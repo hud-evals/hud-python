@@ -1,0 +1,23 @@
+[project]
+name = "hud-text-2048"
+version = "0.1.0"
+description = "Text-based 2048 game environment for hud"
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp",
+    "hud-python @ git+https://github.com/hud-evals/hud-python.git@l/otel-fastmcp-rewrite",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0", "pytest-asyncio>=0.20"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hud_controller"]

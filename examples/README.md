@@ -1,32 +1,84 @@
-# HUD SDK Examples
+# HUD SDK – Examples Overview
 
-This directory contains example notebooks demonstrating different aspects of the HUD SDK.
+These examples show **modern v3 patterns** for building, running and evaluating agents with the HUD SDK.
 
-## Getting Started
+---
 
-1. **Installation**: Follow the [main README](../README.md) instructions to install the SDK.
+## 1 · Quick Start
 
-2. **API Key**: Get your API key from [app.hud.so](https://app.hud.so) and set it as an environment variable:
-   ```bash
-   export HUD_API_KEY=your_api_key_here
-   ```
+```bash
+# Install core SDK (+extras for examples)
+pip install "hud-python[examples]"
 
-3. **Example Folders**:
-   - **[agents_tools/](agents_tools/)** - Examples of agent implementations with various tools, including MCP (Model Context Protocol) integration, browser automation, and secure handling of sensitive data
-   - **[environments/](environments/)** - Environment setup examples showcasing local and remote environment configurations, including emulator-based environments like Pokemon_tools
-   - **[evaluations/](evaluations/)** - Evaluation and benchmarking examples including task creation, OS-level agent evaluation, and practical applications like SheetBench and Wordle
-   - **[rl/](rl/)** - Reinforcement learning examples (currently in development)
+# Set your cloud key (skip for local-only)
+export HUD_API_KEY=your_api_key
 
-## Key Concepts
+# Build the 2048 game image
+docker build -t hud-text-2048 environments/text_2048
 
-- **Tasks**: Define the objective, context, and success criteria for what an agent should accomplish
-- **Environments**: Browser or OS interfaces where agents can perceive and interact with real applications
-- **Agents**: AI systems (like Claude or OpenAI models) that process observations and generate actions in environments
-- **Jobs**: Group related environment runs (trajectories) together for evaluation and analysis
-- **Evaluation**: Methods to assess agent performance, success rates, and behavior patterns
+# Run the tiniest demo
+python 01_hello_2048.py
+```
 
-Each example demonstrates practical applications of these concepts with code you can run and modify.
+---
 
-For more detailed documentation, visit [docs.hud.so](https://docs.hud.so/introduction).
+## 2 · What You’ll Find
 
+| File / Notebook | What it Proves | Notes |
+|-----------------|----------------|-------|
+| **01_hello_2048.py** | Local Docker game + agent | Simple 2048 game with text interface.
+| **02_agent_lifecycle.py** | *Full* task lifecycle <br>setup → agent loop → evaluate | Wrapped in `hud.trace()` – generates RUN_ID.
+| **03_cloud_vs_local.py** | Same agent, two deployments | Compare HUD cloud vs local Docker.
+| **claude_agent.py** | Claude-3.7, screenshots & reasoning | Uses *anthropic_computer* tool.
+| **openai_agent.py** | GPT-4o with function calling | Uses *openai_computer* tool.
+| **mcp_use_agent.py** | Provider-agnostic via LangChain | Works with any LLM key you have.
+| **task_with_setup_eval.py** | Visual todo / Wikipedia tasks | See the browser at `http://localhost:8080/vnc.html`.
+| **resources_exploration.py** | List `setup://`, `evaluate://`, etc. | Discover what an MCP server can do.
+| **agent_lifecycle_exploration.ipynb** | Step-through debug of an agent | Inspect messages, tool calls, screenshots.
+| **dataset_evaluation_pipeline.ipynb** | Run a HF dataset end-to-end | Auto-traced; outputs CSV + MD report.
 
+---
+
+## 3 · Prerequisites
+
+| Requirement | Why |
+|-------------|-----|
+| **Docker** | Needed for local browser examples. |
+| **HUD_API_KEY** | Required for cloud routes. |
+| **OPENAI / ANTHROPIC API keys** | Only if you run those LLM agents. |
+
+---
+
+## 4 · Running Visual Examples
+
+```bash
+# Build the browser image once
+docker pull hudpython/hud-browser:latest
+
+# Start a visual task
+python task_with_setup_eval.py
+# Open http://localhost:8080/vnc.html to watch the agent
+```
+
+---
+
+## 5 · Pattern Cheat-Sheet
+
+```python
+from hud.telemetry import trace
+from hud.datasets import TaskConfig
+from hud.mcp.client import MCPClient
+from hud.mcp import ClaudeMCPAgent
+
+with trace("My Demo"):
+    task = TaskConfig(...)
+    client = MCPClient(mcp_config=task.mcp_config)
+    agent  = ClaudeMCPAgent(mcp_client=client, ...)
+    result = await agent.run(task)
+```
+
+*️⃣  Every example follows this structure – once you understand it, you can mix-and-match components to build your own flows.
+
+---
+
+Happy hacking 🚀

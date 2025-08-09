@@ -19,8 +19,8 @@ def test_tools_imports():
     assert utils is not None
 
     # Check key classes/functions
-    assert hasattr(base, "ToolResult")
-    assert hasattr(base, "ToolError")
+    assert hasattr(base, "BaseTool")
+    assert hasattr(base, "BaseHub")
     assert hasattr(bash, "BashTool")
     assert hasattr(edit, "EditTool")
     assert hasattr(utils, "run")

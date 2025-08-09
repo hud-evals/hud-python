@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Literal, TypeAlias
 
-from hud.tools.base import ToolResult
+from hud.tools.types import ContentResult
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,12 @@ class BaseExecutor:
         Args:
             display_num: X display number (for Linux/X11 systems)
         """
-        self.display_num = display_num
+        if display_num is None:
+            from hud.tools.computer.settings import computer_settings
+
+            self.display_num = computer_settings.DISPLAY_NUM
+        else:
+            self.display_num = display_num
         self._screenshot_delay = 0.5
         logger.info("BaseExecutor initialized")
 
@@ -42,7 +47,7 @@ class BaseExecutor:
         pattern: list[int] | None = None,
         hold_keys: list[str] | None = None,
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """
         Click at specified coordinates.
 
@@ -60,11 +65,11 @@ class BaseExecutor:
             msg += f" while holding {hold_keys}"
 
         screenshot = await self.screenshot() if take_screenshot else None
-        return ToolResult(output=msg, base64_image=screenshot)
+        return ContentResult(output=msg, base64_image=screenshot)
 
-    async def type(
+    async def write(
         self, text: str, enter_after: bool = False, delay: int = 12, take_screenshot: bool = True
-    ) -> ToolResult:
+    ) -> ContentResult:
         """
         Type text using keyboard.
 
@@ -79,9 +84,9 @@ class BaseExecutor:
             msg += " followed by Enter"
 
         screenshot = await self.screenshot() if take_screenshot else None
-        return ToolResult(output=msg, base64_image=screenshot)
+        return ContentResult(output=msg, base64_image=screenshot)
 
-    async def press(self, keys: list[str], take_screenshot: bool = True) -> ToolResult:
+    async def press(self, keys: list[str], take_screenshot: bool = True) -> ContentResult:
         """
         Press a key combination (hotkey).
 
@@ -93,9 +98,9 @@ class BaseExecutor:
         msg = f"[SIMULATED] Press key combination: {key_combo}"
 
         screenshot = await self.screenshot() if take_screenshot else None
-        return ToolResult(output=msg, base64_image=screenshot)
+        return ContentResult(output=msg, base64_image=screenshot)
 
-    async def key(self, key_sequence: str, take_screenshot: bool = True) -> ToolResult:
+    async def key(self, key_sequence: str, take_screenshot: bool = True) -> ContentResult:
         """
         Press a single key or key combination.
 
@@ -106,9 +111,9 @@ class BaseExecutor:
         msg = f"[SIMULATED] Press key: {key_sequence}"
 
         screenshot = await self.screenshot() if take_screenshot else None
-        return ToolResult(output=msg, base64_image=screenshot)
+        return ContentResult(output=msg, base64_image=screenshot)
 
-    async def keydown(self, keys: list[str], take_screenshot: bool = True) -> ToolResult:
+    async def keydown(self, keys: list[str], take_screenshot: bool = True) -> ContentResult:
         """
         Press and hold keys.
 
@@ -119,9 +124,9 @@ class BaseExecutor:
         msg = f"[SIMULATED] Key down: {', '.join(keys)}"
 
         screenshot = await self.screenshot() if take_screenshot else None
-        return ToolResult(output=msg, base64_image=screenshot)
+        return ContentResult(output=msg, base64_image=screenshot)
 
-    async def keyup(self, keys: list[str], take_screenshot: bool = True) -> ToolResult:
+    async def keyup(self, keys: list[str], take_screenshot: bool = True) -> ContentResult:
         """
         Release held keys.
 
@@ -132,7 +137,7 @@ class BaseExecutor:
         msg = f"[SIMULATED] Key up: {', '.join(keys)}"
 
         screenshot = await self.screenshot() if take_screenshot else None
-        return ToolResult(output=msg, base64_image=screenshot)
+        return ContentResult(output=msg, base64_image=screenshot)
 
     async def scroll(
         self,
@@ -142,7 +147,7 @@ class BaseExecutor:
         scroll_y: int | None = None,
         hold_keys: list[str] | None = None,
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """
         Scroll at specified position.
 
@@ -164,7 +169,7 @@ class BaseExecutor:
             msg += f" while holding {hold_keys}"
 
         screenshot = await self.screenshot() if take_screenshot else None
-        return ToolResult(output=msg, base64_image=screenshot)
+        return ContentResult(output=msg, base64_image=screenshot)
 
     async def move(
         self,
@@ -173,7 +178,7 @@ class BaseExecutor:
         offset_x: int | None = None,
         offset_y: int | None = None,
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """
         Move mouse cursor.
 
@@ -190,7 +195,7 @@ class BaseExecutor:
             msg = "[SIMULATED] Move mouse (no coordinates specified)"
 
         screenshot = await self.screenshot() if take_screenshot else None
-        return ToolResult(output=msg, base64_image=screenshot)
+        return ContentResult(output=msg, base64_image=screenshot)
 
     async def drag(
         self,
@@ -198,7 +203,7 @@ class BaseExecutor:
         pattern: list[int] | None = None,
         hold_keys: list[str] | None = None,
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """
         Drag along a path.
 
@@ -209,7 +214,7 @@ class BaseExecutor:
             take_screenshot: Whether to capture screenshot after action
         """
         if len(path) < 2:
-            return ToolResult(error="Drag path must have at least 2 points")
+            return ContentResult(error="Drag path must have at least 2 points")
 
         start = path[0]
         end = path[-1]
@@ -220,13 +225,13 @@ class BaseExecutor:
             msg += f" while holding {hold_keys}"
 
         screenshot = await self.screenshot() if take_screenshot else None
-        return ToolResult(output=msg, base64_image=screenshot)
+        return ContentResult(output=msg, base64_image=screenshot)
 
     async def mouse_down(
         self,
         button: Literal["left", "right", "middle", "back", "forward"] = "left",
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """
         Press and hold a mouse button.
 
@@ -237,13 +242,13 @@ class BaseExecutor:
         msg = f"[SIMULATED] Mouse down: {button} button"
 
         screenshot = await self.screenshot() if take_screenshot else None
-        return ToolResult(output=msg, base64_image=screenshot)
+        return ContentResult(output=msg, base64_image=screenshot)
 
     async def mouse_up(
         self,
         button: Literal["left", "right", "middle", "back", "forward"] = "left",
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """
         Release a mouse button.
 
@@ -254,9 +259,11 @@ class BaseExecutor:
         msg = f"[SIMULATED] Mouse up: {button} button"
 
         screenshot = await self.screenshot() if take_screenshot else None
-        return ToolResult(output=msg, base64_image=screenshot)
+        return ContentResult(output=msg, base64_image=screenshot)
 
-    async def hold_key(self, key: str, duration: float, take_screenshot: bool = True) -> ToolResult:
+    async def hold_key(
+        self, key: str, duration: float, take_screenshot: bool = True
+    ) -> ContentResult:
         """
         Hold a key for a specified duration.
 
@@ -269,11 +276,11 @@ class BaseExecutor:
         await asyncio.sleep(duration)  # Simulate the wait
 
         screenshot = await self.screenshot() if take_screenshot else None
-        return ToolResult(output=msg, base64_image=screenshot)
+        return ContentResult(output=msg, base64_image=screenshot)
 
     # ===== Utility Actions =====
 
-    async def wait(self, time: int) -> ToolResult:
+    async def wait(self, time: int) -> ContentResult:
         """
         Wait for specified time.
 
@@ -282,7 +289,7 @@ class BaseExecutor:
         """
         duration_seconds = time / 1000.0
         await asyncio.sleep(duration_seconds)
-        return ToolResult(output=f"Waited {time}ms")
+        return ContentResult(output=f"Waited {time}ms")
 
     async def screenshot(self) -> str | None:
         """
@@ -294,18 +301,18 @@ class BaseExecutor:
         logger.info("[SIMULATION] Taking screenshot")
         return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="  # noqa: E501
 
-    async def position(self) -> ToolResult:
+    async def position(self) -> ContentResult:
         """
         Get current cursor position.
 
         Returns:
             ToolResult with position information
         """
-        return ToolResult(output="[SIMULATED] Mouse position: (0, 0)")
+        return ContentResult(output="[SIMULATED] Mouse position: (0, 0)")
 
     # ===== Legacy/Compatibility Methods =====
 
-    async def execute(self, command: str, take_screenshot: bool = True) -> ToolResult:
+    async def execute(self, command: str, take_screenshot: bool = True) -> ContentResult:
         """
         Execute a raw command (for backwards compatibility).
 
@@ -315,18 +322,18 @@ class BaseExecutor:
         """
         msg = f"[SIMULATED] Execute: {command}"
         screenshot = await self.screenshot() if take_screenshot else None
-        return ToolResult(output=msg, base64_image=screenshot)
+        return ContentResult(output=msg, base64_image=screenshot)
 
     # Compatibility aliases
     async def type_text(
         self, text: str, delay: int = 12, take_screenshot: bool = True
-    ) -> ToolResult:
+    ) -> ContentResult:
         """Alias for type() to maintain compatibility."""
         return await self.type(
             text, enter_after=False, delay=delay, take_screenshot=take_screenshot
         )
 
-    async def mouse_move(self, x: int, y: int, take_screenshot: bool = True) -> ToolResult:
+    async def mouse_move(self, x: int, y: int, take_screenshot: bool = True) -> ContentResult:
         """Alias for move() to maintain compatibility."""
         return await self.move(x=x, y=y, take_screenshot=take_screenshot)
 

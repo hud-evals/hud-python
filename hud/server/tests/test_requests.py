@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import httpx
 import pytest
 
-from hud.exceptions import (
+from hud.server.exceptions import (
     HudAuthenticationError,
     HudNetworkError,
     HudRequestError,

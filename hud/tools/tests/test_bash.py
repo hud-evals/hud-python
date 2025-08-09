@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from hud.tools.base import ToolResult
-from hud.tools.bash import BashTool, ToolError, _BashSession
+from hud.tools.bash import BashTool, ContentResult, ToolError, _BashSession
+from hud.tools.types import TextContent
 
 
 class TestBashSession:
@@ -79,7 +79,7 @@ class TestBashTool:
     def test_bash_tool_init(self):
         """Test BashTool initialization."""
         tool = BashTool()
-        assert tool._session is None
+        assert tool.session is None
 
     @pytest.mark.asyncio
     async def test_call_with_command(self):
@@ -88,7 +88,7 @@ class TestBashTool:
 
         # Mock session
         mock_session = MagicMock()
-        mock_session.run = AsyncMock(return_value=ToolResult(output="test output"))
+        mock_session.run = AsyncMock(return_value=ContentResult(output="test output"))
 
         # Mock _BashSession creation
         with patch("hud.tools.bash._BashSession") as mock_session_class:
@@ -97,8 +97,10 @@ class TestBashTool:
 
             result = await tool(command="echo test")
 
-            assert isinstance(result, ToolResult)
-            assert result.output == "test output"
+            assert isinstance(result, list)
+            assert len(result) == 1
+            assert isinstance(result[0], TextContent)
+            assert result[0].text == "test output"
             mock_session.start.assert_called_once()
             mock_session.run.assert_called_once_with("echo test")
 
@@ -110,7 +112,7 @@ class TestBashTool:
         # Set up existing session
         old_session = MagicMock()
         old_session.stop = MagicMock()
-        tool._session = old_session
+        tool.session = old_session
 
         # Mock new session
         new_session = MagicMock()
@@ -119,11 +121,13 @@ class TestBashTool:
         with patch("hud.tools.bash._BashSession", return_value=new_session):
             result = await tool(restart=True)
 
-            assert isinstance(result, ToolResult)
-            assert result.system == "tool has been restarted."
+            assert isinstance(result, list)
+            assert len(result) == 1
+            assert isinstance(result[0], TextContent)
+            assert result[0].text == "Bash session restarted."
             old_session.stop.assert_called_once()
             new_session.start.assert_called_once()
-            assert tool._session == new_session
+            assert tool.session == new_session
 
     @pytest.mark.asyncio
     async def test_call_no_command_error(self):
@@ -133,7 +137,7 @@ class TestBashTool:
         with pytest.raises(ToolError) as exc_info:
             await tool()
 
-        assert "no command provided" in str(exc_info.value)
+        assert str(exc_info.value) == "No command provided."
 
     @pytest.mark.asyncio
     async def test_call_with_existing_session(self):
@@ -142,11 +146,13 @@ class TestBashTool:
 
         # Set up existing session
         existing_session = MagicMock()
-        existing_session.run = AsyncMock(return_value=ToolResult(output="result"))
-        tool._session = existing_session
+        existing_session.run = AsyncMock(return_value=ContentResult(output="result"))
+        tool.session = existing_session
 
         result = await tool(command="ls")
 
-        assert isinstance(result, ToolResult)
-        assert result.output == "result"
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert isinstance(result[0], TextContent)
+        assert result[0].text == "result"
         existing_session.run.assert_called_once_with("ls")

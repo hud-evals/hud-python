@@ -7,7 +7,7 @@ import os
 from io import BytesIO
 from typing import Any, Literal
 
-from hud.tools.base import ToolResult
+from hud.tools.types import ContentResult
 
 from .base import BaseExecutor
 
@@ -29,14 +29,14 @@ def _get_pyautogui() -> Any | None:
         # Set display if not already set
         if "DISPLAY" not in os.environ:
             try:
-                from hud.settings import settings
+                from hud.tools.computer import computer_settings
 
-                os.environ["DISPLAY"] = settings.display
+                os.environ["DISPLAY"] = str(computer_settings.DISPLAY_NUM)
             except (ImportError, AttributeError):
                 os.environ["DISPLAY"] = ":0"
 
         try:
-            import pyautogui
+            import pyautogui  # type: ignore[import-not-found]
 
             _pyautogui = pyautogui
             _pyautogui_available = True
@@ -183,7 +183,7 @@ class PyAutoGUIExecutor(BaseExecutor):
         pattern: list[int] | None = None,
         hold_keys: list[str] | None = None,
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """Click at specified coordinates or current position."""
         try:
             # Map button names (PyAutoGUI doesn't support back/forward)
@@ -221,7 +221,7 @@ class PyAutoGUIExecutor(BaseExecutor):
                 # Release held keys
                 self._release_keys(hold_keys)
 
-            result = ToolResult(
+            result = ContentResult(
                 output=f"Clicked {button} button at ({x}, {y})" if x else f"Clicked {button} button"
             )
 
@@ -229,17 +229,17 @@ class PyAutoGUIExecutor(BaseExecutor):
                 await asyncio.sleep(self._screenshot_delay)
                 screenshot = await self.screenshot()
                 if screenshot:
-                    result = ToolResult(
+                    result = ContentResult(
                         output=result.output, error=result.error, base64_image=screenshot
                     )
 
             return result
         except Exception as e:
-            return ToolResult(error=str(e))
+            return ContentResult(error=str(e))
 
-    async def type(
+    async def write(
         self, text: str, enter_after: bool = False, delay: int = 12, take_screenshot: bool = True
-    ) -> ToolResult:
+    ) -> ContentResult:
         """Type text with specified delay between keystrokes."""
         try:
             # Convert delay from milliseconds to seconds for PyAutoGUI
@@ -249,7 +249,7 @@ class PyAutoGUIExecutor(BaseExecutor):
             if enter_after:
                 self.pyautogui.press("enter")
 
-            result = ToolResult(
+            result = ContentResult(
                 output=f"Typed: '{text}'" + (" and pressed Enter" if enter_after else "")
             )
 
@@ -257,41 +257,41 @@ class PyAutoGUIExecutor(BaseExecutor):
                 await asyncio.sleep(self._screenshot_delay)
                 screenshot = await self.screenshot()
                 if screenshot:
-                    result = ToolResult(
+                    result = ContentResult(
                         output=result.output, error=result.error, base64_image=screenshot
                     )
 
             return result
         except Exception as e:
-            return ToolResult(error=str(e))
+            return ContentResult(error=str(e))
 
-    async def key(self, key_sequence: str, take_screenshot: bool = True) -> ToolResult:
+    async def key(self, key_sequence: str, take_screenshot: bool = True) -> ContentResult:
         """Press a key or key combination."""
         try:
             # Handle key combinations (e.g., "ctrl+c")
             if "+" in key_sequence:
                 keys = key_sequence.split("+")
                 self.pyautogui.hotkey(*keys)
-                result = ToolResult(output=f"Pressed hotkey: {key_sequence}")
+                result = ContentResult(output=f"Pressed hotkey: {key_sequence}")
             else:
                 # Map common key names from xdotool to PyAutoGUI
                 key = key_sequence.lower()
                 self.pyautogui.press(CLA_TO_PYAUTOGUI.get(key, key))
-                result = ToolResult(output=f"Pressed key: {key_sequence}")
+                result = ContentResult(output=f"Pressed key: {key_sequence}")
 
             if take_screenshot:
                 await asyncio.sleep(self._screenshot_delay)
                 screenshot = await self.screenshot()
                 if screenshot:
-                    result = ToolResult(
+                    result = ContentResult(
                         output=result.output, error=result.error, base64_image=screenshot
                     )
 
             return result
         except Exception as e:
-            return ToolResult(error=str(e))
+            return ContentResult(error=str(e))
 
-    async def press(self, keys: list[str], take_screenshot: bool = True) -> ToolResult:
+    async def press(self, keys: list[str], take_screenshot: bool = True) -> ContentResult:
         """Press a key combination (hotkey)."""
         try:
             # Map CLA keys to PyAutoGUI keys
@@ -300,7 +300,7 @@ class PyAutoGUIExecutor(BaseExecutor):
             # Handle single key or combination
             if len(mapped_keys) == 1 and "+" not in mapped_keys[0]:
                 self.pyautogui.press(mapped_keys[0])
-                result = ToolResult(output=f"Pressed key: {keys[0]}")
+                result = ContentResult(output=f"Pressed key: {keys[0]}")
             else:
                 # For combinations, use hotkey
                 hotkey_parts = []
@@ -310,21 +310,21 @@ class PyAutoGUIExecutor(BaseExecutor):
                     else:
                         hotkey_parts.append(key)
                 self.pyautogui.hotkey(*hotkey_parts)
-                result = ToolResult(output=f"Pressed hotkey: {'+'.join(keys)}")
+                result = ContentResult(output=f"Pressed hotkey: {'+'.join(keys)}")
 
             if take_screenshot:
                 await asyncio.sleep(self._screenshot_delay)
                 screenshot = await self.screenshot()
                 if screenshot:
-                    result = ToolResult(
+                    result = ContentResult(
                         output=result.output, error=result.error, base64_image=screenshot
                     )
 
             return result
         except Exception as e:
-            return ToolResult(error=str(e))
+            return ContentResult(error=str(e))
 
-    async def keydown(self, keys: list[str], take_screenshot: bool = True) -> ToolResult:
+    async def keydown(self, keys: list[str], take_screenshot: bool = True) -> ContentResult:
         """Press and hold keys."""
         try:
             # Map CLA keys to PyAutoGUI keys
@@ -332,21 +332,21 @@ class PyAutoGUIExecutor(BaseExecutor):
             for key in mapped_keys:
                 self.pyautogui.keyDown(key)
 
-            result = ToolResult(output=f"Keys down: {', '.join(keys)}")
+            result = ContentResult(output=f"Keys down: {', '.join(keys)}")
 
             if take_screenshot:
                 await asyncio.sleep(self._screenshot_delay)
                 screenshot = await self.screenshot()
                 if screenshot:
-                    result = ToolResult(
+                    result = ContentResult(
                         output=result.output, error=result.error, base64_image=screenshot
                     )
 
             return result
         except Exception as e:
-            return ToolResult(error=str(e))
+            return ContentResult(error=str(e))
 
-    async def keyup(self, keys: list[str], take_screenshot: bool = True) -> ToolResult:
+    async def keyup(self, keys: list[str], take_screenshot: bool = True) -> ContentResult:
         """Release held keys."""
         try:
             # Map CLA keys to PyAutoGUI keys
@@ -354,19 +354,19 @@ class PyAutoGUIExecutor(BaseExecutor):
             for key in reversed(mapped_keys):  # Release in reverse order
                 self.pyautogui.keyUp(key)
 
-            result = ToolResult(output=f"Keys up: {', '.join(keys)}")
+            result = ContentResult(output=f"Keys up: {', '.join(keys)}")
 
             if take_screenshot:
                 await asyncio.sleep(self._screenshot_delay)
                 screenshot = await self.screenshot()
                 if screenshot:
-                    result = ToolResult(
+                    result = ContentResult(
                         output=result.output, error=result.error, base64_image=screenshot
                     )
 
             return result
         except Exception as e:
-            return ToolResult(error=str(e))
+            return ContentResult(error=str(e))
 
     async def scroll(
         self,
@@ -376,7 +376,7 @@ class PyAutoGUIExecutor(BaseExecutor):
         scroll_y: int | None = None,
         hold_keys: list[str] | None = None,
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """Scroll at specified position."""
         try:
             # Move to position if specified
@@ -406,7 +406,7 @@ class PyAutoGUIExecutor(BaseExecutor):
                         msg_parts.append(f"horizontally by {scroll_x} (not supported)")
 
                 if not msg_parts:
-                    return ToolResult(output="No scroll amount specified")
+                    return ContentResult(output="No scroll amount specified")
 
                 msg = "Scrolled " + " and ".join(msg_parts)
                 if x is not None and y is not None:
@@ -417,19 +417,19 @@ class PyAutoGUIExecutor(BaseExecutor):
                 # Release held keys
                 self._release_keys(hold_keys)
 
-            result = ToolResult(output=msg)
+            result = ContentResult(output=msg)
 
             if take_screenshot:
                 await asyncio.sleep(self._screenshot_delay)
                 screenshot = await self.screenshot()
                 if screenshot:
-                    result = ToolResult(
+                    result = ContentResult(
                         output=result.output, error=result.error, base64_image=screenshot
                     )
 
             return result
         except Exception as e:
-            return ToolResult(error=str(e))
+            return ContentResult(error=str(e))
 
     async def move(
         self,
@@ -438,33 +438,33 @@ class PyAutoGUIExecutor(BaseExecutor):
         offset_x: int | None = None,
         offset_y: int | None = None,
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """Move mouse cursor."""
         try:
             if x is not None and y is not None:
                 # Absolute move
                 self.pyautogui.moveTo(x, y, duration=0.1)
-                result = ToolResult(output=f"Moved mouse to ({x}, {y})")
+                result = ContentResult(output=f"Moved mouse to ({x}, {y})")
             elif offset_x is not None or offset_y is not None:
                 # Relative move
                 offset_x = offset_x or 0
                 offset_y = offset_y or 0
                 self.pyautogui.moveRel(xOffset=offset_x, yOffset=offset_y, duration=0.1)
-                result = ToolResult(output=f"Moved mouse by offset ({offset_x}, {offset_y})")
+                result = ContentResult(output=f"Moved mouse by offset ({offset_x}, {offset_y})")
             else:
-                return ToolResult(output="No move coordinates specified")
+                return ContentResult(output="No move coordinates specified")
 
             if take_screenshot:
                 await asyncio.sleep(self._screenshot_delay)
                 screenshot = await self.screenshot()
                 if screenshot:
-                    result = ToolResult(
+                    result = ContentResult(
                         output=result.output, error=result.error, base64_image=screenshot
                     )
 
             return result
         except Exception as e:
-            return ToolResult(error=str(e))
+            return ContentResult(error=str(e))
 
     async def drag(
         self,
@@ -472,10 +472,10 @@ class PyAutoGUIExecutor(BaseExecutor):
         pattern: list[int] | None = None,
         hold_keys: list[str] | None = None,
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """Drag along a path."""
         if len(path) < 2:
-            return ToolResult(error="Drag path must have at least 2 points")
+            return ContentResult(error="Drag path must have at least 2 points")
 
         try:
             # Hold keys if specified
@@ -491,7 +491,7 @@ class PyAutoGUIExecutor(BaseExecutor):
                     # Simple drag
                     end_x, end_y = path[1]
                     self.pyautogui.dragTo(end_x, end_y, duration=0.5, button="left")
-                    result = ToolResult(
+                    result = ContentResult(
                         output=f"Dragged from ({start_x}, {start_y}) to ({end_x}, {end_y})"
                     )
                 else:
@@ -504,10 +504,10 @@ class PyAutoGUIExecutor(BaseExecutor):
                         self.pyautogui.moveTo(x, y, duration=duration)
                     self.pyautogui.mouseUp(button="left")
 
-                    result = ToolResult(output=f"Dragged along {len(path)} points")
+                    result = ContentResult(output=f"Dragged along {len(path)} points")
 
                 if hold_keys:
-                    result = ToolResult(output=f"{result.output} while holding {hold_keys}")
+                    result = ContentResult(output=f"{result.output} while holding {hold_keys}")
             finally:
                 # Release held keys
                 self._release_keys(hold_keys)
@@ -516,19 +516,19 @@ class PyAutoGUIExecutor(BaseExecutor):
                 await asyncio.sleep(self._screenshot_delay)
                 screenshot = await self.screenshot()
                 if screenshot:
-                    result = ToolResult(
+                    result = ContentResult(
                         output=result.output, error=result.error, base64_image=screenshot
                     )
 
             return result
         except Exception as e:
-            return ToolResult(error=str(e))
+            return ContentResult(error=str(e))
 
     async def mouse_down(
         self,
         button: Literal["left", "right", "middle", "back", "forward"] = "left",
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """Press and hold a mouse button."""
         try:
             # Map button names (PyAutoGUI doesn't support back/forward)
@@ -542,25 +542,25 @@ class PyAutoGUIExecutor(BaseExecutor):
             button_name = button_map.get(button, "left")
 
             self.pyautogui.mouseDown(button=button_name)
-            result = ToolResult(output=f"Mouse down: {button} button")
+            result = ContentResult(output=f"Mouse down: {button} button")
 
             if take_screenshot:
                 await asyncio.sleep(self._screenshot_delay)
                 screenshot = await self.screenshot()
                 if screenshot:
-                    result = ToolResult(
+                    result = ContentResult(
                         output=result.output, error=result.error, base64_image=screenshot
                     )
 
             return result
         except Exception as e:
-            return ToolResult(error=str(e))
+            return ContentResult(error=str(e))
 
     async def mouse_up(
         self,
         button: Literal["left", "right", "middle", "back", "forward"] = "left",
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """Release a mouse button."""
         try:
             # Map button names (PyAutoGUI doesn't support back/forward)
@@ -574,21 +574,23 @@ class PyAutoGUIExecutor(BaseExecutor):
             button_name = button_map.get(button, "left")
 
             self.pyautogui.mouseUp(button=button_name)
-            result = ToolResult(output=f"Mouse up: {button} button")
+            result = ContentResult(output=f"Mouse up: {button} button")
 
             if take_screenshot:
                 await asyncio.sleep(self._screenshot_delay)
                 screenshot = await self.screenshot()
                 if screenshot:
-                    result = ToolResult(
+                    result = ContentResult(
                         output=result.output, error=result.error, base64_image=screenshot
                     )
 
             return result
         except Exception as e:
-            return ToolResult(error=str(e))
+            return ContentResult(error=str(e))
 
-    async def hold_key(self, key: str, duration: float, take_screenshot: bool = True) -> ToolResult:
+    async def hold_key(
+        self, key: str, duration: float, take_screenshot: bool = True
+    ) -> ContentResult:
         """Hold a key for a specified duration."""
         try:
             # Map CLA key to PyAutoGUI key
@@ -597,23 +599,23 @@ class PyAutoGUIExecutor(BaseExecutor):
             await asyncio.sleep(duration)
             self.pyautogui.keyUp(mapped_key)
 
-            result = ToolResult(output=f"Held key '{key}' for {duration} seconds")
+            result = ContentResult(output=f"Held key '{key}' for {duration} seconds")
 
             if take_screenshot:
                 screenshot = await self.screenshot()
                 if screenshot:
-                    result = ToolResult(
+                    result = ContentResult(
                         output=result.output, error=result.error, base64_image=screenshot
                     )
 
             return result
         except Exception as e:
-            return ToolResult(error=str(e))
+            return ContentResult(error=str(e))
 
-    async def position(self) -> ToolResult:
+    async def position(self) -> ContentResult:
         """Get current cursor position."""
         try:
             x, y = self.pyautogui.position()
-            return ToolResult(output=f"Mouse position: ({x}, {y})")
+            return ContentResult(output=f"Mouse position: ({x}, {y})")
         except Exception as e:
-            return ToolResult(error=str(e))
+            return ContentResult(error=str(e))

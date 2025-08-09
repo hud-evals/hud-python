@@ -25,12 +25,10 @@ from mcp.server.models import InitializationOptions
 from hud.tools.helper import mcp_intialize_wrapper, register_instance_tool
 
 from .services import ServiceManager
-from .runtime import setup_tool, evaluate_tool
-
-# Import registries to trigger registration
-from .evaluators import EvaluatorRegistry
-from .setup import SetupRegistry
+from .evaluators import evaluate_tool
+from .setup import setup_tool
 from .problems import ProblemRegistry
+from .context import initialize_context, get_global_context
 
 service_manager = ServiceManager()
 
@@ -96,15 +94,27 @@ async def initialize_environment(session=None, progress_token=None):
             OpenAIComputerTool,
         )
 
-        register_instance_tool(mcp, "computer", HudComputerTool())
-        register_instance_tool(mcp, "anthropic_computer", AnthropicComputerTool())
-        register_instance_tool(mcp, "openai_computer", OpenAIComputerTool())
+        register_instance_tool(mcp, HudComputerTool())
+        register_instance_tool(mcp, AnthropicComputerTool())
+        register_instance_tool(mcp, OpenAIComputerTool())
 
         # Store playwright tool instance for browser launch
         playwright_tool = PlaywrightTool()
-        register_instance_tool(mcp, "playwright", playwright_tool)
+        register_instance_tool(mcp, playwright_tool)
 
-        await send_progress(80, "Computer and Playwright tools ready")
+        # Initialize global context with service manager and playwright tool
+        global_context = initialize_context(service_manager, playwright_tool)
+
+        # Set context on setup and evaluate tools
+        setup_tool.context = global_context
+        evaluate_tool.context = global_context
+
+        # Register setup and evaluate tools with MCP
+        # They will handle their own __call__ methods
+        register_instance_tool(mcp, setup_tool)
+        register_instance_tool(mcp, evaluate_tool)
+
+        await send_progress(80, "All tools ready")
 
         # Launch apps and browser in parallel (with error handling)
         launch_apps = os.getenv("LAUNCH_APPS", "")
@@ -203,13 +213,17 @@ mcp = FastMCP(
 @mcp.resource("evaluators://registry")
 async def get_evaluators_resource() -> str:
     """MCP resource containing all available evaluators."""
-    return EvaluatorRegistry.to_json()
+    return evaluate_tool.get_registry_json()
 
 
 @mcp.resource("evaluators://{env}")
 async def get_env_evaluators_resource(env: str) -> str:
     """MCP resource containing environment-specific evaluators."""
-    env_evaluators = EvaluatorRegistry.get_evaluators_by_app(env)
+    # Get all evaluators and filter by app prefix
+    all_evaluators = json.loads(evaluate_tool.get_registry_json())
+    env_evaluators = [
+        e for e in all_evaluators.get("functions", []) if e.get("name", "").startswith(f"{env}_")
+    ]
     return json.dumps(
         {"env": env, "evaluators": env_evaluators, "count": len(env_evaluators)}, indent=2
     )
@@ -218,13 +232,17 @@ async def get_env_evaluators_resource(env: str) -> str:
 @mcp.resource("setup://registry")
 async def get_setup_registry_resource() -> str:
     """MCP resource containing all available setup tools."""
-    return SetupRegistry.to_json()
+    return setup_tool.get_registry_json()
 
 
 @mcp.resource("setup://{env}")
 async def get_env_setup_resource(env: str) -> str:
     """MCP resource containing environment-specific setup tools."""
-    env_setup = SetupRegistry.get_setup_tools_by_app(env)
+    # Get all setup tools and filter by app prefix
+    all_setup = json.loads(setup_tool.get_registry_json())
+    env_setup = [
+        s for s in all_setup.get("functions", []) if s.get("name", "").startswith(f"{env}_")
+    ]
     return json.dumps({"env": env, "setup_tools": env_setup, "count": len(env_setup)}, indent=2)
 
 
@@ -244,15 +262,23 @@ async def get_env_problems_resource(env: str) -> str:
 @mcp.resource("schema://evaluator/{evaluator_name}")
 async def get_evaluator_schema_resource(evaluator_name: str) -> str:
     """MCP resource containing detailed schema for a specific evaluator."""
-    schema = EvaluatorRegistry.get_evaluator_schema(evaluator_name)
-    return json.dumps(schema, indent=2)
+    # Get evaluator from registry
+    all_evaluators = json.loads(evaluate_tool.get_registry_json())
+    for e in all_evaluators.get("functions", []):
+        if e.get("name") == evaluator_name:
+            return json.dumps(e, indent=2)
+    return json.dumps({"error": f"Evaluator '{evaluator_name}' not found"}, indent=2)
 
 
 @mcp.resource("schema://setup/{setup_name}")
 async def get_setup_schema_resource(setup_name: str) -> str:
     """MCP resource containing detailed schema for a specific setup tool."""
-    schema = SetupRegistry.get_setup_schema(setup_name)
-    return json.dumps(schema, indent=2)
+    # Get setup tool from registry
+    all_setup = json.loads(setup_tool.get_registry_json())
+    for s in all_setup.get("functions", []):
+        if s.get("name") == setup_name:
+            return json.dumps(s, indent=2)
+    return json.dumps({"error": f"Setup tool '{setup_name}' not found"}, indent=2)
 
 
 @mcp.resource("schema://problem/{problem_name}")
@@ -277,37 +303,6 @@ async def get_telemetry_resource() -> str:
     return json.dumps(telemetry_data, indent=2)
 
 
-# === SETUP AND EVALUATION TOOLS ===
-
-
-@mcp.tool()
-async def setup(
-    function: str = None, args: dict = None, name: str = None, ctx: Context = None
-) -> dict:
-    """Setup the environment based on configuration.
-
-    Args:
-        function: Setup function name (e.g. 'todo_seed')
-        args: Arguments for the setup function
-        name: Problem name to lookup setup from problem registry
-    """
-    return await setup_tool(function, args, name, ctx, service_manager)
-
-
-@mcp.tool()
-async def evaluate(
-    function: str = None, args: dict = None, name: str = None, ctx: Context = None
-) -> dict:
-    """Evaluate the environment based on configuration.
-
-    Args:
-        function: Evaluator function name (e.g. 'todo_completed')
-        args: Arguments for the evaluator function
-        name: Problem name to lookup evaluation from problem registry
-    """
-    return await evaluate_tool(function, args, name, ctx, service_manager)
-
-
 # === APPLICATION TOOLS ===
 
 
@@ -322,11 +317,11 @@ async def launch_app(app_name: str, ctx: Context) -> str:
         Success message with app URL
     """
     await ctx.info(f"Launching app: {app_name}")
-    await ctx.report_progress(0, f"Starting {app_name} app...")
+    await ctx.report_progress(0, 100, f"Starting {app_name} app...")
 
     app_info = await service_manager.launch_app(app_name)
 
-    await ctx.report_progress(100, f"{app_name} app ready!")
+    await ctx.report_progress(100, 100, f"{app_name} app ready!")
     return f"Launched {app_name} at {app_info['url']}"
 
 

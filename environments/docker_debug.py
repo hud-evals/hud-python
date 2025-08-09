@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
-Simple Docker MCP Server Debugger
+Universal MCP Server Debugger
 
-Usage: python docker_debug.py <docker-image>
-Example: python docker_debug.py hudpython/gmail-clone:latest
+Works with any stdio-based MCP server (Docker, Python, Node, etc.)
+
+Usage modes:
+1. Direct command:  python docker_debug.py --cmd "python -m my_server"
+2. Docker shorthand: python docker_debug.py my-image:latest [docker-args...]
+3. Cursor config:   python docker_debug.py --cursor server-name
+4. As MCP server:   python docker_debug.py --mcp
 """
 
 import asyncio
@@ -14,7 +19,9 @@ import subprocess
 import sys
 import time
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List, Tuple
+from io import StringIO
+import shlex
 
 # ANSI color codes for better visual clarity
 # Enable ANSI colors on Windows
@@ -37,54 +44,120 @@ class Colors:
     BOLD = "\033[1m"
 
 
-# Configure logging to stderr with minimal format
-logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(message)s")
-logger = logging.getLogger(__name__)
+class CaptureLogger:
+    """Logger that can both print and capture output"""
+
+    def __init__(self, print_output: bool = True):
+        self.print_output = print_output
+        self.buffer = StringIO()
+        self.logger = logging.getLogger(__name__)
+
+        # Configure base logger
+        if print_output:
+            logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(message)s")
+        else:
+            # In MCP mode, don't print to stderr
+            logging.basicConfig(level=logging.INFO, format="%(message)s", handlers=[])
+
+    def _log(self, message: str, color: str = ""):
+        """Internal log method that handles both printing and capturing"""
+        if self.print_output:
+            if color:
+                self.logger.info(f"{color}{message}{Colors.ENDC}")
+            else:
+                self.logger.info(message)
+
+        # Always capture (without ANSI codes)
+        clean_msg = self._strip_ansi(message)
+        self.buffer.write(clean_msg + "\n")
+
+    def _strip_ansi(self, text: str) -> str:
+        """Remove ANSI escape codes from text"""
+        ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+        return ansi_escape.sub("", text)
+
+    def timestamp(self) -> str:
+        """Get minimal timestamp HH:MM:SS"""
+        return datetime.now().strftime("%H:%M:%S")
+
+    def phase(self, phase_num: int, title: str):
+        """Log a phase header"""
+        self._log(f"\n{'=' * 80}", Colors.CYAN if self.print_output else "")
+        self._log(
+            f"PHASE {phase_num}: {title}", Colors.BOLD + Colors.CYAN if self.print_output else ""
+        )
+        self._log(f"{'=' * 80}\n", Colors.CYAN if self.print_output else "")
+
+    def command(self, cmd: list):
+        """Log the command being executed"""
+        self._log(f"$ {' '.join(cmd)}", Colors.BOLD if self.print_output else "")
+
+    def success(self, message: str):
+        """Log a success message"""
+        self._log(f"✅ {message}", Colors.GREEN if self.print_output else "")
+
+    def error(self, message: str):
+        """Log an error message"""
+        self._log(f"❌ {message}", Colors.RED if self.print_output else "")
+
+    def info(self, message: str):
+        """Log an info message"""
+        self._log(f"[{self.timestamp()}] {message}")
+
+    def stdio(self, message: str):
+        """Log STDIO communication"""
+        self._log(f"[STDIO] {message}", Colors.GOLD if self.print_output else "")
+
+    def stderr(self, message: str):
+        """Log STDERR output"""
+        self._log(f"[STDERR] {message}", Colors.GRAY if self.print_output else "")
+
+    def hint(self, hint: str):
+        """Log a hint message"""
+        self._log(f"\n💡 Hint: {hint}", Colors.YELLOW if self.print_output else "")
+
+    def progress_bar(self, completed: int, total: int):
+        """Show a visual progress bar"""
+        filled = "█" * completed
+        empty = "░" * (total - completed)
+        percentage = (completed / total) * 100
+
+        self._log(
+            f"\nProgress: [{filled}{empty}] {completed}/{total} phases ({percentage:.0f}%)",
+            Colors.BOLD if self.print_output else "",
+        )
+
+        if completed == 0:
+            self._log("Failed at Phase 1 - Server startup", Colors.RED if self.print_output else "")
+        elif completed == 1:
+            self._log(
+                "Failed at Phase 2 - MCP initialization", Colors.YELLOW if self.print_output else ""
+            )
+        elif completed == 2:
+            self._log(
+                "Failed at Phase 3 - Tool discovery", Colors.YELLOW if self.print_output else ""
+            )
+        elif completed == 3:
+            self._log(
+                "Failed at Phase 4 - Remote deployment readiness",
+                Colors.YELLOW if self.print_output else "",
+            )
+        elif completed == 4:
+            self._log(
+                "Failed at Phase 5 - Concurrent clients & resources",
+                Colors.YELLOW if self.print_output else "",
+            )
+        elif completed == 5:
+            self._log(
+                "All phases completed successfully!", Colors.GREEN if self.print_output else ""
+            )
+
+    def get_output(self) -> str:
+        """Get the captured output"""
+        return self.buffer.getvalue()
 
 
-def timestamp():
-    """Get minimal timestamp HH:MM:SS"""
-    return datetime.now().strftime("%H:%M:%S")
-
-
-def log_phase(phase_num: int, title: str):
-    """Log a phase header with nice formatting"""
-    logger.info(f"\n{Colors.BOLD}{Colors.CYAN}{'=' * 80}{Colors.ENDC}")
-    logger.info(f"{Colors.BOLD}{Colors.CYAN}PHASE {phase_num}: {title}{Colors.ENDC}")
-    logger.info(f"{Colors.BOLD}{Colors.CYAN}{'=' * 80}{Colors.ENDC}\n")
-
-
-def log_command(cmd: list):
-    """Log the command being executed"""
-    logger.info(f"{Colors.BOLD}$ {' '.join(cmd)}{Colors.ENDC}")
-
-
-def log_success(message: str):
-    """Log a success message"""
-    logger.info(f"{Colors.GREEN}✅ {message}{Colors.ENDC}")
-
-
-def log_error(message: str):
-    """Log an error message"""
-    logger.info(f"{Colors.RED}❌ {message}{Colors.ENDC}")
-
-
-def log_info(message: str):
-    """Log an info message"""
-    logger.info(f"[{timestamp()}] {message}")
-
-
-def log_stdio(message: str):
-    """Log STDIO communication in gold"""
-    logger.info(f"{Colors.GOLD}[STDIO] {message}{Colors.ENDC}")
-
-
-def log_stderr(message: str):
-    """Log STDERR output in gray"""
-    logger.info(f"{Colors.GRAY}[STDERR] {message}{Colors.ENDC}")
-
-
-# Hint registry with patterns and priorities (higher number = higher priority)
+# Hint registry with patterns and priorities
 HINT_REGISTRY = [
     {
         "patterns": [r"Can't connect to display", r"X11", r"DISPLAY.*not set", r"Xlib.*error"],
@@ -99,8 +172,8 @@ HINT_REGISTRY = [
         "priority": 9,
         "hint": """Missing Python dependencies. Check:
    - Is pyproject.toml complete with all dependencies?
-   - Did 'uv pip install' run successfully in Dockerfile?
-   - Recommendation: Use 'uv' for faster, more reliable installs""",
+   - Did 'pip install' run successfully?
+   - For editable installs, is the package structure correct?""",
     },
     {
         "patterns": [r"json\.decoder\.JSONDecodeError", r"Expecting value.*line.*column"],
@@ -113,16 +186,16 @@ HINT_REGISTRY = [
     {
         "patterns": [r"Permission denied", r"EACCES", r"Operation not permitted"],
         "priority": 7,
-        "hint": """Container permission issues. Try:
-   - Running non-root user in Dockerfile
-   - Setting proper file permissions
-   - Using --privileged flag if absolutely needed""",
+        "hint": """Permission issues. Try:
+   - Check file permissions in container/environment
+   - Running with appropriate user
+   - Using --privileged flag if absolutely needed (Docker)""",
     },
     {
         "patterns": [r"Cannot allocate memory", r"killed", r"OOMKilled"],
         "priority": 6,
-        "hint": """Container resource limits. Consider:
-   - Increasing Docker memory limits
+        "hint": """Resource limits exceeded. Consider:
+   - Increasing memory limits
    - Optimizing memory usage in your code
    - Checking for memory leaks""",
     },
@@ -131,24 +204,16 @@ HINT_REGISTRY = [
         "priority": 5,
         "hint": """Port conflict detected. Options:
    - Use a different port
-   - Check if another container is running
+   - Check if another process is running
    - Ensure proper cleanup in previous runs""",
     },
     {
         "patterns": [r"FileNotFoundError", r"No such file or directory"],
         "priority": 4,
         "hint": """File or directory missing. Check:
-   - All required files are COPYed in Dockerfile
+   - All required files exist
    - Working directory is set correctly
-   - File paths are correct for the container environment""",
-    },
-    {
-        "patterns": [r"AttributeError", r"NameError", r"TypeError"],
-        "priority": 3,
-        "hint": """Python runtime error. Debug with:
-   - Run: docker run --rm <image> python -c "import your_module"
-   - Check for missing environment variables
-   - Verify all dependencies are installed""",
+   - File paths are correct for the environment""",
     },
     {
         "patterns": [r"Traceback.*most recent call last", r"Exception"],
@@ -162,17 +227,9 @@ HINT_REGISTRY = [
         "patterns": [r"timeout", r"timed out"],
         "priority": 1,
         "hint": """Server taking too long to start. Consider:
-   - Using @mcp_initialize_wrapper() for heavy initialization
-   - Moving slow operations to setup() tool instead
+   - Using initialization wrappers for heavy setup
+   - Moving slow operations to setup() tool
    - Checking for deadlocks or infinite loops""",
-    },
-    {
-        "patterns": [r"psutil not installed", r"No module named 'psutil'"],
-        "priority": 8,
-        "hint": """psutil module required for resource monitoring. Install with:
-   - pip install psutil
-   - Or add to pyproject.toml dependencies
-   - Resource monitoring will be skipped without it""",
     },
 ]
 
@@ -187,107 +244,94 @@ def analyze_error_for_hints(error_text: str) -> Optional[str]:
         for pattern in hint_data["patterns"]:
             if re.search(pattern, error_text, re.IGNORECASE):
                 matches.append((hint_data["priority"], hint_data["hint"]))
-                break  # Only need one pattern match per hint
+                break
 
     if matches:
-        # Sort by priority (highest first) and return the top hint
         matches.sort(key=lambda x: x[0], reverse=True)
         return matches[0][1]
 
     return None
 
 
-def log_hint(hint: str):
-    """Log a hint message"""
-    logger.info(f"\n{Colors.YELLOW}💡 Hint: {hint}{Colors.ENDC}")
+async def debug_mcp_stdio(command: List[str], logger: CaptureLogger, max_phase: int = 5) -> int:
+    """
+    Debug any stdio-based MCP server step by step.
 
+    Args:
+        command: Command and arguments to run the MCP server
+        logger: CaptureLogger instance for output
+        max_phase: Maximum phase to run (1-5, default 5 for all phases)
 
-def show_progress_bar(completed: int, total: int):
-    """Show a visual progress bar of phases completed"""
-    filled = "█" * completed
-    empty = "░" * (total - completed)
-    percentage = (completed / total) * 100
+    Returns:
+        Number of phases completed (0-5)
+    """
 
-    logger.info(
-        f"\n{Colors.BOLD}Progress: [{filled}{empty}] {completed}/{total} phases ({percentage:.0f}%){Colors.ENDC}"
+    logger._log(f"\n🔍 MCP Server Debugger", Colors.BOLD if logger.print_output else "")
+    logger._log(f"Command: {' '.join(command)}", Colors.GRAY if logger.print_output else "")
+    logger._log(
+        f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        Colors.GRAY if logger.print_output else "",
     )
 
-    if completed == 0:
-        logger.info(f"{Colors.RED}Failed at Phase 1 - Docker container startup{Colors.ENDC}")
-    elif completed == 1:
-        logger.info(f"{Colors.YELLOW}Failed at Phase 2 - MCP initialization{Colors.ENDC}")
-    elif completed == 2:
-        logger.info(f"{Colors.YELLOW}Failed at Phase 3 - Tool discovery{Colors.ENDC}")
-    elif completed == 3:
-        logger.info(f"{Colors.YELLOW}Failed at Phase 4 - Remote deployment readiness{Colors.ENDC}")
-    elif completed == 4:
-        logger.info(
-            f"{Colors.YELLOW}Failed at Phase 5 - Concurrent clients & resources{Colors.ENDC}"
-        )
-    elif completed == 5:
-        logger.info(f"{Colors.GREEN}All phases completed successfully!{Colors.ENDC}")
+    # Explain color coding (only in print mode)
+    if logger.print_output:
+        logger._log(f"\nColor Key:", Colors.BOLD if logger.print_output else "")
+        logger._log(f"  {Colors.BOLD}■{Colors.ENDC} Commands (bold)")
+        logger._log(f"  {Colors.GOLD}■{Colors.ENDC} STDIO (MCP protocol)")
+        logger._log(f"  {Colors.GRAY}■{Colors.ENDC} STDERR (server logs)")
+        logger._log(f"  {Colors.GREEN}■{Colors.ENDC} Success messages")
+        logger._log(f"  {Colors.RED}■{Colors.ENDC} Error messages")
+        logger._log(f"  ■ Info messages")
 
-
-async def debug_mcp_docker(image: str) -> None:
-    """Debug a Docker MCP server step by step."""
-
-    logger.info(f"\n{Colors.BOLD}🔍 Docker MCP Server Debugger{Colors.ENDC}")
-    logger.info(f"{Colors.GRAY}Image: {image}{Colors.ENDC}")
-
-    # Show extra docker args if provided
-    extra_args = getattr(__builtins__, "_docker_extra_args", [])
-    if extra_args:
-        logger.info(f"{Colors.GRAY}Extra args: {' '.join(extra_args)}{Colors.ENDC}")
-
-    logger.info(f"{Colors.GRAY}Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{Colors.ENDC}")
-
-    # Explain color coding
-    logger.info(f"\n{Colors.BOLD}Color Key:{Colors.ENDC}")
-    logger.info(f"  {Colors.BOLD}■{Colors.ENDC} Commands (bold)")
-    logger.info(f"  {Colors.GOLD}■{Colors.ENDC} STDIO (MCP protocol)")
-    logger.info(f"  {Colors.GRAY}■{Colors.ENDC} STDERR (container logs)")
-    logger.info(f"  {Colors.GREEN}■{Colors.ENDC} Success messages")
-    logger.info(f"  {Colors.RED}■{Colors.ENDC} Error messages")
-    logger.info(f"  ■ Info messages")
-
-    # Track progress
     phases_completed = 0
     total_phases = 5
     start_time = time.time()
 
-    # Phase 1: Basic Docker Test
-    log_phase(1, "Basic Docker Container Test")
+    # Phase 1: Basic Server Test
+    logger.phase(1, "Basic Server Startup Test")
 
     try:
-        # Get extra docker args if provided
-        extra_args = getattr(__builtins__, "_docker_extra_args", [])
-        cmd = ["docker", "run", "--rm"] + extra_args + [image, "echo", "Container OK"]
-        log_command(cmd)
+        # Test if command runs at all
+        test_cmd = command + (["echo", "Server OK"] if "docker" in command[0] else [])
+        logger.command(test_cmd[:3] + ["..."] if len(test_cmd) > 3 else test_cmd)
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        result = subprocess.run(command[:1], capture_output=True, text=True, timeout=2)
 
-        if result.returncode == 0:
-            log_success("Docker container starts successfully")
+        if result.returncode == 0 or "usage" in result.stderr.lower():
+            logger.success("Command executable found")
             phases_completed = 1
         else:
-            log_error(f"Docker container failed with exit code {result.returncode}")
+            logger.error(f"Command failed with exit code {result.returncode}")
             if result.stderr:
-                logger.info(f"{Colors.RED}Error output: {result.stderr}{Colors.ENDC}")
-                # Analyze error for hints
+                logger._log(
+                    f"Error output: {result.stderr}", Colors.RED if logger.print_output else ""
+                )
                 hint = analyze_error_for_hints(result.stderr)
                 if hint:
-                    log_hint(hint)
-            show_progress_bar(phases_completed, total_phases)
-            return
+                    logger.hint(hint)
+            logger.progress_bar(phases_completed, total_phases)
+            return phases_completed
+
+        # Check if we should stop here
+        if max_phase <= 1:
+            logger.info(f"Stopping at phase {max_phase} as requested")
+            logger.progress_bar(phases_completed, total_phases)
+            return phases_completed
+
+    except FileNotFoundError:
+        logger.error(f"Command not found: {command[0]}")
+        logger.hint("Ensure the command is installed and in PATH")
+        logger.progress_bar(phases_completed, total_phases)
+        return phases_completed
     except Exception as e:
-        log_error(f"Docker test failed: {e}")
-        show_progress_bar(phases_completed, total_phases)
-        return
+        logger.error(f"Startup test failed: {e}")
+        logger.progress_bar(phases_completed, total_phases)
+        return phases_completed
 
     # Phase 2: MCP Initialize Test
-    log_phase(2, "MCP Server Initialize Test")
+    logger.phase(2, "MCP Server Initialize Test")
 
-    log_info("STDIO is used for MCP protocol, STDERR for container logs")
+    logger.info("STDIO is used for MCP protocol, STDERR for server logs")
 
     init_request = {
         "jsonrpc": "2.0",
@@ -301,15 +345,11 @@ async def debug_mcp_docker(image: str) -> None:
     }
 
     try:
-        # Get extra docker args if provided
-        extra_args = getattr(__builtins__, "_docker_extra_args", [])
-        cmd = ["docker", "run", "--rm", "-i"] + extra_args + [image]
-        log_command(cmd)
-
-        log_stdio(f"Sending: {json.dumps(init_request)}")
+        logger.command(command)
+        logger.stdio(f"Sending: {json.dumps(init_request)}")
 
         proc = subprocess.Popen(
-            cmd,
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -330,7 +370,7 @@ async def debug_mcp_docker(image: str) -> None:
             for line in proc.stderr:
                 line = line.rstrip()
                 if line:
-                    log_stderr(line)
+                    logger.stderr(line)
                     stderr_lines.append(line)
 
         stderr_thread = threading.Thread(target=read_stderr)
@@ -346,7 +386,7 @@ async def debug_mcp_docker(image: str) -> None:
                 try:
                     response = json.loads(line)
                     if response.get("id") == 1:
-                        log_stdio(f"Received: {json.dumps(response)}")
+                        logger.stdio(f"Received: {json.dumps(response)}")
                         break
                 except:
                     continue
@@ -355,86 +395,87 @@ async def debug_mcp_docker(image: str) -> None:
         time.sleep(0.5)
 
         if response and "result" in response:
-            log_success("MCP server initialized successfully")
+            logger.success("MCP server initialized successfully")
             server_info = response["result"].get("serverInfo", {})
-            log_info(
+            logger.info(
                 f"Server: {server_info.get('name', 'Unknown')} v{server_info.get('version', '?')}"
             )
 
             # Show capabilities
             caps = response["result"].get("capabilities", {})
             if caps:
-                log_info(f"Capabilities: {', '.join(caps.keys())}")
+                logger.info(f"Capabilities: {', '.join(caps.keys())}")
             phases_completed = 2
         else:
-            log_error("No valid MCP response received")
+            logger.error("No valid MCP response received")
 
             # Analyze stderr for hints
             if stderr_lines:
                 all_stderr = "\n".join(stderr_lines)
                 hint = analyze_error_for_hints(all_stderr)
                 if hint:
-                    log_hint(hint)
+                    logger.hint(hint)
             else:
-                # No stderr output, likely stdout pollution
-                log_hint("""MCP requires clean stdout. Ensure:
+                logger.hint("""MCP requires clean stdout. Ensure:
    - All print() statements use file=sys.stderr
    - Logging is configured to use stderr
    - No libraries are printing to stdout""")
 
-            show_progress_bar(phases_completed, total_phases)
+            logger.progress_bar(phases_completed, total_phases)
             proc.terminate()
             proc.wait(timeout=5)
-            return
+            return phases_completed
 
         proc.terminate()
         proc.wait(timeout=5)
 
+        # Check if we should stop here
+        if phases_completed >= max_phase:
+            logger.info(f"Stopping at phase {max_phase} as requested")
+            logger.progress_bar(phases_completed, total_phases)
+            return phases_completed
+
     except Exception as e:
-        log_error(f"MCP test failed: {e}")
-        # Try to analyze the exception for hints
+        logger.error(f"MCP test failed: {e}")
         hint = analyze_error_for_hints(str(e))
         if hint:
-            log_hint(hint)
-        show_progress_bar(phases_completed, total_phases)
-        return
+            logger.hint(hint)
+        logger.progress_bar(phases_completed, total_phases)
+        return phases_completed
 
     # Phase 3: Tool Discovery
-    log_phase(3, "MCP Tool Discovery Test")
+    logger.phase(3, "MCP Tool Discovery Test")
 
     try:
-        from hud.mcp import MCPClient
+        from hud.client import MCPClient
 
-        # Get extra docker args if provided
-        extra_args = getattr(__builtins__, "_docker_extra_args", [])
+        # Create MCP config for the command
         mcp_config = {
-            "test": {"command": "docker", "args": ["run", "--rm", "-i"] + extra_args + [image]}
+            "test": {"command": command[0], "args": command[1:] if len(command) > 1 else []}
         }
 
-        cmd = ["docker"] + mcp_config["test"]["args"]
-        log_command(cmd)
+        logger.command(command)
+        logger.info("Creating MCP client via hud...")
 
-        log_info("Creating MCP client via hud...")
         client = MCPClient(mcp_config=mcp_config, verbose=False)
-
         await client.initialize()
 
         # Wait for initialization
-        log_info("Waiting for server initialization...")
+        logger.info("Waiting for server initialization...")
         await asyncio.sleep(5)
 
         # Get tools
         tools = client.get_available_tools()
 
         if tools:
-            log_success(f"Found {len(tools)} tools")
+            logger.success(f"Found {len(tools)} tools")
 
             # Check for lifecycle tools
             tool_names = [t.name for t in tools]
             has_setup = "setup" in tool_names
             has_evaluate = "evaluate" in tool_names
 
-            log_info(
+            logger.info(
                 f"Lifecycle tools: setup={'✅' if has_setup else '❌'}, evaluate={'✅' if has_evaluate else '❌'}"
             )
 
@@ -442,344 +483,342 @@ async def debug_mcp_docker(image: str) -> None:
             interaction_tools = [
                 name
                 for name in tool_names
-                if name in ["computer", "playwright", "click", "type", "interact"]
+                if name in ["computer", "playwright", "click", "type", "interact", "move"]
             ]
             if interaction_tools:
-                log_info(f"Interaction tools: {', '.join(interaction_tools)}")
-            else:
-                log_info("Interaction tools: None found")
+                logger.info(f"Interaction tools: {', '.join(interaction_tools)}")
 
             # List all tools
-            log_info(f"All tools: {', '.join(tool_names)}")
+            logger.info(f"All tools: {', '.join(tool_names)}")
 
             # Try to list resources
             try:
-                session = client._sessions.get("test")
-                if session and hasattr(session, "list_resources"):
-                    resources = await session.list_resources()
-                    if resources:
-                        log_info(
-                            f"Found {len(resources)} resources: {', '.join(r.uri for r in resources[:3])}..."
-                        )
+                resources = await client.list_resources()
+                if resources:
+                    logger.info(
+                        f"Found {len(resources)} resources: {', '.join(str(r.uri) for r in resources[:3])}..."
+                    )
             except:
                 pass
 
-            # Check if we have the minimum required tools
-            if has_setup and has_evaluate:
-                phases_completed = 3
-            else:
-                log_error("Missing required lifecycle tools (setup/evaluate)")
-                log_hint("""Lifecycle tools missing. Ensure:
-   - @mcp.tool() decorator is used on setup/evaluate functions
-   - Tools are registered before mcp.run()
-   - No import errors preventing tool registration""")
-                await client.close()
-                show_progress_bar(phases_completed, total_phases)
-                return
+            phases_completed = 3
 
         else:
-            log_error("No tools found")
-            log_hint("""Lifecycle tools missing. Ensure:
-   - @mcp.tool() decorator is used on setup/evaluate functions
+            logger.error("No tools found")
+            logger.hint("""No tools found. Ensure:
+   - @mcp.tool() decorator is used on functions
    - Tools are registered before mcp.run()
    - No import errors preventing tool registration""")
             await client.close()
-            show_progress_bar(phases_completed, total_phases)
-            return
+            logger.progress_bar(phases_completed, total_phases)
+            return phases_completed
 
-        # Keep client open for Phase 4
-        # await client.close()
+        # Phase 4: Remote Deployment Readiness
+        logger.phase(4, "Remote Deployment Readiness")
 
-    except Exception as e:
-        log_error(f"Tool discovery failed: {e}")
-        if "verbose" in str(e).lower():
-            # If error is about verbose mode, show simpler error
-            logger.info(f"{Colors.GRAY}Error details hidden (verbose mode issue){Colors.ENDC}")
-        else:
-            import traceback
-
-            error_details = traceback.format_exc()
-            logger.info(f"{Colors.RED}{error_details}{Colors.ENDC}")
-
-            # Analyze error for hints
-            hint = analyze_error_for_hints(error_details)
-            if hint:
-                log_hint(hint)
-        show_progress_bar(phases_completed, total_phases)
-        return
-
-    # Phase 4: Remote Deployment Readiness
-    log_phase(4, "Remote Deployment Readiness")
-
-    try:
-        log_info("Testing setup and evaluate tools...")
-
-        # Test setup tool
-        setup_success = False
-        if "setup" in [t.name for t in tools]:
+        # Test if setup/evaluate exist
+        if "setup" in tool_names:
             try:
-                log_info("Calling setup tool (no params to test existence)...")
+                logger.info("Testing setup tool...")
                 setup_result = await client.call_tool("setup", {})
-
-                # Even if it errors, if we get a response it means the tool exists
-                if hasattr(setup_result, "isError") and setup_result.isError:
-                    log_info(
-                        f"Setup tool exists but returned error (expected): {setup_result.content[0].text if setup_result.content else 'Unknown error'}"
-                    )
-                    setup_success = True  # Tool exists, that's what we're checking
-                elif isinstance(setup_result, dict) and "status" in setup_result:
-                    log_success(f"Setup tool returned: {setup_result}")
-                    setup_success = setup_result.get("status") == "success"
-                else:
-                    log_success(f"Setup tool exists and returned: {type(setup_result)}")
-                    setup_success = True
+                logger.success("Setup tool responded")
             except Exception as e:
-                log_error(f"Setup tool failed: {e}")
+                logger.info(f"Setup tool test: {e}")
 
-        # Test evaluate tool
-        evaluate_success = False
-        if "evaluate" in [t.name for t in tools]:
+        if "evaluate" in tool_names:
             try:
-                log_info("Calling evaluate tool (no params to test existence)...")
+                logger.info("Testing evaluate tool...")
                 eval_result = await client.call_tool("evaluate", {})
-
-                # Even if it errors, if we get a response it means the tool exists
-                if hasattr(eval_result, "isError") and eval_result.isError:
-                    log_info(
-                        f"Evaluate tool exists but returned error (expected): {eval_result.content[0].text if eval_result.content else 'Unknown error'}"
-                    )
-                    evaluate_success = True  # Tool exists, that's what we're checking
-                elif (
-                    isinstance(eval_result, dict)
-                    and "reward" in eval_result
-                    and "done" in eval_result
-                ):
-                    log_success(
-                        f"Evaluate tool returned: reward={eval_result['reward']}, done={eval_result['done']}"
-                    )
-                    evaluate_success = True
-                else:
-                    log_success(f"Evaluate tool exists and returned: {type(eval_result)}")
-                    evaluate_success = True
+                logger.success("Evaluate tool responded")
             except Exception as e:
-                log_error(f"Evaluate tool failed: {e}")
-
-        # Check resources
-        log_info("Checking MCP resources...")
-        resources_found = []
-        try:
-            session = client._sessions.get("test")
-            if session and hasattr(session, "connector"):
-                resources = await session.connector.list_resources()
-                for res in resources.resources:
-                    resources_found.append(res.uri)
-                    if "telemetry://live" in res.uri:
-                        log_info(f"Found telemetry resource: {res.uri}")
-                    elif "registry" in res.uri:
-                        log_info(f"Found registry resource: {res.uri}")
-                if not resources_found:
-                    log_info("No resources exposed by this environment")
-            else:
-                log_info("Session connector not available for resource listing")
-        except Exception as e:
-            log_info(f"Resource check skipped: {e}")
+                logger.info(f"Evaluate tool test: {e}")
 
         # Performance check
-        log_info("Checking initialization performance...")
         init_time = time.time() - start_time
-        log_info(f"Total initialization time: {init_time:.2f}s")
+        logger.info(f"Total initialization time: {init_time:.2f}s")
 
         if init_time > 30:
-            log_error("Initialization took >30s - may be too slow for remote deployment")
-            log_hint("""Consider optimizing startup time:
-   - Use @mcp_initialize_wrapper() for heavy initialization
-   - Move slow operations to setup() tool
-   - Pre-build/cache dependencies in Docker image""")
+            logger.error("Initialization took >30s - may be too slow")
+            logger.hint("Consider optimizing startup time")
 
-        # Overall phase 4 success check
-        if setup_success or evaluate_success:
-            phases_completed = 4
-            log_success("Remote deployment readiness checks passed")
-        else:
-            log_error("Missing or failing lifecycle tools")
-            await client.close()
-            show_progress_bar(phases_completed, total_phases)
-            return
+        phases_completed = 4
 
-        # Close client from Phase 3/4
-        await client.close()
+        # Phase 5: Concurrent Clients
+        logger.phase(5, "Concurrent Clients Testing")
 
-    except Exception as e:
-        log_error(f"Phase 4 failed: {e}")
+        concurrent_clients = []
         try:
-            await client.close()
-        except:
-            pass
-        show_progress_bar(phases_completed, total_phases)
-        return
-
-    # Phase 5: Concurrent Clients & Resource Testing
-    log_phase(5, "Concurrent Clients & Resource Testing")
-
-    concurrent_clients = []
-    try:
-        import psutil
-
-        # Get baseline resource usage
-        process = psutil.Process()
-        baseline_memory = process.memory_info().rss / 1024 / 1024  # MB
-        baseline_cpu = process.cpu_percent(interval=0.1)
-
-        log_info(f"Baseline: Memory={baseline_memory:.1f}MB, CPU={baseline_cpu:.1f}%")
-
-        # Get extra docker args if provided
-        extra_args = getattr(__builtins__, "_docker_extra_args", [])
-
-        # Create multiple concurrent clients
-        log_info("Creating 3 concurrent MCP clients...")
-
-        for i in range(3):
-            client_config = {
-                f"test_concurrent_{i}": {
-                    "command": "docker",
-                    "args": ["run", "--rm", "-i"] + extra_args + [image],
-                }
-            }
-
-            concurrent_client = MCPClient(mcp_config=client_config, verbose=False)
-            await concurrent_client.initialize()
-            concurrent_clients.append(concurrent_client)
-            log_info(f"Client {i + 1} connected")
-
-        # Test concurrent tool calls
-        log_info("Testing concurrent tool calls...")
-        tasks = []
-        for i, client in enumerate(concurrent_clients):
-            if "setup" in [t.name for t in client.get_available_tools()]:
-                task = client.call_tool("setup", {"config": {"client_id": i}})
-                tasks.append(task)
-
-        if tasks:
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            success_count = sum(1 for r in results if not isinstance(r, Exception))
-            log_info(f"Concurrent calls: {success_count}/{len(tasks)} succeeded")
-
-        # Check resource usage under load
-        await asyncio.sleep(1)  # Let things settle
-        current_memory = process.memory_info().rss / 1024 / 1024  # MB
-        current_cpu = process.cpu_percent(interval=0.1)
-        memory_growth = current_memory - baseline_memory
-
-        log_info(
-            f"Under load: Memory={current_memory:.1f}MB (+{memory_growth:.1f}MB), CPU={current_cpu:.1f}%"
-        )
-
-        if memory_growth > 500:  # More than 500MB growth
-            log_error(f"Excessive memory growth: {memory_growth:.1f}MB")
-            log_hint("Check for memory leaks in your MCP server")
-
-        # Test clean shutdown
-        log_info("Testing clean shutdown of all clients...")
-        for i, client in enumerate(concurrent_clients):
-            try:
-                await client.close()
-                log_info(f"Client {i + 1} disconnected")
-            except Exception as e:
-                log_info(f"Client {i + 1} close error: {e}")
-
-        # Small delay to allow cleanup
-        try:
-            await asyncio.sleep(0.5)
-        except asyncio.CancelledError:
-            pass
-
-        try:
-            final_memory = process.memory_info().rss / 1024 / 1024
-            memory_freed = current_memory - final_memory
-            log_info(f"After cleanup: Memory={final_memory:.1f}MB (freed {memory_freed:.1f}MB)")
-        except:
-            pass
-
-        phases_completed = 5
-        log_success("Concurrent client testing completed")
-
-    except ImportError:
-        log_error("psutil not installed - skipping resource monitoring")
-        log_info("Install with: pip install psutil")
-
-        # Still test basic concurrent connections
-        try:
-            # Get extra docker args if provided
-            extra_args = getattr(__builtins__, "_docker_extra_args", [])
+            logger.info("Creating 3 concurrent MCP clients...")
 
             for i in range(3):
                 client_config = {
                     f"test_concurrent_{i}": {
-                        "command": "docker",
-                        "args": ["run", "--rm", "-i"] + extra_args + [image],
+                        "command": command[0],
+                        "args": command[1:] if len(command) > 1 else [],
                     }
                 }
 
                 concurrent_client = MCPClient(mcp_config=client_config, verbose=False)
                 await concurrent_client.initialize()
                 concurrent_clients.append(concurrent_client)
+                logger.info(f"Client {i + 1} connected")
 
-            log_success(f"Created {len(concurrent_clients)} concurrent clients")
+            logger.success("All concurrent clients connected")
 
-            for client in concurrent_clients:
-                await client.close()
+            # Clean shutdown
+            for i, c in enumerate(concurrent_clients):
+                await c.close()
+                logger.info(f"Client {i + 1} disconnected")
 
             phases_completed = 5
 
         except Exception as e:
-            log_error(f"Concurrent client test failed: {e}")
-
-    except Exception as e:
-        log_error(f"Phase 5 failed: {e}")
-
-    finally:
-        # Ensure all clients are closed
-        if concurrent_clients:
-            log_info("Final cleanup of any remaining clients...")
-            for client in concurrent_clients:
+            logger.error(f"Concurrent test failed: {e}")
+        finally:
+            for c in concurrent_clients:
                 try:
-                    await client.close()
+                    await c.close()
                 except:
                     pass
-            # Small delay for cleanup
-            try:
-                await asyncio.sleep(0.2)
-            except:
-                pass
 
-    # All phases completed
-    show_progress_bar(phases_completed, total_phases)
+        await client.close()
+
+    except Exception as e:
+        logger.error(f"Tool discovery failed: {e}")
+        logger.progress_bar(phases_completed, total_phases)
+        return phases_completed
+
+    logger.progress_bar(phases_completed, total_phases)
+    return phases_completed
+
+
+def parse_cursor_config(server_name: str) -> Optional[Tuple[List[str], str]]:
+    """
+    Parse cursor config to get command for a server.
+
+    Returns:
+        Tuple of (command_list, error_message) or None if successful
+    """
+    from pathlib import Path
+
+    # Find cursor config
+    cursor_config_path = Path.home() / ".cursor" / "mcp.json"
+    if not cursor_config_path.exists():
+        # Try Windows path
+        cursor_config_path = Path(os.environ.get("USERPROFILE", "")) / ".cursor" / "mcp.json"
+
+    if not cursor_config_path.exists():
+        return None, f"Cursor config not found at {cursor_config_path}"
+
+    try:
+        with open(cursor_config_path) as f:
+            config = json.load(f)
+
+        servers = config.get("mcpServers", {})
+        if server_name not in servers:
+            available = ", ".join(servers.keys())
+            return None, f"Server '{server_name}' not found. Available: {available}"
+
+        server_config = servers[server_name]
+        command = server_config.get("command", "")
+        args = server_config.get("args", [])
+
+        # Combine command and args
+        full_command = [command] + args
+
+        # Handle reloaderoo wrapper
+        if command == "npx" and "reloaderoo" in args and "--" in args:
+            # Extract the actual command after --
+            dash_index = args.index("--")
+            full_command = args[dash_index + 1 :]
+
+        return full_command, None
+
+    except Exception as e:
+        return None, f"Error reading config: {e}"
+
+
+def run_as_mcp_server():
+    """Run docker_debug as an MCP server."""
+    from mcp.server.fastmcp import FastMCP
+    from mcp.types import TextContent
+
+    # Initialize MCP server
+    mcp = FastMCP(
+        name="mcp-debugger",
+    )
+
+    @mcp.tool()
+    async def debug_stdio_server(
+        command: str, args: list[str] = None, max_phase: int = 1
+    ) -> list[TextContent]:
+        """
+        Debug any stdio-based MCP server.
+
+        Args:
+            command: Command to run (e.g., 'python', 'node', 'docker')
+            args: List of arguments for the command
+            max_phase: Maximum phase to run (1-3, default 1 for quick test)
+
+        Returns:
+            Debug output showing test phases up to max_phase
+        """
+        # Build full command
+        full_command = [command] + (args or [])
+
+        # Create logger in capture mode
+        logger = CaptureLogger(print_output=False)
+
+        # Cap max_phase at 3 for MCP mode
+        max_phase = min(max_phase, 3)
+
+        # Run debug
+        await debug_mcp_stdio(full_command, logger, max_phase=max_phase)
+
+        # Return captured output
+        return [TextContent(text=logger.get_output(), type="text")]
+
+    @mcp.tool()
+    async def debug_docker_image(
+        image: str, docker_args: list[str] = None, max_phase: int = 1
+    ) -> list[TextContent]:
+        """
+        Debug a Docker-based MCP server.
+
+        Args:
+            image: Docker image name
+            docker_args: Additional docker arguments (e.g., ['-e', 'KEY=value'])
+            max_phase: Maximum phase to run (1-3, default 1 for quick test)
+
+        Returns:
+            Debug output showing test phases up to max_phase
+        """
+        # Build docker command
+        command = ["docker", "run", "--rm", "-i"] + (docker_args or []) + [image]
+
+        # Create logger in capture mode
+        logger = CaptureLogger(print_output=False)
+
+        # Cap max_phase at 3 for MCP mode
+        max_phase = min(max_phase, 3)
+
+        # Run debug
+        await debug_mcp_stdio(command, logger, max_phase=max_phase)
+
+        # Return captured output
+        return [TextContent(text=logger.get_output(), type="text")]
+
+    @mcp.tool()
+    async def debug_cursor_config(server_name: str, max_phase: int = 1) -> list[TextContent]:
+        """
+        Debug a server from Cursor's MCP configuration.
+
+        Args:
+            server_name: Name of server in .cursor/mcp.json
+            max_phase: Maximum phase to run (1-3, default 1 for quick test)
+
+        Returns:
+            Debug output showing test phases up to max_phase
+        """
+        # Parse cursor config
+        command, error = parse_cursor_config(server_name)
+
+        if error:
+            return [TextContent(text=f"❌ {error}", type="text")]
+
+        # Create logger in capture mode
+        logger = CaptureLogger(print_output=False)
+
+        # Cap max_phase at 3 for MCP mode
+        max_phase = min(max_phase, 3)
+
+        # Run debug
+        await debug_mcp_stdio(command, logger, max_phase=max_phase)
+
+        # Return captured output
+        return [TextContent(text=logger.get_output(), type="text")]
+
+    # Run the MCP server
+    mcp.run()
 
 
 if __name__ == "__main__":
     import warnings
     import gc
 
+    # Parse arguments
     if len(sys.argv) < 2:
-        print("Usage: python docker_debug.py <docker-image> [docker-args...]")
-        print("Example: python docker_debug.py hudpython/gmail-clone:latest")
-        print(
-            "Example: python docker_debug.py my-env:latest -e BROWSER_PROVIDER=browserbase -e API_KEY=xxx"
-        )
+        print("Universal MCP Server Debugger")
+        print("=" * 40)
+        print("\nUsage modes:")
+        print('  1. Direct command:   python docker_debug.py --cmd "python -m my_server"')
+        print("  2. Docker shorthand: python docker_debug.py my-image:latest [docker-args...]")
+        print("  3. Cursor config:    python docker_debug.py --cursor server-name")
+        print("  4. As MCP server:    python docker_debug.py --mcp")
+        print("\nExamples:")
+        print('  python docker_debug.py --cmd "python -m hud_controller.server"')
+        print('  python docker_debug.py --cmd "node server.js"')
+        print("  python docker_debug.py hud-text-2048:dev")
+        print("  python docker_debug.py my-image:latest -e API_KEY=xxx")
+        print("  python docker_debug.py --cursor text-2048-dev")
+        print("  python docker_debug.py --mcp")
         sys.exit(1)
-
-    docker_image = sys.argv[1]
-    docker_extra_args = sys.argv[2:] if len(sys.argv) > 2 else []
 
     # Suppress cleanup warnings
     warnings.filterwarnings("ignore", category=ResourceWarning)
 
-    # Store extra args globally so they can be used in docker commands
-    import builtins
+    # Mode 4: Run as MCP server
+    if sys.argv[1] == "--mcp":
+        run_as_mcp_server()
 
-    setattr(builtins, "_docker_extra_args", docker_extra_args)
+    # Mode 1: Direct command mode
+    elif sys.argv[1] == "--cmd":
+        if len(sys.argv) < 3:
+            print("Error: --cmd requires a command string")
+            sys.exit(1)
 
-    asyncio.run(debug_mcp_docker(docker_image))
+        # Parse the command (handle quoted strings)
+        command = shlex.split(sys.argv[2])
 
-    # Force cleanup to avoid warnings
+        # Create logger in print mode
+        logger = CaptureLogger(print_output=True)
+
+        # Run debug
+        asyncio.run(debug_mcp_stdio(command, logger))
+
+    # Mode 3: Cursor config mode
+    elif sys.argv[1] == "--cursor":
+        if len(sys.argv) < 3:
+            print("Error: --cursor requires a server name")
+            sys.exit(1)
+
+        server_name = sys.argv[2]
+        command, error = parse_cursor_config(server_name)
+
+        if error:
+            print(f"❌ {error}")
+            sys.exit(1)
+
+        # Create logger in print mode
+        logger = CaptureLogger(print_output=True)
+
+        # Run debug
+        asyncio.run(debug_mcp_stdio(command, logger))
+
+    # Mode 2: Docker shorthand (backward compatible)
+    else:
+        # Assume it's a docker image
+        docker_image = sys.argv[1]
+        docker_args = sys.argv[2:] if len(sys.argv) > 2 else []
+
+        # Build docker command
+        command = ["docker", "run", "--rm", "-i"] + docker_args + [docker_image]
+
+        # Create logger in print mode
+        logger = CaptureLogger(print_output=True)
+
+        # Run debug
+        asyncio.run(debug_mcp_stdio(command, logger))
+
+    # Force cleanup
     gc.collect()

@@ -5,10 +5,11 @@ import logging
 from typing import Any, Literal, cast
 
 from mcp import ErrorData, McpError
-from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ImageContent, TextContent
+from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ContentBlock, TextContent
 from pydantic import Field
 
-from hud.tools.base import ToolResult, tool_result_to_content_blocks
+from hud.tools.computer.settings import computer_settings
+from hud.tools.types import ContentResult
 
 from .hud import HudComputerTool
 
@@ -49,13 +50,13 @@ class OpenAIComputerTool(HudComputerTool):
 
     def __init__(
         self,
-        width: int = 1024,
-        height: int = 768,
-        environment_width: int = 1920,
-        environment_height: int = 1080,
-        display_num: int | None = None,
-        platform_type: Literal["auto", "xdo", "pyautogui"] = "auto",
-        rescale_images: bool = False,
+        # Overrides for what dimensions the agent thinks it operates in
+        width: int = computer_settings.OPENAI_COMPUTER_WIDTH,
+        height: int = computer_settings.OPENAI_COMPUTER_HEIGHT,
+        rescale_images: bool = computer_settings.OPENAI_RESCALE_IMAGES,
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -64,24 +65,18 @@ class OpenAIComputerTool(HudComputerTool):
         Args:
             width: Target width for rescaling (default: 1024 for OpenAI)
             height: Target height for rescaling (default: 768 for OpenAI)
-            environment_width: Environment screen width (default: 1920)
-            environment_height: Environment screen height (default: 1080)
-            display_num: X display number
-            platform_type: Which executor to use:
-                - "auto": Automatically detect based on platform
-                - "xdo": Use XDOExecutor (Linux/X11 only)
-                - "pyautogui": Use PyAutoGUIExecutor (cross-platform)
             rescale_images: If True, rescale screenshots. If False, only rescale action coordinates
-            **kwargs: Additional arguments passed to HudComputerTool (e.g., executor)
+            name: Tool name for MCP registration (auto-generated from class name if not provided)
+            title: Human-readable display name for the tool (auto-generated from class name)
+            description: Tool description (auto-generated from docstring if not provided)
         """
         super().__init__(
             width=width,
             height=height,
-            environment_width=environment_width,
-            environment_height=environment_height,
-            display_num=display_num,
-            platform_type=platform_type,
             rescale_images=rescale_images,
+            name=name or "openai_computer",
+            title=title or "OpenAI Computer Tool",
+            description=description or "Control computer with mouse, keyboard, and screenshots",
             **kwargs,
         )
 
@@ -116,7 +111,7 @@ class OpenAIComputerTool(HudComputerTool):
         ),
         # Custom action parameter
         action: str | None = Field(None, description="Custom action name"),
-    ) -> list[ImageContent | TextContent]:
+    ) -> list[ContentBlock]:
         """
         Handle OpenAI Computer Use API calls.
 
@@ -138,9 +133,9 @@ class OpenAIComputerTool(HudComputerTool):
             if screenshot_base64:
                 # Rescale screenshot if requested
                 screenshot_base64 = await self._rescale_screenshot(screenshot_base64)
-                result = ToolResult(base64_image=screenshot_base64)
+                result = ContentResult(base64_image=screenshot_base64)
             else:
-                result = ToolResult(error="Failed to take screenshot")
+                result = ContentResult(error="Failed to take screenshot")
 
         elif type == "click":
             if x is not None and y is not None:
@@ -187,7 +182,7 @@ class OpenAIComputerTool(HudComputerTool):
         elif type == "type":
             if text is None:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="text is required for type"))
-            result = await self.executor.type(text=text, enter_after=False)
+            result = await self.executor.write(text=text, enter_after=False)
 
         elif type == "wait":
             wait_time = ms or 1000  # Default to 1 second
@@ -257,9 +252,9 @@ class OpenAIComputerTool(HudComputerTool):
             raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Invalid action type: {type}"))
 
         # Rescale screenshot in result if present
-        if isinstance(result, ToolResult) and result.base64_image and self.rescale_images:
+        if isinstance(result, ContentResult) and result.base64_image and self.rescale_images:
             rescaled_image = await self._rescale_screenshot(result.base64_image)
-            result = result.replace(base64_image=rescaled_image)
+            result.base64_image = rescaled_image
 
         # Handle screenshot for actions that need it
         screenshot_actions = {
@@ -277,16 +272,16 @@ class OpenAIComputerTool(HudComputerTool):
         if (
             type in screenshot_actions
             and type != "screenshot"
-            and isinstance(result, ToolResult)
+            and isinstance(result, ContentResult)
             and not result.base64_image
         ):
             screenshot_base64 = await self.executor.screenshot()
             if screenshot_base64:
                 # Rescale screenshot if requested
                 screenshot_base64 = await self._rescale_screenshot(screenshot_base64)
-                result = ToolResult(
+                result = ContentResult(
                     output=result.output, error=result.error, base64_image=screenshot_base64
                 )
 
         # Convert to content blocks
-        return tool_result_to_content_blocks(result)
+        return result.to_content_blocks()

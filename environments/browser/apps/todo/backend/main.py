@@ -33,6 +33,11 @@ class ItemCreate(BaseModel):
     completed: bool = False
 
 
+class BulkUpdateRequest(BaseModel):
+    item_ids: List[int]
+    completed: Optional[bool] = None
+
+
 class EvaluationStats(BaseModel):
     total_items: int
     completed_items: int
@@ -217,6 +222,12 @@ def get_evaluation_stats():
     )
 
 
+@app.get("/api/eval/todos", response_model=List[Item])
+def get_todos_for_evaluation():
+    """Get all todos for evaluation purposes (alias for /api/items)."""
+    return get_items()
+
+
 @app.get("/api/eval/has_todo")
 def check_todo_exists(text: str):
     """Check if a todo item exists with specific text in title or description."""
@@ -240,6 +251,30 @@ def check_todo_exists(text: str):
         "count": len(items),
         "search_text": text,
         "matches": items,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+@app.post("/api/eval/bulk_update")
+def bulk_update_items(request: BulkUpdateRequest):
+    """Update multiple items at once for evaluation purposes."""
+    conn = sqlite3.connect("app.db")
+    c = conn.cursor()
+
+    updated_count = 0
+    if request.completed is not None:
+        for item_id in request.item_ids:
+            c.execute("UPDATE items SET completed = ? WHERE id = ?", (request.completed, item_id))
+            if c.rowcount > 0:
+                updated_count += 1
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "message": f"Updated {updated_count} items",
+        "updated_count": updated_count,
+        "requested_ids": request.item_ids,
         "timestamp": datetime.now().isoformat(),
     }
 
@@ -313,6 +348,33 @@ def seed_test_data():
     return {
         "message": "Test data seeded successfully",
         "items_added": len(test_items),
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+@app.post("/api/eval/seed_custom")
+def seed_custom_data(items: List[ItemCreate]):
+    """Seed the database with custom test data for evaluation purposes."""
+    conn = sqlite3.connect("app.db")
+    c = conn.cursor()
+
+    items_added = 0
+    for item in items:
+        c.execute(
+            """
+            INSERT INTO items (title, description, completed) 
+            VALUES (?, ?, ?)
+        """,
+            (item.title, item.description if hasattr(item, "description") else "", item.completed),
+        )
+        items_added += 1
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "message": "Custom test data seeded successfully",
+        "items_added": items_added,
         "timestamp": datetime.now().isoformat(),
     }
 

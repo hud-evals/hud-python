@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from hud.tools.base import ToolResult
 from hud.tools.executors.pyautogui import PyAutoGUIExecutor
+from hud.tools.types import ContentResult
 
 # Check if pyautogui is available for test skipping
 PYAUTOGUI_AVAILABLE = PyAutoGUIExecutor.is_available()
@@ -35,7 +35,7 @@ class TestPyAutoGUIExecutor:
 
             result = await executor.screenshot()
 
-            # screenshot() returns a base64 string, not a ToolResult
+            # screenshot() returns a base64 string, not a ContentResult
             assert isinstance(result, str)
             mock_screenshot.assert_called_once()
 
@@ -48,7 +48,7 @@ class TestPyAutoGUIExecutor:
         with patch("pyautogui.click") as mock_click:
             result = await executor.click(100, 200, "left")
 
-            assert isinstance(result, ToolResult)
+            assert isinstance(result, ContentResult)
             assert result.output and "Clicked" in result.output
             mock_click.assert_called_once_with(x=100, y=200, button="left")
 
@@ -61,7 +61,7 @@ class TestPyAutoGUIExecutor:
         with patch("pyautogui.typewrite") as mock_type:
             result = await executor.type("Hello world")
 
-            assert isinstance(result, ToolResult)
+            assert isinstance(result, ContentResult)
             assert result.output and "Typed" in result.output
             # The implementation adds interval=0.012 (12ms converted to seconds)
             mock_type.assert_called_once_with("Hello world", interval=0.012)
@@ -76,7 +76,7 @@ class TestPyAutoGUIExecutor:
         with patch("pyautogui.hotkey") as mock_hotkey:
             result = await executor.press(["ctrl", "a"])
 
-            assert isinstance(result, ToolResult)
+            assert isinstance(result, ContentResult)
             assert result.output and "Pressed" in result.output
             mock_hotkey.assert_called_once_with("ctrl", "a")
 
@@ -89,7 +89,7 @@ class TestPyAutoGUIExecutor:
         with patch("pyautogui.moveTo") as mock_move, patch("pyautogui.scroll") as mock_scroll:
             result = await executor.scroll(100, 200, scroll_y=5)
 
-            assert isinstance(result, ToolResult)
+            assert isinstance(result, ContentResult)
             assert result.output and "Scrolled" in result.output
             # First moves to position
             mock_move.assert_called_once_with(100, 200)
@@ -105,7 +105,7 @@ class TestPyAutoGUIExecutor:
         with patch("pyautogui.moveTo") as mock_move:
             result = await executor.move(300, 400)
 
-            assert isinstance(result, ToolResult)
+            assert isinstance(result, ContentResult)
             assert result.output and "Moved" in result.output
             # The implementation adds duration=0.1
             mock_move.assert_called_once_with(300, 400, duration=0.1)
@@ -121,7 +121,7 @@ class TestPyAutoGUIExecutor:
             path = [(100, 100), (300, 400)]
             result = await executor.drag(path)
 
-            assert isinstance(result, ToolResult)
+            assert isinstance(result, ContentResult)
             assert result.output and "Dragged" in result.output
             # Implementation uses dragTo to move to each point
             mock_drag.assert_called()
@@ -136,7 +136,7 @@ class TestPyAutoGUIExecutor:
             # wait expects time in milliseconds
             result = await executor.wait(2500)  # 2500ms = 2.5s
 
-            assert isinstance(result, ToolResult)
+            assert isinstance(result, ContentResult)
             assert result.output and "Waited" in result.output
             # Implementation converts to seconds
             mock_sleep.assert_called_once_with(2.5)
@@ -151,7 +151,7 @@ class TestPyAutoGUIExecutor:
             mock_position.return_value = (123, 456)
             result = await executor.position()
 
-            assert isinstance(result, ToolResult)
+            assert isinstance(result, ContentResult)
             assert result.output is not None
             assert "Mouse position" in result.output
             assert "123" in result.output

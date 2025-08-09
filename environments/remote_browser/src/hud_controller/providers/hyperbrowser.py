@@ -208,7 +208,7 @@ class HyperBrowserProvider(BrowserProvider):
 
         return status
 
-    def get_live_url(self) -> Optional[str]:
+    def get_live_view_url(self) -> Optional[str]:
         """Get the live view URL for the HyperBrowser instance."""
         return self._live_url if hasattr(self, "_live_url") else None
 

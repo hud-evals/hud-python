@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from string import Template
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from mcp.types import CallToolRequestParams as MCPToolParams
+from datasets import Dataset
 from pydantic import BaseModel, Field, field_validator
 
-from hud.telemetry.job import job
+from .types import MCPToolCall
 
 if TYPE_CHECKING:
     from datasets import Dataset
 
-    from hud.mcp.base import AgentResult, BaseMCPAgent
+    from hud.agent import MCPAgent
 
 logger = logging.getLogger("hud.datasets")
 
@@ -43,8 +44,8 @@ class TaskConfig(BaseModel):
     id: str | None = None
     prompt: str
     mcp_config: dict[str, Any]
-    setup_tool: MCPToolParams | None = None
-    evaluate_tool: MCPToolParams | None = None
+    setup_tool: MCPToolCall | list[MCPToolCall] | None = None
+    evaluate_tool: MCPToolCall | list[MCPToolCall] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("mcp_config", mode="before")
@@ -61,7 +62,7 @@ class TaskConfig(BaseModel):
         """
         import os
 
-        from hud.telemetry.context import get_current_task_run_id
+        from hud.otel import get_current_task_run_id
 
         # Start with current environment variables
         mapping = dict(os.environ)
@@ -89,33 +90,65 @@ class TaskConfig(BaseModel):
         return substitute_in_value(v)
 
 
-def to_taskconfigs(dataset: Dataset) -> Dataset:
+def to_taskconfigs(dataset: Dataset) -> list[TaskConfig]:
     """
-    Convert a HuggingFace dataset to contain TaskConfig objects.
+    Convert a HuggingFace dataset to TaskConfig objects.
+
+    The dataset should have complex fields (mcp_config, setup_tool, etc.)
+    stored as JSON strings to avoid null value pollution.
+
+    Environment variables are resolved during TaskConfig instantiation.
 
     Args:
-        dataset: HuggingFace dataset with task data
+        dataset: HuggingFace Dataset with JSON string fields
 
     Returns:
-        Dataset with 'task' column containing TaskConfig objects
+        List of TaskConfig objects with env vars resolved
 
     Example:
-        >>> dataset = load_dataset("hud/sheetbench-v1", split="test")
+        >>> from datasets import load_dataset
+        >>> dataset = load_dataset("hud-evals/browser-taskconfigs", split="train")
         >>> tasks = to_taskconfigs(dataset)
-        >>> tasks[0]["task"]  # This is a TaskConfig object
+        >>> tasks[0].mcp_config  # Env vars like ${HUD_API_KEY} are resolved
     """
+    try:
+        tasks = []
+        for row in dataset:
+            # Cast row to dict for type checker
+            row = cast("dict[str, Any]", row)
+            # Build TaskConfig dict, parsing JSON string fields
+            tc_dict: dict[str, Any] = {
+                "prompt": row["prompt"],
+                "mcp_config": json.loads(row["mcp_config"]),
+            }
 
-    def _convert(example: dict[str, Any]) -> dict[str, TaskConfig]:
-        return {"task": TaskConfig(**example)}
+            # Optional fields
+            if row.get("id"):
+                tc_dict["id"] = row["id"]
 
-    # Map and keep only the task column
-    return dataset.map(_convert, remove_columns=dataset.column_names)
+            if row.get("metadata"):
+                tc_dict["metadata"] = json.loads(row["metadata"])
+
+            if row.get("setup_tool"):
+                tc_dict["setup_tool"] = json.loads(row["setup_tool"])
+
+            if row.get("evaluate_tool"):
+                tc_dict["evaluate_tool"] = json.loads(row["evaluate_tool"])
+
+            # Create TaskConfig (triggers env var resolution)
+            tasks.append(TaskConfig(**tc_dict))
+
+        return tasks
+    except TypeError as e:
+        raise ValueError("Dataset must be a train or test HF split") from e
+    except Exception as e:
+        raise e
 
 
 async def run_dataset(
     name: str,
-    dataset: Dataset,
-    agent_class: type[BaseMCPAgent],
+    dataset: Dataset | list[TaskConfig],
+    agent_class: type[MCPAgent],
     agent_config: dict[str, Any] | None = None,
     max_concurrent: int = 5,
     metadata: dict[str, Any] | None = None,
@@ -125,7 +158,7 @@ async def run_dataset(
 
     Args:
         name: Name for the job
-        dataset: HuggingFace Dataset (raw, not converted)
+        dataset: HuggingFace Dataset with task data OR list of TaskConfig objects
         agent_class: Agent class to instantiate (e.g., ClaudeMCPAgent)
         agent_config: Configuration for agent (model, etc.)
         max_concurrent: Maximum parallel task execution
@@ -137,21 +170,27 @@ async def run_dataset(
     Example:
         >>> from datasets import load_dataset
         >>> from hud.mcp import ClaudeMCPAgent
-        >>> dataset = load_dataset("hud/sheetbench-v1", split="test")
+        >>> # Option 1: From HuggingFace dataset with JSON string fields
+        >>> dataset = load_dataset("hud-evals/browser-taskconfigs", split="train")
+        >>> tasks = to_taskconfigs(dataset)
         >>> results = await run_dataset(
-        ...     "sheetbench_eval",
-        ...     dataset,
+        ...     "browser_eval",
+        ...     tasks,
         ...     ClaudeMCPAgent,
         ...     {"model": "claude-3-5-sonnet-20241022"},
         ...     max_concurrent=3,
         ... )
+        >>> # Option 2: Direct from loaded dataset
+        >>> from datasets import load_dataset
+        >>> dataset = load_dataset("hud-evals/browser-taskconfigs", split="train")
+        >>> results = await run_dataset("my_eval", dataset, ClaudeMCPAgent)
     """
     # Import here to avoid circular imports
     import hud
-    from hud.mcp.client import MCPClient
+    from hud.client import MCPClient
 
-    # Convert dataset to TaskConfigs internally
-    tasks = to_taskconfigs(dataset)
+    # Convert dataset to TaskConfigs if needed
+    tasks = dataset if isinstance(dataset, list) else to_taskconfigs(dataset)
 
     # Create job context
     job_metadata = metadata or {}
@@ -159,17 +198,15 @@ async def run_dataset(
     if agent_config:
         job_metadata["agent_config"] = agent_config
 
-    with job(name, metadata=job_metadata):
+    with hud.job(name, metadata=job_metadata) as job_obj:
         # Run tasks with semaphore for concurrency control
         sem = asyncio.Semaphore(max_concurrent)
-        results: list[AgentResult | None] = [None] * len(tasks)
+        results: list[Any | None] = [None] * len(tasks)
 
-        async def _worker(index: int, row: Any) -> None:
+        async def _worker(index: int, task: TaskConfig) -> None:
             async with sem:
-                task = row["task"]
-
                 # Create trace for this task
-                with hud.trace(f"task_{index}"):
+                with hud.trace(f"task_{index}", job_id=job_obj.id):
                     # Create fresh MCP client per task
                     if task.mcp_config:
                         client = MCPClient(mcp_config=task.mcp_config)
@@ -185,8 +222,64 @@ async def run_dataset(
 
         # Execute all tasks
         await asyncio.gather(
-            *[_worker(i, row) for i, row in enumerate(tasks)],
+            *[_worker(i, task) for i, task in enumerate(tasks)],
             return_exceptions=True,  # Don't fail entire batch on one error
         )
 
     return results
+
+
+def save_taskconfigs(taskconfigs: list[dict[str, Any]], repo_id: str, **kwargs: Any) -> None:
+    """
+    Save TaskConfigs to HuggingFace dataset with JSON string serialization.
+
+    Complex fields are serialized as JSON strings to maintain clean schema
+    and avoid null value pollution in HuggingFace datasets.
+
+    Args:
+        taskconfigs: List of TaskConfig dicts (NOT TaskConfig objects, to preserve templates)
+        repo_id: HuggingFace repository ID (e.g., "hud-evals/my-tasks")
+        **kwargs: Additional arguments passed to dataset.push_to_hub()
+    """
+    from datasets import Dataset
+
+    # Safety check: Ensure we're not saving TaskConfig objects (which have resolved env vars)
+    if taskconfigs and isinstance(taskconfigs[0], TaskConfig):
+        raise ValueError(
+            "save_taskconfigs expects dictionaries, not TaskConfig objects. "
+            "TaskConfig objects have resolved environment variables which would expose secrets. "
+            "Please pass raw dictionaries with template strings like '${HUD_API_KEY}' preserved."
+        )
+
+    # Convert to rows with JSON string fields
+    data = []
+    for i, tc_dict in enumerate(taskconfigs):
+        # Additional safety check for each item
+        if isinstance(tc_dict, TaskConfig):
+            raise ValueError(
+                f"Item {i} is a TaskConfig object, not a dictionary. "
+                "This would expose resolved environment variables. "
+                "Please convert to dictionary format with template strings preserved."
+            )
+        row = {
+            "prompt": tc_dict["prompt"],
+            "mcp_config": json.dumps(tc_dict["mcp_config"]),
+        }
+
+        if tc_dict.get("id"):
+            row["id"] = tc_dict["id"]
+
+        if tc_dict.get("metadata"):
+            row["metadata"] = json.dumps(tc_dict["metadata"])
+
+        if tc_dict.get("setup_tool"):
+            row["setup_tool"] = json.dumps(tc_dict["setup_tool"])
+
+        if tc_dict.get("evaluate_tool"):
+            row["evaluate_tool"] = json.dumps(tc_dict["evaluate_tool"])
+
+        data.append(row)
+
+    # Create and push dataset
+    dataset = Dataset.from_list(data)
+    dataset.push_to_hub(repo_id, **kwargs)

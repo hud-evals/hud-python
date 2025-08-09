@@ -1,154 +1,105 @@
 """Interaction setup functions for remote browser environment."""
 
 import logging
-from ..setup import setup
+from fastmcp import Context
+from hud.tools.types import SetupResult
+from . import setup
 
 logger = logging.getLogger(__name__)
 
 
-@setup("click_element", description="Click on an element by selector")
-class ClickElementSetup:
-    """Setup function to click on an element."""
+@setup.tool("click_element")
+async def click_element(ctx: Context, selector: str, timeout: int = 30000):
+    """Click on an element by selector.
 
-    def __init__(self, context):
-        self.context = context
+    Args:
+        selector: CSS selector for the element
+        timeout: Maximum time to wait for element (ms)
 
-    async def __call__(self, selector: str, timeout: int = 30000) -> dict:
-        """
-        Click on an element identified by a CSS selector.
+    Returns:
+        Setup result with status
+    """
+    logger.info(f"Clicking element with selector: {selector}")
 
-        Args:
-            selector: CSS selector for the element to click
-            timeout: Maximum time to wait for the element (milliseconds)
+    # Get the playwright tool from the environment
+    playwright_tool = setup.env
+    if not playwright_tool or not hasattr(playwright_tool, "page") or not playwright_tool.page:
+        logger.error("No browser page available")
+        return SetupResult(content="No browser page available", isError=True)
 
-        Returns:
-            Setup result dictionary
-        """
-        logger.info(f"Clicking element: {selector}")
+    try:
+        # Wait for element and click
+        element = await playwright_tool.page.wait_for_selector(selector, timeout=timeout)
+        await element.click()
 
-        # Get the playwright tool from context
-        playwright_tool = self.context.playwright_tool
-        if not playwright_tool:
-            logger.error("No playwright tool available")
-            return {
-                "status": "error",
-                "message": "No browser available",
-            }
-
-        # Click the element (tracking is handled by PlaywrightToolWithMemory)
-        result = await playwright_tool.click(selector)
-
-        if result.get("success"):
-            logger.info(f"Successfully clicked: {selector}")
-            return {
-                "status": "success",
-                "message": f"Clicked element: {selector}",
-            }
-        else:
-            logger.error(f"Failed to click: {result.get('error')}")
-            return {
-                "status": "error",
-                "message": f"Failed to click element: {result.get('error')}",
-            }
+        logger.info(f"Successfully clicked element: {selector}")
+        return SetupResult(content=f"Clicked element: {selector}")
+    except Exception as e:
+        logger.error(f"Failed to click element: {e}")
+        return SetupResult(content=f"Failed to click element: {str(e)}", isError=True)
 
 
-@setup("type_text", description="Type text into an input element")
-class TypeTextSetup:
-    """Setup function to type text into an element."""
+@setup.tool("fill_input")
+async def fill_input(ctx: Context, selector: str, text: str, timeout: int = 30000):
+    """Fill an input field with text.
 
-    def __init__(self, context):
-        self.context = context
+    Args:
+        selector: CSS selector for the input element
+        text: Text to fill in the input
+        timeout: Maximum time to wait for element (ms)
 
-    async def __call__(self, selector: str, text: str, clear_first: bool = False) -> dict:
-        """
-        Type text into an input element.
+    Returns:
+        Setup result with status
+    """
+    logger.info(f"Filling input {selector} with text")
 
-        Args:
-            selector: CSS selector for the input element
-            text: Text to type
-            clear_first: Whether to clear the input before typing
+    # Get the playwright tool from the environment
+    playwright_tool = setup.env
+    if not playwright_tool or not hasattr(playwright_tool, "page") or not playwright_tool.page:
+        logger.error("No browser page available")
+        return SetupResult(content="No browser page available", isError=True)
 
-        Returns:
-            Setup result dictionary
-        """
-        logger.info(f"Typing into element: {selector}")
+    try:
+        # Wait for element and fill
+        element = await playwright_tool.page.wait_for_selector(selector, timeout=timeout)
+        await element.fill(text)
 
-        # Get the page from context
-        page = self.context.page
-        if not page:
-            logger.error("No page available")
-            return {
-                "status": "error",
-                "message": "No browser page available",
-            }
-
-        try:
-            # Clear the input if requested
-            if clear_first:
-                await page.fill(selector, "")
-
-            # Type the text (tracking is handled by PlaywrightToolWithMemory)
-            await page.type(selector, text)
-
-            logger.info(f"Successfully typed text into: {selector}")
-            return {
-                "status": "success",
-                "message": f"Typed text into element: {selector}",
-                "selector": selector,
-                "text_length": len(text),
-            }
-        except Exception as e:
-            logger.error(f"Failed to type text: {e}")
-            return {
-                "status": "error",
-                "message": f"Failed to type text: {str(e)}",
-            }
+        logger.info(f"Successfully filled input: {selector}")
+        return SetupResult(
+            content=f"Filled input {selector} with text",
+            info={"selector": selector, "text_length": len(text)},
+        )
+    except Exception as e:
+        logger.error(f"Failed to fill input: {e}")
+        return SetupResult(content=f"Failed to fill input: {str(e)}", isError=True)
 
 
-@setup("wait_for_element", description="Wait for an element to appear")
-class WaitForElementSetup:
-    """Setup function to wait for an element."""
+@setup.tool("select_option")
+async def select_option(ctx: Context, selector: str, value: str, timeout: int = 30000):
+    """Select an option in a dropdown.
 
-    def __init__(self, context):
-        self.context = context
+    Args:
+        selector: CSS selector for the select element
+        value: Value of the option to select
+        timeout: Maximum time to wait for element (ms)
 
-    async def __call__(self, selector: str, timeout: int = 30000, state: str = "visible") -> dict:
-        """
-        Wait for an element to reach a certain state.
+    Returns:
+        Setup result with status
+    """
+    logger.info(f"Selecting option {value} in {selector}")
 
-        Args:
-            selector: CSS selector for the element
-            timeout: Maximum time to wait (milliseconds)
-            state: State to wait for ("visible", "hidden", "attached", "detached")
+    # Get the playwright tool from the environment
+    playwright_tool = setup.env
+    if not playwright_tool or not hasattr(playwright_tool, "page") or not playwright_tool.page:
+        logger.error("No browser page available")
+        return SetupResult(content="No browser page available", isError=True)
 
-        Returns:
-            Setup result dictionary
-        """
-        logger.info(f"Waiting for element: {selector} (state: {state})")
+    try:
+        # Wait for element and select option
+        await playwright_tool.page.select_option(selector, value, timeout=timeout)
 
-        # Get the page from context
-        page = self.context.page
-        if not page:
-            logger.error("No page available")
-            return {
-                "status": "error",
-                "message": "No browser page available",
-            }
-
-        try:
-            # Wait for the element
-            await page.wait_for_selector(selector, timeout=timeout, state=state)
-
-            logger.info(f"Element found: {selector}")
-            return {
-                "status": "success",
-                "message": f"Element is {state}: {selector}",
-                "selector": selector,
-                "state": state,
-            }
-        except Exception as e:
-            logger.error(f"Failed to wait for element: {e}")
-            return {
-                "status": "error",
-                "message": f"Timeout waiting for element: {str(e)}",
-            }
+        logger.info(f"Successfully selected option: {value}")
+        return SetupResult(content=f"Selected option '{value}' in {selector}")
+    except Exception as e:
+        logger.error(f"Failed to select option: {e}")
+        return SetupResult(content=f"Failed to select option: {str(e)}", isError=True)

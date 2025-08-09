@@ -10,7 +10,7 @@ from tempfile import gettempdir
 from typing import Literal
 from uuid import uuid4
 
-from hud.tools.base import ToolResult
+from hud.tools.types import ContentResult
 from hud.tools.utils import run
 
 from .base import BaseExecutor
@@ -125,7 +125,7 @@ class XDOExecutor(BaseExecutor):
         except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
             return False
 
-    async def execute(self, command: str, take_screenshot: bool = True) -> ToolResult:
+    async def execute(self, command: str, take_screenshot: bool = True) -> ContentResult:
         """
         Execute an xdotool command.
 
@@ -134,7 +134,7 @@ class XDOExecutor(BaseExecutor):
             take_screenshot: Whether to capture a screenshot after execution
 
         Returns:
-            ToolResult with output, error, and optional screenshot
+            ContentResult with output, error, and optional screenshot
         """
         full_command = f"{self.xdotool} {command}"
 
@@ -142,7 +142,7 @@ class XDOExecutor(BaseExecutor):
         returncode, stdout, stderr = await run(full_command)
 
         # Prepare result
-        result = ToolResult(
+        result = ContentResult(
             output=stdout if stdout else None, error=stderr if stderr or returncode != 0 else None
         )
 
@@ -151,7 +151,7 @@ class XDOExecutor(BaseExecutor):
             await asyncio.sleep(self._screenshot_delay)
             screenshot = await self.screenshot()
             if screenshot:
-                result = ToolResult(
+                result = ContentResult(
                     output=result.output, error=result.error, base64_image=screenshot
                 )
 
@@ -227,7 +227,7 @@ class XDOExecutor(BaseExecutor):
         pattern: list[int] | None = None,
         hold_keys: list[str] | None = None,
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """Click at specified coordinates or current position."""
         # Map button names to xdotool button numbers
         button_map = {"left": 1, "right": 3, "middle": 2, "back": 8, "forward": 9}
@@ -260,9 +260,9 @@ class XDOExecutor(BaseExecutor):
 
         return result
 
-    async def type(
+    async def write(
         self, text: str, enter_after: bool = False, delay: int = 12, take_screenshot: bool = True
-    ) -> ToolResult:
+    ) -> ContentResult:
         """Type text with specified delay between keystrokes."""
         # Escape text for shell
         escaped_text = shlex.quote(text)
@@ -276,22 +276,22 @@ class XDOExecutor(BaseExecutor):
             combined_error = None
             if result.error or enter_result.error:
                 combined_error = (result.error or "") + "\n" + (enter_result.error or "")
-            result = ToolResult(output=combined_output.strip(), error=combined_error)
+            result = ContentResult(output=combined_output.strip(), error=combined_error)
 
         if take_screenshot:
             screenshot = await self.screenshot()
             if screenshot:
-                result = ToolResult(
+                result = ContentResult(
                     output=result.output, error=result.error, base64_image=screenshot
                 )
 
         return result
 
-    async def key(self, key_sequence: str, take_screenshot: bool = True) -> ToolResult:
+    async def key(self, key_sequence: str, take_screenshot: bool = True) -> ContentResult:
         """Press a key or key combination."""
         return await self.execute(f"key -- {key_sequence}", take_screenshot=take_screenshot)
 
-    async def press(self, keys: list[str], take_screenshot: bool = True) -> ToolResult:
+    async def press(self, keys: list[str], take_screenshot: bool = True) -> ContentResult:
         """Press a key combination (hotkey)."""
         # Map CLA keys to XDO keys
         mapped_keys = self._map_keys(keys)
@@ -299,7 +299,7 @@ class XDOExecutor(BaseExecutor):
         key_combo = "+".join(mapped_keys)
         return await self.key(key_combo, take_screenshot=take_screenshot)
 
-    async def keydown(self, keys: list[str], take_screenshot: bool = True) -> ToolResult:
+    async def keydown(self, keys: list[str], take_screenshot: bool = True) -> ContentResult:
         """Press and hold keys."""
         # Map CLA keys to XDO keys
         mapped_keys = self._map_keys(keys)
@@ -311,13 +311,13 @@ class XDOExecutor(BaseExecutor):
         if take_screenshot and last_result:
             screenshot = await self.screenshot()
             if screenshot:
-                last_result = ToolResult(
+                last_result = ContentResult(
                     output=last_result.output, error=last_result.error, base64_image=screenshot
                 )
 
-        return last_result or ToolResult()
+        return last_result or ContentResult()
 
-    async def keyup(self, keys: list[str], take_screenshot: bool = True) -> ToolResult:
+    async def keyup(self, keys: list[str], take_screenshot: bool = True) -> ContentResult:
         """Release held keys."""
         # Map CLA keys to XDO keys
         mapped_keys = self._map_keys(keys)
@@ -329,11 +329,11 @@ class XDOExecutor(BaseExecutor):
         if take_screenshot and last_result:
             screenshot = await self.screenshot()
             if screenshot:
-                last_result = ToolResult(
+                last_result = ContentResult(
                     output=last_result.output, error=last_result.error, base64_image=screenshot
                 )
 
-        return last_result or ToolResult()
+        return last_result or ContentResult()
 
     async def scroll(
         self,
@@ -343,7 +343,7 @@ class XDOExecutor(BaseExecutor):
         scroll_y: int | None = None,
         hold_keys: list[str] | None = None,
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """Scroll at specified position."""
         # Convert scroll amounts to xdotool format
         scroll_button_map = {"up": 4, "down": 5, "left": 6, "right": 7}
@@ -379,7 +379,7 @@ class XDOExecutor(BaseExecutor):
                 result = await self.execute(cmd, take_screenshot=take_screenshot)
 
             else:
-                result = ToolResult(output="No scroll amount specified")
+                result = ContentResult(output="No scroll amount specified")
         finally:
             # Release held keys
             await self._release_keys(hold_keys)
@@ -393,7 +393,7 @@ class XDOExecutor(BaseExecutor):
         offset_x: int | None = None,
         offset_y: int | None = None,
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """Move mouse cursor."""
         if x is not None and y is not None:
             # Absolute move
@@ -406,7 +406,7 @@ class XDOExecutor(BaseExecutor):
                 f"mousemove_relative -- {offset_x} {offset_y}", take_screenshot=take_screenshot
             )
         else:
-            return ToolResult(output="No move coordinates specified")
+            return ContentResult(output="No move coordinates specified")
 
     async def drag(
         self,
@@ -414,10 +414,10 @@ class XDOExecutor(BaseExecutor):
         pattern: list[int] | None = None,
         hold_keys: list[str] | None = None,
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """Drag along a path."""
         if len(path) < 2:
-            return ToolResult(error="Drag path must have at least 2 points")
+            return ContentResult(error="Drag path must have at least 2 points")
 
         # Hold keys if specified
         await self._hold_keys_context(hold_keys)
@@ -442,11 +442,11 @@ class XDOExecutor(BaseExecutor):
             # Take final screenshot if requested
             if take_screenshot:
                 screenshot = await self.screenshot()
-                result = ToolResult(
+                result = ContentResult(
                     output=f"Dragged along {len(path)} points", base64_image=screenshot
                 )
             else:
-                result = ToolResult(output=f"Dragged along {len(path)} points")
+                result = ContentResult(output=f"Dragged along {len(path)} points")
 
         finally:
             # Release held keys
@@ -458,7 +458,7 @@ class XDOExecutor(BaseExecutor):
         self,
         button: Literal["left", "right", "middle", "back", "forward"] = "left",
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """Press and hold a mouse button."""
         button_map = {"left": 1, "right": 3, "middle": 2, "back": 8, "forward": 9}
         button_num = button_map.get(button, 1)
@@ -468,13 +468,15 @@ class XDOExecutor(BaseExecutor):
         self,
         button: Literal["left", "right", "middle", "back", "forward"] = "left",
         take_screenshot: bool = True,
-    ) -> ToolResult:
+    ) -> ContentResult:
         """Release a mouse button."""
         button_map = {"left": 1, "right": 3, "middle": 2, "back": 8, "forward": 9}
         button_num = button_map.get(button, 1)
         return await self.execute(f"mouseup {button_num}", take_screenshot=take_screenshot)
 
-    async def hold_key(self, key: str, duration: float, take_screenshot: bool = True) -> ToolResult:
+    async def hold_key(
+        self, key: str, duration: float, take_screenshot: bool = True
+    ) -> ContentResult:
         """Hold a key for a specified duration."""
         # Map CLA key to XDO key
         mapped_key = self._map_key(key)
@@ -492,12 +494,12 @@ class XDOExecutor(BaseExecutor):
         if take_screenshot:
             screenshot = await self.screenshot()
             if screenshot:
-                result = ToolResult(
+                result = ContentResult(
                     output=result.output, error=result.error, base64_image=screenshot
                 )
 
         return result
 
-    async def position(self) -> ToolResult:
+    async def position(self) -> ContentResult:
         """Get current cursor position."""
         return await self.execute("getmouselocation", take_screenshot=False)

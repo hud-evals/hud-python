@@ -8,7 +8,7 @@ import pytest
 from mcp.shared.exceptions import McpError
 from mcp.types import INVALID_PARAMS, ImageContent, TextContent
 
-from hud.tools.playwright_tool import PlaywrightTool
+from hud.tools.playwright import PlaywrightTool
 
 
 class TestPlaywrightTool:
@@ -19,8 +19,8 @@ class TestPlaywrightTool:
         """Test tool initialization."""
         tool = PlaywrightTool()
         assert tool._browser is None
-        assert tool._context is None
-        assert tool._page is None
+        assert tool._browser_context is None
+        assert tool.page is None
 
     @pytest.mark.asyncio
     async def test_playwright_tool_invalid_action(self):
@@ -44,7 +44,7 @@ class TestPlaywrightTool:
 
         with patch.object(tool, "_ensure_browser", new_callable=AsyncMock) as mock_ensure:
             # Set up the tool with mocked page
-            tool._page = mock_page
+            tool.page = mock_page
 
             blocks = await tool(action="navigate", url="https://example.com")
 
@@ -67,13 +67,13 @@ class TestPlaywrightTool:
 
         with patch.object(tool, "_ensure_browser", new_callable=AsyncMock):
             # Set up the tool with mocked page
-            tool._page = mock_page
+            tool.page = mock_page
 
             blocks = await tool(action="click", selector="button#submit")
 
             assert blocks is not None
             assert any(isinstance(b, TextContent) for b in blocks)
-            mock_page.click.assert_called_once_with("button#submit")
+            mock_page.click.assert_called_once_with("button#submit", button="left", click_count=1)
 
     @pytest.mark.asyncio
     async def test_playwright_tool_type_with_mocked_browser(self):
@@ -86,7 +86,7 @@ class TestPlaywrightTool:
 
         with patch.object(tool, "_ensure_browser", new_callable=AsyncMock):
             # Set up the tool with mocked page
-            tool._page = mock_page
+            tool.page = mock_page
 
             blocks = await tool(action="type", selector="input#name", text="John Doe")
 
@@ -105,7 +105,7 @@ class TestPlaywrightTool:
 
         with patch.object(tool, "_ensure_browser", new_callable=AsyncMock):
             # Set up the tool with mocked page
-            tool._page = mock_page
+            tool.page = mock_page
 
             blocks = await tool(action="screenshot")
 
@@ -127,7 +127,7 @@ class TestPlaywrightTool:
 
         with patch.object(tool, "_ensure_browser", new_callable=AsyncMock):
             # Set up the tool with mocked page
-            tool._page = mock_page
+            tool.page = mock_page
 
             blocks = await tool(action="get_page_info")
 
@@ -150,7 +150,7 @@ class TestPlaywrightTool:
 
         with patch.object(tool, "_ensure_browser", new_callable=AsyncMock):
             # Set up the tool with mocked page
-            tool._page = mock_page
+            tool.page = mock_page
 
             # wait_for_element doesn't accept timeout parameter directly
             blocks = await tool(action="wait_for_element", selector="div#loaded")
@@ -171,13 +171,13 @@ class TestPlaywrightTool:
         mock_page = AsyncMock()
 
         tool._browser = mock_browser
-        tool._context = mock_context
-        tool._page = mock_page
+        tool._browser_context = mock_context
+        tool.page = mock_page
 
         # Call the cleanup method directly (tool is not a context manager)
         await tool.close()
 
         mock_browser.close.assert_called_once()
         assert tool._browser is None
-        assert tool._context is None
-        assert tool._page is None
+        assert tool._browser_context is None
+        assert tool.page is None

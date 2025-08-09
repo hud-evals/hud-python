@@ -6,8 +6,9 @@ import logging
 import os
 import signal
 import atexit
-from typing import Literal, Optional, Any
-from pathlib import Path
+import json
+from datetime import datetime
+from typing import Optional, TypedDict
 
 # Configure logging
 logging.basicConfig(
@@ -18,26 +19,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from mcp.server.fastmcp import FastMCP, Context
-from pydantic import Field
-from mcp.types import InitializeRequest, InitializeResult, Implementation
-from mcp.shared.context import RequestContext
-from mcp.server.models import InitializationOptions
+from fastmcp import FastMCP
+from hud.tools.helper import mcp_intialize_wrapper
 
-# Import tools from SDK
-from hud.tools.helper import mcp_intialize_wrapper, register_instance_tool
-from .playwright_with_memory import PlaywrightToolWithMemory
-from .browser_executor import BrowserExecutor
-from hud.tools.computer import HudComputerTool, AnthropicComputerTool, OpenAIComputerTool
+# Import tools
+from .tools import PlaywrightToolWithMemory, BrowserExecutor, create_computer_tools
 
-# Import providers and runtime
+# Import setup and evaluate hubs
+from .setup import setup as setup_hub
+from .evaluate import evaluate as evaluate_hub
+
+# Import providers
 from .providers import get_provider, BrowserProvider
-from .runtime import setup_tool, evaluate_tool
-
-# Import registries for resources
-from .evaluators import EvaluatorRegistry
-from .setup import SetupRegistry
-from .problems import ProblemRegistry
 
 # Global state
 browser_provider: Optional[BrowserProvider] = None
@@ -46,6 +39,67 @@ browser_executor: Optional[BrowserExecutor] = None
 
 # Track if we're already cleaning up to prevent double cleanup
 _cleanup_in_progress = False
+
+
+# Create FastMCP instance
+mcp = FastMCP(
+    name="HUD Remote Browser Environment",
+    instructions="""
+    This is a remote browser automation environment that connects to cloud browser providers.
+    The browser provider is configured via the BROWSER_PROVIDER environment variable.
+    
+    Available tools:
+    - setup: Initialize browser environment with various setup functions
+    - evaluate: Evaluate browser state with various evaluator functions
+    - playwright tools: Browser automation (navigate, click, type, etc.)
+    - computer tools: Control browser as if it were a desktop application
+    """,
+)
+
+
+class Telemetry(TypedDict):
+    """Standard evaluation result format."""
+
+    provider: str
+    status: str
+    live_url: str | None
+    timestamp: str
+    cdp_url: str | None
+    instance_id: str | None
+
+
+@mcp.resource("telemetry://live")
+async def get_telemetry_resource() -> Telemetry:
+    """MCP resource containing telemetry data including provider's live view URL."""
+    global browser_provider
+
+    telemetry_data: Telemetry = {
+        "provider": os.getenv("BROWSER_PROVIDER", "unknown"),
+        "status": "unknown",
+        "live_url": None,
+        "timestamp": datetime.now().isoformat(),
+        "cdp_url": None,
+        "instance_id": None,
+    }
+
+    if browser_provider:
+        try:
+            # Get provider status
+            status = await browser_provider.get_status()
+            telemetry_data.update(
+                {
+                    "status": "running" if browser_provider.is_running else "stopped",
+                    "cdp_url": browser_provider.cdp_url,
+                    "instance_id": status.get("instance_id"),
+                    "live_url": browser_provider.get_live_view_url(),
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error getting telemetry data: {e}")
+    else:
+        telemetry_data["status"] = "not_initialized"
+
+    return telemetry_data
 
 
 @mcp_intialize_wrapper()
@@ -89,6 +143,16 @@ async def initialize_environment(session=None, progress_token=None):
             provider_config["base_url"] = os.getenv(
                 "ANCHOR_BASE_URL", "https://api.anchorbrowser.io"
             )
+        elif provider_name == "steel":
+            provider_config["api_key"] = os.getenv("STEEL_API_KEY")
+            provider_config["base_url"] = os.getenv("STEEL_BASE_URL", "https://api.steel.dev")
+        elif provider_name == "browserbase":
+            provider_config["api_key"] = os.getenv("BROWSERBASE_API_KEY")
+            provider_config["project_id"] = os.getenv("BROWSERBASE_PROJECT_ID")
+        elif provider_name == "hyperbrowser":
+            provider_config["api_key"] = os.getenv("HYPERBROWSER_API_KEY")
+        elif provider_name == "kernel":
+            provider_config["api_key"] = os.getenv("KERNEL_API_KEY")
 
         browser_provider = provider_class(provider_config)
         await send_progress(30, "Browser provider initialized")
@@ -133,39 +197,39 @@ async def initialize_environment(session=None, progress_token=None):
 
         # Create browser session
         cdp_url = await browser_provider.launch(**launch_options)
+        await send_progress(60, f"Browser launched, CDP URL: {cdp_url}")
 
-        # The provider already returns the proper CDP URL
-        session_id = browser_provider._instance_id
+        # Initialize PlaywrightToolWithMemory with context as itself
+        # The tool itself is the context - it has the page, history, etc.
+        playwright_tool = PlaywrightToolWithMemory(context=None, cdp_url=cdp_url)
 
-        await send_progress(60, f"Remote browser launched, session ID: {session_id}")
+        # Ensure browser is connected before registering tools
+        await playwright_tool._ensure_browser()
+        await send_progress(65, "Browser connection established")
 
-        # Initialize playwright tool with memory and CDP URL
-        await send_progress(70, "Initializing Playwright tool with memory...")
-        playwright_tool = PlaywrightToolWithMemory(cdp_url=cdp_url)
-
-        # Register tools with MCP
-        register_instance_tool(mcp, "playwright", playwright_tool)
-        await send_progress(80, "Playwright tool registered")
+        # Add playwright tool to MCP
+        mcp.add_tool(playwright_tool.mcp)
+        await send_progress(70, "Playwright tool registered")
 
         # Initialize browser executor
         browser_executor = BrowserExecutor(playwright_tool)
-        await send_progress(85, "Browser executor initialized")
+        await send_progress(75, "Browser executor initialized")
 
-        # Register all computer tool variants with the browser executor
-        hud_computer = HudComputerTool(executor=browser_executor)
-        register_instance_tool(mcp, "computer", hud_computer)
+        # Create and register computer tools
+        computer_tools = create_computer_tools(browser_executor)
+        for tool_name, tool_instance in computer_tools.items():
+            mcp.add_tool(tool_instance.mcp)
+        await send_progress(80, f"Registered {len(computer_tools)} computer tools")
 
-        anthropic_computer = AnthropicComputerTool(executor=browser_executor)
-        register_instance_tool(mcp, "anthropic_computer", anthropic_computer)
+        # Set the playwright_tool as environment for setup and evaluate hubs
+        # This allows all setup/evaluate functions to access the browser
+        setup_hub.env = playwright_tool
+        evaluate_hub.env = playwright_tool
 
-        openai_computer = OpenAIComputerTool(executor=browser_executor)
-        register_instance_tool(mcp, "openai_computer", openai_computer)
-
-        await send_progress(88, "Computer tools registered")
-
-        # Ensure browser is connected
-        await playwright_tool._ensure_browser()
-        await send_progress(90, "Browser connection verified")
+        # Mount the hubs
+        mcp.mount(setup_hub)
+        mcp.mount(evaluate_hub)
+        await send_progress(90, "Setup and evaluate tools registered")
 
         # Navigate to initial URL if specified
         initial_url = os.getenv("BROWSER_URL")
@@ -186,211 +250,58 @@ async def initialize_environment(session=None, progress_token=None):
         raise
 
 
-# Create FastMCP instance
-mcp = FastMCP(
-    name="HUD Remote Browser Environment",
-    instructions="""
-    This is a remote browser automation environment that connects to cloud browser providers.
-    The browser provider is configured via the BROWSER_PROVIDER environment variable.
-    """,
-)
-
-
-# Setup tool - with simplified parameters
-@mcp.tool()
-async def setup(
-    function: str | None = Field(None, description="Setup function name to call directly"),
-    args: Any = Field(None, description="Arguments for the setup function"),
-    name: str | None = Field(None, description="Problem name to run predefined setup"),
-    ctx: Context = None,
-) -> dict:
-    """Setup the remote browser environment.
-
-    Can be used in two ways:
-    1. Direct function call: Specify 'function' and 'args'
-    2. Problem-based: Specify 'name' to run a predefined problem's setup
-
-    Available setup functions:
-    - navigate_to_url: Navigate to a URL (args: {url: str})
-    - set_cookies: Set browser cookies (args: {cookies: list})
-    - clear_cookies: Clear all browser cookies
-    - click_element: Click an element (args: {selector: str})
-    - type_text: Type text in an element (args: {selector: str, text: str})
-    - wait_for_element: Wait for element to appear (args: {selector: str, timeout?: int})
-    - sheets_from_xlsx: Load Google Sheets from XLSX file (args: {path: str})
-    - sheets_from_bytes: Load Google Sheets from bytes (args: {data: str, filename: str})
-    - load_html_content: Load HTML content directly (args: {html: str})
-
-    Available problems: navigate_and_verify, form_fill_and_submit,
-    google_search, button_click_test
-
-    Returns a dict with status, message, and any function-specific data.
-    """
-    return await setup_tool(function, args, name, ctx, browser_provider, playwright_tool)
-
-
-# Evaluate tool
-@mcp.tool()
-async def evaluate(
-    function: str = Field(
-        None,
-        description="Evaluator function name. Available: url_match, page_contains, cookie_exists, cookie_match, history_length, raw_last_action_is, selector_history, sheet_contains, sheets_cell_values, verify_type_action",
-    ),
-    args: Any = Field(
-        None,
-        description="Arguments for the evaluator function. Each evaluator has specific requirements - check the evaluator registry for details",
-    ),
-    name: str = Field(None, description="Problem name to lookup evaluation from problem registry"),
-    ctx: Context = None,
-) -> dict:
-    """Evaluate the remote browser environment state.
-
-    Can be used in two ways:
-    1. Direct function call: Specify 'function' and 'args'
-    2. Problem-based: Specify 'name' to run a predefined problem's evaluation
-
-    Available evaluator functions:
-    - url_match: Check if current URL matches pattern (args: {target_url: str})
-    - page_contains: Check if page contains text (args: {search_terms: str|list, partial_rewarding?: bool})
-    - cookie_exists: Check if cookie exists (args: {cookie_names: str|list})
-    - cookie_match: Check if cookie value matches (args: {expected_cookies: dict})
-    - history_length: Check navigation history length (args: {expected_length: int, min_length?: int})
-    - raw_last_action_is: Check last action type (args: {expected_action: str})
-    - selector_history: Get selector interaction history (args: {index: int, expected_selector: str})
-    - sheet_contains: Check if sheet contains text (args: {text: str})
-    - sheets_cell_values: Check cell values in sheets (args: {expected_values: dict})
-    - verify_type_action: Verify text was typed (args: {expected_text: str})
-
-    Available problems: Same as setup tool
-
-    Returns evaluation result with reward, done, and info fields.
-    """
-    return await evaluate_tool(function, args, name, ctx, browser_provider, playwright_tool)
-
-
-# MCP Resources
-@mcp.resource("evaluators://registry")
-async def get_evaluators_resource() -> str:
-    """MCP resource containing all available evaluators."""
-    return EvaluatorRegistry.to_json()
-
-
-@mcp.resource("setup://registry")
-async def get_setup_resource() -> str:
-    """MCP resource containing all available setup functions."""
-    return SetupRegistry.to_json()
-
-
-@mcp.resource("problems://registry")
-async def get_problems_resource() -> str:
-    """MCP resource containing all available problem definitions."""
-    return ProblemRegistry.to_json()
-
-
-@mcp.resource("telemetry://live")
-async def get_telemetry_live() -> str:
-    """Live telemetry data for the remote browser environment."""
-    import json
-    from datetime import datetime
-
-    telemetry_data = {
-        "live_url": browser_provider.get_live_view_url() if browser_provider else None,
-        "instance_id": browser_provider._instance_id if browser_provider else None,
-        "provider": browser_provider.__class__.__name__ if browser_provider else None,
-        "status": "ready" if browser_provider and browser_provider.is_running else "not_ready",
-        "timestamp": datetime.now().isoformat(),
-        "browser_connected": playwright_tool._browser.is_connected()
-        if playwright_tool and playwright_tool._browser
-        else False,
-        "cdp_url": browser_provider.cdp_url if browser_provider else None,
-    }
-
-    # Add current page URL if available
-    if playwright_tool and playwright_tool._page:
-        try:
-            telemetry_data["current_url"] = playwright_tool._page.url
-        except Exception:
-            telemetry_data["current_url"] = None
-
-    return json.dumps(telemetry_data, indent=2)
-
-
-# Cleanup on shutdown
-async def cleanup():
-    """Clean up resources on shutdown."""
+async def cleanup_browser():
+    """Clean up browser resources."""
     global browser_provider, playwright_tool, browser_executor, _cleanup_in_progress
 
     if _cleanup_in_progress:
+        logger.info("Cleanup already in progress, skipping")
         return
 
     _cleanup_in_progress = True
-    logger.info("Cleaning up remote browser environment...")
+    logger.info("Starting browser cleanup...")
 
-    # Close resources with timeout
-    cleanup_tasks = []
-
-    if playwright_tool and hasattr(playwright_tool, "_browser") and playwright_tool._browser:
-        cleanup_tasks.append(("browser", playwright_tool._browser.close()))
-
-    if browser_provider:
-        cleanup_tasks.append(("provider", browser_provider.close()))
-
-    # Run all cleanup tasks with timeout
-    for name, task in cleanup_tasks:
-        try:
-            await asyncio.wait_for(task, timeout=5.0)
-            logger.info(f"Closed {name} successfully")
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout closing {name}")
-        except Exception as e:
-            logger.error(f"Error closing {name}: {e}")
-
-    # Clear references
-    browser_executor = None
-    playwright_tool = None
-    browser_provider = None
-
-    logger.info("Cleanup completed")
-    _cleanup_in_progress = False
-
-
-def handle_shutdown(signum=None, frame=None):
-    if signum:
-        logger.info(f"Received signal {signum}, shutting down...")
-    else:
-        logger.info("Normal shutdown initiated...")
-
-    # Block until async cleanup completes (or timeout)
     try:
-        asyncio.run(asyncio.wait_for(cleanup(), timeout=10.0))
-    except asyncio.TimeoutError:
-        logger.error("Cleanup timed out after 10 seconds")
-    except Exception as e:
-        logger.error(f"Cleanup error: {e}")
+        # Close playwright connection
+        if playwright_tool:
+            try:
+                await playwright_tool.close()
+                logger.info("Playwright tool closed")
+            except Exception as e:
+                logger.error(f"Error closing playwright tool: {e}")
 
-    if signum:
-        sys.exit(0)
+        # Close browser through provider
+        if browser_provider:
+            try:
+                await browser_provider.close()
+                logger.info("Browser provider closed")
+            except Exception as e:
+                logger.error(f"Error closing browser provider: {e}")
+
+        logger.info("Browser cleanup completed")
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}")
+    finally:
+        _cleanup_in_progress = False
+        browser_provider = None
+        playwright_tool = None
+        browser_executor = None
+
+
+def handle_signal(signum, frame):
+    """Handle termination signals."""
+    logger.info(f"Received signal {signum}, initiating cleanup...")
+    asyncio.create_task(cleanup_browser())
+    sys.exit(0)
+
+
+# Register signal handlers
+signal.signal(signal.SIGINT, handle_signal)
+signal.signal(signal.SIGTERM, handle_signal)
+
+# Register cleanup on exit
+atexit.register(lambda: asyncio.run(cleanup_browser()))
 
 
 if __name__ == "__main__":
-    import typer
-
-    app = typer.Typer()
-
-    @app.command()
-    def run(transport: Literal["stdio", "streamable-http"] = "stdio"):
-        """Run the MCP server."""
-        # Register shutdown handlers
-        signal.signal(signal.SIGTERM, handle_shutdown)  # Docker stop
-        signal.signal(signal.SIGINT, handle_shutdown)  # Ctrl+C
-        atexit.register(handle_shutdown)  # Normal exit
-
-        logger.info("Remote browser MCP server starting...")
-        logger.info("Graceful shutdown enabled (10s timeout)")
-
-        try:
-            mcp.run(transport=transport)
-        finally:
-            logger.info("MCP server stopped")
-
-    app()
+    mcp.run()
