@@ -175,10 +175,10 @@ Explore the core concepts and features of the SDK:
 
 We recommend you first take a look at the example notebooks showing how to use the HUD SDK:
 
-1. [Browser Basics](examples/browser_use.ipynb) - Simple browser interaction with live view
-2. [Task Design](examples/tasks.ipynb) - Creating and customizing tasks
-3. [OSWorld](examples/osworld.ipynb) - Running the OSWorld benchmark
-4. [Local Development](examples/local.ipynb) - Setting up local custom environments
+1. [Browser Basics](examples/environments/simple_browser_example.py) - Simple browser interaction with live view
+2. [Task Design](examples/evaluations/tasks.ipynb) - Creating and customizing tasks
+3. [OSWorld](examples/evaluations/osworld.ipynb) - Running the OSWorld benchmark
+4. [Local Development](examples/environments/gmail_local.ipynb) - Setting up local custom environments
 
 ## Documentation
 
