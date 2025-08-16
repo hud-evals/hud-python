@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import httpx
 import pytest
 
-from hud.exceptions import (
+from hud.server.exceptions import (
     HudAuthenticationError,
     HudNetworkError,
     HudRequestError,
@@ -157,20 +157,20 @@ async def test_make_request_unexpected_error():
 
 
 @pytest.mark.asyncio
-async def test_make_request_auto_client_creation(mocker):
+async def test_make_request_auto_client_creation():
     """Test automatic client creation when not provided."""
-    mock_create_client = mocker.patch("hud.server.requests._create_default_async_client")
-    mock_client = AsyncMock()
-    mock_client.request.return_value = httpx.Response(
-        200, json={"result": "success"}, request=httpx.Request("GET", "https://api.test.com")
-    )
-    mock_client.aclose = AsyncMock()
-    mock_create_client.return_value = mock_client
+    with patch("hud.server.requests._create_default_async_client") as mock_create_client:
+        mock_client = AsyncMock()
+        mock_client.request.return_value = httpx.Response(
+            200, json={"result": "success"}, request=httpx.Request("GET", "https://api.test.com")
+        )
+        mock_client.aclose = AsyncMock()
+        mock_create_client.return_value = mock_client
 
-    result = await make_request("GET", "https://api.test.com/data", api_key="test-key")
+        result = await make_request("GET", "https://api.test.com/data", api_key="test-key")
 
-    assert result == {"result": "success"}
-    mock_client.aclose.assert_awaited_once()
+        assert result == {"result": "success"}
+        mock_client.aclose.assert_awaited_once()
 
 
 def test_make_request_sync_success():

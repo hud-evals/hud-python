@@ -42,7 +42,7 @@ docker push ghcr.io/your-org/hud-browser:latest
 import os
 import hud
 from mcp_use import MCPClient
-from hud.mcp import ClaudeMCPAgent
+from hud.mcp import ClaudeAgent
 
 BASE_URL = "https://mcp.hud.so"
 HUD_API_KEY = os.getenv("HUD_API_KEY")
@@ -64,7 +64,7 @@ async def main():
         }
 
         client = MCPClient.from_dict(config)
-        agent = ClaudeMCPAgent(
+        agent = ClaudeAgent(
             client=client,
             model="claude-sonnet-4-20250514",
             allowed_tools=["computer", "setup", "evaluate"]

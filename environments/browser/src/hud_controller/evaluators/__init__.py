@@ -1,18 +1,16 @@
-"""Evaluators package for browser environment.
+"""Evaluators module for browser environment."""
 
-This package provides environment-specific evaluators that can be used
-as MCP resources and for direct evaluation calls.
-"""
+from hud.tools import EvaluateTool
 
-from .registry import EvaluatorRegistry, evaluator
-from .context import BrowserEnvironmentContext, BrowserEvaluationContext
+# Create global evaluate tool instance
+evaluate_tool = EvaluateTool(
+    name="evaluate", title="Browser Evaluator", description="Evaluate the current browser state"
+)
 
-# Import all environment evaluators to trigger registration
-from .todo import *
+# Convenience decorator
+evaluator = evaluate_tool.register
 
-__all__ = [
-    "EvaluatorRegistry",
-    "evaluator",
-    "BrowserEnvironmentContext",
-    "BrowserEvaluationContext",  # Backward compatibility
-]
+# Import all evaluator modules to register their functions
+from . import todo
+
+__all__ = ["evaluate_tool", "evaluator"]

@@ -23,10 +23,10 @@ def problem(name: str, app: str = "", description: str = "", **metadata):
         @problem("todo_basic", app="todo", description="Basic test", difficulty="easy")
         class TodoBasicProblem:
             def get_setup(self):
-                return {"function": "todo_seed", "args": {"num_items": 5}}
+                return {"name": "todo_seed", "arguments": {"num_items": 5}}
 
             def get_evaluation(self):
-                return {"function": "todo_completed", "args": {"expected_count": 2}}
+                return {"name": "todo_completed", "arguments": {"expected_count": 2}}
     """
 
     def decorator(cls: Type) -> Type:

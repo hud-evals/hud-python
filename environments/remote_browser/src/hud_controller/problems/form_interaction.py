@@ -10,8 +10,8 @@ class FormFillAndSubmitProblem:
     def get_setup(self):
         """Set up a form page."""
         return {
-            "function": "navigate_to_url",
-            "args": {
+            "name": "navigate_to_url",
+            "arguments": {
                 "url": "https://httpbin.org/forms/post",
                 "wait_for_load_state": "domcontentloaded",
             },
@@ -20,9 +20,9 @@ class FormFillAndSubmitProblem:
     def get_evaluation(self):
         """Verify form elements are present."""
         return {
-            "function": "page_contains",
-            "args": {
+            "name": "page_contains",
+            "arguments": {
                 "search_terms": ["Customer name:", "Pizza Size", "Submit order"],
-                "partial_rewarding": False,
+                "partial_rewarding": True,
             },
         }

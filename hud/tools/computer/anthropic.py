@@ -5,15 +5,18 @@ import logging
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from mcp import ErrorData, McpError
-from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ImageContent, TextContent
+from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ContentBlock
 from pydantic import Field
 
-from hud.tools.base import ToolResult, tool_result_to_content_blocks
+from hud.tools.types import ContentResult
 
 from .hud import HudComputerTool
+from .settings import computer_settings
 
 if TYPE_CHECKING:
     from anthropic.types.beta import BetaToolComputerUse20250124Param
+
+    from hud.tools.executors.base import BaseExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -66,39 +69,41 @@ class AnthropicComputerTool(HudComputerTool):
 
     def __init__(
         self,
-        width: int = 1400,
-        height: int = 850,
-        environment_width: int = 1920,
-        environment_height: int = 1080,
-        display_num: int | None = None,
+        # Define within environment based on platform
+        executor: BaseExecutor | None = None,
         platform_type: Literal["auto", "xdo", "pyautogui"] = "auto",
-        rescale_images: bool = False,
+        display_num: int | None = None,
+        # Overrides for what dimensions the agent thinks it operates in
+        width: int = computer_settings.ANTHROPIC_COMPUTER_WIDTH,
+        height: int = computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
+        rescale_images: bool = computer_settings.ANTHROPIC_RESCALE_IMAGES,
+        # What the agent sees as the tool's name, title, and description
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
         **kwargs: Any,
     ) -> None:
         """
         Initialize with Anthropic's default dimensions.
 
         Args:
-            width: Target width for rescaling (default: 1400 for Anthropic)
-            height: Target height for rescaling (default: 850 for Anthropic)
-            environment_width: Environment screen width (default: 1920)
-            environment_height: Environment screen height (default: 1080)
-            display_num: X display number
-            platform_type: Which executor to use:
-                - "auto": Automatically detect based on platform
-                - "xdo": Use XDOExecutor (Linux/X11 only)
-                - "pyautogui": Use PyAutoGUIExecutor (cross-platform)
+            width: Target width for rescaling (None = use environment width)
+            height: Target height for rescaling (None = use environment height)
             rescale_images: If True, rescale screenshots. If False, only rescale action coordinates
-            **kwargs: Additional arguments passed to HudComputerTool (e.g., executor)
+            name: Tool name for MCP registration (auto-generated from class name if not provided)
+            title: Human-readable display name for the tool (auto-generated from class name)
+            description: Tool description (auto-generated from docstring if not provided)
         """
         super().__init__(
+            executor=executor,
+            platform_type=platform_type,
+            display_num=display_num,
             width=width,
             height=height,
-            display_num=display_num,
-            environment_width=environment_width,
-            environment_height=environment_height,
-            platform_type=platform_type,
             rescale_images=rescale_images,
+            name=name or "anthropic_computer",
+            title=title or "Anthropic Computer Tool",
+            description=description or "Control computer with mouse, keyboard, and screenshot",
             **kwargs,
         )
 
@@ -153,7 +158,7 @@ class AnthropicComputerTool(HudComputerTool):
         take_screenshot_on_click: bool = Field(
             True, description="Whether to take a screenshot after clicking"
         ),
-    ) -> list[ImageContent | TextContent]:
+    ) -> list[ContentBlock]:
         """
         Handle Anthropic Computer Use API calls.
 
@@ -180,10 +185,9 @@ class AnthropicComputerTool(HudComputerTool):
             screenshot_base64 = await self.executor.screenshot()
             if screenshot_base64:
                 # Rescale screenshot if requested
-                screenshot_base64 = await self._rescale_screenshot(screenshot_base64)
-                result = ToolResult(base64_image=screenshot_base64)
+                result = ContentResult(base64_image=screenshot_base64)
             else:
-                result = ToolResult(error="Failed to take screenshot")
+                result = ContentResult(error="Failed to take screenshot")
 
         elif action == "left_click" or action == "click":
             if coord_tuple and len(coord_tuple) >= 2:
@@ -234,7 +238,7 @@ class AnthropicComputerTool(HudComputerTool):
 
         elif action == "type":
             if text:
-                result = await self.executor.type(text=text)
+                result = await self.executor.write(text=text)
             else:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="text is required for type"))
 
@@ -243,7 +247,14 @@ class AnthropicComputerTool(HudComputerTool):
                 # Anthropic sends single key or combo like "ctrl+a"
                 # Map to CLA standard key format
                 mapped_key = self._map_anthropic_key_to_cla(text)
-                result = await self.executor.press(keys=[mapped_key])
+
+                # Split key combination into list of keys
+                if "+" in mapped_key:
+                    keys_list = [k.strip() for k in mapped_key.split("+")]
+                else:
+                    keys_list = [mapped_key]
+
+                result = await self.executor.press(keys=keys_list)
             else:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="text is required for key"))
 
@@ -264,17 +275,23 @@ class AnthropicComputerTool(HudComputerTool):
                     )
                 )
 
+            # Convert scroll amount from "clicks" to pixels
+            # Anthropic's scroll_amount represents wheel clicks, not pixels
+            # Standard conversion: 1 wheel click ≈ 100 pixels (3 lines of text)
+            PIXELS_PER_WHEEL_CLICK = 100
+            pixel_amount = scroll_amount * PIXELS_PER_WHEEL_CLICK
+
             # Convert direction to scroll amounts
             scroll_x = None
             scroll_y = None
             if scroll_direction == "down":
-                scroll_y = scroll_amount
+                scroll_y = pixel_amount
             elif scroll_direction == "up":
-                scroll_y = -scroll_amount
+                scroll_y = -pixel_amount
             elif scroll_direction == "right":
-                scroll_x = scroll_amount
+                scroll_x = pixel_amount
             elif scroll_direction == "left":
-                scroll_x = -scroll_amount
+                scroll_x = -pixel_amount
 
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
@@ -375,9 +392,9 @@ class AnthropicComputerTool(HudComputerTool):
             raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Invalid action: {action}"))
 
         # Rescale screenshot in result if present
-        if isinstance(result, ToolResult) and result.base64_image and self.rescale_images:
+        if isinstance(result, ContentResult) and result.base64_image and self.rescale_images:
             rescaled_image = await self._rescale_screenshot(result.base64_image)
-            result = result.replace(base64_image=rescaled_image)
+            result.base64_image = rescaled_image
 
         # Handle screenshot for actions that need it
         screenshot_actions = {
@@ -405,16 +422,16 @@ class AnthropicComputerTool(HudComputerTool):
             action in screenshot_actions
             and action != "screenshot"
             and take_screenshot_on_click
-            and isinstance(result, ToolResult)
+            and isinstance(result, ContentResult)
             and not result.base64_image
         ):
             screenshot_base64 = await self.executor.screenshot()
             if screenshot_base64:
                 # Rescale screenshot if requested
                 screenshot_base64 = await self._rescale_screenshot(screenshot_base64)
-                result = ToolResult(
+                result = ContentResult(
                     output=result.output, error=result.error, base64_image=screenshot_base64
                 )
 
         # Convert to content blocks
-        return tool_result_to_content_blocks(result)
+        return result.to_content_blocks()

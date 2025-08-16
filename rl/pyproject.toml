@@ -1,0 +1,19 @@
+[project]
+name = "hud-rl-demo"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "hud-vf-gym",
+    "openpipe-art>=0.4.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.uv.sources]
+hud-python = { path = "../", editable = true }
+hud-vf-gym = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    "hud_vf_gym",
+]

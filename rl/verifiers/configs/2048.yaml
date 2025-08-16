@@ -1,0 +1,57 @@
+# Configuration for 2048 game environment
+
+system_prompt: |
+  You are an excellent 2048 player. Always choose the move most likely to combine tiles and reach higher numbers.
+  
+  Available moves: left(), right(), up(), down(), done()
+
+  Return ONLY the tool call wrapped in XML tags, nothing else: <tool>move()</tool>
+
+# Default settings
+defaults:
+  max_turns: 100
+
+# Action mappings for 2048 game tools
+# Each direction is exposed as a separate tool to the agent
+# But they all map to the underlying MCP 'move' tool
+action_mappings:
+  left:
+    _parser:
+      positional: []
+    _tool: "move"
+    direction:
+      static: "left"
+  
+  right:
+    _parser:
+      positional: []
+    _tool: "move"
+    direction:
+      static: "right"
+  
+  up:
+    _parser:
+      positional: []
+    _tool: "move"
+    direction:
+      static: "up"
+  
+  down:
+    _parser:
+      positional: []
+    _tool: "move"
+    direction:
+      static: "down"
+
+# Parser configuration
+parser:
+  use_thinking: false
+  xml_weight: 0.6    # Weight for XML format validation
+  action_weight: 0.4  # Weight for action syntax validation
+
+# Rubric configuration for 2048
+rubric:
+  weights:
+    task_completion: 0.8       # Primary focus on reaching target tile
+    tool_execution: 0.05      # Minimal - moves usually valid
+    format_compliance: 0.15   # Some weight for correct XML format

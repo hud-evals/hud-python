@@ -21,9 +21,9 @@ def problem(name: str, description: str | None = None):
         @problem("navigate_and_click", description="Navigate to URL and click element")
         class NavigateAndClickProblem:
             def get_setup(self):
-                return {"function": "navigate_to_url", "args": {"url": "https://example.com"}}
+                return {"name": "navigate_to_url", "arguments": {"url": "https://example.com"}}
             def get_evaluation(self):
-                return {"function": "element_clicked", "args": {"selector": "#submit"}}
+                return {"name": "element_clicked", "arguments": {"selector": "#submit"}}
     """
 
     def decorator(cls):

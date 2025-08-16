@@ -15,7 +15,7 @@ class BaseSetupResetProblem:
 
     def get_setup(self) -> Dict[str, Any]:
         """Default setup that resets the database."""
-        return {"function": "todo_reset", "args": {}}
+        return {"name": "todo_reset", "arguments": {}}
 
 
 class BaseSeedProblem:
@@ -23,7 +23,7 @@ class BaseSeedProblem:
 
     def get_setup(self) -> Dict[str, Any]:
         """Default setup that seeds test data."""
-        return {"function": "todo_seed", "args": {"num_items": 5}}
+        return {"name": "todo_seed", "arguments": {"num_items": 5}}
 
 
 class BaseCompletionProblem:
@@ -31,7 +31,7 @@ class BaseCompletionProblem:
 
     def get_evaluation(self) -> Dict[str, Any]:
         """Default evaluation for completion count."""
-        return {"function": "todo_completed", "args": {"expected_count": 2}}
+        return {"name": "todo_completed", "arguments": {"expected_count": 2}}
 
 
 # === CONCRETE PROBLEM CLASSES ===
@@ -65,7 +65,7 @@ class TodoEmptyStartProblem(BaseSetupResetProblem):
 
     def get_evaluation(self) -> Dict[str, Any]:
         """Evaluate that completion rate handles empty case gracefully."""
-        return {"function": "todo_completion_rate", "args": {"min_rate": 0.0}}
+        return {"name": "todo_completion_rate", "arguments": {"min_rate": 0.0}}
 
 
 @problem(
@@ -98,11 +98,11 @@ class TodoCompositeWeightedProblem:
     def get_evaluation(self) -> Dict[str, Any]:
         """Composite evaluation with weights."""
         return {
-            "function": "composite_evaluate",
-            "args": {
+            "name": "composite_evaluate",
+            "arguments": {
                 "evaluators": [
-                    {"function": "todo_completed", "args": {"expected_count": 2}, "weight": 0.6},
-                    {"function": "todo_exists", "args": {"text": "important"}, "weight": 0.4},
+                    {"name": "todo_completed", "arguments": {"expected_count": 2}, "weight": 0.6},
+                    {"name": "todo_exists", "arguments": {"text": "important"}, "weight": 0.4},
                 ]
             },
         }
@@ -120,7 +120,7 @@ class TodoHighCompletionRateProblem(BaseSeedProblem):
 
     def get_evaluation(self) -> Dict[str, Any]:
         """Evaluate that completion rate is at least 60%."""
-        return {"function": "todo_completion_rate", "args": {"min_rate": 0.6}}
+        return {"name": "todo_completion_rate", "arguments": {"min_rate": 0.6}}
 
 
 @problem(
@@ -159,4 +159,4 @@ class TodoDirectDbTestProblem(BaseSetupResetProblem):
 
     def get_evaluation(self) -> Dict[str, Any]:
         """Evaluate specific item state via direct access."""
-        return {"function": "todo_db_direct", "args": {"todo_id": "1", "expected_completed": True}}
+        return {"name": "todo_db_direct", "arguments": {"todo_id": "1", "expected_completed": True}}

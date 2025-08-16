@@ -112,42 +112,45 @@ def test_get_progress(tracker):
     assert percentage == 100.0
 
 
-def test_get_stats_no_progress(tracker, mocker):
+def test_get_stats_no_progress(tracker):
+    from unittest.mock import patch
+
     rate, eta = tracker.get_stats()
     assert rate == 0.0
     assert eta is None
 
-    mocker.patch("time.monotonic", return_value=100.0)
-    tracker.start_task("task1")
+    with patch("time.monotonic", return_value=100.0):
+        tracker.start_task("task1")
 
-    mocker.patch("time.monotonic", return_value=100.0)
-    rate, eta = tracker.get_stats()
-    assert rate == 0.0
-    assert eta is None
+        rate, eta = tracker.get_stats()
+        assert rate == 0.0
+        assert eta is None
 
 
-def test_get_stats_with_progress(mocker):
-    mock_time = mocker.patch("time.monotonic")
-    mock_time.return_value = 100.0
+def test_get_stats_with_progress():
+    from unittest.mock import patch
 
-    tracker = StepProgressTracker(total_tasks=1, max_steps_per_task=10)
-    tracker.start_task("task1")
+    with patch("time.monotonic") as mock_time:
+        mock_time.return_value = 100.0
 
-    mock_time.return_value = 160.0
-    for _ in range(5):
-        tracker.increment_step("task1")
+        tracker = StepProgressTracker(total_tasks=1, max_steps_per_task=10)
+        tracker.start_task("task1")
 
-    rate, eta = tracker.get_stats()
+        mock_time.return_value = 160.0
+        for _ in range(5):
+            tracker.increment_step("task1")
 
-    assert rate == pytest.approx(5.0)
-    assert eta == pytest.approx(60.0)
+        rate, eta = tracker.get_stats()
 
-    for _ in range(5):
-        tracker.increment_step("task1")
+        assert rate == pytest.approx(5.0)
+        assert eta == pytest.approx(60.0)
 
-    rate, eta = tracker.get_stats()
-    assert rate == pytest.approx(10.0)
-    assert eta == pytest.approx(0.0)
+        for _ in range(5):
+            tracker.increment_step("task1")
+
+        rate, eta = tracker.get_stats()
+        assert rate == pytest.approx(10.0)
+        assert eta == pytest.approx(0.0)
 
 
 def test_is_finished(tracker):
@@ -162,31 +165,33 @@ def test_is_finished(tracker):
     assert tracker.is_finished()
 
 
-def test_display(tracker, mocker):
-    mock_time = mocker.patch("time.monotonic")
-    mock_time.return_value = 100.0
-    tracker.start_task("task1")
+def test_display(tracker):
+    from unittest.mock import patch
 
-    mock_time.return_value = 130.0
-    tracker.increment_step("task1")
-    tracker.increment_step("task1")
+    with patch("time.monotonic") as mock_time:
+        mock_time.return_value = 100.0
+        tracker.start_task("task1")
 
-    display_str = tracker.display()
+        mock_time.return_value = 130.0
+        tracker.increment_step("task1")
+        tracker.increment_step("task1")
 
-    assert "%" in display_str
-    assert "2/20" in display_str
-    assert "0:30" in display_str
-    assert "steps/min" in display_str
+        display_str = tracker.display()
 
-    tracker.finish_task("task1")
-    display_str = tracker.display()
-    assert "10/20" in display_str
+        assert "%" in display_str
+        assert "2/20" in display_str
+        assert "0:30" in display_str
+        assert "steps/min" in display_str
 
-    tracker.start_task("task2")
-    tracker.finish_task("task2")
-    display_str = tracker.display()
-    assert "100%" in display_str
-    assert "20/20" in display_str
+        tracker.finish_task("task1")
+        display_str = tracker.display()
+        assert "10/20" in display_str
+
+        tracker.start_task("task2")
+        tracker.finish_task("task2")
+        display_str = tracker.display()
+        assert "100%" in display_str
+        assert "20/20" in display_str
 
 
 def test_complex_workflow():
@@ -223,3 +228,34 @@ def test_complex_workflow():
 
     assert tracker.is_finished()
     assert tracker.get_progress()[2] == 100.0
+
+
+def test_display_eta_when_finished(tracker):
+    from unittest.mock import patch
+
+    """Test that ETA shows 0:00 when progress is finished."""
+
+    with patch("time.monotonic") as mock_time:
+        mock_time.return_value = 100.0
+
+        # Start and complete all tasks
+        tracker.start_task("task1")
+        for _ in range(10):
+            tracker.increment_step("task1")
+        tracker.finish_task("task1")
+
+        tracker.start_task("task2")
+        for _ in range(10):
+            tracker.increment_step("task2")
+        tracker.finish_task("task2")
+
+        # Some time has passed
+        mock_time.return_value = 120.0
+
+        display = tracker.display()
+
+        # When finished, ETA should be 0:00 (not ??:??)
+        assert tracker.is_finished()
+        assert "0:00" in display
+        assert "100%" in display
+        assert "20/20" in display

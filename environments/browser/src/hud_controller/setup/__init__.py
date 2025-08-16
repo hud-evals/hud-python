@@ -1,10 +1,18 @@
-"""Setup tools package for browser environment.
+"""Setup module for browser environment."""
 
-This package provides environment-specific setup functions that can be used
-as MCP resources and for direct setup calls.
-"""
+from hud.tools import SetupTool
 
-from .registry import SetupRegistry, setup
-from .todo import *
+# Create global setup tool instance
+setup_tool = SetupTool(
+    name="setup",
+    title="Browser Setup",
+    description="Initialize or configure the browser environment",
+)
 
-__all__ = ["SetupRegistry", "setup"]
+# Convenience decorator
+setup = setup_tool.register
+
+# Import all setup modules to register their functions
+from . import todo, apps
+
+__all__ = ["setup_tool", "setup"]

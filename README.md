@@ -2,195 +2,200 @@
   <img src="https://raw.githubusercontent.com/hud-evals/hud-python/main/docs/logo/hud_logo.svg" alt="HUD" width="150" style="margin-bottom: 20px;"/>
 </div>
 
-<h3>
-Evaluate your Computer Use AI agents across web browsers, desktop environments, and custom scenarios.
-</h3>
+Evaluate and improve agent–environment systems. Wrap software as environments, define measurable evaluations, and train with RL – locally or at scale.
 
-### 🚀 Are you a startup building agents?
+### Are you a startup building agents?
 
 [📅 Hop on a call](https://cal.com/jay-ram-z6st6w/demo) or [📧 founders@hud.so](mailto:founders@hud.so)
 
-We're here to help with eval strategies, custom environments, or improving your agent architecture!
-
-
-> **Early Release Notice**: We'd love to hear your feedback in [Issues](https://github.com/hud-evals/hud-python/issues), as the SDK is still evolving!
+We're here to help with eval strategies, custom environments, or improving your agent via RL!
 
 [![PyPI version](https://img.shields.io/pypi/v/hud-python)](https://pypi.org/project/hud-python/)
 
-## ✨ What You Can Do
+## What we help you do
 
-**[Evaluate Existing Benchmarks](https://docs.hud.so/examples/benchmarking-agents)**
-```python
-from hud import load_taskset, run_job, ClaudeAgent
+- Environments: turn any app (browser, game, API) into a controllable environment with tools
+- Evaluations: define setup/evaluate logic and run benchmarks (e.g., SheetBench)
+- RL: train and evaluate via HUD’s Verifier-based gym (hud-vf-gym)
 
-taskset = await load_taskset("WebVoyager")  # or GAIA, OSWorld-Ubuntu, Mind2Web
-job = await run_job(ClaudeAgent, taskset, "my-evaluation")
+```text
+Agent (LLM/Policy)  ── tool calls (MCP JSON-RPC) ──►  Environment (your software)
+                                   │                        ▲
+                                   ▼                        │
+                           HUD Client/SDK           Tools you expose (setup/evaluate/act)
 ```
 
-**[Create Custom Tasks](https://docs.hud.so/task-creation)** 
-```python
-from hud.task import Task
+MCP (Model-Context Protocol) is the wire format we use to send tool calls. You rarely “see” MCP directly – it’s just the protocol that lets any agent talk to any environment, locally or in Docker or in the cloud.
 
-task = Task(
-    prompt="Find and book the cheapest flight from NYC to Paris",
-    gym="hud-browser",
-    setup=("goto", "https://kayak.com"),
-    evaluate=("page_contains", "confirmation")
-)
-```
+---
 
-**[Build Custom Environments](https://docs.hud.so/environment-creation)**
-```python
-from hud.types import CustomGym
+## 1) Environments
 
-# Launch any website as an environment
-custom_gym = CustomGym(
-    image_or_build_context="nginx:alpine",
-    location="local"
-)
+Wrap your software as an environment by exposing a small set of tools. We use FastMCP to register tool functions and (usually) run them in Docker so they’re reproducible and scalable.
 
-# Or create complex Docker environments - see environments/ folder for examples
-```
-
-**[Trace Tool Calls Alongside HUD Environments (or Independently)](https://docs.hud.so/examples/mcp-agent-tracing)**
-```python
-import hud
-
-with hud.trace("my-agent-run"):
-    # Your agent code here - MCP calls automatically captured
-    result = await agent.run(task)
-```
-
-## Quick Start
-
-### Installation
-
-```bash
-pip install hud-python
-```
-
-### API Key Setup
-
-Before getting started, you'll need to obtain an API key:
-
-1. Visit [app.hud.so](https://app.hud.so) to create a free account and generate your API key
-2. Set it in your environment or .env file:
-
-```bash
-export HUD_API_KEY=your_api_key_here
-```
-
-### Simple Browser Example with Claude Computer Use
-
-> This example uses the `@register_job("test-run")` decorator, so the results of this run will appear under the job named "test-run" on the your [HUD Jobs page](https://app.hud.so/jobs).
-
-Make sure your have defined your `ANTRHOPIC_API_KEY` in environment variables to run Claude.
+Minimal call example (MCP client calling a local Docker image):
 
 ```python
 import asyncio
-from hud import gym, register_job
-from hud.task import Task
-from hud.agent import ClaudeAgent
+import hud
+from hud.client import MCPClient
 
-@register_job("test-run")
 async def main():
-    task = Task(
-        prompt="Insert the text 'capybara' into the search bar",
-        gym="hud-browser",
-        setup=("goto", "google.com"),
-        evaluate=("contains_text", "capybara")
-    )
-    print(f"Running task with prompt: {task.prompt}")
-    
-    # Create environment using the gym module
-    env = await gym.make(task)
-    
-    # Initialize Claude agent (API key is loaded automatically)
-    agent = ClaudeAgent()
-    
-    # Agent loop with predict and step functions
-    obs, _ = await env.reset() # Gets first observation
-    for i in range(5):
-        actions, done = await agent.predict(obs)
-        print(f"Agent action {i}: {actions}")
+    with hud.trace("env-quickstart"):
+        client = MCPClient(mcp_config={
+            "local": {
+                "command": "docker",
+                "args": ["run","--rm","-i","hud-text-2048"]
+            }
+        })
+        # Setup 2048 board, make a move, then evaluate
+        await client.call_tool("setup", {"name": "board", "arguments": {"board_size": 4}})
+        await client.call_tool("move", {"direction": "up"})
+        result = await client.call_tool("evaluate", {"name": "max_number", "arguments": {"target": 64}})
+        print(result)
+        await client.close()
 
-        obs, reward, terminated, info = await env.step(actions)
-        if done or terminated: break
-    
-    # Evaluate and close
-    result = await env.evaluate()
-    print(f"Evaluation result: {result}")
-    await env.close()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
 ```
 
-Alternatively, run a full evaluation set via the ```run_job``` command:
+Start here:
+- environments/README.md – how to build an environment (with BaseHub + tools)
+- examples/01_hello_2048.py – end-to-end hello world using the 2048 environment
+- examples/task_with_setup_eval.py – minimal setup/evaluate without an LLM
+
+---
+
+## 2) Evaluations
+
+Evaluations turn tasks into measurable outcomes. Your `evaluate` tool returns a reward (0–1), a done flag, and optional info.
+
+Return shapes:
 
 ```python
-from hud import load_taskset, run_job, ClaudeAgent
+from hud.tools.types import SetupResult, EvaluationResult
 
-# Load a benchmark
-taskset = load_taskset("GAIA")
-
-# Evaluate
-job = await run_job(ClaudeAgent, taskset, "test-gaia-job")
-
-# Get results OR view them in app.hud.so
-print(await job.get_analytics())
+SetupResult(content="Seeded 5 items", info={"items": 5})
+EvaluationResult(reward=0.8, done=False, content="Found 8/10 entries")
 ```
 
-## Ready-to-Use TaskSets
+Recommended starting points:
+- examples/sheet_bench.py – SheetBench demo using a dataset → TaskConfig → agent run
+- environments/remote_browser – rich setup/evaluate hubs (navigate, cookies, page checks)
 
-- **WebVoyager** - Web navigation and interaction
-- **Mind2Web** - Complex web application tasks  
-- **GAIA** - Question answering and reasoning
-- **OSWorld-Ubuntu** - Desktop interaction
-- **hud-samples** - Getting started examples
+Run with Claude (quick demo):
 
-## Community
+```python
+import asyncio
+import hud
+from datasets import load_dataset
+from hud.datasets import to_taskconfigs
+from hud.client import MCPClient
+from hud.agents import ClaudeAgent
 
-**Contributing Custom Environments**
+async def main():
+    with hud.trace("sheetbench-claude-demo"):
+        # Load a small SheetBench split from HF and convert to TaskConfig
+        dataset = load_dataset("hud-evals/SheetBench-50", split="train")
+        task = to_taskconfigs(dataset)[0]
 
-Add your environment to the `environments/` folder and submit a PR! Examples:
-- `environments/novnc_ubuntu/` - Ubuntu with VNC access 
-- `environments/pokemon_controller/` - Pokemon emulator environment (In Development)
-- `environments/qa_controller/` - Lightweight app sample
+        client = MCPClient(mcp_config=task.mcp_config)
+        agent = ClaudeAgent(
+            mcp_client=client,
+            model="claude-3-7-sonnet-20250219",
+            allowed_tools=["anthropic_computer"],
+            initial_screenshot=True,
+        )
+        try:
+            print(task.prompt)
+            result = await agent.run(task, max_steps=15)
+            print(result.reward)
+        finally:
+            await client.close()
 
-See [Custom Environments Guide](https://docs.hud.so/environment-creation) for details.
+asyncio.run(main())
+```
 
-## Documentation Sections
+Tip: use `with hud.trace("run-name"):` to send traces to app.hud.so for debugging.
 
-Explore the core concepts and features of the SDK:
+---
 
-*   **[Task Creation](https://docs.hud.so/task-creation)**: Build custom evaluation scenarios with setup and evaluation criteria.
-*   **[Environments](https://docs.hud.so/environments/browser)**: Understand browser environments and create custom Docker-based environments.
-*   **[Agents](https://docs.hud.so/concepts/agent)**: Learn about the agent architecture (Claude, Operator) and how they process observations and predict actions.
-*   **[Jobs](https://docs.hud.so/concepts/job)**: Group related runs for analysis and viewing on the HUD platform.
-*   **[MCP Telemetry](https://docs.hud.so/telemetry/mcp)**: Automatic tracing of Model Context Protocol interactions.
-*   **[Full API Reference](https://docs.hud.so/api-reference/gym)**: Detailed specifications for all modules and classes.
+## 3) RL (hud-vf-gym + Verifiers)
 
-## [Examples](examples/)
+HUD integrates with the Verifiers framework via `hud-vf-gym` (config-driven). A YAML config defines the agent-facing tools and maps them to MCP tools (action_mappings). You can run evaluations with the Verifiers CLI and train with GRPO.
 
-We recommend you first take a look at the example notebooks showing how to use the HUD SDK:
+Run evals (CLI):
 
-1. [Browser Basics](examples/browser_use.ipynb) - Simple browser interaction with live view
-2. [Task Design](examples/tasks.ipynb) - Creating and customizing tasks
-3. [OSWorld](examples/osworld.ipynb) - Running the OSWorld benchmark
-4. [Local Development](examples/local.ipynb) - Setting up local custom environments
+```bash
+vf-eval hud_vf_gym \
+  --model gpt-4.1-mini \
+  --env-args '{"taskset":"hud-evals/gmail-taskset","config_path":"./configs/default.yaml"}' \
+  --num-examples 5
+```
 
-## Documentation
+Train with GRPO (programmatic):
 
-For comprehensive guides, examples, and API reference, visit [our docs](https://docs.hud.so/introduction)
+```python
+from verifiers.trainers import GRPOTrainer, GRPOConfig
+from hud_vf_gym import load_environment
 
-## License
+env = load_environment(taskset="hud-evals/gmail-taskset", config_path="./configs/default.yaml")
+cfg = GRPOConfig(model_name_or_path="your-model", num_train_epochs=3, per_device_train_batch_size=4)
+trainer = GRPOTrainer(model=model, env=env, args=cfg, processing_class=tokenizer)
+trainer.train()
+```
+
+Action mapping (YAML):
+
+```yaml
+action_mappings:
+  screenshot:
+    _parser: { positional: [] }
+    _tool: "computer"
+    action: "screenshot"
+  key:
+    _parser: { positional: ["key"] }
+    _tool: "computer"
+    action: "press"
+    keys: { from_arg: "key", transform: "lambda x: x.split('+')" }
+```
+
+Learn more:
+- rl/README.md – overview of RL frameworks (ART and Verifiers)
+- rl/verifiers/README.md – how hud-vf-gym + Verifiers work, configs and datasets
+- rl/verifiers/configs/default.yaml (browser/computer), rl/verifiers/configs/2048.yaml (2048)
+
+---
+
+## Tooling & telemetry
+
+### CLI Tools (`hud`)
+
+**What's the difference?**
+
+- **`hud debug <IMAGE>`** – 5-phase checker (startup → MCP handshake → tools → telemetry → stress).
+- **`hud analyze <IMAGE>`** – Explore tools/resources (`--format json|markdown`). Requires debug phase 3.
+
+```bash
+hud debug hudpython/hud-remote-browser:latest
+hud analyze hudpython/hud-remote-browser:latest
+```
+
+### Tracing & Debugging
+
+- **Tracing**: `with hud.trace("run-name"):` - Stream any MCP-based trace to app.hud.so for debugging and visualization
+
+---
+
+## Next steps
+
+- environments/ – build an environment (BaseHub + tools)
+- examples/ – hello world, agent lifecycle, SheetBench
+- rl/ – RL training with ART and Verifiers frameworks
+
+Install: `pip install hud-python`  •  Issues/feedback welcome.
+
 
 [MIT License](LICENSE)
-
-## Citation
-
-If you use this SDK in your research, please cite it as follows:
 
 ```bibtex
 @software{hud2025agentevalplatform,

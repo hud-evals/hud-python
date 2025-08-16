@@ -59,7 +59,6 @@ async def _patched_received_request(
         if _init_function and not _initialized:
             try:
                 await _init_function(session=self, progress_token=progress_token)
-                ServerSession._received_request = _original_received_request
             except Exception as e:
                 if progress_token:
                     await self.send_progress_notification(
@@ -70,11 +69,17 @@ async def _patched_received_request(
                     )
                 raise
 
-    # Call the original handler to send the InitializeResult
-    result = await _original_received_request(self, responder)
-    _initialized = True
+        # Call the original handler to send the InitializeResult
+        result = await _original_received_request(self, responder)
+        _initialized = True
 
-    return result
+        # Restore the original method AFTER initialization is complete
+        ServerSession._received_request = _original_received_request
+
+        return result
+
+    # For non-initialization requests, use the original handler
+    return await _original_received_request(self, responder)
 
 
 def mcp_intialize_wrapper(

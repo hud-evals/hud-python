@@ -3,9 +3,13 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .base import CLIResult, ToolError, ToolResult
+from .base import BaseTool
+from .types import ContentResult, ToolError
+
+if TYPE_CHECKING:
+    from mcp.types import ContentBlock
 
 
 class _BashSession:
@@ -53,13 +57,13 @@ class _BashSession:
             return
         self._process.terminate()
 
-    async def run(self, command: str) -> CLIResult:
+    async def run(self, command: str) -> ContentResult:
         """Execute a command in the bash shell."""
         if not self._started:
             raise ToolError("Session has not started.")
         if self._process.returncode is not None:
             await asyncio.sleep(0)
-            return ToolResult(
+            return ContentResult(
                 system="tool must be restarted",
                 error=f"bash has exited with returncode {self._process.returncode}",
             )
@@ -102,36 +106,56 @@ class _BashSession:
         except TimeoutError:
             error = ""
 
-        return CLIResult(output=output, error=error)
+        return ContentResult(output=output, error=error)
 
 
-class BashTool:
+class BashTool(BaseTool):
     """
     A tool that allows the agent to run bash commands.
-    The tool parameters are defined by Anthropic and are not editable.
+    The tool maintains a persistent bash session that can be restarted.
     """
 
-    _session: _BashSession | None
+    def __init__(self, session: _BashSession | None = None) -> None:
+        """Initialize BashTool with an optional session.
 
-    def __init__(self) -> None:
-        self._session = None
+        Args:
+            session: Optional pre-configured bash session. If not provided,
+                     a new session will be created on first use.
+        """
+        super().__init__(
+            env=session,
+            name="bash",
+            title="Bash Shell",
+            description="Execute bash commands in a persistent shell session",
+        )
+
+    @property
+    def session(self) -> _BashSession | None:
+        """Get the current bash session (alias for context)."""
+        return self.env
+
+    @session.setter
+    def session(self, value: _BashSession | None) -> None:
+        """Set the bash session (alias for context)."""
+        self.env = value
 
     async def __call__(
         self, command: str | None = None, restart: bool = False, **kwargs: Any
-    ) -> ToolResult:
+    ) -> list[ContentBlock]:
         if restart:
-            if self._session:
-                self._session.stop()
-            self._session = _BashSession()
-            await self._session.start()
+            if self.session:
+                self.session.stop()
+            self.session = _BashSession()
+            await self.session.start()
 
-            return ToolResult(system="tool has been restarted.")
+            return ContentResult(output="Bash session restarted.").to_content_blocks()
 
-        if self._session is None:
-            self._session = _BashSession()
-            await self._session.start()
+        if self.session is None:
+            self.session = _BashSession()
+            await self.session.start()
 
         if command is not None:
-            return await self._session.run(command)
+            result = await self.session.run(command)
+            return result.to_content_blocks()
 
-        raise ToolError("no command provided.")
+        raise ToolError("No command provided.")

@@ -10,15 +10,15 @@ class NavigateAndVerifyProblem:
     def get_setup(self):
         """Get the setup configuration for this problem."""
         return {
-            "function": "navigate_to_url",
-            "args": {"url": "https://example.com", "wait_for_load_state": "networkidle"},
+            "name": "navigate_to_url",
+            "arguments": {"url": "https://example.com", "wait_for_load_state": "networkidle"},
         }
 
     def get_evaluation(self):
         """Get the evaluation configuration for this problem."""
         return {
-            "function": "page_contains",
-            "args": {
+            "name": "page_contains",
+            "arguments": {
                 "search_terms": [
                     "Example Domain",
                     "This domain is for use in illustrative examples",

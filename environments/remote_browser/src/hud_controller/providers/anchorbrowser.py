@@ -142,7 +142,7 @@ class AnchorBrowserProvider(BrowserProvider):
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.get(
-                        f"{self.base_url}/sessions/{self._instance_id}/status",
+                        f"{self.base_url}/v1/sessions/{self._instance_id}/status",
                         headers={
                             "anchor-api-key": str(self.api_key),
                             "Content-Type": "application/json",

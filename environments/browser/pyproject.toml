@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "HUD Controller for browser environments with MCP tools"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "hud-python",
+    "hud-python @ git+https://github.com/hud-evals/hud-python.git@l/text-2048",
     "playwright",
     "pyautogui",
     "httpx",

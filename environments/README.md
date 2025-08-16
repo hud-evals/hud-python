@@ -2,7 +2,20 @@
 
 This document is a step-by-step guide for turning *any* piece of software that can run in a Docker container into a **Model Context Protocol (MCP)** environment that the HUD SDK can evaluate or control.  We’ll move through six short phases, each with a clear checkpoint.
 
-The official MCP lifecycle specification is an excellent companion reference – skim it now, keep it open while you work: [modelcontextprotocol.io › Lifecycle](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle).
+> **Big picture**
+> • An *agent* (LLM) wants to solve tasks inside a *software environment*.
+> • Your job: give that environment a clean, programmable surface – a set of
+>   *tools* the agent can invoke.
+> • MCP is simply the wire-format we use to move those tool calls back and forth
+>   (like gRPC or HTTP but JSON-RPC over stdio/Docker).
+> • FastMCP is the Python SDK that lets you register functions as tools and run
+>   them inside a container.
+> 
+> The picture:
+> ```text
+>  LLM Agent ──JSON-RPC──► FastMCP server (your code) ──► real app / game / browser
+> ```
+> Your job is to wrap *any* app in an MCP server so agents can control it reproducibly & safely.
 
 ---
 
@@ -14,18 +27,56 @@ The official MCP lifecycle specification is an excellent companion reference –
 | 2 | A minimal MCP server that responds to `initialize` over **stdio** |
 | 3 | Working `setup`, `evaluate`, and **interaction** tools |
 | 4 | Image launches remotely on the HUD platform & exposes live telemetry |
-| 5 | Fast local iteration with **cursor-mcp** and a tiny `mcp.json` |
-| 6 | Optional polish – registries, optimisation, security, creative ideas |
+| 5 | Fast local iteration with Cursor Agent and a tiny `mcp.json` |
 
-Take the phases one at a time; do **not** jump ahead.  Each stage’s checkpoint is the foundation for the next.
+Take the phases one at a time; do **not** jump ahead.  Each stage's checkpoint is the foundation for the next.
 
-### One-command sanity check (`docker_debug.py`)
+## Reference Implementations
 
-While you move through the phases it’s handy to run the **interactive checker** to make sure nothing broke:
+This repository includes two complete MCP environment implementations that demonstrate different levels of complexity:
+
+### 1. `text_2048` - Simple Game Environment
+A minimalist ASCII-based 2048 game that showcases:
+- Basic hub pattern with setup/evaluate tools
+- Custom interaction tools (move command)
+- Clean separation of game logic and MCP server
+- Minimal dependencies (Python only)
+- Perfect for learning the core concepts
+
+### 2. `remote_browser` - Advanced Browser Automation
+A sophisticated browser automation environment featuring:
+- Multiple cloud browser provider integrations (AnchorBrowser, Steel, BrowserBase, HyperBrowser, Kernel)
+- Both Playwright and computer tools for interaction
+- Extensive setup/evaluate capabilities (navigation, cookies, sheets, element checks)
+- Live telemetry with browser viewing URLs
+- Production-ready error handling and cleanup
+
+💡 **Follow along with text_2048** as you work through each phase - it demonstrates all the core patterns with minimal complexity.
+
+### Installing the HUD CLI
+
+The HUD SDK includes a powerful CLI for debugging and analyzing MCP environments:
 
 ```bash
-python environments/docker_debug.py my-environment:latest
+# Install HUD SDK (if not already installed)
+pip install hud-python
+
+# Verify installation
+hud --help
 ```
+While you move through the phases it's handy to run the **interactive checker** to make sure nothing broke:
+
+```bash
+# First build your Docker image
+docker build -t my-environment environments/my-environment
+
+# Then debug it
+hud debug my-environment
+```
+
+**What's the difference?**
+- **`hud debug`** - Tests your environment in 5 phases, checking startup, MCP protocol, tools, and readiness. Use this first!
+- **`hud analyze`** - Explores the environment to discover all tools, resources, and capabilities. Only works after debug passes phase 3.
 
 The script walks the *same* checklist and prints coloured, human-friendly hints whenever something fails.
 
@@ -41,37 +92,45 @@ The script walks the *same* checklist and prints coloured, human-friendly hints 
 
 ---
 
-## Phase 1 – Write a *Simple* Dockerfile
+## Phase 1 – Write a Dockerfile
 
-**Goal →** the container starts, prints a message to **stderr**, and exits cleanly.  Nothing else.
+**Goal →** Create a container that can run your MCP server with proper Python packaging.
 
-Why stderr?  In Phase 2 the MCP server will reserve **stdout** for JSON-RPC traffic, so *all* human-readable logs should already go to the other stream.
+Key principles:
+- **stdout** is reserved for MCP protocol (JSON-RPC)
+- **stderr** is for all logs and debug output
+- Use proper Python packaging with `pyproject.toml`
+- Run as a module for clean imports
 
-### Minimal example
+### Dockerfile Template
 
 ```dockerfile
 FROM python:3.11-slim
 
-WORKDIR /apphello
+# Prevent Python from buffering output (important for logs)
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
-COPY . .
+WORKDIR /app
 
-# Optional: install requirements
-# RUN pip install --no-cache-dir -r requirements.txt
+# Copy package files
+COPY pyproject.toml ./
+COPY src/ ./src/
 
-# ‼️  Send logs to stderr (stdout remains untouched for MCP)
-CMD [
-  "python",
-  "-c",
-  "import sys, time; print('hello from the container', file=sys.stderr); time.sleep(1)"
-]
+# Install in editable mode for development flexibility
+RUN pip install --no-cache-dir -e .
+
+# Run as a module to ensure proper package imports
+CMD ["python", "-m", "my_module.server"]
 ```
 
-Build & run:
+### Build & Test
 
 ```bash
 docker build -t my-environment .
-docker run --rm -it my-environment     # look for the log line on stderr
+
+# Test Phase 1: Container should start without errors
+docker run --rm -i my-environment
 ```
 
 ### Recommended Environment Structure
@@ -81,33 +140,43 @@ For Python-based MCP environments, use this standard structure:
 ```
 my-environment/
 ├── Dockerfile
-├── pyproject.toml
-├── README.md
+├── pyproject.toml          # Package definition with dependencies
+├── README.md               # Environment documentation
 └── src/
-    └── my_module/           # Your Python package
+    └── my_module/          # Your Python package
         ├── __init__.py
-        ├── server.py        # MCP server (Phase 2)
-        ├── setup/           # Setup functions (Phase 3)
-        ├── evaluators/      # Evaluation logic (Phase 3)
-        └── problems/        # Problem definitions (Phase 3)
+        ├── server.py       # MCP server entry point
+        ├── context.py      # Core stateful environment logic (optional)
+        ├── tools/          # Interactive tools (move, click, type, etc.)
+        │   ├── __init__.py
+        │   └── move.py     # Example: custom tool inheriting from BaseTool
+        ├── setup/          # Setup functions (modular approach)
+        │   ├── __init__.py # Creates SetupTool instance & exports decorator
+        │   ├── basic.py    # Basic setup functions
+        │   └── advanced.py # Advanced setup functions
+        └── evaluate/       # Evaluator functions (modular approach)
+            ├── __init__.py # Creates EvaluateTool instance & exports decorator
+            ├── checks.py   # Basic evaluation checks
+            └── metrics.py  # Advanced metrics evaluators
 ```
 
 This structure enables:
-- Clean separation of concerns
+- Clean separation of concerns (environment logic, tools, setup, evaluation)
 - Easy volume mounting for development (Phase 5)
 - Standard Python packaging with `pip install -e .`
+- Modular organization - each setup/evaluator in its own file for clarity
 
 • **One Dockerfile only** – no docker-compose.  
 • If you're building a GUI environment, start from `hudpython/novnc-base:latest` instead and leave VNC configuration for later phases.
 
 Checkpoint reached?  Congratulations – move on.
 
-👉 Quick sanity check: `python environments/docker_debug.py my-environment:latest` (verifies Phase 1 automatically)
+👉 Quick sanity check: `hud debug my-environment` (verifies Phase 1 automatically)
 
-Need inspiration?  Skim the real Dockerfiles used in the example browser environments:
-• [`browser/Dockerfile`](./browser/Dockerfile)
-• [`remote_browser/Dockerfile`](./remote_browser/Dockerfile)
-They follow the exact same pattern – a single file, logs to stderr, nothing fancy.
+Need inspiration? Check out our reference implementations:
+• [`text_2048/Dockerfile`](./text_2048/Dockerfile) - Minimal Python setup, perfect for simple environments
+• [`remote_browser/Dockerfile`](./remote_browser/Dockerfile) - Uses pre-built base image with browser dependencies
+• [`browser/Dockerfile`](./browser/Dockerfile) - Multi-stage build with full GUI support
 
 ---
 
@@ -125,7 +194,7 @@ The MCP lifecycle is *initialize → operate → shutdown* (see spec link above)
 ```python
 import sys
 import logging
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 # 1️⃣  Always log to stderr – stdout is reserved for JSON-RPC
 logging.basicConfig(
@@ -163,9 +232,9 @@ WORKDIR /app
 COPY . .
 
 # Optional: install requirements
-# RUN pip install --no-cache-dir -r requirements.txt
+# RUN pip install -r requirements.txt
 
-CMD ["uv", "pip", "run", "python", "-m", "your_module_name"]  # Replace 'your_module_name' with your actual entrypoint module
+CMD ["python", "-m", "your_module_name"]  # Replace 'your_module_name' with your actual entrypoint module
 ```
 
 ### Three validation steps (run them **in order**)
@@ -175,7 +244,7 @@ CMD ["uv", "pip", "run", "python", "-m", "your_module_name"]  # Replace 'your_mo
 | 1 | **Direct stdio test** – pipe the JSON below into your script | Proves the Python code handles `initialize` without any client or Docker noise |
 | 2 | **MCP Inspector** – `npx @modelcontextprotocol/inspector python -m my_package.server` | Lets you click around: view capabilities, tools, resources |
 | 3 | **Inside Docker** – rebuild the image and run it | This is *exactly* how HUD will execute the server |
-| 4 | **Run `docker_debug.py`** – `python environments/docker_debug.py my-environment:latest` | Combines the above checks & points out common mistakes |
+| 4 | **Run `hud debug`** – `hud debug my-environment` | Combines the above checks & points out common mistakes |
 
 #### JSON for step 1
 
@@ -201,16 +270,28 @@ If all three validations succeed, you have a real MCP server – time to make it
 
 **Goal →** tools are discoverable in the Inspector *and* callable from the HUD SDK.
 
-👉 After wiring in the tools, confirm with `python environments/docker_debug.py my-environment:latest` – it now checks for their presence and basic execution.
+👉 After wiring in the tools, confirm with `hud debug my-environment --max-phase 3` – it now checks for their presence and basic execution.
+
+🔍 Once debug passes phase 3, you can analyze the environment:
+```bash
+hud analyze my-environment  # Interactive view of tools and resources
+hud analyze my-environment --format json  # JSON output for scripts
+hud analyze my-environment --format markdown  # Generate documentation
+```
 
 1. Write **`setup`** and **`evaluate`** tools first – they are *lifecycle* tools and never shown to the LLM.
 2. Register at least one **interaction** tool (`computer`, `playwright`, or your own).
 
-### Example
+### Approach 1: Simple Direct Implementation
+
+For simple environments with just a few setup/evaluate functions, you can use direct tool decorators:
 
 ```python
-from hud.tools.helper import register_instance_tool
+from fastmcp import FastMCP
+from hud.tools.helper import mcp_intialize_wrapper
 from hud.tools import HudComputerTool
+
+mcp = FastMCP("my-environment")
 
 @mcp.tool()
 async def setup(config: dict) -> dict:
@@ -220,9 +301,167 @@ async def setup(config: dict) -> dict:
 async def evaluate(config: dict) -> dict:
     ...               # return {"reward": <0-1>, "done": bool}
 
-@mcp.initialize()
-async def init():
-    register_instance_tool(mcp, "computer", HudComputerTool())
+@mcp_intialize_wrapper()
+async def initialize_environment():
+    custom_tool = HudComputerTool()
+    mcp.add_tool(custom_tool.mcp)
+    
+    # Any other initialization
+```
+
+### Approach 2: Hub Pattern (Recommended for Complex Environments)
+
+The BaseHub pattern provides a clean way to organize multiple setup/evaluate functions with automatic discovery and registration. **A BaseHub is fundamentally another MCP server (it's a subclass of FastMCP)** that you mount to your main server, providing namespace separation and modular organization. All hub functions are exposed through one tool named after the hub, and a resource that can list all of its tools.
+
+When mounted, the hub's tools are accessible through a single tool that dispatches to the appropriate function:
+```json
+{
+  "name": "setup",
+  "arguments": {
+    "name": "reset",  // Which function in the hub to call
+    "arguments": {"param": "value"}  // Additional parameters
+  }
+}
+```
+
+```python
+# In setup/__init__.py
+from hud.tools.base import BaseHub
+
+# Create the setup hub (a sub-server)
+setup = BaseHub("setup")
+
+# Import all setup modules to register their tools
+from . import basic, advanced  # This registers all @setup.tool() decorated functions
+
+# In setup/basic.py
+from . import setup
+from hud.tools.types import SetupResult
+
+@setup.tool()
+async def reset(**kwargs):
+    """Reset the environment to its initial state.
+    
+    Args:
+        **kwargs: Additional parameters
+    
+    Returns:
+        SetupResult
+    """
+    # Access environment from the hub
+    env = setup.env
+    await env.reset_state()
+    return SetupResult(
+        content="Environment reset to initial state",
+        info={"status": "success"}
+    )
+
+@setup.tool()
+async def seed_data(num_items: int = 5):
+    """Seed the environment with test data.
+    
+    Args:
+        num_items: Number of items to create
+    
+    Returns:
+        SetupResult
+    """
+    # Access environment from the hub
+    env = setup.env
+    items = await env.create_items(num_items)
+    return SetupResult(
+        content=f"Created {len(items)} items",
+        info={"items_created": len(items)}
+    )
+
+# In evaluate/__init__.py
+from hud.tools.base import BaseHub
+
+# Create the evaluate hub (another sub-server)
+evaluate = BaseHub("evaluate")
+
+# Import all evaluator modules
+from . import checks, metrics
+
+# In evaluate/checks.py
+from . import evaluate
+from hud.tools.types import EvaluationResult
+
+@evaluate.tool()
+async def task_complete(expected_count: int):
+    """Check if the expected number of tasks are completed.
+    
+    Args:
+        expected_count: Expected number of completed tasks
+    
+    Returns:
+        EvaluationResult
+    """
+    # Access environment from the hub
+    env = evaluate.env
+    completed = await env.count_completed()
+    return EvaluationResult(
+        reward=min(completed / expected_count, 1.0),
+        done=completed >= expected_count,
+        content=f"Completed {completed}/{expected_count} tasks",
+        info={"completed": completed, "expected": expected_count}
+    )
+
+# In server.py
+from .setup import setup as setup_hub
+from .evaluate import evaluate as evaluate_hub
+from hud.tools.helper import mcp_intialize_wrapper
+
+# Create MCP server
+mcp = FastMCP(name="my-environment")
+
+@mcp_intialize_wrapper()
+async def initialize_environment(session=None, progress_token=None):
+    """Initialize the environment with progress notifications."""
+    # Send progress updates if available
+    async def send_progress(progress: int, message: str):
+        if progress_token and session:
+            await session.send_progress_notification(
+                progress_token=progress_token,
+                progress=progress,
+                total=100,
+                message=message,
+            )
+    
+    await send_progress(10, "Starting environment initialization...")
+    
+    # Initialize your environment state/context
+    env = await create_environment_context()
+    await send_progress(50, "Environment created...")
+    
+    # Set environment on hubs
+    setup_hub.env = env
+    evaluate_hub.env = env
+    
+    # Mount hubs to MCP server
+    mcp.mount(setup_hub)
+    mcp.mount(evaluate_hub)
+    await send_progress(80, "Tools registered...")
+    
+    # Register any custom interaction tools
+    if hasattr(env, 'custom_tool'):
+        mcp.add_tool(env.custom_tool.mcp)
+    
+    await send_progress(100, "Environment ready!")
+```
+
+The BaseHub pattern provides:
+- **Namespace isolation**: Tools are grouped under the hub's name (e.g., "setup", "evaluate")
+- **Modular organization**: Each hub can be developed and tested independently
+- **Type safety**: Full type hints preserved for parameters and returns
+
+When you call a hub's tool, you specify which function to execute:
+```python
+# Calling the "reset" function in the setup hub
+await client.call_tool("setup", {"name": "reset"})
+
+# Calling the "task_complete" function in the evaluate hub  
+await client.call_tool("evaluate", {"name": "task_complete", "expected_count": 5})
 ```
 
 ### Test workflow
@@ -233,44 +472,44 @@ async def init():
 
 ```python
 import asyncio
-from hud import Task
-from hud.mcp import ClaudeMCPAgent
-from hud.telemetry import trace
-from mcp_use import MCPClient
+import hud
+from hud.datasets import TaskConfig
+from hud.agents import ClaudeAgent
+from hud.client import MCPClient
 
 async def main():
     # `trace` captures *everything* that happens and sends it to app.hud.so
-    with trace("local_test"):
-        cfg = {
-            "mcp_config": {
-                "local": {"command": "docker", "args": ["run", "--rm", "-i", "my-environment:latest"]}
-            }
-        }
-        client = MCPClient.from_dict(cfg)
-
-        agent = ClaudeMCPAgent(
-            client=client,
-            model="claude-3-sonnet-20241022",
-            allowed_tools=["computer"]
+    with hud.trace("local_test"):
+        task = TaskConfig(
+            prompt="Complete the task",
+            mcp_config={
+                "local": {
+                    "command": "docker", 
+                    "args": ["run", "--rm", "-i", "my-environment:latest"]
+                }
+            },
+            setup_tool={"name": "setup", "arguments": {"name": "todo_seed", "num_items": 5}},
+            evaluate_tool={"name": "evaluate", "arguments": {"name": "todo_completed", "expected_count": 2}}
         )
+        client = MCPClient(mcp_config=task.mcp_config)
 
-        task = Task(
-            prompt="Mark two todo items as done",
-            setup={"function": "todo_seed", "args": {"num_items": 5}},
-            evaluate={"function": "todo_completed", "args": {"expected_count": 2}}
+        agent = ClaudeAgent(
+            mcp_client=client,
+            model="claude-3-7-sonnet-20250219",
+            allowed_tools=["computer"]  # or ["move"] for text_2048
         )
 
         result = await agent.run(task)
         print(result)
 
-    await client.close_all_sessions()
+    await client.close()
 
 asyncio.run(main())
 ```
 
 The `trace` context manager sends a full timeline of agent actions, tool calls, and rewards to app.hud.so – perfect for debugging.
 
-See `examples/agents_tools/simple_task_example.py` and `examples/environments/gmail_local.py` for larger end-to-end demos.
+See `examples/01_hello_2048.py` and `examples/task_with_setup_eval.py` for larger end-to-end demos.
 
 ---
 
@@ -291,24 +530,24 @@ docker push yourdockerhubuser/my-environment:latest
 
 ### 2. Launch it remotely (gmail_remote pattern)
 
-`examples/environments/gmail_remote.py` shows the canonical pattern – a remote MCP server entry that simply runs **the same Docker image**:
+Here's how to configure a remote MCP server that runs **the same Docker image**:
 
 ```python
 from hud import settings
+from hud.client import MCPClient
+
 # Your image is in a registry, now tell HUD to pull & run it on demand
 config = {
-    "mcp_config": {
-        "hud": {
-            "url": settings.mcp_url,  # Provided by HUD when you create an evaluation run
-            "headers": {
-                "Authorization": f"Bearer {settings.api_key}",
-                "Mcp-Image": "yourdockerhubuser/my-environment:latest",  # which image to launch
-            },
-        }
+    "hud": {
+        "url": settings.hud_mcp_url,
+        "headers": {
+            "Authorization": f"Bearer {settings.api_key}",
+            "Mcp-Image": "yourdockerhubuser/my-environment:latest",  # which image to launch
+        },
     }
 }
 
-client = MCPClient.from_dict(config)
+client = MCPClient(mcp_config=config)
 ```
 
 _Steps 3 and 4 below are **optional but highly recommended** once the image boots successfully._
@@ -326,10 +565,15 @@ from hud.tools.helper import mcp_intialize_wrapper
 async def initialize_environment(session=None, progress_token=None):
     async def send(p, msg):
         if session and progress_token:
-            await session.send_progress_notification(progress_token, p, 100, msg)
-    await send(10, "starting X11…")
+            await session.send_progress_notification(
+                progress_token=progress_token,
+                progress=p,
+                total=100,
+                message=msg
+            )
+    await send(10, "Starting X11...")
     await start_x11()
-    await send(50, "launching browser…")
+    await send(50, "Launching browser...")
     await launch_browser()
     await send(100, "ready")
 ```
@@ -346,46 +590,31 @@ Once all of the above works you can unleash *hundreds* of concurrent agents on y
 
 ## Phase 5 – Takeoff: Automatic environment improvement with Cursor Agent
 
-To enable rapid development without constant Docker rebuilds, use the unified Dockerfile's development mode. This allows you to edit code locally and see changes immediately in the running MCP server, and use Cursor Agent to automate iteration.
+To enable rapid development without Docker rebuilds, we can mount the dockerfile and expose the live MCP server to Cursor Agent or any other MCP client. We can combine this approach with a package like [reloaderoo](https://github.com/cameroncooke/reloaderoo) that is a proxy to allow dynamic reloading of the MCP connection, so the entire agent loop can happen asynchronously.
 
 ### Setting up Development Mode
 
-#### 1. Update Your Dockerfile
+#### 1. Build for Development
 
-First, modify your Dockerfile to support a `DEV_MODE` build argument to simplify transitioning between dev and build:
+Your Dockerfile needs to copy source for the build, even though we'll mount over it:
 
 ```dockerfile
-# Add this at the top of your Dockerfile
-ARG DEV_MODE=false
-
-# ... your existing setup ...
-
-# Conditionally handle source for dev mode -- this should reflect your environment structure
-RUN if [ "$DEV_MODE" = "true" ]; then \
-        mkdir -p /app/src/your_module && \
-        echo "# Stub for editable install" > /app/src/your_module/__init__.py; \
-    fi
-
-# Copy source (will be overridden by volume mount in dev mode but necessary for the build in the Phase 1 recommended setup)
+# Copy source files
 COPY src/ ./src/
 
-# Install in editable mode still works!
+# Install in editable mode for development
 RUN pip install -e .
-
-# ... your existing setup ...
 ```
-
-The key insight: In dev mode, we create stub files so the package can be installed, but the actual source will come from the volume mount.
 
 #### 2. Build the Development Image
 
 ```bash
-docker build --build-arg DEV_MODE=true -t my-environment:dev .
+docker build -t my-environment:dev .
 ```
 
-#### 3. Configure Cursor Agent for development
+#### 3. Configure Cursor Agent for development with hot-reload
 
-Add a development configuration to `.cursor/mcp.json` that includes the volume mount:
+Add a development configuration to `.cursor/mcp.json` using [reloaderoo](https://github.com/cameroncooke/reloaderoo):
 
 ```jsonc
 {
@@ -397,9 +626,10 @@ Add a development configuration to `.cursor/mcp.json` that includes the volume m
     },
     // This is how you make the dev mode config:
     "my-environment-dev": {
-      "command": "docker",
+      "command": "npx",
       "args": [
-        "run", "--rm", "-i",
+        "reloaderoo", "--",  // Wraps docker for hot-reload
+        "docker", "run", "-i", "--rm",
         "-v", "%cd%/src:/app/src:rw",  // Windows
         // "-v", "$(pwd)/src:/app/src:rw",  // Linux/Mac
         "-e", "PYTHONPATH=/app/src",  // Required for module imports in the Phase 1 like setup
@@ -411,8 +641,34 @@ Add a development configuration to `.cursor/mcp.json` that includes the volume m
 }
 ```
 
+Now you can edit code and call `restart_server` to reload without restarting the client.
+
 2. Follow the cursor rules below: rebuild, refresh, test, reflect, repeat.
 3. Keep the agent open for any messages or issues.
+
+### 3.5. Debug MCP servers directly from Cursor (Optional)
+
+Add this to your `.cursor/mcp.json`:
+
+```jsonc
+{
+  "mcpServers": {
+    "hud-cli": {
+      "command": "hud",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+You can use the "debug_cursor_config" tool to test another mcp server by name (like the one defined in 3.)
+
+Example usage in Cursor:
+```
+Use the debug_docker_image tool to test if my-environment:dev starts correctly with max_phase=3
+```
+
+This is incredibly useful for rapid debugging without leaving your IDE!
 
 ### 4. Cursor rules – paste this once
 
@@ -433,8 +689,7 @@ Iteration
 2. Based on the objectives, test and verify the functionality of different tools and parts of the environment. If any tool call responds with an error, note it down. If any interaction with the environment is wrong, unexpected, incomplete, or parts of the environment are not developed fully, note it down. If any new problem sets up wrong or evaluation does not match the expected outcome, note it down. All of these inconsistencies you should note down in your TODOs.
 3. Then, based on the TODOs, view the source folder and find the places where those errors would occur. Think about the system and how to fix it. Then fix it.
 4. After you've fixed your TODO items, go back to step 2 and test them. Test through all of your available tools, and use feedback (such as screenshots) to determine your progress. If they now work as expected, mark them as complete. If not, continue the loop from step 2. Be extremely careful, scrupolous and attentive to all details. Never assume something is working unless you've tested it fully for all of its edge cases.
-5. The only time you can exit this iteration loop is if you're adding a *new* tool, a new import package to the environment, need additional environment variables, or if there is no feasible way to create input conditions to test something. In this case, ask the user for help and recap your progress. If you're simply changing tools, changing code, and still have more realistic TODOs, the environment will refresh automatically and you should continue working. In *all* other cases, you must continue this iteration loop until you can come up with no more TODOs. You must not halt.
-```
+5. The only time you can exit this iteration loop is if you're adding if there is no feasible way to create input conditions to test something. In this case, ask the user for help and recap your progress. If you're simply changing tools, changing code, and still have more realistic TODOs, the restart_server tool automatically refreshes the environment and you should continue working. In *all* other cases, you must continue this iteration loop until you can come up with no more TODOs. You must not halt.```
 
 ### 5. Prompt the agent
 
@@ -490,6 +745,127 @@ Decorators keep registration *next to the implementation* and avoid manual bookk
 
 ---
 
+## Contributing to Existing Environments
+
+When improving existing environments, follow these guidelines:
+
+### 1. Understanding the Environment
+
+Before making changes:
+- Read the environment's README and any documentation
+- Run `hud debug <image>` to test the environment
+- Run `hud analyze <image>` (after debug passes phase 3) to explore capabilities
+- Explore the folder structure and identify key components
+- Test existing setup/evaluate functions to understand behavior
+
+### 2. Making Improvements
+
+**Adding New Setup Functions**
+```python
+# In setup/my_new_setup.py
+from . import setup
+from hud.tools import BaseSetup, SetupResult
+
+@setup("my_new_setup", description="Clear description of what this does")
+class MyNewSetup(BaseSetup):
+    async def __call__(self, context, param1: str, param2: int = 10) -> SetupResult:
+        # Implementation
+        return {"status": "success", "details": "..."}
+```
+
+**Adding New Evaluators**
+```python
+# In evaluate/my_evaluator.py
+from . import evaluator
+from hud.tools import BaseEvaluator, EvaluationResult
+
+@evaluator("my_check", description="What this evaluates")
+class MyCheckEvaluator(BaseEvaluator):
+    async def __call__(self, context, threshold: float) -> EvaluationResult:
+        score = await context.calculate_score()
+        return {
+            "reward": min(score / 100, 1.0),
+            "done": score >= threshold,
+            "info": {"score": score, "threshold": threshold}
+        }
+```
+
+### 3. Testing Your Changes
+
+**Use the Development Configuration**
+```jsonc
+// In .cursor/mcp.json
+{
+  "mcpServers": {
+    "my-env-dev": {
+      "command": "npx",
+      "args": [
+        "reloaderoo", "--",
+        "docker", "run", "-i", "--rm",
+        "-v", "$(pwd)/src:/app/src:rw",
+        "my-environment:dev"
+      ]
+    }
+  }
+}
+```
+
+## Testing Your Environment
+
+Once your environment is working, create comprehensive tests to ensure it stays that way:
+
+### Creating Test Files
+
+Each environment should have a test file following this pattern:
+- `environments/<env_name>/test_<env_name>_mcp.py`
+
+The test file should include:
+1. **Docker Build Test**: Ensure the image builds successfully
+2. **MCP Initialization Tests**: Verify phases 1-3 using `hud debug`
+3. **Tool-Specific Tests**: Test your environment's unique tools
+4. **Integration Tests**: Test complete workflows
+
+Example test structure:
+```python
+class TestMyEnvironment:
+    IMAGE_NAME = "my-environment-test:latest"
+    
+    @classmethod
+    def setup_class(cls):
+        """Build Docker image before tests"""
+        # Build the image
+    
+    def test_phase1_basic_startup(self):
+        """Test container starts"""
+    
+    @pytest.mark.asyncio
+    async def test_phase2_3_mcp_initialize_and_tools(self):
+        """Test MCP init and tool discovery"""
+    
+    @pytest.mark.asyncio
+    async def test_environment_specific_tools(self):
+        """Test your custom tools"""
+```
+
+### Running Tests
+
+You can run tests directly with pytest:
+
+```bash
+# Run all tests for an environment
+cd environments/text_2048
+pytest test_text_2048_mcp.py -v
+```
+
+### Test Dependencies
+
+Add pytest to your environment's `pyproject.toml`:
+
+```toml
+[project.optional-dependencies]
+test = ["pytest>=7.0", "pytest-asyncio>=0.20"]
+```
+
 ## Summary
 
 1. Start with a *plain* Dockerfile – verify it runs.  
@@ -497,6 +873,7 @@ Decorators keep registration *next to the implementation* and avoid manual bookk
 3. Implement tools – verify discovery + execution.  
 4. Run the same image remotely – verify telemetry.  
 5. Automate the loop with cursor-mcp.  
-6. Polish and extend as inspiration strikes.
+6. **Write comprehensive tests** – ensure reliability.
+7. Polish and extend as inspiration strikes.
 
 Happy building – and remember: **stderr is your friend, stdout belongs to MCP.** 🚀

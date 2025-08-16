@@ -1,61 +1,43 @@
 """Setup function to load custom HTML content."""
 
 import logging
-from typing import Dict, Any
-from .registry import setup
-from ..evaluators.context import RemoteBrowserContext
+from fastmcp import Context
+from hud.tools.types import SetupResult
+from . import setup
 
 logger = logging.getLogger(__name__)
 
 
-@setup("load_html_content")
-class LoadHtmlContentSetup:
-    """Setup function to load custom HTML content directly into the browser."""
+@setup.tool("load_html_content")
+async def load_html_content(ctx: Context, html: str):
+    """Load custom HTML content directly into the browser.
 
-    name = "load_html_content"
+    Args:
+        html: HTML content to load
 
-    def __init__(self, context):
-        self.context = context
+    Returns:
+        Setup result with status
+    """
+    logger.info("Loading custom HTML content into browser")
 
-    async def __call__(self, html: str) -> Dict[str, Any]:
-        """
-        Load custom HTML content into the browser.
+    # Get the playwright tool from the environment
+    playwright_tool = setup.env
+    if not playwright_tool or not hasattr(playwright_tool, "page") or not playwright_tool.page:
+        logger.error("No browser page available")
+        return SetupResult(content="No browser page available", isError=True)
 
-        Args:
-            html: HTML content to load
+    try:
+        # Create a data URL with the HTML content
+        data_url = f"data:text/html,{html}"
 
-        Returns:
-            Status dictionary
-        """
-        logger.info("Starting load_html_content setup")
+        # Navigate to the data URL
+        await playwright_tool.page.goto(data_url)
+        logger.info("Successfully loaded custom HTML content")
 
-        if not html:
-            logger.error("No HTML content provided")
-            return {"status": "error", "message": "No HTML content provided for load_html_content"}
-
-        # Get page from context
-        page = self.context.page
-        if not page:
-            logger.error("No page available in context")
-            return {"status": "error", "message": "No browser page available"}
-
-        try:
-            logger.info("Setting custom HTML content")
-
-            # Set the page content directly
-            await page.set_content(html, wait_until="domcontentloaded", timeout=10000)
-
-            # Wait a short time for rendering and scripts to initialize
-            await page.wait_for_timeout(1000)
-
-            logger.info("HTML content loaded successfully")
-
-            return {
-                "status": "success",
-                "message": "HTML content loaded",
-                "content_length": len(html),
-            }
-
-        except Exception as e:
-            logger.error(f"Error loading HTML content: {str(e)}")
-            return {"status": "error", "message": f"Failed to load HTML content: {str(e)}"}
+        return SetupResult(
+            content="Custom HTML content loaded",
+            info={"html_length": len(html), "current_url": playwright_tool.page.url},
+        )
+    except Exception as e:
+        logger.error(f"Failed to load HTML content: {e}")
+        return SetupResult(content=f"Failed to load HTML content: {str(e)}", isError=True)

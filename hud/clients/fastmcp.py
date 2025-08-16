@@ -1,0 +1,185 @@
+"""FastMCP-based client implementation."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+from contextlib import AsyncExitStack
+from typing import TYPE_CHECKING, Any
+
+from fastmcp import Client as FastMCPClient
+from mcp import types
+from mcp.shared.exceptions import McpError
+
+from hud.types import MCPToolResult
+
+from .base import BaseHUDClient
+from .utils.retry_transport import create_retry_httpx_client
+
+if TYPE_CHECKING:
+    from pydantic import AnyUrl
+
+logger = logging.getLogger(__name__)
+
+
+class FastMCPHUDClient(BaseHUDClient):
+    """FastMCP-based implementation of HUD MCP client."""
+
+    def __init__(self, mcp_config: dict[str, dict[str, Any]], **kwargs: Any) -> None:
+        """
+        Initialize FastMCP client with retry support for HTTP transports.
+
+        Args:
+            mcp_config: MCP server configuration dict
+            **kwargs: Additional arguments passed to base class
+        """
+        super().__init__(mcp_config, **kwargs)
+
+        # Import here to avoid circular imports
+        from mcp.types import Implementation
+
+        # Create custom transport with retry support for HTTP servers
+        transport = self._create_transport_with_retry(mcp_config)
+
+        # Create FastMCP client with the custom transport
+        client_info = Implementation(name="hud-python", version="3.0.3")
+
+        timeout = 5 * 60  # 5 minutes
+        os.environ["FASTMCP_CLIENT_INIT_TIMEOUT"] = str(timeout)
+
+        self._client = FastMCPClient(transport, client_info=client_info, timeout=timeout)
+        self._stack: AsyncExitStack | None = None
+
+    def _create_transport_with_retry(self, mcp_config: dict[str, dict[str, Any]]) -> Any:
+        """Create transport with retry support for HTTP-based servers."""
+        from fastmcp.client.transports import StreamableHttpTransport
+
+        # If single server with HTTP URL, create transport directly with retry
+        if len(mcp_config) == 1:
+            _, server_config = next(iter(mcp_config.items()))
+            url = server_config.get("url", "")
+
+            if url.startswith("http") and not url.endswith("/sse"):
+                headers = server_config.get("headers", {})
+
+                logger.info("Enabling retry mechanism for HTTP transport to %s", url)
+                return StreamableHttpTransport(
+                    url=url,
+                    headers=headers,
+                    httpx_client_factory=create_retry_httpx_client,
+                )
+
+        # For all other cases, use standard config (no retry)
+        return {"mcpServers": mcp_config}
+
+    async def _connect(self) -> None:
+        """Enter FastMCP context to establish connection."""
+        if self._stack is None:
+            self._stack = AsyncExitStack()
+            await self._stack.enter_async_context(self._client)
+
+            # Configure validation for output schemas based on client setting
+            from mcp.client.session import ValidationOptions
+
+            if (
+                hasattr(self._client, "_session_state")
+                and self._client._session_state.session is not None
+            ):
+                self._client._session_state.session._validation_options = ValidationOptions(
+                    strict_output_validation=self.strict_validation
+                )
+
+            logger.info("FastMCP client connected")
+
+    async def list_tools(self) -> list[types.Tool]:
+        """List all available tools."""
+        return await self._client.list_tools()
+
+    async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> MCPToolResult:
+        """Execute a tool by name."""
+        # FastMCP returns a different result type, convert it
+        result = await self._client.call_tool(
+            name=name,
+            arguments=arguments or {},
+            raise_on_error=False,  # Don't raise, return error in result
+        )
+
+        # Convert FastMCP result to MCPToolResult
+        return MCPToolResult(
+            content=result.content,
+            isError=result.is_error,
+            structuredContent=result.structured_content,
+        )
+
+    async def list_resources(self) -> list[types.Resource]:
+        """List all available resources."""
+        return await self._client.list_resources()
+
+    async def _read_resource_internal(self, uri: str | AnyUrl) -> types.ReadResourceResult | None:
+        """Read a resource by URI."""
+        try:
+            contents = await self._client.read_resource(uri)
+            return types.ReadResourceResult(contents=contents)
+        except McpError as e:
+            if "telemetry://" in str(uri):
+                logger.debug("Telemetry resource not supported by server: %s", e)
+            elif self.verbose:
+                logger.debug("MCP resource error for '%s': %s", uri, e)
+            return None
+        except Exception as e:
+            if "telemetry://" in str(uri):
+                logger.debug("Failed to fetch telemetry: %s", e)
+            else:
+                logger.warning("Unexpected error reading resource '%s': %s", uri, e)
+            return None
+
+    async def close(self) -> None:
+        """Close the client connection, ensuring the underlying transport is terminated."""
+        # First close any active async context stack (this triggers client.__aexit__()).
+        if self._stack:
+            await self._stack.aclose()
+            self._stack = None
+
+        try:
+            # Close the FastMCP client - this calls transport.close()
+            await self._client.close()
+
+            # CRITICAL: Cancel any lingering transport tasks to ensure subprocess termination
+            # FastMCP's StdioTransport creates asyncio tasks that can outlive the client
+            # We need to handle nested transport structures (MCPConfigTransport -> StdioTransport)
+            transport = getattr(self._client, "transport", None)
+            if transport:
+                # If it's an MCPConfigTransport with a nested transport
+                if hasattr(transport, "transport"):
+                    transport = transport.transport
+
+                # Now check if it's a StdioTransport with a _connect_task
+                if (
+                    hasattr(transport, "_connect_task")
+                    and transport._connect_task
+                    and not transport._connect_task.done()
+                ):
+                    logger.debug("Canceling lingering StdioTransport connect task")
+                    transport._connect_task.cancel()
+                    try:
+                        await transport._connect_task
+                    except asyncio.CancelledError:
+                        logger.debug("Transport task cancelled successfully")
+                    except Exception as e:
+                        logger.debug("Error canceling transport task: %s", e)
+
+        except Exception as e:
+            logger.debug("Error while closing FastMCP client transport: %s", e)
+
+        self._initialized = False
+        logger.debug("FastMCP client closed")
+
+    async def __aenter__(self: Any) -> Any:
+        """Async context manager entry."""
+        await self.initialize()
+        return self
+
+    async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        """Async context manager exit."""
+        await self.close()

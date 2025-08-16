@@ -33,3 +33,14 @@ TODO.md
 /ref/
 
 .cursor/
+
+/dev/
+
+.claude
+CLAUDE.md
+
+*.csv
+
+# RL
+wandb/
+outputs/

@@ -1,15 +1,16 @@
-"""Setup functions for remote browser environment."""
+"""Setup layer for remote browser environment.
 
-from .registry import SetupRegistry, setup
+This module exposes:
+- ``setup``, the BaseHub instance for setup operations
+"""
 
-# Import setup functions to trigger registration
-from .navigate import NavigateSetup
-from .cookies import SetCookiesSetup, ClearCookiesSetup
-from .interact import ClickElementSetup, TypeTextSetup, WaitForElementSetup
-from .sheets import SheetsFromXlsxSetup, SheetsFromBytesSetup
-from .load_html import LoadHtmlContentSetup
+from __future__ import annotations
 
-__all__ = [
-    "SetupRegistry",
-    "setup",
-]
+from hud.tools.base import BaseHub
+
+setup = BaseHub("setup")
+
+# Import all setup functions to register them
+from . import navigate, cookies, load_html, interact, sheets
+
+__all__ = ["setup"]
