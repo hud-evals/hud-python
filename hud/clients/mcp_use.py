@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 
 from mcp import Implementation
 from mcp.shared.exceptions import McpError
-from mcp_use.client import MCPClient as MCPUseClient
 from pydantic import AnyUrl
 
 from hud.types import MCPToolCall, MCPToolResult
@@ -17,7 +16,15 @@ from .base import BaseHUDClient
 
 if TYPE_CHECKING:
     from mcp import types
+    from mcp_use.client import MCPClient as MCPUseClient
     from mcp_use.session import MCPSession as MCPUseSession
+
+try:
+    from mcp_use.client import MCPClient as MCPUseClient
+    from mcp_use.session import MCPSession as MCPUseSession
+except ImportError:
+    MCPUseClient = None  # type: ignore[misc, assignment]
+    MCPUseSession = None  # type: ignore[misc, assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +46,15 @@ class MCPUseHUDClient(BaseHUDClient):
         """
         super().__init__(mcp_config=mcp_config, **kwargs)
 
-        self._sessions: dict[str, MCPUseSession] = {}
+        if MCPUseClient is None or MCPUseSession is None:
+            raise ImportError(
+                "MCP-use dependencies are not available. "
+                "Please install the optional agent dependencies: pip install 'hud-python[agent]'"
+            )
+
+        self._sessions: dict[str, Any] = {}  # Will be MCPUseSession when available
         self._tool_map: dict[str, tuple[str, types.Tool]] = {}
-        self._client: MCPUseClient | None = None
+        self._client: Any | None = None  # Will be MCPUseClient when available
 
     async def _connect(self, mcp_config: dict[str, dict[str, Any]]) -> None:
         """Create all sessions for MCP-use client."""
@@ -50,23 +63,30 @@ class MCPUseHUDClient(BaseHUDClient):
             return
 
         config = {"mcpServers": mcp_config}
+        if MCPUseClient is None:
+            raise ImportError("MCPUseClient is not available")
         self._client = MCPUseClient.from_dict(config)
         try:
+            assert self._client is not None  # For type checker
             self._sessions = await self._client.create_all_sessions()
             logger.info("Created %d MCP sessions", len(self._sessions))
 
             # Configure validation for all sessions based on client setting
-            from mcp.client.session import ValidationOptions
+            try:
+                from mcp.client.session import ValidationOptions  # type: ignore[import-not-found]
 
-            for session in self._sessions.values():
-                if (
-                    hasattr(session, "connector")
-                    and hasattr(session.connector, "client_session")
-                    and session.connector.client_session is not None
-                ):
-                    session.connector.client_session._validation_options = ValidationOptions(
-                        strict_output_validation=self._strict_validation
-                    )
+                for session in self._sessions.values():
+                    if (
+                        hasattr(session, "connector")
+                        and hasattr(session.connector, "client_session")
+                        and session.connector.client_session is not None
+                    ):
+                        session.connector.client_session._validation_options = ValidationOptions(
+                            strict_output_validation=self._strict_validation
+                        )
+            except ImportError:
+                # ValidationOptions may not be available in some mcp versions
+                pass
 
             # Log session details in verbose mode
             if self.verbose and self._sessions:
@@ -273,6 +293,6 @@ class MCPUseHUDClient(BaseHUDClient):
         logger.debug("MCP-use client disconnected")
 
     # Legacy compatibility methods (limited; tests should not rely on these)
-    def get_sessions(self) -> dict[str, MCPUseSession]:
+    def get_sessions(self) -> dict[str, Any]:
         """Get active MCP sessions."""
         return self._sessions

@@ -58,7 +58,7 @@ class MoveTool(BaseTool):
 
         # Format response
         board_str = self.env.get_board_ascii()
-        
+
         text = f"Moved {direction.upper()}\n"
         text += f"Score: {self.env.get_score()}\n"
         text += f"{board_str}"

@@ -9,13 +9,18 @@ import mcp.types as types
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.schema import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from mcp_use.adapters.langchain_adapter import LangChainAdapter
 
 import hud
 
 if TYPE_CHECKING:
     from langchain.schema.language_model import BaseLanguageModel
     from langchain_core.tools import BaseTool
+    from mcp_use.adapters.langchain_adapter import LangChainAdapter
+
+try:
+    from mcp_use.adapters.langchain_adapter import LangChainAdapter
+except ImportError:
+    LangChainAdapter = None  # type: ignore[misc, assignment]
 
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
@@ -50,6 +55,12 @@ class LangChainAgent(MCPAgent):
             **kwargs: Additional arguments passed to BaseMCPAgent
         """
         super().__init__(**kwargs)
+
+        if LangChainAdapter is None:
+            raise ImportError(
+                "LangChainAdapter is not available. "
+                "Please install the optional agent dependencies: pip install 'hud-python[agent]'"
+            )
 
         self.llm = llm
         self.adapter = LangChainAdapter(disallowed_tools=self.disallowed_tools)
