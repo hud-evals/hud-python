@@ -123,12 +123,14 @@ async def run_full_dataset(
         agent_class = OperatorAgent
         agent_config: dict[str, Any] = {
             "allowed_tools": allowed_tools or ["openai_computer"],
+            "response_agent": ResponseAgent(),
         }
     else:
         agent_class = ClaudeAgent
         agent_config = {
             "model": model or "claude-sonnet-4-20250514",
             "allowed_tools": allowed_tools or ["anthropic_computer"],
+            "response_agent": ResponseAgent(),
         }
 
     print("🚀 Running evaluation…")

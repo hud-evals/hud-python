@@ -250,7 +250,11 @@ async def run_dataset(
                     agent = agent_class(**(agent_config or {}))
 
                     if auto_respond:
-                        agent.response_agent = ResponseAgent()
+                        agent.response_agent = (
+                            agent_config.get("response_agent")
+                            if agent_config
+                            else ResponseAgent()
+                        )
                     results[index] = await agent.run(task, max_steps=max_steps)
 
         # Execute all tasks
