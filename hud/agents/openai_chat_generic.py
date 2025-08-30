@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import mcp.types as types
 
+from hud import instrument
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 from .base import MCPAgent
@@ -52,6 +53,7 @@ class GenericOpenAIChatAgent(MCPAgent):
         self.model_name = model_name
         self.parallel_tool_calls = parallel_tool_calls
         self.logprobs = logprobs
+        self.conversation_history = []
 
     @staticmethod
     def _oai_to_mcp(tool_call: Any) -> MCPToolCall:  # type: ignore[valid-type]
@@ -64,9 +66,7 @@ class GenericOpenAIChatAgent(MCPAgent):
 
     async def get_system_messages(self) -> list[Any]:
         """Get system messages for OpenAI."""
-        return [
-            {"role": "system", "content": self.system_prompt},
-        ]
+        return [{"role": "system", "content": self.system_prompt}]
 
     async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
         """Format blocks for OpenAI."""
@@ -96,8 +96,14 @@ class GenericOpenAIChatAgent(MCPAgent):
             openai_tools.append(openai_tool)
         return openai_tools
 
+    @instrument(
+        span_type="agent",
+        record_args=False,
+        record_result=True,
+    )
     async def get_response(self, messages: list[Any]) -> AgentResponse:
         """Send chat request to OpenAI and convert the response."""
+        
         # Convert MCP tool schemas to OpenAI format
         mcp_schemas = self.get_tool_schemas()
 
@@ -111,6 +117,19 @@ class GenericOpenAIChatAgent(MCPAgent):
 
         choice = response.choices[0]
         msg = choice.message
+        
+        assistant_msg: dict[str, Any] = {"role": "assistant"}
+        
+        if msg.content:
+            assistant_msg["content"] = msg.content
+        
+        if msg.tool_calls:
+            assistant_msg["tool_calls"] = msg.tool_calls
+        
+        messages.append(assistant_msg)
+
+        # Store the complete conversation history
+        self.conversation_history = messages.copy()
 
         tool_calls = []
         if msg.tool_calls:
@@ -144,11 +163,10 @@ class GenericOpenAIChatAgent(MCPAgent):
                     for c in res.content
                     if hasattr(c, "text")
                 )
-            rendered.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": call.id,
-                    "content": content or "",  # Ensure content is never None
-                }
-            )
+            tool_msg = {
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": content or "",  # Ensure content is never None
+            }
+            rendered.append(tool_msg)
         return rendered
