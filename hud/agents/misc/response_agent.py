@@ -54,7 +54,7 @@ class ResponseAgent:
         """
         try:
             response = await self.client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-5-nano",
                 messages=[
                     {"role": "system", "content": self.system_prompt},
                     {
