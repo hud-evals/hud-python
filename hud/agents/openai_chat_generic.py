@@ -142,7 +142,7 @@ class GenericOpenAIChatAgent(MCPAgent):
         return AgentResponse(
             content=msg.content or "",
             tool_calls=tool_calls,
-            done=choice.finish_reason == "stop",
+            done=choice.finish_reason in ("stop", "length"),
             raw=response,  # Include raw response for access to Choice objects
         )
 
