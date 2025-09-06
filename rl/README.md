@@ -64,6 +64,25 @@ vf-eval hud-vf-gym \
     --rollouts-per-example 3
 ```
 
+You can also load tasks from a local JSON/JSONL file by passing a file path in `taskset`:
+```bash
+vf-eval hud-vf-gym \
+    --model gpt-4.1-mini \
+    --env-args '{"taskset": "./tasks.json", "config_path": "./configs/2048.yaml"}' \
+    --num-examples 2 \
+    --rollouts-per-example 3
+```
+Supported formats are a JSON array of tasks, a dict with a top-level `data` list, or JSON Lines (one JSON object per line). Each task should follow the HUD Task format.
+
+Example using the included browser 2048 files:
+```bash
+vf-eval hud-vf-gym \
+    --model gpt-4.1-mini \
+    --env-args '{"taskset": "./data/browser_2048.json", "config_path": "./configs/browser_2048.yaml"}' \
+    --num-examples 2 \
+    --rollouts-per-example 3
+```
+
 ## Training with GRPO
 
 Verifier's GRPOtrainer is optimized for at least 2 GPUs. You can rent GPUs on marketplaces for [<$1/hr](https://app.primeintellect.ai).
@@ -118,183 +137,35 @@ For any issues related to Verifiers, see [their docs](https://verifiers.readthed
 
 ## Configuration
 
-### Environment Configuration
+HUDGym consumes a simple YAML file. These keys are supported:
 
-HUD VF Gym uses a config-driven architecture where each environment defines its tools, mappings, and behavior through YAML configuration files.
+- job: name and optional metadata (dataset, experiment, dataset_link) for HUD telemetry
+- system_prompt: multiline instructions passed to the agent
+- defaults: max_turns integer
+- rubric: optional weights dict
+- allowed_tools: list of tool names to allow
 
-#### Job Configuration
+Generate a starter template:
+```bash
+hudvf-config-init --output ./configs/template.yaml
+```
 
-HUD VF Gym automatically creates a HUD job for each training/evaluation run to track all rollouts. Configure the job metadata in your YAML file:
-
+Example minimal config:
 ```yaml
 job:
-  name: "2048 Training Run"
+  name: "My Run"
   metadata:
-    dataset: "hud-evals/2048-taskset"
-    experiment: "baseline"
-```
-
-This creates a unique job for each environment instance, and all rollouts during that training/evaluation run will be associated with the same job ID. You can view all traces from a training run grouped together on the [HUD platform](https://app.hud.so).
-
-#### Available Configurations
-
-The configuration files are now included in the hud-python/rl package:
-
-- `./configs/default.yaml` - Browser/computer interaction environment
-- `./configs/2048.yaml` - 2048 game environment
-
-Note: `config_path` is now required when creating environments. There is no default fallback.
-
-#### Configuration Structure
-
-##### System Prompt
-Defines the instructions and available tools presented to the agent:
-
-```yaml
+    dataset: "your-dataset"
 system_prompt: |
-  You are an AI assistant that can interact with [environment description]...
-  
-  You have access to the following tools:
-  - tool_name: Description
-    Usage: <tool>tool_name(args)</tool>
-  ...
-```
-
-##### Thinking Mode
-Controls whether agents should use reasoning tags:
-
-```yaml
-parser:
-  use_thinking: true   # Enable/disable <think> tag parsing (default: true)
-  xml_weight: 0.6      # Weight for XML format validation
-  action_weight: 0.4   # Weight for action syntax validation
-```
-
-When `use_thinking: false`, agents should output only tool calls without thinking tags (useful for production or when reasoning isn't needed).
-
-##### Action Mappings
-The core of the config-driven architecture. Maps agent-facing tools to underlying MCP tools:
-
-```yaml
-action_mappings:
-  # Agent calls screenshot(), maps to computer tool
-  screenshot:
-    _parser:
-      positional: []  # No arguments expected
-    _tool: "computer"  # MCP tool to call
-    action: "screenshot"  # Parameter for computer tool
-  
-  # Agent calls click(x, y), maps to computer tool  
-  click:
-    _parser:
-      positional: ["x", "y"]  # Positional argument names
-    _tool: "computer"
-    action: "click"
-    x:
-      from_arg: "x"  # Map from parsed argument
-    y:
-      from_arg: "y"
-  
-  # Agent calls key("ctrl+a"), maps to computer tool with transform
-  key:
-    _parser:
-      positional: ["key"]
-    _tool: "computer"
-    action: "press"
-    keys:
-      from_arg: "key"
-      transform: "lambda x: x.split('+')"  # Split into key array
-```
-
-Key fields:
-- `_parser.positional`: Defines expected positional arguments
-- `_tool`: Specifies which MCP tool to call (required)
-- `action`: For computer tool, specifies the action parameter
-- `transform`: Lambda string for argument transformation
-- `static`: Static value instead of from argument
-- `from_arg`: Maps from parsed argument name
-
-##### Transforms
-Transforms are defined as lambda strings evaluated in a safe context:
-
-```yaml
-# Simple transforms
-transform: "lambda x: x.upper()"
-transform: "lambda x: int(x * 1000)"
-
-# Context-aware transforms (access other arguments)
-transform: "lambda d, ctx: ctx.get('amount', 3) if d == 'right' else -ctx.get('amount', 3)"
-use_context: true
-```
-
-#### Parser and Rubric Configuration
-
-```yaml
-parser:
-  xml_weight: 0.6    # Weight for XML format validation
-  action_weight: 0.4  # Weight for action syntax validation
-
-rubric:
-  weights:
-    task_completion: 0.8       # Primary task completion
-    tool_execution: 0.1        # Successful tool execution rate
-    format_compliance: 0.1     # XML format and action syntax
-```
-
-## Environment Examples
-
-### Browser/Computer Environment (default.yaml)
-
-Provides tools for interacting with computer interfaces:
-
-```yaml
-# Agent-facing tools (defined in system prompt)
-screenshot()           → MCP: computer(action="screenshot")
-click(100, 200)       → MCP: computer(action="click", x=100, y=200)
-type("hello")         → MCP: computer(action="type", text="hello")
-key("ctrl+a")         → MCP: computer(action="press", keys=["ctrl", "a"])
-scroll("down", 3)     → MCP: computer(action="scroll", scroll_y=3, ...)
-wait(2.5)             → MCP: computer(action="wait", time=2500)
-done()                → Task completion signal
-```
-
-### 2048 Game Environment (2048.yaml)
-
-Provides directional movement tools for the game:
-
-```yaml
-# Agent-facing tools (defined in system prompt)
-left()   → MCP: move(direction="left")
-right()  → MCP: move(direction="right")
-up()     → MCP: move(direction="up")
-down()   → MCP: move(direction="down")
-done()   → Task completion signal
-```
-
-The configuration maps each directional tool to the same underlying `move` MCP tool:
-
-```yaml
-action_mappings:
-  left:
-    _parser:
-      positional: []  # No arguments
-    _tool: "move"     # MCP tool
-    direction:
-      static: "left"  # Static direction value
-```
-
-### Tool Format
-
-All environments use the same XML format for tool calls:
-
-```xml
-<think>Reasoning about the task...</think>
-<tool>tool_name(arguments)</tool>
+  You are an AI assistant.
+defaults:
+  max_turns: 30
+allowed_tools: []
 ```
 
 ## Dataset Format
 
-HUD Gym uses HuggingFace datasets with hud.Task format:
+HUD Gym uses HuggingFace datasets or JSON files with hud.Task format:
 
 ```python
 {
@@ -307,83 +178,44 @@ HUD Gym uses HuggingFace datasets with hud.Task format:
 }
 ```
 
+When loading from a file path in `taskset`, place objects in a JSON array, a `{ "data": [...] }` structure, or use JSON Lines where each line is a task object.
+
 ## Reward Functions
 
-The base rubric system combines three core reward functions:
+By default, HUDBaseRubric combines:
 
-1. **Task Completion** (80%) - Primary reward from HUD evaluation tool
-2. **Tool Execution** (10%) - Success rate of tool calls
-3. **Format Compliance** (10%) - Proper XML format and action syntax
+1. Task Completion - Primary reward from HUD evaluation
+2. Tool Execution - Success rate of tool calls
 
-Note: The base rubric (`HUDBaseRubric`) contains only generic components for extensibility. Environment-specific behaviors (like screenshot requirements or thinking quality) can be added by extending the base rubric class.
-
-## Custom Environments
-
-Extend HUD Gym for custom tasks:
-
-```python
-from hud_vf_gym import HUDGym
-
-class CustomGym(HUDGym):
-    def setup_state(self, state, **kwargs):
-        state = super().setup_state(state, **kwargs)
-        # Add custom state tracking
-        state["custom_metric"] = 0
-        return state
-    
-    def env_response(self, messages, state, **kwargs):
-        # Custom response logic
-        return super().env_response(messages, state, **kwargs)
-```
+You can adjust weights via the `rubric.weights` section in the config.
 
 ### Adding new HUD Environments
 
-To create a new environment:
+To work with a new environment:
 
-1. **Create a config file** (`configs/my_env.yaml`):
+1. Create a config file (`configs/my_env.yaml`) with at least:
 ```yaml
+job:
+  name: "My Env"
 system_prompt: |
   Instructions for the agent...
-  
-  You have access to these tools:
-  - my_tool(arg): Description
-    Usage: <tool>my_tool("value")</tool>
-
-action_mappings:
-  my_tool:
-    _parser:
-      positional: ["arg"]  # Expected arguments
-    _tool: "mcp_tool_name"  # MCP tool to call
-    param_name:
-      from_arg: "arg"
-      transform: "lambda x: x.upper()"  # Optional transform
+defaults:
+  max_turns: 30
+allowed_tools: []  # populate as needed
 ```
 
-2. **Use the config**:
+2. Run with your config:
 ```bash
 vf-eval hud-vf-gym \
-    --env-args '{"taskset": "your-org/your-taskset", "config_path": "configs/my_env.yaml"}' \
-    --model gpt-4o-mini
+  --env-args '{"taskset": "your-org/your-taskset", "config_path": "configs/my_env.yaml"}' \
+  --model gpt-4o-mini
 ```
 
 ### Adding New Tools to Existing Environments
 
-1. **Update the system prompt** to describe the tool to agents
-
-2. **Add action mapping**:
-```yaml
-action_mappings:
-  new_tool:
-    _parser:
-      positional: ["arg1", "arg2"]  # Define positional arguments
-    _tool: "target_mcp_tool"  # Required: which MCP tool to call
-    # Map arguments with optional transforms
-    param1:
-      from_arg: "arg1"
-    param2:
-      from_arg: "arg2"
-      transform: "lambda x: x * 2"
-```
+1. Update the system prompt to describe the tool and how to use it.
+2. Add the tool name to `allowed_tools` in your config.
+3. Ensure your dataset's `mcp_config` enables/points to the MCP server that implements the tool.
 
 ### Creating Datasets
 
@@ -415,7 +247,7 @@ dataset.push_to_hub("your-org/your-dataset")
 ### Common Issues
 
 1. **"Unknown tool" errors**: Ensure action mappings are correctly configured
-2. **XML parsing failures**: Check that agents use proper `<tool>` and `<think>` tags
+2. Tool-calling failures: Ensure your model supports tool calls and `allowed_tools` is set correctly in the config
 3. **MCP connection issues**: Verify MCP configuration in dataset
 4. **Low rewards**: Review rubric weights and ensure evaluation tool returns grades
 
