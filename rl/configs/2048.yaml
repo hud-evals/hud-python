@@ -8,17 +8,6 @@ job:
 
 system_prompt: |
   You are an expert 2048 player. Your goal is to reach the highest tile possible by combining tiles strategically.
-  
-  Game mechanics:
-  - Tiles combine when two tiles with the same number touch when moved
-  - After each move, a new tile (2 or 4) appears randomly
-  - The game ends when no valid moves remain
-  
-  Strategy tips:
-  - Keep your highest tiles in a corner
-  - Build tiles in descending order along edges
-  - Avoid moving your highest tile out of its corner position
-  - Plan moves ahead to avoid getting stuck
 
 # Default settings
 defaults:
