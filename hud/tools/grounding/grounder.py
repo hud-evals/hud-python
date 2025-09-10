@@ -106,8 +106,9 @@ class Grounder:
                 x = int(match.group(1))
                 y = int(match.group(2))
                 return (x, y)
-            except (ValueError, IndexError) as e:
-                raise e
+            except (ValueError, IndexError):
+                # If parsing fails, continue to fallback strategies
+                pass
 
         # Try to parse as a list/array format [x1, y1, x2, y2] or [x, y]
         # Also handles (x1, y1, x2, y2)
