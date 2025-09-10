@@ -2,73 +2,135 @@
 
 from __future__ import annotations
 
-import json
 import logging
+from typing import TYPE_CHECKING, Any
 
 from mcp import ErrorData, McpError
-from mcp.types import INVALID_PARAMS, ContentBlock, TextContent
-
-from hud.tools.base import BaseTool
+from mcp.types import INVALID_PARAMS, ContentBlock, ImageContent, TextContent
 
 from .grounder import Grounder
+
+if TYPE_CHECKING:
+    from hud.clients.base import AgentMCPClient
 
 logger = logging.getLogger(__name__)
 
 
-class GroundedComputerTool(BaseTool):
-    """Computer tool that grounds element descriptions to coordinates without executing actions.
+class GroundedComputerTool:
+    """Computer tool wrapper that grounds element descriptions to coordinates.
     
-    This tool:
-    - Accepts CUA-compatible parameters (action, element_description, etc.)
-    - Uses a grounding model to resolve descriptions to XY coordinates
-    - Returns a JSON payload describing the resolved action
-    - Does NOT execute any actual computer actions (no side effects)
+    This tool acts as a local wrapper that:
+    1. Accepts natural language element descriptions from the agent
+    2. Calls the environment's computer tool via MCP to take screenshots
+    3. Uses a grounding model to resolve descriptions to coordinates
+    4. Calls the environment's computer tool via MCP with resolved coordinates
+    5. Returns the result to the agent
     
-    The returned payload can be used by an agent to construct actual computer tool calls.
+    This allows the agent to use element descriptions while ensuring all
+    computer actions happen in the correct environment.
     """
     
     def __init__(
         self,
         *,
         grounder: Grounder,
-        name: str = "computer",
-        title: str = "Grounded Computer",
-        description: str = "CUA-compatible grounded computer tool that resolves descriptions to coordinates"
+        mcp_client: AgentMCPClient,
+        computer_tool_name: str = "computer"
     ) -> None:
         """Initialize the grounded computer tool.
         
         Args:
-            grounder: GrounderLiteLLM instance for visual grounding
-            name: Tool name for registration
-            title: Human-readable title
-            description: Tool description
+            grounder: Grounder instance for visual grounding
+            mcp_client: MCP client to call the environment's computer tool
+            computer_tool_name: Name of the computer tool in the environment
         """
-        super().__init__(
-            env=None,
-            name=name,
-            title=title,
-            description=description
-        )
         self._grounder = grounder
+        self._mcp_client = mcp_client
+        self._computer_tool_name = computer_tool_name
+    
+    def get_openai_tool_schema(self) -> dict:
+        """Get the OpenAI tool schema for the grounded computer tool.
+        
+        Returns:
+            Dictionary containing the tool schema in OpenAI format
+        """
+        return {
+            "type": "function",
+            "function": {
+                "name": "computer",
+                "description": "Control a computer by interacting with UI elements. This tool uses element descriptions to locate and interact with UI elements on the screen (e.g., 'red submit button', 'search text field', 'hamburger menu icon', 'close button in top right corner').",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["click", "double_click", "move", "scroll", "drag", "type", "keypress", "wait", "screenshot", "get_current_url", "get_dimensions", "get_environment"],
+                            "description": "The action to perform"
+                        },
+                        "element_description": {
+                            "type": "string",
+                            "description": "Natural language description of the element for click/move/scroll actions"
+                        },
+                        "start_element_description": {
+                            "type": "string",
+                            "description": "Description of the start element for drag actions"
+                        },
+                        "end_element_description": {
+                            "type": "string",
+                            "description": "Description of the end element for drag actions"
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Text to type"
+                        },
+                        "keys": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Keys to press (e.g., ['ctrl', 'a'] for Ctrl+A)"
+                        },
+                        "button": {
+                            "type": "string",
+                            "enum": ["left", "right", "middle"],
+                            "description": "Mouse button to use"
+                        },
+                        "scroll_x": {
+                            "type": "integer",
+                            "description": "Horizontal scroll amount"
+                        },
+                        "scroll_y": {
+                            "type": "integer",
+                            "description": "Vertical scroll amount"
+                        }
+                    },
+                    "required": ["action"]
+                }
+            }
+        }
     
     async def __call__(
         self,
         action: str,
-        screenshot_b64: str,  # Required screenshot parameter
+        # Screenshot from conversation 
+        screenshot_b64: str | None = None,
+        # Grounding-specific parameters
         element_description: str | None = None,
         start_element_description: str | None = None,
         end_element_description: str | None = None,
+        # Pass-through parameters
         text: str | None = None,
         keys: list[str] | None = None,
         button: str | None = None,
         scroll_x: int | None = None,
         scroll_y: int | None = None,
+        **kwargs: Any,
     ) -> list[ContentBlock]:
-        """Process a CUA-compatible computer action and return resolved coordinates.
+        """Execute a computer action, grounding element descriptions to coordinates first.
+        
+        This method calls the environment's computer tool through MCP to ensure
+        actions happen in the correct environment.
         
         Args:
-            action: The action to perform (click, double_click, move, scroll, drag, type, keypress, wait, screenshot)
-            screenshot_b64: Base64-encoded screenshot for grounding
+            action: The action to perform
             element_description: Description of element for click/move/scroll actions
             start_element_description: Start element for drag actions
             end_element_description: End element for drag actions
@@ -77,26 +139,38 @@ class GroundedComputerTool(BaseTool):
             button: Mouse button (left, right, middle)
             scroll_x: Horizontal scroll amount
             scroll_y: Vertical scroll amount
+            **kwargs: Additional arguments
             
         Returns:
-            List containing a TextContent block with JSON payload
+            List of ContentBlocks with action results from the environment
         """
         try:
-            # Validate screenshot is provided
-            if not screenshot_b64:
-                return [TextContent(
-                    type="text",
-                    text=json.dumps({"error": "No screenshot provided"})
-                )]
+            # For actions that don't need grounding, call environment tool directly
+            if action in ("screenshot", "type", "keypress", "wait", "get_current_url", "get_dimensions", "get_environment"):
+                computer_args = {"action": action}
+                if text is not None:
+                    computer_args["text"] = text
+                if keys is not None:
+                    computer_args["keys"] = keys
+                    
+                result = await self._mcp_client.call_tool(
+                    name=self._computer_tool_name,
+                    arguments={**computer_args, **kwargs}
+                )
+                return result.content
             
-            payload: dict[str, any] = {}
-            
-            # Handle actions that require grounding
+            # For actions that need coordinates, we need to ground element descriptions
             if action in ("click", "double_click", "move", "scroll"):
                 if not element_description:
                     raise McpError(ErrorData(
                         code=INVALID_PARAMS,
                         message=f"element_description is required for {action} action"
+                    ))
+                
+                if not screenshot_b64:
+                    raise McpError(ErrorData(
+                        code=INVALID_PARAMS,
+                        message="No screenshot available for grounding"
                     ))
                 
                 # Ground the element description to coordinates
@@ -106,33 +180,43 @@ class GroundedComputerTool(BaseTool):
                 )
                 
                 if not coords:
-                    return [TextContent(
-                        type="text",
-                        text=json.dumps({
-                            "error": f"Could not locate element: '{element_description}'. Try a more specific description or different identifying features (color, position, text, etc.)"
-                        })
-                    )]
+                    raise McpError(ErrorData(
+                        code=INVALID_PARAMS,
+                        message=f"Could not locate element: '{element_description}'. Try a more specific description or different identifying features (color, position, text, etc.)"
+                    ))
                 
                 x, y = coords
-                payload = {
+                
+                # Execute action with resolved coordinates
+                computer_args = {
                     "action": action,
                     "x": x,
-                    "y": y,
+                    "y": y
                 }
-                
-                # Add optional parameters
                 if button:
-                    payload["button"] = button
+                    computer_args["button"] = button
                 if scroll_x is not None:
-                    payload["scroll_x"] = scroll_x
+                    computer_args["scroll_x"] = scroll_x
                 if scroll_y is not None:
-                    payload["scroll_y"] = scroll_y
-            
+                    computer_args["scroll_y"] = scroll_y
+                    
+                result = await self._mcp_client.call_tool(
+                    name=self._computer_tool_name,
+                    arguments={**computer_args, **kwargs}
+                )
+                return result.content
+                
             elif action == "drag":
                 if not start_element_description or not end_element_description:
                     raise McpError(ErrorData(
                         code=INVALID_PARAMS,
                         message="start_element_description and end_element_description are required for drag action"
+                    ))
+                
+                if not screenshot_b64:
+                    raise McpError(ErrorData(
+                        code=INVALID_PARAMS,
+                        message="No screenshot available for grounding"
                     ))
                 
                 # Ground both start and end points
@@ -142,12 +226,10 @@ class GroundedComputerTool(BaseTool):
                 )
                 
                 if not start_coords:
-                    return [TextContent(
-                        type="text",
-                        text=json.dumps({
-                            "error": f"Could not locate start element: '{start_element_description}'. Try a more specific description or different identifying features."
-                        })
-                    )]
+                    raise McpError(ErrorData(
+                        code=INVALID_PARAMS,
+                        message=f"Could not locate start element: '{start_element_description}'. Try a more specific description or different identifying features."
+                    ))
                 
                 end_coords = await self._grounder.predict_click(
                     image_b64=screenshot_b64,
@@ -155,81 +237,40 @@ class GroundedComputerTool(BaseTool):
                 )
                 
                 if not end_coords:
-                    return [TextContent(
-                        type="text",
-                        text=json.dumps({
-                            "error": f"Could not locate end element: '{end_element_description}'. Try a more specific description or different identifying features."
-                        })
-                    )]
+                    raise McpError(ErrorData(
+                        code=INVALID_PARAMS,
+                        message=f"Could not locate end element: '{end_element_description}'. Try a more specific description or different identifying features."
+                    ))
                 
-                payload = {
+                # Execute drag with resolved coordinates
+                computer_args = {
                     "action": "drag",
                     "path": [
                         {"x": start_coords[0], "y": start_coords[1]},
                         {"x": end_coords[0], "y": end_coords[1]}
                     ]
                 }
-            
-            elif action == "type":
-                if text is None:
-                    raise McpError(ErrorData(
-                        code=INVALID_PARAMS,
-                        message="text is required for type action"
-                    ))
-                
-                payload = {
-                    "action": "type",
-                    "text": text
-                }
-            
-            elif action == "keypress":
-                if not keys:
-                    raise McpError(ErrorData(
-                        code=INVALID_PARAMS,
-                        message="keys are required for keypress action"
-                    ))
-                
-                payload = {
-                    "action": "keypress",
-                    "keys": keys
-                }
-            
-            elif action == "wait":
-                # Default wait time of 500ms if not specified
-                payload = {
-                    "action": "wait",
-                    "ms": 500
-                }
-            
-            elif action == "screenshot":
-                payload = {
-                    "action": "screenshot"
-                }
-            
-            elif action in ("get_current_url", "get_dimensions", "get_environment"):
-                # Pass through informational actions
-                payload = {
-                    "action": action
-                }
+                if button:
+                    computer_args["button"] = button
+                    
+                result = await self._mcp_client.call_tool(
+                    name=self._computer_tool_name,
+                    arguments={**computer_args, **kwargs}
+                )
+                return result.content
             
             else:
-                return [TextContent(
-                    type="text",
-                    text=json.dumps({"error": f"Unsupported action: {action}"})
-                )]
-            
-            # Return the resolved payload as JSON
-            return [TextContent(
-                type="text",
-                text=json.dumps(payload)
-            )]
-            
+                raise McpError(ErrorData(
+                    code=INVALID_PARAMS,
+                    message=f"Unsupported action: {action}"
+                ))
+                
         except McpError:
             # Re-raise MCP errors
             raise
         except Exception as e:
             logger.error(f"Grounded tool failed: {e}")
-            return [TextContent(
-                type="text",
-                text=json.dumps({"error": str(e)})
-            )]
+            raise McpError(ErrorData(
+                code=INVALID_PARAMS,
+                message=f"Grounding failed: {str(e)}"
+            ))

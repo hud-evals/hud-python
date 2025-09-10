@@ -6,10 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 SYSTEM_PROMPT = '''
-You are an expert UI element locator. Given a GUI image and a user's element description, provide the coordinates of the specified element as a single (x,y) point. For elements with area, return the center point.
-
-Output the coordinate pair exactly:
-(x,y)
+You are a visual grounding model. Given an image and a description, return ONLY the center pixel coordinates of the described element as a single point in parentheses format: (x, y). Do not return bounding boxes or multiple coordinates.
 '''.strip()
 
 @dataclass

@@ -44,6 +44,12 @@ class Settings(BaseSettings):
         validation_alias="OPENAI_API_KEY",
     )
 
+    openrouter_api_key: str | None = Field(
+        default=None,
+        description="API key for OpenRouter models",
+        validation_alias="OPENROUTER_API_KEY",
+    )
+
     wandb_api_key: str | None = Field(
         default=None,
         description="API key for Weights & Biases",

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import io
-import logging
 import re
 from typing import Any
 import json
@@ -16,9 +15,6 @@ from PIL import Image
 from hud import instrument
 
 from .config import GrounderConfig
-
-logger = logging.getLogger(__name__)
-
 
 class Grounder:
     """Grounder that uses AsyncOpenAI to call vLLM or other model endpoints for visual grounding.
@@ -88,8 +84,6 @@ class Grounder:
             buffer = io.BytesIO()
             img.save(buffer, format="PNG")
             resized_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
-            
-            logger.debug(f"Resized image from {original_size} to ({new_width}, {new_height})")
             return resized_b64, original_size, (new_width, new_height)
         
         return image_b64, original_size, original_size
@@ -116,34 +110,28 @@ class Grounder:
                 y = int(match.group(2))
                 return (x, y)
             except (ValueError, IndexError) as e:
-                logger.error(f"Failed to parse coordinates from match: {e}")
+                raise e
         
         # Try to parse as a list/array format [x1, y1, x2, y2] or [x, y]
-        # Also handles parentheses with 4 values (x1, y1, x2, y2)
+        # Also handles (x1, y1, x2, y2)
         list_pattern = r'[\[\(](\d+)[,\s]+(\d+)(?:[,\s]+(\d+)[,\s]+(\d+))?[\]\)]'
         list_match = re.search(list_pattern, response_text)
         if list_match:
-            try:
-                x1 = int(list_match.group(1))
-                y1 = int(list_match.group(2))
-                
-                # Check if it's a bounding box (4 values) or a point (2 values)
-                if list_match.group(3) and list_match.group(4):
-                    # Bounding box format - return center point
-                    x2 = int(list_match.group(3))
-                    y2 = int(list_match.group(4))
-                    center_x = (x1 + x2) // 2
-                    center_y = (y1 + y2) // 2
-                    logger.debug(f"Parsed bounding box [{x1}, {y1}, {x2}, {y2}] -> center ({center_x}, {center_y})")
-                    return (center_x, center_y)
-                else:
-                    # Point format
-                    logger.debug(f"Parsed point [{x1}, {y1}]")
-                    return (x1, y1)
-            except (ValueError, IndexError) as e:
-                logger.error(f"Failed to parse list coordinates: {e}")
-        
-        logger.warning(f"No coordinates found in response: {response_text}")
+            x1 = int(list_match.group(1))
+            y1 = int(list_match.group(2))
+            
+            # Check if it's a bounding box (4 values) or a point (2 values)
+            if list_match.group(3) and list_match.group(4):
+                # Bounding box format - return center point
+                x2 = int(list_match.group(3))
+                y2 = int(list_match.group(4))
+                center_x = (x1 + x2) // 2
+                center_y = (y1 + y2) // 2
+                return (center_x, center_y)
+            else:
+                # Point format
+                return (x1, y1)
+
         return None
     
     def _convert_coordinates(
@@ -179,7 +167,6 @@ class Grounder:
             proc_x = int(x * proc_width / 999)
             proc_y = int(y * proc_height / 999)
         else:
-            logger.warning(f"Unknown output format: {self.config.output_format}")
             proc_x, proc_y = x, y
         
         # Scale from processed image coordinates to original image coordinates
@@ -216,12 +203,8 @@ class Grounder:
         """
         
         # Resize image once outside the retry loop
-        try:
-            processed_image, original_size, processed_size = self._resize_image(image_b64)
-        except Exception as e:
-            logger.error(f"Failed to resize image: {e}")
-            return None
-        
+        processed_image, original_size, processed_size = self._resize_image(image_b64)
+
         # Build messages once
         messages = []
         
@@ -262,7 +245,6 @@ class Grounder:
                 
                 # Extract response text
                 response_text = response.choices[0].message.content
-                logger.debug(f"Grounder response (attempt {attempt + 1}): {response_text}")
                 
                 # Manually record the raw response in the span
                 span = trace.get_current_span()
@@ -273,7 +255,6 @@ class Grounder:
                 # Parse coordinates from response
                 coords = self._parse_coordinates(response_text)
                 if coords is None:
-                    logger.warning(f"Failed to parse coordinates on attempt {attempt + 1}/{max_retries}")
                     if attempt < max_retries - 1:
                         continue
                     return None
@@ -284,13 +265,10 @@ class Grounder:
                 # Validate coordinates are within image bounds
                 x, y = pixel_coords
                 if x < 0 or y < 0 or x >= original_size[0] or y >= original_size[1]:
-                    logger.warning(f"Coordinates {pixel_coords} are outside image bounds {original_size}")
                     # Clamp to image bounds
                     x = max(0, min(x, original_size[0] - 1))
                     y = max(0, min(y, original_size[1] - 1))
                     pixel_coords = (x, y)
-                
-                logger.info(f"Grounded '{instruction}' to coordinates {pixel_coords} (attempt {attempt + 1})")
                 
                 # Record successful grounding in span
                 span = trace.get_current_span()
@@ -302,12 +280,8 @@ class Grounder:
                 return pixel_coords
                 
             except Exception as e:
-                logger.error(f"Grounding attempt {attempt + 1}/{max_retries} failed: {e}")
                 if attempt < max_retries - 1:
-                    logger.info(f"Retrying... ({attempt + 2}/{max_retries})")
                     continue
-                
-        logger.error(f"All {max_retries} grounding attempts failed for instruction: {instruction}")
         
         # Record failure in span
         span = trace.get_current_span()
