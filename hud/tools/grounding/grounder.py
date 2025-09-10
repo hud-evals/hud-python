@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import base64
 import io
-import re
-from typing import Any
 import json
+import re
 
 from openai import AsyncOpenAI
 from opentelemetry import trace
 from PIL import Image
 
 from hud import instrument
-
-from .config import GrounderConfig
+from hud.tools.grounding.config import GrounderConfig  # noqa: TC001
 
 
 class Grounder:
@@ -43,7 +41,8 @@ class Grounder:
             image_b64: Base64-encoded image string
 
         Returns:
-            Tuple of (processed_base64, (original_width, original_height), (processed_width, processed_height))
+            Tuple of (processed_base64, (original_width, original_height),
+                     (processed_width, processed_height))
         """
         # Decode image
         image_bytes = base64.b64decode(image_b64)
@@ -207,8 +206,11 @@ class Grounder:
             messages.append(
                 {
                     "role": "system",
-                    "content": self.config.system_prompt
-                    + f" The image resolution is height {processed_size[1]} and width {processed_size[0]}.",
+                    "content": (
+                        self.config.system_prompt
+                        + f" The image resolution is height {processed_size[1]} "
+                        + f"and width {processed_size[0]}."
+                    ),
                 }
             )
 
@@ -247,6 +249,11 @@ class Grounder:
                     span.set_attribute("grounder.attempt", attempt + 1)
 
                 # Parse coordinates from response
+                if response_text is None:
+                    if attempt < max_retries - 1:
+                        continue
+                    return None
+                
                 coords = self._parse_coordinates(response_text)
                 if coords is None:
                     if attempt < max_retries - 1:
@@ -275,7 +282,7 @@ class Grounder:
 
                 return pixel_coords
 
-            except Exception as e:
+            except Exception:
                 if attempt < max_retries - 1:
                     continue
 

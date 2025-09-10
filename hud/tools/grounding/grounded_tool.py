@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from mcp import ErrorData, McpError
-from mcp.types import INVALID_PARAMS, ContentBlock, ImageContent, TextContent
+from mcp.types import INVALID_PARAMS, ContentBlock
 
-from .grounder import Grounder
-
-if TYPE_CHECKING:
-    from hud.clients.base import AgentMCPClient
+from hud.clients.base import AgentMCPClient  # noqa: TC001
+from hud.tools.grounding.grounder import Grounder  # noqa: TC001
+from hud.types import MCPToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +57,12 @@ class GroundedComputerTool:
             "type": "function",
             "function": {
                 "name": "computer",
-                "description": "Control a computer by interacting with UI elements. This tool uses element descriptions to locate and interact with UI elements on the screen (e.g., 'red submit button', 'search text field', 'hamburger menu icon', 'close button in top right corner').",
+                "description": (
+                    "Control a computer by interacting with UI elements. This tool uses "
+                    "element descriptions to locate and interact with UI elements on the "
+                    "screen (e.g., 'red submit button', 'search text field', 'hamburger menu "
+                    "icon', 'close button in top right corner')."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -82,7 +86,10 @@ class GroundedComputerTool:
                         },
                         "element_description": {
                             "type": "string",
-                            "description": "Natural language description of the element for click/move/scroll actions",
+                            "description": (
+                                "Natural language description of the element for "
+                                "click/move/scroll actions"
+                            ),
                         },
                         "start_element_description": {
                             "type": "string",
@@ -159,14 +166,17 @@ class GroundedComputerTool:
                 "get_dimensions",
                 "get_environment",
             ):
-                computer_args = {"action": action}
+                computer_args: dict[str, Any] = {"action": action}
                 if text is not None:
                     computer_args["text"] = text
                 if keys is not None:
                     computer_args["keys"] = keys
 
                 result = await self._mcp_client.call_tool(
-                    name=self._computer_tool_name, arguments={**computer_args, **kwargs}
+                    MCPToolCall(
+                        name=self._computer_tool_name,
+                        arguments={**computer_args, **kwargs}
+                    )
                 )
                 return result.content
 
@@ -196,14 +206,18 @@ class GroundedComputerTool:
                     raise McpError(
                         ErrorData(
                             code=INVALID_PARAMS,
-                            message=f"Could not locate element: '{element_description}'. Try a more specific description or different identifying features (color, position, text, etc.)",
+                            message=(
+                                f"Could not locate element: '{element_description}'. "
+                                "Try a more specific description or different identifying "
+                                "features (color, position, text, etc.)"
+                            ),
                         )
                     )
 
                 x, y = coords
 
                 # Execute action with resolved coordinates
-                computer_args = {"action": action, "x": x, "y": y}
+                computer_args: dict[str, Any] = {"action": action, "x": x, "y": y}
                 if button:
                     computer_args["button"] = button
                 if scroll_x is not None:
@@ -212,7 +226,10 @@ class GroundedComputerTool:
                     computer_args["scroll_y"] = scroll_y
 
                 result = await self._mcp_client.call_tool(
-                    name=self._computer_tool_name, arguments={**computer_args, **kwargs}
+                    MCPToolCall(
+                        name=self._computer_tool_name,
+                        arguments={**computer_args, **kwargs}
+                    )
                 )
                 return result.content
 
@@ -221,7 +238,10 @@ class GroundedComputerTool:
                     raise McpError(
                         ErrorData(
                             code=INVALID_PARAMS,
-                            message="start_element_description and end_element_description are required for drag action",
+                            message=(
+                                "start_element_description and end_element_description "
+                                "are required for drag action"
+                            ),
                         )
                     )
 
@@ -241,7 +261,10 @@ class GroundedComputerTool:
                     raise McpError(
                         ErrorData(
                             code=INVALID_PARAMS,
-                            message=f"Could not locate start element: '{start_element_description}'. Try a more specific description or different identifying features.",
+                            message=(
+                                f"Could not locate start element: '{start_element_description}'. "
+                                "Try a more specific description or different identifying features."
+                            ),
                         )
                     )
 
@@ -253,12 +276,15 @@ class GroundedComputerTool:
                     raise McpError(
                         ErrorData(
                             code=INVALID_PARAMS,
-                            message=f"Could not locate end element: '{end_element_description}'. Try a more specific description or different identifying features.",
+                            message=(
+                                f"Could not locate end element: '{end_element_description}'. "
+                                "Try a more specific description or different identifying features."
+                            ),
                         )
                     )
 
                 # Execute drag with resolved coordinates
-                computer_args = {
+                computer_args: dict[str, Any] = {
                     "action": "drag",
                     "path": [
                         {"x": start_coords[0], "y": start_coords[1]},
@@ -269,7 +295,10 @@ class GroundedComputerTool:
                     computer_args["button"] = button
 
                 result = await self._mcp_client.call_tool(
-                    name=self._computer_tool_name, arguments={**computer_args, **kwargs}
+                    MCPToolCall(
+                        name=self._computer_tool_name,
+                        arguments={**computer_args, **kwargs}
+                    )
                 )
                 return result.content
 
@@ -282,5 +311,7 @@ class GroundedComputerTool:
             # Re-raise MCP errors
             raise
         except Exception as e:
-            logger.error(f"Grounded tool failed: {e}")
-            raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Grounding failed: {str(e)}"))
+            logger.error("Grounded tool failed: %s", e)
+            raise McpError(
+                ErrorData(code=INVALID_PARAMS, message=f"Grounding failed: {e!s}")
+            ) from e

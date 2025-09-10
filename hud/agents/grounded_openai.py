@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from hud import instrument
-from hud.tools.grounding import *
+from hud.tools.grounding import GroundedComputerTool, Grounder, GrounderConfig
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 from .openai_chat_generic import GenericOpenAIChatAgent
@@ -51,15 +51,19 @@ class GroundedOpenAIChatAgent(GenericOpenAIChatAgent):
 
         if system_prompt is None:
             system_prompt = (
-                "You are a helpful AI assistant that can control the computer through visual interaction.\n\n"
+                "You are a helpful AI assistant that can control the computer "
+                "through visual interaction.\n\n"
                 "IMPORTANT: Always explain your reasoning and observations before taking actions:\n"
                 "1. First, describe what you see on the screen\n"
                 "2. Explain what you plan to do and why\n"
                 "3. Then use the computer tool with natural language descriptions\n\n"
                 "For example:\n"
-                "- 'I can see a login form with username and password fields. I need to click on the username field first.'\n"
-                "- 'There's a blue submit button at the bottom. I'll click on it to submit the form.'\n"
-                "- 'I notice a red close button in the top right corner. I'll click it to close this dialog.'\n\n"
+                "- 'I can see a login form with username and password fields. "
+                "I need to click on the username field first.'\n"
+                "- 'There's a blue submit button at the bottom. "
+                "I'll click on it to submit the form.'\n"
+                "- 'I notice a red close button in the top right corner. "
+                "I'll click it to close this dialog.'\n\n"
                 "Use descriptive element descriptions like:\n"
                 "- Colors: 'red button', 'blue link', 'green checkmark'\n"
                 "- Position: 'top right corner', 'bottom of the page', 'left sidebar'\n"
@@ -78,16 +82,18 @@ class GroundedOpenAIChatAgent(GenericOpenAIChatAgent):
         self.grounder = Grounder(grounder_config)
         self.grounded_tool = None
 
-    async def initialize(self, task=None) -> None:
+    async def initialize(self, task: Any = None) -> None:
         """Initialize the agent and create the grounded tool with mcp_client."""
         # Call parent initialization first
         await super().initialize(task)
 
+        if self.mcp_client is None:
+            raise ValueError("mcp_client must be initialized before creating grounded tool")
         self.grounded_tool = GroundedComputerTool(
             grounder=self.grounder, mcp_client=self.mcp_client, computer_tool_name="computer"
         )
 
-    def get_tool_schemas(self) -> list[dict]:
+    def get_tool_schemas(self) -> list[Any]:
         """Override to expose only the synthetic grounded tool.
 
         The planning model only sees the synthetic "computer" tool,
@@ -96,6 +102,8 @@ class GroundedOpenAIChatAgent(GenericOpenAIChatAgent):
         Returns:
             List containing only the grounded computer tool schema
         """
+        if self.grounded_tool is None:
+            return []
         return [self.grounded_tool.get_openai_tool_schema()]
 
     @instrument(
@@ -132,20 +140,24 @@ class GroundedOpenAIChatAgent(GenericOpenAIChatAgent):
         )
 
         if not has_image:
+            if self.mcp_client is None:
+                raise ValueError("mcp_client is not initialized")
             screenshot_result = await self.mcp_client.call_tool(
-                name="computer", arguments={"action": "screenshot"}
+                MCPToolCall(name="computer", arguments={"action": "screenshot"})
             )
 
             for block in screenshot_result.content:
+                # Check for ImageContent type from MCP
                 if hasattr(block, "data") and hasattr(block, "mimeType"):
-                    mime_type = block.mimeType or "image/png"
+                    mime_type = getattr(block, "mimeType", "image/png")
+                    data = getattr(block, "data", "")
                     messages.append(
                         {
                             "role": "user",
                             "content": [
                                 {
                                     "type": "image_url",
-                                    "image_url": {"url": f"data:{mime_type};base64,{block.data}"},
+                                    "image_url": {"url": f"data:{mime_type};base64,{data}"},
                                 }
                             ],
                         }
@@ -197,9 +209,9 @@ class GroundedOpenAIChatAgent(GenericOpenAIChatAgent):
         # Parse the arguments
         try:
             args = json.loads(tc.function.arguments or "{}")
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError:
             return AgentResponse(
-                content=f"Error: Invalid tool arguments", tool_calls=[], done=True, raw=response
+                content="Error: Invalid tool arguments", tool_calls=[], done=True, raw=response
             )
 
         tool_call = MCPToolCall(name="computer", arguments=args, id=tc.id)
@@ -211,7 +223,10 @@ class GroundedOpenAIChatAgent(GenericOpenAIChatAgent):
     async def call_tools(
         self, tool_call: MCPToolCall | list[MCPToolCall] | None = None
     ) -> list[MCPToolResult]:
-        """Override call_tools to intercept computer tool calls and execute through grounded tool."""
+        """Override call_tools to intercept computer tool calls.
+        
+        Execute them through grounded tool.
+        """
         if tool_call is None:
             return []
 
@@ -243,18 +258,20 @@ class GroundedOpenAIChatAgent(GenericOpenAIChatAgent):
                                 break
 
                     # Pass screenshot to grounded tool
-                    args_with_screenshot = {**tc.arguments}
+                    args_with_screenshot = dict(tc.arguments) if tc.arguments else {}
                     if screenshot_b64:
                         args_with_screenshot["screenshot_b64"] = screenshot_b64
 
+                    if self.grounded_tool is None:
+                        raise ValueError("Grounded tool is not initialized")
                     content_blocks = await self.grounded_tool(**args_with_screenshot)
                     results.append(MCPToolResult(content=content_blocks, isError=False))
                 except Exception as e:
                     # Create error result
                     from mcp.types import TextContent
 
-                    error_content = [TextContent(text=str(e), type="text")]
-                    results.append(MCPToolResult(content=error_content, isError=True))
+                    error_content = TextContent(text=str(e), type="text")
+                    results.append(MCPToolResult(content=[error_content], isError=True))
             else:
                 # For non-computer tools, use parent implementation
                 parent_results = await super().call_tools(tc)

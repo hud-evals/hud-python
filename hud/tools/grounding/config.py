@@ -5,9 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-SYSTEM_PROMPT = """
-You are a visual grounding model. Given an image and a description, return ONLY the center pixel coordinates of the described element as a single point in parentheses format: (x, y). Do not return bounding boxes or multiple coordinates.
-""".strip()
+SYSTEM_PROMPT = (
+    "You are a visual grounding model. Given an image and a description, "
+    "return ONLY the center pixel coordinates of the described element as a "
+    "single point in parentheses format: (x, y). Do not return bounding boxes "
+    "or multiple coordinates."
+)
 
 
 @dataclass
