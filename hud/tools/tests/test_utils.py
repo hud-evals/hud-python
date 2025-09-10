@@ -58,7 +58,7 @@ class TestRun:
         mock_proc.communicate = AsyncMock(return_value=(b"processed", b""))
 
         with patch("asyncio.create_subprocess_shell", return_value=mock_proc):
-            return_code, stdout, stderr = await run("cat", input="test input")
+            return_code, stdout, _stderr = await run("cat", input="test input")
 
             assert return_code == 0
             assert stdout == "processed"
@@ -91,7 +91,7 @@ class TestRun:
         ):
             mock_wait_for.return_value = (b"done", b"")
 
-            return_code, stdout, stderr = await run("sleep 1", timeout=5.0)
+            _return_code, _stdout, _stderr = await run("sleep 1", timeout=5.0)
 
             # Check that wait_for was called with the correct timeout
             mock_wait_for.assert_called_once()

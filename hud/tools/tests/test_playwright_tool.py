@@ -52,7 +52,7 @@ class TestPlaywrightTool:
             assert any(isinstance(b, TextContent) for b in blocks)
             # The actual call includes wait_until parameter with a Field object
             mock_page.goto.assert_called_once()
-            args, kwargs = mock_page.goto.call_args
+            args, _kwargs = mock_page.goto.call_args
             assert args[0] == "https://example.com"
             mock_ensure.assert_called_once()
 

@@ -364,16 +364,21 @@ class ClaudeAgent(MCPAgent):
         messages_cached = copy.deepcopy(messages)
 
         # Mark last user message with cache control
-        if messages_cached and messages_cached[-1].get("role") == "user":
+        if (
+            messages_cached
+            and isinstance(messages_cached[-1], dict)
+            and messages_cached[-1].get("role") == "user"
+        ):
             last_content = messages_cached[-1]["content"]
             # Content is formatted to be list of ContentBlock in format_blocks and format_message
             if isinstance(last_content, list):
                 for block in last_content:
-                    # Only add cache control to block types that support it
-                    block_type = block.get("type")
-                    if block_type in ["text", "image", "tool_use", "tool_result"]:
-                        cache_control: BetaCacheControlEphemeralParam = {"type": "ephemeral"}
-                        block["cache_control"] = cache_control  # type: ignore[reportGeneralTypeIssues]
+                    # Only add cache control to dict-like block types that support it
+                    if isinstance(block, dict):
+                        block_type = block.get("type")
+                        if block_type in ["text", "image", "tool_use", "tool_result"]:
+                            cache_control: BetaCacheControlEphemeralParam = {"type": "ephemeral"}
+                            block["cache_control"] = cache_control  # type: ignore[reportGeneralTypeIssues]
 
         return messages_cached
 

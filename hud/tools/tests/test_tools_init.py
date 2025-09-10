@@ -33,7 +33,7 @@ class TestToolsInit:
         """Test lazy import with invalid attribute name."""
         import hud.tools as tools_module
 
-        with pytest.raises(AttributeError, match="module '.*' has no attribute 'InvalidTool'"):
+        with pytest.raises(AttributeError, match=r"module '.*' has no attribute 'InvalidTool'"):
             _ = tools_module.InvalidTool
 
     def test_direct_imports_available(self):

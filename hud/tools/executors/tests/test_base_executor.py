@@ -361,5 +361,5 @@ class TestLazyImports:
         """Test lazy import with invalid attribute name."""
         import hud.tools.executors as executors_module
 
-        with pytest.raises(AttributeError, match="module '.*' has no attribute 'InvalidExecutor'"):
+        with pytest.raises(AttributeError, match=r"module '.*' has no attribute 'InvalidExecutor'"):
             _ = executors_module.InvalidExecutor

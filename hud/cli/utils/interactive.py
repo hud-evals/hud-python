@@ -74,7 +74,7 @@ class InteractiveMCPTester:
 
         for tool in self.tools:
             if "/" in tool.name:
-                hub, name = tool.name.split("/", 1)
+                hub, _ = tool.name.split("/", 1)
                 if hub not in hub_tools:
                     hub_tools[hub] = []
                 hub_tools[hub].append(tool)

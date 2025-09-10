@@ -175,7 +175,7 @@ class XDOExecutor(BaseExecutor):
 
         screenshot_cmd = f"{self._display_prefix}scrot -p {screenshot_path}"
 
-        returncode, _, stderr = await run(screenshot_cmd)
+        returncode, _, _stderr = await run(screenshot_cmd)
 
         if returncode == 0 and screenshot_path.exists():
             try:
