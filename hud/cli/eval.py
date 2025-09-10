@@ -87,7 +87,7 @@ async def run_single_task(
     except ImportError as e:
         design.error(
             "Dataset dependencies are not installed. "
-            "Please install with: pip install 'hud-python\u27E6agent\u27E7'"
+            "Please install with: pip install 'hud-python\u27e6agent\u27e7'"
         )
         raise typer.Exit(1) from e
 
@@ -111,7 +111,7 @@ async def run_single_task(
                 except ImportError as e:
                     design.error(
                         "OpenAI agent dependencies are not installed. "
-                        "Please install with: pip install 'hud-python\u27E6agent\u27E7'"
+                        "Please install with: pip install 'hud-python\u27e6agent\u27e7'"
                     )
                     raise typer.Exit(1) from e
 
