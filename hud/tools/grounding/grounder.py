@@ -254,7 +254,7 @@ class Grounder:
                     if attempt < max_retries - 1:
                         continue
                     return None
-                
+
                 coords = self._parse_coordinates(response_text)
                 if coords is None:
                     if attempt < max_retries - 1:

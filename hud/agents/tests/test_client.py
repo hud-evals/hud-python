@@ -200,7 +200,12 @@ class TestMCPClient:
         # Calling a non-existent tool should return an error result
         result = await client.call_tool(name="nonexistent", arguments={})
         assert result.isError is True
-        assert "Tool 'nonexistent' not found" in result.content[0].text
+        # Check that the error message is in the text content
+        text_content = ""
+        for content in result.content:
+            if isinstance(content, types.TextContent):
+                text_content += content.text
+        assert "Tool 'nonexistent' not found" in text_content
 
     @pytest.mark.asyncio
     async def test_get_telemetry_data(self, mock_telemetry, mock_mcp_use_client):

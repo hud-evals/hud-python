@@ -1,4 +1,5 @@
 """Grounding module for visual element detection and coordinate resolution."""
+
 from __future__ import annotations
 
 from .config import GrounderConfig

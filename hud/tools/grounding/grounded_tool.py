@@ -174,8 +174,7 @@ class GroundedComputerTool:
 
                 result = await self._mcp_client.call_tool(
                     MCPToolCall(
-                        name=self._computer_tool_name,
-                        arguments={**computer_args, **kwargs}
+                        name=self._computer_tool_name, arguments={**computer_args, **kwargs}
                     )
                 )
                 return result.content
@@ -227,8 +226,7 @@ class GroundedComputerTool:
 
                 result = await self._mcp_client.call_tool(
                     MCPToolCall(
-                        name=self._computer_tool_name,
-                        arguments={**computer_args, **kwargs}
+                        name=self._computer_tool_name, arguments={**computer_args, **kwargs}
                     )
                 )
                 return result.content
@@ -296,8 +294,7 @@ class GroundedComputerTool:
 
                 result = await self._mcp_client.call_tool(
                     MCPToolCall(
-                        name=self._computer_tool_name,
-                        arguments={**computer_args, **kwargs}
+                        name=self._computer_tool_name, arguments={**computer_args, **kwargs}
                     )
                 )
                 return result.content

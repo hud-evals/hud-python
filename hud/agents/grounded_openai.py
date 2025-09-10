@@ -224,7 +224,7 @@ class GroundedOpenAIChatAgent(GenericOpenAIChatAgent):
         self, tool_call: MCPToolCall | list[MCPToolCall] | None = None
     ) -> list[MCPToolResult]:
         """Override call_tools to intercept computer tool calls.
-        
+
         Execute them through grounded tool.
         """
         if tool_call is None:
