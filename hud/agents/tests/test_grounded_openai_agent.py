@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, List
+from typing import Any
 
 import mcp.types as types
 import pytest
@@ -27,7 +27,17 @@ class DummyOpenAI:
                                 {
                                     "id": "call_1",
                                     "function": type(
-                                        "Fn", (), {"name": "computer", "arguments": json.dumps({"action": "click", "element_description": "blue button"})}  # noqa: E501
+                                        "Fn",
+                                        (),
+                                        {
+                                            "name": "computer",
+                                            "arguments": json.dumps(
+                                                {
+                                                    "action": "click",
+                                                    "element_description": "blue button",
+                                                }
+                                            ),
+                                        },
                                     ),
                                 },
                             )()
@@ -91,7 +101,10 @@ class DummyGroundedTool:
         return [types.TextContent(text="ok", type="text")]
 
     def get_openai_tool_schema(self) -> dict:
-        return {"type": "function", "function": {"name": "computer", "parameters": {"type": "object"}}}  # noqa: E501
+        return {
+            "type": "function",
+            "function": {"name": "computer", "parameters": {"type": "object"}},
+        }
 
 
 @pytest.mark.asyncio
@@ -125,7 +138,9 @@ async def test_call_tools_injects_screenshot_and_delegates(monkeypatch: pytest.M
     ]
 
     # Build a tool call as GroundedOpenAIChatAgent.get_response would produce
-    tool_call = MCPToolCall(name="computer", arguments={"action": "click", "element_description": "blue button"})  # noqa: E501
+    tool_call = MCPToolCall(
+        name="computer", arguments={"action": "click", "element_description": "blue button"}
+    )
 
     results = await agent.call_tools(tool_call)
 
@@ -138,4 +153,3 @@ async def test_call_tools_injects_screenshot_and_delegates(monkeypatch: pytest.M
     assert dummy_tool.last_args["element_description"] == "blue button"
     assert "screenshot_b64" in dummy_tool.last_args
     assert isinstance(dummy_tool.last_args["screenshot_b64"], str)
-

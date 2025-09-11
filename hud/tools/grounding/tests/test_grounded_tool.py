@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
-from typing import Any, List, Tuple
+from typing import Any
 
 import mcp.types as types
 import pytest
@@ -19,20 +18,46 @@ class FakeResult:
 
 
 class FakeMCPClient:
+    """Fake MCP client that implements AgentMCPClient protocol."""
+
+    _initialized: bool
+
     def __init__(self) -> None:
-        self.calls: list[Tuple[str, dict[str, Any]]] = []
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self._initialized = False
+
+    @property
+    def mcp_config(self) -> dict[str, dict[str, Any]]:
+        return {"test": {"command": "echo", "args": ["test"]}}
+
+    @property
+    def is_connected(self) -> bool:
+        return self._initialized
+
+    async def initialize(self, mcp_config: dict[str, dict[str, Any]] | None = None) -> None:
+        self._initialized = True
+
+    async def list_tools(self) -> list[types.Tool]:
+        return [types.Tool(name="computer", description="Test tool", inputSchema={})]
 
     async def call_tool(self, tool_call: MCPToolCall) -> MCPToolResult:
         self.calls.append((tool_call.name, tool_call.arguments or {}))
         return MCPToolResult(content=[types.TextContent(text="ok", type="text")], isError=False)
 
+    async def shutdown(self) -> None:
+        self._initialized = False
+
 
 class FakeGrounder:
+    """Fake grounder that implements Grounder interface."""
+
     def __init__(self, coords: tuple[int, int] | None = (10, 20)) -> None:
         self.coords = coords
         self.calls: list[tuple[str, str]] = []
 
-    async def predict_click(self, *, image_b64: str, instruction: str, max_retries: int = 3) -> tuple[int, int] | None:  # noqa: E501
+    async def predict_click(
+        self, *, image_b64: str, instruction: str, max_retries: int = 3
+    ) -> tuple[int, int] | None:
         self.calls.append((image_b64[:10], instruction))
         return self.coords
 
@@ -49,7 +74,7 @@ def _png_b64() -> str:
 async def test_click_action_grounds_and_calls_mcp() -> None:
     client = FakeMCPClient()
     grounder = FakeGrounder(coords=(123, 456))
-    tool = GroundedComputerTool(grounder=grounder, mcp_client=client)
+    tool = GroundedComputerTool(grounder=grounder, mcp_client=client)  # type: ignore
 
     blocks = await tool(
         action="click",
@@ -62,14 +87,14 @@ async def test_click_action_grounds_and_calls_mcp() -> None:
     # Grounder called once
     assert len(grounder.calls) == 1
     # MCP called with resolved coordinates
-    assert client.calls == [("computer", {"action": "click", "x": 123, "y": 456, "button": "left"})]  # noqa: E501
+    assert client.calls == [("computer", {"action": "click", "x": 123, "y": 456, "button": "left"})]
 
 
 @pytest.mark.asyncio
 async def test_move_and_scroll_require_element_description_and_screenshot() -> None:
     client = FakeMCPClient()
     grounder = FakeGrounder(coords=(5, 6))
-    tool = GroundedComputerTool(grounder=grounder, mcp_client=client)
+    tool = GroundedComputerTool(grounder=grounder, mcp_client=client)  # type: ignore
 
     # Missing element_description
     with pytest.raises(Exception) as ei:
@@ -86,7 +111,7 @@ async def test_move_and_scroll_require_element_description_and_screenshot() -> N
 async def test_drag_grounds_both_points_and_calls_mcp() -> None:
     client = FakeMCPClient()
     grounder = FakeGrounder(coords=(10, 20))
-    tool = GroundedComputerTool(grounder=grounder, mcp_client=client)
+    tool = GroundedComputerTool(grounder=grounder, mcp_client=client)  # type: ignore
 
     await tool(
         action="drag",
@@ -110,7 +135,7 @@ async def test_drag_grounds_both_points_and_calls_mcp() -> None:
 async def test_drag_requires_both_descriptions_and_screenshot() -> None:
     client = FakeMCPClient()
     grounder = FakeGrounder()
-    tool = GroundedComputerTool(grounder=grounder, mcp_client=client)
+    tool = GroundedComputerTool(grounder=grounder, mcp_client=client)  # type: ignore
 
     with pytest.raises(Exception) as ei:
         await tool(action="drag", start_element_description="a", screenshot_b64=_png_b64())
@@ -129,7 +154,7 @@ async def test_drag_requires_both_descriptions_and_screenshot() -> None:
 async def test_direct_actions_bypass_grounding_and_call_mcp() -> None:
     client = FakeMCPClient()
     grounder = FakeGrounder()
-    tool = GroundedComputerTool(grounder=grounder, mcp_client=client)
+    tool = GroundedComputerTool(grounder=grounder, mcp_client=client)  # type: ignore
 
     # Actions that bypass grounding
     for action, extra in [
@@ -153,7 +178,7 @@ async def test_direct_actions_bypass_grounding_and_call_mcp() -> None:
 async def test_unsupported_action_raises() -> None:
     client = FakeMCPClient()
     grounder = FakeGrounder()
-    tool = GroundedComputerTool(grounder=grounder, mcp_client=client)
+    tool = GroundedComputerTool(grounder=grounder, mcp_client=client)  # type: ignore
 
     with pytest.raises(Exception) as ei:
         await tool(action="zoom")
@@ -164,9 +189,8 @@ async def test_unsupported_action_raises() -> None:
 async def test_grounding_failure_propagates_as_error() -> None:
     client = FakeMCPClient()
     grounder = FakeGrounder(coords=None)
-    tool = GroundedComputerTool(grounder=grounder, mcp_client=client)
+    tool = GroundedComputerTool(grounder=grounder, mcp_client=client)  # type: ignore
 
     with pytest.raises(Exception) as ei:
         await tool(action="click", element_description="x", screenshot_b64=_png_b64())
     assert "Could not locate element" in str(ei.value)
-

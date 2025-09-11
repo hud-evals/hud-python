@@ -85,7 +85,7 @@ class Grounder:
 
         return image_b64, original_size, original_size
 
-    def _parse_coordinates(self, response_text: str) -> tuple[int, int] | None:
+    def _parse_coordinates(self, response_text: str) -> tuple[float, float] | None:
         """Parse coordinates from model response.
 
         Handles multiple formats:
@@ -103,8 +103,8 @@ class Grounder:
         match = re.search(self.config.parser_regex, response_text)
         if match:
             try:
-                x = int(match.group(1))
-                y = int(match.group(2))
+                x = float(match.group(1))
+                y = float(match.group(2))
                 return (x, y)
             except (ValueError, IndexError):
                 # If parsing fails, continue to fallback strategies
@@ -112,19 +112,23 @@ class Grounder:
 
         # Try to parse as a list/array format [x1, y1, x2, y2] or [x, y]
         # Also handles (x1, y1, x2, y2)
-        list_pattern = r"[\[\(](\d+)[,\s]+(\d+)(?:[,\s]+(\d+)[,\s]+(\d+))?[\]\)]"
+        # Updated pattern to handle both integers and floats
+        list_pattern = (
+            r"[\[\(](\d+(?:\.\d+)?)[,\s]+(\d+(?:\.\d+)?)"
+            r"(?:[,\s]+(\d+(?:\.\d+)?)[,\s]+(\d+(?:\.\d+)?))?[\]\)]"
+        )
         list_match = re.search(list_pattern, response_text)
         if list_match:
-            x1 = int(list_match.group(1))
-            y1 = int(list_match.group(2))
+            x1 = float(list_match.group(1))
+            y1 = float(list_match.group(2))
 
             # Check if it's a bounding box (4 values) or a point (2 values)
             if list_match.group(3) and list_match.group(4):
                 # Bounding box format - return center point
-                x2 = int(list_match.group(3))
-                y2 = int(list_match.group(4))
-                center_x = (x1 + x2) // 2
-                center_y = (y1 + y2) // 2
+                x2 = float(list_match.group(3))
+                y2 = float(list_match.group(4))
+                center_x = (x1 + x2) / 2
+                center_y = (y1 + y2) / 2
                 return (center_x, center_y)
             else:
                 # Point format
@@ -134,14 +138,14 @@ class Grounder:
 
     def _convert_coordinates(
         self,
-        coords: tuple[int, int],
+        coords: tuple[float, float],
         processed_size: tuple[int, int],
         original_size: tuple[int, int],
     ) -> tuple[int, int]:
         """Convert coordinates based on output format configuration and scale to original size.
 
         Args:
-            coords: Raw coordinates from model
+            coords: Raw coordinates from model (can be float for normalized formats)
             processed_size: Dimensions of the processed/resized image (width, height)
             original_size: Original image dimensions (width, height)
 
@@ -158,12 +162,12 @@ class Grounder:
             proc_x, proc_y = x, y
         elif self.config.output_format == "norm_0_1":
             # Convert from 0-1 normalized to pixels
-            proc_x = int(x * proc_width)
-            proc_y = int(y * proc_height)
+            proc_x = x * proc_width
+            proc_y = y * proc_height
         elif self.config.output_format == "norm_0_999":
             # Convert from 0-999 normalized to pixels
-            proc_x = int(x * proc_width / 999)
-            proc_y = int(y * proc_height / 999)
+            proc_x = x * proc_width / 999
+            proc_y = y * proc_height / 999
         else:
             proc_x, proc_y = x, y
 
