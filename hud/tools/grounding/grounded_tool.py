@@ -285,8 +285,8 @@ class GroundedComputerTool:
                 computer_args: dict[str, Any] = {
                     "action": "drag",
                     "path": [
-                        {"x": start_coords[0], "y": start_coords[1]},
-                        {"x": end_coords[0], "y": end_coords[1]},
+                        (start_coords[0], start_coords[1]),
+                        (end_coords[0], end_coords[1]),
                     ],
                 }
                 if button:
