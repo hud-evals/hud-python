@@ -16,7 +16,7 @@ class ResponseAgent:
     based on the agent's final response message.
     """
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(self, api_key: str | None = None, model: str = "gpt-4o") -> None:
         self.api_key = api_key or settings.openai_api_key or os.environ.get("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError(
@@ -24,6 +24,7 @@ class ResponseAgent:
             )
 
         self.client = AsyncOpenAI(api_key=self.api_key)
+        self.model = model
 
         self.system_prompt = """
         You are an assistant that helps determine the appropriate response to an agent's message.
@@ -54,7 +55,7 @@ class ResponseAgent:
         """
         try:
             response = await self.client.chat.completions.create(
-                model="gpt-5-nano",
+                model=self.model,
                 messages=[
                     {"role": "system", "content": self.system_prompt},
                     {
