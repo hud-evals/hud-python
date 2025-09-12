@@ -47,6 +47,11 @@ from hud.datasets import Task, run_dataset, run_dataset_parallel, run_dataset_pa
 
 logger = logging.getLogger(__name__)
 
+# Uncomment to enable logging
+# logging.basicConfig(
+#     level=logging.INFO, format="%(asctime)s - %(name)s - %(message)s", datefmt="%H:%M:%S"
+# )
+
 # ---------------------------------------------------------------------------
 # Agent factory helpers
 # ---------------------------------------------------------------------------
@@ -93,6 +98,10 @@ async def run_single_task(
     max_steps: int = 10,
 ) -> None:
     """Load *one* task from *dataset_name* and execute it."""
+
+    # Enable agent step logging for single task mode
+    logging.getLogger("hud.agents").setLevel(logging.INFO)
+    logging.getLogger("hud.agents.base").setLevel(logging.INFO)
 
     print("📊 Loading dataset…")
     dataset = load_dataset(dataset_name, split="train")
