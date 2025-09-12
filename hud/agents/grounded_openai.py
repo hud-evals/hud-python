@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, ClassVar
 
 from hud import instrument
 from hud.tools.grounding import GroundedComputerTool, Grounder, GrounderConfig
@@ -25,6 +25,8 @@ class GroundedOpenAIChatAgent(GenericOpenAIChatAgent):
     - Planning model (GPT-4o etc) focuses on high-level reasoning
     - Grounding model (Qwen2-VL etc) handles visual element detection
     """
+
+    metadata: ClassVar[dict[str, Any]] = {}
 
     def __init__(
         self,

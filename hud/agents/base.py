@@ -94,8 +94,6 @@ class MCPAgent(ABC):
         self.model_name = model_name
         self.design = HUDDesign(logger=logger)
 
-        self.metadata = {}
-
         # Set verbose mode if requested
         if verbose:
             self.design.set_verbose(True)

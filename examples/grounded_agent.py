@@ -51,7 +51,6 @@ async def main():
             openai_client=openai_client,
             model_name="gpt-4o-mini",  # Planning model
         )
-        agent.metadata = {}
 
         try:
             # Create a task with MCP config

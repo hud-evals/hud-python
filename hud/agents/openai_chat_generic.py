@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, ClassVar
 
 import mcp.types as types
 
@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 class GenericOpenAIChatAgent(MCPAgent):
     """MCP-enabled agent that speaks the OpenAI *chat.completions* protocol."""
+
+    metadata: ClassVar[dict[str, Any]] = {}
 
     def __init__(
         self,

@@ -9,7 +9,6 @@ import re
 
 from openai import AsyncOpenAI
 from opentelemetry import trace
-from PIL import Image
 
 from hud import instrument
 from hud.tools.grounding.config import GrounderConfig  # noqa: TC001
@@ -45,6 +44,8 @@ class Grounder:
                      (processed_width, processed_height))
         """
         # Decode image
+        from PIL import Image
+
         image_bytes = base64.b64decode(image_b64)
         img = Image.open(io.BytesIO(image_bytes))
         original_size = (img.width, img.height)

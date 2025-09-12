@@ -116,6 +116,7 @@ agent = [
     # Data and evaluation
     "datasets>=2.14.0",
     "numpy>=1.24.0",
+    "pillow>=11.1.0",
     # Jupyter support
     "ipykernel",
     "ipython <9",

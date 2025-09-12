@@ -136,8 +136,6 @@ async def run_example(mode: Literal["text", "browser"], target: int) -> None:
         system_prompt=system_prompt,
     )
 
-    agent.metadata = {}
-
     title = "OpenAI 2048 Game (Browser)" if mode == "browser" else "OpenAI 2048 Game (Text)"
     with hud.job(title, metadata={"model": model_name, "mode": mode}) as job:
         print("🎮 Starting 2048 game with OpenAI-compatible agent...")
