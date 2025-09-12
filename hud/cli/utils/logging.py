@@ -15,18 +15,18 @@ if sys.platform == "win32":
 
 
 class Colors:
-    """ANSI color codes for terminal output."""
+    """ANSI color codes for terminal output - optimized for both light and dark modes."""
 
-    HEADER = "\033[95m"
-    BLUE = "\033[94m"
-    CYAN = "\033[96m"
-    GREEN = "\033[92m"
-    YELLOW = "\033[93m"
-    GOLD = "\033[33m"
-    RED = "\033[91m"
-    GRAY = "\033[90m"
-    ENDC = "\033[0m"
-    BOLD = "\033[1m"
+    HEADER = "\033[95m"  # Light magenta
+    BLUE = "\033[94m"    # Light blue
+    CYAN = "\033[96m"    # Light cyan
+    GREEN = "\033[92m"   # Light green
+    YELLOW = "\033[93m"  # Light yellow
+    GOLD = "\033[33m"    # Gold/orange
+    RED = "\033[91m"     # Light red 
+    GRAY = "\033[37m"    # Light gray
+    ENDC = "\033[0m"     # Reset
+    BOLD = "\033[1m"     # Bold
 
 
 class CaptureLogger:

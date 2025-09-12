@@ -87,7 +87,7 @@ def display_interactive(analysis: dict) -> None:
     # Server metadata
     hud_console.section_title("📊 Environment Overview")
     meta_table = Table(show_header=False, box=None)
-    meta_table.add_column("Property", style="dim")
+    meta_table.add_column("Property", style="bright_black")
     meta_table.add_column("Value")
 
     # Check if this is a live analysis (has metadata) or metadata-only analysis
@@ -127,18 +127,18 @@ def display_interactive(analysis: dict) -> None:
 
     # Tools
     hud_console.section_title("🔧 Available Tools")
-    tools_tree = Tree("Tools")
+    tools_tree = Tree("[bold bright_white]Tools[/bold bright_white]")
 
     # Check if we have hub_tools info (live analysis) or not (metadata-only)
     if "hub_tools" in analysis:
         # Live analysis format - separate regular and hub tools
         # Regular tools
-        regular_tools = tools_tree.add("Regular Tools")
+        regular_tools = tools_tree.add("[bright_white]Regular Tools[/bright_white]")
         for tool in analysis["tools"]:
             if tool["name"] not in analysis["hub_tools"]:
-                tool_node = regular_tools.add(f"[default]{tool['name']}[/default]")
+                tool_node = regular_tools.add(f"[bright_white]{tool['name']}[/bright_white]")
                 if tool["description"]:
-                    tool_node.add(f"[dim]{tool['description']}[/dim]")
+                    tool_node.add(f"[bright_black]{tool['description']}[/bright_black]")
 
                 # Show input schema if verbose
                 if analysis.get("verbose") and tool.get("input_schema"):
@@ -148,17 +148,17 @@ def display_interactive(analysis: dict) -> None:
 
         # Hub tools
         if analysis["hub_tools"]:
-            hub_tools = tools_tree.add("Hub Tools")
+            hub_tools = tools_tree.add("[bright_white]Hub Tools[/bright_white]")
             for hub_name, functions in analysis["hub_tools"].items():
-                hub_node = hub_tools.add(f"[yellow]{hub_name}[/yellow]")
+                hub_node = hub_tools.add(f"[rgb(181,137,0)]{hub_name}[/rgb(181,137,0)]")
                 for func in functions:
-                    hub_node.add(f"[default]{func}[/default]")
+                    hub_node.add(f"[bright_white]{func}[/bright_white]")
     else:
         # Metadata-only format - just list all tools
         for tool in analysis["tools"]:
-            tool_node = tools_tree.add(f"[default]{tool['name']}[/default]")
+            tool_node = tools_tree.add(f"[bright_white]{tool['name']}[/bright_white]")
             if tool.get("description"):
-                tool_node.add(f"[dim]{tool['description']}[/dim]")
+                tool_node.add(f"[bright_black]{tool['description']}[/bright_black]")
 
             # Show input schema if verbose
             if tool.get("inputSchema"):
@@ -172,9 +172,9 @@ def display_interactive(analysis: dict) -> None:
     if analysis["resources"]:
         hud_console.section_title("📚 Available Resources")
         resources_table = Table()
-        resources_table.add_column("URI", style="default")
-        resources_table.add_column("Name", style="white")
-        resources_table.add_column("Type", style="dim")
+        resources_table.add_column("URI", style="bright_white")
+        resources_table.add_column("Name", style="bright_white")
+        resources_table.add_column("Type", style="bright_black")
 
         for resource in analysis["resources"][:10]:
             resources_table.add_row(
@@ -184,7 +184,7 @@ def display_interactive(analysis: dict) -> None:
         console.print(resources_table)
 
         if len(analysis["resources"]) > 10:
-            console.print(f"[dim]... and {len(analysis['resources']) - 10} more resources[/dim]")
+            console.print(f"[bright_black]... and {len(analysis['resources']) - 10} more resources[/bright_black]")
 
     # Telemetry (only for live analysis)
     if analysis.get("telemetry"):
