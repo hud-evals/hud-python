@@ -11,7 +11,7 @@ import requests
 import typer
 import yaml
 
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
 
 def _get_response_text(response: requests.Response) -> str:
@@ -123,8 +123,8 @@ def push_environment(
     verbose: bool = False,
 ) -> None:
     """Push HUD environment to registry."""
-    design = HUDDesign()
-    design.header("HUD Environment Push")
+    hud_console = HUDConsole()
+    hud_console.header("HUD Environment Push")
 
     # Import settings lazily after any environment setup
     from hud.settings import settings
@@ -134,19 +134,19 @@ def push_environment(
     lock_path = env_dir / "hud.lock.yaml"
 
     if not lock_path.exists():
-        design.error(f"No hud.lock.yaml found in {directory}")
-        design.info("Run 'hud build' first to generate a lock file")
+        hud_console.error(f"No hud.lock.yaml found in {directory}")
+        hud_console.info("Run 'hud build' first to generate a lock file")
         raise typer.Exit(1)
 
     # Check for API key first
     if not settings.api_key:
-        design.error("No HUD API key found")
-        design.warning("A HUD API key is required to push environments.")
-        design.info("\nTo get started:")
-        design.info("1. Get your API key at: https://hud.so/settings")
-        design.command_example("export HUD_API_KEY=your-key-here", "Set your API key")
-        design.command_example("hud push", "Try again")
-        design.info("")
+        hud_console.error("No HUD API key found")
+        hud_console.warning("A HUD API key is required to push environments.")
+        hud_console.info("\nTo get started:")
+        hud_console.info("1. Get your API key at: https://hud.so/settings")
+        hud_console.command_example("export HUD_API_KEY=your-key-here", "Set your API key")
+        hud_console.command_example("hud push", "Try again")
+        hud_console.info("")
         raise typer.Exit(1)
 
     # Load lock file
@@ -184,24 +184,24 @@ def push_environment(
             # Use provided tag, or internal version, or current tag as fallback
             if tag:
                 final_tag = tag
-                design.info(f"Using specified tag: {tag}")
+                hud_console.info(f"Using specified tag: {tag}")
             elif internal_version:
                 final_tag = internal_version
-                design.info(f"Using internal version from lock file: {internal_version}")
+                hud_console.info(f"Using internal version from lock file: {internal_version}")
             else:
                 final_tag = current_tag
-                design.info(f"Using current tag: {current_tag}")
+                hud_console.info(f"Using current tag: {current_tag}")
 
             # Suggest a registry image
             image = f"{username}/{base_name}:{final_tag}"
-            design.info(f"Auto-detected Docker username: {username}")
-            design.info(f"Will push to: {image}")
+            hud_console.info(f"Auto-detected Docker username: {username}")
+            hud_console.info(f"Will push to: {image}")
 
             if not yes and not typer.confirm(f"\nPush to {image}?"):
-                design.info("Aborted.")
+                hud_console.info("Aborted.")
                 raise typer.Exit(0)
         else:
-            design.error(
+            hud_console.error(
                 "Not logged in to Docker Hub. Please specify --image or run 'docker login'"
             )
             raise typer.Exit(1)
@@ -215,11 +215,11 @@ def push_environment(
             existing_tag = image.split(":")[-1]
             if existing_tag != final_tag:
                 if tag:
-                    design.warning(
+                    hud_console.warning(
                         f"Image already has tag '{existing_tag}', overriding with '{final_tag}'"
                     )
                 else:
-                    design.info(
+                    hud_console.info(
                         f"Image has tag '{existing_tag}', but using internal version '{final_tag}'"
                     )
                 image = image.rsplit(":", 1)[0] + f":{final_tag}"
@@ -229,10 +229,10 @@ def push_environment(
             image = f"{image}:{final_tag}"
 
         if tag:
-            design.info(f"Using specified tag: {tag}")
+            hud_console.info(f"Using specified tag: {tag}")
         else:
-            design.info(f"Using internal version from lock file: {internal_version}")
-        design.info(f"Will push to: {image}")
+            hud_console.info(f"Using internal version from lock file: {internal_version}")
+        hud_console.info(f"Will push to: {image}")
 
     # Verify local image exists
     # Extract the tag part (before @sha256:...) for Docker operations
@@ -250,7 +250,7 @@ def push_environment(
         try:
             subprocess.run(["docker", "inspect", version_tag], capture_output=True, check=True)  # noqa: S603, S607
             image_to_push = version_tag
-            design.info(f"Found version-tagged image: {version_tag}")
+            hud_console.info(f"Found version-tagged image: {version_tag}")
         except subprocess.CalledProcessError:
             pass
 
@@ -259,10 +259,10 @@ def push_environment(
             subprocess.run(["docker", "inspect", local_tag], capture_output=True, check=True)  # noqa: S603, S607
             image_to_push = local_tag
         except subprocess.CalledProcessError:
-            design.error(f"Local image not found: {local_tag}")
+            hud_console.error(f"Local image not found: {local_tag}")
             if version_tag:
-                design.error(f"Also tried: {version_tag}")
-            design.info("Run 'hud build' first to create the image")
+                hud_console.error(f"Also tried: {version_tag}")
+            hud_console.info("Run 'hud build' first to create the image")
             raise typer.Exit(1)  # noqa: B904
 
     # Check if local image has the expected label
@@ -273,16 +273,16 @@ def push_environment(
     # Skip hash verification - the lock file may have been updated with digest after build
     if verbose:
         if expected_label:
-            design.info(f"Image label: {expected_label[:12]}...")
+            hud_console.info(f"Image label: {expected_label[:12]}...")
         if version_label:
-            design.info(f"Version label: {version_label}")
+            hud_console.info(f"Version label: {version_label}")
 
     # Tag the image for push
-    design.progress_message(f"Tagging {image_to_push} as {image}")
+    hud_console.progress_message(f"Tagging {image_to_push} as {image}")
     subprocess.run(["docker", "tag", image_to_push, image], check=True)  # noqa: S603, S607
 
     # Push the image
-    design.progress_message(f"Pushing {image} to registry...")
+    hud_console.progress_message(f"Pushing {image} to registry...")
 
     # Show push output
     process = subprocess.Popen(  # noqa: S603
@@ -295,12 +295,12 @@ def push_environment(
     )
 
     for line in process.stdout or []:
-        design.info(line.rstrip())
+        hud_console.info(line.rstrip())
 
     process.wait()
 
     if process.returncode != 0:
-        design.error("Push failed")
+        hud_console.error("Push failed")
         raise typer.Exit(1)
 
     # Get the digest of the pushed image
@@ -316,11 +316,11 @@ def push_environment(
         pushed_digest = image
 
     # Success!
-    design.success("Push complete!")
+    hud_console.success("Push complete!")
 
     # Show the final image reference
-    design.section_title("Pushed Image")
-    design.status_item("Registry", pushed_digest, primary=True)
+    hud_console.section_title("Pushed Image")
+    hud_console.status_item("Registry", pushed_digest, primary=True)
 
     # Update the lock file with registry information
     lock_data["image"] = pushed_digest
@@ -338,7 +338,7 @@ def push_environment(
     with open(lock_path, "w") as f:
         yaml.dump(lock_data, f, default_flow_style=False, sort_keys=False)
 
-    design.success("Updated lock file with registry image")
+    hud_console.success("Updated lock file with registry image")
 
     # Upload lock file to HUD registry
     try:
@@ -376,19 +376,19 @@ def push_environment(
 
         # Validate the image format
         if not name_with_tag:
-            design.warning("Could not determine image name for registry upload")
+            hud_console.warning("Could not determine image name for registry upload")
             raise typer.Exit(0)
 
         # For HUD registry, we need org/name format
         if "/" not in name_with_tag:
-            design.warning("Image name must include organization/namespace for HUD registry")
-            design.info(f"Current format: {name_with_tag}")
-            design.info("Expected format: org/name:tag (e.g., hudpython/myenv:v1.0)")
-            design.info("\nYour Docker push succeeded - share hud.lock.yaml manually")
+            hud_console.warning("Image name must include organization/namespace for HUD registry")
+            hud_console.info(f"Current format: {name_with_tag}")
+            hud_console.info("Expected format: org/name:tag (e.g., hudpython/myenv:v1.0)")
+            hud_console.info("\nYour Docker push succeeded - share hud.lock.yaml manually")
             raise typer.Exit(0)
 
         # Upload to HUD registry
-        design.progress_message("Uploading metadata to HUD registry...")
+        hud_console.progress_message("Uploading metadata to HUD registry...")
 
         # URL-encode the path segments to handle special characters in tags
         url_safe_path = "/".join(quote(part, safe="") for part in name_with_tag.split("/"))
@@ -405,48 +405,48 @@ def push_environment(
         response = requests.post(registry_url, json=payload, headers=headers, timeout=10)
 
         if response.status_code in [200, 201]:
-            design.success("Metadata uploaded to HUD registry")
-            design.info("Others can now pull with:")
-            design.command_example(f"hud pull {name_with_tag}")
-            design.info("")
+            hud_console.success("Metadata uploaded to HUD registry")
+            hud_console.info("Others can now pull with:")
+            hud_console.command_example(f"hud pull {name_with_tag}")
+            hud_console.info("")
         elif response.status_code == 401:
-            design.error("Authentication failed")
-            design.info("Check your HUD_API_KEY is valid")
-            design.info("Get a new key at: https://hud.so/settings")
+            hud_console.error("Authentication failed")
+            hud_console.info("Check your HUD_API_KEY is valid")
+            hud_console.info("Get a new key at: https://hud.so/settings")
         elif response.status_code == 403:
-            design.error("Permission denied")
-            design.info("You may not have access to push to this namespace")
+            hud_console.error("Permission denied")
+            hud_console.info("You may not have access to push to this namespace")
         elif response.status_code == 409:
-            design.warning("This version already exists in the registry")
-            design.info("Consider using a different tag if you want to update")
+            hud_console.warning("This version already exists in the registry")
+            hud_console.info("Consider using a different tag if you want to update")
         else:
-            design.warning(f"Could not upload to registry: {response.status_code}")
-            design.warning(_get_response_text(response))
-            design.info("Share hud.lock.yaml manually\n")
+            hud_console.warning(f"Could not upload to registry: {response.status_code}")
+            hud_console.warning(_get_response_text(response))
+            hud_console.info("Share hud.lock.yaml manually\n")
     except requests.exceptions.Timeout:
-        design.warning("Registry upload timed out")
-        design.info("The registry might be slow or unavailable")
-        design.info("Your Docker push succeeded - share hud.lock.yaml manually")
+        hud_console.warning("Registry upload timed out")
+        hud_console.info("The registry might be slow or unavailable")
+        hud_console.info("Your Docker push succeeded - share hud.lock.yaml manually")
     except requests.exceptions.ConnectionError:
-        design.warning("Could not connect to HUD registry")
-        design.info("Check your internet connection")
-        design.info("Your Docker push succeeded - share hud.lock.yaml manually")
+        hud_console.warning("Could not connect to HUD registry")
+        hud_console.info("Check your internet connection")
+        hud_console.info("Your Docker push succeeded - share hud.lock.yaml manually")
     except Exception as e:
-        design.warning(f"Registry upload failed: {e}")
-        design.info("Share hud.lock.yaml manually")
+        hud_console.warning(f"Registry upload failed: {e}")
+        hud_console.info("Share hud.lock.yaml manually")
 
     # Show usage examples
-    design.section_title("What's Next?")
+    hud_console.section_title("What's Next?")
 
-    design.info("Test locally:")
-    design.command_example(f"hud run {image}")
-    design.info("")
-    design.info("Share environment:")
-    design.info("  Share the updated hud.lock.yaml for others to reproduce your exact environment")
+    hud_console.info("Test locally:")
+    hud_console.command_example(f"hud run {image}")
+    hud_console.info("")
+    hud_console.info("Share environment:")
+    hud_console.info("  Share the updated hud.lock.yaml for others to reproduce your exact environment")
 
     # TODO: Upload lock file to HUD registry
     if sign:
-        design.warning("Signing not yet implemented")
+        hud_console.warning("Signing not yet implemented")
 
 
 def push_command(

@@ -110,24 +110,24 @@ class TestGetDockerImageLabels:
 class TestPushEnvironment:
     """Test the main push_environment function."""
 
-    @mock.patch("hud.cli.push.HUDDesign")
-    def test_push_no_lock_file(self, mock_design_class, tmp_path):
+    @mock.patch("hud.cli.push.HUDConsole")
+    def test_push_no_lock_file(self, mock_hud_console_class, tmp_path):
         """Test pushing when no lock file exists."""
-        mock_design = mock.Mock()
-        mock_design_class.return_value = mock_design
+        mock_hud_console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
 
         with pytest.raises(typer.Exit) as exc_info:
             push_environment(str(tmp_path))
 
         assert exc_info.value.exit_code == 1
-        mock_design.error.assert_called()
+        mock_hud_console.error.assert_called()
 
-    @mock.patch("hud.cli.push.HUDDesign")
+    @mock.patch("hud.cli.push.HUDConsole")
     @mock.patch("hud.settings.settings")
-    def test_push_no_api_key(self, mock_settings, mock_design_class, tmp_path):
+    def test_push_no_api_key(self, mock_settings, mock_hud_console_class, tmp_path):
         """Test pushing without API key."""
-        mock_design = mock.Mock()
-        mock_design_class.return_value = mock_design
+        mock_hud_console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
         mock_settings.api_key = None
 
         # Create lock file
@@ -144,10 +144,10 @@ class TestPushEnvironment:
     @mock.patch("subprocess.run")
     @mock.patch("hud.cli.push.get_docker_username")
     @mock.patch("hud.settings.settings")
-    @mock.patch("hud.cli.push.HUDDesign")
+    @mock.patch("hud.cli.push.HUDConsole")
     def test_push_auto_detect_username(
         self,
-        mock_design_class,
+        mock_hud_console_class,
         mock_settings,
         mock_get_username,
         mock_run,
@@ -157,8 +157,8 @@ class TestPushEnvironment:
     ):
         """Test auto-detecting Docker username and pushing."""
         # Setup mocks
-        mock_design = mock.Mock()
-        mock_design_class.return_value = mock_design
+        mock_hud_console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
         mock_settings.api_key = "test-key"
         mock_settings.hud_telemetry_url = "https://api.hud.test"
         mock_get_username.return_value = "testuser"
@@ -206,11 +206,11 @@ class TestPushEnvironment:
 
     @mock.patch("subprocess.run")
     @mock.patch("hud.settings.settings")
-    @mock.patch("hud.cli.push.HUDDesign")
-    def test_push_explicit_image(self, mock_design_class, mock_settings, mock_run, tmp_path):
+    @mock.patch("hud.cli.push.HUDConsole")
+    def test_push_explicit_image(self, mock_hud_console_class, mock_settings, mock_run, tmp_path):
         """Test pushing with explicit image name."""
-        mock_design = mock.Mock()
-        mock_design_class.return_value = mock_design
+        mock_hud_console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
         mock_settings.api_key = "test-key"
 
         # Create lock file
@@ -227,11 +227,11 @@ class TestPushEnvironment:
     @mock.patch("subprocess.Popen")
     @mock.patch("subprocess.run")
     @mock.patch("hud.settings.settings")
-    @mock.patch("hud.cli.push.HUDDesign")
-    def test_push_with_tag(self, mock_design_class, mock_settings, mock_run, mock_popen, tmp_path):
+    @mock.patch("hud.cli.push.HUDConsole")
+    def test_push_with_tag(self, mock_hud_console_class, mock_settings, mock_run, mock_popen, tmp_path):
         """Test pushing with explicit tag."""
-        mock_design = mock.Mock()
-        mock_design_class.return_value = mock_design
+        mock_hud_console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
         mock_settings.api_key = "test-key"
 
         # Create lock file
@@ -269,11 +269,11 @@ class TestPushEnvironment:
         assert "user/test:v2.0" in tag_call[0][0][0]
 
     @mock.patch("subprocess.Popen")
-    @mock.patch("hud.cli.push.HUDDesign")
-    def test_push_docker_failure(self, mock_design_class, mock_popen):
+    @mock.patch("hud.cli.push.HUDConsole")
+    def test_push_docker_failure(self, mock_hud_console_class, mock_popen):
         """Test handling Docker push failure."""
-        mock_design = mock.Mock()
-        mock_design_class.return_value = mock_design
+        mock_hud_console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
 
         # Mock docker push failure
         mock_process = mock.Mock()
@@ -293,13 +293,13 @@ class TestPushEnvironment:
     @mock.patch("hud.cli.push.get_docker_image_labels")
     @mock.patch("subprocess.run")
     @mock.patch("hud.settings.settings")
-    @mock.patch("hud.cli.push.HUDDesign")
+    @mock.patch("hud.cli.push.HUDConsole")
     def test_push_with_labels(
-        self, mock_design_class, mock_settings, mock_run, mock_get_labels, tmp_path
+        self, mock_hud_console_class, mock_settings, mock_run, mock_get_labels, tmp_path
     ):
         """Test pushing with image labels."""
-        mock_design = mock.Mock()
-        mock_design_class.return_value = mock_design
+        mock_hud_console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
         mock_settings.api_key = "test-key"
 
         # Create lock file

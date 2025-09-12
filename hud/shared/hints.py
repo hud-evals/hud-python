@@ -144,9 +144,9 @@ def render_hints(hints: Iterable[Hint] | None, *, design: Any | None = None) -> 
 
     try:
         if design is None:
-            from hud.utils.design import design as default_design  # lazy import
+            from hud.utils.hud_console import hud_console as default_design  # lazy import
 
-            design = default_design
+            hud_console = default_design
     except Exception:
         # If design is unavailable (non-CLI contexts), silently skip rendering
         return
@@ -155,23 +155,23 @@ def render_hints(hints: Iterable[Hint] | None, *, design: Any | None = None) -> 
         try:
             # Compact rendering - skip title if same as message
             if hint.title and hint.title != hint.message:
-                design.warning(f"{hint.title}: {hint.message}")
+                hud_console.warning(f"{hint.title}: {hint.message}")
             else:
-                design.warning(hint.message)
+                hud_console.warning(hint.message)
 
             # Tips as bullet points
             if hint.tips:
                 for tip in hint.tips:
-                    design.info(f"  • {tip}")
+                    hud_console.info(f"  • {tip}")
 
             # Only show command examples if provided
             if hint.command_examples:
                 for cmd in hint.command_examples:
-                    design.command_example(cmd)
+                    hud_console.command_example(cmd)
 
             # Only show docs URL if provided
             if hint.docs_url:
-                design.link(hint.docs_url)
+                hud_console.link(hint.docs_url)
         except Exception:
             logger.warning("Failed to render hint: %s", hint)
             continue

@@ -251,7 +251,7 @@ class TestDisplayFunctions:
 
             # Check console was called multiple times
             assert mock_console.print.call_count > 0
-            # The design.section_title uses its own console, not the patched one
+            # The hud_console.section_title uses its own console, not the patched one
             # Just verify the function ran without errors
 
     def test_display_markdown_basic(self) -> None:

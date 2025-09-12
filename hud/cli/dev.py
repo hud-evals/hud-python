@@ -12,7 +12,7 @@ from typing import Any
 import click
 from fastmcp import FastMCP
 
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
 from .utils.docker import get_docker_cmd, inject_supervisor
 from .utils.environment import (
@@ -22,8 +22,8 @@ from .utils.environment import (
     update_pyproject_toml,
 )
 
-# Global design instance
-design = HUDDesign()
+# Global hud_console instance
+hud_console = HUDConsole()
 
 
 def build_and_update(directory: str | Path, image_name: str, no_cache: bool = False) -> None:
@@ -47,7 +47,7 @@ def create_proxy_server(
     # Get the original CMD from the image
     original_cmd = get_docker_cmd(image_name)
     if not original_cmd:
-        design.warning(f"Could not extract CMD from {image_name}, using default")
+        hud_console.warning(f"Could not extract CMD from {image_name}, using default")
         original_cmd = ["python", "-m", "hud_controller.server"]
 
     # Generate unique container name from image to avoid conflicts between multiple instances
@@ -81,7 +81,7 @@ def create_proxy_server(
 
     # Validate reload options
     if no_reload and full_reload:
-        design.warning("Cannot use --full-reload with --no-reload, ignoring --full-reload")
+        hud_console.warning("Cannot use --full-reload with --no-reload, ignoring --full-reload")
         full_reload = False
 
     if not no_reload and not full_reload:
@@ -109,30 +109,30 @@ def create_proxy_server(
     # Debug output - only if verbose
     if verbose:
         if not no_reload and not full_reload:
-            design.info("Mode: Hot-reload (server restart within container)")
-            design.info("Watching: /app/src for changes")
+            hud_console.info("Mode: Hot-reload (server restart within container)")
+            hud_console.info("Watching: /app/src for changes")
         elif full_reload:
-            design.info("Mode: Full reload (container restart on file changes)")
-            design.info("Note: Full container restart not yet implemented, using no-reload mode")
+            hud_console.info("Mode: Full reload (container restart on file changes)")
+            hud_console.info("Note: Full container restart not yet implemented, using no-reload mode")
         else:
-            design.info("Mode: No reload")
-            design.info("Container will run without hot-reload")
-        design.command_example(f"docker logs -f {container_name}", "View container logs")
+            hud_console.info("Mode: No reload")
+            hud_console.info("Container will run without hot-reload")
+        hud_console.command_example(f"docker logs -f {container_name}", "View container logs")
 
         # Show the full Docker command if there are environment variables
         if docker_args and any(arg == "-e" or arg.startswith("--env") for arg in docker_args):
-            design.info("")
-            design.info("Docker command with environment variables:")
-            design.info(" ".join(docker_cmd))
+            hud_console.info("")
+            hud_console.info("Docker command with environment variables:")
+            hud_console.info(" ".join(docker_cmd))
 
     # Create the HTTP proxy server using config
     try:
         proxy = FastMCP.as_proxy(config, name=f"HUD Dev Proxy - {image_name}")
     except Exception as e:
-        design.error(f"Failed to create proxy server: {e}")
-        design.info("")
-        design.info("💡 Tip: Run the following command to debug the container:")
-        design.info(f"   hud debug {image_name}")
+        hud_console.error(f"Failed to create proxy server: {e}")
+        hud_console.info("")
+        hud_console.info("💡 Tip: Run the following command to debug the container:")
+        hud_console.info(f"   hud debug {image_name}")
         raise
 
     return proxy
@@ -228,7 +228,7 @@ async def start_mcp_proxy(
     # Now check for src directory
     src_path = Path(directory) / "src"
     if not src_path.exists():
-        design.error(f"Source directory not found: {src_path}")
+        hud_console.error(f"Source directory not found: {src_path}")
         raise click.Abort
 
     # Extract container name from the proxy configuration (must match create_proxy_server naming)
@@ -252,16 +252,16 @@ async def start_mcp_proxy(
 
     if transport == "stdio":
         if verbose:
-            design.info("Starting stdio proxy (each connection gets its own container)")
+            hud_console.info("Starting stdio proxy (each connection gets its own container)")
     else:
         # Find available port for HTTP
         actual_port = find_free_port(port)
         if actual_port is None:
-            design.error(f"No available ports found starting from {port}")
+            hud_console.error(f"No available ports found starting from {port}")
             raise click.Abort
 
         if actual_port != port and verbose:
-            design.warning(f"Port {port} in use, using port {actual_port} instead")
+            hud_console.warning(f"Port {port} in use, using port {actual_port} instead")
 
         # Launch MCP Inspector if requested
         if inspector:
@@ -284,8 +284,8 @@ async def start_mcp_proxy(
                     )
 
                     # Print inspector info cleanly
-                    design.section_title("MCP Inspector")
-                    design.link(inspector_url)
+                    hud_console.section_title("MCP Inspector")
+                    hud_console.link(inspector_url)
 
                     # Set environment to disable auth (for development only)
                     env = os.environ.copy()
@@ -311,7 +311,7 @@ async def start_mcp_proxy(
 
                 except (FileNotFoundError, Exception):
                     # Silently fail - inspector is optional
-                    design.error("Failed to launch inspector")
+                    hud_console.error("Failed to launch inspector")
 
             # Launch inspector asynchronously so it doesn't block
             asyncio.create_task(launch_inspector())  # noqa: RUF006
@@ -319,7 +319,7 @@ async def start_mcp_proxy(
         # Launch interactive mode if requested
         if interactive:
             if transport != "http":
-                design.warning("Interactive mode only works with HTTP transport")
+                hud_console.warning("Interactive mode only works with HTTP transport")
             else:
                 server_url = f"http://localhost:{actual_port}/mcp"
 
@@ -332,9 +332,9 @@ async def start_mcp_proxy(
                     time.sleep(3)
 
                     try:
-                        design.section_title("Interactive Mode")
-                        design.info("Starting interactive testing mode...")
-                        design.info("Press Ctrl+C in the interactive session to exit")
+                        hud_console.section_title("Interactive Mode")
+                        hud_console.info("Starting interactive testing mode...")
+                        hud_console.info("Press Ctrl+C in the interactive session to exit")
 
                         # Import and run interactive mode in a new event loop
                         from .utils.interactive import run_interactive_mode
@@ -350,7 +350,7 @@ async def start_mcp_proxy(
                     except Exception as e:
                         # Log error but don't crash the server
                         if verbose:
-                            design.error(f"Interactive mode error: {e}")
+                            hud_console.error(f"Interactive mode error: {e}")
 
                 # Launch interactive mode in a separate thread
                 import threading
@@ -365,12 +365,12 @@ async def start_mcp_proxy(
         Note: The Docker container is created on-demand when the first client connects.
         Any environment variables passed via -e flags are included when the container starts.
         """
-        log_design = design
+        log_hud_console = design
 
         # Always show waiting message
-        log_design.info("")  # Empty line for spacing
-        log_design.progress_message("⏳ Waiting for first client connection to start container...")
-        log_design.info(f"📋 Looking for container: {container_name}")  # noqa: G004
+        log_hud_console.info("")  # Empty line for spacing
+        log_hud_console.progress_message("⏳ Waiting for first client connection to start container...")
+        log_hud_console.info(f"📋 Looking for container: {container_name}")  # noqa: G004
 
         # Keep trying to stream logs - container is created on demand
         has_shown_started = False
@@ -395,7 +395,7 @@ async def start_mcp_proxy(
 
             # Container exists! Show success if first time
             if not has_shown_started:
-                log_design.success("Container started! Streaming logs...")
+                log_hud_console.success("Container started! Streaming logs...")
                 has_shown_started = True
 
             # Now stream the logs
@@ -422,7 +422,7 @@ async def start_mcp_proxy(
                         # Show all logs with gold formatting like hud debug
                         # Format all logs in gold/dim style like hud debug's stderr
                         # Use stdout console to avoid stderr redirection when not verbose
-                        log_design._stdout_console.print(
+                        log_hud_console_stdout_console.print(
                             f"[rgb(192,150,12)]■[/rgb(192,150,12)] {decoded_line}", highlight=False
                         )
 
@@ -435,11 +435,11 @@ async def start_mcp_proxy(
 
             except Exception as e:
                 # Some unexpected error - show it so we can debug
-                log_design.warning(f"Failed to stream Docker logs: {e}")  # noqa: G004
+                log_hud_console.warning(f"Failed to stream Docker logs: {e}")  # noqa: G004
                 if verbose:
                     import traceback
 
-                    log_design.warning(f"Traceback: {traceback.format_exc()}")  # noqa: G004
+                    log_hud_console.warning(f"Traceback: {traceback.format_exc()}")  # noqa: G004
                 await asyncio.sleep(1)
 
     # Import contextlib here so it's available in the finally block
@@ -456,7 +456,7 @@ async def start_mcp_proxy(
 
     def signal_handler(signum: int, frame: Any) -> None:
         """Handle signals by setting shutdown event."""
-        design.info(f"\n📡 Received signal {signum}, shutting down gracefully...")
+        hud_console.info(f"\n📡 Received signal {signum}, shutting down gracefully...")
         shutdown_event.set()
 
     # Register signal handlers - SIGINT is available on all platforms
@@ -524,7 +524,7 @@ async def start_mcp_proxy(
             stdout, _ = await check_result.communicate()
 
             if container_name in stdout.decode():
-                design.info("🛑 Stopping container gracefully...")
+                hud_console.info("🛑 Stopping container gracefully...")
                 # Stop with 30 second timeout before SIGKILL
                 stop_result = await asyncio.create_subprocess_exec(
                     "docker",
@@ -535,10 +535,10 @@ async def start_mcp_proxy(
                     stderr=asyncio.subprocess.DEVNULL,
                 )
                 await stop_result.communicate()
-                design.success("✅ Container stopped successfully")
+                hud_console.success("✅ Container stopped successfully")
                 container_stopped = True
         except Exception as e:
-            design.warning(f"Failed to stop container: {e}")
+            hud_console.warning(f"Failed to stop container: {e}")
 
     try:
         # Start Docker logs streaming if enabled
@@ -578,36 +578,36 @@ async def start_mcp_proxy(
                     show_banner=False,
                 )
     except (ConnectionError, OSError) as e:
-        design.error(f"Failed to connect to Docker container: {e}")
-        design.info("")
-        design.info("💡 Tip: Run the following command to debug the container:")
-        design.info(f"   hud debug {image_name}")
-        design.info("")
-        design.info("Common issues:")
-        design.info("  • Container failed to start or crashed immediately")
-        design.info("  • Server initialization failed")
-        design.info("  • Port binding conflicts")
+        hud_console.error(f"Failed to connect to Docker container: {e}")
+        hud_console.info("")
+        hud_console.info("💡 Tip: Run the following command to debug the container:")
+        hud_console.info(f"   hud debug {image_name}")
+        hud_console.info("")
+        hud_console.info("Common issues:")
+        hud_console.info("  • Container failed to start or crashed immediately")
+        hud_console.info("  • Server initialization failed")
+        hud_console.info("  • Port binding conflicts")
         raise
     except KeyboardInterrupt:
-        design.info("\n👋 Shutting down...")
+        hud_console.info("\n👋 Shutting down...")
 
         # Stop the container before showing next steps
         await stop_container()
 
         # Show next steps tutorial
         if not interactive:  # Only show if not in interactive mode
-            design.section_title("Next Steps")
-            design.info("🏗️  Ready to test with real agents? Run:")
-            design.info(f"    [cyan]hud build {directory}[/cyan]")
-            design.info("")
-            design.info("This will:")
-            design.info("  1. Build your environment image")
-            design.info("  2. Generate a hud.lock.yaml file")
-            design.info("  3. Prepare it for testing with agents")
-            design.info("")
-            design.info("Then you can:")
-            design.info("  • Test locally: [cyan]hud run <image>[/cyan]")
-            design.info("  • Push to registry: [cyan]hud push --image <registry/name>[/cyan]")
+            hud_console.section_title("Next Steps")
+            hud_console.info("🏗️  Ready to test with real agents? Run:")
+            hud_console.info(f"    [cyan]hud build {directory}[/cyan]")
+            hud_console.info("")
+            hud_console.info("This will:")
+            hud_console.info("  1. Build your environment image")
+            hud_console.info("  2. Generate a hud.lock.yaml file")
+            hud_console.info("  3. Prepare it for testing with agents")
+            hud_console.info("")
+            hud_console.info("Then you can:")
+            hud_console.info("  • Test locally: [cyan]hud run <image>[/cyan]")
+            hud_console.info("  • Push to registry: [cyan]hud push --image <registry/name>[/cyan]")
     except Exception as e:
         # Suppress the graceful shutdown error and other FastMCP/uvicorn internal errors
         error_msg = str(e)
@@ -619,7 +619,7 @@ async def start_mcp_proxy(
                 "Application shutdown complete",
             ]
         ):
-            design.error(f"Unexpected error: {e}")
+            hud_console.error(f"Unexpected error: {e}")
     finally:
         # Cancel log streaming task if it exists
         if log_task and not log_task.done():
@@ -663,7 +663,7 @@ def run_mcp_dev_server(
     """
     # Ensure directory exists
     if not Path(directory).exists():
-        design.error(f"Directory not found: {directory}")
+        hud_console.error(f"Directory not found: {directory}")
         raise click.Abort
 
     # No external dependencies needed for hot-reload anymore!
@@ -696,10 +696,10 @@ def run_mcp_dev_server(
 
         actual_port = find_free_port(port)
         if actual_port is None:
-            design.error(f"No available ports found starting from {port}")
+            hud_console.error(f"No available ports found starting from {port}")
             raise click.Abort
         if actual_port != port and verbose:
-            design.warning(f"Port {port} in use, using port {actual_port}")
+            hud_console.warning(f"Port {port} in use, using port {actual_port}")
 
     # Create config
     if transport == "stdio":
@@ -722,38 +722,38 @@ def run_mcp_dev_server(
     )
 
     # Show header with gold border
-    design.info("")  # Empty line before header
-    design.header("HUD Development Server")
+    hud_console.info("")  # Empty line before header
+    hud_console.header("HUD Development Server")
 
     # Always show the Docker image being used as the first thing after header
-    design.section_title("Docker Image")
+    hud_console.section_title("Docker Image")
     if source == "cache":
-        design.info(f"📦 {resolved_image}")
+        hud_console.info(f"📦 {resolved_image}")
     elif source == "auto":
-        design.info(f"🔧 {resolved_image} (auto-generated)")
+        hud_console.info(f"🔧 {resolved_image} (auto-generated)")
     elif source == "override":
-        design.info(f"🎯 {resolved_image} (specified)")
+        hud_console.info(f"🎯 {resolved_image} (specified)")
     else:
-        design.info(f"🐳 {resolved_image}")
+        hud_console.info(f"🐳 {resolved_image}")
 
-    design.progress_message(
+    hud_console.progress_message(
         f"❗ If any issues arise, run `hud debug {resolved_image}` to debug the container"
     )
 
     # Show environment variables if provided
     if docker_args and any(arg == "-e" or arg.startswith("--env") for arg in docker_args):
-        design.section_title("Environment Variables")
-        design.info("The following environment variables will be passed to the Docker container:")
+        hud_console.section_title("Environment Variables")
+        hud_console.info("The following environment variables will be passed to the Docker container:")
         i = 0
         while i < len(docker_args):
             if docker_args[i] == "-e" and i + 1 < len(docker_args):
-                design.info(f"  • {docker_args[i + 1]}")
+                hud_console.info(f"  • {docker_args[i + 1]}")
                 i += 2
             elif docker_args[i].startswith("--env="):
-                design.info(f"  • {docker_args[i][6:]}")
+                hud_console.info(f"  • {docker_args[i][6:]}")
                 i += 1
             elif docker_args[i] == "--env" and i + 1 < len(docker_args):
-                design.info(f"  • {docker_args[i + 1]}")
+                hud_console.info(f"  • {docker_args[i + 1]}")
                 i += 2
             else:
                 i += 1
@@ -761,35 +761,35 @@ def run_mcp_dev_server(
     # Show hints about inspector and interactive mode
     if transport == "http":
         if not inspector and not interactive:
-            design.progress_message("💡 Run with --inspector to launch MCP Inspector")
-            design.progress_message("🧪 Run with --interactive for interactive testing mode")
+            hud_console.progress_message("💡 Run with --inspector to launch MCP Inspector")
+            hud_console.progress_message("🧪 Run with --interactive for interactive testing mode")
         elif not inspector:
-            design.progress_message("💡 Run with --inspector to launch MCP Inspector")
+            hud_console.progress_message("💡 Run with --inspector to launch MCP Inspector")
         elif not interactive:
-            design.progress_message("🧪 Run with --interactive for interactive testing mode")
+            hud_console.progress_message("🧪 Run with --interactive for interactive testing mode")
 
     # Disable logs and hot-reload if interactive mode is enabled
     if interactive:
         if not no_logs:
-            design.warning("Docker logs disabled in interactive mode for better UI experience")
+            hud_console.warning("Docker logs disabled in interactive mode for better UI experience")
             no_logs = True
         if not no_reload:
-            design.warning("Hot-reload disabled in interactive mode to prevent output interference")
+            hud_console.warning("Hot-reload disabled in interactive mode to prevent output interference")
             no_reload = True
 
     # Show configuration as JSON (just the server config, not wrapped)
     full_config = {}
     full_config[server_name] = server_config
 
-    design.section_title("MCP Configuration (add this to any agent/client)")
-    design.json_config(json.dumps(full_config, indent=2))
+    hud_console.section_title("MCP Configuration (add this to any agent/client)")
+    hud_console.json_config(json.dumps(full_config, indent=2))
 
     # Show connection info
-    design.section_title(
+    hud_console.section_title(
         "Connect to Cursor (be careful with multiple windows as that may interfere with the proxy)"
     )
-    design.link(deeplink)
-    design.info("")  # Empty line
+    hud_console.link(deeplink)
+    hud_console.info("")  # Empty line
 
     # Start the proxy (pass original port, start_mcp_proxy will find actual port again)
     try:
@@ -809,10 +809,10 @@ def run_mcp_dev_server(
             )
         )
     except Exception as e:
-        design.error(f"Failed to start MCP server: {e}")
-        design.info("")
-        design.info("💡 Tip: Run the following command to debug the container:")
-        design.info(f"   hud debug {resolved_image}")
-        design.info("")
-        design.info("This will help identify connection issues or initialization failures.")
+        hud_console.error(f"Failed to start MCP server: {e}")
+        hud_console.info("")
+        hud_console.info("💡 Tip: Run the following command to debug the container:")
+        hud_console.info(f"   hud debug {resolved_image}")
+        hud_console.info("")
+        hud_console.info("This will help identify connection issues or initialization failures.")
         raise

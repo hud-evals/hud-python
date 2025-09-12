@@ -8,9 +8,9 @@ from typing import Any
 
 import yaml
 
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
-design = HUDDesign()
+hud_console = HUDConsole()
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ def read_lock_file() -> dict[str, Any]:
         with open(lock_file) as f:
             return yaml.safe_load(f) or {}
     except Exception as e:
-        design.warning(f"Could not read hud.lock.yaml: {e}")
+        hud_console.warning(f"Could not read hud.lock.yaml: {e}")
         return {}
 
 
@@ -38,7 +38,7 @@ def write_lock_file(data: dict[str, Any]) -> bool:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
         return True
     except Exception as e:
-        design.warning(f"Could not write hud.lock.yaml: {e}")
+        hud_console.warning(f"Could not write hud.lock.yaml: {e}")
         return False
 
 
@@ -109,26 +109,26 @@ def validate_dataset_name(name: str) -> bool:
         return False
 
     if "/" not in name:
-        design.error(f"Invalid dataset name: {name}")
-        design.info("Dataset name should be in format: org/dataset")
+        hud_console.error(f"Invalid dataset name: {name}")
+        hud_console.info("Dataset name should be in format: org/dataset")
         return False
 
     parts = name.split("/")
     if len(parts) != 2:
-        design.error(f"Invalid dataset name: {name}")
+        hud_console.error(f"Invalid dataset name: {name}")
         return False
 
     org, dataset = parts
     if not org or not dataset:
-        design.error(f"Invalid dataset name: {name}")
+        hud_console.error(f"Invalid dataset name: {name}")
         return False
 
     # Check for valid characters (alphanumeric, dash, underscore)
     import re
 
     if not re.match(r"^[a-zA-Z0-9_-]+$", org) or not re.match(r"^[a-zA-Z0-9_-]+$", dataset):
-        design.error(f"Invalid characters in dataset name: {name}")
-        design.info("Use only letters, numbers, dashes, and underscores")
+        hud_console.error(f"Invalid characters in dataset name: {name}")
+        hud_console.info("Use only letters, numbers, dashes, and underscores")
         return False
 
     return True

@@ -12,7 +12,7 @@ import time
 from rich.console import Console
 
 from hud.clients import MCPClient
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
 from .utils.logging import CaptureLogger, Colors, analyze_error_for_hints
 
@@ -31,15 +31,15 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
     Returns:
         Number of phases completed (0-5)
     """
-    # Create design instance for initial output (before logger takes over)
+    # Create hud_console instance for initial output (before logger takes over)
     if logger.print_output:
-        design = HUDDesign()
-        design.header("MCP Server Debugger", icon="🔍")
-        design.dim_info("Command:", " ".join(command))
-        design.dim_info("Time:", time.strftime("%Y-%m-%d %H:%M:%S"))
+        hud_console = HUDConsole()
+        hud_console.header("MCP Server Debugger", icon="🔍")
+        hud_console.dim_info("Command:", " ".join(command))
+        hud_console.dim_info("Time:", time.strftime("%Y-%m-%d %H:%M:%S"))
 
         # Explain color coding using Rich formatting
-        design.info("\nColor Key:")
+        hud_console.info("\nColor Key:")
         console.print("  [bold]■[/bold] Commands (bold)")
         console.print("  [rgb(192,150,12)]■[/rgb(192,150,12)] STDIO (MCP protocol)")
         console.print("  [dim]■[/dim] STDERR (server logs)")

@@ -14,7 +14,7 @@ from rich.syntax import Syntax
 from rich.tree import Tree
 
 from hud.clients import MCPClient
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
 console = Console()
 
@@ -33,7 +33,7 @@ class InteractiveMCPTester:
         self.verbose = verbose
         self.client: MCPClient | None = None
         self.tools: list[Any] = []
-        self.design = HUDDesign()
+        self.console = HUDConsole()
 
     async def connect(self) -> bool:
         """Connect to the MCP server."""
@@ -53,7 +53,7 @@ class InteractiveMCPTester:
 
             return True
         except Exception as e:
-            self.design.error(f"Failed to connect: {e}")
+            self.console.error(f"Failed to connect: {e}")
             return False
 
     async def disconnect(self) -> None:
@@ -361,7 +361,7 @@ class InteractiveMCPTester:
 
     async def run(self) -> None:
         """Run the interactive testing loop."""
-        self.design.header("Interactive MCP Tester")
+        self.console.header("Interactive MCP Tester")
 
         # Connect to server
         console.print(f"[cyan]Connecting to {self.server_url}...[/cyan]")
@@ -397,19 +397,19 @@ class InteractiveMCPTester:
             await self.disconnect()
 
             # Show next steps tutorial
-            self.design.section_title("Next Steps")
-            self.design.info("🏗️  Ready to test with real agents? Run:")
-            self.design.info("    [cyan]hud build[/cyan]")
-            self.design.info("")
-            self.design.info("This will:")
-            self.design.info("  1. Build your environment image")
-            self.design.info("  2. Generate a hud.lock.yaml file")
-            self.design.info("  3. Prepare it for testing with agents")
-            self.design.info("")
-            self.design.info("Then you can:")
-            self.design.info("  • Test locally: [cyan]hud run <image>[/cyan]")
-            self.design.info("  • Push to registry: [cyan]hud push --image <registry/name>[/cyan]")
-            self.design.info("  • Use with agents via the lock file")
+            self.console.section_title("Next Steps")
+            self.console.info("🏗️  Ready to test with real agents? Run:")
+            self.console.info("    [cyan]hud build[/cyan]")
+            self.console.info("")
+            self.console.info("This will:")
+            self.console.info("  1. Build your environment image")
+            self.console.info("  2. Generate a hud.lock.yaml file")
+            self.console.info("  3. Prepare it for testing with agents")
+            self.console.info("")
+            self.console.info("Then you can:")
+            self.console.info("  • Test locally: [cyan]hud run <image>[/cyan]")
+            self.console.info("  • Push to registry: [cyan]hud push --image <registry/name>[/cyan]")
+            self.console.info("  • Use with agents via the lock file")
 
             console.print("\n[dim]Happy testing! 🎉[/dim]")
 

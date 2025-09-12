@@ -7,7 +7,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
 from .docker import generate_container_name, remove_container
 
@@ -24,7 +24,7 @@ class MCPServerManager:
         """
         self.image = image
         self.docker_args = docker_args or []
-        self.design = HUDDesign()
+        self.console = HUDConsole()
         self.container_name = self._generate_container_name()
 
     def _generate_container_name(self) -> str:
@@ -155,7 +155,7 @@ class MCPServerManager:
             pass  # Normal cancellation
         except Exception as e:
             if verbose:
-                self.design.error(f"Server error: {e}")
+                self.console.error(f"Server error: {e}")
             raise
 
 
@@ -174,16 +174,16 @@ async def run_server_with_interactive(
     from .interactive import run_interactive_mode
     from .logging import find_free_port
 
-    design = HUDDesign()
+    hud_console = HUDConsole()
 
     # Find available port
     actual_port = find_free_port(port)
     if actual_port is None:
-        design.error(f"No available ports found starting from {port}")
+        hud_console.error(f"No available ports found starting from {port}")
         return
 
     if actual_port != port:
-        design.warning(f"Port {port} in use, using port {actual_port} instead")
+        hud_console.warning(f"Port {port} in use, using port {actual_port} instead")
 
     # Clean up any existing container
     server_manager.cleanup_container()
@@ -198,16 +198,16 @@ async def run_server_with_interactive(
     proxy = server_manager.create_proxy(config, f"HUD Interactive - {server_manager.image}")
 
     # Show header
-    design.info("")  # Empty line
-    design.header("HUD MCP Server - Interactive Mode", icon="🎮")
+    hud_console.info("")  # Empty line
+    hud_console.header("HUD MCP Server - Interactive Mode", icon="🎮")
 
     # Show configuration
-    design.section_title("Server Information")
-    design.info(f"Image: {server_manager.image}")
-    design.info(f"Port: {actual_port}")
-    design.info(f"URL: http://localhost:{actual_port}/mcp")
-    design.info(f"Container: {server_manager.container_name}")
-    design.info("")
+    hud_console.section_title("Server Information")
+    hud_console.info(f"Image: {server_manager.image}")
+    hud_console.info(f"Port: {actual_port}")
+    hud_console.info(f"URL: http://localhost:{actual_port}/mcp")
+    hud_console.info(f"Container: {server_manager.container_name}")
+    hud_console.info("")
 
     # Create event to signal server is ready
     server_ready = asyncio.Event()
@@ -236,7 +236,7 @@ async def run_server_with_interactive(
         await run_interactive_mode(server_url, verbose=verbose)
 
     except KeyboardInterrupt:
-        design.info("\n👋 Shutting down...")
+        hud_console.info("\n👋 Shutting down...")
     finally:
         # Cancel server task
         if server_task and not server_task.done():
@@ -244,7 +244,7 @@ async def run_server_with_interactive(
             try:
                 await server_task
             except asyncio.CancelledError:
-                design.error("Server task cancelled")
+                hud_console.error("Server task cancelled")
 
         # Clean up container
         server_manager.cleanup_container()

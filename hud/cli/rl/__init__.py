@@ -6,7 +6,7 @@ from pathlib import Path  # noqa: TC003
 
 import typer
 
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
 # Create the RL subcommand app
 rl_app = typer.Typer(
@@ -15,7 +15,7 @@ rl_app = typer.Typer(
     rich_markup_mode="rich",
 )
 
-design = HUDDesign()
+hud_console = HUDConsole()
 
 
 @rl_app.callback(invoke_without_command=True)

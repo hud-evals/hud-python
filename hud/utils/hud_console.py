@@ -1,4 +1,4 @@
-"""HUD Design System - Consistent styling utilities for CLI output.
+"""HUD Console Design System - Consistent styling utilities for CLI output.
 
 This module provides a unified design system for HUD CLI commands,
 ensuring consistent colors, formatting, and visual hierarchy across
@@ -30,7 +30,7 @@ GREEN = "green"
 DIM = "dim"
 
 
-class HUDDesign:
+class HUDConsole:
     """Design system for HUD CLI output."""
 
     def __init__(self, logger: logging.Logger | None = None) -> None:
@@ -476,5 +476,5 @@ class HUDDesign:
             return f"  [{GREEN}]✓[/{GREEN}] {content}"
 
 
-# Global design instance for convenience
-design = HUDDesign()
+# Global hud_console instance for convenience
+hud_console = HUDConsole()

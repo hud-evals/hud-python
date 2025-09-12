@@ -11,7 +11,7 @@ from typing import Any
 import typer
 
 from hud.settings import settings
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
 from .pod import run_prime_training
 from .utils import (
@@ -20,7 +20,7 @@ from .utils import (
     validate_dataset_name,
 )
 
-design = HUDDesign()
+hud_console = HUDConsole()
 
 
 def find_task_json_files() -> list[Path]:
@@ -67,7 +67,7 @@ def train_command_wrapper(
 ) -> None:
     """Wrapper to handle interactive prompts before entering async context."""
     # Pre-flight checks for required environment variables
-    design.section_title("🔍 Pre-flight Checks")
+    hud_console.section_title("🔍 Pre-flight Checks")
 
     missing_vars = []
 
@@ -75,30 +75,30 @@ def train_command_wrapper(
     if not settings.api_key:
         missing_vars.append("HUD_API_KEY")
     else:
-        design.success("✓ HUD_API_KEY configured")
+        hud_console.success("✓ HUD_API_KEY configured")
 
     # Check WANDB API key (optional but recommended)
     if not getattr(settings, "wandb_api_key", None):
-        design.warning("⚠ WANDB_API_KEY not set (optional but recommended for training metrics)")
+        hud_console.warning("⚠ WANDB_API_KEY not set (optional but recommended for training metrics)")
     else:
-        design.success("✓ WANDB_API_KEY configured")
+        hud_console.success("✓ WANDB_API_KEY configured")
 
     # Check PRIME API key (required for remote training)
     if provider == "prime" and not getattr(settings, "prime_api_key", None):
         missing_vars.append("PRIME_API_KEY")
     elif provider == "prime":
-        design.success("✓ PRIME_API_KEY configured")
+        hud_console.success("✓ PRIME_API_KEY configured")
 
     if missing_vars:
-        design.error(f"Missing required environment variables: {', '.join(missing_vars)}")
-        design.info("")
-        design.info("Set them using one of these methods:")
-        design.info("1. Environment variables:")
+        hud_console.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+        hud_console.info("")
+        hud_console.info("Set them using one of these methods:")
+        hud_console.info("1. Environment variables:")
         for var in missing_vars:
-            design.command_example(f"export {var}=your-{var.lower().replace('_', '-')}")
-        design.info("")
-        design.info("2. Create a .env file in your project root:")
-        design.command_example(
+            hud_console.command_example(f"export {var}=your-{var.lower().replace('_', '-')}")
+        hud_console.info("")
+        hud_console.info("2. Create a .env file in your project root:")
+        hud_console.command_example(
             "\n".join([f"{var}=your-{var.lower().replace('_', '-')}" for var in missing_vars]),
             "env",
         )
@@ -114,7 +114,7 @@ def train_command_wrapper(
             yaml_files = list(config_dir.glob("*.yaml"))
             if len(yaml_files) == 1:
                 config = yaml_files[0]
-                design.info(f"Using config: {config}")
+                hud_console.info(f"Using config: {config}")
 
     # Store user choice for pod creation
     auto_create_pod = None
@@ -128,20 +128,20 @@ def train_command_wrapper(
                 config_dir = Path("configs")
                 yaml_files = list(config_dir.glob("*.yaml"))
                 config_names = [f.name for f in yaml_files]
-                selected_config = design.select(
+                selected_config = hud_console.select(
                     "Multiple config files found. Select one:", config_names
                 )
                 config = config_dir / selected_config
             else:
                 # No config found, offer to generate
-                generate_config = design.select(
+                generate_config = hud_console.select(
                     "No config file found. Would you like to generate one?",
                     ["Yes, generate config", "No, I'll create it manually"],
                 )
 
                 if generate_config == "Yes, generate config":
-                    design.info("Running 'hud rl init' to generate config...")
-                    design.info("")
+                    hud_console.info("Running 'hud rl init' to generate config...")
+                    hud_console.info("")
                     # Import here to avoid circular imports
                     from .init import init_command_wrapper
 
@@ -153,29 +153,29 @@ def train_command_wrapper(
                         yaml_files = list(config_dir.glob("*.yaml"))
                         if yaml_files:
                             config = yaml_files[0]
-                            design.success(f"Using generated config: {config}")
+                            hud_console.success(f"Using generated config: {config}")
                         else:
-                            design.error("Config generation failed")
+                            hud_console.error("Config generation failed")
                             raise typer.Exit(1)
                 else:
-                    design.info("Please create a config file and try again")
+                    hud_console.info("Please create a config file and try again")
                     raise typer.Exit(1)
 
         if "dataset" in missing:
             if missing["dataset"] == "multiple_json":
                 # Multiple JSON files found, let user choose
                 json_files = find_task_json_files()
-                design.info("Multiple task files found:")
-                file_choice = design.select(
+                hud_console.info("Multiple task files found:")
+                file_choice = hud_console.select(
                     "Select a task file to use:",
                     choices=[str(f) for f in json_files],
                 )
                 dataset = file_choice
-                design.success(f"Selected: {dataset}")
+                hud_console.success(f"Selected: {dataset}")
             elif missing["dataset"] == "none":
-                design.error("No dataset specified and no task JSON files found")
-                design.info("Please use --dataset or create a tasks.json file")
-                design.hint(
+                hud_console.error("No dataset specified and no task JSON files found")
+                hud_console.info("Please use --dataset or create a tasks.json file")
+                hud_console.hint(
                     "Example: hud hf --name my-org/my-tasks  # Generate tasks from HUD evaluation"
                 )
                 raise typer.Exit(1)
@@ -201,12 +201,12 @@ def train_command_wrapper(
                         value = parts[1].strip()
                         if value and value != "None":
                             has_global_team = True
-                            design.info("Using globally configured team ID")
+                            hud_console.info("Using globally configured team ID")
                             break
 
         if not has_global_team:
             # Only ask if no global team is configured
-            auto_create_pod = design.select(
+            auto_create_pod = hud_console.select(
                 "How would you like to create the Prime Intellect pod?",
                 ["Personal account (automated)", "Team account (enter team ID)"],
             )
@@ -217,7 +217,7 @@ def train_command_wrapper(
 
                 # Save it globally automatically
                 subprocess.run(["prime", "config", "set-team-id", team_id])  # noqa: S603, S607
-                design.success("Team ID saved globally")
+                hud_console.success("Team ID saved globally")
 
                 auto_create_pod = (
                     "Personal account (automated)"  # Treat as automated after getting team ID
@@ -249,13 +249,13 @@ async def train_command(
     team_id: str | None = None,
 ) -> None:
     """Run RL training on HUD environments."""
-    design.header("🤖 HUD RL Training")
+    hud_console.header("🤖 HUD RL Training")
 
     # Get environment image
     image = detect_image_name()
     if not image:
-        design.error("No environment image found")
-        design.hint("Run 'hud build' first or specify with 'hud rl init <image>'")
+        hud_console.error("No environment image found")
+        hud_console.hint("Run 'hud build' first or specify with 'hud rl init <image>'")
         raise typer.Exit(1)
 
     # Handle dataset (JSON file or HuggingFace dataset)
@@ -269,17 +269,17 @@ async def train_command(
         if json_files:
             if len(json_files) == 1:
                 dataset = str(json_files[0])
-                design.info(f"Found task file: {dataset}")
+                hud_console.info(f"Found task file: {dataset}")
                 is_json_file = True
             else:
                 # This case should have been handled in train_command_wrapper
-                design.error("Multiple task files found but none selected")
+                hud_console.error("Multiple task files found but none selected")
                 raise typer.Exit(1)
         else:
             # Use dataset from lock file
             dataset = get_primary_dataset()
             if dataset:
-                design.info(f"Using dataset from lock file: {dataset}")
+                hud_console.info(f"Using dataset from lock file: {dataset}")
 
     # Check if dataset is a file path
     if dataset and Path(dataset).exists() and dataset.endswith(".json"):
@@ -288,7 +288,7 @@ async def train_command(
     # Validate dataset
     if dataset and is_json_file:
         # Load and validate JSON file
-        design.info(f"Validating task file: {dataset}")
+        hud_console.info(f"Validating task file: {dataset}")
         try:
             with open(dataset) as f:  # noqa: ASYNC230
                 tasks_data = json.load(f)
@@ -299,17 +299,17 @@ async def train_command(
             elif isinstance(tasks_data, list):
                 tasks = tasks_data
             else:
-                design.error("Invalid tasks file format")
+                hud_console.error("Invalid tasks file format")
                 raise typer.Exit(1)
 
             dataset_size = len(tasks)
             if dataset_size < 4:
-                design.error(f"Task file has only {dataset_size} tasks")
-                design.info("RL training requires at least 4 tasks for proper batching")
-                design.hint("Consider adding more tasks to your JSON file")
+                hud_console.error(f"Task file has only {dataset_size} tasks")
+                hud_console.info("RL training requires at least 4 tasks for proper batching")
+                hud_console.hint("Consider adding more tasks to your JSON file")
                 raise typer.Exit(1)
 
-            design.success(f"✓ Task file has {dataset_size} tasks")
+            hud_console.success(f"✓ Task file has {dataset_size} tasks")
 
             # Check and convert MCP configs to remote if needed
             if tasks:
@@ -328,7 +328,7 @@ async def train_command(
                             config_type = "local"
 
                 if config_type == "local":
-                    design.info("Converting local MCP configs to remote for training...")
+                    hud_console.info("Converting local MCP configs to remote for training...")
 
                     # Get the image name from lock file or environment
                     from .utils import get_image_from_lock
@@ -336,18 +336,18 @@ async def train_command(
                     env_image = image or get_image_from_lock()
 
                     if not env_image:
-                        design.error("No image found for remote MCP conversion")
-                        design.hint("Run 'hud build' first")
+                        hud_console.error("No image found for remote MCP conversion")
+                        hud_console.hint("Run 'hud build' first")
                         raise typer.Exit(1)
 
                     # Check if image needs to be pushed
                     if "/" not in env_image or env_image.startswith("local/"):
-                        design.warning(f"Image '{env_image}' appears to be local only")
-                        design.info("Running 'hud push' to make it publicly available...")
+                        hud_console.warning(f"Image '{env_image}' appears to be local only")
+                        hud_console.info("Running 'hud push' to make it publicly available...")
                         from hud.cli.push import push_command
 
                         push_command(directory=".", yes=True)
-                        design.success("Image pushed successfully")
+                        hud_console.success("Image pushed successfully")
                         # Re-read image name after push
                         env_image = get_image_from_lock()
 
@@ -364,18 +364,18 @@ async def train_command(
                         }
                         task["mcp_config"] = remote_config
 
-                    design.success("✓ Converted all tasks to use remote MCP configs")
+                    hud_console.success("✓ Converted all tasks to use remote MCP configs")
 
                     # Save the modified tasks back to the file
                     with open(dataset, "w") as f:  # noqa: ASYNC230
                         json.dump(tasks, f, indent=2)
-                    design.info("Updated task file with remote configs")
+                    hud_console.info("Updated task file with remote configs")
         except json.JSONDecodeError as e:
-            design.error(f"Invalid JSON in task file: {e}")
+            hud_console.error(f"Invalid JSON in task file: {e}")
             raise typer.Exit(1) from e
     elif dataset:
         # Validate HuggingFace dataset
-        design.info(f"Validating dataset: {dataset}")
+        hud_console.info(f"Validating dataset: {dataset}")
         try:
             # Try to load dataset info from HuggingFace
             from datasets import load_dataset_builder
@@ -386,21 +386,21 @@ async def train_command(
             # Check split sizes
             train_size = ds_info.splits.get("train", None) if ds_info.splits else None
             if train_size and train_size.num_examples < 4:
-                design.error(f"Dataset '{dataset}' has only {train_size.num_examples} tasks")
-                design.info("RL training requires at least 4 tasks for proper batching")
-                design.hint("Consider adding more tasks or duplicating existing ones")
+                hud_console.error(f"Dataset '{dataset}' has only {train_size.num_examples} tasks")
+                hud_console.info("RL training requires at least 4 tasks for proper batching")
+                hud_console.hint("Consider adding more tasks or duplicating existing ones")
                 raise typer.Exit(1)
             elif train_size:
                 dataset_size = train_size.num_examples
-                design.success(f"✓ Dataset has {dataset_size} tasks")
+                hud_console.success(f"✓ Dataset has {dataset_size} tasks")
         except Exception as e:
             # If we can't validate, warn but continue
-            design.warning(f"Could not validate dataset size: {e}")
-            design.info("Proceeding with training - ensure dataset has at least 4 tasks")
+            hud_console.warning(f"Could not validate dataset size: {e}")
+            hud_console.info("Proceeding with training - ensure dataset has at least 4 tasks")
 
     # Display configuration
-    design.section_title("📋 Training Configuration")
-    design.json_config(
+    hud_console.section_title("📋 Training Configuration")
+    hud_console.json_config(
         json.dumps(
             {
                 "Model": model,
@@ -416,13 +416,13 @@ async def train_command(
     )
 
     if not config:
-        design.error("No config file found")
-        design.hint("Run 'hud rl init' to generate a config file")
+        hud_console.error("No config file found")
+        hud_console.hint("Run 'hud rl init' to generate a config file")
         raise typer.Exit(1)
 
     if not dataset:
-        design.error("No dataset found")
-        design.hint("Run 'hud hf tasks.json' to create a dataset")
+        hud_console.error("No dataset found")
+        hud_console.hint("Run 'hud hf tasks.json' to create a dataset")
         raise typer.Exit(1)
 
     # Always run remote training
@@ -499,14 +499,14 @@ def create_dataset_interactive() -> str | None:
     # Check if tasks.json exists
     tasks_file = Path("tasks.json")
     if not tasks_file.exists():
-        design.error("No tasks.json file found")
+        hud_console.error("No tasks.json file found")
         return None
 
     # Prompt for dataset name
     dataset_name = typer.prompt("Enter HuggingFace dataset name (e.g., username/dataset-name)")
 
     if not validate_dataset_name(dataset_name):
-        design.error("Invalid dataset name format")
+        hud_console.error("Invalid dataset name format")
         return None
 
     # Run hf command
@@ -519,9 +519,9 @@ def create_dataset_interactive() -> str | None:
     if result.returncode == 0:
         return dataset_name
     else:
-        design.error("Failed to create dataset")
+        hud_console.error("Failed to create dataset")
         if result.stderr:
-            design.error(result.stderr)
+            hud_console.error(result.stderr)
         return None
 
 
@@ -539,7 +539,7 @@ async def run_remote_training(
     is_json_file: bool = False,
 ) -> None:
     """Run training on remote infrastructure."""
-    design.section_title("🚀 Remote Training")
+    hud_console.section_title("🚀 Remote Training")
 
     if provider == "prime":
         await run_prime_training(
@@ -555,6 +555,6 @@ async def run_remote_training(
             is_json_file,
         )
     else:
-        design.error(f"Provider '{provider}' not yet supported")
-        design.info("Currently supported: prime")
+        hud_console.error(f"Provider '{provider}' not yet supported")
+        hud_console.info("Currently supported: prime")
         raise typer.Exit(1)

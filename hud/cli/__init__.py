@@ -184,7 +184,7 @@ def debug(
         hud debug . --max-phase 3               # Stop after phase 3
     """
     # Import here to avoid circular imports
-    from hud.utils.design import HUDDesign
+    from hud.utils.hud_console import HUDConsole
 
     from .utils.environment import (
         build_environment,
@@ -193,7 +193,7 @@ def debug(
         is_environment_directory,
     )
 
-    design = HUDDesign()
+    hud_console = HUDConsole()
 
     # Determine the command to run
     command = None
@@ -227,7 +227,7 @@ def debug(
             image_name, source = get_image_name(directory)
 
             if source == "auto":
-                design.info(f"Auto-generated image name: {image_name}")
+                hud_console.info(f"Auto-generated image name: {image_name}")
 
             # Build if requested or if image doesn't exist
             if build or not image_exists(image_name):
@@ -263,20 +263,20 @@ def debug(
     phases_completed = asyncio.run(debug_mcp_stdio(command, logger, max_phase=max_phase))
 
     # Show summary using design system
-    from hud.utils.design import HUDDesign
+    from hud.utils.hud_console import HUDConsole
 
-    design = HUDDesign()
+    hud_console = HUDConsole()
 
-    design.info("")  # Empty line
-    design.section_title("Debug Summary")
+    hud_console.info("")  # Empty line
+    hud_console.section_title("Debug Summary")
 
     if phases_completed == max_phase:
-        design.success(f"All {max_phase} phases completed successfully!")
+        hud_console.success(f"All {max_phase} phases completed successfully!")
         if max_phase == 5:
-            design.info("Your MCP server is fully functional and ready for production use.")
+            hud_console.info("Your MCP server is fully functional and ready for production use.")
     else:
-        design.warning(f"Completed {phases_completed} out of {max_phase} phases")
-        design.info("Check the errors above for troubleshooting.")
+        hud_console.warning(f"Completed {phases_completed} out of {max_phase} phases")
+        hud_console.info("Check the errors above for troubleshooting.")
 
     # Exit with appropriate code
     if phases_completed < max_phase:
@@ -831,9 +831,9 @@ def eval(
     ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents."""
-    from hud.utils.design import HUDDesign
+    from hud.utils.hud_console import HUDConsole
 
-    design = HUDDesign()
+    hud_console = HUDConsole()
 
     # If no source provided, look for task/eval JSON files in current directory
     if source is None:
@@ -863,30 +863,30 @@ def eval(
         json_files = sorted(set(json_files))
 
         if not json_files:
-            design.error(
+            hud_console.error(
                 "No source provided and no task/eval JSON files found in current directory"
             )
-            design.info(
+            hud_console.info(
                 "Usage: hud eval <source> or create a task JSON file "
                 "(e.g., task.json, eval_config.json)"
             )
             raise typer.Exit(1)
         elif len(json_files) == 1:
             source = str(json_files[0])
-            design.info(f"Found task file: {source}")
+            hud_console.info(f"Found task file: {source}")
         else:
             # Multiple files found, let user choose
-            design.info("Multiple task files found:")
-            file_choice = design.select(
+            hud_console.info("Multiple task files found:")
+            file_choice = hud_console.select(
                 "Select a task file to run:",
                 choices=[str(f) for f in json_files],
             )
             source = file_choice
-            design.success(f"Selected: {source}")
+            hud_console.success(f"Selected: {source}")
 
     # If no agent specified, prompt for selection
     if agent is None:
-        agent = design.select(
+        agent = hud_console.select(
             "Select an agent to use:",
             choices=[
                 {"name": "Claude 4 Sonnet", "value": "claude"},
@@ -898,14 +898,14 @@ def eval(
     # Validate agent choice
     valid_agents = ["claude", "openai"]
     if agent not in valid_agents:
-        design.error(f"Invalid agent: {agent}. Must be one of: {', '.join(valid_agents)}")
+        hud_console.error(f"Invalid agent: {agent}. Must be one of: {', '.join(valid_agents)}")
         raise typer.Exit(1)
 
     # Import eval_command lazily to avoid importing agent dependencies
     try:
         from .eval import eval_command
     except ImportError as e:
-        design.error(
+        hud_console.error(
             "Evaluation dependencies are not installed. "
             "Please install with: pip install 'hud-python[agent]'"
         )
@@ -995,9 +995,9 @@ def main() -> None:
         except Exception:
             exit_code = 1
         if exit_code != 0:
-            from hud.utils.design import design
+            from hud.utils.hud_console import hud_console
 
-            design.info(SUPPORT_HINT)
+            hud_console.info(SUPPORT_HINT)
         raise
     except Exception:
         raise

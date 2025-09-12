@@ -11,10 +11,10 @@ from typing import Any, Literal
 import typer
 
 import hud
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
 logger = logging.getLogger(__name__)
-design = HUDDesign()
+hud_console = HUDConsole()
 
 
 def build_agent(
@@ -31,7 +31,7 @@ def build_agent(
         try:
             from hud.agents import OperatorAgent
         except ImportError as e:
-            design.error(
+            hud_console.error(
                 "OpenAI agent dependencies are not installed. "
                 "Please install with: pip install 'hud-python[agent]'"
             )
@@ -49,7 +49,7 @@ def build_agent(
     try:
         from hud.agents import ClaudeAgent
     except ImportError as e:
-        design.error(
+        hud_console.error(
             "Claude agent dependencies are not installed. "
             "Please install with: pip install 'hud-python[agent]'"
         )
@@ -85,7 +85,7 @@ async def run_single_task(
     try:
         from hud.datasets import Task, run_dataset
     except ImportError as e:
-        design.error(
+        hud_console.error(
             "Dataset dependencies are not installed. "
             "Please install with: pip install 'hud-python\u27e6agent\u27e7'"
         )
@@ -94,13 +94,13 @@ async def run_single_task(
     # Check if it's a JSON file
     path = Path(source)
     if path.exists() and path.suffix == ".json":
-        design.info("📊 Loading task file…")
+        hud_console.info("📊 Loading task file…")
         with open(path) as f:  # noqa: ASYNC230
             json_data = json.load(f)
 
         # Check if JSON contains multiple tasks (list with more than 1 task)
         if isinstance(json_data, list) and len(json_data) > 1:
-            design.info(f"Found {len(json_data)} tasks in JSON file, running as dataset…")
+            hud_console.info(f"Found {len(json_data)} tasks in JSON file, running as dataset…")
 
             # Build agent class and config for run_dataset
             if agent_type == "openai":
@@ -109,7 +109,7 @@ async def run_single_task(
 
                     agent_class = OperatorAgent
                 except ImportError as e:
-                    design.error(
+                    hud_console.error(
                         "OpenAI agent dependencies are not installed. "
                         "Please install with: pip install 'hud-python\u27e6agent\u27e7'"
                     )
@@ -125,7 +125,7 @@ async def run_single_task(
 
                     agent_class = ClaudeAgent
                 except ImportError as e:
-                    design.error(
+                    hud_console.error(
                         "Claude agent dependencies are not installed. "
                         "Please install with: pip install 'hud-python[agent]'"
                     )
@@ -151,25 +151,25 @@ async def run_single_task(
 
             # Display summary
             successful = sum(1 for r in results if getattr(r, "reward", 0) > 0)
-            design.success(f"Completed {len(results)} tasks: {successful} successful")
+            hud_console.success(f"Completed {len(results)} tasks: {successful} successful")
             return
 
         # Single task JSON (either direct object or list with 1 task)
         if isinstance(json_data, list) and len(json_data) == 1:
-            design.info("Found 1 task in JSON file, running as single task…")
+            hud_console.info("Found 1 task in JSON file, running as single task…")
             task = Task(**json_data[0])
         elif isinstance(json_data, dict):
             task = Task(**json_data)
         else:
-            design.error("JSON file must contain a list of tasks when using --full flag")
+            hud_console.error("JSON file must contain a list of tasks when using --full flag")
             raise typer.Exit(1)
     else:
         # Load from HuggingFace dataset
-        design.info(f"📊 Loading dataset from HuggingFace: {source}…")
+        hud_console.info(f"📊 Loading dataset from HuggingFace: {source}…")
         try:
             from datasets import load_dataset
         except ImportError as e:
-            design.error(
+            hud_console.error(
                 "Datasets library is not installed. "
                 "Please install with: pip install 'hud-python[agent]'"
             )
@@ -190,9 +190,9 @@ async def run_single_task(
             allowed_tools=allowed_tools,
             verbose=verbose,
         )
-        design.info(task.prompt)
+        hud_console.info(task.prompt)
         result = await agent.run(task, max_steps=max_steps)
-        design.success(f"Reward: {result.reward}")
+        hud_console.success(f"Reward: {result.reward}")
 
 
 async def run_full_dataset(
@@ -217,7 +217,7 @@ async def run_full_dataset(
     try:
         from hud.datasets import run_dataset, run_dataset_parallel, run_dataset_parallel_manual
     except ImportError as e:
-        design.error(
+        hud_console.error(
             "Dataset dependencies are not installed. "
             "Please install with: pip install 'hud-python[[agent]]'"
         )
@@ -235,9 +235,9 @@ async def run_full_dataset(
         if isinstance(json_data, list):
             dataset_or_tasks = json_data
             dataset_name = f"JSON Dataset: {path.name}"
-            design.info(f"Found {len(json_data)} tasks in JSON file")
+            hud_console.info(f"Found {len(json_data)} tasks in JSON file")
         else:
-            design.error("JSON file must contain a list of tasks when using --full flag")
+            hud_console.error("JSON file must contain a list of tasks when using --full flag")
             raise typer.Exit(1)
 
     # Build agent class + config for run_dataset
@@ -247,7 +247,7 @@ async def run_full_dataset(
 
             agent_class = OperatorAgent
         except ImportError as e:
-            design.error(
+            hud_console.error(
                 "OpenAI agent dependencies are not installed. "
                 "Please install with: pip install 'hud-python[agent]'"
             )
@@ -263,7 +263,7 @@ async def run_full_dataset(
 
             agent_class = ClaudeAgent
         except ImportError as e:
-            design.error(
+            hud_console.error(
                 "Claude agent dependencies are not installed. "
                 "Please install with: pip install 'hud-python[agent]'"
             )
@@ -277,7 +277,7 @@ async def run_full_dataset(
             agent_config["allowed_tools"] = allowed_tools
 
     if parallel:
-        design.info(
+        hud_console.info(
             f"🚀 Running PARALLEL evaluation (workers: {max_workers or 'auto'}, max_concurrent: {max_concurrent})…"  # noqa: E501
         )
         if max_workers is None:
@@ -307,7 +307,7 @@ async def run_full_dataset(
                 auto_respond=True,
             )
     else:
-        design.info(f"🚀 Running evaluation (max_concurrent: {max_concurrent})…")
+        hud_console.info(f"🚀 Running evaluation (max_concurrent: {max_concurrent})…")
         return await run_dataset(
             name=f"Evaluation {dataset_name}",
             dataset=dataset_or_tasks,
@@ -410,18 +410,18 @@ def eval_command(
     # Check for required API keys
     if agent == "claude":
         if not settings.anthropic_api_key:
-            design.error("ANTHROPIC_API_KEY is required for Claude agent")
-            design.info("Set it in your environment or .env file: ANTHROPIC_API_KEY=your-key-here")
+            hud_console.error("ANTHROPIC_API_KEY is required for Claude agent")
+            hud_console.info("Set it in your environment or .env file: ANTHROPIC_API_KEY=your-key-here")
             raise typer.Exit(1)
     elif agent == "openai" and not settings.openai_api_key:
-        design.error("OPENAI_API_KEY is required for OpenAI agent")
-        design.info("Set it in your environment or .env file: OPENAI_API_KEY=your-key-here")
+        hud_console.error("OPENAI_API_KEY is required for OpenAI agent")
+        hud_console.info("Set it in your environment or .env file: OPENAI_API_KEY=your-key-here")
         raise typer.Exit(1)
 
     # Check for HUD_API_KEY if using HUD services
     if not settings.api_key:
-        design.warning("HUD_API_KEY not set. Some features may be limited.")
-        design.info("Get your API key at: https://app.hud.so")
+        hud_console.warning("HUD_API_KEY not set. Some features may be limited.")
+        hud_console.info("Get your API key at: https://app.hud.so")
 
     # Parse allowed tools
     allowed_tools_list = (

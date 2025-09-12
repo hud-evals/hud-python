@@ -8,7 +8,7 @@ import typer
 from rich.panel import Panel
 from rich.syntax import Syntax
 
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
 # Embedded templates
 DOCKERFILE_TEMPLATE = """FROM python:3.11-slim
@@ -541,7 +541,7 @@ def sanitize_name(name: str) -> str:
 def create_environment(name: str | None, directory: str, force: bool) -> None:
     """Create a new HUD environment from templates."""
 
-    design = HUDDesign()
+    hud_console = HUDConsole()
 
     # Determine environment name
     if name is None:
@@ -549,7 +549,7 @@ def create_environment(name: str | None, directory: str, force: bool) -> None:
         current_dir = Path.cwd()
         name = current_dir.name
         target_dir = current_dir
-        design.info(f"Using current directory name: {name}")
+        hud_console.info(f"Using current directory name: {name}")
     else:
         # Create new directory
         target_dir = Path(directory) / name
@@ -557,16 +557,16 @@ def create_environment(name: str | None, directory: str, force: bool) -> None:
     # Sanitize name for Python package
     package_name = sanitize_name(name)
     if package_name != name:
-        design.warning(f"Package name adjusted for Python: {name} → {package_name}")
+        hud_console.warning(f"Package name adjusted for Python: {name} → {package_name}")
 
     # Check if directory exists
     if target_dir.exists() and any(target_dir.iterdir()):
         if not force:
-            design.error(f"Directory {target_dir} already exists and is not empty")
-            design.info("Use --force to overwrite existing files")
+            hud_console.error(f"Directory {target_dir} already exists and is not empty")
+            hud_console.info("Use --force to overwrite existing files")
             raise typer.Exit(1)
         else:
-            design.warning(f"Overwriting existing files in {target_dir}")
+            hud_console.warning(f"Overwriting existing files in {target_dir}")
 
     # Create directory structure
     src_dir = target_dir / "src" / "controller"
@@ -633,38 +633,38 @@ def create_environment(name: str | None, directory: str, force: bool) -> None:
     files_created.append(".env")
 
     # Success message
-    design.header(f"Created HUD Environment: {name}")
+    hud_console.header(f"Created HUD Environment: {name}")
 
-    design.section_title("Files created")
+    hud_console.section_title("Files created")
     for file in files_created:
-        design.status_item(file, "created")
+        hud_console.status_item(file, "created")
 
-    design.section_title("Next steps")
+    hud_console.section_title("Next steps")
 
     # Show commands based on where we created the environment
     if target_dir == Path.cwd():
-        design.info("1. Start development server (with MCP inspector):")
-        design.command_example("hud dev --inspector")
+        hud_console.info("1. Start development server (with MCP inspector):")
+        hud_console.command_example("hud dev --inspector")
     else:
-        design.info("1. Enter the directory:")
-        design.command_example(f"cd {target_dir}")
-        design.info("\n2. Start development server (with MCP inspector):")
-        design.command_example("hud dev --inspector")
+        hud_console.info("1. Enter the directory:")
+        hud_console.command_example(f"cd {target_dir}")
+        hud_console.info("\n2. Start development server (with MCP inspector):")
+        hud_console.command_example("hud dev --inspector")
 
-    design.info("\n3. Connect from Cursor or test via the MCP inspector:")
-    design.info("   Follow the instructions shown by hud dev --inspector")
+    hud_console.info("\n3. Connect from Cursor or test via the MCP inspector:")
+    hud_console.info("   Follow the instructions shown by hud dev --inspector")
 
-    design.info("\n4. Test your environment:")
-    design.command_example("python test_task.py")
+    hud_console.info("\n4. Test your environment:")
+    hud_console.command_example("python test_task.py")
 
-    design.info("\n5. Customize your environment:")
-    design.info("   - Add tools to src/controller/server.py")
-    design.info("   - Add state to src/controller/env.py")
-    design.info("   - Modify tasks in tasks.json")
-    design.info("   - Experiment in test_env.ipynb")
+    hud_console.info("\n5. Customize your environment:")
+    hud_console.info("   - Add tools to src/controller/server.py")
+    hud_console.info("   - Add state to src/controller/env.py")
+    hud_console.info("   - Modify tasks in tasks.json")
+    hud_console.info("   - Experiment in test_env.ipynb")
 
     # Show a sample of the server code
-    design.section_title("Your MCP server")
+    hud_console.section_title("Your MCP server")
     sample_code = '''@mcp.tool()
 async def act() -> str:
     """Perform an action that changes the environment state."""
@@ -674,4 +674,4 @@ async def act() -> str:
     return f"Action #{count} performed. Current count: {count}"'''
 
     syntax = Syntax(sample_code, "python", theme="monokai", line_numbers=False)
-    design.console.print(Panel(syntax, border_style="dim"))
+    hud_console.console.print(Panel(syntax, border_style="dim"))

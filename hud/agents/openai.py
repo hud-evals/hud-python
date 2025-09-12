@@ -204,7 +204,7 @@ class OperatorAgent(MCPAgent):
                         break
 
                 if not latest_screenshot:
-                    self.design.warning_log("No screenshot provided for response to action")
+                    self.console.warning_log("No screenshot provided for response to action")
                     return AgentResponse(
                         content="No screenshot available for next action",
                         tool_calls=[],
@@ -327,7 +327,7 @@ class OperatorAgent(MCPAgent):
                 for content in result.content:
                     if isinstance(content, types.TextContent):
                         # Don't add error text as input_text, just track it
-                        self.design.error_log(f"Tool error: {content.text}")
+                        self.console.error_log(f"Tool error: {content.text}")
                     elif isinstance(content, types.ImageContent):
                         # Even error results might have images
                         latest_screenshot = content.data

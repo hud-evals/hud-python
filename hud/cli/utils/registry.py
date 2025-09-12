@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
 
 def get_registry_dir() -> Path:
@@ -84,7 +84,7 @@ def save_to_registry(
     Returns:
         Path to the saved lock file, or None if save failed
     """
-    design = HUDDesign()
+    hud_console = HUDConsole()
 
     try:
         # Extract digest for registry storage
@@ -98,14 +98,14 @@ def save_to_registry(
         with open(local_lock_path, "w") as f:
             yaml.dump(lock_data, f, default_flow_style=False, sort_keys=False)
 
-        design.success(f"Added to local registry: {digest}")
+        hud_console.success(f"Added to local registry: {digest}")
         if verbose:
-            design.info(f"Registry location: {local_lock_path}")
+            hud_console.info(f"Registry location: {local_lock_path}")
 
         return local_lock_path
     except Exception as e:
         if verbose:
-            design.warning(f"Failed to save to registry: {e}")
+            hud_console.warning(f"Failed to save to registry: {e}")
         return None
 
 

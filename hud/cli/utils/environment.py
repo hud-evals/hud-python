@@ -7,9 +7,9 @@ from pathlib import Path
 
 import toml
 
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
-design = HUDDesign()
+hud_console = HUDConsole()
 
 
 def get_image_name(directory: str | Path, image_override: str | None = None) -> tuple[str, str]:
@@ -31,7 +31,7 @@ def get_image_name(directory: str | Path, image_override: str | None = None) -> 
             if config.get("tool", {}).get("hud", {}).get("image"):
                 return config["tool"]["hud"]["image"], "cache"
         except Exception:
-            design.error("Error loading pyproject.toml")
+            hud_console.error("Error loading pyproject.toml")
 
     # Auto-generate with :dev tag
     dir_path = Path(directory).resolve()  # Get absolute path first
@@ -65,10 +65,10 @@ def update_pyproject_toml(directory: str | Path, image_name: str, silent: bool =
                 toml.dump(config, f)
 
             if not silent:
-                design.success(f"Updated pyproject.toml with image: {image_name}")
+                hud_console.success(f"Updated pyproject.toml with image: {image_name}")
         except Exception as e:
             if not silent:
-                design.warning(f"Could not update pyproject.toml: {e}")
+                hud_console.warning(f"Could not update pyproject.toml: {e}")
 
 
 def build_environment(directory: str | Path, image_name: str, no_cache: bool = False) -> bool:
@@ -82,20 +82,20 @@ def build_environment(directory: str | Path, image_name: str, no_cache: bool = F
         build_cmd.append("--no-cache")
     build_cmd.append(str(directory))
 
-    design.info(f"🔨 Building image: {image_name}{' (no cache)' if no_cache else ''}")
-    design.info("")  # Empty line before Docker output
+    hud_console.info(f"🔨 Building image: {image_name}{' (no cache)' if no_cache else ''}")
+    hud_console.info("")  # Empty line before Docker output
 
     # Just run Docker build directly - it has its own nice live display
     result = subprocess.run(build_cmd)  # noqa: S603
 
     if result.returncode == 0:
-        design.info("")  # Empty line after Docker output
-        design.success(f"Build successful! Image: {image_name}")
+        hud_console.info("")  # Empty line after Docker output
+        hud_console.success(f"Build successful! Image: {image_name}")
         # Update pyproject.toml (silently since we already showed success)
         update_pyproject_toml(directory, image_name, silent=True)
         return True
     else:
-        design.error("Build failed!")
+        hud_console.error("Build failed!")
         return False
 
 
@@ -127,7 +127,7 @@ def is_environment_directory(path: str | Path) -> bool:
 
     # Must have pyproject.toml
     if not (dir_path / "pyproject.toml").exists():
-        design.error("pyproject.toml not found")
+        hud_console.error("pyproject.toml not found")
         return False
 
     return True

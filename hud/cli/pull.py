@@ -12,7 +12,7 @@ import yaml
 from rich.table import Table
 
 from hud.settings import settings
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
 from .utils.registry import save_to_registry
 
@@ -115,8 +115,8 @@ def pull_environment(
     verbose: bool = False,
 ) -> None:
     """Pull HUD environment from registry."""
-    design = HUDDesign()
-    design.header("HUD Environment Pull")
+    hud_console = HUDConsole()
+    hud_console.header("HUD Environment Pull")
 
     # Two modes:
     # 1. Pull from lock file (recommended)
@@ -133,10 +133,10 @@ def pull_environment(
 
         lock_path = Path(lock_file) if lock_file else None
         if lock_path and not lock_path.exists():
-            design.error(f"Lock file not found: {lock_file}")
+            hud_console.error(f"Lock file not found: {lock_file}")
             raise typer.Exit(1)
 
-        design.info(f"Reading lock file: {lock_file}")
+        hud_console.info(f"Reading lock file: {lock_file}")
         if lock_path:
             with open(lock_path) as f:
                 lock_data = yaml.safe_load(f)
@@ -149,29 +149,29 @@ def pull_environment(
         # Check if it's a simple org/name or org/name:tag format (no @sha256)
         if "/" in target and "@" not in target:
             # Looks like org/env reference, possibly with tag
-            design.info(f"Checking HUD registry for: {target}")
+            hud_console.info(f"Checking HUD registry for: {target}")
 
             # Check for API key (not required for pulling, but good to inform)
             if not settings.api_key:
-                design.info("No HUD API key set (pulling from public registry)")
+                hud_console.info("No HUD API key set (pulling from public registry)")
 
             lock_data = fetch_lock_from_registry(target)
 
             if lock_data:
-                design.success("Found in HUD registry")
+                hud_console.success("Found in HUD registry")
                 image_ref = lock_data.get("image", "")
             else:
                 # Fall back to treating as Docker image
                 if not settings.api_key:
-                    design.info(
+                    hud_console.info(
                         "Not found in HUD registry (try setting HUD_API_KEY for private environments)"  # noqa: E501
                     )
                 else:
-                    design.info("Not found in HUD registry, treating as Docker image")
+                    hud_console.info("Not found in HUD registry, treating as Docker image")
 
         # Try to get metadata from Docker registry
         if not lock_data:
-            design.info(f"Fetching Docker metadata for: {image_ref}")
+            hud_console.info(f"Fetching Docker metadata for: {image_ref}")
             manifest = get_docker_manifest(image_ref)
 
             if manifest:
@@ -184,12 +184,12 @@ def pull_environment(
                     lock_data["size"] = format_size(size)
 
                 if verbose:
-                    design.info(
+                    hud_console.info(
                         f"Retrieved manifest (type: {manifest.get('mediaType', 'unknown')})"
                     )
 
     # Display environment summary
-    design.section_title("Environment Details")
+    hud_console.section_title("Environment Details")
 
     # Create summary table
     table = Table(show_header=False, box=None)
@@ -210,8 +210,8 @@ def pull_environment(
             # Minimal data from Docker manifest
             table.add_row("Source", "Docker Registry")
             if not yes:
-                design.warning("Note: Limited metadata available from Docker registry.")
-                design.info("For full environment details, use a lock file.\n")
+                hud_console.warning("Note: Limited metadata available from Docker registry.")
+                hud_console.info("For full environment details, use a lock file.\n")
         else:
             # Full lock file data
             if "build" in lock_data:
@@ -242,38 +242,38 @@ def pull_environment(
         table.add_row("Source", "Unknown")
 
     # Use design's console to maintain consistent output
-    design.console.print(table)
+    hud_console.console.print(table)
 
     # Tool summary (show after table)
     if lock_data and "tools" in lock_data:
-        design.section_title("Available Tools")
+        hud_console.section_title("Available Tools")
         for tool in lock_data["tools"]:
-            design.info(f"• {tool['name']}: {tool['description']}")
+            hud_console.info(f"• {tool['name']}: {tool['description']}")
 
     # Show warnings if no metadata
     if not lock_data and not yes:
-        design.warning("No metadata available for this image.")
-        design.info("The image will be pulled without verification.")
+        hud_console.warning("No metadata available for this image.")
+        hud_console.info("The image will be pulled without verification.")
 
     # If verify only, stop here
     if verify_only:
-        design.success("Verification complete")
+        hud_console.success("Verification complete")
         return
 
     # Ask for confirmation unless --yes
     if not yes:
-        design.info("")
+        hud_console.info("")
         # Show simple name for confirmation, not the full digest
         if ":" in image_ref and "@" in image_ref:
             simple_name = image_ref.split("@")[0]
         else:
             simple_name = image_ref
         if not typer.confirm(f"Pull {simple_name}?"):
-            design.info("Aborted")
+            hud_console.info("Aborted")
             raise typer.Exit(0)
 
     # Pull the image
-    design.progress_message(f"Pulling {image_ref}...")
+    hud_console.progress_message(f"Pulling {image_ref}...")
 
     # Run docker pull with progress
     process = subprocess.Popen(  # noqa: S603
@@ -287,12 +287,12 @@ def pull_environment(
 
     for line in process.stdout or []:
         if verbose or "Downloading" in line or "Extracting" in line or "Pull complete" in line:
-            design.info(line.rstrip())
+            hud_console.info(line.rstrip())
 
     process.wait()
 
     if process.returncode != 0:
-        design.error("Pull failed")
+        hud_console.error("Pull failed")
         raise typer.Exit(1)
 
     # Store lock file locally if we have full lock data (not minimal manifest data)
@@ -301,22 +301,22 @@ def pull_environment(
         save_to_registry(lock_data, image_ref, verbose)
 
     # Success!
-    design.success("Pull complete!")
+    hud_console.success("Pull complete!")
 
     # Show usage
-    design.section_title("Next Steps")
+    hud_console.section_title("Next Steps")
 
     # Extract simple name for examples
     simple_ref = image_ref.split("@")[0] if ":" in image_ref and "@" in image_ref else image_ref
 
-    design.info("1. Quick analysis (from metadata):")
-    design.command_example(f"hud analyze {simple_ref}")
-    design.info("")
-    design.info("2. Live analysis (runs container):")
-    design.command_example(f"hud analyze {simple_ref} --live")
-    design.info("")
-    design.info("3. Run the environment:")
-    design.command_example(f"hud run {simple_ref}")
+    hud_console.info("1. Quick analysis (from metadata):")
+    hud_console.command_example(f"hud analyze {simple_ref}")
+    hud_console.info("")
+    hud_console.info("2. Live analysis (runs container):")
+    hud_console.command_example(f"hud analyze {simple_ref} --live")
+    hud_console.info("")
+    hud_console.info("3. Run the environment:")
+    hud_console.command_example(f"hud run {simple_ref}")
 
 
 def pull_command(

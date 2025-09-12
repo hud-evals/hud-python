@@ -5,7 +5,7 @@ import logging
 import sys
 from typing import Any
 
-from hud.utils.design import design
+from hud.utils.hud_console import hud_console
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +27,8 @@ def _render_and_fallback(exc_type: type[BaseException], value: BaseException, tb
             # Flush stderr to ensure traceback is printed first
             sys.stderr.flush()
             # Add separator and render our formatted error
-            design.console.print("")
-            design.render_exception(value)
+            hud_console.console.print("")
+            hud_console.render_exception(value)
     except Exception:
         # If rendering fails for any reason, silently continue
         logger.warning("Failed to render exception: %s, %s, %s", exc_type, value, tb)
@@ -39,10 +39,10 @@ def _async_exception_handler(loop: asyncio.AbstractEventLoop, context: dict[str,
     msg = context.get("message")
     try:
         if exc is not None:
-            design.render_exception(exc)
+            hud_console.render_exception(exc)
         elif msg:
-            design.error(msg)
-            design.render_support_hint()
+            hud_console.error(msg)
+            hud_console.render_support_hint()
     except Exception:
         logger.warning("Failed to render exception: %s, %s, %s", exc, msg, context)
 

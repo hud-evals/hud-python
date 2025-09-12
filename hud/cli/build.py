@@ -14,7 +14,7 @@ import typer
 import yaml
 
 from hud.clients import MCPClient
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 from hud.version import __version__ as hud_version
 
 from .utils.registry import save_to_registry
@@ -156,7 +156,7 @@ async def analyze_mcp_environment(
     image: str, verbose: bool = False, env_vars: dict[str, str] | None = None
 ) -> dict[str, Any]:
     """Analyze an MCP environment to extract metadata."""
-    design = HUDDesign()
+    hud_console = HUDConsole()
     env_vars = env_vars or {}
 
     # Build Docker command to run the image
@@ -180,7 +180,7 @@ async def analyze_mcp_environment(
 
     try:
         if verbose:
-            design.info(f"Initializing MCP client with command: {' '.join(docker_cmd)}")
+            hud_console.info(f"Initializing MCP client with command: {' '.join(docker_cmd)}")
 
         await client.initialize()
         initialized = True
@@ -215,7 +215,7 @@ async def analyze_mcp_environment(
                 await client.shutdown()
             except Exception:
                 # Ignore shutdown errors
-                design.warning("Failed to shutdown MCP client")
+                hud_console.warning("Failed to shutdown MCP client")
 
 
 def build_docker_image(
@@ -226,13 +226,13 @@ def build_docker_image(
     build_args: dict[str, str] | None = None,
 ) -> bool:
     """Build a Docker image from a directory."""
-    design = HUDDesign()
+    hud_console = HUDConsole()
     build_args = build_args or {}
 
     # Check if Dockerfile exists
     dockerfile = directory / "Dockerfile"
     if not dockerfile.exists():
-        design.error(f"No Dockerfile found in {directory}")
+        hud_console.error(f"No Dockerfile found in {directory}")
         return False
 
     # Build command
@@ -247,14 +247,14 @@ def build_docker_image(
     cmd.append(str(directory))
 
     # Always show build output
-    design.info(f"Running: {' '.join(cmd)}")
+    hud_console.info(f"Running: {' '.join(cmd)}")
 
     try:
         # Use Docker's native output formatting - no capture, let Docker handle display
         result = subprocess.run(cmd, check=False)  # noqa: S603
         return result.returncode == 0
     except Exception as e:
-        design.error(f"Build error: {e}")
+        hud_console.error(f"Build error: {e}")
         return False
 
 
@@ -266,20 +266,20 @@ def build_environment(
     env_vars: dict[str, str] | None = None,
 ) -> None:
     """Build a HUD environment and generate lock file."""
-    design = HUDDesign()
+    hud_console = HUDConsole()
     env_vars = env_vars or {}
-    design.header("HUD Environment Build")
+    hud_console.header("HUD Environment Build")
 
     # Resolve directory
     env_dir = Path(directory).resolve()
     if not env_dir.exists():
-        design.error(f"Directory not found: {directory}")
+        hud_console.error(f"Directory not found: {directory}")
         raise typer.Exit(1)
 
     # Check for pyproject.toml
     pyproject_path = env_dir / "pyproject.toml"
     if not pyproject_path.exists():
-        design.error(f"No pyproject.toml found in {directory}")
+        hud_console.error(f"No pyproject.toml found in {directory}")
         raise typer.Exit(1)
 
     # Read pyproject.toml to get image name
@@ -301,17 +301,17 @@ def build_environment(
     # Build temporary image first
     temp_tag = f"hud-build-temp:{int(time.time())}"
 
-    design.progress_message(f"Building Docker image: {temp_tag}")
+    hud_console.progress_message(f"Building Docker image: {temp_tag}")
 
     # Build the image (env vars are for runtime, not build time)
     if not build_docker_image(env_dir, temp_tag, no_cache, verbose):
-        design.error("Docker build failed")
+        hud_console.error("Docker build failed")
         raise typer.Exit(1)
 
-    design.success(f"Built temporary image: {temp_tag}")
+    hud_console.success(f"Built temporary image: {temp_tag}")
 
     # Analyze the environment
-    design.progress_message("Analyzing MCP environment...")
+    hud_console.progress_message("Analyzing MCP environment...")
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -320,7 +320,7 @@ def build_environment(
     finally:
         loop.close()
 
-    design.success(f"Analyzed environment: {analysis['toolCount']} tools found")
+    hud_console.success(f"Analyzed environment: {analysis['toolCount']} tools found")
 
     # Extract environment variables from Dockerfile
     dockerfile_path = env_dir / "Dockerfile"
@@ -335,14 +335,14 @@ def build_environment(
         missing_required = [e for e in required_env if e not in env_vars]
 
         # Show what env vars were provided
-        design.success(f"Using provided environment variables: {', '.join(env_vars.keys())}")
+        hud_console.success(f"Using provided environment variables: {', '.join(env_vars.keys())}")
     else:
         missing_required = required_env[:]
 
     # Warn about missing required variables
     if missing_required:
-        design.warning(f"Missing required environment variables: {', '.join(missing_required)}")
-        design.info("These can be added to the lock file after build or provided with -e flags")
+        hud_console.warning(f"Missing required environment variables: {', '.join(missing_required)}")
+        hud_console.info("These can be added to the lock file after build or provided with -e flags")
 
     # Check for existing version and increment
     lock_path = env_dir / "hud.lock.yaml"
@@ -351,11 +351,11 @@ def build_environment(
     if existing_version:
         # Increment existing version
         new_version = increment_version(existing_version)
-        design.info(f"Incrementing version: {existing_version} → {new_version}")
+        hud_console.info(f"Incrementing version: {existing_version} → {new_version}")
     else:
         # Start with 0.1.0 for new environments
         new_version = "0.1.0"
-        design.info(f"Setting initial version: {new_version}")
+        hud_console.info(f"Setting initial version: {new_version}")
 
     # Create lock file content - minimal and useful
     lock_content = {
@@ -406,7 +406,7 @@ def build_environment(
     with open(lock_path, "w") as f:
         yaml.dump(lock_content, f, default_flow_style=False, sort_keys=False)
 
-    design.success("Created lock file: hud.lock.yaml")
+    hud_console.success("Created lock file: hud.lock.yaml")
 
     # Calculate lock file hash
     lock_content_str = yaml.dump(lock_content, default_flow_style=False, sort_keys=True)
@@ -414,7 +414,7 @@ def build_environment(
     lock_size = len(lock_content_str)
 
     # Rebuild with label containing lock file hash
-    design.progress_message("Rebuilding with lock file metadata...")
+    hud_console.progress_message("Rebuilding with lock file metadata...")
 
     # Build final image with label (uses cache from first build)
     # Also tag with version
@@ -447,10 +447,10 @@ def build_environment(
         )
 
     if result.returncode != 0:
-        design.error("Failed to rebuild with label")
+        hud_console.error("Failed to rebuild with label")
         raise typer.Exit(1)
 
-    design.success("Built final image with lock file metadata")
+    hud_console.success("Built final image with lock file metadata")
 
     # NOW get the image ID after the final build
     image_id = get_docker_image_id(tag)  # type: ignore
@@ -466,9 +466,9 @@ def build_environment(
         with open(lock_path, "w") as f:
             yaml.dump(lock_content, f, default_flow_style=False, sort_keys=False)
 
-        design.success("Updated lock file with image ID")
+        hud_console.success("Updated lock file with image ID")
     else:
-        design.warning("Could not retrieve image ID for lock file")
+        hud_console.warning("Could not retrieve image ID for lock file")
 
     # Remove temp image after we're done
     subprocess.run(["docker", "rmi", temp_tag], capture_output=True)  # noqa: S603, S607
@@ -479,30 +479,30 @@ def build_environment(
         save_to_registry(lock_content, lock_content.get("image", tag), verbose)
 
     # Print summary
-    design.section_title("Build Complete")
+    hud_console.section_title("Build Complete")
 
     # Show the version tag as primary since that's what will be pushed
-    design.status_item("Built image", version_tag, primary=True)
+    hud_console.status_item("Built image", version_tag, primary=True)
     if tag:
-        design.status_item("Also tagged", tag)
-    design.status_item("Version", new_version)
-    design.status_item("Lock file", "hud.lock.yaml")
-    design.status_item("Tools found", str(analysis["toolCount"]))
+        hud_console.status_item("Also tagged", tag)
+    hud_console.status_item("Version", new_version)
+    hud_console.status_item("Lock file", "hud.lock.yaml")
+    hud_console.status_item("Tools found", str(analysis["toolCount"]))
 
     # Show the digest info separately if we have it
     if image_id:
-        design.dim_info("\nImage digest", image_id)
+        hud_console.dim_info("\nImage digest", image_id)
 
-    design.section_title("Next Steps")
-    design.info("Test locally:")
-    design.command_example("hud dev", "Hot-reload development")
-    design.command_example(f"hud run {tag}", "Run the built image")
-    design.info("")
-    design.info("Publish to registry:")
-    design.command_example("hud push", f"Push as {version_tag}")
-    design.command_example("hud push --tag latest", "Push with custom tag")
-    design.info("")
-    design.info("The lock file can be used to reproduce this exact environment.")
+    hud_console.section_title("Next Steps")
+    hud_console.info("Test locally:")
+    hud_console.command_example("hud dev", "Hot-reload development")
+    hud_console.command_example(f"hud run {tag}", "Run the built image")
+    hud_console.info("")
+    hud_console.info("Publish to registry:")
+    hud_console.command_example("hud push", f"Push as {version_tag}")
+    hud_console.command_example("hud push --tag latest", "Push with custom tag")
+    hud_console.info("")
+    hud_console.info("The lock file can be used to reproduce this exact environment.")
 
 
 def build_command(

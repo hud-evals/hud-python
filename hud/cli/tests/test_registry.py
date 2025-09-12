@@ -118,11 +118,11 @@ class TestExtractNameAndTag:
 class TestSaveToRegistry:
     """Test saving to local registry."""
 
-    @mock.patch("hud.cli.utils.registry.HUDDesign")
-    def test_save_success(self, mock_design_class, tmp_path):
+    @mock.patch("hud.cli.utils.registry.HUDConsole")
+    def test_save_success(self, mock_hud_console_class, tmp_path):
         """Test successful save to registry."""
-        mock_design = mock.Mock()
-        mock_design_class.return_value = mock_design
+        mock_hud_console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
 
         # Mock home directory
         with mock.patch("pathlib.Path.home", return_value=tmp_path):
@@ -142,13 +142,13 @@ class TestSaveToRegistry:
             # Verify directory structure
             assert result.parent.name == "abc123def456"
 
-            mock_design.success.assert_called_once()
+            mock_hud_console.success.assert_called_once()
 
-    @mock.patch("hud.cli.utils.registry.HUDDesign")
-    def test_save_verbose(self, mock_design_class, tmp_path):
+    @mock.patch("hud.cli.utils.registry.HUDConsole")
+    def test_save_verbose(self, mock_hud_console_class, tmp_path):
         """Test save with verbose output."""
-        mock_design = mock.Mock()
-        mock_design_class.return_value = mock_design
+        mock_hud_console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
 
         with mock.patch("pathlib.Path.home", return_value=tmp_path):
             lock_data = {"image": "test:v1"}
@@ -157,13 +157,13 @@ class TestSaveToRegistry:
 
             assert result is not None
             # Should show verbose info
-            assert mock_design.info.call_count >= 1
+            assert mock_hud_console.info.call_count >= 1
 
-    @mock.patch("hud.cli.utils.registry.HUDDesign")
-    def test_save_failure(self, mock_design_class):
+    @mock.patch("hud.cli.utils.registry.HUDConsole")
+    def test_save_failure(self, mock_hud_console_class):
         """Test handling save failure."""
-        mock_design = mock.Mock()
-        mock_design_class.return_value = mock_design
+        mock_hud_console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
 
         # Mock file operations to fail
         with (
@@ -175,7 +175,7 @@ class TestSaveToRegistry:
             result = save_to_registry(lock_data, "test:latest", verbose=True)
 
             assert result is None
-            mock_design.warning.assert_called_once()
+            mock_hud_console.warning.assert_called_once()
 
 
 class TestLoadFromRegistry:

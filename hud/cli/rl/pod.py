@@ -15,11 +15,11 @@ from rich.live import Live
 from rich.spinner import Spinner
 
 from hud.settings import settings
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
 from .ssh import check_and_configure_ssh_key, connect_and_train
 
-design = HUDDesign()
+hud_console = HUDConsole()
 
 
 def parse_gpu_config(gpus: str) -> tuple[int, str]:
@@ -29,7 +29,7 @@ def parse_gpu_config(gpus: str) -> tuple[int, str]:
         try:
             count = int(count_str)
         except ValueError as e:
-            design.error(f"Invalid GPU count: {count_str}")
+            hud_console.error(f"Invalid GPU count: {count_str}")
             raise typer.Exit(1) from e
     else:
         # Default to 1 GPU if no count specified
@@ -65,7 +65,7 @@ async def create_and_connect_prime_pod(
     is_json_file: bool = False,
 ) -> None:
     """Create a Prime Intellect pod and connect to it for training."""
-    design.section_title("🌐 Creating Prime Intellect Pod")
+    hud_console.section_title("🌐 Creating Prime Intellect Pod")
 
     create_cmd = [
         "prime",
@@ -79,8 +79,8 @@ async def create_and_connect_prime_pod(
         pod_name,
     ]
 
-    design.info(f"Creating pod: {pod_name}")
-    design.info(f"GPU configuration: {gpu_count}x {gpu_type}")
+    hud_console.info(f"Creating pod: {pod_name}")
+    hud_console.info(f"GPU configuration: {gpu_count}x {gpu_type}")
 
     # Check for global team config first
     has_global_team = False
@@ -106,21 +106,21 @@ async def create_and_connect_prime_pod(
                             break
 
     # Display automated selections
-    design.info("")
-    design.info("Automated selections:")
-    design.info("  Provider: Will select from supported providers")
-    design.info("  Disk: Default size")
-    design.info("  Image: cuda_12_4_pytorch_2_5")
+    hud_console.info("")
+    hud_console.info("Automated selections:")
+    hud_console.info("  Provider: Will select from supported providers")
+    hud_console.info("  Disk: Default size")
+    hud_console.info("  Image: cuda_12_4_pytorch_2_5")
     if team_id:
-        design.info(f"  Team: {team_id}")
+        hud_console.info(f"  Team: {team_id}")
     elif has_global_team:
-        design.info("  Team: Using pre-configured team")
+        hud_console.info("  Team: Using pre-configured team")
     else:
-        design.info("  Team: Personal Account")
-    design.info("")
+        hud_console.info("  Team: Personal Account")
+    hud_console.info("")
 
     # First, get the provider list by running the command with minimal input
-    design.info("Checking available providers...")
+    hud_console.info("Checking available providers...")
 
     # Run command with just a newline to see provider list
     provider_check = subprocess.run(  # noqa: S603, ASYNC221
@@ -156,7 +156,7 @@ async def create_and_connect_prime_pod(
     for provider in supported_providers:
         if provider in provider_map:
             provider_choice = provider_map[provider]
-            design.info(f"Selected provider: {provider} (option {provider_choice})")
+            hud_console.info(f"Selected provider: {provider} (option {provider_choice})")
             break
 
     # Build inputs step by step for clarity
@@ -164,39 +164,39 @@ async def create_and_connect_prime_pod(
     image_choice = "7"  # cuda_12_4_pytorch_2_5
 
     # Log what we're doing
-    design.debug("Pod creation configuration:")
-    design.debug(f"  Team ID provided: {team_id}")
-    design.debug(f"  Global team detected: {has_global_team}")
+    hud_console.debug("Pod creation configuration:")
+    hud_console.debug(f"  Team ID provided: {team_id}")
+    hud_console.debug(f"  Global team detected: {has_global_team}")
 
     if team_id:
         # Explicit team ID provided, select Custom Team ID (option 3)
         team_choice = "3"
         # Fixed: confirmation should be lowercase 'y'
         inputs = f"{provider_choice}\n{disk_size}\n{image_choice}\n{team_choice}\n{team_id}\ny\n"
-        design.debug(f"  Using explicit team ID: option {team_choice} with ID {team_id}")
+        hud_console.debug(f"  Using explicit team ID: option {team_choice} with ID {team_id}")
     elif has_global_team:
         # When team is pre-configured, it shows as option 2 - select it
         team_choice = "2"
         # Fixed: confirmation should be lowercase 'y' and come after team selection
         inputs = f"{provider_choice}\n{disk_size}\n{image_choice}\n{team_choice}\ny\n"
-        design.debug(f"  Using pre-configured team: option {team_choice}")
+        hud_console.debug(f"  Using pre-configured team: option {team_choice}")
     else:
         # Personal account (option 1) - just press enter to accept default [1]
         inputs = (
             f"{provider_choice}\n{disk_size}\n{image_choice}\n\ny\n"  # Empty line for default [1]
         )
-        design.debug("  Using personal account: default option [1]")
+        hud_console.debug("  Using personal account: default option [1]")
 
-    design.debug(
+    hud_console.debug(
         f"  Input sequence: provider={provider_choice}, disk={disk_size or 'default'}, image={image_choice}, team={team_choice if 'team_choice' in locals() else 'default'}"  # noqa: E501
     )
 
     # Show found providers
     if provider_lines:
-        design.info("")
-        design.info("Found providers:")
+        hud_console.info("")
+        hud_console.info("Found providers:")
         for pl in provider_lines[:5]:  # Show first 5
-            design.info(f"  {pl}")
+            hud_console.info(f"  {pl}")
 
     try:
         console = Console()
@@ -214,7 +214,7 @@ async def create_and_connect_prime_pod(
             )
 
         if result.returncode != 0:
-            design.error("Failed to create pod")
+            hud_console.error("Failed to create pod")
 
             # Parse output for better error reporting
             output_lines = result.stdout.strip().split("\n") if result.stdout else []
@@ -222,60 +222,60 @@ async def create_and_connect_prime_pod(
             # Look for provider prices
             for line in output_lines:
                 if "$" in line and "/hr" in line:
-                    design.info(f"Provider option: {line.strip()}")
+                    hud_console.info(f"Provider option: {line.strip()}")
 
             # Check for team selection error
             if "invalid selection" in result.stdout.lower():
-                design.error("Team selection failed")
+                hud_console.error("Team selection failed")
                 # Find and display the team selection section
                 for i, line in enumerate(output_lines):
                     if "Select Team:" in line:
-                        design.info("Team selection options:")
+                        hud_console.info("Team selection options:")
                         # Show next few lines
                         for j in range(i, min(i + 6, len(output_lines))):
-                            design.info(f"  {output_lines[j]}")
+                            hud_console.info(f"  {output_lines[j]}")
                         break
 
-                design.info("")
-                design.hint(
+                hud_console.info("")
+                hud_console.hint(
                     "The Prime CLI interface may have changed. Try running the command manually:"
                 )
-                design.command_example(
+                hud_console.command_example(
                     f"prime pods create --gpu-type {gpu_type} --gpu-count {gpu_count} --name {pod_name}"  # noqa: E501
                 )
 
             # Show error details
             if result.stderr:
-                design.error("Error output:")
+                hud_console.error("Error output:")
                 for line in result.stderr.strip().split("\n"):
-                    design.error(f"  {line}")
+                    hud_console.error(f"  {line}")
 
             # Show last part of stdout for context
             if result.stdout:
-                design.info("Command output:")
+                hud_console.info("Command output:")
                 # Show last 15 lines for brevity
                 for line in output_lines[-15:]:
-                    design.info(f"  {line}")
+                    hud_console.info(f"  {line}")
 
             if "max_price" in str(result.stderr) or "max_price" in str(result.stdout):
-                design.warning("")
-                design.warning("The selected provider requires a maximum price limit.")
-                design.info("This is a known limitation with some providers.")
-                design.info("")
-                design.hint("Workarounds:")
-                design.info("1. Run the command manually and select a different provider")
-                design.info("2. Try again later when datacrunch (usually cheapest) is available")
-                design.info("3. Use the Prime web interface: https://app.primeintellect.ai")
+                hud_console.warning("")
+                hud_console.warning("The selected provider requires a maximum price limit.")
+                hud_console.info("This is a known limitation with some providers.")
+                hud_console.info("")
+                hud_console.hint("Workarounds:")
+                hud_console.info("1. Run the command manually and select a different provider")
+                hud_console.info("2. Try again later when datacrunch (usually cheapest) is available")
+                hud_console.info("3. Use the Prime web interface: https://app.primeintellect.ai")
 
-            design.info("")
-            design.info("Debug info:")
-            design.info(f"  Command: {' '.join(create_cmd)}")
-            design.info(f"  Pod name: {pod_name}")
-            design.info(f"  Team ID: {'Provided' if team_id else 'Not provided'}")
-            design.info(f"  Global team detected: {has_global_team}")
+            hud_console.info("")
+            hud_console.info("Debug info:")
+            hud_console.info(f"  Command: {' '.join(create_cmd)}")
+            hud_console.info(f"  Pod name: {pod_name}")
+            hud_console.info(f"  Team ID: {'Provided' if team_id else 'Not provided'}")
+            hud_console.info(f"  Global team detected: {has_global_team}")
 
             # Show the exact inputs we sent
-            design.info("  Inputs sent (in order):")
+            hud_console.info("  Inputs sent (in order):")
             input_parts = inputs.strip().split("\n")
             input_labels = [
                 "Provider selection",
@@ -287,9 +287,9 @@ async def create_and_connect_prime_pod(
             ]
             for i, (part, label) in enumerate(zip(input_parts, input_labels, strict=False)):
                 if part:
-                    design.info(f"    {i + 1}. {label}: '{part}'")
+                    hud_console.info(f"    {i + 1}. {label}: '{part}'")
                 else:
-                    design.info(f"    {i + 1}. {label}: [Enter/default]")
+                    hud_console.info(f"    {i + 1}. {label}: [Enter/default]")
 
             raise typer.Exit(1)
 
@@ -304,18 +304,18 @@ async def create_and_connect_prime_pod(
                 break
 
         if not pod_id:
-            design.error("Could not extract pod ID from output")
-            design.info(f"Output: {result.stdout}")
+            hud_console.error("Could not extract pod ID from output")
+            hud_console.info(f"Output: {result.stdout}")
             raise typer.Exit(1)
 
-        design.success(f"Created pod: {pod_id}")
+        hud_console.success(f"Created pod: {pod_id}")
 
         # Poll for pod status
         ssh_info = await poll_pod_status(pod_id)
 
         if ssh_info:
-            design.success("Pod is ready!")
-            design.info(f"SSH: {ssh_info}")
+            hud_console.success("Pod is ready!")
+            hud_console.info(f"SSH: {ssh_info}")
 
             # Check if SSH key is configured globally
             ssh_key_configured = await check_and_configure_ssh_key()
@@ -335,25 +335,25 @@ async def create_and_connect_prime_pod(
                 )
             else:
                 # Manual fallback
-                design.section_title("📋 Manual Connection Required")
-                design.info("SSH key configuration failed. Connect manually:")
-                design.info("")
-                design.info("1. Download the SSH key from:")
-                design.info("   https://app.primeintellect.ai/dashboard/profile")
-                design.info("")
-                design.info("2. Set permissions:")
-                design.command_example("chmod 400 /path/to/prime-key.pem", "")
-                design.info("")
-                design.info("3. Connect to your instance:")
-                design.command_example(f"ssh -i /path/to/prime-key.pem {ssh_info}", "")
-                design.info("")
-                design.info("4. Run these commands:")
-                design.command_example("pip install verifiers hud-vf-gym", "")
-                design.command_example(f"prime env install {image}", "")
+                hud_console.section_title("📋 Manual Connection Required")
+                hud_console.info("SSH key configuration failed. Connect manually:")
+                hud_console.info("")
+                hud_console.info("1. Download the SSH key from:")
+                hud_console.info("   https://app.primeintellect.ai/dashboard/profile")
+                hud_console.info("")
+                hud_console.info("2. Set permissions:")
+                hud_console.command_example("chmod 400 /path/to/prime-key.pem", "")
+                hud_console.info("")
+                hud_console.info("3. Connect to your instance:")
+                hud_console.command_example(f"ssh -i /path/to/prime-key.pem {ssh_info}", "")
+                hud_console.info("")
+                hud_console.info("4. Run these commands:")
+                hud_console.command_example("pip install verifiers hud-vf-gym", "")
+                hud_console.command_example(f"prime env install {image}", "")
 
                 # Build training command with env vars
                 if settings.wandb_api_key:
-                    design.command_example(f"export WANDB_API_KEY={settings.wandb_api_key}", "")
+                    hud_console.command_example(f"export WANDB_API_KEY={settings.wandb_api_key}", "")
 
                 train_cmd = f"""vf-train hud-vf-gym \\
   --model {model} \\
@@ -362,15 +362,15 @@ async def create_and_connect_prime_pod(
   --run-name hud-rl-{pod_id[:8]} \\
   --wandb-project hud-rl"""
 
-                design.command_example(train_cmd, "")
-                design.info("")
-                design.warning(f"Remember to terminate when done: prime pods terminate {pod_id}")
+                hud_console.command_example(train_cmd, "")
+                hud_console.info("")
+                hud_console.warning(f"Remember to terminate when done: prime pods terminate {pod_id}")
         else:
-            design.error("Pod failed to become active")
+            hud_console.error("Pod failed to become active")
             raise typer.Exit(1)
 
     except subprocess.CalledProcessError as e:
-        design.error(f"Failed to create pod: {e}")
+        hud_console.error(f"Failed to create pod: {e}")
         raise typer.Exit(1) from e
 
 
@@ -433,7 +433,7 @@ async def poll_pod_status(pod_id: str) -> str | None:
                     if ssh_value and ssh_value.strip() and ssh_value.strip() != "N/A":
                         # Stop the spinner before logging
                         live.stop()
-                        design.success(f"SSH is available: {ssh_value}")
+                        hud_console.success(f"SSH is available: {ssh_value}")
                         return ssh_value
 
                 time.sleep(10)  # Wait 10 seconds # noqa: ASYNC251
@@ -444,8 +444,8 @@ async def poll_pod_status(pod_id: str) -> str | None:
                 time.sleep(10)  # noqa: ASYNC251
                 attempt += 1
 
-    # Spinner is done, now we can use design.error
-    design.error("Timeout: Pod did not become ready within 20 minutes")
+    # Spinner is done, now we can use hud_console.error
+    hud_console.error("Timeout: Pod did not become ready within 20 minutes")
     return None
 
 
@@ -464,11 +464,11 @@ async def run_prime_training(
     """Run training on Prime Intellect infrastructure."""
     # Check API key
     if not settings.prime_api_key:
-        design.error("Prime API key not found")
-        design.info("Set your Prime API key:")
-        design.info("  export PRIME_API_KEY='your-api-key'")
-        design.info("  # or")
-        design.info("  prime auth")
+        hud_console.error("Prime API key not found")
+        hud_console.info("Set your Prime API key:")
+        hud_console.info("  export PRIME_API_KEY='your-api-key'")
+        hud_console.info("  # or")
+        hud_console.info("  prime auth")
         raise typer.Exit(1)
 
     # Parse GPU configuration

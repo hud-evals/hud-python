@@ -9,9 +9,9 @@ from pathlib import Path
 import typer
 
 from hud.settings import settings
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
-design = HUDDesign()
+hud_console = HUDConsole()
 
 
 async def check_and_configure_ssh_key() -> bool:
@@ -48,32 +48,32 @@ async def check_and_configure_ssh_key() -> bool:
     # If SSH key is configured, verify it exists
     if ssh_key_path:
         if Path(ssh_key_path).expanduser().exists():
-            design.info(f"Using configured SSH key: {ssh_key_path}")
+            hud_console.info(f"Using configured SSH key: {ssh_key_path}")
             return True
         else:
-            design.warning(f"Configured SSH key not found: {ssh_key_path}")
+            hud_console.warning(f"Configured SSH key not found: {ssh_key_path}")
 
     # Prompt for SSH key
-    design.section_title("🔑 SSH Key Configuration")
-    design.info("Prime Intellect requires an SSH key for pod access.")
-    design.info("")
-    design.info("If you don't have a key:")
-    design.info("1. Visit https://app.primeintellect.ai/dashboard/profile")
-    design.info("2. Generate or upload your SSH key")
-    design.info("3. Download the private key file")
-    design.info("")
+    hud_console.section_title("🔑 SSH Key Configuration")
+    hud_console.info("Prime Intellect requires an SSH key for pod access.")
+    hud_console.info("")
+    hud_console.info("If you don't have a key:")
+    hud_console.info("1. Visit https://app.primeintellect.ai/dashboard/profile")
+    hud_console.info("2. Generate or upload your SSH key")
+    hud_console.info("3. Download the private key file")
+    hud_console.info("")
 
     key_path = typer.prompt("Enter path to your Prime SSH private key (e.g., ~/.ssh/prime-key.pem)")
     key_path = Path(key_path).expanduser()
 
     if not key_path.exists():
-        design.error(f"File not found: {key_path}")
+        hud_console.error(f"File not found: {key_path}")
         return False
 
     # Set permissions if not Windows
     if os.name != "nt":
         subprocess.run(["chmod", "400", str(key_path)])  # noqa: S603, S607, ASYNC221
-        design.success("Set proper permissions on key file")
+        hud_console.success("Set proper permissions on key file")
 
     # Configure the SSH key globally
     result = subprocess.run(  # noqa: S603, ASYNC221
@@ -83,12 +83,12 @@ async def check_and_configure_ssh_key() -> bool:
     )
 
     if result.returncode == 0:
-        design.success("SSH key configured successfully")
+        hud_console.success("SSH key configured successfully")
         return True
     else:
-        design.error("Failed to configure SSH key")
+        hud_console.error("Failed to configure SSH key")
         if result.stderr:
-            design.error(f"Error: {result.stderr}")
+            hud_console.error(f"Error: {result.stderr}")
         return False
 
 
@@ -104,7 +104,7 @@ async def connect_and_train(
     is_json_file: bool = False,
 ) -> None:
     """Connect to the pod via SSH and run training commands."""
-    design.section_title("🚀 Starting Remote Training")
+    hud_console.section_title("🚀 Starting Remote Training")
 
     # Parse SSH info to get host and port
     # Format is like "root@65.108.33.78 -p 1234"
@@ -135,19 +135,19 @@ async def connect_and_train(
                         break
 
     if not ssh_key_path:
-        design.error("SSH key path not configured")
+        hud_console.error("SSH key path not configured")
         raise typer.Exit(1)
 
     # Verify SSH key exists
     ssh_key_path = Path(ssh_key_path).expanduser()
     if not ssh_key_path.exists():
-        design.error(f"SSH key not found: {ssh_key_path}")
+        hud_console.error(f"SSH key not found: {ssh_key_path}")
         raise typer.Exit(1)
 
-    design.info(f"Using SSH key: {ssh_key_path}")
+    hud_console.info(f"Using SSH key: {ssh_key_path}")
 
     # First, copy the config file to the pod using scp
-    design.info("Copying config file to pod...")
+    hud_console.info("Copying config file to pod...")
     try:
         # On Windows, we need to ensure proper path formatting
         config_path = str(config).replace("\\", "/")
@@ -164,22 +164,22 @@ async def connect_and_train(
             config_path,
             f"{ssh_user_host}:/root/config.yaml",
         ]
-        design.debug(f"Running: {' '.join(scp_cmd)}")
+        hud_console.debug(f"Running: {' '.join(scp_cmd)}")
         subprocess.run(scp_cmd, check=True)  # noqa: S603, ASYNC221
-        design.success("Config file copied")
+        hud_console.success("Config file copied")
     except subprocess.CalledProcessError as e:
-        design.error(f"Failed to copy config file: {e}")
+        hud_console.error(f"Failed to copy config file: {e}")
         if os.name == "nt":  # Windows
-            design.info("Make sure OpenSSH is installed. On Windows 10+, it's built-in.")
-            design.info("If using older Windows, install Git for Windows which includes SSH/SCP.")
+            hud_console.info("Make sure OpenSSH is installed. On Windows 10+, it's built-in.")
+            hud_console.info("If using older Windows, install Git for Windows which includes SSH/SCP.")
         else:
-            design.info("Make sure scp is installed and in your PATH")
+            hud_console.info("Make sure scp is installed and in your PATH")
         raise typer.Exit(1) from e
 
     # If dataset is a JSON file, copy it too
     remote_dataset = dataset  # Default to unchanged
     if is_json_file:
-        design.info("Copying task file to pod...")
+        hud_console.info("Copying task file to pod...")
         try:
             # On Windows, we need to ensure proper path formatting
             dataset_path = str(dataset).replace("\\", "/")
@@ -200,16 +200,16 @@ async def connect_and_train(
                 dataset_path,
                 f"{ssh_user_host}:{remote_dataset}",
             ]
-            design.debug(f"Running: {' '.join(scp_cmd)}")
+            hud_console.debug(f"Running: {' '.join(scp_cmd)}")
             subprocess.run(scp_cmd, check=True)  # noqa: S603, ASYNC221
-            design.success(f"Task file copied to {remote_dataset}")
+            hud_console.success(f"Task file copied to {remote_dataset}")
         except subprocess.CalledProcessError as e:
-            design.error(f"Failed to copy task file: {e}")
+            hud_console.error(f"Failed to copy task file: {e}")
             raise typer.Exit(1) from e
 
-    design.info("Setting up environment and starting training...")
-    design.info("This will take a few minutes for initial setup, then training will begin.")
-    design.info("")
+    hud_console.info("Setting up environment and starting training...")
+    hud_console.info("This will take a few minutes for initial setup, then training will begin.")
+    hud_console.info("")
 
     # Build environment exports
     env_exports = []
@@ -311,10 +311,10 @@ async def connect_and_train(
         subprocess.run(ssh_cmd, check=True)  # noqa: S603, ASYNC221
 
     except subprocess.CalledProcessError as e:
-        design.error(f"Training failed: {e}")
+        hud_console.error(f"Training failed: {e}")
         raise typer.Exit(1) from e
     except KeyboardInterrupt:
-        design.warning("Training interrupted by user")
-        design.info(f"To reconnect: prime pods ssh {pod_id}")
-        design.info(f"To check status: prime pods status {pod_id}")
-        design.info(f"To terminate: prime pods terminate {pod_id}")
+        hud_console.warning("Training interrupted by user")
+        hud_console.info(f"To reconnect: prime pods ssh {pod_id}")
+        hud_console.info(f"To check status: prime pods status {pod_id}")
+        hud_console.info(f"To terminate: prime pods terminate {pod_id}")

@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from hud.settings import settings
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
 from .registry import (
     extract_digest_from_image,
@@ -19,7 +19,7 @@ from .registry import (
 )
 
 console = Console()
-design = HUDDesign()
+hud_console = HUDConsole()
 
 
 def fetch_lock_from_registry(reference: str) -> dict | None:
@@ -81,7 +81,7 @@ def check_local_cache(reference: str) -> dict | None:
                     if ref_base in img_base or img_base in ref_base:
                         return lock_data
             except Exception:
-                design.error("Error loading lock file")
+                hud_console.error("Error loading lock file")
 
     return None
 
@@ -92,9 +92,9 @@ async def analyze_from_metadata(reference: str, output_format: str, verbose: boo
 
     from hud.cli.analyze import display_interactive, display_markdown
 
-    design.header("MCP Environment Analysis", icon="🔍")
-    design.info(f"Looking up: {reference}")
-    design.info("")
+    hud_console.header("MCP Environment Analysis", icon="🔍")
+    hud_console.info(f"Looking up: {reference}")
+    hud_console.info("")
 
     lock_data = None
     source = None
@@ -155,7 +155,7 @@ async def analyze_from_metadata(reference: str, output_format: str, verbose: boo
                 progress.update(task, description="[red]✗ Not found[/red]")
 
     if not lock_data:
-        design.error("Environment metadata not found")
+        hud_console.error("Environment metadata not found")
         console.print("\n[yellow]This environment hasn't been analyzed yet.[/yellow]")
         console.print("\nOptions:")
         console.print(f"  1. Pull it first: [cyan]hud pull {reference}[/cyan]")
@@ -205,16 +205,16 @@ async def analyze_from_metadata(reference: str, output_format: str, verbose: boo
             )
 
     # Display results
-    design.info("")
+    hud_console.info("")
     if source == "local":
-        design.dim_info("Source:", "Local cache")
+        hud_console.dim_info("Source:", "Local cache")
     else:
-        design.dim_info("Source:", "HUD registry")
+        hud_console.dim_info("Source:", "HUD registry")
 
     if "image" in analysis:
-        design.dim_info("Image:", analysis["image"])
+        hud_console.dim_info("Image:", analysis["image"])
 
-    design.info("")
+    hud_console.info("")
 
     # Display results based on format
     if output_format == "json":

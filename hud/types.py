@@ -29,9 +29,9 @@ class MCPToolCall(CallToolRequestParams):
 
     def __rich__(self) -> str:
         """Rich representation with color formatting."""
-        from hud.utils.design import design
+        from hud.utils.hud_console import hud_console
 
-        return design.format_tool_call(self.name, self.arguments)
+        return hud_console.format_tool_call(self.name, self.arguments)
 
 
 class MCPToolResult(CallToolResult):
@@ -74,10 +74,10 @@ class MCPToolResult(CallToolResult):
 
     def __rich__(self) -> str:
         """Rich representation with color formatting."""
-        from hud.utils.design import design
+        from hud.utils.hud_console import hud_console
 
         content_summary = self._get_content_summary()
-        return design.format_tool_result(content_summary, self.isError)
+        return hud_console.format_tool_result(content_summary, self.isError)
 
 
 class AgentResponse(BaseModel):

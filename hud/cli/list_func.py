@@ -8,7 +8,7 @@ import typer
 import yaml
 from rich.table import Table
 
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
 from .utils.registry import extract_name_and_tag, get_registry_dir, list_registry_entries
 
@@ -46,10 +46,10 @@ def list_environments(
     verbose: bool = False,
 ) -> None:
     """List all HUD environments in the local registry."""
-    design = HUDDesign()
+    hud_console = HUDConsole()
 
     if not json_output:
-        design.header("HUD Environment Registry")
+        hud_console.header("HUD Environment Registry")
 
     # Check for environment directory
     env_dir = get_registry_dir()
@@ -57,10 +57,10 @@ def list_environments(
         if json_output:
             print("[]")  # noqa: T201
         else:
-            design.info("No environments found in local registry.")
-            design.info("")
-            design.info("Pull environments with: [cyan]hud pull <org/name:tag>[/cyan]")
-            design.info("Build environments with: [cyan]hud build[/cyan]")
+            hud_console.info("No environments found in local registry.")
+            hud_console.info("")
+            hud_console.info("Pull environments with: [cyan]hud pull <org/name:tag>[/cyan]")
+            hud_console.info("Build environments with: [cyan]hud build[/cyan]")
         return
 
     # Collect all environments using the registry helper
@@ -103,7 +103,7 @@ def list_environments(
 
         except Exception as e:
             if verbose:
-                design.warning(f"Failed to read {lock_file}: {e}")
+                hud_console.warning(f"Failed to read {lock_file}: {e}")
 
     # Sort by pulled time (newest first)
     environments.sort(key=lambda x: x["pulled_time"], reverse=True)
@@ -129,10 +129,10 @@ def list_environments(
         return
 
     if not environments:
-        design.info("No environments found matching criteria.")
-        design.info("")
-        design.info("Pull environments with: [cyan]hud pull <org/name:tag>[/cyan]")
-        design.info("Build environments with: [cyan]hud build[/cyan]")
+        hud_console.info("No environments found matching criteria.")
+        hud_console.info("")
+        hud_console.info("Pull environments with: [cyan]hud pull <org/name:tag>[/cyan]")
+        hud_console.info("Build environments with: [cyan]hud build[/cyan]")
         return
 
     # Create table
@@ -169,26 +169,26 @@ def list_environments(
 
         table.add_row(*row)
 
-    design.print(table)  # type: ignore
-    design.info("")
+    hud_console.print(table)  # type: ignore
+    hud_console.info("")
 
     # Show usage hints
-    design.section_title("Usage")
+    hud_console.section_title("Usage")
     if environments:
         # Use the most recently pulled environment as example
         example_env = environments[0]
         example_ref = f"{example_env['name']}:{example_env['tag']}"
 
-        design.info(f"Run an environment: [cyan]hud run {example_ref}[/cyan]")
-        design.info(f"Analyze tools: [cyan]hud analyze {example_ref}[/cyan]")
-        design.info(f"Debug server: [cyan]hud debug {example_ref}[/cyan]")
+        hud_console.info(f"Run an environment: [cyan]hud run {example_ref}[/cyan]")
+        hud_console.info(f"Analyze tools: [cyan]hud analyze {example_ref}[/cyan]")
+        hud_console.info(f"Debug server: [cyan]hud debug {example_ref}[/cyan]")
 
-    design.info("Pull more environments: [cyan]hud pull <org/name:tag>[/cyan]")
-    design.info("Build new environments: [cyan]hud build[/cyan]")
+    hud_console.info("Pull more environments: [cyan]hud pull <org/name:tag>[/cyan]")
+    hud_console.info("Build new environments: [cyan]hud build[/cyan]")
 
     if verbose:
-        design.info("")
-        design.info(f"[dim]Registry location: {env_dir}[/dim]")
+        hud_console.info("")
+        hud_console.info(f"[dim]Registry location: {env_dir}[/dim]")
 
 
 def list_command(

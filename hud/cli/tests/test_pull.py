@@ -180,15 +180,15 @@ class TestFormatSize:
 class TestPullEnvironment:
     """Test the main pull_environment function."""
 
-    @mock.patch("hud.cli.pull.HUDDesign")
+    @mock.patch("hud.cli.pull.HUDConsole")
     @mock.patch("hud.cli.pull.save_to_registry")
     @mock.patch("subprocess.Popen")
-    def test_pull_with_lock_file(self, mock_popen, mock_save, mock_design_class, tmp_path):
+    def test_pull_with_lock_file(self, mock_popen, mock_save, mock_hud_console_class, tmp_path):
         """Test pulling with a lock file."""
-        # Create mock design instance
-        mock_design = mock.Mock()
-        mock_design.console = mock.Mock()
-        mock_design_class.return_value = mock_design
+        # Create mock hud_console instance
+        mock_hud_console = mock.Mock()
+        mock_hud_console.console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
 
         # Create lock file
         lock_data = {
@@ -218,15 +218,15 @@ class TestPullEnvironment:
         # Verify lock was saved to registry
         mock_save.assert_called_once()
 
-    @mock.patch("hud.cli.pull.HUDDesign")
+    @mock.patch("hud.cli.pull.HUDConsole")
     @mock.patch("hud.cli.pull.fetch_lock_from_registry")
     @mock.patch("subprocess.Popen")
-    def test_pull_from_registry(self, mock_popen, mock_fetch, mock_design_class):
+    def test_pull_from_registry(self, mock_popen, mock_fetch, mock_hud_console_class):
         """Test pulling from HUD registry."""
-        # Create mock design instance
-        mock_design = mock.Mock()
-        mock_design.console = mock.Mock()
-        mock_design_class.return_value = mock_design
+        # Create mock hud_console instance
+        mock_hud_console = mock.Mock()
+        mock_hud_console.console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
 
         # Mock registry response
         lock_data = {"image": "docker.io/org/env:latest@sha256:def456", "tools": []}
@@ -250,18 +250,18 @@ class TestPullEnvironment:
         call_args = mock_popen.call_args[0][0]
         assert "docker.io/org/env:latest@sha256:def456" in call_args
 
-    @mock.patch("hud.cli.pull.HUDDesign")
+    @mock.patch("hud.cli.pull.HUDConsole")
     @mock.patch("hud.cli.pull.get_docker_manifest")
     @mock.patch("hud.cli.pull.fetch_lock_from_registry")
     @mock.patch("subprocess.Popen")
     def test_pull_docker_image_direct(
-        self, mock_popen, mock_fetch, mock_manifest, mock_design_class
+        self, mock_popen, mock_fetch, mock_manifest, mock_hud_console_class
     ):
         """Test pulling Docker image directly."""
-        # Create mock design instance
-        mock_design = mock.Mock()
-        mock_design.console = mock.Mock()
-        mock_design_class.return_value = mock_design
+        # Create mock hud_console instance
+        mock_hud_console = mock.Mock()
+        mock_hud_console.console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
 
         # Mock no registry data
         mock_fetch.return_value = None
@@ -284,28 +284,28 @@ class TestPullEnvironment:
         call_args = mock_popen.call_args[0][0]
         assert call_args == ["docker", "pull", "ubuntu:latest"]
 
-    @mock.patch("hud.cli.pull.HUDDesign")
-    def test_pull_verify_only(self, mock_design_class):
+    @mock.patch("hud.cli.pull.HUDConsole")
+    def test_pull_verify_only(self, mock_hud_console_class):
         """Test verify-only mode."""
-        # Create mock design instance
-        mock_design = mock.Mock()
-        mock_design.console = mock.Mock()
-        mock_design_class.return_value = mock_design
+        # Create mock hud_console instance
+        mock_hud_console = mock.Mock()
+        mock_hud_console.console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
 
         # Should not actually pull
         pull_environment("test:latest", verify_only=True)
 
         # Check success message
-        mock_design.success.assert_called_with("Verification complete")
+        mock_hud_console.success.assert_called_with("Verification complete")
 
-    @mock.patch("hud.cli.pull.HUDDesign")
+    @mock.patch("hud.cli.pull.HUDConsole")
     @mock.patch("subprocess.Popen")
-    def test_pull_docker_failure(self, mock_popen, mock_design_class):
+    def test_pull_docker_failure(self, mock_popen, mock_hud_console_class):
         """Test handling Docker pull failure."""
-        # Create mock design instance
-        mock_design = mock.Mock()
-        mock_design.console = mock.Mock()
-        mock_design_class.return_value = mock_design
+        # Create mock hud_console instance
+        mock_hud_console = mock.Mock()
+        mock_hud_console.console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
 
         # Mock docker pull failure
         mock_process = mock.Mock()
@@ -318,16 +318,16 @@ class TestPullEnvironment:
         with pytest.raises(typer.Exit):
             pull_environment("invalid:image", yes=True)
 
-        mock_design.error.assert_called_with("Pull failed")
+        mock_hud_console.error.assert_called_with("Pull failed")
 
-    @mock.patch("hud.cli.pull.HUDDesign")
+    @mock.patch("hud.cli.pull.HUDConsole")
     @mock.patch("typer.confirm")
-    def test_pull_user_cancels(self, mock_confirm, mock_design_class):
+    def test_pull_user_cancels(self, mock_confirm, mock_hud_console_class):
         """Test when user cancels pull."""
-        # Create mock design instance
-        mock_design = mock.Mock()
-        mock_design.console = mock.Mock()
-        mock_design_class.return_value = mock_design
+        # Create mock hud_console instance
+        mock_hud_console = mock.Mock()
+        mock_hud_console.console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
 
         mock_confirm.return_value = False
 
@@ -335,15 +335,15 @@ class TestPullEnvironment:
             pull_environment("test:latest", yes=False)
 
         assert exc_info.value.exit_code == 0
-        mock_design.info.assert_called_with("Aborted")
+        mock_hud_console.info.assert_called_with("Aborted")
 
-    @mock.patch("hud.cli.pull.HUDDesign")
-    def test_pull_nonexistent_lock_file(self, mock_design_class):
+    @mock.patch("hud.cli.pull.HUDConsole")
+    def test_pull_nonexistent_lock_file(self, mock_hud_console_class):
         """Test pulling with non-existent lock file."""
-        # Create mock design instance
-        mock_design = mock.Mock()
-        mock_design.console = mock.Mock()
-        mock_design_class.return_value = mock_design
+        # Create mock hud_console instance
+        mock_hud_console = mock.Mock()
+        mock_hud_console.console = mock.Mock()
+        mock_hud_console_class.return_value = mock_hud_console
 
         with pytest.raises(typer.Exit):
             pull_environment("nonexistent.yaml")

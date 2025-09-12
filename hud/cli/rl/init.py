@@ -10,14 +10,14 @@ import typer
 import yaml
 
 from hud.clients import MCPClient
-from hud.utils.design import HUDDesign
+from hud.utils.hud_console import HUDConsole
 
-design = HUDDesign()
+hud_console = HUDConsole()
 
 
 def init_command_wrapper(directory: str, output: Path | None, force: bool, build: bool) -> None:
     """Wrapper to handle interactive prompts before entering async context."""
-    design.header("RL Config Generator", icon="🔧")
+    hud_console.header("RL Config Generator", icon="🔧")
 
     # Determine if this is a directory or Docker image
     path = Path(directory)
@@ -30,7 +30,7 @@ def init_command_wrapper(directory: str, output: Path | None, force: bool, build
         if not lock_path.exists():
             if build:
                 # Auto-build was requested
-                design.info("Building environment...")
+                hud_console.info("Building environment...")
                 from hud.cli.build import build_command
 
                 build_command(str(directory), None, False, False, {})
@@ -42,15 +42,15 @@ def init_command_wrapper(directory: str, output: Path | None, force: bool, build
                 image, source = get_image_name(directory)
 
                 if not (source == "cache" and image_exists(image)):
-                    design.warning(f"No hud.lock.yaml found in {directory}")
+                    hud_console.warning(f"No hud.lock.yaml found in {directory}")
                     # Need to handle interactive prompt here, before async
-                    action = design.select(
+                    action = hud_console.select(
                         "No lock file found. Would you like to:",
                         ["Build the environment", "Use Docker image directly", "Cancel"],
                     )
 
                     if action == "Build the environment":
-                        design.info("Building environment...")
+                        hud_console.info("Building environment...")
                         from hud.cli.build import build_command
 
                         build_command(str(directory), None, False, False, {})
@@ -78,11 +78,11 @@ async def init_command(directory: str, output: Path | None, force: bool, build: 
         lock_path = path / "hud.lock.yaml"
 
         if lock_path.exists():
-            design.info(f"Found lock file: {lock_path}")
+            hud_console.info(f"Found lock file: {lock_path}")
             lock_data = read_lock_file_path(lock_path)
 
             if not lock_data:
-                design.error("Failed to read lock file")
+                hud_console.error("Failed to read lock file")
                 raise typer.Exit(1)
 
             # Get image and tools from lock file
@@ -90,13 +90,13 @@ async def init_command(directory: str, output: Path | None, force: bool, build: 
             tools = lock_data.get("tools", [])
 
             if not image:
-                design.error("No image found in lock file")
-                design.hint("Run 'hud build' to create a proper lock file")
+                hud_console.error("No image found in lock file")
+                hud_console.hint("Run 'hud build' to create a proper lock file")
                 raise typer.Exit(1)
 
             if not tools:
-                design.error("No tools found in lock file")
-                design.hint("Lock file may be outdated. Run 'hud build' to regenerate")
+                hud_console.error("No tools found in lock file")
+                hud_console.hint("Lock file may be outdated. Run 'hud build' to regenerate")
                 raise typer.Exit(1)
 
             # Use lock file data to generate config
@@ -111,11 +111,11 @@ async def init_command(directory: str, output: Path | None, force: bool, build: 
 
             if source == "cache" and image_exists(image):
                 # Found cached image in pyproject.toml
-                design.info(f"Using cached image: {image}")
+                hud_console.info(f"Using cached image: {image}")
                 await analyze_and_generate(image, output, force)
             else:
                 # This should have been handled in the wrapper
-                design.error("No valid image or lock file found")
+                hud_console.error("No valid image or lock file found")
                 raise typer.Exit(1)
 
     else:
@@ -130,7 +130,7 @@ def read_lock_file_path(lock_path: Path) -> dict[str, Any]:
         with open(lock_path) as f:
             return yaml.safe_load(f) or {}
     except Exception as e:
-        design.error(f"Failed to read lock file: {e}")
+        hud_console.error(f"Failed to read lock file: {e}")
         return {}
 
 
@@ -148,8 +148,8 @@ async def generate_from_lock(
 
     # Check if file exists
     if output.exists() and not force:
-        design.error(f"Config file already exists: {output}")
-        design.info("Use --force to overwrite")
+        hud_console.error(f"Config file already exists: {output}")
+        hud_console.info("Use --force to overwrite")
         raise typer.Exit(1)
 
     # Create output directory if needed
@@ -178,18 +178,18 @@ async def generate_from_lock(
     with open(output, "w") as f:  # noqa: ASYNC230
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
-    design.success(f"Generated config: {output}")
+    hud_console.success(f"Generated config: {output}")
 
     # Show summary
-    design.section_title("📋 Generated Configuration")
-    design.info("Source: hud.lock.yaml")
-    design.info(f"Image: {image}")
-    design.info(f"System prompt: {len(config['system_prompt'])} characters")
-    design.info(f"Action mappings: {len(config['action_mappings'])} tools")
-    design.info("")
-    design.info("Next steps:")
-    design.command_example("hud hf tasks.json --name my-tasks", "Create dataset")
-    design.command_example(f"hud rl --config {output}", "Start training")
+    hud_console.section_title("📋 Generated Configuration")
+    hud_console.info("Source: hud.lock.yaml")
+    hud_console.info(f"Image: {image}")
+    hud_console.info(f"System prompt: {len(config['system_prompt'])} characters")
+    hud_console.info(f"Action mappings: {len(config['action_mappings'])} tools")
+    hud_console.info("")
+    hud_console.info("Next steps:")
+    hud_console.command_example("hud hf tasks.json --name my-tasks", "Create dataset")
+    hud_console.command_example(f"hud rl --config {output}", "Start training")
 
 
 async def analyze_and_generate(image: str, output: Path | None, force: bool) -> None:
@@ -202,14 +202,14 @@ async def analyze_and_generate(image: str, output: Path | None, force: bool) -> 
 
     # Check if file exists
     if output.exists() and not force:
-        design.error(f"Config file already exists: {output}")
-        design.info("Use --force to overwrite")
+        hud_console.error(f"Config file already exists: {output}")
+        hud_console.info("Use --force to overwrite")
         raise typer.Exit(1)
 
     # Create output directory if needed
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    design.info(f"Analyzing environment: {image}")
+    hud_console.info(f"Analyzing environment: {image}")
 
     # Analyze the environment
     try:
@@ -231,23 +231,23 @@ async def analyze_and_generate(image: str, output: Path | None, force: bool) -> 
             with open(output, "w") as f:  # noqa: ASYNC230
                 yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
-            design.success(f"Generated config: {output}")
+            hud_console.success(f"Generated config: {output}")
 
             # Show summary
-            design.section_title("📋 Generated Configuration")
-            design.info(f"System prompt: {len(config['system_prompt'])} characters")
-            design.info(f"Action mappings: {len(config['action_mappings'])} tools")
-            design.info("")
-            design.info("Next steps:")
-            design.command_example("hud hf tasks.json --name my-tasks", "Create dataset")
-            design.command_example(f"hud rl --config {output}", "Start training")
+            hud_console.section_title("📋 Generated Configuration")
+            hud_console.info(f"System prompt: {len(config['system_prompt'])} characters")
+            hud_console.info(f"Action mappings: {len(config['action_mappings'])} tools")
+            hud_console.info("")
+            hud_console.info("Next steps:")
+            hud_console.command_example("hud hf tasks.json --name my-tasks", "Create dataset")
+            hud_console.command_example(f"hud rl --config {output}", "Start training")
 
         finally:
             await client.shutdown()
 
     except Exception as e:
-        design.error(f"Failed to analyze environment: {e}")
-        design.hint("Make sure the Docker image exists and contains a valid MCP server")
+        hud_console.error(f"Failed to analyze environment: {e}")
+        hud_console.hint("Make sure the Docker image exists and contains a valid MCP server")
         raise typer.Exit(1) from e
 
 
