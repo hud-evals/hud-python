@@ -223,7 +223,7 @@ class MCPAgent(ABC):
                     done=True,
                     content=f"Task failed with error: {e}",
                     isError=True,
-                    info={"error": str(e)}
+                    info={"error": str(e)},
                 )
         finally:
             # Cleanup auto-created resources
@@ -281,7 +281,12 @@ class MCPAgent(ABC):
                     self.console.warning_log(f"Evaluate tool returned error: {results}")
                     # Still extract what we can from the error response
                     if prompt_result is None:
-                        prompt_result = Trace(reward=0.0, done=True, content="Task failed before evaluation", isError=True)
+                        prompt_result = Trace(
+                            reward=0.0,
+                            done=True,
+                            content="Task failed before evaluation",
+                            isError=True,
+                        )
                     prompt_result.reward = 0.0  # Default to 0 on error
                 else:
                     # Extract reward and content from evaluation
@@ -291,13 +296,16 @@ class MCPAgent(ABC):
 
                         # Update the prompt result with evaluation reward
                         if prompt_result is None:
-                            prompt_result = Trace(reward=reward, done=True, content=eval_content or "", isError=False)
+                            prompt_result = Trace(
+                                reward=reward, done=True, content=eval_content or "", isError=False
+                            )
                         else:
                             prompt_result.reward = reward
 
                             # Update the prompt result with evaluation content (if available)
                             if eval_content:
-                                # Prompt result may already have final response content, so we append to it
+                                # Prompt result may already have final response content,
+                                # so we append to it
                                 if prompt_result.content:
                                     prompt_result.content += "\n\n" + eval_content
                                 else:
@@ -307,7 +315,9 @@ class MCPAgent(ABC):
                 self.console.error_log(f"Evaluation phase failed: {e}")
                 # Ensure we have a result even if evaluation failed
                 if prompt_result is None:
-                    prompt_result = Trace(reward=0.0, done=True, content=f"Evaluation failed: {e}", isError=True)
+                    prompt_result = Trace(
+                        reward=0.0, done=True, content=f"Evaluation failed: {e}", isError=True
+                    )
 
         return (
             prompt_result

@@ -114,7 +114,9 @@ def _process_worker(
                     task_name = task_dict.get("prompt") or f"Task {index}"
 
                     # Use the job_id to group all tasks under the same job
-                    with hud.trace(task_name, job_id=job_id, task_id=task_dict.get("id")) as trace_id:
+                    with hud.trace(
+                        task_name, job_id=job_id, task_id=task_dict.get("id")
+                    ):
                         try:
                             # Convert dict to Task
                             task = Task(**task_dict)
@@ -151,16 +153,17 @@ def _process_worker(
                                 "[Worker %s] Task %s failed during execution: %s",
                                 worker_id,
                                 index,
-                                str(e)[:200]
+                                str(e)[:200],
                             )
                             # Create a proper Trace result for errors
                             from hud.types import Trace
+
                             error_result = Trace(
                                 reward=0.0,
                                 done=True,
                                 content=f"Task execution failed: {e}",
                                 isError=True,
-                                info={"error": str(e), "traceback": traceback.format_exc()}
+                                info={"error": str(e), "traceback": traceback.format_exc()},
                             )
                             return (index, error_result)
 
@@ -242,14 +245,16 @@ def _process_worker(
             if provider and hasattr(provider, "force_flush"):
                 # This forces BatchSpanProcessor to export all buffered spans NOW
                 # The method returns True if successful, False if timeout
-                success = provider.force_flush(timeout_millis=10000)  # 10 second timeout # type: ignore
+                success = provider.force_flush(
+                    timeout_millis=10000
+                )  # 10 second timeout # type: ignore
                 if not success:
                     logger.warning("Worker %s: Telemetry flush timed out", worker_id)
                 else:
                     logger.debug("Worker %s: Telemetry flushed successfully", worker_id)
         except Exception as flush_error:
             logger.error("Worker %s: Failed to flush telemetry: %s", worker_id, flush_error)
-        
+
         # Clean up the event loop
         try:
             loop.close()
