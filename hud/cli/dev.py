@@ -367,7 +367,7 @@ async def start_mcp_proxy(
         Note: The Docker container is created on-demand when the first client connects.
         Any environment variables passed via -e flags are included when the container starts.
         """
-        log_hud_console = design
+        log_hud_console = hud_console
 
         # Always show waiting message
         log_hud_console.info("")  # Empty line for spacing
@@ -426,7 +426,7 @@ async def start_mcp_proxy(
                         # Show all logs with gold formatting like hud debug
                         # Format all logs in gold/dim style like hud debug's stderr
                         # Use stdout console to avoid stderr redirection when not verbose
-                        log_hud_console_stdout_console.print(
+                        log_hud_console._stdout_console.print(
                             f"[rgb(192,150,12)]■[/rgb(192,150,12)] {decoded_line}", highlight=False
                         )
 

@@ -184,8 +184,9 @@ def display_interactive(analysis: dict) -> None:
         console.print(resources_table)
 
         if len(analysis["resources"]) > 10:
+            remaining = len(analysis["resources"]) - 10
             console.print(
-                f"[bright_black]... and {len(analysis['resources']) - 10} more resources[/bright_black]"
+                f"[bright_black]... and {remaining} more resources[/bright_black]"
             )
 
     # Telemetry (only for live analysis)
