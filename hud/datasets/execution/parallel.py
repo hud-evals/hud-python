@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 import traceback
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -212,6 +212,19 @@ def _process_worker(
     try:
         # Run the async batch processing
         results = loop.run_until_complete(process_batch())
+
+        # Best-effort telemetry flush here with a tight bound so we don't hang.
+        # We avoid doing this in finally to prevent blocking process exit.
+        try:
+            from opentelemetry import trace as otel_trace
+
+            provider = otel_trace.get_tracer_provider()
+            if provider and hasattr(provider, "force_flush"):
+                provider.force_flush(timeout_millis=2000)  # type: ignore[attr-defined]
+        except Exception:
+            # Never let telemetry flushing break worker completion
+            pass
+
         return results
     except KeyboardInterrupt:
         logger.info("Worker %s: Interrupted by user, stopping gracefully", worker_id)
@@ -236,25 +249,6 @@ def _process_worker(
         logger.error("Worker %s batch processing failed: %s", worker_id, e)
         return [(idx, {"error": str(e), "isError": True}) for idx, _ in task_batch]
     finally:
-        # CRITICAL: Always ensure telemetry is fully sent before process exits
-        # This must happen in finally block to ensure it runs even on errors
-        try:
-            from opentelemetry import trace as otel_trace
-
-            provider = otel_trace.get_tracer_provider()
-            if provider and hasattr(provider, "force_flush"):
-                # This forces BatchSpanProcessor to export all buffered spans NOW
-                # The method returns True if successful, False if timeout
-                success = provider.force_flush(
-                    timeout_millis=10000
-                )  # 10 second timeout # type: ignore
-                if not success:
-                    logger.warning("Worker %s: Telemetry flush timed out", worker_id)
-                else:
-                    logger.debug("Worker %s: Telemetry flushed successfully", worker_id)
-        except Exception as flush_error:
-            logger.error("Worker %s: Failed to flush telemetry: %s", worker_id, flush_error)
-
         # Clean up the event loop
         try:
             loop.close()
@@ -275,6 +269,7 @@ async def run_dataset_parallel_manual(
     split: str = "train",
     auto_respond: bool = False,
     custom_system_prompt: str | None = None,
+    worker_timeout_s: int = 300,
 ) -> list[Any]:
     """
     Run all tasks in a dataset using process-based parallelism with manual configuration.
@@ -446,53 +441,66 @@ async def run_dataset_parallel_manual(
             # Track progress
             completed = 0
             total = len(task_dicts)
+            pending = set(future_to_batch.keys())
 
-            # Process results as they complete
+            # Process results with a watchdog to avoid hanging forever
             try:
-                for future in as_completed(future_to_batch):
-                    batch = future_to_batch[future]
+                while pending:
+                    done, pending = wait(pending, timeout=worker_timeout_s, return_when=FIRST_COMPLETED)
 
-                    try:
-                        # Get results from this worker
-                        batch_results = future.result()
-
-                        # Place results in correct positions
-                        for index, result in batch_results:
-                            results[index] = result
-                            completed += 1
-
-                        # Calculate success rate so far
-                        successful_so_far = sum(
-                            1
-                            for r in results[:completed]
-                            if r is not None and getattr(r, "reward", 0) > 0
-                        )
-
-                        progress_msg = (
-                            f"Progress: {completed}/{total} tasks completed "
-                            f"({100 * completed / total:.1f}%) | "
-                            f"Success rate: {successful_so_far}/{completed} "
-                            f"({100 * successful_so_far / completed:.1f}%)"
-                        )
-
-                        logger.info(progress_msg)
-
-                    except Exception as e:
-                        # Handle worker failure
+                    if not done:
+                        # Hard timeout: some workers are stuck; cancel and mark failed
                         logger.error(
-                            "Worker failed with exception: %s\n%s", e, traceback.format_exc()
+                            "Worker timeout after %ss. Cancelling %s stuck workers...",
+                            worker_timeout_s,
+                            len(pending),
                         )
+                        for f in list(pending):
+                            try:
+                                f.cancel()
+                            except Exception:
+                                pass
+                        break
 
-                        # Mark all tasks in this batch as failed
-                        for index, _ in batch:
-                            results[index] = {
-                                "error": f"Worker process failed: {e}",
-                                "isError": True,
-                                "reward": 0.0,
-                                "done": False,
-                                "content": f"Worker process failed: {e}",
-                            }
-                            completed += 1
+                    for future in done:
+                        batch = future_to_batch[future]
+                        try:
+                            # Get results from this worker
+                            batch_results = future.result()
+
+                            # Place results in correct positions
+                            for index, result in batch_results:
+                                results[index] = result
+                                completed += 1
+
+                            # Calculate success rate so far
+                            successful_so_far = sum(
+                                1 for r in results[:completed] if r is not None and getattr(r, "reward", 0) > 0
+                            )
+
+                            progress_msg = (
+                                f"Progress: {completed}/{total} tasks completed "
+                                f"({100 * completed / total:.1f}%) | "
+                                f"Success rate: {successful_so_far}/{completed} "
+                                f"({100 * successful_so_far / completed:.1f}%)"
+                            )
+                            logger.info(progress_msg)
+
+                        except Exception as e:
+                            # Handle worker failure
+                            logger.error(
+                                "Worker failed with exception: %s\n%s", e, traceback.format_exc()
+                            )
+                            # Mark all tasks in this batch as failed
+                            for index, _ in batch:
+                                results[index] = {
+                                    "error": f"Worker process failed: {e}",
+                                    "isError": True,
+                                    "reward": 0.0,
+                                    "done": False,
+                                    "content": f"Worker process failed: {e}",
+                                }
+                                completed += 1
 
             except KeyboardInterrupt:
                 logger.warning("\n⚠️  Parallel evaluation interrupted by user (Ctrl+C)")
@@ -521,7 +529,7 @@ async def run_dataset_parallel_manual(
             # Always shutdown the executor properly
             executor.shutdown(wait=False, cancel_futures=True)
 
-        # Verify all results are populated
+        # Verify all results are populated (including any timed-out workers)
         missing = [i for i, r in enumerate(results) if r is None]
         if missing:
             logger.warning("Missing results for task indices: %s...", missing[:10])
