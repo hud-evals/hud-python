@@ -207,6 +207,7 @@ class MCPAgent(ABC):
             else:
                 raise TypeError(f"prompt_or_task must be str or Task, got {type(prompt_or_task)}")
         except Exception as e:
+            # Always return a Trace object for any exception
             if self._is_connection_error(e):
                 # Return error trace for connection failures
                 return Trace(
@@ -215,7 +216,15 @@ class MCPAgent(ABC):
                     content=self._get_connection_error_message(e),
                     isError=True,
                 )
-            raise
+            else:
+                # Return error trace for any other exception
+                return Trace(
+                    reward=0.0,
+                    done=True,
+                    content=f"Task failed with error: {e}",
+                    isError=True,
+                    info={"error": str(e)}
+                )
         finally:
             # Cleanup auto-created resources
             await self._cleanup()
@@ -262,34 +271,43 @@ class MCPAgent(ABC):
             prompt_result = Trace(reward=0.0, done=True, content=str(e), isError=True)
             prompt_result.populate_from_context()
 
-        # Always evaluate if we have a prompt result and evaluate tool
-        if prompt_result is not None and task.evaluate_tool is not None:
+        # Always evaluate if we have evaluate tool, regardless of errors
+        if task.evaluate_tool is not None:
             try:
                 self.console.progress_log(f"Evaluating tool phase: {task.evaluate_tool}")
                 results = await self.call_tools(task.evaluate_tool)
 
                 if any(result.isError for result in results):
-                    raise RuntimeError(f"{results}")
+                    self.console.warning_log(f"Evaluate tool returned error: {results}")
+                    # Still extract what we can from the error response
+                    if prompt_result is None:
+                        prompt_result = Trace(reward=0.0, done=True, content="Task failed before evaluation", isError=True)
+                    prompt_result.reward = 0.0  # Default to 0 on error
+                else:
+                    # Extract reward and content from evaluation
+                    if results:
+                        reward = find_reward(results[0])
+                        eval_content = find_content(results[0])
 
-                # Extract reward and content from evaluation
-                if results:
-                    reward = find_reward(results[0])
-                    eval_content = find_content(results[0])
-
-                    # Update the prompt result with evaluation reward
-                    prompt_result.reward = reward
-
-                    # Update the prompt result with evaluation content (if available)
-                    if eval_content:
-                        # Prompt result may already have final response content, so we append to it
-                        if prompt_result.content:
-                            prompt_result.content += "\n\n" + eval_content
+                        # Update the prompt result with evaluation reward
+                        if prompt_result is None:
+                            prompt_result = Trace(reward=reward, done=True, content=eval_content or "", isError=False)
                         else:
-                            prompt_result.content = eval_content
+                            prompt_result.reward = reward
+
+                            # Update the prompt result with evaluation content (if available)
+                            if eval_content:
+                                # Prompt result may already have final response content, so we append to it
+                                if prompt_result.content:
+                                    prompt_result.content += "\n\n" + eval_content
+                                else:
+                                    prompt_result.content = eval_content
 
             except Exception as e:
                 self.console.error_log(f"Evaluation phase failed: {e}")
-                # Continue with the prompt result even if evaluation failed
+                # Ensure we have a result even if evaluation failed
+                if prompt_result is None:
+                    prompt_result = Trace(reward=0.0, done=True, content=f"Evaluation failed: {e}", isError=True)
 
         return (
             prompt_result

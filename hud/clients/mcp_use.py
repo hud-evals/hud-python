@@ -15,6 +15,7 @@ from hud.types import MCPToolCall, MCPToolResult
 from hud.version import __version__ as hud_version
 
 from .base import BaseHUDClient
+from .utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -127,8 +128,11 @@ class MCPUseHUDClient(BaseHUDClient):
                     logger.warning("Client session not initialized for %s", server_name)
                     continue
 
-                # List tools
-                tools_result = await session.connector.client_session.list_tools()
+                # List tools with retry logic for HTTP errors
+                tools_result = await retry_with_backoff(
+                    session.connector.client_session.list_tools,
+                    operation_name=f"list_tools_{server_name}",
+                )
 
                 logger.info(
                     "Discovered %d tools from '%s': %s",
@@ -202,9 +206,12 @@ class MCPUseHUDClient(BaseHUDClient):
         if session.connector.client_session is None:
             raise ValueError(f"Client session not initialized for {server_name}")
 
-        result = await session.connector.client_session.call_tool(
+        # Call tool with retry logic for HTTP errors (502, 503, 504)
+        result = await retry_with_backoff(
+            session.connector.client_session.call_tool,
             name=original_tool.name,  # Use original tool name, not prefixed
             arguments=tool_call.arguments or {},
+            operation_name=f"call_tool_{original_tool.name}",
         )
 
         if self.verbose:
@@ -232,7 +239,10 @@ class MCPUseHUDClient(BaseHUDClient):
                     continue
                 # Prefer standard method name if available
                 if hasattr(session.connector.client_session, "list_resources"):
-                    resources = await session.connector.client_session.list_resources()
+                    resources = await retry_with_backoff(
+                        session.connector.client_session.list_resources,
+                        operation_name=f"list_resources_{server_name}",
+                    )
                 else:
                     # If the client doesn't support resource listing, skip
                     continue
@@ -262,7 +272,11 @@ class MCPUseHUDClient(BaseHUDClient):
                 resource_uri = AnyUrl(uri) if isinstance(uri, str) else uri
                 # Prefer read_resource; fall back to list_resources if needed
                 if hasattr(session.connector.client_session, "read_resource"):
-                    result = await session.connector.client_session.read_resource(resource_uri)
+                    result = await retry_with_backoff(
+                        session.connector.client_session.read_resource,
+                        resource_uri,
+                        operation_name=f"read_resource_{server_name}",
+                    )
                 else:
                     # Fallback path for older clients: not supported in strict typing
                     raise AttributeError("read_resource not available")

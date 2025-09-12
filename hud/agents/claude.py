@@ -196,7 +196,7 @@ class ClaudeAgent(MCPAgent):
                 response = await self.anthropic_client.beta.messages.create(**create_kwargs)
                 break
             except BadRequestError as e:
-                if e.message.startswith("prompt is too long"):
+                if "prompt is too long" in str(e) or "request_too_large" in str(e) or e.status_code == 413:
                     logger.warning("Prompt too long, truncating message history")
                     # Keep first message and last 20 messages
                     if len(current_messages) > 21:
