@@ -24,6 +24,7 @@ from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from pydantic import BaseModel, ConfigDict, Field
 
 from hud.shared import make_request_sync
+import httpx
 from hud.types import TraceStep as HudSpanAttributes
 
 if TYPE_CHECKING:
@@ -303,6 +304,14 @@ class HudSpanExporter(SpanExporter):
         super().__init__()
         self._telemetry_url = telemetry_url.rstrip("/")
         self._api_key = api_key
+        # Use a short-timeout client so exporter never blocks shutdown for long
+        # These limits are generous but bounded; telemetry payloads are small
+        self._client = httpx.Client(
+            timeout=15.0,
+            limits=httpx.Limits(
+                max_connections=128, max_keepalive_connections=64, keepalive_expiry=5.0
+            ),
+        )
 
     # ------------------------------------------------------------------
     # Core API
@@ -350,6 +359,9 @@ class HudSpanExporter(SpanExporter):
                     url=url,
                     json=payload,
                     api_key=self._api_key,
+                    max_retries=1,
+                    retry_delay=0.5,
+                    client=self._client,
                 )
             except Exception as exc:
                 logger.exception("HUD exporter failed to send spans for task %s: %s", run_id, exc)
@@ -359,11 +371,13 @@ class HudSpanExporter(SpanExporter):
         return SpanExportResult.SUCCESS
 
     def shutdown(self) -> None:  # type: ignore[override]
-        # Nothing to cleanup, httpx handled inside make_request_sync
-        pass
+        # Close HTTP client
+        try:
+            self._client.close()
+        except Exception:
+            pass
 
     def force_flush(self, timeout_millis: int | None = None) -> bool:  # type: ignore[override]
-        if timeout_millis:
-            time.sleep(timeout_millis / 1000)
-        # Synchronous export, nothing buffered here
+        # No-op and return immediately. Export is synchronous and handled by
+        # BatchSpanProcessor; this exporter does not buffer internally.
         return True

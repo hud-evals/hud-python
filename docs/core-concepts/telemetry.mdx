@@ -1,0 +1,35 @@
+---
+title: Telemetry and Tracing
+---
+
+HUD SDK includes a first‑class OpenTelemetry integration that records agent and MCP activity as structured traces and ships them to the HUD backend.
+
+What gets installed
+• configure_telemetry: Creates a global TracerProvider, adds processors/exporters, and installs MCP auto‑instrumentation. It is idempotent and safe to call from any process/thread.
+• HudEnrichmentProcessor: A SpanProcessor that enriches every span with HUD context from OTel baggage/contextvars:
+  - hud.task_run_id, hud.job_id
+  - step counters: hud.base_mcp_steps, hud.mcp_tool_steps, hud.agent_steps
+• HudSpanExporter: A synchronous exporter that groups spans by hud.task_run_id and POSTs them to the HUD telemetry endpoint (/trace/<id>/telemetry-upload). It translates spans into HUD’s TraceStep wire format.
+• In‑memory collector (optional): When enabled, spans are also kept in memory for replay/debug via get_trace.
+
+Trace lifecycle
+• Start: Use hud.trace(name, job_id=..., task_id=...). This creates a root span and sets OTel baggage so that child spans inherit the task/job context.
+• During: Agent and MCP spans are created by instrumentation. HudEnrichmentProcessor updates per‑span step counters and copies baggage into attributes.
+• Status updates: On entering hud.trace, HUD sends a “running” status asynchronously. On exit, status is finalized synchronously as “completed” or “error,” ensuring the run is visible in HUD even if the process exits quickly.
+• Export: BatchSpanProcessor buffers spans and calls HudSpanExporter periodically or on flush/shutdown.
+
+Flush and shutdown
+• Flush is handled by OpenTelemetry’s BatchSpanProcessor. The exporter itself does not buffer.
+• Providers expose provider.force_flush(timeout_millis=...), which we call in long‑running workers when appropriate to reduce tail loss, but we keep the timeout short to avoid hangs.
+• The exporter uses a bounded‑timeout httpx.Client (15s) with minimal retries so shutdown can’t be blocked by slow networks.
+
+What to look for in logs
+• “HUD exporter sending … spans …” when batches are exported
+• Status updates to /trace/<id>/status for running/completed/error
+• If network issues occur, exporter returns FAILURE so OTel can retry internally; the SDK will not throw or exit on exporter errors.
+
+Operational guidance
+• You can safely call configure_telemetry() in every process, including forked workers.
+• Avoid long sleeps or blocking work inside SpanProcessor.force_flush() or exporter.force_flush(); the SDK must be able to shut down promptly.
+• If using a custom OTLP backend, pass enable_otlp=True and optionally endpoint/headers to configure_telemetry().
+

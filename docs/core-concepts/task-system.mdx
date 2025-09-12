@@ -159,6 +159,24 @@ results = await run_dataset_parallel(
 )
 ```
 
+## Parallel execution
+
+For large datasets, use the process‑based parallel runner. It launches a pool of worker processes, each with its own asyncio event loop and bounded concurrency.
+
+Key pieces
+- run_dataset_parallel: Auto‑configures worker count and per‑worker concurrency based on dataset size and CPU resources.
+- run_dataset_parallel_manual: Manual control over workers, per‑worker concurrency, and an optional total concurrency cap. Workers instantiate the agent per task from the provided class and config.
+
+Worker lifecycle
+- Each worker calls configure_telemetry() (idempotent), sets up its own event loop, and processes its assigned batch concurrently (bounded by max_concurrent_per_worker).
+- Each task runs inside a hud.trace so it is individually visible in HUD and linked to the job via job_id.
+- After processing its batch, a worker performs a best‑effort provider.force_flush() with a short timeout to reduce telemetry tail loss without risking a shutdown hang. It then closes the event loop and exits.
+
+Fault tolerance
+- KeyboardInterrupt: Remaining tasks are marked as interrupted.
+- Worker failure: All tasks in that batch are marked failed and execution continues.
+- Watchdog: The manual runner includes a per‑worker watchdog (worker_timeout_s) so the main process cannot hang indefinitely if a worker becomes unresponsive; stuck workers are cancelled and their tasks are marked failed.
+
 ## Creating Datasets
 
 ```python

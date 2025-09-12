@@ -116,6 +116,7 @@ class HudEnrichmentProcessor(SpanProcessor):
         pass
 
     def force_flush(self, timeout_millis: int | None = None) -> bool:  # type: ignore[override]
-        if timeout_millis:
-            time.sleep(timeout_millis / 1000)
+        # No-op and return immediately. We never want a SpanProcessor to block
+        # shutdown/flush in worker processes. BatchSpanProcessor handles flushing
+        # its own queue and exporter.
         return True
