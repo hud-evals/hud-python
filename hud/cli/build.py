@@ -341,8 +341,12 @@ def build_environment(
 
     # Warn about missing required variables
     if missing_required:
-        hud_console.warning(f"Missing required environment variables: {', '.join(missing_required)}")
-        hud_console.info("These can be added to the lock file after build or provided with -e flags")
+        hud_console.warning(
+            f"Missing required environment variables: {', '.join(missing_required)}"
+        )
+        hud_console.info(
+            "These can be added to the lock file after build or provided with -e flags"
+        )
 
     # Check for existing version and increment
     lock_path = env_dir / "hud.lock.yaml"

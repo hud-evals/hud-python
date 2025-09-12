@@ -79,7 +79,9 @@ def train_command_wrapper(
 
     # Check WANDB API key (optional but recommended)
     if not getattr(settings, "wandb_api_key", None):
-        hud_console.warning("⚠ WANDB_API_KEY not set (optional but recommended for training metrics)")
+        hud_console.warning(
+            "⚠ WANDB_API_KEY not set (optional but recommended for training metrics)"
+        )
     else:
         hud_console.success("✓ WANDB_API_KEY configured")
 

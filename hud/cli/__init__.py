@@ -50,8 +50,6 @@ SUPPORT_HINT = (
 )
 
 
-
-
 # Capture IMAGE and any following Docker args as a single variadic argument list.
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def analyze(
@@ -968,11 +966,12 @@ def main() -> None:
     if "--version" in sys.argv:
         try:
             from hud import __version__
+
             console.print(f"HUD CLI version: [cyan]{__version__}[/cyan]")
         except ImportError:
             console.print("HUD CLI version: [cyan]unknown[/cyan]")
         return
-    
+
     try:
         # Show header for main help
         if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"]):

@@ -256,7 +256,9 @@ class HUDConsole:
         """
         console = self._stderr_console if stderr else self._stdout_console
         if description:
-            console.print(f"  [{SECONDARY}]{command}[/{SECONDARY}]  [bright_black]# {description}[/bright_black]")
+            console.print(
+                f"  [{SECONDARY}]{command}[/{SECONDARY}]  [bright_black]# {description}[/bright_black]"
+            )
         else:
             console.print(f"  [{SECONDARY}]{command}[/{SECONDARY}]")
 

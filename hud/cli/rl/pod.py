@@ -264,7 +264,9 @@ async def create_and_connect_prime_pod(
                 hud_console.info("")
                 hud_console.hint("Workarounds:")
                 hud_console.info("1. Run the command manually and select a different provider")
-                hud_console.info("2. Try again later when datacrunch (usually cheapest) is available")
+                hud_console.info(
+                    "2. Try again later when datacrunch (usually cheapest) is available"
+                )
                 hud_console.info("3. Use the Prime web interface: https://app.primeintellect.ai")
 
             hud_console.info("")
@@ -353,7 +355,9 @@ async def create_and_connect_prime_pod(
 
                 # Build training command with env vars
                 if settings.wandb_api_key:
-                    hud_console.command_example(f"export WANDB_API_KEY={settings.wandb_api_key}", "")
+                    hud_console.command_example(
+                        f"export WANDB_API_KEY={settings.wandb_api_key}", ""
+                    )
 
                 train_cmd = f"""vf-train hud-vf-gym \\
   --model {model} \\
@@ -364,7 +368,9 @@ async def create_and_connect_prime_pod(
 
                 hud_console.command_example(train_cmd, "")
                 hud_console.info("")
-                hud_console.warning(f"Remember to terminate when done: prime pods terminate {pod_id}")
+                hud_console.warning(
+                    f"Remember to terminate when done: prime pods terminate {pod_id}"
+                )
         else:
             hud_console.error("Pod failed to become active")
             raise typer.Exit(1)

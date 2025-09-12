@@ -442,7 +442,9 @@ def push_environment(
     hud_console.command_example(f"hud run {image}")
     hud_console.info("")
     hud_console.info("Share environment:")
-    hud_console.info("  Share the updated hud.lock.yaml for others to reproduce your exact environment")
+    hud_console.info(
+        "  Share the updated hud.lock.yaml for others to reproduce your exact environment"
+    )
 
     # TODO: Upload lock file to HUD registry
     if sign:

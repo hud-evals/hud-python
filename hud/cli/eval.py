@@ -411,7 +411,9 @@ def eval_command(
     if agent == "claude":
         if not settings.anthropic_api_key:
             hud_console.error("ANTHROPIC_API_KEY is required for Claude agent")
-            hud_console.info("Set it in your environment or .env file: ANTHROPIC_API_KEY=your-key-here")
+            hud_console.info(
+                "Set it in your environment or .env file: ANTHROPIC_API_KEY=your-key-here"
+            )
             raise typer.Exit(1)
     elif agent == "openai" and not settings.openai_api_key:
         hud_console.error("OPENAI_API_KEY is required for OpenAI agent")

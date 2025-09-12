@@ -171,7 +171,9 @@ async def connect_and_train(
         hud_console.error(f"Failed to copy config file: {e}")
         if os.name == "nt":  # Windows
             hud_console.info("Make sure OpenSSH is installed. On Windows 10+, it's built-in.")
-            hud_console.info("If using older Windows, install Git for Windows which includes SSH/SCP.")
+            hud_console.info(
+                "If using older Windows, install Git for Windows which includes SSH/SCP."
+            )
         else:
             hud_console.info("Make sure scp is installed and in your PATH")
         raise typer.Exit(1) from e

@@ -228,7 +228,9 @@ class TestPushEnvironment:
     @mock.patch("subprocess.run")
     @mock.patch("hud.settings.settings")
     @mock.patch("hud.cli.push.HUDConsole")
-    def test_push_with_tag(self, mock_hud_console_class, mock_settings, mock_run, mock_popen, tmp_path):
+    def test_push_with_tag(
+        self, mock_hud_console_class, mock_settings, mock_run, mock_popen, tmp_path
+    ):
         """Test pushing with explicit tag."""
         mock_hud_console = mock.Mock()
         mock_hud_console_class.return_value = mock_hud_console

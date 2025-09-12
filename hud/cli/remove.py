@@ -91,7 +91,9 @@ def remove_environment(
             if image:
                 hud_console.info("")
                 hud_console.info("Note: The Docker image may still exist locally.")
-                hud_console.info(f"To remove it, run: [cyan]docker rmi {image.split('@')[0]}[/cyan]")
+                hud_console.info(
+                    f"To remove it, run: [cyan]docker rmi {image.split('@')[0]}[/cyan]"
+                )
     except Exception as e:
         hud_console.error(f"Failed to remove environment: {e}")
         raise typer.Exit(1) from e

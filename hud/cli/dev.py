@@ -113,7 +113,9 @@ def create_proxy_server(
             hud_console.info("Watching: /app/src for changes")
         elif full_reload:
             hud_console.info("Mode: Full reload (container restart on file changes)")
-            hud_console.info("Note: Full container restart not yet implemented, using no-reload mode")
+            hud_console.info(
+                "Note: Full container restart not yet implemented, using no-reload mode"
+            )
         else:
             hud_console.info("Mode: No reload")
             hud_console.info("Container will run without hot-reload")
@@ -369,7 +371,9 @@ async def start_mcp_proxy(
 
         # Always show waiting message
         log_hud_console.info("")  # Empty line for spacing
-        log_hud_console.progress_message("⏳ Waiting for first client connection to start container...")
+        log_hud_console.progress_message(
+            "⏳ Waiting for first client connection to start container..."
+        )
         log_hud_console.info(f"📋 Looking for container: {container_name}")  # noqa: G004
 
         # Keep trying to stream logs - container is created on demand
@@ -743,7 +747,9 @@ def run_mcp_dev_server(
     # Show environment variables if provided
     if docker_args and any(arg == "-e" or arg.startswith("--env") for arg in docker_args):
         hud_console.section_title("Environment Variables")
-        hud_console.info("The following environment variables will be passed to the Docker container:")
+        hud_console.info(
+            "The following environment variables will be passed to the Docker container:"
+        )
         i = 0
         while i < len(docker_args):
             if docker_args[i] == "-e" and i + 1 < len(docker_args):
@@ -774,7 +780,9 @@ def run_mcp_dev_server(
             hud_console.warning("Docker logs disabled in interactive mode for better UI experience")
             no_logs = True
         if not no_reload:
-            hud_console.warning("Hot-reload disabled in interactive mode to prevent output interference")
+            hud_console.warning(
+                "Hot-reload disabled in interactive mode to prevent output interference"
+            )
             no_reload = True
 
     # Show configuration as JSON (just the server config, not wrapped)
