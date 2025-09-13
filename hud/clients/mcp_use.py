@@ -64,7 +64,7 @@ class MCPUseHUDClient(BaseHUDClient):
             self._sessions = await self._client.create_all_sessions()
             logger.info("Created %d MCP sessions", len(self._sessions))
 
-            # This is similar to FastMCP's approach of wrapping the HTTP transport
+            # Patch all sessions with retry logic
             patch_all_sessions(self._sessions)
             logger.debug("Applied retry logic to all MCP sessions")
 
@@ -270,9 +270,7 @@ class MCPUseHUDClient(BaseHUDClient):
                 # Prefer read_resource; fall back to list_resources if needed
                 if hasattr(session.connector.client_session, "read_resource"):
                     # Read resource (retry logic is handled at transport level)
-                    result = await session.connector.client_session.read_resource(
-                        resource_uri
-                    )
+                    result = await session.connector.client_session.read_resource(resource_uri)
                 else:
                     # Fallback path for older clients: not supported in strict typing
                     raise AttributeError("read_resource not available")

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import multiprocessing
 import os
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
-import multiprocessing
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -75,7 +75,7 @@ def _process_worker(
     except AttributeError:
         pass
 
-  # Set up signal handler for clean interruption
+    # Set up signal handler for clean interruption
     def signal_handler(signum: int, frame: Any) -> None:
         logger.warning("Worker %s: Received interrupt signal", worker_id)
         # Raise KeyboardInterrupt to actually interrupt the worker
