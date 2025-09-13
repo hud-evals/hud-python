@@ -192,10 +192,8 @@ def _process_worker(
         # Run the async batch processing
         results = loop.run_until_complete(process_batch())
 
-        # CRITICAL: Ensure telemetry is fully sent before process exits
-        # Two things need to complete:
-        # 1. The trace context's __exit__ already called _update_task_status_sync (blocking)
-        # 2. But spans are buffered in BatchSpanProcessor and need explicit flush
+        # Ensure telemetry is fully sent before process exits
+        # Spans are buffered in BatchSpanProcessor and need explicit flush
 
         from opentelemetry import trace as otel_trace
 
@@ -230,6 +228,18 @@ def _process_worker(
         logger.error("Worker %s batch processing failed: %s", worker_id, e)
         return [(idx, {"error": str(e), "isError": True}) for idx, _ in task_batch]
     finally:
+        try:
+            from opentelemetry import trace as otel_trace
+
+            provider = otel_trace.get_tracer_provider()
+            if provider and hasattr(provider, "force_flush"):
+                # Flush buffered spans with reasonable timeout
+                success = provider.force_flush(timeout_millis=2000)  # type: ignore[arg-type]
+                if not success:
+                    logger.warning("Worker %s: Telemetry flush timed out", worker_id)
+        except Exception as e:
+            logger.warning("Worker %s: Failed to flush telemetry: %s", worker_id, e)
+
         # Clean up the event loop
         try:
             loop.close()

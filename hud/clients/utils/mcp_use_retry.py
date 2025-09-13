@@ -150,16 +150,16 @@ def create_async_retry_wrapper(
                     and result.status_code in retry_status_codes
                     and attempt < max_retries
                 ):
-                        logger.warning(
-                            "HTTP %d error (attempt %d/%d), retrying in %.1fs",
-                            result.status_code,
-                            attempt + 1,
-                            max_retries + 1,
-                            delay,
-                        )
-                        await asyncio.sleep(delay)
-                        delay *= backoff_factor
-                        continue
+                    logger.warning(
+                        "HTTP %d error (attempt %d/%d), retrying in %.1fs",
+                        result.status_code,
+                        attempt + 1,
+                        max_retries + 1,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    delay *= backoff_factor
+                    continue
 
                 return result
 
