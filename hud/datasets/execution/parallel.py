@@ -7,6 +7,7 @@ import logging
 import os
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -200,9 +201,8 @@ def _process_worker(
 
         provider = otel_trace.get_tracer_provider()
         if provider and hasattr(provider, "force_flush"):
-            # This forces BatchSpanProcessor to export all buffered spans NOW
-            # The method returns True if successful, False if timeout
-            success = provider.force_flush(timeout_millis=5000)  # 5 second timeout # type: ignore
+            # Flush of buffered spans
+            success = provider.force_flush(timeout_millis=2000)  # type: ignore[arg-type]
             if not success:
                 logger.warning("Worker %s: Telemetry flush timed out", worker_id)
 
@@ -342,6 +342,8 @@ async def run_dataset_parallel_manual(
         for task_dict in task_dicts:
             if "system_prompt" not in task_dict:
                 task_dict["system_prompt"] = custom_system_prompt
+            else:
+                task_dict["system_prompt"] += "\n" + custom_system_prompt
 
     # Prepare job metadata
     job_metadata = metadata or {}
@@ -365,6 +367,8 @@ async def run_dataset_parallel_manual(
             dataset_link = f"{project}/{dataset_name}"
         except Exception:
             logger.warning("Failed to extract dataset verification info")
+
+    # task_dicts = task_dicts[:10]
 
     # Create job context
     with hud.job(name, metadata=job_metadata, dataset_link=dataset_link) as job_obj:
@@ -410,7 +414,10 @@ async def run_dataset_parallel_manual(
         )
 
         # Process batches in parallel using ProcessPoolExecutor
-        executor = ProcessPoolExecutor(max_workers=max_workers)
+        executor = ProcessPoolExecutor(
+            max_workers=max_workers,
+            mp_context=multiprocessing.get_context("spawn"),
+        )
         try:
             # Submit all batches to workers
             future_to_batch = {

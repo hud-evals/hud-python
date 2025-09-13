@@ -97,7 +97,16 @@ def configure_telemetry(
         exporter = HudSpanExporter(
             telemetry_url=settings.hud_telemetry_url, api_key=settings.api_key
         )
-        provider.add_span_processor(BatchSpanProcessor(exporter))
+        # Export more continuously to avoid big end flushes
+        provider.add_span_processor(
+            BatchSpanProcessor(
+                exporter,
+                schedule_delay_millis=1000,
+                max_queue_size=8192,
+                max_export_batch_size=256,
+                export_timeout_millis=30000,
+            )
+        )
     elif settings.telemetry_enabled and not settings.api_key and not enable_otlp:
         # Error if no exporters are configured
         raise ValueError(
@@ -127,7 +136,15 @@ def configure_telemetry(
                 otlp_config["headers"] = otlp_headers
 
             otlp_exporter = OTLPSpanExporter(**otlp_config)
-            provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+            provider.add_span_processor(
+                BatchSpanProcessor(
+                    otlp_exporter,
+                    schedule_delay_millis=1000,
+                    max_queue_size=8192,
+                    max_export_batch_size=256,
+                    export_timeout_millis=30000,
+                )
+            )
             logger.info("OTLP HTTP exporter enabled - endpoint: %s", otlp_config["endpoint"])
         except ImportError:
             logger.warning(
