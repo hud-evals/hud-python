@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import copy
 import logging
+import requests
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-from anthropic import AsyncAnthropic, BadRequestError
+from anthropic import AsyncAnthropic, BadRequestError, AuthenticationError
 from anthropic.types.beta import BetaContentBlockParam, BetaImageBlockParam, BetaTextBlockParam
 
 import hud
@@ -209,6 +210,8 @@ class ClaudeAgent(MCPAgent):
                         raise
                 else:
                     raise
+            except AuthenticationError:
+                raise ValueError("Anthropic API key is set but is not valid.")
 
         messages.append(
             cast(
