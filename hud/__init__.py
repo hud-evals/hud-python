@@ -7,13 +7,18 @@ from __future__ import annotations
 
 from .telemetry import clear_trace, create_job, get_trace, instrument, job, trace
 
+# Import submodules to make them available as attributes
+from . import tools, utils
+
 __all__ = [
     "clear_trace",
     "create_job",
     "get_trace",
     "instrument",
     "job",
+    "tools",
     "trace",
+    "utils",
 ]
 
 try:
