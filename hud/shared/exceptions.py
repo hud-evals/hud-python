@@ -69,11 +69,9 @@ class HudException(Exception):
             elif isinstance(exc_value, Exception):
                 # Try to convert to a specific HudException
                 result = cls._analyze_exception(exc_value, message or str(exc_value))
+
                 # If we couldn't categorize it (still base HudException),
-                # just re-raise the original exception
-                if type(result) is HudException:
-                    # Re-raise the original exception unchanged
-                    raise exc_value from None
+                # just return it as-is (explicit user intent via 'raise from')
                 return result
 
         # Normal creation
@@ -93,7 +91,7 @@ class HudException(Exception):
         if not self.args:
             # Pass the message to the base Exception class
             super().__init__(message)
-        self.message = message or (self.args[0] if self.args else "")
+        self.message = message or (self.args[0] if self.args and self.args[0] else "An error occurred")
         self.response_json = response_json
         # If hints not provided, use defaults defined by subclass
         self.hints: list[Hint] = hints if hints is not None else list(self.default_hints)
@@ -102,6 +100,10 @@ class HudException(Exception):
         # Get the message from the exception
         # First check if we have args (standard Exception message storage)
         msg = str(self.args[0]) if self.args and self.args[0] else ""
+
+        # If message is empty, use the stored message or a default
+        if not msg:
+            msg = getattr(self, 'message', 'An error occurred')
 
         # Add response JSON if available
         if self.response_json:

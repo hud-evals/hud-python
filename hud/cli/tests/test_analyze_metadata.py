@@ -214,7 +214,7 @@ class TestAnalyzeFromMetadata:
 
     @mock.patch("hud.cli.utils.metadata.check_local_cache")
     @mock.patch("hud.cli.utils.metadata.fetch_lock_from_registry")
-    @mock.patch("hud.cli.utils.metadata.design")
+    @mock.patch("hud.cli.utils.metadata.hud_console")
     @mock.patch("hud.cli.utils.metadata.console")
     async def test_analyze_not_found(self, mock_console, mock_hud_console, mock_fetch, mock_check):
         """Test when environment not found anywhere."""

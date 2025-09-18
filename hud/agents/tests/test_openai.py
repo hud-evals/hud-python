@@ -139,14 +139,17 @@ class TestOperatorAgent:
         ]
 
         # Mock OpenAI API response for a successful computer use response
+        from openai.types.responses import ResponseOutputMessage, ResponseOutputText
+
         mock_response = MagicMock()
         mock_response.id = "response_123"
         mock_response.state = "completed"
-        # Mock the output message structure
-        mock_output_text = MagicMock()
+
+        # Mock the output message structure with proper types
+        mock_output_text = MagicMock(spec=ResponseOutputText)
         mock_output_text.type = "output_text"
         mock_output_text.text = "I can see the screen content."
-        mock_output_message = MagicMock()
+        mock_output_message = MagicMock(spec=ResponseOutputMessage)
         mock_output_message.type = "message"
         mock_output_message.content = [mock_output_text]
         mock_response.output = [mock_output_message]

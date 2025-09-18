@@ -126,14 +126,15 @@ class TestDatasetOperations:
 
     def test_save_taskconfigs_empty_list(self):
         """Test saving empty task list."""
-        with patch("datasets.Dataset") as MockDataset:
-            mock_instance = MagicMock()
-            MockDataset.from_list.return_value = mock_instance
+        with patch("datasets.Dataset.from_list") as mock_from_list:
+            mock_dataset = MagicMock()
+            mock_dataset.push_to_hub.return_value = None
+            mock_from_list.return_value = mock_dataset
 
             save_tasks([], "test-org/empty-dataset")
 
-            MockDataset.from_list.assert_called_once_with([])
-            mock_instance.push_to_hub.assert_called_once()
+            mock_from_list.assert_called_once_with([])
+            mock_dataset.push_to_hub.assert_called_once()
 
     def test_save_taskconfigs_mixed_rejection(self):
         """Test that mixing dicts and Task objects is rejected."""

@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
@@ -204,10 +204,17 @@ async def analyze_mcp_environment(
             "success": True,
         }
     except Exception as e:
-        from hud.shared.exceptions import HudException
+        # Return error result instead of raising exception
+        error_msg = str(e)
+        if verbose:
+            hud_console.error(f"Failed to analyze MCP environment: {error_msg}")
 
-        # Convert to HudException for better error messages and hints
-        raise HudException from e
+        return {
+            "success": False,
+            "error": error_msg,
+            "toolCount": 0,
+            "tools": [],
+        }
     finally:
         # Only shutdown if we successfully initialized
         if initialized:
@@ -320,6 +327,12 @@ def build_environment(
     finally:
         loop.close()
 
+    # Check if analysis succeeded
+    if not analysis.get("success", False):
+        error_msg = analysis.get("error", "Unknown analysis error")
+        hud_console.error(f"MCP environment analysis failed: {error_msg}")
+        raise typer.Exit(1)
+
     hud_console.success(f"Analyzed environment: {analysis['toolCount']} tools found")
 
     # Extract environment variables from Dockerfile
@@ -366,13 +379,13 @@ def build_environment(
         "version": "1.0",  # Lock file format version
         "image": tag,  # Will be updated with ID/digest later
         "build": {
-            "generatedAt": datetime.utcnow().isoformat() + "Z",
+            "generatedAt": datetime.now(UTC).isoformat() + "Z",
             "hudVersion": hud_version,
             "directory": str(env_dir.name),
             "version": new_version,  # Internal environment version
         },
         "environment": {
-            "initializeMs": analysis["initializeMs"],
+            "initializeMs": analysis.get("initializeMs", 0),
             "toolCount": analysis["toolCount"],
         },
     }

@@ -247,9 +247,11 @@ class TestMCPErrorHandling:
         with patch("hud.clients.mcp_use.McpError") as MockMcpError:
             MockMcpError.side_effect = Exception
 
-            # Create a mock MCP error
-            mcp_error = Exception("MCP protocol error: Unknown method")
-            mcp_error.__class__.__name__ = "McpError"
+            # Create a mock MCP error class with correct name
+            class McpError(Exception):
+                pass
+
+            mcp_error = McpError("MCP protocol error: Unknown method")
 
             try:
                 raise mcp_error

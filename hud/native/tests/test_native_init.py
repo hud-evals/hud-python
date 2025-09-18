@@ -19,7 +19,7 @@ class TestNativeInit:
         """Test that __all__ is properly defined."""
         import hud.native.comparator
 
-        expected_exports = ["comparator"]
+        expected_exports = ["comparator_server"]
 
         # Check __all__ exists and contains expected exports
         assert hasattr(hud.native.comparator, "__all__")
@@ -40,8 +40,8 @@ class TestNativeInit:
         # Should have the main compare tool
         assert "compare" in tool_names
 
-        # Should have the submit tool
-        assert "submit" in tool_names
+        # Should have the response tool (SubmitTool is named "response")
+        assert "response" in tool_names
 
         # Should have all the alias tools
         expected_aliases = [
@@ -59,13 +59,12 @@ class TestNativeInit:
         for alias in expected_aliases:
             assert alias in tool_names, f"Expected alias {alias} not found"
 
-        # Total should be 1 (submit) + 1 (compare) + 9 (aliases) = 11 tools
+        # Total should be 1 (response) + 1 (compare) + 9 (aliases) = 11 tools
         assert len(tool_names) == 11
 
     def test_comparator_tool_functionality(self):
         """Test that we can get the CompareTool from the comparator."""
         from hud.native.comparator import comparator_server
-        from hud.tools import BaseTool
 
         # Get the compare tool
         compare_tool = None
@@ -75,5 +74,7 @@ class TestNativeInit:
                 break
 
         assert compare_tool is not None
-        assert isinstance(compare_tool, BaseTool)
-        assert hasattr(compare_tool, "__call__")
+        # Tools are wrapped in FastMCP FunctionTool, not our BaseTool
+        assert hasattr(compare_tool, "name")
+        assert hasattr(compare_tool, "run")  # FunctionTool uses 'run' method
+        assert compare_tool.name == "compare"
