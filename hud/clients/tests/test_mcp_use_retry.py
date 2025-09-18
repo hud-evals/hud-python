@@ -11,7 +11,6 @@ from mcp import types
 
 if TYPE_CHECKING:
     from requests.adapters import HTTPAdapter
-    from mcp.types import TextContent
 
 from hud.clients.mcp_use import MCPUseHUDClient
 from hud.clients.utils.mcp_use_retry import (
