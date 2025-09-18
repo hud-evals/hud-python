@@ -680,9 +680,14 @@ class TestMCPAgentExtended:
 
     @pytest.mark.asyncio
     async def test_run_with_invalid_prompt_type(self, agent_with_tools):
-        """Test run with invalid prompt type raises TypeError."""
-        with pytest.raises(TypeError, match="prompt_or_task must be str or Task"):
-            await agent_with_tools.run(123)  # Invalid type
+        """Test run with invalid prompt type returns error trace."""
+        result = await agent_with_tools.run(123)  # Invalid type
+
+        # Should return an error trace instead of raising
+        assert result.isError is True
+        assert result.done is True
+        assert result.reward == 0.0
+        assert "prompt_or_task must be str or Task" in result.content
 
     @pytest.mark.asyncio
     async def test_evaluate_phase_with_multiple_tools(self, agent_with_tools):
