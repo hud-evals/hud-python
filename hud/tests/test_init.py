@@ -67,7 +67,7 @@ class TestHudInit:
 
         # Verify that pretty_errors module is available (was imported successfully)
         from hud.utils import pretty_errors
-        assert hasattr(pretty_errors, 'install_pretty_errors')
+        assert hasattr(pretty_errors, "install_pretty_errors")
 
         # Clean up
         if "hud" in sys.modules:
