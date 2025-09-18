@@ -261,11 +261,15 @@ class TestHudComputerToolExtended:
         tool = HudComputerTool(executor=base_executor)
 
         # Right click
-        result = await tool(action="click", x=100, y=100, button="right", pattern=None, hold_keys=None)
+        result = await tool(
+            action="click", x=100, y=100, button="right", pattern=None, hold_keys=None
+        )
         assert result
 
         # Middle click
-        result = await tool(action="click", x=100, y=100, button="middle", pattern=None, hold_keys=None)
+        result = await tool(
+            action="click", x=100, y=100, button="middle", pattern=None, hold_keys=None
+        )
         assert result
 
         # Double click (using pattern)
