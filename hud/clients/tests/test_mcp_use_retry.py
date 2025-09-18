@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 import requests
 from mcp import types
+
+if TYPE_CHECKING:
+    from requests.adapters import HTTPAdapter
+    from mcp.types import TextContent
 
 from hud.clients.mcp_use import MCPUseHUDClient
 from hud.clients.utils.mcp_use_retry import (
@@ -35,7 +40,7 @@ class TestRetrySession:
         assert "https://" in session.adapters
 
         # Check adapter configuration
-        adapter = session.adapters["http://"]
+        adapter: HTTPAdapter = session.adapters["http://"]  # type: ignore[assignment]
         assert adapter.max_retries.total == 5
         assert 500 in adapter.max_retries.status_forcelist
         assert 502 in adapter.max_retries.status_forcelist
@@ -45,7 +50,7 @@ class TestRetrySession:
         """Test retry session with default values."""
         session = create_retry_session()
 
-        adapter = session.adapters["https://"]
+        adapter: HTTPAdapter = session.adapters["https://"]  # type: ignore[assignment]
         assert adapter.max_retries.total == 3
         assert 502 in adapter.max_retries.status_forcelist
         assert 503 in adapter.max_retries.status_forcelist
@@ -316,7 +321,9 @@ class TestMCPUseClientRetry:
             # Verify retry worked
             assert call_count == 2  # Failed once, then succeeded
             assert not result.isError
-            assert result.content[0].text == "Success"
+            content = result.content[0]
+            assert isinstance(content, types.TextContent)
+            assert content.text == "Success"
 
     @pytest.mark.asyncio
     async def test_resource_read_with_retry(self):
@@ -347,7 +354,7 @@ class TestMCPUseClientRetry:
                 if call_count == 1:
                     raise Exception("HTTP 502 Bad Gateway")
 
-                return Mock(contents=[Mock(text='{"status": "ok"}')])
+                return Mock(contents=[types.TextContent(type="text", text='{"status": "ok"}')])
 
             mock_session.connector.client_session.read_resource = mock_read_resource
             mock_session.connector.client_session._send_request = AsyncMock()
@@ -371,7 +378,9 @@ class TestMCPUseClientRetry:
             # Verify retry worked
             assert call_count == 2  # Failed once, then succeeded
             assert result is not None
-            assert result.contents[0].text == '{"status": "ok"}'
+            content = result.contents[0]
+            assert isinstance(content, types.TextContent)
+            assert content.text == '{"status": "ok"}'
 
 
 if __name__ == "__main__":
