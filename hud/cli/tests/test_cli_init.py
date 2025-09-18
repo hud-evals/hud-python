@@ -120,7 +120,7 @@ class TestCLICommands:
 
     def test_debug_with_max_phase(self) -> None:
         """Test debug command with max phase limit."""
-        with patch("hud.cli.asyncio.run", side_effect=_close_coro(result=3)) as mock_run:
+        with patch("hud.cli.asyncio.run", side_effect=_close_coro(result=3)):
             result = runner.invoke(app, ["debug", "test-image", "--max-phase", "3"])
             assert result.exit_code == 0  # Exit code 0 when phases_completed == max_phase
 
@@ -133,7 +133,7 @@ class TestCLICommands:
             with os.fdopen(fd, "w") as f:
                 json.dump({"test": {"command": "python", "args": ["server.py"]}}, f)
 
-            with patch("hud.cli.asyncio.run", side_effect=_close_coro(result=5)) as mock_run:
+            with patch("hud.cli.asyncio.run", side_effect=_close_coro(result=5)):
                 # Need to provide a dummy positional arg since params is required
                 result = runner.invoke(app, ["debug", "dummy", "--config", temp_path])
                 assert result.exit_code == 0
@@ -147,7 +147,7 @@ class TestCLICommands:
         """Test debug command with Cursor server."""
         with patch("hud.cli.parse_cursor_config") as mock_parse:
             mock_parse.return_value = (["python", "server.py"], None)
-            with patch("hud.cli.asyncio.run", side_effect=_close_coro(result=5)) as mock_run:
+            with patch("hud.cli.asyncio.run", side_effect=_close_coro(result=5)):
                 # Need to provide a dummy positional arg since params is required
                 result = runner.invoke(app, ["debug", "dummy", "--cursor", "test-server"])
                 assert result.exit_code == 0

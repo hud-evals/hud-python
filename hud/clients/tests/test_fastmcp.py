@@ -300,7 +300,8 @@ class TestFastMCPHUDClient:
             client._initialized = True
             client._client = mock_fastmcp  # Set the mock client
 
-            # Provide a task-like connect handle so shutdown's done() check behaves like real transport
+            # Provide a task-like connect handle so shutdown's done() check behaves like
+            # real transport
             loop = asyncio.get_running_loop()
             connect_task = loop.create_future()
             connect_task.set_result(None)

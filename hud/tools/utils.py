@@ -42,7 +42,7 @@ async def run(
 
     try:
         stdout, stderr = await asyncio.wait_for(communicate_coro, timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         # When asyncio.wait_for raises before scheduling cancellations (as in some test patches),
         # make sure the coroutine is properly cleaned up to avoid un-awaited warnings.
         if hasattr(communicate_coro, "close"):
