@@ -24,7 +24,7 @@ async def test_hud_computer_screenshot():
 @pytest.mark.asyncio
 async def test_hud_computer_click_simulation():
     comp = HudComputerTool()
-    blocks = await comp(action="click", x=10, y=10)
+    blocks = await comp(action="click", x=10, y=10, button=None, pattern=None, hold_keys=None)
     # Should return text confirming execution or screenshot block
     assert blocks
     assert len(blocks) > 0
@@ -131,7 +131,7 @@ class TestHudComputerToolExtended:
         tool = HudComputerTool(executor=base_executor, width=800, height=600)
 
         # Test click with scaling
-        result = await tool(action="click", x=400, y=300)
+        result = await tool(action="click", x=400, y=300, button=None, pattern=None, hold_keys=None)
         assert result
 
         # Test that coordinates are scaled properly
@@ -185,7 +185,7 @@ class TestHudComputerToolExtended:
     async def test_move_action(self, base_executor):
         """Test move action with BaseExecutor."""
         tool = HudComputerTool(executor=base_executor)
-        result = await tool(action="move", x=100, y=100)
+        result = await tool(action="move", x=100, y=100, offset_x=None, offset_y=None)
         assert result
         assert any("Move" in content.text for content in result if isinstance(content, TextContent))
 
@@ -261,15 +261,15 @@ class TestHudComputerToolExtended:
         tool = HudComputerTool(executor=base_executor)
 
         # Right click
-        result = await tool(action="click", x=100, y=100, button="right")
+        result = await tool(action="click", x=100, y=100, button="right", pattern=None, hold_keys=None)
         assert result
 
         # Middle click
-        result = await tool(action="click", x=100, y=100, button="middle")
+        result = await tool(action="click", x=100, y=100, button="middle", pattern=None, hold_keys=None)
         assert result
 
         # Double click (using pattern)
-        result = await tool(action="click", x=100, y=100, pattern=[100])
+        result = await tool(action="click", x=100, y=100, pattern=[100], hold_keys=None)
         assert result
 
     @pytest.mark.asyncio
