@@ -26,7 +26,9 @@ class TestInitModule:
             "get_trace",
             "instrument",
             "job",
+            "tools",
             "trace",
+            "utils",
         ]
 
         assert set(hud.__all__) == set(expected)
