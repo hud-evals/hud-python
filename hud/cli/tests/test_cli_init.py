@@ -18,6 +18,16 @@ runner = CliRunner()
 logger = logging.getLogger(__name__)
 
 
+def _close_coro(result=None):
+    """Return a side effect that closes the provided coroutine before returning."""
+
+    def _runner(coro):
+        coro.close()
+        return result
+
+    return _runner
+
+
 class TestCLICommands:
     """Test CLI command handling."""
 
@@ -30,7 +40,7 @@ class TestCLICommands:
 
     def test_analyze_docker_image(self) -> None:
         """Test analyze command with Docker image."""
-        with patch("hud.cli.asyncio.run") as mock_run:
+        with patch("hud.cli.asyncio.run", side_effect=_close_coro()) as mock_run:
             result = runner.invoke(app, ["analyze", "test-image:latest"])
             assert result.exit_code == 0
             mock_run.assert_called_once()
@@ -40,7 +50,7 @@ class TestCLICommands:
 
     def test_analyze_with_docker_args(self) -> None:
         """Test analyze command with additional Docker arguments."""
-        with patch("hud.cli.asyncio.run") as mock_run:
+        with patch("hud.cli.asyncio.run", side_effect=_close_coro()) as mock_run:
             # Docker args need to come after -- to avoid being parsed as CLI options
             result = runner.invoke(
                 app, ["analyze", "test-image", "--", "-e", "KEY=value", "-p", "8080:8080"]
@@ -57,7 +67,7 @@ class TestCLICommands:
             with os.fdopen(fd, "w") as f:
                 json.dump({"test": {"command": "python", "args": ["server.py"]}}, f)
 
-            with patch("hud.cli.asyncio.run") as mock_run:
+            with patch("hud.cli.asyncio.run", side_effect=_close_coro()) as mock_run:
                 # Need to provide a dummy positional arg since params is required
                 result = runner.invoke(app, ["analyze", "dummy", "--config", temp_path])
                 assert result.exit_code == 0
@@ -74,7 +84,7 @@ class TestCLICommands:
         """Test analyze command with Cursor server."""
         with patch("hud.cli.parse_cursor_config") as mock_parse:
             mock_parse.return_value = (["python", "server.py"], None)
-            with patch("hud.cli.asyncio.run") as mock_run:
+            with patch("hud.cli.asyncio.run", side_effect=_close_coro()) as mock_run:
                 # Need to provide a dummy positional arg since params is required
                 result = runner.invoke(app, ["analyze", "dummy", "--cursor", "test-server"])
                 assert result.exit_code == 0
@@ -97,22 +107,20 @@ class TestCLICommands:
     def test_analyze_output_formats(self) -> None:
         """Test analyze with different output formats."""
         for format_type in ["interactive", "json", "markdown"]:
-            with patch("hud.cli.asyncio.run"):
+            with patch("hud.cli.asyncio.run", side_effect=_close_coro()):
                 result = runner.invoke(app, ["analyze", "test-image", "--format", format_type])
                 assert result.exit_code == 0
 
     def test_debug_docker_image(self) -> None:
         """Test debug command with Docker image."""
-        with patch("hud.cli.asyncio.run") as mock_run:
-            mock_run.return_value = 5  # All phases completed
+        with patch("hud.cli.asyncio.run", side_effect=_close_coro(result=5)) as mock_run:
             result = runner.invoke(app, ["debug", "test-image:latest"])
             assert result.exit_code == 0
             mock_run.assert_called_once()
 
     def test_debug_with_max_phase(self) -> None:
         """Test debug command with max phase limit."""
-        with patch("hud.cli.asyncio.run") as mock_run:
-            mock_run.return_value = 3  # Completed 3 phases
+        with patch("hud.cli.asyncio.run", side_effect=_close_coro(result=3)) as mock_run:
             result = runner.invoke(app, ["debug", "test-image", "--max-phase", "3"])
             assert result.exit_code == 0  # Exit code 0 when phases_completed == max_phase
 
@@ -125,8 +133,7 @@ class TestCLICommands:
             with os.fdopen(fd, "w") as f:
                 json.dump({"test": {"command": "python", "args": ["server.py"]}}, f)
 
-            with patch("hud.cli.asyncio.run") as mock_run:
-                mock_run.return_value = 5
+            with patch("hud.cli.asyncio.run", side_effect=_close_coro(result=5)) as mock_run:
                 # Need to provide a dummy positional arg since params is required
                 result = runner.invoke(app, ["debug", "dummy", "--config", temp_path])
                 assert result.exit_code == 0
@@ -140,8 +147,7 @@ class TestCLICommands:
         """Test debug command with Cursor server."""
         with patch("hud.cli.parse_cursor_config") as mock_parse:
             mock_parse.return_value = (["python", "server.py"], None)
-            with patch("hud.cli.asyncio.run") as mock_run:
-                mock_run.return_value = 5
+            with patch("hud.cli.asyncio.run", side_effect=_close_coro(result=5)) as mock_run:
                 # Need to provide a dummy positional arg since params is required
                 result = runner.invoke(app, ["debug", "dummy", "--cursor", "test-server"])
                 assert result.exit_code == 0

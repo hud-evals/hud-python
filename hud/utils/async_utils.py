@@ -59,7 +59,10 @@ def fire_and_forget(coro: Coroutine[Any, Any, Any], description: str = "task") -
             thread = threading.Thread(target=run_in_thread, daemon=True)
             thread.start()
         except Exception as e:
-            # If that fails too, just log and continue
+            # If that fails too, make sure the coroutine gets cleaned up before logging
+            if hasattr(coro, "close"):
+                coro.close()
+
             # Special case: suppress "cannot schedule new futures after interpreter shutdown"
             if "interpreter shutdown" not in str(e):
                 logger.debug("Could not %s - no event loop available: %s", description, e)

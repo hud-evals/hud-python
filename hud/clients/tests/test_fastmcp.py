@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
@@ -297,6 +299,12 @@ class TestFastMCPHUDClient:
             client._stack = mock_stack
             client._initialized = True
             client._client = mock_fastmcp  # Set the mock client
+
+            # Provide a task-like connect handle so shutdown's done() check behaves like real transport
+            loop = asyncio.get_running_loop()
+            connect_task = loop.create_future()
+            connect_task.set_result(None)
+            mock_fastmcp.transport = SimpleNamespace(_connect_task=connect_task)
 
             with patch("hud.clients.fastmcp.logger") as mock_logger:
                 await client.shutdown()

@@ -38,9 +38,16 @@ async def run(
             stderr=subprocess.PIPE,
         )
 
-    stdout, stderr = await asyncio.wait_for(
-        proc.communicate(input=input.encode() if input else None), timeout=timeout
-    )
+    communicate_coro = proc.communicate(input=input.encode() if input else None)
+
+    try:
+        stdout, stderr = await asyncio.wait_for(communicate_coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        # When asyncio.wait_for raises before scheduling cancellations (as in some test patches),
+        # make sure the coroutine is properly cleaned up to avoid un-awaited warnings.
+        if hasattr(communicate_coro, "close"):
+            communicate_coro.close()
+        raise
 
     return proc.returncode or 0, stdout.decode(), stderr.decode()
 
