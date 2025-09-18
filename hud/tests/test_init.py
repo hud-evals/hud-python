@@ -67,6 +67,7 @@ class TestHudInit:
 
         # Verify that pretty_errors module is available (was imported successfully)
         from hud.utils import pretty_errors
+
         assert hasattr(pretty_errors, "install_pretty_errors")
 
         # Clean up
@@ -80,6 +81,7 @@ class TestHudInit:
         pretty_errors_module = None
         try:
             from hud.utils import pretty_errors as pe
+
             pretty_errors_module = pe
             original_install = pe.install_pretty_errors
 

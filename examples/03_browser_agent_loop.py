@@ -58,7 +58,13 @@ async def main():
             "mcp_config": mcp_config,
             "setup_tool": [
                 {"name": "launch_app", "arguments": {"app_name": "2048"}},
-                {"name": "setup", "arguments": {"name": "game_2048_board", "arguments": {"board_size": 4, "target_tile": 512}}},
+                {
+                    "name": "setup",
+                    "arguments": {
+                        "name": "game_2048_board",
+                        "arguments": {"board_size": 4, "target_tile": 512},
+                    },
+                },
             ],
             "evaluate_tool": {
                 "name": "evaluate",
@@ -77,7 +83,10 @@ async def main():
             "mcp_config": mcp_config,
             "setup_tool": [
                 {"name": "launch_app", "arguments": {"app_name": "todo"}},
-                {"name": "setup", "arguments": {"name": "todo_seed", "arguments": {"num_items": 5}}},
+                {
+                    "name": "setup",
+                    "arguments": {"name": "todo_seed", "arguments": {"num_items": 5}},
+                },
             ],
             "evaluate_tool": {
                 "name": "evaluate",
