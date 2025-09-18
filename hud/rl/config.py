@@ -111,19 +111,17 @@ class ActorConfig:
     # Execution parameters
     max_steps_per_episode: int = 5
     max_parallel_episodes: int = 48
+
+    # Agent parameters
+    temperature: float = 0.7
+    vllm_base_url: str = "http://localhost:8000/v1"
+    vllm_api_key: str = "token-abc123"
     max_new_tokens: int = 1024
     force_tool_choice: bool = True
     allowed_tools: list[str] | None = None
-
-    # Model parameters
-    temperature: float = 0.7
-
-    # Hud agent parameters
-    system_prompt: str = "You are an expert agent. Complete the task efficiently."
-    vllm_base_url: str = "http://localhost:8000/v1"
-    vllm_api_key: str = "token-abc123"
-
-    # Episode execution timeout (seconds)
+    
+    # Timeouts
+    request_timeout: int = 45
     episode_timeout_sec: int = 600
 
 
