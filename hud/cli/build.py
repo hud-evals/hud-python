@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import subprocess
 import time
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
