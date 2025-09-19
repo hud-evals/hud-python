@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from pathlib import Path
 
 import hud
 from hud.types import Task, Trace
@@ -93,6 +95,13 @@ class Actor:
         return result
 
 
+def save_traces(traces: list[Trace], output_path: str) -> None:
+    """Save traces to JSON file."""
+    with open(output_path, "w") as f:
+        json.dump([trace.model_dump(mode="json") for trace in traces], f, indent=2)
+    print(f"Saved {len(traces)} traces to {output_path}")
+
+
 if __name__ == "__main__":
     from hud.datasets import Task
     import uuid
@@ -168,5 +177,9 @@ Strategy: keep highest tiles in a corner; maintain order; avoid random moves.
 
         for trace in traces:
             print(f"Trace completed - Reward: {trace.reward}")
+        
+        # Dump traces for training system testing
+        output_file = f"traces_{job_id}.json"
+        save_traces(traces, output_file)
 
     asyncio.run(test_actor())
