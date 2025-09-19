@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
+import requests
 from typing import Any, ClassVar, Literal
 
 import mcp.types as types
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, AuthenticationError
 from openai.types.responses import (
     ResponseComputerToolCall,
     ResponseInputMessageContentListParam,
@@ -175,14 +176,17 @@ class OperatorAgent(MCPAgent):
 
             input_param: ResponseInputParam = [{"role": "user", "content": input_content}]  # type: ignore[reportUnknownMemberType]
 
-            response = await self.openai_client.responses.create(
-                model=self.model,
-                tools=[computer_tool],
-                input=input_param,
-                instructions=self.system_prompt,
-                truncation="auto",
-                reasoning={"summary": "auto"},  # type: ignore[arg-type]
-            )
+            try:
+                response = await self.openai_client.responses.create(
+                    model=self.model,
+                    tools=[computer_tool],
+                    input=input_param,
+                    instructions=self.system_prompt,
+                    truncation="auto",
+                    reasoning={"summary": "auto"},  # type: ignore[arg-type]
+                )
+            except AuthenticationError:
+                raise ValueError("OpenAI API key is set but is not valid.")
         else:
             # Follow-up step - check if this is user input or tool result
             latest_message = messages[-1] if messages else {}
