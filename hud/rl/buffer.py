@@ -219,12 +219,93 @@ class ReplayBuffer(Buffer[Trace]):
         else:
             raise ValueError(f"Invalid select strategy: {self.select_strategy}")
 
+    def _extract_group_key(self, trace: Trace) -> tuple[str, str]:
+        """Return a stable grouping key for a trace.
+
+        Preference order:
+        1) task.id when present (kind='id')
+        2) task.prompt exact string (kind='prompt') when id is None
+        3) 'NA' for missing/errored entries (kind='NA')
+        """
+        if getattr(trace, "isError", False):
+            return ("NA", "NA")
+
+        task = getattr(trace, "task", None)
+        if task is None:
+            return ("NA", "NA")
+
+        tid = getattr(task, "id", None)
+        if tid is not None:
+            return ("id", str(tid))
+
+        prompt = getattr(task, "prompt", None)
+        if prompt:
+            return ("prompt", str(prompt))
+
+        return ("NA", "NA")
+
+    def _validate_and_split_groups(
+        self, recent_traces: list[Trace]
+    ) -> tuple[list[list[Trace]], list[tuple[str, str]]]:
+        """Validate and split recent traces into homogeneous groups by id or prompt.
+
+        - Uses id when present; otherwise falls back to prompt equality.
+        - Any NA/error traces are excluded and the group is filled by duplicating
+          existing valid members in that group.
+        - Always returns len == groups_per_batch groups of size == group_size.
+        """
+        from collections import Counter
+
+        groups_per_batch = self.batch_size // self.group_size
+
+        window_keys = [self._extract_group_key(t) for t in recent_traces]
+        window_counter = Counter(k for k in window_keys if k[0] != "NA")
+
+        validated_groups: list[list[Trace]] = []
+        selected_keys: list[tuple[str, str]] = []
+
+        for g_idx in range(groups_per_batch):
+            start = g_idx * self.group_size
+            end = start + self.group_size
+            chunk = recent_traces[start:end]
+
+            key_counts = Counter()
+            per_item_keys: list[tuple[str, str]] = []
+            for tr in chunk:
+                k = self._extract_group_key(tr)
+                per_item_keys.append(k)
+                if k[0] != "NA":
+                    key_counts[k] += 1
+
+            if key_counts:
+                best_key = key_counts.most_common(1)[0][0]
+            elif window_counter:
+                best_key = window_counter.most_common(1)[0][0]
+            else:
+                best_key = ("NA", "NA")
+
+            homogeneous = [tr for tr, k in zip(chunk, per_item_keys, strict=False) if k == best_key]
+
+            while len(homogeneous) < self.group_size:
+                if homogeneous:
+                    homogeneous.append(homogeneous[-1])
+                else:
+                    idx = next((i for i, wk in enumerate(window_keys) if wk[0] != "NA"), None)
+                    if idx is not None:
+                        homogeneous.append(recent_traces[idx])
+                    elif chunk:
+                        homogeneous.append(chunk[0])
+                    else:
+                        homogeneous.append(recent_traces[0])
+
+            validated_groups.append(homogeneous)
+            selected_keys.append(best_key)
+
+        return validated_groups, selected_keys
+
     def _sample_high_variance_traces(self) -> list[Trace]:
         from collections import Counter, defaultdict, deque
 
-        # Expect recent window to already be grouped by task id
-
-        # Build recent window and earlier lookup (short form)
         buf_list = list(self.buffer)
         if len(buf_list) < self.batch_size:
             hud_console.warning(
@@ -234,81 +315,32 @@ class ReplayBuffer(Buffer[Trace]):
                 take = min(len(buf_list) or 1, self.batch_size - len(buf_list))
                 buf_list.extend(buf_list[:take])
         recent_traces = buf_list[-self.batch_size :]
-        hud_console.info(
-            f"[group-sampler] recent-window histogram: {Counter(getattr(t.task, 'id', 'NA') for t in recent_traces)}"  # noqa: E501
-        )
+
+        recent_keys = [self._extract_group_key(t) for t in recent_traces]
+        hud_console.info(f"[group-sampler] recent-window histogram: {Counter(recent_keys)}")
 
         hud_console.info(
             f"[group-sampler] Building earlier traces lookup, buffer size: {len(buf_list)}"
         )
-        earlier_traces_by_task: dict[str, deque[Trace]] = defaultdict(deque)
+        earlier_traces_by_key: dict[tuple[str, str], deque[Trace]] = defaultdict(deque)
         for tr in buf_list[: -self.batch_size]:
-            earlier_traces_by_task[getattr(tr.task, "id", "NA")].append(tr)
+            k = self._extract_group_key(tr)
+            if k[0] != "NA":
+                earlier_traces_by_key[k].append(tr)
 
-        # Chunk from the most-recent end
+        groups, group_keys = self._validate_and_split_groups(recent_traces)
+
         final_traces: list[Trace] = []
-        groups_per_batch = self.batch_size // self.group_size
-        hud_console.info(f"[group-sampler] Processing {groups_per_batch} groups")
-        for g_idx in range(groups_per_batch):
-            start = g_idx * self.group_size
-            end = start + self.group_size
-            group = recent_traces[start:end]
+        for g_idx, (homogeneous, target_key) in enumerate(zip(groups, group_keys, strict=False)):
 
-            # Assert homogeneity: every trace in a group must share the same task id
-            cnt = Counter(getattr(t.task, "id", "NA") for t in group)
-            if len(cnt) != 1:
-                raise RuntimeError(f"Group {g_idx} is not homogeneous: {dict(cnt)}")
-            target_tid = next(iter(cnt.keys()))
-
-            # Build homogeneous group of target_tid, filling from earlier traces to increase spread
-            homogeneous: list[Trace] = [
-                t for t in group if getattr(t.task, "id", "NA") == target_tid
-            ]
-            needed = self.group_size - len(homogeneous)
-
-            # Greedy fill: choose earlier traces (same task-id) farthest from current mean reward
-            def current_mean(homogeneous: list[Trace]) -> float:
-                if not homogeneous:
+            def current_mean(h: list[Trace]) -> float:
+                if not h:
                     return 0.0
-                vals = [float(getattr(t, "reward", 0.0) or 0.0) for t in homogeneous]
+                vals = [float(getattr(t, "reward", 0.0) or 0.0) for t in h]
                 return sum(vals) / len(vals)
 
-            while needed > 0:
-                pool = earlier_traces_by_task.get(target_tid, deque())
-                if pool:
-                    mu = current_mean(homogeneous)
-                    # pick element farthest from current mean
-                    best_i = None
-                    best_dist = -1.0
-                    for i, tr in enumerate(list(pool)):
-                        r = float(getattr(tr, "reward", 0.0) or 0.0)
-                        dist = abs(r - mu)
-                        if dist > best_dist:
-                            best_dist = dist
-                            best_i = i
-                    # pop selected
-                    chosen = list(pool)[best_i]  # type: ignore[index]
-                    # remove from deque efficiently by rotating
-                    left = list(pool)
-                    if best_i is not None:
-                        left.pop(best_i)  # O(n) but pool is small in practice
-                        earlier_traces_by_task[target_tid] = deque(left)
-                        homogeneous.append(chosen)
-                else:
-                    # duplicate extreme within current homogeneous set
-                    if not homogeneous:
-                        raise RuntimeError(f"Group {g_idx} has no traces for target {target_tid}")
-                    mu = current_mean(homogeneous)
-                    extreme = max(
-                        homogeneous, key=lambda t: abs(float(getattr(t, "reward", 0.0) or 0.0) - mu)
-                    )
-                    homogeneous.append(extreme)
-                needed -= 1
-
-            # Replacement step: swap in earlier traces to increase reward spread
-            pool = earlier_traces_by_task.get(target_tid, deque())
+            pool = earlier_traces_by_key.get(target_key, deque())
             if pool:
-                # Log pool stats
                 pool_vals = [float(getattr(tr, "reward", 0.0) or 0.0) for tr in list(pool)]
                 if pool_vals:
                     pool_mean = sum(pool_vals) / len(pool_vals)
@@ -316,16 +348,15 @@ class ReplayBuffer(Buffer[Trace]):
                         pool_vals
                     )
                     hud_console.info(
-                        f"[group-sampler] Group {g_idx}: earlier-pool size={len(pool_vals)} mean={pool_mean:.4f} std={(pool_var**0.5):.4f}"  # noqa: E501
+                        f"[group-sampler] Group {g_idx}: earlier-pool size={len(pool_vals)} "
+                        f"mean={pool_mean:.4f} std={(pool_var**0.5):.4f}"
                     )
 
-                # Decide how many to replace (up to 1/4 of group, at least 1)
                 replace_k = max(1, self.group_size // 4)
                 replace_k = min(replace_k, len(pool), self.group_size)
 
                 if replace_k > 0:
                     mu = current_mean(homogeneous)
-                    # Select replacement candidates from pool farthest from current mean
                     pool_list = list(pool)
                     pool_indices = list(range(len(pool_list)))
                     pool_indices.sort(
@@ -337,12 +368,11 @@ class ReplayBuffer(Buffer[Trace]):
                     chosen_pool_idx = set(pool_indices[:replace_k])
                     replacements = [pool_list[i] for i in pool_indices[:replace_k]]
 
-                    # Remove chosen from pool deque
                     remaining = [tr for i, tr in enumerate(pool_list) if i not in chosen_pool_idx]
-                    earlier_traces_by_task[target_tid] = deque(remaining)
+                    earlier_traces_by_key[target_key] = deque(remaining)
 
-                    # Select current group positions closest to mean to replace
                     group_indices = list(range(len(homogeneous)))
+                    mu = current_mean(homogeneous)
                     group_indices.sort(
                         key=lambda i: abs(
                             (float(getattr(homogeneous[i], "reward", 0.0) or 0.0)) - mu
@@ -353,18 +383,19 @@ class ReplayBuffer(Buffer[Trace]):
                     for pos, new_tr in zip(target_positions, replacements, strict=False):
                         homogeneous[pos] = new_tr
 
-            # Validate homogeneity
-            if any(getattr(t.task, "id", "NA") != target_tid for t in homogeneous):
+            if any(self._extract_group_key(t) != target_key for t in homogeneous):
                 raise RuntimeError(f"Group {g_idx} is not homogeneous after sampling")
             final_traces.extend(homogeneous)
 
         for i in range(0, len(final_traces), self.group_size):
             block = final_traces[i : i + self.group_size]
-            if len({getattr(t.task, "id", "NA") for t in block}) != 1:
+            keys = {self._extract_group_key(t) for t in block}
+            if len(keys) != 1:
                 raise RuntimeError(f"Homogeneity validation failed for block starting at index {i}")
 
         hud_console.info(
-            f"[group-sampler] final histogram: {Counter(getattr(t.task, 'id', 'NA') for t in final_traces)}"  # noqa: E501
+            f"[group-sampler] final histogram: "
+            f"{Counter(self._extract_group_key(t) for t in final_traces)}"
         )
         return final_traces
 

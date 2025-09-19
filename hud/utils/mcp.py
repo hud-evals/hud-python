@@ -66,8 +66,13 @@ def setup_hud_telemetry(
     auto_trace_cm = None
 
     if not run_id and auto_trace:
+        # Start an auto trace and capture its ID for headers/metadata
         auto_trace_cm = trace("My Trace")
-        run_id = auto_trace_cm.__enter__()
+        _trace_obj = auto_trace_cm.__enter__()
+        try:
+            run_id = getattr(_trace_obj, "id", None) or str(_trace_obj)
+        except Exception:  # pragma: no cover - fallback shouldn't fail lint
+            run_id = None
 
     # Patch HUD servers with run-id (works whether auto or user trace)
     if run_id:

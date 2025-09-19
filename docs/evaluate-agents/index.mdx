@@ -11,42 +11,59 @@ HUD makes it easy to evaluate any MCP-compatible agent on a variety of tasks and
 Evaluate an agent on a single task:
 
 ```python
+import asyncio
 import hud
 import os
 from hud.datasets import Task
 from hud.agents import ClaudeAgent
 
-with hud.trace("eval-demo"):
-    task = Task(
-        prompt="Create a spreadsheet with quarterly sales data",
-        mcp_config={
-            "hud": {
-                "url": "https://mcp.hud.so/v3/mcp",
-                "headers": {
-                    "Authorization": f"Bearer {os.getenv('HUD_API_KEY')}",
-                    "Mcp-Image": "hudpython/hud-browser:latest"
+async def main():
+    with hud.trace("eval-demo"):
+        task = Task(
+            prompt="Start at the Wikipedia page for 'Python programming language' and navigate to the page for 'Mount Everest' only through page links.",
+            mcp_config={
+                "hud": {
+                    "url": "https://mcp.hud.so/v3/mcp",
+                    "headers": {
+                        "Authorization": f"Bearer {os.getenv('HUD_API_KEY')}",
+                        "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+                    }
+                }
+            },
+            setup_tool={
+                "name": "setup",
+                "arguments": {
+                    "name": "navigate_to_url",
+                    "arguments": {"url": "https://en.wikipedia.org/wiki/Python_(programming_language)"}
+                }
+            },
+            evaluate_tool={
+                "name": "evaluate",
+                "arguments": {
+                    "name": "page_contains",
+                    "arguments": {
+                        "search_terms": [
+                            "Mount Everest",
+                            "8,848",
+                            "Himalayas",
+                            "Nepal",
+                            "China"
+                        ],
+                        "partial_rewarding": True
+                    }
                 }
             }
-        },
-        setup_tool={
-            "name": "playwright",
-            "arguments": {
-                "action": "navigate",
-                "url": "https://sheets.google.com"
-            }
-        },
-        evaluate_tool={
-            "name": "evaluate", 
-            "arguments": {
-                "name": "sheet_contains",
-                "text": "Q1 Sales"
-            }
-        }
-    )
-    
-    agent = ClaudeAgent()
-    result = await agent.run(task)
-    print(f"Success: {result.reward > 0.5}")
+        )
+        
+        agent = ClaudeAgent(
+            allowed_tools=["anthropic_computer"]
+        )
+        result = await agent.run(task)
+        print(f"Success: {result.reward > 0.5}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
 ```
 
 ## What You Can Do
@@ -63,7 +80,7 @@ task = Task(
             "url": "https://mcp.hud.so/v3/mcp",
             "headers": {
                 "Authorization": f"Bearer {os.getenv('HUD_API_KEY')}",
-                "Mcp-Image": "hudpython/hud-browser:latest"
+                "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
             }
         }
     },
@@ -71,14 +88,16 @@ task = Task(
         "name": "setup",
         "arguments": {
             "name": "navigate",
-            "url": "https://github.com"
+            "arguments": {"url": "https://github.com"}
         }
     },
     evaluate_tool={
         "name": "evaluate", 
         "arguments": {
-            "name": "url_contains",
-            "substring": "hud-python"
+            "name": "url_match",
+            "arguments": {
+                "target_url": "hud-python"
+            }
         }
     }
 )
@@ -155,9 +174,9 @@ class MyCustomAgent(MCPAgent):
 Use `hud analyze` to discover available tools and evaluators:
 
 ```bash
-$ hud analyze hudpython/hud-browser:latest
+$ hud analyze hudevals/hud-remote-browser:0.1.1
 
-🔍 Analyzing hudpython/hud-browser:latest...
+🔍 Analyzing hudevals/hud-remote-browser:0.1.1...
 
 📊 Environment Summary:
 ├── Tools: 15 available
@@ -188,7 +207,7 @@ After running evaluations, view results on the leaderboard:
 ```python
 # Run evaluation (parallel)
 results = await run_dataset_parallel(
-    "Claude-3.5 SheetBench",
+    "Claude-4 Sonnet SheetBench",
     dataset="hud-evals/sheetbench-50",
     agent_class=ClaudeAgent
 )

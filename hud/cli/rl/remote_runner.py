@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import subprocess
 import time
+import uuid
 from pathlib import Path
 
 from rich.console import Console
@@ -27,6 +28,41 @@ GPU_PRICING = {
     "A100": {"price": "1", "memory": "80GB"},
     "H100": {"price": "2", "memory": "80GB"},
 }
+
+
+def ensure_vllm_deployed(model_name: str, gpu_type: str = "A100", timeout: int = 600) -> None:
+    """Deploy vLLM for a model if needed and wait until it's ready.
+
+    Args:
+        model_name: The name of the model to deploy vLLM for
+        gpu_type: GPU type to use for deployment (e.g., A100, H100)
+        timeout: Max seconds to wait for vLLM to be ready
+    """
+    # Check current model status
+    info = rl_api.get_model(model_name)
+    if info.vllm_url:
+        hud_console.success("vLLM server already running")
+        return
+
+    hud_console.info(f"Deploying vLLM server for {model_name}...")
+    rl_api.deploy_vllm(model_name, gpu_type=gpu_type)
+    hud_console.success("vLLM deployment started")
+
+    hud_console.info("Waiting for vLLM server to be ready...")
+    start_time = time.time()
+    with hud_console.progress() as progress:
+        progress.update("Checking deployment status (see live status on https://app.hud.so/models)")
+        while True:
+            if time.time() - start_time > timeout:
+                hud_console.error("Timeout waiting for vLLM deployment")
+                raise ValueError("vLLM deployment timeout")
+            info = rl_api.get_model(model_name)
+            if info.vllm_url or info.status == "ready":
+                hud_console.success(
+                    f"vLLM server ready at http://rl.hud.so/v1/models/{model_name}/vllm"
+                )
+                break
+            time.sleep(5)
 
 
 def run_remote_training(
@@ -128,49 +164,55 @@ def run_remote_training(
             from rich.prompt import Prompt
 
             # Ask for model name
-            default_name = model_type.split("/")[-1].lower()
+            base_default = model_type.split("/")[-1].lower()
+            default_name = base_default
+            existing_names = {m.name for m in active_models}
+            suffix = 1
+            while default_name in existing_names:
+                default_name = f"{base_default}-{suffix}"
+                suffix += 1
+
             hud_console.info(f"Enter model name (default: {default_name}):")
             model_name = Prompt.ask("Model name", default=default_name)
             model_name = model_name.replace("/", "-").lower()
 
-            # Create the model
+            # Create the model with retry on name conflict
             hud_console.info(f"Creating model: {model_name}")
             try:
                 rl_api.create_model(model_name, model_type)
                 hud_console.success(f"Created model: {model_name}")
-
-                # Deploy vLLM automatically
-                hud_console.info(f"Deploying vLLM server for {model_name}...")
-                rl_api.deploy_vllm(model_name, gpu_type="A100")
-                hud_console.success("vLLM deployment started")
-
-                # Wait for deployment
-                hud_console.info("Waiting for vLLM server to be ready...")
-                max_wait = 600  # 10 minutes
-                start_time = time.time()
-
-                with hud_console.progress() as progress:
-                    progress.update(
-                        "Checking deployment status (see live status on https://app.hud.so/models)"
-                    )
-
-                    while True:
-                        if time.time() - start_time > max_wait:
-                            hud_console.error("Timeout waiting for vLLM deployment")
-                            raise ValueError("vLLM deployment timeout")
-
-                        model_info = rl_api.get_model(model_name)
-                        if model_info.status == "ready":
-                            hud_console.success(
-                                f"vLLM server ready at http://rl.hud.so/v1/models/{model_name}/vllm"
-                            )
-                            break
-
-                        time.sleep(5)
+                ensure_vllm_deployed(model_name, gpu_type="A100")
 
             except Exception as e:
-                hud_console.error(f"Failed to create model: {e}")
-                raise
+                # If the name already exists, suggest a new name and prompt once
+                message = str(e)
+                if "already exists" in message or "409" in message:
+                    alt_name = f"{model_name}-1"
+                    i = 1
+                    while True:
+                        candidate = f"{model_name}-{str(uuid.uuid4())[:4]}"
+                        if candidate not in existing_names:
+                            alt_name = candidate
+                            break
+                        i += 1
+                    hud_console.warning(
+                        f"Model '{model_name}' exists. Suggesting '{alt_name}' instead."
+                    )
+                    try:
+                        from rich.prompt import Prompt as _Prompt
+
+                        chosen = _Prompt.ask("Use different name", default=alt_name)
+                        chosen = chosen.replace("/", "-").lower()
+                        rl_api.create_model(chosen, model_type)
+                        hud_console.success(f"Created model: {chosen}")
+                        model_name = chosen
+                        ensure_vllm_deployed(model_name, gpu_type="A100")
+                    except Exception as e2:
+                        hud_console.error(f"Failed to create model: {e2}")
+                        raise
+                else:
+                    hud_console.error(f"Failed to create model: {e}")
+                    raise
 
         else:
             # Existing model selected
@@ -194,36 +236,7 @@ def run_remote_training(
                     return
 
             # Ensure vLLM is deployed
-            if not model_info.vllm_url:
-                hud_console.info(f"Deploying vLLM server for {model_name}...")
-                rl_api.deploy_vllm(model_name, gpu_type="A100")
-                hud_console.success("vLLM deployment started")
-
-                # Wait for deployment
-                hud_console.info("Waiting for vLLM server to be ready...")
-                max_wait = 600  # 10 minutes
-                start_time = time.time()
-
-                with hud_console.progress() as progress:
-                    progress.update(
-                        "Checking deployment status (see live status on https://app.hud.so/models)"
-                    )
-
-                    while True:
-                        if time.time() - start_time > max_wait:
-                            hud_console.error("Timeout waiting for vLLM deployment")
-                            raise ValueError("vLLM deployment timeout")
-
-                        model_info = rl_api.get_model(model_name)
-                        if model_info.vllm_url:
-                            hud_console.success(
-                                f"vLLM server ready at http://rl.hud.so/v1/models/{model_name}/vllm"
-                            )
-                            break
-
-                        time.sleep(5)
-            else:
-                hud_console.success("vLLM server already running")
+            ensure_vllm_deployed(model_name, gpu_type="A100")
     except KeyboardInterrupt:
         hud_console.dim_info("Training cancelled", "")
         return
@@ -281,7 +294,17 @@ def run_remote_training(
             presets=presets,
         )
 
-        config.job_name = f"RL {model_name} on {tasks_file}"
+        # Use a short label for tasks (avoid full absolute paths)
+        try:
+            if tasks_file and Path(tasks_file).exists():
+                tasks_label = Path(tasks_file).name
+            else:
+                # Fallback: last segment of a non-existent path or dataset name
+                tasks_label = str(tasks_file).replace("\\", "/").split("/")[-1]
+        except Exception:
+            tasks_label = str(tasks_file)
+
+        config.job_name = f"RL {model_name} on {tasks_label}"
 
         # Save config for editing
         temp_config_path = Path(f".rl_config_temp_{model_name}.json")

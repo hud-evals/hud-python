@@ -433,11 +433,11 @@ NOTEBOOK_TEMPLATE = """{{
 
 ENV_FILE_TEMPLATE = """# HUD API Configuration
 # Get your API key from https://app.hud.so/account
-HUD_API_KEY=your_hud_api_key_here
+HUD_API_KEY=""
 
 # Anthropic API Configuration (optional)
 # Required for using Claude agents - get from https://console.anthropic.com/
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
+ANTHROPIC_API_KEY=""
 """
 
 README_TEMPLATE = """# {title}

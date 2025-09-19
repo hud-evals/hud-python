@@ -10,12 +10,12 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, TypeVar
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 

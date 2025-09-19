@@ -240,8 +240,6 @@ async def launch_app(ctx: Context, app_name: str) -> str:
     Returns:
         Success message with app URL
     """
-    await ctx.info(f"Launching app: {app_name}")
-
     assert persistent_ctx is not None, "Persistent context not initialized"
 
     # Get the service manager from persistent context to ensure state consistency

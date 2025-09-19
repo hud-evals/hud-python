@@ -332,6 +332,7 @@ def push_environment(
         "source": local_image,
         "pushedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "registry": pushed_digest.split("/")[0] if "/" in pushed_digest else "docker.io",
+        "image_with_tag": image,
     }
 
     # Save updated lock file

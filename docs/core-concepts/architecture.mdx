@@ -15,7 +15,7 @@ graph TB
         API["🔌 MCP Orchestrator<br/>(mcp.hud.so)"]
     end
     
-    subgraph "Your Code"
+    subgraph Code["Your Code"]
         Agent["🤖 Agent<br/>(Claude/Operator)"]
         Task["📋 Task<br/>(Prompt + Evaluation)"]
         SDK["📦 hud-python"]
@@ -40,14 +40,21 @@ graph TB
     SDK <-->|"MCP"| LocalEnv
     SDK <-->|"MCP"| API
     API  <-->|"MCP"| RemoteEnv
-    SDK  -->|"hud.trace"| Trace
+    SDK  -->|"hud.trace"| OpenTelemetry
     Trace --> Dashboard
     AnyMCP -->|"MCP"| API
     
-    style Dashboard fill:#e0e7ff,stroke:#6366f1,stroke-width:2px
-    style SDK fill:#fef3c7,stroke:#f59e0b,stroke-width:2px
-    style RemoteEnv fill:#d1fae5,stroke:#10b981,stroke-width:2px
-    style AnyMCP fill:#fce7f3,stroke:#ec4899,stroke-width:2px,stroke-dasharray: 5 5
+    style Dashboard fill:#3b82f6,stroke:#1e40af,stroke-width:2px,color:#ffffff
+    style API fill:#6b7280,stroke:#374151,stroke-width:2px,color:#ffffff
+    style Agent fill:#ef4444,stroke:#dc2626,stroke-width:2px,color:#ffffff
+    style Task fill:#f97316,stroke:#ea580c,stroke-width:2px,color:#ffffff
+    style SDK fill:#f59e0b,stroke:#d97706,stroke-width:2px,color:#ffffff
+    style LocalEnv fill:#06b6d4,stroke:#0891b2,stroke-width:2px,color:#ffffff
+    style RemoteEnv fill:#10b981,stroke:#047857,stroke-width:2px,color:#ffffff
+    style Trace fill:#84cc16,stroke:#65a30d,stroke-width:2px,color:#ffffff
+    style Dataset fill:#a855f7,stroke:#9333ea,stroke-width:2px,color:#ffffff
+    style AnyMCP fill:#8b5cf6,stroke:#7c3aed,stroke-width:2px,color:#ffffff,stroke-dasharray: 5 5
+  
 ```
 
 ## Core Components

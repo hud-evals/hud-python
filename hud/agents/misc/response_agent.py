@@ -16,7 +16,17 @@ class ResponseAgent:
     based on the agent's final response message.
     """
 
-    def __init__(self, api_key: str | None = None, model: str = "gpt-4o") -> None:
+    def __init__(
+        self, api_key: str | None = None, model: str = "gpt-4o", system_prompt: str | None = None
+    ) -> None:
+        """
+        Initialize the ResponseAgent.
+
+        Args:
+            api_key: The API key to use for the OpenAI client
+            model: The model to use for the OpenAI client (default: "gpt-4o")
+            system_prompt: The system prompt to use for the OpenAI client
+        """
         self.api_key = api_key or settings.openai_api_key or os.environ.get("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError(
@@ -26,23 +36,29 @@ class ResponseAgent:
         self.client = AsyncOpenAI(api_key=self.api_key)
         self.model = model
 
-        self.system_prompt = """
+        self.system_prompt = (
+            system_prompt
+            or """
         You are an assistant that helps determine the appropriate response to an agent's message.
         
         You will receive messages from an agent that is performing tasks for a user.
         Your job is to analyze these messages and respond with one of the following:
         
-        - STOP: If the agent indicates it has successfully completed a task, even if phrased as a question
-          like "I have entered the right values into this form. Would you like me to do anything else?"
-          or "Here is the website. Is there any other information you need?" or if the agent has
-          strongly determined it wants to stop the task.
-        
+        - STOP: If the agent indicates it has successfully completed a task or is stuck,
+          struggling or says it cannot complete the task, even if phrased as a question
+          like "I have entered the right values into this form. Would you like me to do
+          anything else?" or "Here is the website. Is there any other information you
+          need?" or if the agent has strongly determined it wants to stop the task like
+          "The task is infeasible. Can I help you with something else?"
+
         - CONTINUE: If the agent is asking for clarification before proceeding with a task
           like "I'm about to clear cookies from this website. Would you like me to proceed?"
-          or "I've entered the right values into this form. Would you like me to continue with the rest of the task?"
+          or "I've entered the right values into this form. Would you like me to continue
+          with the rest of the task?"
         
         Respond ONLY with one of these two options.
-        """  # noqa: E501
+        """
+        )
 
     async def determine_response(self, agent_message: str) -> ResponseType:
         """

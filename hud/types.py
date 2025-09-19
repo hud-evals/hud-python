@@ -12,6 +12,7 @@ from mcp.types import CallToolRequestParams, CallToolResult
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from hud.settings import settings
+from hud.utils.tool_shorthand import normalize_to_tool_call_dict
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +60,18 @@ class Task(BaseModel):
 
     @field_validator("setup_tool", "evaluate_tool", mode="before")
     @classmethod
-    def convert_dict_to_tool_call(cls, v: Any) -> Any:
-        """Convert dict to MCPToolCall instance, parsing JSON strings first."""
+    def convert_dict_to_tool_call(cls, v: Any, info: Any) -> Any:
+        """Convert dict (with shorthands) to MCPToolCall instance.
+
+        Supports nested forms by walking to the deepest tool name and its arguments.
+        Examples:
+        - {"name": "navigate", "arguments": {...}} -> name=navigate
+        - {"navigate": {...}} -> name=navigate
+        - {"setup": {"navigate": {...}}} -> name=navigate
+        - {"name": "setup", "arguments": {"name": "navigate", "arguments": {...}}}
+          -> name=navigate
+        - Lists are normalized element-wise
+        """
         if v is None:
             return None
 
@@ -73,10 +84,12 @@ class Task(BaseModel):
 
                 raise HudConfigError(f"Invalid JSON string: {e}") from e
 
-        if isinstance(v, dict):
-            return MCPToolCall(**v)
-        if isinstance(v, list):
-            return [MCPToolCall(**item) if isinstance(item, dict) else item for item in v]
+        normalized = normalize_to_tool_call_dict(v)
+
+        if isinstance(normalized, dict):
+            return MCPToolCall(**normalized)
+        if isinstance(normalized, list):
+            return [MCPToolCall(**item) if isinstance(item, dict) else item for item in normalized]
         return v
 
     @field_validator("mcp_config", mode="before")

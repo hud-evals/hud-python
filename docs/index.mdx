@@ -4,6 +4,10 @@ description: "OSS RL environment + evals toolkit."
 icon: "book"
 ---
 
+<Note>
+**Version 0.4.33** - Latest stable release
+</Note>
+
 <CardGroup cols={3}>
 <Card title="I want to evaluate agents" icon="robot" href="/evaluate-agents">
   Test Claude, Operator, or custom agents on benchmarks like SheetBench and OSWorld
@@ -33,9 +37,9 @@ graph LR
     Env -->|"screenshot"| MCP
     MCP -->|"get_response()"| Agent
     
-    style Agent fill:#e0e7ff,stroke:#6366f1,stroke-width:2px
-    style MCP fill:#fef3c7,stroke:#f59e0b,stroke-width:2px
-    style Env fill:#d1fae5,stroke:#10b981,stroke-width:2px
+    style Agent fill:#3b82f6,stroke:#1e40af,stroke-width:2px,color:#ffffff
+    style MCP fill:#f59e0b,stroke:#d97706,stroke-width:2px,color:#ffffff
+    style Env fill:#10b981,stroke:#047857,stroke-width:2px,color:#ffffff
 ```
 
 ## Why HUD?
@@ -76,7 +80,7 @@ async def main():
                 "url": "https://mcp.hud.so/v3/mcp",
                 "headers": {
                     "Authorization": f"Bearer {os.getenv('HUD_API_KEY')}",
-                    "Mcp-Image": "hudpython/hud-text-2048:v1.2"
+                    "Mcp-Image": "hudevals/hud-text-2048:0.1.3"
                 }
             }
         },

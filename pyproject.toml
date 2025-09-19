@@ -1,6 +1,6 @@
 [project]
 name = "hud-python"
-version = "0.4.30"
+version = "0.4.33"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
@@ -30,7 +30,14 @@ dependencies = [
     "opentelemetry-instrumentation-mcp==0.47.0",
     "opentelemetry-api>=1.34.1",
     "opentelemetry-sdk>=1.34.1",
-    "opentelemetry-exporter-otlp-proto-http>=1.34.1"
+    "opentelemetry-exporter-otlp-proto-http>=1.34.1",
+    # Data and evaluation
+    "datasets>=2.14.0",
+    "numpy>=1.24.0",
+    "pillow>=11.1.0",
+    # AI providers
+    "anthropic",
+    "openai",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -113,16 +120,9 @@ packages = ["hud"]
 [project.optional-dependencies]
 # Agent dependencies - AI capabilities + telemetry + datasets
 agent = [
-    # AI providers
-    "anthropic",
-    "openai",
     "langchain",
     "langchain-openai",
     "langchain-anthropic",
-    # Data and evaluation
-    "datasets>=2.14.0",
-    "numpy>=1.24.0",
-    "pillow>=11.1.0",
     # Jupyter support
     "ipykernel",
     "ipython <9",

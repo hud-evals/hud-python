@@ -4,27 +4,28 @@ description: "Build your own MCP-compatible agent for HUD evaluation"
 icon: "robot"
 ---
 
-Create custom agents that work with HUD's evaluation system. You can either extend the `MCPAgent` class for full control, or use the quickstart template for a simpler approach.
+Build custom agents that interact with MCP tools to complete tasks. An agent is essentially a loop that calls your LLM, executes tools based on its decisions, and continues until the task is complete.
 
-## Quick Start with Template
+## How Agents Work
 
-The fastest way to create an agent is using the HUD quickstart template:
+An agent follows this lifecycle:
 
-```bash
-# Clone the quickstart repository
-uvx hud-python quickstart
-
-# This creates a full agent implementation with:
-# - Complete lifecycle example
-# - Direct tool call handling
-# - Ready-to-run code
+```mermaid
+graph LR
+    A[System Prompt] --> B[User Prompt]
+    B --> C[LLM Response]
+    C --> D{Has Tool Calls?}
+    D -->|Yes| E[Execute Tools]
+    E --> F[Format Results]
+    F --> C
+    D -->|No| G[Task Complete]
 ```
 
-The quickstart provides a working agent that you can modify to add your own logic for making tool calls.
+The agent keeps calling your LLM and executing tools until the LLM stops requesting tools, indicating the task is complete.
 
-## Building from Scratch
+## The Four Required Methods
 
-For full control, create an agent by inheriting from `MCPAgent` and implementing four core methods:
+To create an agent, you implement four methods that bridge your LLM with MCP's tool system:
 
 ```python
 from hud.agents import MCPAgent
@@ -32,290 +33,155 @@ from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 class MyAgent(MCPAgent):
     """Your custom agent implementation."""
-    
+
     async def get_system_messages(self) -> list[Any]:
-        """Return system messages for your LLM."""
+        """1. Called ONCE at start - returns your LLM's system prompt."""
         pass
-    
+
     async def get_response(self, messages: list[Any]) -> AgentResponse:
-        """Generate agent response with tool calls."""
+        """2. Called EACH TURN - sends messages to your LLM, returns its response, optionally adds the assistant message to messages."""
         pass
-    
+
     async def format_blocks(self, blocks: list[ContentBlock]) -> list[Any]:
-        """Format content blocks for your LLM."""
+        """3. Called at START - converts initial prompt/context to your LLM format."""
         pass
-    
+
     async def format_tool_results(
-        self, tool_calls: list[MCPToolCall], 
+        self, tool_calls: list[MCPToolCall],
         tool_results: list[MCPToolResult]
     ) -> list[Any]:
-        """Format tool results back into messages."""
+        """4. Called AFTER TOOLS - converts tool results to your LLM format."""
         pass
 ```
 
-## Understanding the Interface
+### Understanding When Each Method is Called
 
-The methods provide a bridge between two worlds:
+The agent loop calls your methods in this sequence:
 
-- **`messages: list[Any]`** - Your LLM's native message format (e.g., OpenAI's format)
-- **`blocks: list[ContentBlock]`** - MCP's content blocks (text, images, etc.)
-- **`tool_calls: list[MCPToolCall]`** and **`tool_results: list[MCPToolResult]`** - Native MCP types
+1. **`get_system_messages()`** - Once at start
+2. **`format_blocks()`** - Converts initial task prompt
+3. **`get_response()`** - Gets LLM decision, adds assistant message to messages
+4. **`format_tool_results()`** - After each tool execution
+5. Back to step 3 until done
 
-These methods translate between your LLM's format and MCP's standardized format.
+## What MCPAgent Does For You
 
-## Implementation Guide
+### The Agent Loop
 
-### 1. Get System Messages
+The base `MCPAgent` class handles the entire execution loop. When you call `agent.run(task)`:
 
-Define the system prompt for your agent:
+1. **Initialization Phase**
+   - Connects to MCP servers (auto-creates client from task.mcp_config if needed)
+   - Discovers available tools from all connected servers
+   - Applies tool filtering (allowed/disallowed lists)
+   - Identifies lifecycle tools (setup, evaluate, response)
 
+2. **Setup Phase** (if task.setup_tool provided)
+   - Executes setup tools (e.g., navigate to website, initialize environment)
+   - Optionally appends setup output to initial context (controlled by `append_setup_output`)
+   - Can include initial screenshots (controlled by `initial_screenshot`)
+
+3. **Main Execution Loop**
+   ```python
+   while not done and step < max_steps:
+       # Your get_response() is called here
+       response = await agent.get_response(messages)
+
+       if response.tool_calls:
+           # MCPAgent executes tools for you
+           results = await agent.call_tools(response.tool_calls)
+
+           # Your format_tool_results() is called here
+           messages.extend(await agent.format_tool_results(tool_calls, results))
+       else:
+           done = True
+   ```
+
+4. **Evaluation Phase** (if task.evaluate_tool provided)
+   - Runs evaluation tools to calculate reward
+   - Extracts reward from result (looks for "reward", "grade", "score" keys)
+   - Returns Trace object with full execution history
+
+### Tool Management
+
+**Tool Discovery & Filtering**
 ```python
-async def get_system_messages(self) -> list[Any]:
-    """
-    Return system messages in your LLM's format.
-    """
-    # Use the configured system prompt or default
-    prompt = self.system_prompt or "You are a helpful assistant."
-    
-    # Return in your LLM's expected format
-    return [{"role": "system", "content": prompt}]
+agent = ClaudeAgent(
+    api_key="...",
+    allowed_tools=["anthropic_computer"],  # Only these tools
+    disallowed_tools=["openai_computer"],  # Never these tools
+    lifecycle_tools=["setup", "evaluate"]  # Hidden from LLM
+)
 ```
 
-### 2. Get Response Method
+- **Available Tools**: Retrieved via `self.get_available_tools()` - already filtered
+- **Lifecycle Tools**: Automatically detected and hidden from your LLM
+- **Response Tools**: Auto-detected (tools with "response" in name) for task completion
 
-This is where your agent decides what to do:
+### Client Management
+
+MCPAgent handles complex client lifecycle:
 
 ```python
-async def get_response(self, messages: list[Any]) -> AgentResponse:
-    """
-    Call your LLM and return tool calls.
-    
-    Args:
-        messages: Conversation history in your LLM's format
-        
-    Returns:
-        AgentResponse with content and tool_calls
-    """
-    # Call your LLM API
-    response = await self.llm_client.chat(
-        messages=messages,
-        tools=self._available_tools  # Provided by MCPAgent
-    )
-    
-    # Parse response into tool calls
-    tool_calls = []
-    if response.tool_calls:
-        for tc in response.tool_calls:
-            tool_calls.append(
-                MCPToolCall(
-                    name=tc.function.name,
-                    arguments=json.loads(tc.function.arguments),
-                    id=tc.id  # Optional tool call ID
-                )
-            )
-    
-    return AgentResponse(
-        content=response.content,
-        tool_calls=tool_calls
-    )
+# Option 1: Provide your own client
+from hud.clients import MCPClient
+client = MCPClient(mcp_config={...})
+agent = MyAgent(mcp_client=client)
+
+# Option 2: Auto-create from task
+task = Task(mcp_config={...})
+agent = MyAgent()  # No client needed
+await agent.run(task)  # Client created automatically
 ```
 
-### 3. Format Blocks Method
+**Auto-cleanup**: Clients created automatically are properly shut down after execution.
 
-Convert MCP's content blocks into your LLM's message format:
+### Error Handling
 
-```python
-async def format_blocks(self, blocks: list[ContentBlock]) -> list[Any]:
-    """
-    Format content blocks from tools into messages.
-    
-    Args:
-        blocks: List of MCP ContentBlock objects
-        
-    Returns:
-        Messages in your LLM's expected format
-    """
-    # Example for OpenAI-style format
-    content = []
-    for block in blocks:
-        if block.type == "text":
-            content.append({"type": "text", "text": block.text})
-        elif block.type == "image":
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{block.mime_type};base64,{block.data}"}
-            })
-    
-    return [{"role": "user", "content": content}]
+MCPAgent provides robust error handling:
+
+- **Connection Errors**: Helpful messages about MCP server availability
+- **Tool Errors**: Captured and returned as MCPToolResult with isError=True
+- **Timeout Handling**: Graceful shutdown on tool execution timeouts
+- **Trace Always Returns**: Even on errors, you get a Trace object with details
+
+### Message Accumulation
+
+Messages build up over the conversation:
+
+```
+[System] → [User Prompt] → [LLM Response] → [Tool Results] → [LLM Response] → ...
 ```
 
-### 4. Format Tool Results Method
+Your `get_response()` receives the full conversation history each time, allowing your LLM to maintain context.
 
-Convert tool execution results back into messages:
+### Advanced Features
 
+**Response Agent Integration**
 ```python
-async def format_tool_results(
-    self, 
-    tool_calls: list[MCPToolCall], 
-    tool_results: list[MCPToolResult]
-) -> list[Any]:
-    """
-    Format tool results for the next LLM call.
-    
-    Args:
-        tool_calls: The MCP tool calls that were made
-        tool_results: MCP results from executing those tools
-        
-    Returns:
-        Messages to append to conversation
-    """
-    messages = []
-    
-    for call, result in zip(tool_calls, tool_results):
-        # Add the assistant's tool call
-        messages.append({
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [{
-                "id": call.id or str(uuid.uuid4()),
-                "type": "function",
-                "function": {
-                    "name": call.name,
-                    "arguments": json.dumps(call.arguments)
-                }
-            }]
-        })
-        
-        # Add the tool result
-        messages.append({
-            "role": "tool",
-            "tool_call_id": call.id,
-            "content": json.dumps(result.content)
-        })
-    
-    return messages
+from hud.agents.misc import ResponseAgent
+
+agent = MyAgent(
+    response_agent=ResponseAgent()  # Auto-decides when to stop/continue
+)
 ```
 
-## Custom Agent Implementation
+The ResponseAgent can analyze ambiguous LLM responses like "Should I submit?" and decide whether to continue.
 
-To create a custom agent, implement the `MCPAgent` protocol by defining these four core methods:
-
+**Telemetry & Tracing**
 ```python
-from hud.agents import MCPAgent
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
-from typing import Any
-import json
+agent = MyAgent(
+    auto_trace=True,  # Automatic span creation
+    verbose=True  # Detailed logging
+)
+```
 
-class CustomAgent(MCPAgent):
-    """Custom agent implementation for any LLM provider."""
-    
-    def __init__(self, model: str = "your-model", **kwargs):
-        super().__init__(**kwargs)
-        self.model = model
-        # Initialize your LLM client here
-        # self.client = YourLLMClient()
-    
-    async def get_system_messages(self) -> list[Any]:
-        """Return system messages for your LLM.
-        
-        This method should return the system prompt and any other
-        initialization messages in your LLM's expected format.
-        """
-        prompt = self.system_prompt or "You are a helpful assistant that uses tools to complete tasks."
-        return [{"role": "system", "content": prompt}]
-    
-    async def get_response(self, messages: list[Any]) -> AgentResponse:
-        """Generate agent response with tool calls.
-        
-        This is where you call your LLM and parse the response into
-        tool calls. Convert available MCP tools to your LLM's format.
-        """
-        # Convert MCP tools to your LLM's tool format
-        tools = [
-            {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.inputSchema
-            }
-            for tool in self._available_tools
-        ]
-        
-        # Call your LLM with tools
-        response = await self.call_llm(messages, tools)
-        
-        # Parse tool calls from response
-        tool_calls = self.parse_tool_calls(response)
-        
-        return AgentResponse(
-            content=response.get("content", ""),
-            tool_calls=tool_calls
-        )
-    
-    async def format_blocks(self, blocks: list[Any]) -> list[Any]:
-        """Format content blocks for your LLM.
-        
-        Convert MCP content blocks (text, images) into your LLM's
-        message format.
-        """
-        messages = []
-        for block in blocks:
-            if block.type == "text":
-                messages.append({"role": "user", "content": block.text})
-            elif block.type == "image":
-                # Handle image blocks if your LLM supports them
-                messages.append({
-                    "role": "user", 
-                    "content": [
-                        {"type": "image", "image": block.data}
-                    ]
-                })
-        return messages
-    
-    async def format_tool_results(
-        self, 
-        tool_calls: list[MCPToolCall], 
-        tool_results: list[MCPToolResult]
-    ) -> list[Any]:
-        """Format tool results for your LLM.
-        
-        Convert tool call results back into your LLM's message format.
-        """
-        messages = []
-        
-        # Add assistant message with tool calls
-        messages.append({
-            "role": "assistant",
-            "tool_calls": [
-                {
-                    "id": call.id,
-                    "name": call.name,
-                    "arguments": call.arguments
-                }
-                for call in tool_calls
-            ]
-        })
-        
-        # Add tool results
-        for call, result in zip(tool_calls, tool_results):
-            content = json.dumps(result.content) if result.content else ""
-            messages.append({
-                "role": "tool",
-                "tool_call_id": call.id,
-                "content": content
-            })
-        
-        return messages
-
-    # Helper methods you'll need to implement
-    async def call_llm(self, messages: list[Any], tools: list[Any]) -> dict:
-        """Call your LLM API and return the response."""
-        # Implement your LLM API call here
-        pass
-    
-    def parse_tool_calls(self, response: dict) -> list[MCPToolCall]:
-        """Parse tool calls from your LLM's response format."""
-        # Implement parsing logic for your LLM's tool call format
-        pass
+**System Prompt Augmentation**
+```python
+task = Task(
+    system_prompt="Additional instructions...",  # Appended to agent's system prompt
+    ...
+)
 ```
 
 ## Testing Your Agent
@@ -358,7 +224,7 @@ async def test_agent():
         )
         
         # Use your custom agent
-        agent = CustomAgent(model="your-model")
+        agent = MyOpenAIAgent(api_key=os.getenv("OPENAI_API_KEY"))
         result = await agent.run(task)
         print(f"Reward: {result.reward}")
 
@@ -367,62 +233,81 @@ asyncio.run(test_agent())
 
 ## Built-in Agents
 
-For quick prototyping, HUD provides built-in agents:
+HUD provides built-in agents for common LLM providers:
 
 ```python
 from hud.agents import ClaudeAgent, OperatorAgent
 
 # Claude (Anthropic)
 claude_agent = ClaudeAgent(
-    allowed_tools=["anthropic_computer"]
+    model="claude-4-sonnet-20241022",
+    api_key=os.getenv("ANTHROPIC_API_KEY")
 )
 
-# OpenAI 
-openai_agent = OperatorAgent(
-    allowed_tools=["openai_computer"]
+# Operator (OpenAI-based)
+operator_agent = OperatorAgent(
+    api_key=os.getenv("OPENAI_API_KEY")
 )
 ```
 
-These are great for getting started, but implementing your own agent gives you full control over the conversation flow, tool selection, and response formatting.
+These handle all the formatting details for you, but creating your own gives you full control.
 
-## Advanced Features
+## Common Pitfalls & Solutions
 
-### Custom System Prompts
-
+### 1. Using Wrong Tool List
 ```python
-class MyAgent(MCPAgent):
-    def __init__(self, **kwargs):
-        super().__init__(
-            system_prompt="You are an expert web automation agent.",
-            **kwargs
-        )
+# ❌ Wrong - uses all tools including lifecycle ones
+for tool in self._available_tools:
+    ...
+
+# ✅ Correct - uses filtered tools
+for tool in self.get_available_tools():
+    ...
 ```
 
-### Tool Filtering
-
+### 2. Not Handling Tool IDs
 ```python
-# Only allow specific tools
-agent = MyAgent(
-    allowed_tools=["click", "type", "playwright"],
-    disallowed_tools=["execute_script"]
+# ❌ Wrong - missing tool call ID
+MCPToolCall(name="click", arguments={...})
+
+# ✅ Correct - includes ID for correlation
+MCPToolCall(
+    name="click",
+    arguments={...},
+    id=tc.id  # From your LLM's response
 )
 ```
 
-### Response Agent
-
-The ResponseAgent is an OpenAI-powered helper that determines whether an agent should stop or continue based on the agent's messages. It's useful for handling ambiguous situations:
-
+### 3. Incorrect Content Extraction
 ```python
-from hud.agents.misc import ResponseAgent
+# ❌ Wrong - assumes result.content is a string
+content = result.content
 
-# ResponseAgent analyzes agent messages like:
-# "I've completed the form. Should I submit it?"
-# And returns "STOP" or "CONTINUE"
-
-agent = MyAgent(
-    response_agent=ResponseAgent()  # Requires OPENAI_API_KEY
-)
+# ✅ Correct - extracts from content blocks
+content = ""
+if result.content:
+    for block in result.content:
+        if hasattr(block, 'text'):
+            content += block.text
 ```
+
+### 4. Missing Error Handling
+```python
+# ✅ Good practice - check for errors
+if result.isError:
+    # Handle error case
+    content = f"Tool error: {result.content}"
+```
+
+### 5. Environment-Specific Behavior
+
+Different MCP servers behave differently:
+
+- **Browser environments**: May include screenshots in setup output
+- **CLI environments**: Text-only responses
+- **Response tools**: Some servers auto-detect them, others need explicit handling
+
+Always test your agent with the actual MCP servers you'll use in production.
 
 ## Next Steps
 

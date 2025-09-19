@@ -54,16 +54,19 @@ class VLLMAdapter:
             except requests.exceptions.RequestException as e:
                 if attempt == max_retries:
                     hud_console.error(
-                        f"[VLLMAdapter] Failed to load adapter {adapter_name} after {attempt} attempts: {e}"
+                        f"[VLLMAdapter] Failed to load adapter {adapter_name} after {attempt} attempts: {e}"  # noqa: E501
                     )
                     return False
                 else:
                     hud_console.warning(
-                        f"[VLLMAdapter] Load adapter {adapter_name} failed (attempt {attempt}/{max_retries}): {e}. Retrying in {delay} seconds...",
+                        f"[VLLMAdapter] Load adapter {adapter_name} failed (attempt {attempt}/{max_retries}): {e}. Retrying in {delay} seconds...",  # noqa: E501
                     )
                     import time
+
                     time.sleep(delay)
                     delay *= backoff_factor
+
+        return False
 
     def unload_adapter(self, adapter_name: str) -> bool:
         """

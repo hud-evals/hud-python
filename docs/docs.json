@@ -27,67 +27,72 @@
     "url": "https://app.hud.so"
   },
   "navigation": {
-    "groups": [
+    "versions": [
       {
-        "group": "Get Started",
-        "pages": ["index", "quickstart", "llm-quickstart"]
-      },
-      {
-        "group": "Core Concepts",
-        "pages": [
-          "core-concepts/mcp-protocol",
-          "core-concepts/architecture", 
-          "core-concepts/task-system"
-        ]
-      },
-              {
-          "group": "Evaluate Agents",
-          "pages": [
-            "evaluate-agents/index",
-            "evaluate-agents/create-agents",
-            "evaluate-agents/leaderboards",
-            "evaluate-agents/create-benchmarks"
-          ]
-        },
-      {
-        "group": "Build Environments",
-        "pages": [
-          "build-environments/index",
-          "build-environments/quickstart-todo",
-          "build-environments/docker-to-mcp",
-          "build-environments/registry"
-        ]
-      },
-      {
-        "group": "Train Agents",
-        "pages": [
-          "train-agents/index",
-          "train-agents/rl-quickstart",
-          "train-agents/verifiers-gym",
-          "train-agents/datasets"
-        ]
-      },
-      {
-        "group": "CLI Reference",
-        "pages": [
-          "reference/cli/overview",
-          "reference/cli/init",
-          "reference/cli/dev",
-          "reference/cli/build",
-          "reference/cli/push",
-          "reference/cli/pull",
-          "reference/cli/analyze",
-          "reference/cli/debug",
-          "reference/cli/run"
-        ]
-      },
-            {
-        "group": "SDK Reference",
-        "pages": [
-          "reference/tools",
-          "reference/agents",
-          "reference/environments",
-          "reference/tasks"
+        "version": "0.4.33",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["index", "quickstart", "llm-quickstart"]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "core-concepts/mcp-protocol",
+              "core-concepts/architecture", 
+              "core-concepts/task-system"
+            ]
+          },
+          {
+            "group": "Evaluate Agents",
+            "pages": [
+              "evaluate-agents/index",
+              "evaluate-agents/create-agents",
+              "evaluate-agents/leaderboards",
+              "evaluate-agents/create-benchmarks"
+            ]
+          },
+          {
+            "group": "Build Environments",
+            "pages": [
+              "build-environments/index",
+              "build-environments/quickstart-todo",
+              "build-environments/docker-to-mcp",
+              "build-environments/registry"
+            ]
+          },
+          {
+            "group": "Train Agents",
+            "pages": [
+              "train-agents/index",
+              "train-agents/rl-quickstart",
+              "train-agents/verifiers-gym",
+              "train-agents/datasets"
+            ]
+          },
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "reference/cli/overview",
+              "reference/cli/init",
+              "reference/cli/dev",
+              "reference/cli/build",
+              "reference/cli/push",
+              "reference/cli/pull",
+              "reference/cli/analyze",
+              "reference/cli/debug",
+              "reference/cli/run"
+            ]
+          },
+          {
+            "group": "SDK Reference",
+            "pages": [
+              "reference/tools",
+              "reference/agents",
+              "reference/environments",
+              "reference/tasks"
+            ]
+          }
         ]
       }
     ]
