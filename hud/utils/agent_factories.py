@@ -8,6 +8,7 @@ from openai import AsyncOpenAI
 
 from hud.agents.grounded_openai import GroundedOpenAIChatAgent
 from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
+from hud.clients.utils.retry_transport import create_retry_httpx_client
 from hud.tools.grounding import GrounderConfig
 
 
@@ -18,6 +19,8 @@ def create_openai_agent(**kwargs: Any) -> GenericOpenAIChatAgent:
         api_key: OpenAI API key
         base_url: Optional custom API endpoint
         model_name: Model to use (e.g., "gpt-4o-mini")
+        http_client: Optional custom HTTP client (httpx.AsyncClient)
+        request_timeout: Timeout for HTTP requests (default: 60.0)
         **kwargs: Additional arguments passed to GenericOpenAIChatAgent
 
     Returns:
@@ -35,8 +38,22 @@ def create_openai_agent(**kwargs: Any) -> GenericOpenAIChatAgent:
     """
     api_key = kwargs.pop("api_key", None)
     base_url = kwargs.pop("base_url", None)
+    http_client = kwargs.pop("http_client", None)
+    request_timeout = kwargs.pop("request_timeout", 60.0)
 
-    openai_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+    # Create retry HTTP client if none provided
+    if http_client is None:
+        import httpx
+        http_client = create_retry_httpx_client(
+            timeout=httpx.Timeout(request_timeout)
+        )
+
+    openai_client = AsyncOpenAI(
+        api_key=api_key, 
+        base_url=base_url, 
+        http_client=http_client,
+        max_retries=2,
+    )
 
     return GenericOpenAIChatAgent(openai_client=openai_client, **kwargs)
 

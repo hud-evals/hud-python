@@ -5,13 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 
-import httpx
-from openai import AsyncOpenAI
-
 import hud
-from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
-from hud.clients.utils.retry_transport import create_retry_httpx_client
 from hud.types import Task, Trace
+from hud.utils.agent_factories import create_openai_agent
 from hud.utils.hud_console import HUDConsole
 
 from .config import Config
@@ -26,27 +22,13 @@ class Actor:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.actor_config = config.actor
-        
-        # Setup OpenAI client for vLLM
-        base_url = self.actor_config.vllm_base_url.replace("localhost", "127.0.0.1")
-        self.openai_client = self._create_openai_client(base_url)
 
-    def _create_openai_client(self, base_url: str) -> AsyncOpenAI:
-        """Create OpenAI client with optimized settings for vLLM."""
-        http_client = create_retry_httpx_client(
-            timeout=httpx.Timeout(self.actor_config.request_timeout),   
-        )
-        return AsyncOpenAI(
-            base_url=base_url,
-            api_key=self.actor_config.vllm_api_key,
-            http_client=http_client,
-            max_retries=2,
-        )
-
-    def create_agent(self) -> GenericOpenAIChatAgent:
+    def create_agent(self):
         """Create an agent with the current adapter."""
-        return GenericOpenAIChatAgent(
-            openai_client=self.openai_client,
+        return create_openai_agent(
+            base_url=self.actor_config.vllm_base_url.replace("localhost", "127.0.0.1"),
+            api_key=self.actor_config.vllm_api_key,
+            request_timeout=self.actor_config.request_timeout,
             model_name=self.config.model.base_model,
             allowed_tools=self.actor_config.allowed_tools,
             append_setup_output=False,
@@ -118,8 +100,10 @@ if __name__ == "__main__":
     async def test_actor() -> None:
         """Test the actor with a single 2048 task using local hud-browser image."""
         config = Config()
-        config.actor.max_parallel_episodes = 2
-        config.actor.max_steps_per_episode = 6
+        config.actor.max_parallel_episodes = 16
+        config.actor.max_steps_per_episode = 10
+        config.actor.temperature = 0.6
+        config.actor.force_tool_choice = False
         config.verbose = True
 
         # Create test task with local hud-browser image
@@ -129,7 +113,7 @@ if __name__ == "__main__":
             "mcp_config": {
                 "local": {
                     "command": "sh",
-                    "args": ["-c", "docker run --rm --platform linux/amd64 -i hudevals/hud-browser:0.1.6 2>/dev/null"]
+                    "args": ["-c", f"docker run --rm --platform linux/amd64 -i -e AGENT_DISPLAY_WIDTH=588 -e AGENT_DISPLAY_HEIGHT=336 hud-browser 2>/dev/null"]
                 }
             },
             "setup_tool": {"name": "launch_app", "arguments": {"app_name": "2048"}},
@@ -137,7 +121,37 @@ if __name__ == "__main__":
                 "name": "evaluate",
                 "arguments": {"name": "game_2048_max_number", "arguments": {"target": 128}},
             },
-            "system_prompt": "You are an expert 2048 game player. Use arrow keys to reach the target tile. First take a screenshot, then make strategic moves.",
+            "system_prompt": '''You are an expert 2048 game player using a browser interface. Your goal is to reach the tile specified by the user.
+HOW 2048 WORKS:
+- 4x4 grid with numbered tiles (2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048...)
+- When you move, all tiles slide in that direction
+- When two tiles with SAME number touch, they merge into one (2+2=4, 4+4=8, etc.)
+- After each move, a new tile (2 or 4) appears randomly
+- Game ends when grid is full and no merges possible
+
+BROWSER INTERACTION USING THE COMPUTER TOOL:
+1. FIRST TURN ONLY - TAKE SCREENSHOT:
+   Use: {"name": "computer", "arguments": {"action": "screenshot"}}
+   After that, the environment returns an image with each successful move.
+
+2. MAKE MOVES - Use the computer tool with action="press" and keys parameter (list of strings):
+   - Move up: {"name": "computer", "arguments": {"action": "press", "keys": ["up"]}}
+   - Move down: {"name": "computer", "arguments": {"action": "press", "keys": ["down"]}}
+   - Move left: {"name": "computer", "arguments": {"action": "press", "keys": ["left"]}}
+   - Move right: {"name": "computer", "arguments": {"action": "press", "keys": ["right"]}}
+
+IMPORTANT GAME PLAYING GUIDELINES:
+- You can make MULTIPLE actions in a turn (press multiple keys)
+- ONLY USE THE PRESS ACTION
+- After each turn, you will see the result of the tool calls and the new game state. CONTINUE playing until the objective is clearly achieved
+- Do NOT stop playing just because you made several moves - keep going until you reach the target
+- There is NO "terminate" or "stop" action - you continue until the task is complete
+- If you're unsure whether the target is reached, make one more move to verify, then continue if needed
+- The game/environment will naturally end when appropriate - you don't need to manually stop it
+- Keep taking actions until you can clearly see the objective has been met
+
+Strategy: keep highest tiles in a corner; maintain order; avoid random moves.
+''',
             "agent_tools": ["computer"],
         }
 
@@ -150,6 +164,9 @@ if __name__ == "__main__":
 
         job_id = str(uuid.uuid4())
         with hud.job("Test Actor", job_id=job_id):
-            await actor.run_tasks([task]*5, job_id=job_id)
+           traces = await actor.run_tasks([task]*32, job_id=job_id)
+
+        for trace in traces:
+            print(f"Trace completed - Reward: {trace.reward}")
 
     asyncio.run(test_actor())
