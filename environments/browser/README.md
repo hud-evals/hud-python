@@ -186,6 +186,28 @@ from . import setup
 
 **Fix**: Use getter/setter methods instead of direct attribute access.
 
+## Agent Display Configuration
+
+The browser environment supports dynamic image rescaling based on agent display dimensions. When agents specify their preferred display dimensions via environment variables, the computer tools will automatically rescale screenshots to match the agent's expected resolution.
+
+### How It Works
+
+1. **Agent sets environment variables**: Agents can set `AGENT_DISPLAY_WIDTH` and `AGENT_DISPLAY_HEIGHT` environment variables
+2. **Automatic rescaling**: Computer tools detect these variables and enable image rescaling
+3. **Seamless experience**: Screenshots are automatically resized to match the agent's expected resolution
+
+### Usage
+
+```bash
+# Run with agent-specific display dimensions
+AGENT_DISPLAY_WIDTH=1024 AGENT_DISPLAY_HEIGHT=768 hud dev . --build
+
+# Or set in environment
+export AGENT_DISPLAY_WIDTH=1024
+export AGENT_DISPLAY_HEIGHT=768
+hud dev . --build
+```
+
 ## Development Workflow
 
 1. **Start the environment**: `hud dev`

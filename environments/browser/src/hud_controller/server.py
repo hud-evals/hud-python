@@ -150,9 +150,29 @@ async def initialize_environment(ctx):
 
         # Register interaction tools
         with contextlib.redirect_stdout(sys.stderr):
-            mcp.add_tool(HudComputerTool())
-            mcp.add_tool(AnthropicComputerTool())
-            mcp.add_tool(OpenAIComputerTool())
+            # Check for agent-specific environment variables
+            tool_kwargs = {}
+            
+            # Check for agent display dimensions via environment variables
+            agent_width = os.getenv("AGENT_DISPLAY_WIDTH")
+            agent_height = os.getenv("AGENT_DISPLAY_HEIGHT")
+            
+            if agent_width:
+                tool_kwargs['width'] = int(agent_width)
+            if agent_height:
+                tool_kwargs['height'] = int(agent_height)
+            
+            # Enable image rescaling when agent provides dimensions
+            if 'width' in tool_kwargs or 'height' in tool_kwargs:
+                tool_kwargs['rescale_images'] = True
+                logger.info(f"Agent display dimensions detected: {tool_kwargs}")
+            else:
+                logger.info("No agent display dimensions provided, using defaults")
+            
+            # Create computer tools with agent configuration
+            mcp.add_tool(HudComputerTool(**tool_kwargs))
+            mcp.add_tool(AnthropicComputerTool(**tool_kwargs))
+            mcp.add_tool(OpenAIComputerTool(**tool_kwargs))
             mcp.add_tool(playwright_tool)
 
         # Mark as initialized
