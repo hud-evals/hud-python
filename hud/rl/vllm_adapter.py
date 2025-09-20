@@ -1,15 +1,8 @@
-"""vLLM adapter management for LoRA hot-swapping."""
-
-from __future__ import annotations
-
 import json
-import logging
 
 import requests
 
-from hud.utils.hud_console import HUDConsole
-
-hud_console = HUDConsole(logging.getLogger(__name__))
+from hud.rl.logger import console
 
 
 class VLLMAdapter:
@@ -48,17 +41,17 @@ class VLLMAdapter:
                 response.raise_for_status()
 
                 self.current_adapter = adapter_name
-                hud_console.info(f"[VLLMAdapter] Loaded adapter: {adapter_name}")
+                console.info_log(f"[VLLMAdapter] Loaded adapter: {adapter_name}")
                 return True
 
             except requests.exceptions.RequestException as e:
                 if attempt == max_retries:
-                    hud_console.error(
+                    console.error_log(
                         f"[VLLMAdapter] Failed to load adapter {adapter_name} after {attempt} attempts: {e}"  # noqa: E501
                     )
                     return False
                 else:
-                    hud_console.warning(
+                    console.warning_log(
                         f"[VLLMAdapter] Load adapter {adapter_name} failed (attempt {attempt}/{max_retries}): {e}. Retrying in {delay} seconds...",  # noqa: E501
                     )
                     import time
@@ -89,11 +82,11 @@ class VLLMAdapter:
             if self.current_adapter == adapter_name:
                 self.current_adapter = None
 
-            hud_console.info(f"[VLLMAdapter] Unloaded adapter: {adapter_name}")
+            console.info_log(f"[VLLMAdapter] Unloaded adapter: {adapter_name}")
             return True
 
         except requests.exceptions.RequestException as e:
-            hud_console.error(f"[VLLMAdapter] Failed to unload adapter {adapter_name}: {e}")
+            console.error_log(f"[VLLMAdapter] Failed to unload adapter {adapter_name}: {e}")
             return False
 
     def list_adapters(self) -> list | None:
@@ -112,7 +105,7 @@ class VLLMAdapter:
             return response.json().get("adapters", [])
 
         except requests.exceptions.RequestException as e:
-            hud_console.error(f"[VLLMAdapter] Failed to list adapters: {e}")
+            console.error_log(f"[VLLMAdapter] Failed to list adapters: {e}")
             return None
 
     def get_current(self) -> str | None:

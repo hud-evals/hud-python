@@ -1,7 +1,3 @@
-"""Configuration for RL training."""
-
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -119,7 +115,7 @@ class ActorConfig:
     max_new_tokens: int = 1024
     force_tool_choice: bool = True
     allowed_tools: list[str] | None = None
-    
+
     # Timeouts
     request_timeout: int = 45
     episode_timeout_sec: int = 600

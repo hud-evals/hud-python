@@ -1,7 +1,3 @@
-"""Shared types for RL training."""
-
-from __future__ import annotations
-
 import math
 from typing import Any
 
