@@ -11,13 +11,13 @@ from transformers.utils.chat_template_utils import render_jinja_template
 
 from hud.rl.logger import console
 
-from .types import TrainingSample
+from hud.rl.types import TrainingSample
 
 if TYPE_CHECKING:
     from hud.types import Trace
 
-    from .buffer import Buffer
-    from .config import Config
+    from hud.rl.buffer import Buffer
+    from hud.rl.config import Config
 
 
 class DataLoader:

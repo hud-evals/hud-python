@@ -30,8 +30,8 @@ from hud.rl.distributed import (
 from hud.rl.logger import console
 from hud.rl.loss import compute_grpo_loss, compute_logprobs, sanity_check
 from hud.rl.metrics import MetricsCollector
-from hud.rl.model import load_models
-from hud.rl.optimizer import create_optimizer
+from hud.rl.model import get_model, get_processor
+from hud.rl.optimizer import get_optimizer
 from hud.rl.utils import (
     ensure_dir,
     get_gpu_utilization,
@@ -227,9 +227,8 @@ async def train(config: Config, tasks: list[Task]) -> None:
     # Actor is responsible for running tasks and collecting episodes
     actor = Actor(config) if is_main_process() else None
 
-    # Load models and optimizer directly
-    processor, policy, ref = load_models(config)
-    optimizer = create_optimizer(config, policy)
+    processor, policy = get_processor(config.model), get_model(config.model)
+    optimizer = get_optimizer(config, policy)
 
     # Create checkpoint manager for training loop
     checkpoint_manager = CheckpointManager(
@@ -237,7 +236,7 @@ async def train(config: Config, tasks: list[Task]) -> None:
     )
 
     # Initialize metrics collector
-    collector = MetricsCollector(distributed=config.distributed.enabled)
+    collector = MetricsCollector()
 
     # Initialize buffer based on select strategy
     if config.training.select_strategy in ["variance", "random"]:
@@ -480,7 +479,7 @@ async def main() -> None:
         * config.actor.max_new_tokens
     )
     console.info(f"Estimated tokens per forward pass: {token_estimate}")
-    image_estimate = config.model.max_pixels
+    image_estimate = config.model.processor.max_pixels
     total_memory = INITIAL_MEMORY + SCALING_FACTOR * token_estimate * image_estimate
     console.info(f"Estimated memory peak: {total_memory:.2f} GB")
     if total_memory > 75.0:

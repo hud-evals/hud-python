@@ -12,10 +12,10 @@ except ImportError:
 from hud.rl.logger import console
 
 if TYPE_CHECKING:
-    from .config import Config
+    from hud.rl.config import Config
 
 
-def create_optimizer(config: Config, policy: Any) -> Any:
+def get_optimizer(config: Config, policy: Any) -> Any:
     """Create optimizer for the policy model.
 
     Args:
