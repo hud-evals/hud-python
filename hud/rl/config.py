@@ -18,12 +18,8 @@ def validate_model(model_name: str) -> None:
 
 class BaseConfig(BaseModel):
     model_config = ConfigDict(
-        arbitrary_types_allowed=True,
         validate_assignment=True,
-        extra="forbid",
-        json_schema_extra={
-            "examples": []
-        }
+        extra="forbid"
     )
     
     @classmethod
@@ -199,25 +195,50 @@ class TrainingConfig:
     adam_eps: float = 1e-8
 
 
-@dataclass
-class ActorConfig:
+class ActorConfig(BaseConfig):
     """Actor/episode collection configuration."""
 
+    # Model and logging
+    base_model: str = Field(default="Qwen/Qwen2.5-VL-3B-Instruct", description="Base model name")
+    verbose: bool = Field(default=False, description="Enable verbose logging")
+
     # Execution parameters
-    max_steps_per_episode: int = 5
-    max_parallel_episodes: int = 48
+    max_steps_per_episode: int = Field(default=5, ge=1, description="Maximum steps per episode")
+    max_parallel_episodes: int = Field(default=48, ge=1, description="Maximum parallel episodes")
 
     # Agent parameters
-    temperature: float = 0.7
-    vllm_base_url: str = "http://localhost:8000/v1"
-    vllm_api_key: str = "token-abc123"
-    max_new_tokens: int = 1024
-    force_tool_choice: bool = True
-    allowed_tools: list[str] | None = None
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature")
+    vllm_base_url: str = Field(default="http://localhost:8000/v1", description="vLLM server base URL")
+    vllm_api_key: str = Field(default="token-abc123", description="vLLM API key")
+    max_new_tokens: int = Field(default=1024, ge=1, le=4096, description="Maximum new tokens to generate")
+    force_tool_choice: bool = Field(default=True, description="Force tool choice when available")
+    allowed_tools: list[str] | None = Field(default=None, description="List of allowed tools (None = all)")
 
     # Timeouts
-    request_timeout: int = 45
-    episode_timeout_sec: int = 600
+    request_timeout: int = Field(default=45, ge=1, le=300, description="Request timeout in seconds")
+    episode_timeout_sec: int = Field(default=600, ge=1, le=3600, description="Episode timeout in seconds")
+
+    @field_validator("base_model")
+    @classmethod
+    def validate_base_model(cls, v: str) -> str:
+        validate_model(v)
+        return v
+
+    @field_validator("allowed_tools")
+    @classmethod
+    def validate_allowed_tools(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None and len(v) == 0:
+            raise ValueError("allowed_tools cannot be an empty list, use None to allow all tools")
+        return v
+
+    def validate_config(self) -> None:
+        super().validate_config()
+        
+        if self.episode_timeout_sec <= self.request_timeout:
+            raise ValueError(
+                f"episode_timeout_sec ({self.episode_timeout_sec}) must be greater than "
+                f"request_timeout ({self.request_timeout})"
+            )
 
 
 @dataclass

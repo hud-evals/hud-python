@@ -2,7 +2,7 @@ import asyncio
 import json
 
 import hud
-from hud.rl.config import Config
+from hud.rl.config import ActorConfig
 from hud.rl.logger import console
 from hud.types import Task, Trace
 from hud.utils.agent_factories import create_openai_agent
@@ -11,31 +11,30 @@ from hud.utils.agent_factories import create_openai_agent
 class Actor:
     """Collects episodes using vLLM-served models via HUD agents."""
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: ActorConfig) -> None:
         self.config = config
-        self.actor_config = config.actor
 
     def create_agent(self):
         """Create an agent with the current adapter."""
         return create_openai_agent(
-            base_url=self.actor_config.vllm_base_url.replace("localhost", "127.0.0.1"),
-            api_key=self.actor_config.vllm_api_key,
-            request_timeout=self.actor_config.request_timeout,
-            model_name=self.config.model.base_model,
-            allowed_tools=self.actor_config.allowed_tools,
+            base_url=self.config.vllm_base_url.replace("localhost", "127.0.0.1"),
+            api_key=self.config.vllm_api_key,
+            request_timeout=self.config.request_timeout,
+            model_name=self.config.base_model,
+            allowed_tools=self.config.allowed_tools,
             append_setup_output=False,
             verbose=self.config.verbose,
             completion_kwargs={
-                "temperature": self.actor_config.temperature,
-                "max_tokens": self.actor_config.max_new_tokens,
-                "tool_choice": "required" if self.actor_config.force_tool_choice else "auto",
+                "temperature": self.config.temperature,
+                "max_tokens": self.config.max_new_tokens,
+                "tool_choice": "required" if self.config.force_tool_choice else "auto",
             },
         )
 
     async def run_tasks(self, tasks: list[Task], job_id: str) -> list[Trace]:
         """Run tasks and collect traces using semaphore for concurrency control."""
         # Create semaphore to limit concurrent episodes
-        semaphore = asyncio.Semaphore(self.actor_config.max_parallel_episodes)
+        semaphore = asyncio.Semaphore(self.config.max_parallel_episodes)
 
         async def run_with_semaphore(task: Task) -> Trace:
             """Run a single task with semaphore and timeout protection."""
@@ -43,7 +42,7 @@ class Actor:
                 try:
                     return await asyncio.wait_for(
                         self._run_task(task, job_id),
-                        timeout=self.actor_config.episode_timeout_sec,
+                        timeout=self.config.episode_timeout_sec,
                     )
                 except TimeoutError:
                     console.warning_log(f"Episode timed out for task {task.id}")
@@ -75,7 +74,7 @@ class Actor:
 
         # Run the task
         with hud.trace(f"Training | {task.id}", job_id=job_id):
-            result = await agent.run(task, max_steps=self.actor_config.max_steps_per_episode)
+            result = await agent.run(task, max_steps=self.config.max_steps_per_episode)
 
         result.info["tool_spec"] = agent.get_tool_schemas()
 
@@ -96,11 +95,11 @@ if __name__ == "__main__":
 
     async def test_actor() -> None:
         """Test the actor with a single 2048 task using local hud-browser image."""
-        config = Config()
-        config.actor.max_parallel_episodes = 16
-        config.actor.max_steps_per_episode = 10
-        config.actor.temperature = 0.6
-        config.actor.force_tool_choice = False
+        config = ActorConfig()
+        config.max_parallel_episodes = 16
+        config.max_steps_per_episode = 10
+        config.temperature = 0.6
+        config.force_tool_choice = False
         config.verbose = True
 
         # Create test task with local hud-browser image
@@ -158,19 +157,19 @@ Strategy: keep highest tiles in a corner; maintain order; avoid random moves.
         task = Task(**task_data)
         actor = Actor(config)
 
-        console.info_log(f"Testing actor with task: {task.id}")
-        console.info_log(f"Model: {config.model.base_model}")
-        console.info_log(f"VLLM: {config.actor.vllm_base_url}")
+        console.info_log(f"Testing actor with task: {task.id}") 
+        console.info_log(f"Model: {config.base_model}")
+        console.info_log(f"VLLM: {config.vllm_base_url}")
 
         job_id = str(uuid.uuid4())
-        with hud.job("Test Actor", job_id=job_id):
-            traces = await actor.run_tasks([task] * 32, job_id=job_id)
+        # with hud.job("Test Actor", job_id=job_id):
+        traces = await actor.run_tasks([task] * 32, job_id=job_id)
 
         for trace in traces:
             print(f"Trace completed - Reward: {trace.reward}")
 
         # Dump traces for training system testing
-        output_file = f"traces_{job_id}.json"
-        save_traces(traces, output_file)
+        # output_file = f"traces_{job_id}.json"
+        # save_traces(traces, output_file)
 
     asyncio.run(test_actor())
