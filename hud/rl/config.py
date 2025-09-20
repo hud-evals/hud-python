@@ -1,57 +1,156 @@
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, TypeAlias
+from pathlib import Path
 
-# List of supported VL (Vision-Language) models
-SUPPORTED_MODELS = [
-    "Qwen/Qwen2.5-VL-3B-Instruct",
-    "Qwen/Qwen2.5-VL-7B-Instruct",
-    "Qwen/Qwen2.5-VL-14B-Instruct",
-    "Qwen/Qwen2.5-VL-32B-Instruct",
-    "Qwen/Qwen2.5-VL-72B-Instruct",
-    "Qwen/Qwen2.5-7B-Instruct",
-]
+from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator
+
+# Simple type alias for attention implementations
+AttnImplementation: TypeAlias = Literal["eager", "flash_attention_2", "sdpa"]
+
+import re
 
 
-def validate_vl_model(model_name: str) -> None:
-    """Validate that the model is a supported VL model.
+PATTERN = re.compile(r"^Qwen/Qwen2\.5.*", re.IGNORECASE)
 
-    Args:
-        model_name: The model name to validate
+def validate_model(model_name: str) -> None:
+    if not PATTERN.match(model_name):
+        raise ValueError(f"Model '{model_name}' is not supported. Only Qwen2.5 models are supported.")
 
-    Raises:
-        ValueError: If the model is not a supported VL model
-    """
-    if not any(model_name.startswith(supported) for supported in SUPPORTED_MODELS):
-        raise ValueError(
-            f"Model '{model_name}' is not a supported VL model. "
-            f"Only VL (Vision-Language) models are supported for RL training.\n"
-            f"Supported models: {', '.join(SUPPORTED_MODELS)}\n"
-            f"Note: '{model_name}' appears to be a text-only model."
-        )
-
-
-@dataclass
-class ModelConfig:
-    """Model and LoRA configuration."""
-
-    base_model: str = "Qwen/Qwen2.5-VL-3B-Instruct"
-    lora_r: int = 8
-    lora_alpha: int = 16
-    lora_dropout: float = 0.05
-    target_modules: tuple[str, ...] = (
-        "q_proj",
-        "k_proj",
-        "v_proj",
-        "o_proj",
-        "gate_proj",
-        "up_proj",
-        "down_proj",
+class BaseConfig(BaseModel):
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        validate_assignment=True,
+        extra="forbid",
+        json_schema_extra={
+            "examples": []
+        }
     )
-    min_pixels: int = 256 * 28 * 28
-    max_pixels: int = 512 * 28 * 28
-    attn_implementation: str = "flash_attention_2"
-    use_liger: bool = True
-    gradient_checkpointing: bool = True
+    
+    @classmethod
+    def from_file(cls, config_path: str | Path) -> "BaseConfig":
+        config_path = Path(config_path)
+        if not config_path.exists():
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+        
+        with open(config_path, 'r') as f:
+            import json
+            config_data = json.load(f)
+        
+        return cls.model_validate(config_data)
+    
+    def save_to_file(self, config_path: str | Path) -> None:
+        config_path = Path(config_path)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(config_path, 'w') as f:
+            import json
+            json.dump(self.model_dump(), f, indent=2)
+    
+    def validate_config(self) -> None:
+        pass
+    
+    def model_post_init(self, __context: object) -> None:
+        self.validate_config()
+
+
+class LoRAConfig(BaseConfig):
+    r: int = Field(default=8, ge=1, le=64, description="LoRA rank parameter - controls the size of the adaptation")
+    alpha: int = Field(default=16, ge=1, description="LoRA alpha parameter - scaling factor for the adaptation")
+    dropout: float = Field(default=0.05, ge=0.0, le=1.0, description="LoRA dropout rate")
+    target_modules: tuple[str, ...] = Field(
+        default=(
+            "q_proj",
+            "k_proj", 
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ),
+        description="List of modules to apply LoRA to"
+    )
+    
+    @field_validator("alpha")
+    @classmethod
+    def validate_alpha(cls, v: int) -> int:
+        # This will be validated after r is set in validate_config
+        return v
+    
+    def validate_config(self) -> None:
+        super().validate_config()
+        
+        if self.alpha < self.r:
+            raise ValueError(
+                f"LoRA alpha ({self.alpha}) should be >= LoRA rank ({self.r})"
+            )
+        
+        if not self.target_modules:
+            raise ValueError("target_modules cannot be empty")
+
+
+class ProcessorConfig(BaseConfig): 
+    min_pixels: int = Field(default=256 * 28 * 28, ge=1, description="Minimum number of pixels for image processing")
+    max_pixels: int = Field(default=512 * 28 * 28, ge=1, description="Maximum number of pixels for image processing")
+    
+    def validate_config(self) -> None:
+        super().validate_config()
+        
+        if self.min_pixels >= self.max_pixels:
+            raise ValueError(
+                f"min_pixels ({self.min_pixels}) must be less than max_pixels ({self.max_pixels})"
+            )
+
+
+class ModelConfig(BaseConfig):
+    base_model: str = Field(
+        default="Qwen/Qwen2.5-VL-3B-Instruct",
+        description="Base model name for fine-tuning"
+    )
+    lora: LoRAConfig = Field(
+        default_factory=LoRAConfig,
+        description="LoRA configuration"
+    )
+    processor: ProcessorConfig = Field(
+        default_factory=ProcessorConfig,
+        description="Image processor configuration"
+    )
+    attn_implementation: AttnImplementation = Field(default="flash_attention_2")
+    trust_remote_code: bool = Field(
+        default=True,
+        description="Whether to trust remote code from HuggingFace"
+    )
+    use_liger: bool = Field(
+        default=True,
+        description="Whether to use Liger kernel optimizations for the model"
+    )
+
+    @field_validator("base_model")
+    @classmethod
+    def validate_base_model(cls, v: str) -> str:
+        validate_model(v)
+        return v
+
+
+    @model_validator(mode='after')
+    def validate_dependencies(self) -> 'ModelConfig':
+        if self.attn_implementation == "flash_attention_2":
+            try:
+                import flash_attn
+            except ImportError:
+                # Silent fallback to eager attention
+                self.attn_implementation = "eager"
+        
+        if self.use_liger:
+            try:
+                import liger_kernel.transformers
+            except ImportError:
+                # Silent fallback to disable liger
+                self.use_liger = False
+        
+        return self
+
+    def validate_config(self) -> None:
+        super().validate_config()
 
 
 @dataclass
@@ -143,7 +242,7 @@ class Config:
     seed: int = 1234
 
     @classmethod
-    def from_dict(cls, d: dict) -> Config:
+    def from_dict(cls, d: dict) -> "Config":
         """Create config from dictionary."""
         model = ModelConfig(**d.get("model", {}))
         training = TrainingConfig(**d.get("training", {}))
