@@ -13,35 +13,7 @@ if TYPE_CHECKING:
 class Buffer(ABC):
     """Abstract base class for managing tasks and traces with sampling strategies."""
 
-    @abstractmethod
-    def add_tasks(self, tasks: list[Task]) -> None:
-        """Add raw dataset tasks to the buffer."""
-
-    @abstractmethod
-    def add_traces(self, traces: list[Trace]) -> None:
-        """Add completed rollouts to the buffer."""
-
-    @abstractmethod
-    def sample_tasks(self, n: int) -> list[Task]:
-        """Sample tasks for the actor to execute."""
-
-    @abstractmethod
-    def sample_traces(self, batch_size: int | None = None) -> list[Trace]:
-        """Sample traces for training."""
-
-    @abstractmethod
-    def update(self, **kwargs) -> None:
-        """Update buffer state/strategy based on training progress."""
-
-    def __len__(self) -> int:
-        """Return the number of traces in the buffer."""
-        return 0
-
-
-class SimpleBuffer(Buffer):
-    """Simple buffer with recent sampling strategy."""
-
-    def __init__(self, tasks: list[Task], config: Config) -> None:
+    def __init__(self, tasks: list[Task], config: "Config") -> None:
         self.config = config
         self.batch_size = config.training.batch_size
         self.group_size = config.training.group_size
@@ -70,7 +42,6 @@ class SimpleBuffer(Buffer):
         )
 
     def _initialize_tasks(self, tasks: list[Task]) -> None:
-        """Initialize task queue with repetition to fill training steps."""
         if not tasks:
             raise ValueError("No tasks provided to buffer")
 
@@ -86,17 +57,14 @@ class SimpleBuffer(Buffer):
                     break
 
     def add_tasks(self, tasks: list[Task]) -> None:
-        """Add tasks to the buffer."""
         for task in tasks:
             self.task_queue.append(task)
 
     def add_traces(self, traces: list[Trace]) -> None:
-        """Add traces to the buffer."""
         for trace in traces:
             self.trace_buffer.append(trace)
 
     def sample_tasks(self, n: int | None = None) -> list[Task]:
-        """Sample n tasks from the buffer, creating groups with repetition."""
         if n is None:
             n = self.groups_per_batch
 
@@ -110,6 +78,30 @@ class SimpleBuffer(Buffer):
         for task in tasks:
             result.extend([task] * self.group_size)
         return result
+
+    @abstractmethod
+    def sample_traces(self, batch_size: int | None = None) -> list[Trace]:
+        raise NotImplementedError
+
+    def update(self, **kwargs) -> None:
+        pass
+
+    def __len__(self) -> int:
+        return len(self.task_queue)
+
+    @property
+    def info(self) -> dict[str, int | float | str]:
+        return {
+            "remaining_tasks": len(self.task_queue),
+            "total_traces": len(self.trace_buffer),
+            "training_steps": self.training_steps,
+            "group_size": self.group_size,
+            "batch_size": self.batch_size,
+        }
+
+
+class SimpleBuffer(Buffer):
+    """Simple buffer with recent sampling strategy."""
 
     def sample_traces(self, batch_size: int | None = None) -> list[Trace]:
         """Sample most recent traces (FIFO)."""
@@ -123,101 +115,16 @@ class SimpleBuffer(Buffer):
         # Return most recent traces
         return list(self.trace_buffer)[-batch_size:]
 
-    def update(self, **kwargs) -> None:
-        """Update buffer state (no-op for simple buffer)."""
-
-    def __len__(self) -> int:
-        """Return the number of remaining tasks in the buffer."""
-        return len(self.task_queue)
-
-    @property
-    def info(self) -> dict[str, int | float | str]:
-        """Get buffer statistics."""
-        return {
-            "remaining_tasks": len(self.task_queue),
-            "total_traces": len(self.trace_buffer),
-            "training_steps": self.training_steps,
-            "group_size": self.group_size,
-            "batch_size": self.batch_size,
-        }
 
 
 class ReplayBuffer(Buffer):
     """Replay buffer with configurable sampling strategy (recent, random, variance)."""
 
     def __init__(self, tasks: list[Task], config: Config) -> None:
-        self.config = config
-        self.batch_size = config.training.batch_size
-        self.group_size = config.training.group_size
-        self.training_steps = config.training.training_steps
+        super().__init__(tasks, config)
         self.select_strategy = config.training.select_strategy
 
-        # Validate group and batch sizes
-        if self.group_size > self.batch_size:
-            raise ValueError(
-                f"Group size is greater than batch size, {self.group_size} > {self.batch_size}"
-            )
-        if self.batch_size % self.group_size != 0:
-            raise ValueError(
-                f"A batch cannot have irregular groups, {self.group_size} % {self.batch_size} != 0"
-            )
-
-        self.groups_per_batch = self.batch_size // self.group_size
-        self.number_of_tasks = self.training_steps * self.groups_per_batch
-
-        # Initialize task queue with provided tasks
-        self.task_queue: deque[Task] = deque()
-        self._initialize_tasks(tasks)
-
-        # Initialize trace buffer
-        self.trace_buffer: deque[Trace] = deque(
-            maxlen=config.training.buffer_steps * config.training.batch_size
-        )
-
-    def _initialize_tasks(self, tasks: list[Task]) -> None:
-        """Initialize task queue with repetition to fill training steps."""
-        if not tasks:
-            raise ValueError("No tasks provided to buffer")
-
-        # Shuffle if configured
-        if self.config.training.shuffle_dataset:
-            random.shuffle(tasks)
-
-        # Fill task queue to match number of training steps
-        while len(self.task_queue) < self.number_of_tasks:
-            for task in tasks:
-                self.task_queue.append(task)
-                if len(self.task_queue) >= self.number_of_tasks:
-                    break
-
-    def add_tasks(self, tasks: list[Task]) -> None:
-        """Add tasks to the buffer."""
-        for task in tasks:
-            self.task_queue.append(task)
-
-    def add_traces(self, traces: list[Trace]) -> None:
-        """Add traces to the buffer."""
-        for trace in traces:
-            self.trace_buffer.append(trace)
-
-    def sample_tasks(self, n: int | None = None) -> list[Task]:
-        """Sample n tasks from the buffer, creating groups with repetition."""
-        if n is None:
-            n = self.groups_per_batch
-
-        tasks = []
-        for _ in range(n):
-            if self.task_queue:
-                tasks.append(self.task_queue.popleft())
-
-        # Create groups where each task is repeated group_size times
-        result = []
-        for task in tasks:
-            result.extend([task] * self.group_size)
-        return result
-
     def sample_traces(self, batch_size: int | None = None) -> list[Trace]:
-        """Sample traces using configured strategy."""
         if batch_size is None:
             batch_size = self.batch_size
 
@@ -234,24 +141,11 @@ class ReplayBuffer(Buffer):
         else:
             raise ValueError(f"Invalid select strategy: {self.select_strategy}")
 
-    def update(self, **kwargs) -> None:
-        """Update buffer state (can be used for curriculum learning, etc)."""
-
-    def __len__(self) -> int:
-        """Return the number of remaining tasks in the buffer."""
-        return len(self.task_queue)
-
     @property
     def info(self) -> dict[str, int | float | str]:
-        """Get buffer statistics."""
-        return {
-            "remaining_tasks": len(self.task_queue),
-            "total_traces": len(self.trace_buffer),
-            "training_steps": self.training_steps,
-            "select_strategy": self.select_strategy,
-            "group_size": self.group_size,
-            "batch_size": self.batch_size,
-        }
+        base_info = super().info
+        base_info["select_strategy"] = self.select_strategy
+        return base_info
 
     def _extract_group_key(self, trace: Trace) -> tuple[str, str]:
         """Return a stable grouping key for a trace.
