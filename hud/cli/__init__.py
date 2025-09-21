@@ -829,6 +829,11 @@ def eval(
         "--verbose",
         help="Enable verbose output from the agent",
     ),
+    mock: bool = typer.Option(
+        False,
+        "--mock",
+        help="Run mock_problem tool, where problem is setup, actions are applied, and evaluation is performed, without spinning up an agent",
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents."""
     from hud.utils.hud_console import HUDConsole
@@ -884,22 +889,24 @@ def eval(
             source = file_choice
             hud_console.success(f"Selected: {source}")
 
-    # If no agent specified, prompt for selection
-    if agent is None:
-        agent = hud_console.select(
-            "Select an agent to use:",
-            choices=[
-                {"name": "Claude 4 Sonnet", "value": "claude"},
-                {"name": "OpenAI Computer Use", "value": "openai"},
-            ],
-            default="Claude 4 Sonnet",
-        )
+    # If --mock, skip agent selection/validation entirely
+    if not mock:
+        # If no agent specified, prompt for selection
+        if agent is None:
+            agent = hud_console.select(
+                "Select an agent to use:",
+                choices=[
+                    {"name": "Claude 4 Sonnet", "value": "claude"},
+                    {"name": "OpenAI Computer Use", "value": "openai"},
+                ],
+                default="Claude 4 Sonnet",
+            )
 
-    # Validate agent choice
-    valid_agents = ["claude", "openai"]
-    if agent not in valid_agents:
-        hud_console.error(f"Invalid agent: {agent}. Must be one of: {', '.join(valid_agents)}")
-        raise typer.Exit(1)
+        # Validate agent choice
+        valid_agents = ["claude", "openai"]
+        if agent not in valid_agents:
+            hud_console.error(f"Invalid agent: {agent}. Must be one of: {', '.join(valid_agents)}")
+            raise typer.Exit(1)
 
     # Import eval_command lazily to avoid importing agent dependencies
     try:
@@ -924,6 +931,7 @@ def eval(
         max_workers=max_workers,
         max_concurrent_per_worker=max_concurrent_per_worker,
         verbose=verbose,
+        mock=mock,
     )
 
 

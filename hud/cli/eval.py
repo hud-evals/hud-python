@@ -12,6 +12,8 @@ import typer
 
 import hud
 from hud.utils.hud_console import HUDConsole
+from hud.agents.base import MCPAgent
+from hud.types import Trace
 
 logger = logging.getLogger(__name__)
 hud_console = HUDConsole()
@@ -78,6 +80,7 @@ async def run_single_task(
     allowed_tools: list[str] | None = None,
     max_steps: int = 10,
     verbose: bool = False,
+    mock: bool = False,
 ) -> None:
     """Load one task and execute it, or detect if JSON contains a list and run as dataset."""
 
@@ -91,12 +94,99 @@ async def run_single_task(
         )
         raise typer.Exit(1) from e
 
-    # Check if it's a JSON file
+    # Check if it's a JSON or YAML file
     path = Path(source)
-    if path.exists() and path.suffix == ".json":
+    if path.exists() and path.suffix in {".json", ".yaml", ".yml"}:
         hud_console.info("📊 Loading task file…")
-        with open(path) as f:  # noqa: ASYNC230
-            json_data = json.load(f)
+        # Load JSON or YAML depending on extension
+        if path.suffix in {".yaml", ".yml"}:
+            try:
+                import yaml  # type: ignore
+            except Exception as e:  # pragma: no cover - optional dependency
+                hud_console.error(
+                    "YAML support is not installed. Please install with: pip install 'pyyaml'"
+                )
+                raise typer.Exit(1) from e
+
+            with open(path) as f:  # noqa: ASYNC230
+                json_data = yaml.safe_load(f)
+        else:
+            with open(path) as f:  # noqa: ASYNC230
+                json_data = json.load(f)
+
+        # If --mock, run a single mock tool call directly (no agent)
+        if mock:
+            # Build single task object
+            if isinstance(json_data, list):
+                if len(json_data) != 1:
+                    hud_console.error("--mock requires a single task file (or a single-item list)")
+                    raise typer.Exit(1)
+                task_data = json_data[0]
+            elif isinstance(json_data, dict):
+                task_data = json_data
+            else:
+                hud_console.error("Unsupported file format for --mock. Provide a task object or single-item list.")
+                raise typer.Exit(1)
+
+            task = Task(**task_data)
+
+            # Wrap in hud.trace so the platform prints the trace link automatically
+            task_prompt = task.prompt[:50] + "..." if len(task.prompt) > 50 else task.prompt
+            with hud.trace(name=task_prompt):
+                hud_console.info("🧪 --mock: calling tool directly (no agent)")
+
+                # Create MCP client from task.mcp_config
+                try:
+                    from hud.clients import MCPClient
+                except ImportError as e:
+                    hud_console.error("MCP client dependencies are not installed.")
+                    raise typer.Exit(1) from e
+
+                client = MCPClient(mcp_config=task.mcp_config, verbose=verbose)  # type: ignore[call-arg]
+                await client.initialize()
+
+                # Enforce ONLY mock_tool in --mock mode
+                if not task.mock_tool:
+                    await client.shutdown()
+                    hud_console.error("--mock requires mock_tool")
+                    raise typer.Exit(1)
+                if task.setup_tool or task.evaluate_tool:
+                    await client.shutdown()
+                    hud_console.error("--mock requires only mock_tool; remove setup_tool/evaluate_tool")
+                    raise typer.Exit(1)
+
+                # Execute the single mock tool call (e.g., hub "mock_problem").
+                # The MCP tool result can be returned in two shapes:
+                # 1) structuredContent (preferred): a structured JSON payload
+                # 2) content[0].text: a JSON string we need to parse
+                res = await client.call_tool(task.mock_tool)
+                payload: dict[str, Any] | None = None
+                # Prefer structuredContent.result if available (most robust shape)
+                sc = getattr(res, "structuredContent", None)
+                try:
+                    if sc and isinstance(sc, dict) and "result" in sc:
+                        payload = sc["result"]  # type: ignore[index]
+                    elif res.content and len(res.content) > 0:
+                        text = getattr(res.content[0], "text", None)
+                        if isinstance(text, str):
+                            import json as _json
+
+                            payload = _json.loads(text)
+                except Exception:
+                    payload = None
+
+                await client.shutdown()
+
+                # Extract a numeric score. Support top-level reward and nested evaluation.reward
+                reward = 0.0
+                if isinstance(payload, dict):
+                    if isinstance(payload.get("reward"), (int, float)):
+                        reward = float(payload.get("reward", 0.0))
+                    elif isinstance(payload.get("evaluation"), dict):
+                        reward = float(payload.get("evaluation", {}).get("reward", 0.0))
+
+                hud_console.success(f"Reward: {reward}")
+                return
 
         # Check if JSON contains multiple tasks (list with more than 1 task)
         if isinstance(json_data, list) and len(json_data) > 1:
@@ -140,7 +230,7 @@ async def run_single_task(
 
             # Run as dataset with single-task concurrency to maintain debug behavior
             results = await run_dataset(
-                name=f"JSON Dataset: {path.name}",
+                name=f"Dataset: {path.name}",
                 dataset=json_data,  # Pass the list directly
                 agent_class=agent_class,
                 agent_config=agent_config,
@@ -156,7 +246,7 @@ async def run_single_task(
 
         # Single task JSON (either direct object or list with 1 task)
         if isinstance(json_data, list) and len(json_data) == 1:
-            hud_console.info("Found 1 task in JSON file, running as single task…")
+            hud_console.info("Found 1 task in file, running as single task…")
             task = Task(**json_data[0])
         elif isinstance(json_data, dict):
             task = Task(**json_data)
@@ -177,7 +267,7 @@ async def run_single_task(
 
         dataset = load_dataset(source, split="train")
 
-        # Get first task from dataset
+        # Get first task from dataset (non-mock single-task debug)
         sample_task = dataset[0]  # type: ignore[index]
         task = Task(**sample_task)  # type: ignore[arg-type]
 
@@ -223,21 +313,33 @@ async def run_full_dataset(
         )
         raise typer.Exit(1) from e
 
-    # Check if source is a JSON file with list of tasks
+    # Check if source is a JSON/YAML file with list of tasks
     path = Path(source)
     dataset_or_tasks = source
     dataset_name = source.split("/")[-1]
 
-    if path.exists() and path.suffix == ".json":
-        with open(path) as f:  # noqa: ASYNC230
-            json_data = json.load(f)
+    if path.exists() and path.suffix in {".json", ".yaml", ".yml"}:
+        if path.suffix in {".yaml", ".yml"}:
+            try:
+                import yaml  # type: ignore
+            except Exception as e:  # pragma: no cover - optional dependency
+                hud_console.error(
+                    "YAML support is not installed. Please install with: pip install 'pyyaml'"
+                )
+                raise typer.Exit(1) from e
+
+            with open(path) as f:  # noqa: ASYNC230
+                json_data = yaml.safe_load(f)
+        else:
+            with open(path) as f:  # noqa: ASYNC230
+                json_data = json.load(f)
 
         if isinstance(json_data, list):
             dataset_or_tasks = json_data
-            dataset_name = f"JSON Dataset: {path.name}"
-            hud_console.info(f"Found {len(json_data)} tasks in JSON file")
+            dataset_name = f"Dataset: {path.name}"
+            hud_console.info(f"Found {len(json_data)} tasks in file: {path.name}")
         else:
-            hud_console.error("JSON file must contain a list of tasks when using --full flag")
+            hud_console.error("File must contain a list of tasks when using --full flag")
             raise typer.Exit(1)
 
     # Build agent class + config for run_dataset
@@ -374,6 +476,11 @@ def eval_command(
         "--verbose",
         help="Enable verbose output from the agent",
     ),
+    mock: bool = typer.Option(
+        False,
+        "--mock",
+        help="Run mock_problem tool, where problem is setup, actions are applied, and evaluation is performed, without spinning up an agent",
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
 
@@ -459,5 +566,6 @@ def eval_command(
                 allowed_tools=allowed_tools_list,
                 max_steps=max_steps,
                 verbose=verbose,
+                mock=mock,
             )
         )

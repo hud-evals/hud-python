@@ -40,6 +40,7 @@ class Task(BaseModel):
     mcp_config: dict[str, Any]
     setup_tool: MCPToolCall | list[MCPToolCall] | None = None
     evaluate_tool: MCPToolCall | list[MCPToolCall] | None = None
+    mock_tool: MCPToolCall | list[MCPToolCall] | None = None
     system_prompt: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -56,7 +57,7 @@ class Task(BaseModel):
                 raise HudConfigError(f"Invalid JSON string: {e}") from e
         return v
 
-    @field_validator("setup_tool", "evaluate_tool", mode="before")
+    @field_validator("setup_tool", "evaluate_tool", "mock_tool", mode="before")
     @classmethod
     def convert_dict_to_tool_call(cls, v: Any) -> Any:
         """Convert dict to MCPToolCall instance, parsing JSON strings first."""

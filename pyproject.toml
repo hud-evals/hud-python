@@ -4,237 +4,98 @@ version = "0.4.24"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.14"
-authors = [
-{ name = "HUD SDK", email = "founders@hud.so" },
-]
-license = { file = "LICENSE" }
-dependencies = [
-    # Core dependencies - minimal for MCP servers and CLI
-    "httpx>=0.23.0,<1",
-    "pydantic>=2,<3",
-    "pydantic-settings>=2,<3",
-    # MCP dependencies
-    "hud-mcp-python-sdk>=3.13.2",
-    "hud-fastmcp-python-sdk>=0.1.2",
-    "hud-mcp-use-python-sdk>=2.3.16",
-    "pathspec>=0.12.1",
-    "wrapt>=1.14.0",
-    # CLI dependencies
-    "typer>=0.9.0",
-    "rich>=13.0.0",
-    "toml>=0.10.2",
-    "watchfiles>=0.21.0",
-    "questionary==2.1.0",
-    "prompt-toolkit==3.0.51",
-    # Telemetry
-    "opentelemetry-instrumentation-mcp>=0.44.1",
-    "opentelemetry-api>=1.34.1",
-    "opentelemetry-sdk>=1.34.1",
-    "opentelemetry-exporter-otlp-proto-http>=1.34.1",
-]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-]
+dependencies = [ "httpx>=0.23.0,<1", "pydantic>=2,<3", "pydantic-settings>=2,<3", "hud-mcp-python-sdk>=3.13.2", "hud-fastmcp-python-sdk>=0.1.2", "hud-mcp-use-python-sdk>=2.3.16", "pathspec>=0.12.1", "wrapt>=1.14.0", "typer>=0.9.0", "rich>=13.0.0", "toml>=0.10.2", "watchfiles>=0.21.0", "questionary==2.1.0", "prompt-toolkit==3.0.51", "opentelemetry-instrumentation-mcp>=0.44.1", "opentelemetry-api>=1.34.1", "opentelemetry-sdk>=1.34.1", "opentelemetry-exporter-otlp-proto-http>=1.34.1",]
+classifiers = [ "Development Status :: 4 - Beta", "Intended Audience :: Developers", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Programming Language :: Python :: 3.13",]
+[[project.authors]]
+name = "HUD SDK"
+email = "founders@hud.so"
+
+[build-system]
+requires = [ "hatchling",]
+build-backend = "hatchling.build"
+
+[project.license]
+file = "LICENSE"
 
 [project.urls]
-"Homepage" = "https://github.com/hud-evals/hud-python"
+Homepage = "https://github.com/hud-evals/hud-python"
 "Bug Tracker" = "https://github.com/hud-evals/hud-python/issues"
-"Documentation" = "https://docs.hud.so"
+Documentation = "https://docs.hud.so"
 
 [project.scripts]
 hud = "hud.cli:main"
 hud-python = "hud.cli:main"
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build]
-exclude = [
-    "environments/",
-    "docs/",
-    "examples/",
-    "/rl/",  # Only exclude top-level rl directory, not hud/cli/rl/
-]
-
-[tool.hud.clone]
-title = "🚀 Welcome to HUD SDK!"
-message = """[bold cyan]Thanks for using the hud SDK![/bold cyan]
-
-[yellow]Quick Start:[/yellow]
-• Install in development mode: [green]pip install -e .[/green]
-• Try the CLI: [green]hud --help[/green]
-• Analyze an MCP server: [green]hud analyze hud-text-2048:latest[/green]
-• Read the docs: [green]docs/[/green]
-
-[dim]For more examples, check out the [cyan]examples/[/cyan] directory.[/dim]
-
-[bold]Happy coding! 🎉[/bold]"""
-style = "blue"
-
-[tool.hatch.metadata]
-allow-direct-references = true
-
-[tool.hatch.build.targets.sdist]
-include = [
-    "hud/**",  # Include all files under hud/, including hud/cli/rl/
-    "README.md",
-    "LICENSE",
-    "pyproject.toml"
-]
-exclude = [
-    "*/tests/",
-    "*/__pycache__/",
-    "*.pyc",
-    "*.pyo",
-    "*~",
-    ".DS_Store"
-]
-
-[tool.hatch.build.targets.wheel]
-packages = ["hud"]
-
-# Ensure py.typed is included in the package
-[tool.hatch.build.targets.wheel.force-include]
-"hud/py.typed" = "hud/py.typed"
-
-
 [project.optional-dependencies]
-# Agent dependencies - AI capabilities + telemetry + datasets
-agent = [
-    # AI providers
-    "anthropic",
-    "openai",
-    "langchain",
-    "langchain-openai",
-    "langchain-anthropic",
-    # Data and evaluation
-    "datasets>=2.14.0",
-    "numpy>=1.24.0",
-    "pillow>=11.1.0",
-    # Jupyter support
-    "ipykernel",
-    "ipython <9",
-    "jupyter_client",
-    "jupyter_core",
-    "dotenv>=0.9.9",
-]
+agent = [ "anthropic", "openai", "langchain", "langchain-openai", "langchain-anthropic", "datasets>=2.14.0", "numpy>=1.24.0", "pillow>=11.1.0", "ipykernel", "ipython <9", "jupyter_client", "jupyter_core", "dotenv>=0.9.9",]
+agents = [ "hud-python[agent]",]
+dev = [ "hud-python[agent]", "ruff >=0.11.8", "pytest >=8.1.1,<9", "pytest-asyncio", "pytest-mock", "pytest-cov", "pyright==1.1.401", "playwright", "pyautogui>=0.9.54", "pillow>=11.1.0", "textdistance>=4.5.0,<5", "inspect-ai>=0.3.80", "aiodocker>=0.24.0", "setuptools",]
 
-agents = ["hud-python[agent]"]
-
-# Development dependencies - includes testing, linting, and automation tools
-dev = [
-    # Include agent dependencies
-    "hud-python[agent]",
-    # Testing and linting
-    "ruff >=0.11.8",
-    "pytest >=8.1.1,<9",
-    "pytest-asyncio",
-    "pytest-mock",
-    "pytest-cov",
-    "pyright==1.1.401",
-    # Automation and computer control
-    "playwright",
-    "pyautogui>=0.9.54",
-    "pillow>=11.1.0",
-    # Legacy v2 dependencies
-    "textdistance>=4.5.0,<5",
-    "inspect-ai>=0.3.80",
-    # Other utilities
-    "aiodocker>=0.24.0",
-    "setuptools",
-]
+[tool.hud]
+image = "hud-hud-python:dev"
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-lint.extend-select = [
-    "I",       # isort
-    "F",       # pyflakes
-    "ANN",     # flake8-annotations
-    "Q",       # flake8-quotes
-    "ASYNC",   # flake8-async
-    "TID",     # flake8-tidy
-    "RSE",     # flake8-raise
-    "G",       # flake8-logging-format
-    "B",       # flake8-bugbear
-    "E",       # pycodestyle errors
-    "W",       # pycodestyle warnings
-    "PIE",     # flake8-pie
-    "S",       # flake8-bandit
-    "PERF",    # Perflint
-    "PLC",     # Pylint
-    "UP",      # pyupgrade
-    "SIM",     # flake8-simplify
-    "INP",     # flake8-no-pep420
-    "T20",     # flake8-print
-    "PYI",     # flake8-pyi
-    "TCH",     # Flake-8 TCH
-    "T10",     # flake-8 debugger
-    "RUF",     # Ruff-specific
-]
-lint.ignore = [
-    "ANN401", # Allow Any.
-    "W293",   # Ignore blank line contains whitespace
-    "PLC0415", # Allow function-local imports.
-]
-
-[tool.ruff.lint.extend-per-file-ignores]
-"**/tests/**/*.py" = ["PYI", "B", "S", "ANN"]
-"*.ipynb" = ["ALL"] # Disables all rules for Jupyter.
-"**/examples/**/*.py" = ["ALL"]
-"**/environments/**/*.py" = ["ALL"]
-
-
-[tool.ruff.format]
-docstring-code-format = true
-
-[tool.ruff.lint.isort]
-required-imports = ["from __future__ import annotations"]
-
-[tool.ruff.lint.flake8-type-checking]
-runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.pyright]
-include = ["hud"]
-exclude = [
-    "**/node_modules",
-    "**/__pycache__",
-    "**/venv",
-    "hud/misc/claude_plays_pokemon.py",
-]
+include = [ "hud",]
+exclude = [ "**/node_modules", "**/__pycache__", "**/venv", "hud/misc/claude_plays_pokemon.py",]
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
 reportMissingImports = "warning"
 
+[tool.hatch.build]
+exclude = [ "environments/", "docs/", "examples/", "/rl/",]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hud.clone]
+title = "🚀 Welcome to HUD SDK!"
+message = "[bold cyan]Thanks for using the hud SDK![/bold cyan]\n\n[yellow]Quick Start:[/yellow]\n• Install in development mode: [green]pip install -e .[/green]\n• Try the CLI: [green]hud --help[/green]\n• Analyze an MCP server: [green]hud analyze hud-text-2048:latest[/green]\n• Read the docs: [green]docs/[/green]\n\n[dim]For more examples, check out the [cyan]examples/[/cyan] directory.[/dim]\n\n[bold]Happy coding! 🎉[/bold]"
+style = "blue"
+
+[tool.ruff.lint]
+extend-select = [ "I", "F", "ANN", "Q", "ASYNC", "TID", "RSE", "G", "B", "E", "W", "PIE", "S", "PERF", "PLC", "UP", "SIM", "INP", "T20", "PYI", "TCH", "T10", "RUF",]
+ignore = [ "ANN401", "W293", "PLC0415",]
+
+[tool.ruff.format]
+docstring-code-format = true
+
 [tool.coverage.run]
-source = ["hud"]
-omit = ["*/tests/*", "*/examples/*"]
+source = [ "hud",]
+omit = [ "*/tests/*", "*/examples/*",]
 
 [tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "pass",
-    "pytest.mark.skip",
-    "@(typing\\.)?overload",
-    "if TYPE_CHECKING:",
-    "if typing.TYPE_CHECKING:",
-    "class .*\bProtocol\\):",
-    "@(abc\\.)?abstractmethod",
-]
+exclude_lines = [ "pragma: no cover", "raise AssertionError", "raise NotImplementedError", "pass", "pytest.mark.skip", "@(typing\\.)?overload", "if TYPE_CHECKING:", "if typing.TYPE_CHECKING:", "class .*x08Protocol\\):", "@(abc\\.)?abstractmethod",]
 show_missing = true
 fail_under = 58
-omit = ["*/tests/*", "*/examples/*"]
+omit = [ "*/tests/*", "*/examples/*",]
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
-testpaths = ["hud", "examples"]
-# Ignore the dev folder and other non-test directories
+testpaths = [ "hud", "examples",]
 addopts = "--ignore=dev --ignore=ref --ignore=test_env --ignore=environments"
+
+[tool.ruff.lint.extend-per-file-ignores]
+"**/tests/**/*.py" = [ "PYI", "B", "S", "ANN",]
+"*.ipynb" = [ "ALL",]
+"**/examples/**/*.py" = [ "ALL",]
+"**/environments/**/*.py" = [ "ALL",]
+
+[tool.ruff.lint.isort]
+required-imports = [ "from __future__ import annotations",]
+
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = [ "pydantic.BaseModel",]
+
+[tool.hatch.build.targets.sdist]
+include = [ "hud/**", "README.md", "LICENSE", "pyproject.toml",]
+exclude = [ "*/tests/", "*/__pycache__/", "*.pyc", "*.pyo", "*~", ".DS_Store",]
+
+[tool.hatch.build.targets.wheel]
+packages = [ "hud",]
+
+[tool.hatch.build.targets.wheel.force-include]
+"hud/py.typed" = "hud/py.typed"
