@@ -33,7 +33,6 @@ class Actor:
 
     async def run_tasks(self, tasks: list[Task], job_id: str) -> list[Trace]:
         """Run tasks and collect traces using semaphore for concurrency control."""
-        # Create semaphore to limit concurrent episodes
         semaphore = asyncio.Semaphore(self.config.max_parallel_episodes)
 
         async def run_with_semaphore(task: Task) -> Trace:
@@ -51,13 +50,11 @@ class Actor:
                     console.warning_log(f"Episode error for task {task.id}: {e}")
                     return Trace(isError=True, content=str(e))
 
-        # Run all tasks concurrently with semaphore limiting
         results = await asyncio.gather(
             *[run_with_semaphore(task) for task in tasks],
             return_exceptions=True,
         )
 
-        # Normalize any remaining exceptions to error traces
         traces = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
@@ -72,7 +69,6 @@ class Actor:
         """Run a single task."""
         agent = self.create_agent()
 
-        # Run the task
         with hud.trace(f"Training | {task.id}", job_id=job_id):
             result = await agent.run(task, max_steps=self.config.max_steps_per_episode)
 
@@ -102,7 +98,6 @@ if __name__ == "__main__":
         config.force_tool_choice = False
         config.verbose = True
 
-        # Create test task with local hud-browser image
         task_data = {
             "id": "test_2048_128",
             "prompt": "Play the browser-based 2048 game and try to reach the 128 tile. Start by taking a screenshot, then make strategic moves using arrow keys.",  # noqa: E501
@@ -162,13 +157,12 @@ Strategy: keep highest tiles in a corner; maintain order; avoid random moves.
         console.info_log(f"VLLM: {config.vllm_base_url}")
 
         job_id = str(uuid.uuid4())
-        # with hud.job("Test Actor", job_id=job_id):
-        traces = await actor.run_tasks([task] * 32, job_id=job_id)
+        with hud.job("Test Actor", job_id=job_id):
+            traces = await actor.run_tasks([task] * 32, job_id=job_id)
 
         for trace in traces:
             print(f"Trace completed - Reward: {trace.reward}")
 
-        # Dump traces for training system testing
         # output_file = f"traces_{job_id}.json"
         # save_traces(traces, output_file)
 
