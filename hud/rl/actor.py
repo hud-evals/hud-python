@@ -32,11 +32,10 @@ class Actor:
         )
 
     async def run_tasks(self, tasks: list[Task], job_id: str) -> list[Trace]:
-        """Run tasks and collect traces using semaphore for concurrency control."""
+        """Run tasks and collect traces using semaphore for concurrency control with timeout protection."""
         semaphore = asyncio.Semaphore(self.config.max_parallel_episodes)
 
         async def run_with_semaphore(task: Task) -> Trace:
-            """Run a single task with semaphore and timeout protection."""
             async with semaphore:
                 try:
                     return await asyncio.wait_for(
