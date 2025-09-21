@@ -1,71 +1,68 @@
-"""Advantage calculation utilities for GRPO training."""
+from typing import Literal
 
-import numpy as np
 import torch
-from typing import TYPE_CHECKING
-
 from hud.rl.logger import console
-from hud.rl.types import TrainingSample
 
-if TYPE_CHECKING:
-    from hud.types import Trace
-    from hud.rl.config import Config
-
-
-def calculate_advantages(traces: list[Trace], config: Config) -> list[TrainingSample]:
-    """Calculate advantages for a group of traces.
+def calculate_advantages(
+    rewards: torch.Tensor,
+    group_size: int = 1,
+    scale_rewards: Literal["group", "batch", "none"] = "group",
+    leave_one_out: bool = False,
+) -> torch.Tensor:
+    """
+    Calculate advantages for a batch of rewards.
 
     Args:
-        traces: List of traces to process
-        config: Training configuration
+        rewards: Tensor of rewards
+        group_size: Number of rewards per group (ignored if scale_rewards="batch")
+        scale_rewards: How to scale rewards:
+            - "group": z-score normalization within each group (standard GRPO)
+            - "batch": z-score normalization across entire batch (ignores grouping, LitePPO)
+            - "none": no normalization, just subtract mean (Dr.GRPO)
+        leave_one_out: Apply RLOO scaling factor G/(G-1) (only used with scale_rewards="none")
 
     Returns:
-        List of TrainingSample objects with computed advantages
+        Tensor of advantages
     """
-    group_size = config.training.group_size
-    batch_level = config.training.batch_level
+    if scale_rewards == "batch":
+        mean = rewards.mean()
+        std = rewards.std(unbiased=False)
 
-    if batch_level == "group":
-        groups = [traces[i : i + group_size] for i in range(0, len(traces), group_size)]
-    elif batch_level == "batch":
-        groups = [traces]
-    else:
-        raise ValueError(f"Invalid batch level: {batch_level}")
-
-    all_samples = []
-    for i, group in enumerate(groups):
-        rewards = np.array([trace.reward for trace in group])
-        mean_reward = np.mean(rewards)
-        std_reward = np.std(rewards)
-
-        # Calculate advantages
-        samples = [TrainingSample(**trace.model_dump()) for trace in group]
-        for sample, reward in zip(samples, rewards, strict=True):
-            if sample.isError:
-                sample.advantage = torch.tensor([0.0])
-                continue
-
-            # No std (non-baseline GRPO)
-            if config.training.no_std:
-                advantage_value = reward - mean_reward
-            else:
-                # Avoid division by zero
-                if std_reward < 1e-6:
-                    advantage_value = 0.0
-                else:
-                    advantage_value = (reward - mean_reward) / std_reward
-
-            # Leave one out RLOO/LOOP
-            if config.training.leave_one_out:
-                advantage_value = advantage_value * len(group) / (len(group) - 1)
-
-            sample.advantage = torch.tensor([advantage_value])
+        if std < 1e-6:
+            advantages = torch.zeros_like(rewards)
+        else:
+            advantages = (rewards - mean) / std
 
         console.info_log(
-            f"Advantages for group {i} [{mean_reward:.4f} ± {std_reward:.4f}]: "
-            f"{[round(sample.advantage.item(), 4) for sample in samples if sample.advantage is not None]}"
+            f"Batch advantages [{mean.item():.4f} ± {std.item():.4f}]: "
+            f"{[round(adv.item(), 4) for adv in advantages]}"
         )
+    else:
+        num_groups = len(rewards) // group_size
+        grouped_rewards = rewards[:num_groups * group_size].view(num_groups, group_size)
+        group_means = grouped_rewards.mean(dim=1, keepdim=True)  # [num_groups, 1]
+        group_stds = grouped_rewards.std(dim=1, keepdim=True, unbiased=False)  # [num_groups, 1]
 
-        all_samples.extend(samples)
+        if scale_rewards == "none":
+            grouped_advantages = grouped_rewards - group_means
 
-    return all_samples
+            if leave_one_out and group_size > 1:
+                grouped_advantages = grouped_advantages * group_size / (group_size - 1)
+        else:
+            safe_stds = torch.where(group_stds < 1e-6, torch.ones_like(group_stds), group_stds)
+            grouped_advantages = torch.where(
+                group_stds < 1e-6,
+                torch.zeros_like(grouped_rewards),
+                (grouped_rewards - group_means) / safe_stds
+            )
+
+        advantages = grouped_advantages.view(-1)
+
+        for i in range(num_groups):
+            group_idx = i * group_size
+            console.info_log(
+                f"Group {i} advantages [{group_means[i].item():.4f} ± {group_stds[i].item():.4f}]: "
+                f"{[round(advantages[group_idx + j].item(), 4) for j in range(group_size)]}"
+            )
+
+    return advantages

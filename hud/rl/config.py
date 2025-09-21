@@ -167,9 +167,8 @@ class TrainingConfig:
     accumulate_over_minibatches: bool = False  # Whether to accumulate over minibatches
 
     # Advantage calculation parameters
-    batch_level: Literal["group", "batch"] = "group"
-    no_std: bool = False
-    leave_one_out: bool = True
+    scale_rewards: Literal["group", "batch", "none"] = "group"
+    leave_one_out: bool = False  # RLOO scaling factor G/(G-1), only applies when scale_rewards="none"
 
     # Replay buffer parameters
     buffer_steps: int = 4
