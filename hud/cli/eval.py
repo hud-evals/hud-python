@@ -72,6 +72,68 @@ def build_agent(
         )
 
 
+class MockToolRunner(MCPAgent):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.metadata = {}
+
+    async def run(self, task: Any, max_steps: int = 10) -> Trace:  # noqa: ARG002
+        try:
+            # Initialize using base to set up client and telemetry correctly
+            await self.initialize(task)
+
+            # Validate task shape
+            if not getattr(task, "mock_tool", None):
+                raise ValueError("--mock requires task.mock_tool (single call)")
+            if getattr(task, "setup_tool", None) or getattr(task, "evaluate_tool", None):
+                raise ValueError("--mock requires only mock_tool; remove setup_tool/evaluate_tool")
+
+            # Execute the tool
+            if self.mcp_client is None:
+                raise ValueError("MCP client not initialized")
+            res = await self.mcp_client.call_tool(task.mock_tool)
+
+            # Extract payload and numeric reward
+            payload: dict[str, Any] | None = None
+            sc = getattr(res, "structuredContent", None)
+            try:
+                if sc and isinstance(sc, dict) and "result" in sc:
+                    payload = sc["result"]  # type: ignore[index]
+                elif res.content and len(res.content) > 0:
+                    text = getattr(res.content[0], "text", None)
+                    if isinstance(text, str):
+                        import json as _json
+
+                        payload = _json.loads(text)
+            except Exception:
+                payload = None
+
+            reward = 0.0
+            if isinstance(payload, dict):
+                if isinstance(payload.get("reward"), (int, float)):
+                    reward = float(payload.get("reward", 0.0))
+                elif isinstance(payload.get("evaluation"), dict):
+                    reward = float(payload.get("evaluation", {}).get("reward", 0.0))
+
+            return Trace(done=True, reward=reward, info={})
+        finally:
+            # Ensure resources are cleaned up so the CLI can exit cleanly
+            await self._cleanup()
+
+    # Stub implementations to satisfy abstract base class; not used in --mock path
+    async def get_system_messages(self) -> list[Any]:
+        return []
+
+    async def get_response(self, messages: list[Any]):  # noqa: ARG002
+        raise NotImplementedError("MockToolRunner does not implement agent loop")
+
+    async def format_blocks(self, blocks: list[Any]) -> list[Any]:  # noqa: ARG002
+        return []
+
+    async def format_tool_results(self, tool_calls: list[Any], tool_results: list[Any]) -> list[Any]:  # noqa: ARG002
+        return []
+
+
 async def run_single_task(
     source: str,
     *,
@@ -119,7 +181,7 @@ async def run_single_task(
             # Build single task object
             if isinstance(json_data, list):
                 if len(json_data) != 1:
-                    hud_console.error("--mock requires a single task file (or a single-item list)")
+                    hud_console.error("--mock without --full requires a single task. add --full to run all task mocks.")
                     raise typer.Exit(1)
                 task_data = json_data[0]
             elif isinstance(json_data, dict):
@@ -297,6 +359,7 @@ async def run_full_dataset(
     max_workers: int | None = None,
     max_concurrent_per_worker: int = 25,
     verbose: bool = False,
+    mock: bool = False,
 ) -> list[Any]:
     """Run evaluation across the entire dataset.
 
@@ -341,6 +404,30 @@ async def run_full_dataset(
         else:
             hud_console.error("File must contain a list of tasks when using --full flag")
             raise typer.Exit(1)
+
+        # If --mock in full mode: run via dataset runner with MockToolRunner (supports parallel)
+        if mock:
+            if parallel:
+                return await run_dataset_parallel(
+                    name=f"Evaluation (mock): {dataset_name}",
+                    dataset=dataset_or_tasks,
+                    agent_class=MockToolRunner,  # type: ignore[arg-type]
+                    agent_config={"verbose": verbose},
+                    max_concurrent=max_concurrent,
+                    metadata={"dataset": source, "parallel": True, "mock": True},
+                    max_steps=max_steps,
+                    auto_respond=True,
+                )
+            else:
+                return await run_dataset(
+                    name=f"Evaluation (mock): {dataset_name}",
+                    dataset=dataset_or_tasks,
+                    agent_class=MockToolRunner,  # type: ignore[arg-type]
+                    agent_config={"verbose": verbose},
+                    max_concurrent=max_concurrent,
+                    metadata={"dataset": source, "mock": True},
+                    max_steps=max_steps,
+                )
 
     # Build agent class + config for run_dataset
     if agent_type == "openai":
@@ -555,6 +642,7 @@ def eval_command(
                 max_workers=max_workers,
                 max_concurrent_per_worker=max_concurrent_per_worker,
                 verbose=verbose,
+                mock=mock,
             )
         )
     else:
