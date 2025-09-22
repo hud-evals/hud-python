@@ -12,7 +12,7 @@ import typer
 
 import hud
 from hud.utils.hud_console import HUDConsole
-from hud.agents.base import MCPAgent
+from hud.agents.base import MCPAgent, find_reward
 from hud.types import Trace
 
 logger = logging.getLogger(__name__)
@@ -88,32 +88,9 @@ class MockToolRunner(MCPAgent):
             if getattr(task, "setup_tool", None) or getattr(task, "evaluate_tool", None):
                 raise ValueError("--mock requires only mock_tool; remove setup_tool/evaluate_tool")
 
-            # Execute the tool
-            if self.mcp_client is None:
-                raise ValueError("MCP client not initialized")
-            res = await self.mcp_client.call_tool(task.mock_tool)
-
-            # Extract payload and numeric reward
-            payload: dict[str, Any] | None = None
-            sc = getattr(res, "structuredContent", None)
-            try:
-                if sc and isinstance(sc, dict) and "result" in sc:
-                    payload = sc["result"]  # type: ignore[index]
-                elif res.content and len(res.content) > 0:
-                    text = getattr(res.content[0], "text", None)
-                    if isinstance(text, str):
-                        import json as _json
-
-                        payload = _json.loads(text)
-            except Exception:
-                payload = None
-
-            reward = 0.0
-            if isinstance(payload, dict):
-                if isinstance(payload.get("reward"), (int, float)):
-                    reward = float(payload.get("reward", 0.0))
-                elif isinstance(payload.get("evaluation"), dict):
-                    reward = float(payload.get("evaluation", {}).get("reward", 0.0))
+            # Execute the tool via base helper (gets MCPToolResult list)
+            results = await self.call_tools(task.mock_tool)
+            reward = float(find_reward(results[0])) if results else 0.0
 
             return Trace(done=True, reward=reward, info={})
         finally:
@@ -164,25 +141,33 @@ async def run_single_task(
         if path.suffix in {".yaml", ".yml"}:
             try:
                 import yaml  # type: ignore
-            except Exception as e:  # pragma: no cover - optional dependency
-                hud_console.error(
-                    "YAML support is not installed. Please install with: pip install 'pyyaml'"
-                )
+            except Exception as e:
+                hud_console.error("YAML support is not installed. Please install with: pip install 'pyyaml'")
                 raise typer.Exit(1) from e
 
-            with open(path) as f:  # noqa: ASYNC230
+            with open(path) as f:
                 json_data = yaml.safe_load(f)
         else:
-            with open(path) as f:  # noqa: ASYNC230
+            with open(path) as f:
                 json_data = json.load(f)
 
-        # If --mock, run a single mock tool call directly (no agent)
+        # --mock mode
         if mock:
-            # Build single task object
+            # Build single task object (or forward to full runner if multiple)
             if isinstance(json_data, list):
-                if len(json_data) != 1:
-                    hud_console.error("--mock without --full requires a single task. add --full to run all task mocks.")
-                    raise typer.Exit(1)
+                if len(json_data) > 1:
+                    await run_full_dataset(
+                        source,
+                        agent_type=agent_type,
+                        model=model,
+                        allowed_tools=allowed_tools,
+                        max_concurrent=1,
+                        max_steps=max_steps,
+                        parallel=False,
+                        verbose=verbose,
+                        mock=True,
+                    )
+                    return
                 task_data = json_data[0]
             elif isinstance(json_data, dict):
                 task_data = json_data
@@ -192,62 +177,14 @@ async def run_single_task(
 
             task = Task(**task_data)
 
-            # Wrap in hud.trace so the platform prints the trace link automatically
+            # Run via MockToolRunner but wrap with hud.trace for visible link output
             task_prompt = task.prompt[:50] + "..." if len(task.prompt) > 50 else task.prompt
             with hud.trace(name=task_prompt):
-                hud_console.info("🧪 --mock: calling tool directly (no agent)")
-
-                # Create MCP client from task.mcp_config
-                try:
-                    from hud.clients import MCPClient
-                except ImportError as e:
-                    hud_console.error("MCP client dependencies are not installed.")
-                    raise typer.Exit(1) from e
-
-                client = MCPClient(mcp_config=task.mcp_config, verbose=verbose)  # type: ignore[call-arg]
-                await client.initialize()
-
-                # Enforce ONLY mock_tool in --mock mode
-                if not task.mock_tool:
-                    await client.shutdown()
-                    hud_console.error("--mock requires mock_tool")
-                    raise typer.Exit(1)
-                if task.setup_tool or task.evaluate_tool:
-                    await client.shutdown()
-                    hud_console.error("--mock requires only mock_tool; remove setup_tool/evaluate_tool")
-                    raise typer.Exit(1)
-
-                # Execute the single mock tool call (e.g., hub "mock_problem").
-                # The MCP tool result can be returned in two shapes:
-                # 1) structuredContent (preferred): a structured JSON payload
-                # 2) content[0].text: a JSON string we need to parse
-                res = await client.call_tool(task.mock_tool)
-                payload: dict[str, Any] | None = None
-                # Prefer structuredContent.result if available (most robust shape)
-                sc = getattr(res, "structuredContent", None)
-                try:
-                    if sc and isinstance(sc, dict) and "result" in sc:
-                        payload = sc["result"]  # type: ignore[index]
-                    elif res.content and len(res.content) > 0:
-                        text = getattr(res.content[0], "text", None)
-                        if isinstance(text, str):
-                            import json as _json
-
-                            payload = _json.loads(text)
-                except Exception:
-                    payload = None
-
-                await client.shutdown()
-
-                # Extract a numeric score. Support top-level reward and nested evaluation.reward
-                reward = 0.0
-                if isinstance(payload, dict):
-                    if isinstance(payload.get("reward"), (int, float)):
-                        reward = float(payload.get("reward", 0.0))
-                    elif isinstance(payload.get("evaluation"), dict):
-                        reward = float(payload.get("evaluation", {}).get("reward", 0.0))
-
-                hud_console.success(f"Reward: {reward}")
+                hud_console.info('Prompt: ' + task.prompt)
+                hud_console.info("🧪 --mock: setting up problem, taking actions, evaluating. No llm involved.")
+                agent = MockToolRunner(verbose=verbose)
+                result = await agent.run(task, max_steps=max_steps)
+                hud_console.success(f"Reward: {result.reward}")
                 return
 
         # Check if JSON contains multiple tasks (list with more than 1 task)
@@ -376,25 +313,23 @@ async def run_full_dataset(
         )
         raise typer.Exit(1) from e
 
-    # Check if source is a JSON/YAML file with list of tasks
     path = Path(source)
     dataset_or_tasks = source
     dataset_name = source.split("/")[-1]
 
+    # Check if source is a JSON/YAML file with list of tasks
     if path.exists() and path.suffix in {".json", ".yaml", ".yml"}:
         if path.suffix in {".yaml", ".yml"}:
             try:
                 import yaml  # type: ignore
-            except Exception as e:  # pragma: no cover - optional dependency
-                hud_console.error(
-                    "YAML support is not installed. Please install with: pip install 'pyyaml'"
-                )
+            except Exception as e:
+                hud_console.error("YAML support is not installed. Please install with: pip install 'pyyaml'")
                 raise typer.Exit(1) from e
 
-            with open(path) as f:  # noqa: ASYNC230
+            with open(path) as f:
                 json_data = yaml.safe_load(f)
         else:
-            with open(path) as f:  # noqa: ASYNC230
+            with open(path) as f:
                 json_data = json.load(f)
 
         if isinstance(json_data, list):
@@ -405,32 +340,12 @@ async def run_full_dataset(
             hud_console.error("File must contain a list of tasks when using --full flag")
             raise typer.Exit(1)
 
-        # If --mock in full mode: run via dataset runner with MockToolRunner (supports parallel)
-        if mock:
-            if parallel:
-                return await run_dataset_parallel(
-                    name=f"Evaluation (mock): {dataset_name}",
-                    dataset=dataset_or_tasks,
-                    agent_class=MockToolRunner,  # type: ignore[arg-type]
-                    agent_config={"verbose": verbose},
-                    max_concurrent=max_concurrent,
-                    metadata={"dataset": source, "parallel": True, "mock": True},
-                    max_steps=max_steps,
-                    auto_respond=True,
-                )
-            else:
-                return await run_dataset(
-                    name=f"Evaluation (mock): {dataset_name}",
-                    dataset=dataset_or_tasks,
-                    agent_class=MockToolRunner,  # type: ignore[arg-type]
-                    agent_config={"verbose": verbose},
-                    max_concurrent=max_concurrent,
-                    metadata={"dataset": source, "mock": True},
-                    max_steps=max_steps,
-                )
 
     # Build agent class + config for run_dataset
-    if agent_type == "openai":
+    if mock: # --mock mode
+        agent_class = MockToolRunner  # type: ignore[assignment]
+        agent_config = {"verbose": verbose}
+    elif agent_type == "openai":
         try:
             from hud.agents import OperatorAgent
 
@@ -477,7 +392,7 @@ async def run_full_dataset(
                 agent_class=agent_class,
                 agent_config=agent_config,
                 max_concurrent=max_concurrent,
-                metadata={"dataset": source, "parallel": True},
+                metadata={"dataset": source, "parallel": True, **({"mock": True} if mock else {})},
                 max_steps=max_steps,
                 auto_respond=True,
             )
@@ -491,7 +406,7 @@ async def run_full_dataset(
                 max_workers=max_workers,
                 max_concurrent_per_worker=max_concurrent_per_worker,
                 max_concurrent=max_concurrent,
-                metadata={"dataset": source, "parallel": True},
+                metadata={"dataset": source, "parallel": True, **({"mock": True} if mock else {})},
                 max_steps=max_steps,
                 auto_respond=True,
             )
@@ -503,7 +418,7 @@ async def run_full_dataset(
             agent_class=agent_class,
             agent_config=agent_config,
             max_concurrent=max_concurrent,
-            metadata={"dataset": source},
+            metadata={"dataset": source, **({"mock": True} if mock else {})},
             max_steps=max_steps,
         )
 
