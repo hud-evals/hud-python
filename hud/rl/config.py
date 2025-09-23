@@ -116,6 +116,10 @@ class ModelConfig(BaseConfig):
         default=True,
         description="Whether to use Liger kernel optimizations for the model"
     )
+    freeze_vision_tower: bool = Field(
+        default=True,
+        description="Whether to freeze the vision tower parameters during training"
+    )
 
 
 

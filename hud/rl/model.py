@@ -61,7 +61,8 @@ def get_model(config: ModelConfig) -> nn.Module:
 
     model = get_peft_model(model, lora_config)
 
-    freeze_vision_tower(model)
+    if config.freeze_vision_tower:
+        freeze_vision_tower(model)
 
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total_params = sum(p.numel() for p in model.parameters())
