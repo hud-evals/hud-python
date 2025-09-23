@@ -6,14 +6,17 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # TODO: ideally, we have docker download dataset and, if required, local model weights
-# that way we don't have to redo this if something gets changed further into the process.
-# Example: RUN python -c "from my_project import setup; setup.preprocess_data('/app/raw_data', '/app/processed_data')" 
+# that way we don't have to redo this if something gets changed downstream of this.
+# Example: RUN entrypoint.sh
 
 # Copy and install dependencies
 COPY pyproject.toml ./
 COPY controller/ ./controller/
 COPY environment/ ./environment/
-RUN pip install --no-cache-dir -e .
+RUN pip install -U pip
+RUN pip install uv
+RUN uv sync
+RUN uv pip install --no-cache-dir -e .
 
 ENV ENV_SERVER_PORT=8005
 

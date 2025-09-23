@@ -3,6 +3,7 @@
 import logging
 import sys
 import traceback
+import subprocess
 from fastapi import FastAPI
 from pydantic import BaseModel
 
@@ -43,6 +44,12 @@ def reset(payload: ResetPayload):
     _target_eval = payload.target_eval
     _model = payload.model
     try:
+        result = subprocess.run(
+            ["pip", "install", "uv"],
+            capture_output=True,
+            text=True,
+            check=True,  # This will raise a CalledProcessError if the command fails
+        )
         extra_stdout, _extra_stderr = ""
         stdout, stderr = run_uv_command(["sync"])
         try:
