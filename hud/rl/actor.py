@@ -105,7 +105,7 @@ if __name__ == "__main__":
                     "command": "sh",
                     "args": [
                         "-c",
-                        "docker run --rm --platform linux/amd64 -i -e AGENT_DISPLAY_WIDTH=588 -e AGENT_DISPLAY_HEIGHT=336 hud-browser 2>/dev/null",
+                        "docker run --rm --platform linux/amd64 -i -e AGENT_DISPLAY_WIDTH=588 -e AGENT_DISPLAY_HEIGHT=336 hud-browser",
                     ],
                 }
             },
