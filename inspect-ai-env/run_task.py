@@ -24,11 +24,7 @@ async def run_task(task_data: dict):
         result = await client.call_tool(task.setup_tool)  # type: ignore
         print(f"✅ Setup: {result.content}")
 
-        print("\n🔄 Performing actions:")
-        for _ in range(10):
-            result = await client.call_tool(name="act", arguments={})
-            print(f"  {result.content}")
-
+        print("\n🔄 Running Eval:")
         result = await client.call_tool(task.evaluate_tool)  # type: ignore
         print(f"\n📊 Evaluation: {result.content}")
 

@@ -5,6 +5,10 @@ WORKDIR /app
 # Install git for dependency installation
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
+# TODO: ideally, we have docker download dataset and, if required, local model weights
+# that way we don't have to redo this if something gets changed further into the process.
+# Example: RUN python -c "from my_project import setup; setup.preprocess_data('/app/raw_data', '/app/processed_data')" 
+
 # Copy and install dependencies
 COPY pyproject.toml ./
 COPY controller/ ./controller/

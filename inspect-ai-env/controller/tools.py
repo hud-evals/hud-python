@@ -9,18 +9,26 @@ async def run() -> str:
     """Perform one action step in the environment (increment the counter)."""
     if not http_client:
         raise RuntimeError("HTTP client not initialized")
-    resp = await http_client.post("/run")
-    data = resp.json()
-    return data
+    status = await http_client.get("/health")
+    if status in ["ready", "ok"]:
+        resp = await http_client.post("/run")
+        data = resp.json()
+        return data
+    else:
+        return {
+            "status": status,
+            "error": "Something went wrong. Call setup before run",
+        }
 
 
 @mcp.tool
-async def setup() -> str:
+async def setup(task_data_json) -> str:
     """Initialize or reset the environment to its starting state."""
     if not http_client:
         raise RuntimeError("HTTP client not initialized")
-    await http_client.post("/reset")
-    return "Setup Complete"
+    resp = await http_client.post("/reset", json=task_data_json)
+    data = resp.json()
+    return data
 
 
 @mcp.tool

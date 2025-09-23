@@ -1,20 +1,20 @@
 [
   {
-    "prompt": "Increment the counter to reach 10",
+    "prompt": "n/a",
     "mcp_config": {
       "inspect_ai_env": {
         "url": "http://localhost:8765/mcp"
       }
     },
-    "agent_tools": ["act"],
+    "agent_tools": ["run"],
     "setup_tool": {
       "name": "setup",
-      "arguments": {}
+      "arguments": {"target_eval":"mbpp", "model":"anthropic/claude-3-5-haiku-20241022"}
     },
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "target": 10
+        "limit": 3
       }
     }
   }
