@@ -14,6 +14,12 @@ from hud.rl.distributed import get_local_rank, get_world_size
 from hud.rl.logger import console
 from hud.rl.config import ModelConfig
 
+def freeze_vision_tower(model: nn.Module) -> None:
+    for name, module in model.named_modules():
+        if any(k in name.lower() for k in ["visual", "vision"]):
+            for p in module.parameters():
+                p.requires_grad_(False)
+            module.eval()
 
 def get_model(config: ModelConfig) -> nn.Module:
     console.info_log(f"Loading model: {config.base_model}")
@@ -40,7 +46,7 @@ def get_model(config: ModelConfig) -> nn.Module:
     elif config.use_liger and not LIGER_AVAILABLE:
         console.warning("Liger kernel requested but not available.")
     
-    model = AutoModel.from_config(model_cfg)
+    model = AutoModel.from_pretrained(config.base_model, config=model_cfg, dtype=torch.bfloat16)
 
     local_rank = get_local_rank()
     device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
@@ -50,12 +56,16 @@ def get_model(config: ModelConfig) -> nn.Module:
         r=config.lora.r,
         lora_alpha=config.lora.alpha,
         lora_dropout=config.lora.dropout,
-        task_type="CAUSAL_LM",
-        bias="none",
         target_modules=list(config.lora.target_modules),
     )
 
     model = get_peft_model(model, lora_config)
+
+    freeze_vision_tower(model)
+
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+    console.info_log(f"Trainable params: {trainable_params/1e6:.1f}M / Total params: {total_params/1e6:.1f}M")
 
     world_size = get_world_size()
     if world_size > 1:
@@ -84,3 +94,10 @@ def get_processor(config: ModelConfig) -> ProcessorMixin:
     except Exception as e:
         console.warning(f"Failed to load processor: {e}")
         raise e
+
+if __name__ == "__main__":
+    config = ModelConfig(base_model="Qwen/Qwen2.5-3B-Instruct")
+
+    model = get_model(config)
+    processor = get_processor(config)
+    model.print_trainable_parameters() # type: ignore
