@@ -1,8 +1,7 @@
-from dataclasses import dataclass, field
 from typing import Literal, TypeAlias
 from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator, computed_field
 
 # Simple type alias for attention implementations
 AttnImplementation: TypeAlias = Literal["eager", "flash_attention_2", "sdpa"]
@@ -98,10 +97,8 @@ class ProcessorConfig(BaseConfig):
 
 
 class ModelConfig(BaseConfig):
-    base_model: str = Field(
-        default="Qwen/Qwen2.5-VL-3B-Instruct",
-        description="Base model name for fine-tuning"
-    )
+    base_model: str = ""
+
     lora: LoRAConfig = Field(
         default_factory=LoRAConfig,
         description="LoRA configuration"
@@ -120,11 +117,6 @@ class ModelConfig(BaseConfig):
         description="Whether to use Liger kernel optimizations for the model"
     )
 
-    @field_validator("base_model")
-    @classmethod
-    def validate_base_model(cls, v: str) -> str:
-        validate_model(v)
-        return v
 
 
     @model_validator(mode='after')
@@ -149,56 +141,76 @@ class ModelConfig(BaseConfig):
         super().validate_config()
 
 
-@dataclass
-class TrainingConfig:
+class TrainingConfig(BaseConfig):
     """Training hyperparameters."""
 
     # Training parameters
-    training_steps: int = 100
-    shuffle_dataset: bool = False
-    save_every_batches: int = 1
+    training_steps: int = Field(default=100, ge=1, description="Number of training steps")
+    shuffle_dataset: bool = Field(default=False, description="Whether to shuffle the dataset")
+    save_every_batches: int = Field(default=1, ge=1, description="Save checkpoint every N batches")
 
     # Batching parameters
-    epochs: int = 2
-    batch_size: int = 24
-    group_size: int = 4
-    mini_batch_size: int = 1
-    update_after_group: bool = True  # Whether to update the policy after each task group
-    accumulate_over_minibatches: bool = False  # Whether to accumulate over minibatches
+    epochs: int = Field(default=2, ge=1, description="Number of training epochs")
+    batch_size: int = Field(default=24, ge=1, description="Batch size for training")
+    group_size: int = Field(default=4, ge=1, description="Group size for batching")
+    mini_batch_size: int = Field(default=1, ge=1, description="Mini-batch size")
+    update_after_group: bool = Field(default=True, description="Whether to update the policy after each task group")
+    accumulate_over_minibatches: bool = Field(default=False, description="Whether to accumulate over minibatches")
 
     # Advantage calculation parameters
-    scale_rewards: Literal["group", "batch", "none"] = "group"
-    leave_one_out: bool = False  # RLOO scaling factor G/(G-1), only applies when scale_rewards="none"
+    scale_rewards: Literal["group", "batch", "none"] = Field(default="group", description="Reward scaling strategy")
+    leave_one_out: bool = Field(default=False, description="RLOO scaling factor G/(G-1), only applies when scale_rewards='none'")
 
     # Replay buffer parameters
-    buffer_steps: int = 4
-    select_strategy: Literal["recent", "variance", "random"] = "variance"
+    buffer_steps: int = Field(default=4, ge=0, description="Number of buffer steps")
+    select_strategy: Literal["recent", "variance", "random"] = Field(default="variance", description="Buffer selection strategy")
 
     # Aggregation parameters
-    ppo_mode: Literal["per_token", "per_trace"] = "per_token"
-    token_agg: Literal["mean", "sum"] = "mean"  # noqa: S105
+    ppo_mode: Literal["per_token", "per_trace"] = Field(default="per_token", description="PPO mode")
+    token_agg: Literal["mean", "sum"] = Field(default="mean", description="Token aggregation method")
 
     # Regularization parameters
-    kl_beta: float = 0.0
-    entropy_beta: float = 0.0
-    top_eps: float = 0.2
-    bottom_eps: float = 0.1
+    kl_beta: float = Field(default=0.0, ge=0.0, description="KL divergence coefficient")
+    entropy_beta: float = Field(default=0.0, ge=0.0, description="Entropy coefficient")
+    top_eps: float = Field(default=0.2, ge=0.0, le=1.0, description="Top epsilon for PPO clipping")
+    bottom_eps: float = Field(default=0.1, ge=0.0, le=1.0, description="Bottom epsilon for PPO clipping")
 
     # Training hyperparameters
-    lr: float = 3e-5
-    grad_clip: float = 1.0
+    lr: float = Field(default=3e-5, gt=0.0, description="Learning rate")
+    grad_clip: float = Field(default=1.0, gt=0.0, description="Gradient clipping value")
 
     # Adam hyperparameters
-    use_8bit_optimizer: bool = True
-    adam_betas: tuple[float, float] = (0.9, 0.999)
-    adam_eps: float = 1e-8
+    use_8bit_optimizer: bool = Field(default=True, description="Use 8-bit Adam optimizer")
+    adam_betas: tuple[float, float] = Field(default=(0.9, 0.999), description="Adam beta parameters")
+    adam_eps: float = Field(default=1e-8, gt=0.0, description="Adam epsilon")
+
+    @field_validator("adam_betas")
+    @classmethod
+    def validate_adam_betas(cls, v: tuple[float, float]) -> tuple[float, float]:
+        if len(v) != 2:
+            raise ValueError("adam_betas must be a tuple of 2 floats")
+        if not (0.0 <= v[0] < 1.0 and 0.0 <= v[1] < 1.0):
+            raise ValueError("adam_betas values must be in [0, 1)")
+        return v
+
+    def validate_config(self) -> None:
+        super().validate_config()
+
+        if self.mini_batch_size > self.batch_size:
+            raise ValueError(
+                f"mini_batch_size ({self.mini_batch_size}) cannot be greater than "
+                f"batch_size ({self.batch_size})"
+            )
+
+        if self.top_eps < self.bottom_eps:
+            raise ValueError(
+                f"top_eps ({self.top_eps}) must be >= bottom_eps ({self.bottom_eps})"
+            )
 
 
 class ActorConfig(BaseConfig):
-    """Actor/episode collection configuration."""
+    base_model: str = ""
 
-    # Model and logging
-    base_model: str = Field(default="Qwen/Qwen2.5-VL-3B-Instruct", description="Base model name")
     verbose: bool = Field(default=False, description="Enable verbose logging")
 
     # Execution parameters
@@ -217,11 +229,6 @@ class ActorConfig(BaseConfig):
     request_timeout: int = Field(default=45, ge=1, le=300, description="Request timeout in seconds")
     episode_timeout_sec: int = Field(default=600, ge=1, le=3600, description="Episode timeout in seconds")
 
-    @field_validator("base_model")
-    @classmethod
-    def validate_base_model(cls, v: str) -> str:
-        validate_model(v)
-        return v
 
     @field_validator("allowed_tools")
     @classmethod
@@ -240,35 +247,54 @@ class ActorConfig(BaseConfig):
             )
 
 
-@dataclass
-class Config:
+class Config(BaseConfig):
     """Main configuration combining all sub-configs."""
 
-    model: ModelConfig = field(default_factory=ModelConfig)
-    training: TrainingConfig = field(default_factory=TrainingConfig)
-    actor: ActorConfig = field(default_factory=ActorConfig)
+    # Main model specification - shared across model and actor configs
+    base_model: str = Field(
+        default="Qwen/Qwen2.5-VL-3B-Instruct",
+        description="Base model name shared across model and actor configurations"
+    )
+
+    model: ModelConfig = Field(default_factory=ModelConfig, description="Model configuration")
+    training: TrainingConfig = Field(default_factory=TrainingConfig, description="Training configuration")
+    actor: ActorConfig = Field(default_factory=ActorConfig, description="Actor configuration")
 
     # Telemetry configuration
-    job_name: str = "RL Training"
-    job_id: str | None = None  # Use existing job ID if provided
-    stats_interval: int = 1
-    verbose: bool = False
+    job_name: str = Field(default="RL Training", description="Job name for telemetry")
+    job_id: str | None = Field(default=None, description="Use existing job ID if provided")
+    stats_interval: int = Field(default=1, ge=1, description="Statistics collection interval")
+    verbose: bool = Field(default=False, description="Enable verbose logging")
 
     # Paths
-    out_dir: str = "./checkpoints"
-    adapter_prefix: str = "cua-grpo-step"
+    out_dir: str = Field(default="./checkpoints", description="Output directory for checkpoints")
+    adapter_prefix: str = Field(default="cua-grpo-step", description="Prefix for adapter files")
 
     # Misc
-    seed: int = 1234
+    seed: int = Field(default=1234, description="Random seed for reproducibility")
+
+    @field_validator("base_model")
+    @classmethod
+    def validate_base_model(cls, v: str) -> str:
+        validate_model(v)
+        return v
+
+    @model_validator(mode='after')
+    def propagate_base_model(self) -> 'Config':
+        """Propagate base_model to sub-configs."""
+        self.model.base_model = self.base_model
+        self.actor.base_model = self.base_model
+        return self
 
     @classmethod
     def from_dict(cls, d: dict) -> "Config":
         """Create config from dictionary."""
-        model = ModelConfig(**d.get("model", {}))
-        training = TrainingConfig(**d.get("training", {}))
-        actor = ActorConfig(**d.get("actor", {}))
+        model = ModelConfig.model_validate(d.get("model", {}))
+        training = TrainingConfig.model_validate(d.get("training", {}))
+        actor = ActorConfig.model_validate(d.get("actor", {}))
 
         return cls(
+            base_model=d.get("base_model", "Qwen/Qwen2.5-VL-3B-Instruct"),
             model=model,
             training=training,
             actor=actor,
@@ -284,9 +310,10 @@ class Config:
     def to_dict(self) -> dict:
         """Convert config to dictionary."""
         return {
-            "model": self.model.__dict__,
-            "training": self.training.__dict__,
-            "actor": self.actor.__dict__,
+            "base_model": self.base_model,
+            "model": self.model.model_dump(),
+            "training": self.training.model_dump(),
+            "actor": self.actor.model_dump(),
             "job_name": self.job_name,
             "job_id": self.job_id,
             "stats_interval": self.stats_interval,

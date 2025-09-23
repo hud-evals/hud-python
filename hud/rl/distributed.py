@@ -8,7 +8,6 @@ import torch.distributed as dist
 def setup_distributed() -> None:
     """Initialize distributed training environment."""
     if "RANK" in os.environ and int(os.environ["WORLD_SIZE"]) > 1:
-        # Set device for this process
         local_rank = int(os.environ["LOCAL_RANK"])
         torch.cuda.set_device(local_rank)
 

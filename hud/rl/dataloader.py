@@ -6,12 +6,11 @@ import torch.nn.functional as F
 from hud.rl.logger import console
 from hud.rl.types import TrainingSample
 from hud.rl.advantages import calculate_advantages
-from hud.rl.preprocessor import prepare_inputs_for_samples
+from hud.rl.preprocessor import preprocess_traces
 
 if TYPE_CHECKING:
     from hud.types import Trace
 
-    from hud.rl.buffer import Buffer
     from hud.rl.config import Config
 
 
@@ -20,7 +19,6 @@ class DataLoader:
 
     def __init__(
         self,
-        buffer: Buffer,
         config: Config,
         processor: Any | None = None,
         policy: Any | None = None,
@@ -33,30 +31,48 @@ class DataLoader:
             processor: Model processor for tokenization
             policy: Policy model for computing logprobs
         """
-        self.buffer = buffer
         self.config = config
         self.processor = processor
         self.policy = policy
 
-    def get_tasks(self, n: int) -> list[Any]:
-        """Get tasks from the buffer for actor execution."""
-        return self.buffer.sample_tasks(n)
-
-    def get_training_batch(self) -> list[TrainingSample]:
+    def get_training_batch(self, traces: list[Trace]) -> list[TrainingSample]:
         """Get a preprocessed training batch.
 
         Returns:
             List of TrainingSample objects ready for training
         """
-        # Sample traces from buffer
-        traces = self.buffer.sample_traces()
+
+        # Extract rewards, handling errors
+        rewards = torch.tensor(
+            [0.0 if trace.isError else trace.reward for trace in traces],
+            dtype=torch.float32
+        )
 
         # Calculate advantages
-        samples = calculate_advantages(traces, self.config)
+        advantages = calculate_advantages(
+            rewards=rewards,
+            group_size=self.config.training.group_size,
+            scale_rewards=self.config.training.scale_rewards,
+            leave_one_out=self.config.training.leave_one_out,
+        )
+
 
         # Prepare inputs if processor is available
         if self.processor is not None:
-            samples = prepare_inputs_for_samples(samples, self.processor)
+            processed_inputs = preprocess_traces(traces, self.processor)
+        else:
+            # Create empty inputs if no processor
+            processed_inputs = [{}  for _ in traces]  # type: ignore
+
+        # Create TrainingSample objects
+        samples = []
+        for inputs, advantage in zip(processed_inputs, advantages, strict=True):
+            sample = TrainingSample(
+                inputs=inputs,
+                advantage=advantage.unsqueeze(0),  # Keep shape [1] for compatibility
+            )
+            samples.append(sample)
+        
 
         # Batch samples if needed
         if self.config.training.accumulate_over_minibatches:
@@ -64,7 +80,6 @@ class DataLoader:
         else:
             # Batch samples for efficient forward pass
             return self._batch_samples(samples)
-
 
 
     def _batch_samples(self, samples: list[TrainingSample]) -> list[TrainingSample]:
@@ -197,19 +212,3 @@ class DataLoader:
         new_samples[0].advantage = torch.stack(advantages, dim=0)  # type: ignore
 
         return new_samples
-
-    def add_traces(self, traces: list[Trace]) -> None:
-        """Add completed traces to the buffer.
-
-        Args:
-            traces: List of completed traces from actor
-        """
-        self.buffer.add_traces(traces)
-
-    def update_buffer(self, **kwargs) -> None:
-        """Update buffer state (e.g., for curriculum learning).
-
-        Args:
-            **kwargs: Arguments to pass to buffer.update()
-        """
-        self.buffer.update(**kwargs)
