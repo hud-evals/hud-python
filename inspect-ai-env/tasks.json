@@ -1,0 +1,21 @@
+[
+  {
+    "prompt": "Increment the counter to reach 10",
+    "mcp_config": {
+      "inspect_ai_env": {
+        "url": "http://localhost:8765/mcp"
+      }
+    },
+    "agent_tools": ["act"],
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "target": 10
+      }
+    }
+  }
+]
