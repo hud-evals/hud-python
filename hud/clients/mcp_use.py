@@ -20,6 +20,7 @@ from hud.utils.hud_console import HUDConsole
 from hud.version import __version__ as hud_version
 
 from .base import BaseHUDClient
+from .utils.mcp_use_retry import patch_all_sessions
 from .utils.retry_transport import create_retry_httpx_client
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,18 @@ class MCPUseHUDClient(BaseHUDClient):
             assert self._client is not None  # noqa: S101
             self._sessions = await self._client.create_all_sessions()
             hud_console.info(f"Created {len(self._sessions)} MCP sessions")
+
+            # Ensure MCP-use sessions use retry-aware transports for busy orchestrator responses
+            try:
+                patch_all_sessions(
+                    self._sessions,
+                    retry_status_codes=(409, 423, 502, 503, 504),
+                )
+            except Exception as _e:
+                logger.debug(
+                    "Retry patching for MCP-use sessions failed (non-fatal): %s",
+                    _e,
+                )
 
             # Configure validation for all sessions based on client setting
             try:

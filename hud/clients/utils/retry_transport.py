@@ -44,7 +44,8 @@ class RetryTransport(AsyncHTTPTransport):
         """
         super().__init__(*args, **kwargs)
         self.max_retries = max_retries
-        self.retry_status_codes = retry_status_codes or {502, 503, 504}
+        # Include 409/423 to smooth over transient "pod busy" responses from orchestrators
+        self.retry_status_codes = retry_status_codes or {409, 423, 502, 503, 504}
         self.retry_delay = retry_delay
         self.backoff_factor = backoff_factor
 

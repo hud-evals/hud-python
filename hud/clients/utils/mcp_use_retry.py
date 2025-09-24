@@ -24,7 +24,7 @@ T = TypeVar("T")
 
 def create_retry_session(
     max_retries: int = 3,
-    retry_status_codes: tuple[int, ...] = (502, 503, 504),
+    retry_status_codes: tuple[int, ...] = (409, 423, 502, 503, 504),
     retry_delay: float = 1.0,
     backoff_factor: float = 2.0,
 ) -> requests.Session:
@@ -42,7 +42,7 @@ def create_retry_session(
     """
     session = requests.Session()
 
-    # Configure retry strategy
+    # Configure retry strategy; include orchestrator busy codes (409/423)
     retry = Retry(
         total=max_retries,
         backoff_factor=backoff_factor,
@@ -70,7 +70,10 @@ def create_retry_session(
     return session
 
 
-def patch_mcp_session_http_client(session: Any) -> None:
+def patch_mcp_session_http_client(
+    session: Any,
+    retry_status_codes: tuple[int, ...] = (409, 423, 502, 503, 504),
+) -> None:
     """
     Patch an MCP-use session to use HTTP retry logic.
 
@@ -91,13 +94,14 @@ def patch_mcp_session_http_client(session: Any) -> None:
 
                 # If it's using requests, replace the session
                 if hasattr(manager, "_session") or hasattr(manager, "session"):
-                    retry_session = create_retry_session()
+                    retry_session = create_retry_session(
+                        retry_status_codes=retry_status_codes
+                    )
 
-                    # Try different attribute names
                     if hasattr(manager, "_session"):
                         manager._session = retry_session
                         logger.debug("Patched connection manager's _session with retry logic")
-                    elif hasattr(manager, "session"):
+                    if hasattr(manager, "session"):
                         manager.session = retry_session
                         logger.debug("Patched connection manager's session with retry logic")
 
@@ -108,7 +112,10 @@ def patch_mcp_session_http_client(session: Any) -> None:
                 # Wrap the async HTTP methods with retry logic
                 if hasattr(client, "_send_request"):
                     original_send = client._send_request
-                    client._send_request = create_async_retry_wrapper(original_send)
+                    client._send_request = create_async_retry_wrapper(
+                        original_send,
+                        retry_status_codes=retry_status_codes,
+                    )
                     logger.debug("Wrapped client_session._send_request with retry logic")
 
     except Exception as e:
@@ -118,7 +125,7 @@ def patch_mcp_session_http_client(session: Any) -> None:
 def create_async_retry_wrapper(
     func: Callable[..., Any],
     max_retries: int = 3,
-    retry_status_codes: tuple[int, ...] = (502, 503, 504),
+    retry_status_codes: tuple[int, ...] = (409, 423, 502, 503, 504),
     retry_delay: float = 1.0,
     backoff_factor: float = 2.0,
 ) -> Callable[..., Any]:
@@ -189,7 +196,10 @@ def create_async_retry_wrapper(
     return wrapper
 
 
-def patch_all_sessions(sessions: dict[str, Any]) -> None:
+def patch_all_sessions(
+    sessions: dict[str, Any],
+    retry_status_codes: tuple[int, ...] = (409, 423, 502, 503, 504),
+) -> None:
     """
     Apply retry logic to all MCP sessions.
 
@@ -198,4 +208,4 @@ def patch_all_sessions(sessions: dict[str, Any]) -> None:
     """
     for name, session in sessions.items():
         logger.debug("Patching session '%s' with retry logic", name)
-        patch_mcp_session_http_client(session)
+        patch_mcp_session_http_client(session, retry_status_codes=retry_status_codes)

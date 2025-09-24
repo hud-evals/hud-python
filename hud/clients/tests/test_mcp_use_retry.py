@@ -47,6 +47,8 @@ class TestRetrySession:
 
         adapter = session.adapters["https://"]
         assert adapter.max_retries.total == 3  # type: ignore
+        assert 409 in adapter.max_retries.status_forcelist  # type: ignore
+        assert 423 in adapter.max_retries.status_forcelist  # type: ignore
         assert 502 in adapter.max_retries.status_forcelist  # type: ignore
         assert 503 in adapter.max_retries.status_forcelist  # type: ignore
         assert 504 in adapter.max_retries.status_forcelist  # type: ignore
@@ -127,6 +129,26 @@ class TestAsyncRetryWrapper:
         assert result.status_code == 200
 
     @pytest.mark.asyncio
+    async def test_default_busy_retry_codes(self):
+        """Default wrapper should retry busy-orchestrator errors like 409/423."""
+        call_count = 0
+
+        async def mock_func(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+
+            if call_count < 3:
+                raise Exception("HTTP 409: Pod is currently busy with another operation")
+
+            return Mock(status_code=200)
+
+        wrapped = create_async_retry_wrapper(mock_func, max_retries=3, retry_delay=0.01)
+
+        result = await wrapped()
+        assert call_count == 3
+        assert result.status_code == 200
+
+    @pytest.mark.asyncio
     async def test_max_retries_exceeded(self):
         """Test that retries stop after max attempts."""
         call_count = 0
@@ -172,6 +194,8 @@ class TestSessionPatching:
         # Check that it has retry configuration
         adapter = patched_session.adapters["http://"]
         assert hasattr(adapter, "max_retries")
+        assert 409 in adapter.max_retries.status_forcelist  # type: ignore
+        assert 423 in adapter.max_retries.status_forcelist  # type: ignore
 
     @pytest.mark.asyncio
     async def test_patch_async_session(self):
@@ -216,8 +240,16 @@ class TestSessionPatching:
         patch_all_sessions(sessions)
 
         # Verify both were patched
-        assert "http://" in session1.connector._connection_manager.session.adapters
+        # The session should have been replaced with a retry session
+        manager = session1.connector._connection_manager
+        patched_session = manager.session
+        assert "http://" in patched_session.adapters
+        if hasattr(manager, "_session"):
+            assert manager._session is patched_session
         assert session2.connector.client_session._send_request != AsyncMock
+        adapter = patched_session.adapters["http://"]
+        assert 409 in adapter.max_retries.status_forcelist  # type: ignore
+        assert 423 in adapter.max_retries.status_forcelist  # type: ignore
 
 
 class TestMCPUseClientRetry:

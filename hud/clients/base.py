@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import asyncio
+import random
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, Protocol, overload, runtime_checkable
 
@@ -191,15 +193,34 @@ class BaseHUDClient(AgentMCPClient):
         name: str | None = None,
         arguments: dict[str, Any] | None = None,
     ) -> MCPToolResult:
-        if tool_call is not None:
-            return await self._call_tool(tool_call)
-        elif name is not None:
-            return await self._call_tool(MCPToolCall(name=name, arguments=arguments))
-        else:
+        tc = tool_call or (MCPToolCall(name=name, arguments=arguments) if name else None)
+        if tc is None:
             raise TypeError(
                 "call_tool() requires either an MCPToolCall positional arg "
                 "or keyword 'name' (and optional 'arguments')."
             )
+
+        max_attempts = 4
+        delay = 0.6
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return await self._call_tool(tc)
+            except Exception as e:
+                msg = str(e).lower()
+                retryable = (
+                    " 409" in msg
+                    or "409:" in msg
+                    or " 423" in msg
+                    or "423:" in msg
+                    or "busy with another operation" in msg
+                    or "try again later" in msg
+                    or "locked" in msg
+                )
+                if retryable and attempt < max_attempts:
+                    await asyncio.sleep(delay + random.uniform(0, 0.35))
+                    delay *= 1.8
+                    continue
+                raise
 
     @abstractmethod
     async def _connect(self, mcp_config: dict[str, dict[str, Any]]) -> None:
