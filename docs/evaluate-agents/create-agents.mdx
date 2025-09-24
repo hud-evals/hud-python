@@ -4,263 +4,318 @@ description: "Build your own MCP-compatible agent for HUD evaluation"
 icon: "robot"
 ---
 
-Build custom agents that interact with MCP tools to complete tasks. An agent is essentially a loop that calls your LLM, executes tools based on its decisions, and continues until the task is complete.
+Build custom agents that use MCP tools to complete tasks. An agent is a loop that:
 
-## How Agents Work
+1. Sends messages to your LLM
+2. Receives a response (possibly with tool calls)
+3. Executes those tools via MCP
+4. Feeds results back and repeats until done
 
-An agent follows this lifecycle:
+## How agents run
 
 ```mermaid
 graph LR
-    A[System Prompt] --> B[User Prompt]
+    A[System Prompt] --> B[User / Task Context]
     B --> C[LLM Response]
-    C --> D{Has Tool Calls?}
-    D -->|Yes| E[Execute Tools]
-    E --> F[Format Results]
+    C --> D{Tool Calls?}
+    D -->|Yes| E[Execute MCP Tools]
+    E --> F[Format Tool Results]
     F --> C
-    D -->|No| G[Task Complete]
+    D -->|No| G[Complete]
 ```
 
-The agent keeps calling your LLM and executing tools until the LLM stops requesting tools, indicating the task is complete.
+The base class (`MCPAgent`) manages this loop, MCP connections, tool discovery/filtering, optional setup/evaluation tools, and tracing. You only bridge your LLM’s message format to MCP.
 
-## The Four Required Methods
+## The 4 methods you implement
 
-To create an agent, you implement four methods that bridge your LLM with MCP's tool system:
+Every agent subclass implements these four:
 
 ```python
+from typing import Any
 from hud.agents import MCPAgent
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 class MyAgent(MCPAgent):
-    """Your custom agent implementation."""
-
     async def get_system_messages(self) -> list[Any]:
-        """1. Called ONCE at start - returns your LLM's system prompt."""
-        pass
+        """Return provider-specific 'system' messages. Called once at start."""
+        ...
+
+    async def format_blocks(self, blocks: list[Any]) -> list[Any]:
+        """Convert MCP content blocks (text/images) into your LLM's input format."""
+        ...
 
     async def get_response(self, messages: list[Any]) -> AgentResponse:
-        """2. Called EACH TURN - sends messages to your LLM, returns its response, optionally adds the assistant message to messages."""
-        pass
-
-    async def format_blocks(self, blocks: list[ContentBlock]) -> list[Any]:
-        """3. Called at START - converts initial prompt/context to your LLM format."""
-        pass
+        """Call your LLM with the full conversation and return:
+           - content: assistant text
+           - tool_calls: list[MCPToolCall] when the LLM wants to use tools
+           - done: True when you want the loop to stop
+        """
+        ...
 
     async def format_tool_results(
-        self, tool_calls: list[MCPToolCall],
-        tool_results: list[MCPToolResult]
+        self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
     ) -> list[Any]:
-        """4. Called AFTER TOOLS - converts tool results to your LLM format."""
-        pass
+        """Convert MCP tool outputs back into your LLM's input format (e.g., a tool or user message)."""
+        ...
 ```
 
-### Understanding When Each Method is Called
+Call order during a run:
 
-The agent loop calls your methods in this sequence:
+1. `get_system_messages()` (once)
+2. `format_blocks()` (initial prompt/context → provider format)
+3. Loop: `get_response()` → (if tools) execute → `format_tool_results()` → back to `get_response()`
+4. Stop when `get_response().done` is `True` or no further tool calls
 
-1. **`get_system_messages()`** - Once at start
-2. **`format_blocks()`** - Converts initial task prompt
-3. **`get_response()`** - Gets LLM decision, adds assistant message to messages
-4. **`format_tool_results()`** - After each tool execution
-5. Back to step 3 until done
+---
 
-## What MCPAgent Does For You
+## Quickstart: extend a built-in (recommended)
 
-### The Agent Loop
+Pick a base class that already speaks your provider’s API:
 
-The base `MCPAgent` class handles the entire execution loop. When you call `agent.run(task)`:
+| Base class                | When to use                                                                                        | Notes                                                                                  |
+| ------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `GenericOpenAIChatAgent`  | Any OpenAI-compatible **chat.completions** endpoint (OpenAI, Together, local oai-compatible, etc.) | Stateless; converts MCP tool schemas to OpenAI function tools (with a sanitizer).      |
+| `OperatorAgent`           | OpenAI **Responses + Computer Use** API                                                            | Stateful (uses `previous_response_id`); expects an MCP tool named `openai_computer`.   |
+| `ClaudeAgent`             | Anthropic Messages (beta tools + optional computer-use beta)                                       | Maps Claude `computer_20250124` to your MCP computer tool; handles Claude tool blocks. |
+| `GroundedOpenAIChatAgent` | OpenAI chat, but you want vision grounding (separate model)                                        | Intercepts a synthetic `computer` tool and calls a `Grounder` to locate elements.      |
+| `LiteAgent`               | Any provider supported by LiteLLM                                                                  | Same OpenAI chat shape; optionally uses LiteLLM’s MCP→OpenAI tool transformer.         |
+| `LangChainAgent`          | You already use LangChain LLMs/tools                                                               | Wraps MCP tools as LangChain tools via an adapter (optional dependency).               |
 
-1. **Initialization Phase**
-   - Connects to MCP servers (auto-creates client from task.mcp_config if needed)
-   - Discovers available tools from all connected servers
-   - Applies tool filtering (allowed/disallowed lists)
-   - Identifies lifecycle tools (setup, evaluate, response)
-
-2. **Setup Phase** (if task.setup_tool provided)
-   - Executes setup tools (e.g., navigate to website, initialize environment)
-   - Optionally appends setup output to initial context (controlled by `append_setup_output`)
-   - Can include initial screenshots (controlled by `initial_screenshot`)
-
-3. **Main Execution Loop**
-   ```python
-   while not done and step < max_steps:
-       # Your get_response() is called here
-       response = await agent.get_response(messages)
-
-       if response.tool_calls:
-           # MCPAgent executes tools for you
-           results = await agent.call_tools(response.tool_calls)
-
-           # Your format_tool_results() is called here
-           messages.extend(await agent.format_tool_results(tool_calls, results))
-       else:
-           done = True
-   ```
-
-4. **Evaluation Phase** (if task.evaluate_tool provided)
-   - Runs evaluation tools to calculate reward
-   - Extracts reward from result (looks for "reward", "grade", "score" keys)
-   - Returns Trace object with full execution history
-
-### Tool Management
-
-**Tool Discovery & Filtering**
-```python
-agent = ClaudeAgent(
-    allowed_tools=["anthropic_computer"],  # Only these tools
-    disallowed_tools=["openai_computer"],  # Never these tools
-)
-```
-
-- **Available Tools**: Retrieved via `self.get_available_tools()` - already filtered
-- **Lifecycle Tools**: Automatically detected and hidden from your LLM
-- **Response Tools**: Auto-detected (tools with "response" in name) for task completion
-
-### Client Management
-
-MCPAgent handles complex client lifecycle:
+### Example: point an OpenAI-compatible client at MCP
 
 ```python
-# Option 1: Provide your own client
-from hud.clients import MCPClient
-client = MCPClient(mcp_config={...})
-agent = MyAgent(mcp_client=client)
-
-# Option 2: Auto-create from task
-task = Task(mcp_config={...})
-agent = MyAgent()  # No client needed
-await agent.run(task)  # Client created automatically
-```
-
-**Auto-cleanup**: Clients created automatically are properly shut down after execution.
-
-### Error Handling
-
-MCPAgent provides robust error handling:
-
-- **Connection Errors**: Helpful messages about MCP server availability
-- **Tool Errors**: Captured and returned as MCPToolResult with isError=True
-- **Timeout Handling**: Graceful shutdown on tool execution timeouts
-- **Trace Always Returns**: Even on errors, you get a Trace object with details
-
-### Message Accumulation
-
-Messages build up over the conversation:
-
-```
-[System] → [User Prompt] → [LLM Response] → [Tool Results] → [LLM Response] → ...
-```
-
-Your `get_response()` receives the full conversation history each time, allowing your LLM to maintain context.
-
-### Advanced Features
-
-**Response Agent Integration**
-```python
-from hud.agents.misc import ResponseAgent
-
-agent = MyAgent(
-    response_agent=ResponseAgent()  # Auto-decides when to stop/continue
-)
-```
-
-The ResponseAgent can analyze ambiguous LLM responses like "Should I submit?" and decide whether to continue.
-
-**Telemetry & Tracing**
-```python
-agent = MyAgent(
-    auto_trace=True,  # Automatic span creation
-    verbose=True  # Detailed logging
-)
-```
-
-**System Prompt Augmentation**
-```python
-task = Task(
-    system_prompt="Additional instructions...",  # Appended to agent's system prompt
-    ...
-)
-```
-
-## Testing Your Agent
-
-Test your agent on a simple task:
-
-```python
-import asyncio
-import hud
-import os
+from openai import AsyncOpenAI
+from hud.agents import GenericOpenAIChatAgent
 from hud.datasets import Task
 
-async def test_agent():
-    with hud.trace("test-custom-agent"):
-        task = Task(
-            prompt="Navigate to example.com",
-            mcp_config={
-                "hud": {
-                    "url": "https://mcp.hud.so/v3/mcp",
-                    "headers": {
-                        "Authorization": f"Bearer {os.getenv('HUD_API_KEY')}",
-                        "Mcp-Image": "hudpython/hud-remote-browser:latest"
-                    }
-                }
-            },
-            setup_tool={
-                "name": "setup",
-                "arguments": {
-                    "name": "navigate",
-                    "arguments": {"url": "https://example.com"}
-                }
-            },
-            evaluate_tool={
-                "name": "evaluate",
-                "arguments": {
-                    "name": "url_match",
-                    "arguments": {"pattern": "example.com"}
-                }
-            }
-        )
-        
-        # Use your custom agent
-        agent = MyAgent()
-        result = await agent.run(task)
-        print(f"Reward: {result.reward}")
+oai = AsyncOpenAI(base_url="https://my-gateway/v1", api_key="...")
 
-asyncio.run(test_agent())
-```
-
-## Built-in Agents
-
-HUD provides built-in agents for common LLM providers:
-
-```python
-from hud.agents import ClaudeAgent, OperatorAgent
-
-# Claude (Anthropic)
-claude_agent = ClaudeAgent(
-    model="claude-sonnet-4-20250514",
+agent = GenericOpenAIChatAgent(
+    openai_client=oai,
+    model_name="gpt-4o-mini",
+    allowed_tools=["computer"],        # optional filtering
+    disallowed_tools=["dangerous_op"], # optional filtering
+    verbose=True
 )
 
-# Operator (OpenAI-based)
-operator_agent = OperatorAgent()
+task = Task(
+  prompt="Open example.com and tell me the page title",
+  mcp_config={"hud": {"url": "https://mcp.hud.so/v3/mcp"}},  # your MCP servers
+  setup_tool={"name": "setup", "arguments": {"name": "navigate", "arguments": {"url": "https://example.com"}}},
+  evaluate_tool={"name": "evaluate", "arguments": {"name": "text_match", "arguments": {"pattern": "Example Domain"}}},
+)
+
+result = await agent.run(task)
+print(result.reward, result.content)
 ```
 
-Always test your agent with the actual MCP servers you'll use in production.
+That’s all—you didn’t have to write the 4 bridge methods because the base class already did.
 
-## Next Steps
+---
 
-<CardGroup cols={2}>
-<Card title="Benchmarks" icon="flask" href="/evaluate-agents/benchmarks">
-  Create, run, and publish evaluations
-</Card>
+## Writing a custom agent from `MCPAgent` (from scratch)
 
-<Card title="Agents Reference" icon="book" href="/reference/agents">
-  API details and built-in agents
-</Card>
-</CardGroup>
+Use this when you’re integrating a brand-new LLM API. Here’s a minimal, real template:
 
-## See Also
+```python
+from typing import Any, cast
+from hud.agents import MCPAgent
+from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+import mcp.types as types
 
-- [`hud eval`](/reference/cli/eval) - Run agents on tasks/datasets from the CLI
-- [`hud rl`](/reference/cli/rl) - Train agents with GRPO on your datasets
-- [Agents (SDK Reference)](/reference/agents) – API details and built-in agents
+class MyRawProviderAgent(MCPAgent):
+    async def get_system_messages(self) -> list[Any]:
+        return [{"role": "system", "content": self.system_prompt}]
+
+    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
+        content = []
+        for b in blocks:
+            if isinstance(b, types.TextContent):
+                content.append({"type": "text", "text": b.text})
+            elif isinstance(b, types.ImageContent):
+                content.append({"type": "image_url",
+                                "image_url": {"url": f"data:{b.mimeType};base64,{b.data}"}})
+        return [{"role": "user", "content": content}]
+
+    async def get_response(self, messages: list[Any]) -> AgentResponse:
+        # 1) Call your provider here with `messages`
+        # 2) Convert its tool-calls to MCPToolCall(name, arguments, id)
+        # 3) Return AgentResponse(...)
+        provider = ...  # your SDK
+        resp = await provider.create(messages=messages, tools=self.get_tool_schemas())
+        tool_calls = []
+        for tc in getattr(resp, "tool_calls", []):
+            args = tc.get("arguments", {}) or {}
+            tool_calls.append(MCPToolCall(id=tc.get("id"), name=tc["name"], arguments=args))
+        done = not tool_calls and getattr(resp, "finish_reason", "stop") in ("stop", "length")
+        return AgentResponse(content=getattr(resp, "text", "") or "", tool_calls=tool_calls, done=done)
+
+    async def format_tool_results(
+        self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
+    ) -> list[Any]:
+        # Many providers accept only strings for tool outputs; concatenate text.
+        text_parts = []
+        images = []
+        for call, res in zip(tool_calls, tool_results, strict=False):
+            if res.isError:
+                text_parts.append(f"[{call.name}] ERROR: " + _first_text(res) or "error")
+            else:
+                t = _first_text(res)
+                if t: text_parts.append(f"[{call.name}] {t}")
+                img = _last_image(res)
+                if img: images.append({"type":"image_url","image_url":{"url":f"data:{img.mimeType};base64,{img.data}"}})
+        content = []
+        if text_parts: content.append({"type":"text","text":"\n".join(text_parts)})
+        content.extend(images[-1:])  # keep it compact: latest screenshot
+        return [{"role": "user", "content": content or [{"type":"text","text":"Tools returned no output"}]}]
+
+def _first_text(res: MCPToolResult) -> str | None:
+    for c in res.content:
+        if isinstance(c, types.TextContent):
+            return c.text
+    return None
+
+def _last_image(res: MCPToolResult):
+    last = None
+    for c in res.content:
+        if isinstance(c, types.ImageContent):
+            last = c
+    return last
+```
+
+> Tip: If your provider has its own tool-call shape, your job is just mapping that shape to `MCPToolCall` and mapping `MCPToolResult` back into your provider’s message format.
+
+---
+
+## What `MCPAgent` already does for you
+
+- **Client lifecycle**: If you don’t pass a client, `agent.run(Task)` auto-creates one from `task.mcp_config` and cleans it up afterwards.
+- **Tool discovery & filtering**:
+
+  - `allowed_tools`, `disallowed_tools`, plus **lifecycle** tools (`setup`, `evaluate`, and an auto-detected `response` tool) are handled for you.
+  - `get_available_tools()` returns tools your LLM is allowed to see (lifecycle tools are hidden).
+- **Setup & Evaluate** (optional): If your `Task` supplies them, setup tool output can be appended to the first turn (`append_setup_output=True`), and evaluation computes a reward (looks for `reward`/`grade`/`score` keys).
+- **Tracing & logs**: Consistent logs via HUDConsole and optional auto tracing (`auto_trace=True`).
+
+Minimal usage surface:
+
+```python
+result = await agent.run("Just a prompt", max_steps=5)
+# or
+result = await agent.run(task_obj, max_steps=10)
+```
+
+The return is a `Trace` with `.reward`, `.done`, `.content`, `.isError`, and the full step history.
+
+---
+
+## Common options you’ll actually use
+
+- **Tool filtering**
+
+  ```python
+  agent = ClaudeAgent(
+      allowed_tools=["anthropic_computer", "search"],
+      disallowed_tools=["danger_delete"]
+  )
+  ```
+- **Screenshots / setup output**
+
+  ```python
+  agent = GenericOpenAIChatAgent(
+      initial_screenshot=True,      # include a first screenshot when supported
+      append_setup_output=False     # don’t push setup output into the first LLM turn
+  )
+  ```
+- **Auto stop/continue helper**
+
+  ```python
+  from hud.agents.misc import ResponseAgent
+  agent = GenericOpenAIChatAgent(response_agent=ResponseAgent())
+  ```
+
+---
+
+## Provider-specific notes (quick)
+
+- **OpenAI chat (`GenericOpenAIChatAgent`)**
+
+  - Converts MCP JSON Schemas to OpenAI function tools (handles `anyOf`, `prefixItems` via a sanitizer).
+  - Returns OpenAI-style tool messages and injects the latest image as a separate user message when needed.
+
+- **OpenAI Responses + Computer Use (`OperatorAgent`)**
+
+  - Stateful; tracks `previous_response_id` and `pending_call_id`.
+  - Expects an MCP tool named **`openai_computer`** (required tool).
+  - Formats tool results to send the latest screenshot back as an `input_image`.
+
+- **Anthropic (`ClaudeAgent`)**
+
+  - Builds a mapping from Claude tool names to MCP tool names; prefers the `computer_20250124` beta if available and enables the corresponding beta.
+  - Accepts/returns Anthropic beta content blocks; includes “thinking” summary when present.
+
+- **Grounded OpenAI (`GroundedOpenAIChatAgent`)**
+
+  - The LLM sees only a synthetic `computer` function with natural-language element descriptions.
+  - The agent calls a separate **Grounder** to resolve `"blue button in top-right"` → `(x, y)` clicks and forwards to the real MCP computer tool.
+
+- **LiteLLM (`LiteAgent`)**
+
+  - Uses LiteLLM for transport; if available, uses LiteLLM’s MCP→OpenAI tool transformer for stricter compatibility.
+
+- **LangChain (`LangChainAgent`)**
+
+  - Wraps MCP tools as LangChain tools via `LangChainAdapter` (optional dependency).
+  - Uses `create_tool_calling_agent` + `AgentExecutor` under the hood.
+
+---
+
+## Running and testing quickly
+
+A tiny async smoke test:
+
+```python
+import asyncio, os
+from hud.agents import GenericOpenAIChatAgent
+from openai import AsyncOpenAI
+
+async def main():
+    agent = GenericOpenAIChatAgent(
+        openai_client=AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY")),
+        model_name="gpt-4o-mini",
+    )
+    result = await agent.run("What is 2 + 2?")
+    print(result.content)
+
+asyncio.run(main())
+```
+
+For more thorough tests, look at `hud/agents/tests/` for examples of:
+
+- mocking provider SDKs
+- verifying `format_blocks`/`format_tool_results`
+- simulating tool calls and checking the loop behavior
+
+---
+
+## Troubleshooting (fast)
+
+- **“Required tools not available: ['openai_computer']”**
+  Your MCP servers must expose those tool names. Check `agent.get_available_tools()`; verify your `mcp_config`.
+
+- **Provider says “prompt too long”**
+  Trim message history or mimic what `ClaudeAgent` does (truncate earlier turns on 413).
+
+- **Model keeps asking “Should I continue?”**
+  Add `ResponseAgent()` to auto-resolve CONTINUE/STOP decisions, or refine your `system_prompt`.
+
+- **No screenshot in the next step**
+  Ensure your MCP computer tool returns an `ImageContent`. `OperatorAgent` and `GroundedOpenAIChatAgent` forward the latest screenshot automatically.
+
+---
+
+## See also
+
+- [`hud eval`](/reference/cli/eval) – run agents/datasets from the CLI
+- [`hud rl`](/reference/cli/rl) – train agents with GRPO
+- [Agents (SDK Reference)](/reference/agents) – API details & built-ins
