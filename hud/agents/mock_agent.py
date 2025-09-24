@@ -5,6 +5,7 @@ from typing import Any
 
 class MockToolRunner(MCPAgent):
     def __init__(self, **kwargs: Any) -> None:
+        kwargs["auto_trace"] = False
         super().__init__(**kwargs)
         self.metadata = {}
 

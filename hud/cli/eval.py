@@ -13,6 +13,7 @@ import typer
 import hud
 from hud.utils.hud_console import HUDConsole
 from hud.agents.mock_agent import MockToolRunner
+import yaml
 
 logger = logging.getLogger(__name__)
 hud_console = HUDConsole()
@@ -99,12 +100,6 @@ async def run_single_task(
         hud_console.info("📊 Loading task file…")
         # Load JSON or YAML depending on extension
         if path.suffix in {".yaml", ".yml"}:
-            try:
-                import yaml  # type: ignore
-            except Exception as e:
-                hud_console.error("YAML support is not installed. Please install with: pip install 'pyyaml'")
-                raise typer.Exit(1) from e
-
             with open(path) as f:
                 json_data = yaml.safe_load(f)
         else:
@@ -116,18 +111,7 @@ async def run_single_task(
             # Build single task object (or forward to full runner if multiple)
             if isinstance(json_data, list):
                 if len(json_data) > 1:
-                    await run_full_dataset(
-                        source,
-                        agent_type=agent_type,
-                        model=model,
-                        allowed_tools=allowed_tools,
-                        max_concurrent=1,
-                        max_steps=max_steps,
-                        parallel=False,
-                        verbose=verbose,
-                        mock=True,
-                    )
-                    return
+                    raise ValueError("Multiple tasks in --mock mode not supported yet")
                 task_data = json_data[0]
             elif isinstance(json_data, dict):
                 task_data = json_data
@@ -135,17 +119,12 @@ async def run_single_task(
                 hud_console.error("Unsupported file format for --mock. Provide a task object or single-item list.")
                 raise typer.Exit(1)
 
+            hud_console.info('Prompt: ' + task_data.get("prompt", "[No prompt provided]"))
+            hud_console.info("🧪 --mock: setting up problem, taking actions, evaluating.")
+            
             task = Task(**task_data)
-
-            # Run via MockToolRunner but wrap with hud.trace for visible link output
-            task_prompt = task.prompt[:50] + "..." if len(task.prompt) > 50 else task.prompt
-            with hud.trace(name=task_prompt):
-                hud_console.info('Prompt: ' + task.prompt)
-                hud_console.info("🧪 --mock: setting up problem, taking actions, evaluating. No llm involved.")
-                agent = MockToolRunner(verbose=verbose)
-                result = await agent.run(task, max_steps=max_steps)
-                hud_console.success(f"Reward: {result.reward}")
-                return
+            agent = MockToolRunner(verbose=verbose)
+            result = await agent.run(task, max_steps=max_steps)
 
         # Check if JSON contains multiple tasks (list with more than 1 task)
         if isinstance(json_data, list) and len(json_data) > 1:
@@ -216,7 +195,7 @@ async def run_single_task(
         # Load from HuggingFace dataset
         hud_console.info(f"📊 Loading dataset from HuggingFace: {source}…")
         try:
-            from datasets import load_dataset
+            from datasets import load_dataset  # type: ignore
         except ImportError as e:
             hud_console.error(
                 "Datasets library is not installed. "
@@ -280,12 +259,6 @@ async def run_full_dataset(
     # Check if source is a JSON/YAML file with list of tasks
     if path.exists() and path.suffix in {".json", ".yaml", ".yml"}:
         if path.suffix in {".yaml", ".yml"}:
-            try:
-                import yaml  # type: ignore
-            except Exception as e:
-                hud_console.error("YAML support is not installed. Please install with: pip install 'pyyaml'")
-                raise typer.Exit(1) from e
-
             with open(path) as f:
                 json_data = yaml.safe_load(f)
         else:
