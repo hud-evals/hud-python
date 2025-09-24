@@ -14,7 +14,7 @@ async def run() -> str:
     if status in ["ready", "ok"]:
         resp = await http_client.post("/run")
         data = resp.json()
-        return data
+        return {"result": "success", "data": data}
     else:
         return {
             "status": status,
@@ -31,7 +31,7 @@ async def setup(target_eval: str, model: str) -> str:
         "/reset", json=json.dumps({"target_eval": target_eval, "model": model})
     )
     data = resp.json()
-    return data
+    return {"status": "ready", "data": data}
 
 
 @mcp.tool

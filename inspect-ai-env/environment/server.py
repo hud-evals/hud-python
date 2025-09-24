@@ -16,12 +16,12 @@ logging.basicConfig(
     format="[%(levelname)s] %(asctime)s | %(name)s | %(message)s",
 )
 
-app = FastAPI(title="Inspect-AI eval-wrapper API")
-
+# globals for tracking state
 _model = ""
 _target_eval = ""
-
 _status = "not ready"
+
+app = FastAPI(title="Inspect-AI eval-wrapper API")
 
 
 class ResetPayload(BaseModel):
@@ -40,7 +40,7 @@ def reset(payload: ResetPayload):
     This is where we'd do a check for extra installation requirements
     of a specific inspect eval, and satisfy those. e.g. sweval"""
 
-    global _target_eval, _model
+    global _target_eval, _model, _status
     _target_eval = payload.target_eval
     _model = payload.model
     try:
@@ -60,27 +60,24 @@ def reset(payload: ResetPayload):
             )
         except Exception as irrelevant:
             pass
-        global _status
         _status = "ready"
         return {"ok": True, "stdout": stdout, "stderr": stderr}
     except Exception as e:
-        global _status
         _status = "error"
         return {"ok": False, "error": e, "traceback": traceback.format_exc()}
 
 
 @app.post("/run")
 def run(target_eval: str):
+    global _status
     try:
         # uv run inspect eval inspect_evals/
         stdout, stderr = run_uv_command(
             ["run", "inspect", "eval", f"inspect_evals/{_target_eval}"]
         )
-        global _status
         _status = "ok"
         return {"ok": True, "stdout": stdout, "stderr": stderr}
     except Exception as e:
-        global _status
         _status = "error"
         return {"ok": False, "error": e, "trace back": traceback.format_exc()}
 
