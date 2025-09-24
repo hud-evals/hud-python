@@ -73,6 +73,22 @@ def create_proxy_server(
         "PYTHONUNBUFFERED=1",  # Ensure Python output is not buffered
     ]
 
+    # Check for .env file in the project directory and add env vars
+    env_file = project_path / ".env"
+    loaded_env_vars = {}
+    if env_file.exists():
+        try:
+            from hud.cli.utils.config import parse_env_file
+
+            env_contents = env_file.read_text(encoding="utf-8")
+            loaded_env_vars = parse_env_file(env_contents)
+            for key, value in loaded_env_vars.items():
+                docker_cmd.extend(["-e", f"{key}={value}"])
+            if verbose and loaded_env_vars:
+                hud_console.info(f"Loaded {len(loaded_env_vars)} environment variable(s) from .env file")
+        except Exception as e:
+            hud_console.warning(f"Failed to load .env file: {e}")
+
     # Add user-provided Docker arguments
     if docker_args:
         docker_cmd.extend(docker_args)
@@ -112,8 +128,10 @@ def create_proxy_server(
             hud_console.info("The container's CMD determines reload behavior")
         hud_console.command_example(f"docker logs -f {container_name}", "View container logs")
 
-        # Show the full Docker command if there are environment variables
-        if docker_args and any(arg == "-e" or arg.startswith("--env") for arg in docker_args):
+        # Show the full Docker command if there are environment variables (from .env or args)
+        has_env_from_args = docker_args and any(arg == "-e" or arg.startswith("--env") for arg in docker_args)
+        has_env_from_file = bool(loaded_env_vars)
+        if has_env_from_args or has_env_from_file:
             hud_console.info("")
             hud_console.info("Docker command with environment variables:")
             hud_console.info(" ".join(docker_cmd))

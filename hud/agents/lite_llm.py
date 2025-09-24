@@ -63,7 +63,7 @@ class LiteAgent(GenericOpenAIChatAgent):
         messages: list[Any],
         tools: list[dict] | None,
         extra: dict[str, Any],
-    ):
+    ) -> Any:
         return await litellm.acompletion(
             model=self.model_name,
             messages=messages,

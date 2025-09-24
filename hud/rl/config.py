@@ -13,6 +13,7 @@ SUPPORTED_MODELS = [
     "Qwen/Qwen2.5-VL-32B-Instruct",
     "Qwen/Qwen2.5-VL-72B-Instruct",
     "Qwen/Qwen2.5-7B-Instruct",
+    "Qwen/Qwen2.5-3B-Instruct",
 ]
 
 
@@ -61,6 +62,9 @@ class ModelConfig:
 @dataclass
 class TrainingConfig:
     """Training hyperparameters."""
+    # GPU parameters
+    gpu_type: str = "A100"
+    num_gpus: int = 2
 
     # Training parameters
     training_steps: int = 100
@@ -140,6 +144,7 @@ class Config:
     job_id: str | None = None  # Use existing job ID if provided
     stats_interval: int = 1
     verbose: bool = False
+    very_verbose: bool = False
 
     # Paths
     out_dir: str = "./checkpoints"
@@ -163,6 +168,7 @@ class Config:
             job_id=d.get("job_id"),
             stats_interval=d.get("stats_interval", 1),
             verbose=d.get("verbose", False),
+            very_verbose=d.get("very_verbose", False),
             out_dir=d.get("out_dir", "./checkpoints"),
             adapter_prefix=d.get("adapter_prefix", "cua-grpo-step"),
             seed=d.get("seed", 1234),
@@ -178,6 +184,7 @@ class Config:
             "job_id": self.job_id,
             "stats_interval": self.stats_interval,
             "verbose": self.verbose,
+            "very_verbose": self.very_verbose,
             "out_dir": self.out_dir,
             "adapter_prefix": self.adapter_prefix,
             "seed": self.seed,

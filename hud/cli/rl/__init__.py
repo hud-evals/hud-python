@@ -78,10 +78,9 @@ def rl_command(
         "-y",
         help="Auto-accept all prompts and use defaults (lazy mode)",
     ),
-    # Internal flag
     skip_vllm_startup: bool = typer.Option(
         False,
-        hidden=True,
+        "--skip-vllm-startup",
         help="Skip local vLLM server startup (for internal use)",
     ),
 ) -> None:

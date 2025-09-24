@@ -13,6 +13,7 @@ from pathlib import Path
 from rich.console import Console
 
 from hud.cli.rl.celebrate import show_confetti_async
+from hud.cli.rl.gpu_utils import adjust_config_for_ddp
 from hud.cli.rl.viewer import show_json_interactive
 from hud.cli.rl.wait_utils import wait_for_enter_cancel_or_change
 from hud.utils.hud_console import hud_console
@@ -52,7 +53,7 @@ def ensure_vllm_deployed(model_name: str, gpu_type: str = "A100", timeout: int =
     hud_console.info("Waiting for vLLM server to be ready...")
     start_time = time.time()
     with hud_console.progress() as progress:
-        progress.update("Checking deployment status (see live status on https://app.hud.so/models)")
+        progress.update("Checking deployment status (see live status on https://hud.so/models)")
         while True:
             if time.time() - start_time > timeout:
                 hud_console.error("Timeout waiting for vLLM deployment")
@@ -182,14 +183,18 @@ def run_remote_training(
 
             # Ask for model type
             if yes:
-                model_type = "Qwen/Qwen2.5-VL-3B-Instruct"  # Default model in yes mode
+                if config_file:
+                    config = load_config(config_file)
+                    model_type = config.model.base_model
+                else:
+                    model_type = "Qwen/Qwen2.5-VL-3B-Instruct"
                 hud_console.info(f"Auto-selecting base model: {model_type} (--yes mode)")
             else:
                 model_type = hud_console.select(
                     "Select base model type:",
                     choices=[
                         {"name": "Qwen2.5-VL-3B-Instruct", "value": "Qwen/Qwen2.5-VL-3B-Instruct"},
-                        # {"name": "Qwen2.5-VL-7B-Instruct", "value": "Qwen/Qwen2.5-VL-7B-Instruct"}, # noqa: E501
+                        {"name": "Qwen2.5-3B-Instruct", "value": "Qwen/Qwen2.5-3B-Instruct"},
                     ],
                     default=0,
                 )
@@ -309,7 +314,7 @@ def run_remote_training(
         # console.print(gpu_table)
 
         if yes:
-            gpu_choice = "A100"  # Default GPU in yes mode
+            gpu_choice = "A100"
             hud_console.info(f"Auto-selecting GPU: {gpu_choice} 80GB (--yes mode)")
         else:
             gpu_choice = hud_console.select(
@@ -322,7 +327,7 @@ def run_remote_training(
             )
 
         if yes:
-            num_gpus = 1  # Default to 1 GPU in yes mode
+            num_gpus = 2 # Default to 2 GPUs in yes mode
             hud_console.info(f"Auto-selecting {num_gpus} GPU(s) (--yes mode)")
         else:
             num_gpus = hud_console.select(
@@ -347,6 +352,10 @@ def run_remote_training(
             yes=yes,
         )
 
+        config = adjust_config_for_ddp(config, int(num_gpus))
+
+        config.training.gpu_type = gpu_choice
+
         # Use a short label for tasks (avoid full absolute paths)
         try:
             if tasks_file and Path(tasks_file).exists():
@@ -357,7 +366,7 @@ def run_remote_training(
         except Exception:
             tasks_label = str(tasks_file)
 
-        config.job_name = f"RL {model_name} on {tasks_label}"
+        config.job_name = f"RL {tasks_label} | {model_name}"
 
         # Save config so user can review/edit externally
         temp_config_path = Path(f".rl_config_temp_{model_name}.json")
@@ -420,9 +429,11 @@ def run_remote_training(
         # Load provided config
         hud_console.info(f"Loading configuration from: {config_file}")
         config = load_config(config_file)
+        gpu_choice = config.training.gpu_type
+        num_gpus = config.training.num_gpus
+
+        config = adjust_config_for_ddp(config, int(num_gpus))
         config_dict = config.to_dict()
-        gpu_choice = "A100"  # Default
-        num_gpus = 1  # Default for non-interactive mode
 
     # Launch training
     try:

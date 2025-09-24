@@ -22,10 +22,10 @@ OSS RL environment + evals toolkit. Wrap software as environments, run benchmark
 
 ## Highlights
 
+- 🎓 **[One-click RL](https://hud.so/models)** – Run `hud rl` to get a trained model on any environment.
 - 🚀 **[MCP environment skeleton](https://docs.hud.so/core-concepts/mcp-protocol)** – any agent can call any environment.
 - ⚡️ **[Live telemetry](https://hud.so)** – inspect every tool call, observation, and reward in real time.
 - 🗂️ **[Public benchmarks](https://hud.so/leaderboards)** – OSWorld-Verified, SheetBench-50, and more.
-- 🌱 **[Reinforcement learning built-in](rl/)** – Verifiers gym pipelines for GRPO on any environment.
 - 🌐 **[Cloud browsers](environments/remote_browser/)** – AnchorBrowser, Steel, BrowserBase integrations for browser automation.
 - 🛠️ **[Hot-reload dev loop](environments/README.md#phase-5-hot-reload-development-with-cursor-agent)** – `hud dev` for iterating on environments without rebuilds.
 
@@ -34,27 +34,46 @@ OSS RL environment + evals toolkit. Wrap software as environments, run benchmark
 ## Installation
 
 ```bash
-# Core installation - MCP servers, telemetry, basic tools for environment design
+# SDK - MCP servers, telemetry, evaluation
 pip install hud-python
 
-# Agent installation - Adds AI providers, datasets
-pip install "hud-python[agent]"
-
-# CLI utilities
+# CLI - RL pipeline, environment design
 uv tool install hud-python
 # uv tool update-shell
-
-# From source (latest)
-git clone https://github.com/hud-evals/hud-python
-pip install -e "hud-python[dev]"
 ```
 
 > See [docs.hud.so](https://docs.hud.so), or add docs to any MCP client:
 > `claude mcp add --transport http docs-hud https://docs.hud.so/mcp`
 
-## Quickstart
+Before starting, get your HUD_API_KEY at [hud.so](https://hud.so).
 
-For a tutorial that explains the agent and evaluation design, run ([see quickstart docs](https://docs.hud.so/quickstart)):
+
+## Quickstart: Training
+
+RL using GRPO a Qwen2.5-VL model on any hud dataset:
+
+```bash
+hud get hud-evals/basic-2048 # from HF
+hud rl basic-2048.json
+```
+
+> See [agent training docs](https://docs.hud.so/train-agents/quickstart)
+
+Or make your own environment and dataset:
+
+```bash
+hud init my-env && cd my-env
+hud dev --interactive
+# When ready to run:
+hud rl
+```
+
+> See [environment design docs](https://docs.hud.so/build-environments)
+
+
+## Quickstart: Evals
+
+For a tutorial that explains the agent and evaluation design, run:
 
 ```python
 uvx hud-python quickstart
@@ -117,27 +136,29 @@ This is a Qwen‑2.5‑VL‑3B agent training a policy on the 2048-basic browser
 Train with the new interactive `hud rl` flow:
 
 ```bash
-# Install CLI with RL extras
-uv tool install "hud-python[rl]"
+# Install CLI
+uv tool install hud-python
 
 # Option A: Run directly from a HuggingFace dataset
 hud rl hud-evals/basic-2048
 
 # Option B: Download first, modify, then train
 hud get hud-evals/basic-2048
-hud rl basic-2048.jsonl
+hud rl basic-2048.json
 
 # Optional: baseline evaluation
-hud eval basic-2048.jsonl
+hud eval basic-2048.json
 ```
 
 Supports multi‑turn RL for both:
 - Language‑only models (e.g., `Qwen/Qwen2.5-7B-Instruct`)
 - Vision‑Language models (e.g., `Qwen/Qwen2.5-VL-3B-Instruct`)
 
-By default, `hud rl` provisions a persistant server and trainer in the cloud, streams telemetry to `hud.so`, and lets you monitor/manage models at `hud.so/models`. Use `--local` to run entirely on your machines (typically 2+ GPUs: one for vLLM, the rest for training).
+By default, `hud rl` provisions a persistent server and trainer in the cloud, streams telemetry to `hud.so`, and lets you monitor/manage models at `hud.so/models`. Use `--local` to run entirely on your machines (typically 2+ GPUs: one for vLLM, the rest for training).
 
 Any HUD MCP environment and evaluation works with our RL pipeline (including remote configurations). See the guided docs: `https://docs.hud.so/train-agents/quickstart`.
+
+Pricing: Hosted vLLM and training GPU rates are listed in the [Training Quickstart → Pricing](https://docs.hud.so/train-agents/quickstart#pricing). Manage billing at the [HUD billing dashboard](https://hud.so/project/billing).
 
 ## Benchmarking Agents
 
@@ -186,7 +207,7 @@ from hud.tools import HudComputerTool
 mcp = MCPServer("My Environment")
 
 # Add hud tools (see all tools: https://docs.hud.so/reference/tools)
-mcp.add_tool(HudComputerTool())
+mcp.tool(HudComputerTool())
 
 # Or custom tools (see https://docs.hud.so/build-environments/adapting-software)
 @mcp.tool("launch_app"):
@@ -357,11 +378,10 @@ graph LR
 
 ## Roadmap
 
-- Merging our forks in to the main `mcp`, `mcp_use`, `verifiers` repositories
+- Merging our forks in to the main `mcp`, `mcp_use` repositories
 - Helpers for building new environments (see [current guide](environments/README.md))
 - Integrations with every major agent framework
 - Evaluation environment registry
-- Native RL training to hud environments (see [current RL support](rl/))
 - MCP opentelemetry standard
 
 ## Contributing
@@ -372,7 +392,7 @@ Key areas:
 - [Environment examples](environments/) - Add new MCP environments
 - [Agent implementations](hud/agents/) - Add support for new LLM providers
 - [Tool library](hud/tools/) - Extend the built-in tool collection
-- [RL training](rl/) - Improve reinforcement learning pipelines
+- [RL training](hud/rl/) - Improve reinforcement learning pipelines
 
 Thanks to all our contributors!
 

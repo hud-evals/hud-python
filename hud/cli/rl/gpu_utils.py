@@ -245,13 +245,17 @@ def adjust_config_for_ddp(config: Config, num_gpus: int) -> Config:
     # Apply scaling rule
     if num_gpus == 1:
         # Special case: 2 groups for single GPU
+        groups_per_gpu = 2
         config.training.batch_size = 2 * group_size
     else:
-        # Multi-GPU: each GPU processes 1 group
-        config.training.batch_size = num_gpus * group_size
+        groups_per_gpu = config.training.batch_size // group_size
+        # Multi-GPU: each GPU processes groups_per_gpu groups
+        config.training.batch_size = num_gpus * group_size * groups_per_gpu
 
     # Update max_parallel_episodes to match
     config.actor.max_parallel_episodes = config.training.batch_size
+
+    config.training.num_gpus = num_gpus
 
     # Log the adjustment
     from rich.console import Console
@@ -261,7 +265,7 @@ def adjust_config_for_ddp(config: Config, num_gpus: int) -> Config:
         f"\n[cyan]📊 Adjusted batch_size to {config.training.batch_size} ({config.training.batch_size // group_size} groups)[/cyan]"  # noqa: E501
     )
     console.print(
-        f"[cyan]   Each of the {num_gpus} GPU(s) will process {config.training.batch_size // group_size // num_gpus} group(s) in parallel[/cyan]"  # noqa: E501
+        f"[cyan]   Each of the {num_gpus} GPU(s) will process {groups_per_gpu} group(s) in parallel[/cyan]"  # noqa: E501
     )
 
     return config

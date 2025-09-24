@@ -215,14 +215,11 @@ def convert_tasks_to_remote(tasks_file: str) -> str:
     # Extract existing images from tasks
     existing_images = _extract_existing_images(tasks)
 
-    # Load tasks (supports .json and .jsonl)
-    if already_remote and not existing_images:
-        # Tasks are remote but have no image references - just return as-is
-        return str(tasks_path)
-
     # Locate environment
     env_dir = find_environment_dir(tasks_path)
     if not env_dir:
+        if already_remote:
+            return str(tasks_path)
         hud_console.error("Could not locate an environment directory (Dockerfile + pyproject.toml)")
         hud_console.hint("Ensure you're in or near your environment folder before running 'hud rl'")
         raise typer.Exit(1)

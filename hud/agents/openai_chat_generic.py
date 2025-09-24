@@ -177,16 +177,16 @@ class GenericOpenAIChatAgent(MCPAgent):
         messages: list[Any],
         tools: list[dict] | None,
         extra: dict[str, Any],
-    ):
+    ) -> Any:
         if self.oai is None:
             raise ValueError("openai_client is required for GenericOpenAIChatAgent")
         # default transport = OpenAI SDK
         return await self.oai.chat.completions.create(
             model=self.model_name,
             messages=messages,
-            tools=tools,  # already ChatCompletionToolParam-shaped
+            tools=tools,  # type: ignore ready ChatCompletionToolParam-shaped
             **extra,
-        )
+        )  # type: ignore
 
     @instrument(
         span_type="agent",
@@ -204,7 +204,9 @@ class GenericOpenAIChatAgent(MCPAgent):
 
         try:
             response = await self._invoke_chat_completion(
-                messages=messages, tools=tools, extra=extra
+                messages=messages,
+                tools=tools, # type: ignore
+                extra=extra,
             )
         except Exception as e:
             error_content = f"Error getting response {e}"

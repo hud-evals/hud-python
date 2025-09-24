@@ -84,7 +84,7 @@ def save_config(config: Config, path: Path) -> None:
     """Save configuration to a JSON file."""
     config_dict = config.to_dict()
 
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(config_dict, f, indent=2)
         f.write("\n")  # Add newline at end of file
 
@@ -94,7 +94,7 @@ def save_config(config: Config, path: Path) -> None:
 
 def load_config(path: Path) -> Config:
     """Load configuration from a JSON file."""
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
 
     # Use Config.from_dict which handles missing fields gracefully

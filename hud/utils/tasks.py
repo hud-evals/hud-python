@@ -40,7 +40,7 @@ def load_tasks(tasks_input: str | list[dict], *, raw: bool = False) -> list[Task
         if Path(tasks_input).exists():
             file_path = Path(tasks_input)
 
-            with open(file_path) as f:
+            with open(file_path, encoding="utf-8") as f:
                 # Handle JSON files (array of tasks)
                 if file_path.suffix.lower() == ".json":
                     data = json.load(f)

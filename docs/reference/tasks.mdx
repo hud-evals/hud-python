@@ -135,7 +135,7 @@ results = await run_dataset(
 After confirming stability, use parallel runners for maximum speed:
 
 ```python
-from hud.datasets import run_dataset_parallel
+from hud.datasets import run_dataset
 
 # Fast evaluation once everything is stable
 results = await run_dataset_parallel(
@@ -168,7 +168,7 @@ results = await run_dataset_parallel(
 ### run_dataset_parallel (Automatic)
 
 ```python
-from hud.datasets import run_dataset_parallel
+from hud.datasets import run_dataset
 
 # Automatic optimization - recommended for most cases
 results = await run_dataset_parallel(

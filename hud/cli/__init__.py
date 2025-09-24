@@ -1178,6 +1178,11 @@ def rl(
         "--vllm-gpu",
         help="Specific GPU for vLLM server",
     ),
+    skip_vllm_startup: bool = typer.Option(
+        False,
+        "--skip-vllm-startup",
+        help="Skip the vLLM server startup",
+    ),
 ) -> None:
     """🎯 Run GRPO reinforcement learning training on tasks."""
     # Import from the rl module
@@ -1195,6 +1200,7 @@ def rl(
         ddp_gpus=ddp_gpus,
         vllm_gpu=vllm_gpu,
         yes=yes,
+        skip_vllm_startup=skip_vllm_startup,
     )
 
 

@@ -127,8 +127,4 @@ def is_environment_directory(path: str | Path) -> bool:
         return False
 
     # Must have pyproject.toml
-    if not (dir_path / "pyproject.toml").exists():
-        hud_console.error("pyproject.toml not found")
-        return False
-
-    return True
+    return (dir_path / "pyproject.toml").exists()

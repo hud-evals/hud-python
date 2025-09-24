@@ -56,6 +56,10 @@ async def train(config: Config, tasks: list[Task]) -> None:
         logging.basicConfig(level=logging.INFO)
         # Remove httpx logger
         logging.getLogger("httpx").setLevel(logging.WARNING)
+    if config.very_verbose:
+        logging.basicConfig(level=logging.DEBUG)
+        # Remove httpx logger
+        logging.getLogger("httpx").setLevel(logging.INFO)
 
     if is_main_process():
         hud_console.header("Starting GRPO Training")
@@ -103,7 +107,10 @@ async def train(config: Config, tasks: list[Task]) -> None:
     if is_main_process():
         hud_console.info(f"Creating job with config.job_id: {config.job_id}")
         job_obj = hud.create_job(
-            job_id=config.job_id, name=config.job_name, metadata={"config": config.to_dict()}
+            job_id=config.job_id, name=config.job_name, metadata={
+                "config": config.to_dict(),
+                "agent_class": config.model.base_model
+            }
         )
         hud_console.info(f"Created job with job_obj.id: {job_obj.id}")
         job_obj.update_status_sync("running")
@@ -296,7 +303,7 @@ async def main() -> None:
 
     # Load config
     if args.config:
-        with open(args.config) as f:  # noqa: ASYNC230
+        with open(args.config, encoding="utf-8") as f:  # noqa: ASYNC230
             config_dict = json.load(f)
         config = Config.from_dict(config_dict)
     else:
@@ -334,7 +341,7 @@ async def main() -> None:
     # Load tasks
     if args.tasks_json:
         # Tasks provided as JSON list via command line
-        tasks = load_tasks(args.tasks_jso)
+        tasks = load_tasks(args.tasks_json)
     elif args.tasks:
         # Tasks provided as file path or HuggingFace dataset
         tasks = load_tasks(args.tasks)
