@@ -494,7 +494,8 @@ class GRPOLearner:
 
             logits = out.logits / self.config.actor.temperature
 
-            # Compute token log-probs via negative cross-entropy to avoid materializing full log_probs
+            # Compute token log-probs via negative cross-entropy to avoid
+            # materializing full log_probs
             targets = inputs["input_ids"][:, 1:]
             logits_slice = logits[:, :-1, :]
             loss_flat = F.cross_entropy(
