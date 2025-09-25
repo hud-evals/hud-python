@@ -22,7 +22,7 @@ async def setup() -> str:
     if not http_client:
         raise RuntimeError("HTTP client not initialized")
     resp = await http_client.post("/reset")
-    return json.dumps({"status": "ready", "content": resp.body()})
+    return json.dumps({"status": "ready", "content": resp.json()})
 
 
 @mcp.tool()

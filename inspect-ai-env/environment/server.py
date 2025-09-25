@@ -3,7 +3,9 @@
 import logging
 import sys
 import os
+import warnings
 from datetime import datetime
+
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -77,7 +79,7 @@ async def evaluate(eval_config: dict):
         full_commands = [
             "inspect",
             "eval",
-            f"inspect_evals/{_target_eval}",
+            f"/app/inspect_evals/{_target_eval}",
             "--model",
             _model,
         ] + eval_params

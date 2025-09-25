@@ -1,13 +1,9 @@
 #!/bin/bash
 
-# Default to mbpp if TARGET_EVAL is not set
-TARGET_EVAL=${TARGET_EVAL:-mbpp}
+TARGET_EVAL=${TARGET_EVAL}
 
 # Check if eval already exists
-if [ -d "/app/inspect_evals/${TARGET_EVAL}" ]; then
-    echo "✅ Eval ${TARGET_EVAL} already exists, skipping download"
-else
-    echo "📥 Downloading eval: ${TARGET_EVAL}"
+if ! [ -d "/app/inspect_evals/${TARGET_EVAL}" ]; then
 
     # Download specific eval using sparse checkout
     git clone --filter=blob:none --sparse https://github.com/UKGovernmentBEIS/inspect_evals.git inspect_evals_repo
@@ -16,8 +12,7 @@ else
     cd ..
 
     # Copy to the expected location
-    cp -r inspect_evals_repo/src/inspect_evals/${TARGET_EVAL} inspect_evals/
+    cp -r inspect_evals_repo/src/inspect_evals/${TARGET_EVAL} inspect_evals/${TARGET_EVAL}/
     rm -rf inspect_evals_repo
 
-    echo "✅ Downloaded eval: ${TARGET_EVAL}"
 fi

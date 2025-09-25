@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 # Example: RUN entrypoint.sh
 
 # Copy and install dependencies
-COPY docker_pyproject.toml ./pyproject.toml
+COPY pyproject.toml pyproject.toml
 RUN pip install uv
 # Create a virtual environment
 RUN uv venv /opt/venv
@@ -27,7 +27,7 @@ COPY download-eval.sh ./download-eval.sh
 RUN chmod +x download-eval.sh
 
 RUN uv pip install -e .
-RUN pip list
+RUN uv pip list
 RUN ls -a
 
 ENV ENV_SERVER_PORT=8005
