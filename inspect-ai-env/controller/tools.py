@@ -17,15 +17,12 @@ logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
-async def setup(target_eval: str, model: str) -> str:
+async def setup() -> str:
     """Initialize or reset the environment to its starting state."""
     if not http_client:
         raise RuntimeError("HTTP client not initialized")
-    resp = await http_client.post(
-        "/reset", json={"target_eval": target_eval, "model": model}
-    )
-    data = resp.json()
-    return json.dumps({"status": "ready", "content": data})
+    resp = await http_client.post("/reset")
+    return json.dumps({"status": "ready", "content": resp.body()})
 
 
 @mcp.tool()
@@ -37,7 +34,7 @@ async def evaluate(eval_config: dict = {}) -> EvaluationResult:
     try:
         response = await http_client.post(
             "/evaluate",
-            json={"eval_config": eval_config},
+            json=eval_config,
             timeout=15.0,
         )
 
@@ -46,7 +43,7 @@ async def evaluate(eval_config: dict = {}) -> EvaluationResult:
 
         data = response.json()
         logger.warning(f"data received by mcp: {data}")
-        trace_id = data.get("trace_id")
+        trace_id = data.get("content", {}).get("trace_id")
         assert trace_id is not None
 
         return EvaluationResult(

@@ -6,10 +6,8 @@
         "url": "http://localhost:8765/mcp"
       }
     },
-    "agent_tools": ["run"],
     "setup_tool": {
-      "name": "setup",
-      "arguments": {"target_eval":"mbpp", "model":"anthropic/claude-3-5-haiku-20241022"}
+      "name": "setup"
     },
     "evaluate_tool": {
       "name": "evaluate",

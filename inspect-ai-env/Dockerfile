@@ -18,15 +18,21 @@ RUN uv venv /opt/venv
 # Set the PATH to include the venv's bin directory
 ENV PATH="/opt/venv/bin:$PATH"
 
+# Create inspect_evals directory (eval will be downloaded at runtime)
+RUN mkdir -p inspect_evals
+
 COPY controller/ ./controller/
 COPY environment/ ./environment/
+COPY download-eval.sh ./download-eval.sh
+RUN chmod +x download-eval.sh
 
-RUN pip install --no-cache-dir -e .
+RUN uv pip install -e .
 RUN pip list
 RUN ls -a
 
 ENV ENV_SERVER_PORT=8005
+ENV COLUMNS=120
 
 # Start context server in background, then run controller with hot-reload
 # Disable access logs to prevent stdout corruption
-CMD ["sh", "-c", "uvicorn environment.server:app --host 0.0.0.0 --port $ENV_SERVER_PORT --reload --log-level warning --reload-dir environment & sleep 0.5 && exec hud run controller --reload"]
+CMD ["sh", "-c", "./download-eval.sh && uvicorn environment.server:app --host 0.0.0.0 --port $ENV_SERVER_PORT --reload --log-level warning --reload-dir environment & sleep 0.5 && exec hud run controller --reload"]

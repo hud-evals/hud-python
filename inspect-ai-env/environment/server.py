@@ -2,7 +2,8 @@
 
 import logging
 import sys
-import uuid
+import os
+from datetime import datetime
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -25,25 +26,21 @@ _status = "not ready"
 app = FastAPI(title="Inspect-AI eval-wrapper API")
 
 
-class ResetPayload(BaseModel):
-    target_eval: str
-    model: str
-
-
 @app.get("/health")
 def health():
     return {"ok": True, "content": _status}
 
 
 @app.post("/reset")
-def reset(payload: ResetPayload):
+def reset():
     """Setup and/or reset the environment.
     This is where we'd do a check for extra installation requirements
     of a specific inspect eval, and satisfy those. e.g. sweval"""
 
     global _target_eval, _model, _status
-    _target_eval = payload.target_eval
-    _model = payload.model
+    _target_eval = os.getenv("TARGET_EVAL", "specify_target_eval_in_the_.env")
+    _model = os.getenv("MODEL", "specify_model_in_the_.env")
+    logger.warning(f"Set up model and eval. Model: {_model}, Eval: {_target_eval}")
     # TODO: setup local model if needed
     extra_stdout = ""
     extra_stderr = ""
@@ -87,7 +84,7 @@ async def evaluate(eval_config: dict):
         full_commands = [str(x) for x in full_commands]
         logger.warning(f"full commands: {full_commands}")
 
-        trace_id = f"inspectai_{_target_eval}_{_model}_{str(uuid.uuid4())[:5]}"
+        trace_id = f"inspectai_{_target_eval}_{_model.split('/')[-1]}_{datetime.now().strftime('%y%m%d_%H%M%S')}"
 
         # Create the background task using asyncio.create_task to get a handle to it
         task = asyncio.create_task(run_eval_and_log(trace_id, full_commands))
