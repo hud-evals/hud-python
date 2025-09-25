@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import timedelta
 from typing import Any
 
 import torch
@@ -17,7 +18,10 @@ def setup_distributed() -> None:
         torch.cuda.set_device(local_rank)
 
         # Initialize process group
-        dist.init_process_group("nccl")
+        # Increase watchdog timeout to accommodate long eval/sampling phases
+        # and enable clearer NCCL error handling.
+        os.environ.setdefault("TORCH_NCCL_ASYNC_ERROR_HANDLING", "1")
+        dist.init_process_group("nccl", timeout=timedelta(minutes=15))
 
 
 def get_local_rank() -> int:
@@ -77,7 +81,7 @@ def broadcast_object(obj: Any, src: int = 0) -> Any:
         return obj
 
     obj_list = [obj] if dist.get_rank() == src else [None]
-    dist.broadcast_object_list(obj_list, src=src)
+    dist.broadcast_object_list(obj_list, src=src, device=torch.device("cpu"))
     return obj_list[0]
 
 

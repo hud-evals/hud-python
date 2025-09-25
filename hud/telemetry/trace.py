@@ -138,7 +138,10 @@ def trace(
         task_run_id = str(uuid.uuid4())
     else:
         # Use a placeholder for custom backends
-        task_run_id = "custom-otlp-trace"
+        logger.warning(
+            "HUD API key is not set, using a placeholder for the task run ID. If this looks wrong, check your API key." # noqa: E501
+        )
+        task_run_id = str(uuid.uuid4())
 
     # Create trace object
     trace_obj = Trace(task_run_id, name, job_id, task_id)

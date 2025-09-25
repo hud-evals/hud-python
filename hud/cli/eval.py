@@ -219,7 +219,7 @@ async def run_single_task(
             env_dir = find_environment_dir(path)
             if env_dir is not None:
                 # Non-interactive for eval; warn but don't block
-                ensure_built(env_dir, interactive=True)
+                ensure_built(env_dir, interactive=False)
         except Exception as e:
             hud_console.debug(f"Eval preflight env check skipped: {e}")
 

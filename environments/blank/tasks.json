@@ -3,13 +3,7 @@
     "prompt": "Increment the counter to reach 10",
     "mcp_config": {
       "local": {
-        "command": "docker",
-        "args": [
-          "run",
-          "--rm",
-          "-i",
-          "hud-blank"
-        ]
+        "url": "http://localhost:8765/mcp"
       }
     },
     "agent_tools": ["act"],

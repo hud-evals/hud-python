@@ -7,7 +7,6 @@ import os
 from typing import TYPE_CHECKING, Any
 
 import torch
-import torch.nn.functional as F
 from peft import LoraConfig, get_peft_model
 from torch.nn.parallel import DistributedDataParallel as DDP
 from transformers import (
@@ -494,21 +493,17 @@ class GRPOLearner:
 
             logits = out.logits / self.config.actor.temperature
 
-            # Compute token log-probs via negative cross-entropy to avoid
-            # materializing full log_probs
             targets = inputs["input_ids"][:, 1:]
-            logits_slice = logits[:, :-1, :]
-            loss_flat = F.cross_entropy(
-                logits_slice.reshape(-1, logits_slice.size(-1)),
-                targets.reshape(-1),
-                reduction="none",
-            )
-            token_log_probs = (-loss_flat).reshape_as(targets)
+
+            # Align logits to predict next token: use logits[:, :-1, :]
+            next_logits = logits[:, :-1, :]
+
+            token_log_probs = _selective_log_softmax(next_logits, targets)
 
             # Compute entropy only for assistant tokens to save memory
             assistant_mask = inputs["assistant_mask"]
             entropy = torch.zeros_like(token_log_probs)
-            if assistant_mask.any() and getattr(self.config.training, "entropy_beta", 0.0) != 0.0:
+            if assistant_mask.any():
                 entropy[assistant_mask] = entropy_from_logits(logits[:, :-1][assistant_mask])
 
             return token_log_probs, entropy
@@ -520,9 +515,8 @@ class GRPOLearner:
             batch_size = inputs["input_ids"].shape[0] if "input_ids" in inputs else 1
             # Create dummy tensors that still participate in autograd so backward doesn't fail
             try:
-                param_sum = torch.sum(
-                    next(self.policy.parameters())
-                )  # touch params to build a graph
+                # Touch params to build a graph
+                param_sum = torch.sum(next(self.policy.parameters()))
                 base = param_sum * 0.0
             except StopIteration:
                 base = torch.tensor(0.0, device=self.device)
@@ -611,3 +605,33 @@ def sanity_check(
         rho_diag[m] = torch.exp(masked_log_rho[m].clamp(-20.0, 20.0))
         _stats("ratio_tok(masked)", ratio_diag)
         _stats("rho_tok(masked)", rho_diag)
+
+
+def _selective_log_softmax(
+    logits_bt_v: torch.Tensor,
+    index_bt: torch.Tensor,
+) -> torch.Tensor:
+    """Gather log softmax for selected indices with reduced peak memory.
+
+    Uses logsumexp subtraction for float32/64; falls back to per-row
+    log_softmax for bf16/fp16.
+    logits_bt_v: [B, T, V]
+    index_bt:    [B, T]
+    Returns:     [B, T]
+    """
+    if logits_bt_v.dtype in (torch.float32, torch.float64):
+        # Compute logsumexp per [B, T] in a loop over batch to reduce
+        # peak from B*T*V to T*V
+        logsumexp_values = torch.stack([torch.logsumexp(lg, dim=-1) for lg in logits_bt_v])
+        selected_logits = torch.gather(logits_bt_v, dim=-1, index=index_bt.unsqueeze(-1)).squeeze(
+            -1
+        )
+        return selected_logits - logsumexp_values
+    # Reduced precision: numerically stable route using per-row log_softmax
+    token_logprobs_rows: list[torch.Tensor] = []
+    for logits_row, index_row in zip(logits_bt_v, index_bt, strict=True):
+        logprobs_row = logits_row.log_softmax(dim=-1)
+        token_logprobs_rows.append(
+            torch.gather(logprobs_row, dim=-1, index=index_row.unsqueeze(-1)).squeeze(-1)
+        )
+    return torch.stack(token_logprobs_rows)
