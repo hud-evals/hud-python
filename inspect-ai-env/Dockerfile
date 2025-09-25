@@ -10,17 +10,23 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 # Example: RUN entrypoint.sh
 
 # Copy and install dependencies
-COPY pyproject.toml ./
+COPY docker_pyproject.toml ./pyproject.toml
+RUN pip install uv
+# Create a virtual environment
+RUN uv venv /opt/venv
+
+# Set the PATH to include the venv's bin directory
+ENV PATH="/opt/venv/bin:$PATH"
+
 COPY controller/ ./controller/
 COPY environment/ ./environment/
-RUN pip install -U pip
-RUN pip install uv
-RUN uv sync
-RUN uv pip install --no-cache-dir -e .
-RUN . ./.venv/bin/activate
+
+RUN pip install --no-cache-dir -e .
+RUN pip list
+RUN ls -a
 
 ENV ENV_SERVER_PORT=8005
 
 # Start context server in background, then run controller with hot-reload
 # Disable access logs to prevent stdout corruption
-CMD ["sh", "-c", "uv run uvicorn environment.server:app --host 0.0.0.0 --port $ENV_SERVER_PORT --reload --log-level warning --reload-dir environment & sleep 0.5 && exec uv run hud run controller --reload"]
+CMD ["sh", "-c", "uvicorn environment.server:app --host 0.0.0.0 --port $ENV_SERVER_PORT --reload --log-level warning --reload-dir environment & sleep 0.5 && exec hud run controller --reload"]

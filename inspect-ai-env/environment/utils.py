@@ -1,15 +1,14 @@
 import subprocess
-import sys
+from typing import List
 
 
-def run_uv_command(args):
+def run_command(args: List[str]):
     """
     Runs a uv command with the given arguments and returns the captured output.
     """
-    command = ["uv"] + args
 
     result = subprocess.run(
-        command,
+        args,
         capture_output=True,
         text=True,
         check=True,  # This will raise a CalledProcessError if the command fails

@@ -1,6 +1,6 @@
 [project]
 name = "hud-python"
-version = "0.4.37"
+version = "0.4.42"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
@@ -40,7 +40,6 @@ dependencies = [
     # AI providers
     "anthropic",
     "openai",
-    
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -135,6 +134,7 @@ dev = [
     "langchain",
     "langchain-openai",
     "langchain-anthropic",
+    "litellm>=1.55.0",
     # Jupyter support
     "ipykernel",
     "ipython <9",

@@ -14,7 +14,9 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "limit": 3
+        "eval_config":{
+          "limit": 3
+      }
       }
     }
   }
