@@ -57,16 +57,30 @@ class GenericOpenAIChatAgent(MCPAgent):
 
     @staticmethod
     def _oai_to_mcp(tool_call: Any) -> MCPToolCall:  # type: ignore[valid-type]
-        """Convert an OpenAI ``tool_call`` to :class:`MCPToolCall`."""
-        args = json.loads(tool_call.function.arguments or "{}")
-        if isinstance(args, list):
-            args = args[0]
-        if not isinstance(args, dict):
-            args = {}
+        """Convert chat ``tool_call`` payloads into :class:`MCPToolCall`.
+
+        LiteLLM providers sometimes return dict or list-of-dict arguments rather than
+        a JSON string, so coerce everything to the object MCP expects.
+        """
+        function = getattr(tool_call, "function", None)
+        raw_args = getattr(function, "arguments", None)
+
+        parsed: dict[str, Any] = {}
+        if isinstance(raw_args, str):
+            try:
+                parsed = json.loads(raw_args) if raw_args.strip() else {}
+            except Exception:  # pragma: no cover - fall back to empty args
+                parsed = {}
+        elif isinstance(raw_args, dict):
+            parsed = raw_args
+        elif isinstance(raw_args, list):
+            parsed = next((item for item in raw_args if isinstance(item, dict)), {}) or {}
+
+        name = getattr(function, "name", "") or ""
         return MCPToolCall(
-            id=tool_call.id,
-            name=tool_call.function.name,
-            arguments=args,
+            id=getattr(tool_call, "id", None),
+            name=name,
+            arguments=parsed,
         )
 
     async def get_system_messages(self) -> list[Any]:

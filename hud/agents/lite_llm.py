@@ -68,5 +68,6 @@ class LiteAgent(GenericOpenAIChatAgent):
             model=self.model_name,
             messages=messages,
             tools=tools or None,  # LiteLLM tolerates None better than []
+            tool_choice="auto",
             **extra,
         )
