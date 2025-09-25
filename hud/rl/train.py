@@ -13,7 +13,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import hud
 from hud.rl.actor import Actor
@@ -25,6 +25,7 @@ from hud.rl.distributed import (
     get_global_rank,
     get_world_size,
     is_main_process,
+    scatter_object,
     setup_distributed,
     synchronize,
 )
@@ -107,10 +108,9 @@ async def train(config: Config, tasks: list[Task]) -> None:
     if is_main_process():
         hud_console.info(f"Creating job with config.job_id: {config.job_id}")
         job_obj = hud.create_job(
-            job_id=config.job_id, name=config.job_name, metadata={
-                "config": config.to_dict(),
-                "agent_class": config.model.base_model
-            }
+            job_id=config.job_id,
+            name=config.job_name,
+            metadata={"config": config.to_dict(), "agent_class": config.model.base_model},
         )
         hud_console.info(f"Created job with job_obj.id: {job_obj.id}")
         job_obj.update_status_sync("running")
@@ -134,53 +134,71 @@ async def train(config: Config, tasks: list[Task]) -> None:
             global_reward_stats = None
             global_advantage_stats = None
 
-            # Only rank 0 runs tasks and collects traces
+            # Step-state gate: ensure all ranks branch coherently
+            state = {"ok": False, "err": None, "num_samples": 0}
+            rank_samples = None
+            episode_time_value = None
+
+            # Only rank 0 runs tasks and prepares distribution
             if is_main_process() and actor is not None:
                 import time
 
-                episode_start_time = time.time()
-                traces = await actor.run_tasks(tasks, job_id=job_id)
-                episode_time = time.time() - episode_start_time
-                hud_console.info(f"Sampled {len(traces)} traces in {episode_time:.1f}s")
-                trace_buffer.add(traces)
-                global_reward_stats = [trace.reward for trace in traces]
+                try:
+                    episode_start_time = time.time()
+                    traces = await actor.run_tasks(tasks, job_id=job_id)
+                    episode_time = time.time() - episode_start_time
+                    hud_console.info(f"Sampled {len(traces)} traces in {episode_time:.1f}s")
+                    trace_buffer.add(traces)
+                    global_reward_stats = [trace.reward for trace in traces]
 
-                # Get all traces from buffer for distribution
-                all_traces = trace_buffer.sample_traces()
+                    # Get all traces from buffer for distribution
+                    all_traces = trace_buffer.sample_traces()
 
-                assert len(traces) == len(all_traces)  # noqa: S101
+                    # Preprocess traces to training samples
+                    preprocessed_traces = preprocess_advantages(all_traces, config)
 
-                # Preprocess traces to training samples
-                preprocessed_traces = preprocess_advantages(all_traces, config)
+                    # Store these for later use in metrics
+                    global_advantage_stats = [sample.advantage for sample in preprocessed_traces]
 
-                # Store these for later use in metrics
-                global_advantage_stats = [sample.advantage for sample in preprocessed_traces]
+                    # Distribute preprocessed samples in groups across ranks via scatter
+                    # Ensure list length is a multiple of num_gpus by allowing empty per-rank slices
+                    gpu_batch_size = max(1, (len(preprocessed_traces) + num_gpus - 1) // num_gpus)
+                    rank_samples = [
+                        preprocessed_traces[i : i + gpu_batch_size]
+                        for i in range(0, len(preprocessed_traces), gpu_batch_size)
+                    ]
+                    # Pad rank_samples to exactly num_gpus entries
+                    if len(rank_samples) < num_gpus:
+                        rank_samples.extend([[] for _ in range(num_gpus - len(rank_samples))])
 
-                # Distribute preprocessed samples in groups across ranks
-                gpu_batch_size = len(preprocessed_traces) // num_gpus
-                rank_samples = [
-                    preprocessed_traces[i : i + gpu_batch_size]
-                    for i in range(0, len(preprocessed_traces), gpu_batch_size)
-                ]
+                    # Log distribution info
+                    dist_msg = (
+                        f"Distributing {len(preprocessed_traces)} samples as {gpu_batch_size} "
+                        f"sized batches across {num_gpus} GPUs"
+                    )
+                    hud_console.info(dist_msg)
+                    for rank in range(num_gpus):
+                        n_samples = len(rank_samples[rank]) if rank < len(rank_samples) else 0
+                        hud_console.info(f"  Rank {rank}: {n_samples} samples")
 
-                # Log distribution info
-                hud_console.info(
-                    f"Distributing {len(preprocessed_traces)} samples as {gpu_batch_size} sized batches across {num_gpus} GPUs"  # noqa: E501
-                )
-                for rank in range(num_gpus):
-                    n_samples = len(rank_samples[rank])
-                    hud_console.info(f"  Rank {rank}: {n_samples} samples")
+                    hud_console.section_title(f"Training on {len(all_traces)} traces")
+                    episode_time_value = episode_time
 
-                hud_console.section_title(f"Training on {len(all_traces)} traces")
-                episode_time_value = episode_time
-            else:
-                rank_samples = None
-                episode_time_value = None
+                    state.update({"ok": True, "num_samples": len(preprocessed_traces)})
+                except Exception as e:
+                    state.update({"ok": False, "err": str(e)})
 
-            # Broadcast each rank's samples and episode time
-            rank_samples = broadcast_object(rank_samples, src=0)
+            # Broadcast step-state to keep ranks in lockstep
+            state = broadcast_object(state, src=0)
+            if not state.get("ok", False):
+                hud_console.warning("Step failed on rank 0; skipping this step coherently")
+                synchronize()
+                continue
+
+            # Scatter per-rank samples; each rank receives only its slice
+            my_samples = scatter_object(rank_samples if is_main_process() else None, src=0)
+            # Broadcast the episode time (small object)
             episode_time_value = broadcast_object(episode_time_value, src=0)
-            my_samples = rank_samples[get_global_rank()] if rank_samples else []
 
             # Process only assigned samples
             last_metrics = learner.update(my_samples)
@@ -357,7 +375,8 @@ async def main() -> None:
             )
 
     # Run training
-    await train(config, tasks)
+    tasks_typed = cast("list[Task]", tasks)
+    await train(config, tasks_typed)
 
 
 if __name__ == "__main__":

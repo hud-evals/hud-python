@@ -32,7 +32,9 @@ GPU_PRICING = {
 }
 
 
-def ensure_vllm_deployed(model_name: str, gpu_type: str = "A100", timeout: int = 600) -> None:
+def ensure_vllm_deployed(
+    model_name: str, gpu_type: str = "A100", gpu_count: int = 1, timeout: int = 600
+) -> None:
     """Deploy vLLM for a model if needed and wait until it's ready.
 
     Args:
@@ -47,7 +49,7 @@ def ensure_vllm_deployed(model_name: str, gpu_type: str = "A100", timeout: int =
         return
 
     hud_console.info(f"Deploying vLLM server for {model_name}...")
-    rl_api.deploy_vllm(model_name, gpu_type=gpu_type)
+    rl_api.deploy_vllm(model_name, gpu_type=gpu_type, gpu_count=gpu_count)
     hud_console.success("vLLM deployment started")
 
     hud_console.info("Waiting for vLLM server to be ready...")
@@ -72,6 +74,7 @@ def run_remote_training(
     model: str | None,
     config_file: Path | None,
     output_dir: str,
+    vllm_gpu_count: int = 1,
     yes: bool = False,
 ) -> None:
     """Run RL training remotely via the API server following the new interactive flow."""
@@ -222,7 +225,7 @@ def run_remote_training(
             try:
                 rl_api.create_model(model_name, model_type)
                 hud_console.success(f"Created model: {model_name}")
-                ensure_vllm_deployed(model_name, gpu_type="A100")
+                ensure_vllm_deployed(model_name, gpu_type="A100", gpu_count=vllm_gpu_count)
 
             except Exception as e:
                 # If the name already exists, suggest a new name and prompt once
@@ -251,7 +254,7 @@ def run_remote_training(
                         rl_api.create_model(chosen, model_type)
                         hud_console.success(f"Created model: {chosen}")
                         model_name = chosen
-                        ensure_vllm_deployed(model_name, gpu_type="A100")
+                        ensure_vllm_deployed(model_name, gpu_type="A100", gpu_count=vllm_gpu_count)
                     except Exception as e2:
                         hud_console.error(f"Failed to create model: {e2}")
                         raise
@@ -285,7 +288,7 @@ def run_remote_training(
                     return
 
             # Ensure vLLM is deployed
-            ensure_vllm_deployed(model_name, gpu_type="A100")
+            ensure_vllm_deployed(model_name, gpu_type="A100", gpu_count=vllm_gpu_count)
     except KeyboardInterrupt:
         hud_console.dim_info("Training cancelled", "")
         return
@@ -327,7 +330,7 @@ def run_remote_training(
             )
 
         if yes:
-            num_gpus = 2 # Default to 2 GPUs in yes mode
+            num_gpus = 2  # Default to 2 GPUs in yes mode
             hud_console.info(f"Auto-selecting {num_gpus} GPU(s) (--yes mode)")
         else:
             num_gpus = hud_console.select(

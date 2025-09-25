@@ -85,7 +85,9 @@ def create_proxy_server(
             for key, value in loaded_env_vars.items():
                 docker_cmd.extend(["-e", f"{key}={value}"])
             if verbose and loaded_env_vars:
-                hud_console.info(f"Loaded {len(loaded_env_vars)} environment variable(s) from .env file")
+                hud_console.info(
+                    f"Loaded {len(loaded_env_vars)} environment variable(s) from .env file"
+                )
         except Exception as e:
             hud_console.warning(f"Failed to load .env file: {e}")
 
@@ -129,7 +131,9 @@ def create_proxy_server(
         hud_console.command_example(f"docker logs -f {container_name}", "View container logs")
 
         # Show the full Docker command if there are environment variables (from .env or args)
-        has_env_from_args = docker_args and any(arg == "-e" or arg.startswith("--env") for arg in docker_args)
+        has_env_from_args = docker_args and any(
+            arg == "-e" or arg.startswith("--env") for arg in docker_args
+        )
         has_env_from_file = bool(loaded_env_vars)
         if has_env_from_args or has_env_from_file:
             hud_console.info("")

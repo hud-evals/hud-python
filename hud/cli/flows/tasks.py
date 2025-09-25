@@ -370,6 +370,8 @@ def convert_tasks_to_remote(tasks_file: str) -> str:
             item["system_prompt"] = t.system_prompt
         if t.metadata:
             item["metadata"] = t.metadata
+        if t.id is not None:
+            item["id"] = t.id
 
         tasks_payload.append(item)
 

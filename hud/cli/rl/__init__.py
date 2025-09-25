@@ -78,6 +78,11 @@ def rl_command(
         "-y",
         help="Auto-accept all prompts and use defaults (lazy mode)",
     ),
+    vllm_gpu_count: int = typer.Option(
+        None,
+        "--vllm-gpu-count",
+        help="Number of GPUs for vLLM server",
+    ),
     skip_vllm_startup: bool = typer.Option(
         False,
         "--skip-vllm-startup",
@@ -145,6 +150,7 @@ def rl_command(
                 model=model,
                 config_file=config_file,
                 output_dir=output_dir,
+                vllm_gpu_count=vllm_gpu_count,
                 yes=yes,
             )
             return

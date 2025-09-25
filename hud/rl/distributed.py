@@ -66,13 +66,46 @@ def all_reduce_mean(tensor: torch.Tensor) -> torch.Tensor:
 
 
 def broadcast_object(obj: Any, src: int = 0) -> Any:
-    """Broadcast a Python object from src rank to all ranks."""
+    """Broadcast a Python object from src rank to all ranks.
+
+    Args:
+        obj: Object to broadcast (used on src rank)
+        src: Source rank
+        device: Device for temporary tensor buffer during pickling transfer
+    """
     if not dist.is_initialized():
         return obj
 
     obj_list = [obj] if dist.get_rank() == src else [None]
     dist.broadcast_object_list(obj_list, src=src)
     return obj_list[0]
+
+
+def scatter_object(
+    obj_list: list[Any] | None,
+    src: int = 0,
+) -> Any:
+    """Scatter a list of Python objects from src so each rank receives one object.
+
+    Usage:
+        - On src rank: pass the full list (length == world_size)
+        - On non-src ranks: pass None
+
+    Returns:
+        The object intended for this rank.
+    """
+    if not dist.is_initialized():
+        # Single-process: return first element if provided, else None
+        if obj_list is None or len(obj_list) == 0:
+            return None
+        return obj_list[0]
+
+    out: list[Any] = [None]
+    if dist.get_rank() == src:
+        dist.scatter_object_list(out, obj_list, src=src)
+    else:
+        dist.scatter_object_list(out, None, src=src)
+    return out[0]
 
 
 def gather_tensors(tensor: torch.Tensor) -> list[torch.Tensor] | None:

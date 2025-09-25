@@ -240,6 +240,8 @@ class GRPOLearner:
                 if sample.inputs:
                     sample = sample.to_device(self.device)
                     sample.old_logprobs, _ = self.compute_logprobs(self.policy, sample.inputs)
+                    # Free GPU memory for this sample immediately
+                    sample.to_device(torch.device("cpu"))
 
             policy_module = self.policy.module if hasattr(self.policy, "module") else self.policy
             with policy_module.disable_adapter():
@@ -247,7 +249,10 @@ class GRPOLearner:
                     if is_main_process():
                         progress.update(f"Processing batch of traces... {i}/{len(batch)}")
                     if sample.inputs:
+                        # Move back to GPU for reference computation, then free
+                        sample = sample.to_device(self.device)
                         sample.ref_logprobs, _ = self.compute_logprobs(self.policy, sample.inputs)
+                        sample.to_device(torch.device("cpu"))
 
         hud_console.info_log("Creating mini-batches...")
         group_size = self.config.training.group_size
@@ -488,15 +493,21 @@ class GRPOLearner:
             out = model(**model_inputs)
 
             logits = out.logits / self.config.actor.temperature
-            log_probs = F.log_softmax(logits, dim=-1)
 
+            # Compute token log-probs via negative cross-entropy to avoid materializing full log_probs
             targets = inputs["input_ids"][:, 1:]
-            token_log_probs = log_probs[:, :-1].gather(-1, targets.unsqueeze(-1)).squeeze(-1)
+            logits_slice = logits[:, :-1, :]
+            loss_flat = F.cross_entropy(
+                logits_slice.reshape(-1, logits_slice.size(-1)),
+                targets.reshape(-1),
+                reduction="none",
+            )
+            token_log_probs = (-loss_flat).reshape_as(targets)
 
             # Compute entropy only for assistant tokens to save memory
             assistant_mask = inputs["assistant_mask"]
             entropy = torch.zeros_like(token_log_probs)
-            if assistant_mask.any():
+            if assistant_mask.any() and getattr(self.config.training, "entropy_beta", 0.0) != 0.0:
                 entropy[assistant_mask] = entropy_from_logits(logits[:, :-1][assistant_mask])
 
             return token_log_probs, entropy
@@ -506,8 +517,20 @@ class GRPOLearner:
             # Return dummy values that match expected shapes
             seq_len = inputs["input_ids"].shape[1] - 1 if "input_ids" in inputs else 0
             batch_size = inputs["input_ids"].shape[0] if "input_ids" in inputs else 1
-            dummy_logprobs = torch.zeros(batch_size, seq_len, device=self.device)
-            dummy_entropy = torch.zeros(batch_size, seq_len, device=self.device)
+            # Create dummy tensors that still participate in autograd so backward doesn't fail
+            try:
+                param_sum = torch.sum(
+                    next(self.policy.parameters())
+                )  # touch params to build a graph
+                base = param_sum * 0.0
+            except StopIteration:
+                base = torch.tensor(0.0, device=self.device)
+            dummy_logprobs = (
+                base + torch.zeros(batch_size, seq_len, device=self.device)
+            ).requires_grad_(True)
+            dummy_entropy = (
+                base + torch.zeros(batch_size, seq_len, device=self.device)
+            ).requires_grad_(True)
             return dummy_logprobs, dummy_entropy
 
     def save(self, path: str) -> None:

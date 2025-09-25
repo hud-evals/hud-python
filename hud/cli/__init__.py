@@ -144,7 +144,7 @@ def debug(
         None,
         help="Docker image, environment directory, or config file followed by optional Docker arguments",  # noqa: E501
     ),
-    config: Path = typer.Option(  # noqa: B008
+    config: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
         "-c",
@@ -976,12 +976,24 @@ def eval(
         "--group-size",
         help="Number of times to run each task (similar to RL training)",
     ),
+    integration_test: bool = typer.Option(
+        False,
+        "--integration-test",
+        help=(
+            "Run integration_test_tool, where problem is setup, "
+            "actions are applied, and evaluation is performed, without "
+            "spinning up an agent"
+        ),
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents."""
     from hud.settings import settings
     from hud.utils.hud_console import HUDConsole
 
     hud_console = HUDConsole()
+
+    if integration_test:
+        agent = "integration_test"
 
     # If no source provided, reuse RL helper to find a tasks file interactively
     if source is None:
@@ -1038,7 +1050,7 @@ def eval(
         agent = hud_console.select("Select an agent to use:", choices=choices, default=0)
 
     # Handle HUD model selection
-    if agent and agent not in ["claude", "openai", "vllm", "litellm"]:
+    if agent and agent not in ["claude", "openai", "vllm", "litellm", "integration_test"]:
         # Find remote model name
         model = agent
         if not vllm_base_url:
@@ -1059,7 +1071,7 @@ def eval(
         hud_console.info(f"Using HUD model: {model} (trained on {base_model})")
 
     # Validate agent choice
-    valid_agents = ["claude", "openai", "vllm", "litellm"]
+    valid_agents = ["claude", "openai", "vllm", "litellm", "integration_test"]
     if agent not in valid_agents:
         hud_console.error(f"Invalid agent: {agent}. Must be one of: {', '.join(valid_agents)}")
         raise typer.Exit(1)
@@ -1080,6 +1092,7 @@ def eval(
         very_verbose=very_verbose,
         vllm_base_url=vllm_base_url,
         group_size=group_size,
+        integration_test=integration_test,
     )
 
 
@@ -1105,7 +1118,7 @@ def get(
     ),
 ) -> None:
     """📥 Download a HuggingFace dataset and save it as JSONL."""
-    from .get import get_command
+    from hud.cli.get import get_command
 
     get_command(
         dataset_name=dataset_name,
@@ -1178,6 +1191,11 @@ def rl(
         "--vllm-gpu",
         help="Specific GPU for vLLM server",
     ),
+    vllm_gpu_count: int = typer.Option(
+        1,
+        "--vllm-gpu-count",
+        help="Number of GPUs for vLLM server",
+    ),
     skip_vllm_startup: bool = typer.Option(
         False,
         "--skip-vllm-startup",
@@ -1199,6 +1217,7 @@ def rl(
         no_ddp=no_ddp,
         ddp_gpus=ddp_gpus,
         vllm_gpu=vllm_gpu,
+        vllm_gpu_count=vllm_gpu_count,
         yes=yes,
         skip_vllm_startup=skip_vllm_startup,
     )

@@ -69,7 +69,7 @@ def get_available_models() -> list[dict[str, str | None]]:
 
 
 def build_agent(
-    agent_type: Literal["claude", "openai", "vllm", "litellm"],
+    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"],
     *,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
@@ -79,7 +79,11 @@ def build_agent(
     """Create and return the requested agent type."""
 
     # Import agents lazily to avoid dependency issues
-    if agent_type == "vllm":
+    if agent_type == "integration_test":
+        from hud.agents.misc.integration_test_agent import IntegrationTestRunner
+
+        return IntegrationTestRunner(verbose=verbose)
+    elif agent_type == "vllm":
         # Create a generic OpenAI agent for vLLM server
         try:
             from openai import AsyncOpenAI
@@ -185,7 +189,7 @@ def build_agent(
 async def run_single_task(
     source: str,
     *,
-    agent_type: Literal["claude", "openai", "vllm", "litellm"] = "claude",
+    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = "claude",
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_steps: int = 10,
@@ -205,12 +209,9 @@ async def run_single_task(
         )
         raise typer.Exit(1) from e
 
-    # Check if it's a file
     path = Path(source)
     if path.exists() and (path.suffix in [".json", ".jsonl"]):
         hud_console.info("📊 Loading task file…")
-
-        # Use unified loader for both JSON and JSONL
         tasks: list[Task] = load_tasks(str(path))  # type: ignore[assignment]
 
         # If tasks reference a local environment (nearby), ensure it's built/up-to-date.
@@ -225,6 +226,7 @@ async def run_single_task(
         # Single task - use the first (and only) task
         task = tasks[0]
         hud_console.info("Found 1 task, running as single task…")
+
     else:
         # Load from HuggingFace dataset or non-file source
         hud_console.info(f"📊 Loading tasks from: {source}…")
@@ -243,75 +245,78 @@ async def run_single_task(
     task_prompt = task.prompt[:50] + "..." if len(task.prompt) > 50 else task.prompt
 
     # Use grouped evaluation if group_size > 1
+    agent_config: dict[str, Any] = {}
+    if agent_type == "integration_test":
+        from hud.agents.misc.integration_test_agent import IntegrationTestRunner
+
+        agent_class = IntegrationTestRunner
+        agent_config = {"verbose": verbose}
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+    elif agent_type == "vllm":
+        # Special handling for vLLM
+        sample_agent = build_agent(
+            agent_type,
+            model=model,
+            allowed_tools=allowed_tools,
+            verbose=verbose,
+            vllm_base_url=vllm_base_url,
+        )
+        agent_config = {
+            "openai_client": sample_agent.oai,
+            "model_name": sample_agent.model_name,
+            "verbose": verbose,
+            "completion_kwargs": sample_agent.completion_kwargs,
+        }
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+
+        from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
+
+        agent_class = GenericOpenAIChatAgent
+    elif agent_type == "openai":
+        from hud.agents import OperatorAgent
+
+        agent_class = OperatorAgent
+        agent_config = {"verbose": verbose}
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+    elif agent_type == "litellm":
+        from hud.agents.lite_llm import LiteAgent
+
+        agent_class = LiteAgent
+        agent_config = {
+            "model_name": model or "gpt-4o-mini",
+            "verbose": verbose,
+        }
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+    elif agent_type == "claude":
+        from hud.agents import ClaudeAgent
+
+        agent_class = ClaudeAgent
+        agent_config = {
+            "model": model or "claude-sonnet-4-20250514",
+            "verbose": verbose,
+        }
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+    else:
+        raise ValueError(f"Invalid agent type: {agent_type}")
+
     if group_size > 1:
         hud_console.info(f"🔄 Running task with group_size={group_size}")
-        agent_config: dict[str, Any] = {}
-
-        # Build agent configuration
-        if agent_type == "vllm":
-            # Special handling for vLLM
-            sample_agent = build_agent(
-                agent_type,
-                model=model,
-                allowed_tools=allowed_tools,
-                verbose=verbose,
-                vllm_base_url=vllm_base_url,
-            )
-            agent_config = {
-                "openai_client": sample_agent.oai,
-                "model_name": sample_agent.model_name,
-                "verbose": verbose,
-                "completion_kwargs": sample_agent.completion_kwargs,
-            }
-            if allowed_tools:
-                agent_config["allowed_tools"] = allowed_tools
-
-            from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
-
-            agent_class = GenericOpenAIChatAgent
-        elif agent_type == "openai":
-            from hud.agents import OperatorAgent
-
-            agent_class = OperatorAgent
-            agent_config = {"verbose": verbose}
-            if allowed_tools:
-                agent_config["allowed_tools"] = allowed_tools
-        elif agent_type == "litellm":
-            from hud.agents.lite_llm import LiteAgent
-
-            agent_class = LiteAgent
-            agent_config = {
-                "model_name": model or "gpt-4o-mini",
-                "verbose": verbose,
-            }
-            if allowed_tools:
-                agent_config["allowed_tools"] = allowed_tools
-        else:
-            from hud.agents import ClaudeAgent
-
-            agent_class = ClaudeAgent
-            agent_config = {
-                "model": model or "claude-sonnet-4-20250514",
-                "verbose": verbose,
-            }
-            if allowed_tools:
-                agent_config["allowed_tools"] = allowed_tools
-
         # Run with grouping
-        with hud.trace(name=f"{task_prompt} (group_size={group_size})"):
-            stats = await run_tasks_grouped(
-                tasks=[task],
-                agent_class=agent_class,
-                agent_config=agent_config,
-                group_size=group_size,
-                max_parallel_episodes=48,  # Same as RL default
-                max_steps=max_steps,
-                verbose=verbose,
-            )
-
-        # Display results
+        stats = await run_tasks_grouped(
+            tasks=[task],
+            agent_class=agent_class,
+            agent_config=agent_config,
+            group_size=group_size,
+            max_parallel_episodes=48,  # Same as RL default
+            max_steps=max_steps,
+            verbose=verbose,
+        )
         display_group_statistics(stats, show_details=True)
-
     else:
         # Original single-run logic
         with hud.trace(name=task_prompt):
@@ -330,7 +335,7 @@ async def run_single_task(
 async def run_full_dataset(
     source: str,
     *,
-    agent_type: Literal["claude", "openai", "vllm", "litellm"] = "claude",
+    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = "claude",
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_concurrent: int = 30,
@@ -373,10 +378,13 @@ async def run_full_dataset(
     path = Path(source)
     dataset_name = f"Dataset: {path.name}" if path.exists() else source.split("/")[-1]
 
-    hud_console.info(f"Found {len(tasks)} tasks")
-
     # Build agent class + config for run_dataset
-    if agent_type == "vllm":
+    if agent_type == "integration_test":  # --integration-test mode
+        from hud.agents.misc.integration_test_agent import IntegrationTestRunner
+
+        agent_class = IntegrationTestRunner
+        agent_config = {"verbose": verbose}
+    elif agent_type == "vllm":
         try:
             from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
 
@@ -406,7 +414,6 @@ async def run_full_dataset(
         }
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
-
     elif agent_type == "openai":
         try:
             from hud.agents import OperatorAgent
@@ -499,7 +506,7 @@ async def run_full_dataset(
             )
 
         # Display results
-        display_group_statistics(stats, show_details=len(stats) <= 20)
+        display_group_statistics(stats, show_details=len(stats) <= 50)
 
         # Return stats for consistency with other modes
         return stats
@@ -558,7 +565,7 @@ def eval_command(
         "--full",
         help="Run the entire dataset (omit for single-task debug mode)",
     ),
-    agent: Literal["claude", "openai", "vllm", "litellm"] = typer.Option(
+    agent: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = typer.Option(
         "claude",
         "--agent",
         help="Agent backend to use (claude, openai, vllm for local server, or litellm)",
@@ -574,7 +581,7 @@ def eval_command(
         help="Comma-separated list of allowed tools",
     ),
     max_concurrent: int = typer.Option(
-        50,
+        30,
         "--max-concurrent",
         help="Concurrency level for asyncio mode (ignored in parallel mode)",
     ),
@@ -618,6 +625,15 @@ def eval_command(
         1,
         "--group-size",
         help="Number of times to run each task (similar to RL training)",
+    ),
+    integration_test: bool = typer.Option(
+        False,
+        "--integration-test",
+        help=(
+            "Run integration_test_tool tool, where problem is setup, "
+            "actions are applied, and evaluation is performed, without "
+            "spinning up an agent"
+        ),
     ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
@@ -674,6 +690,10 @@ def eval_command(
         )
         logging.getLogger("hud.agents").setLevel(logging.INFO)
         logging.getLogger("hud.agents.base").setLevel(logging.INFO)
+
+    # We pass integration_test as the agent_type
+    if integration_test:
+        agent = "integration_test"
 
     # Check for required API keys
     if agent == "claude":
