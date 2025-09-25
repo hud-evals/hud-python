@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import torch
+from torch.distributed.device_mesh import init_device_mesh
 
 import hud
 from hud.rl.actor import Actor
@@ -209,8 +210,9 @@ async def train(config: Config, tasks: list[Task]) -> None:
     """Main training loop."""
     # Setup distributed environment
     setup_distributed()
+    mesh = init_device_mesh("cuda", (get_world_size(),))
 
-    # Initialize components
+    # Initialize components)
     set_seed(config.seed + get_global_rank())  # Different seed per rank
     ensure_dir(config.out_dir)
     if config.verbose:
@@ -225,7 +227,7 @@ async def train(config: Config, tasks: list[Task]) -> None:
     num_gpus = get_world_size()
 
     # Actor is responsible for running tasks and collecting episodes
-    actor = Actor(config) if is_main_process() else None
+    actor = Actor(config.actor) if is_main_process() else None
 
     processor, policy = get_processor(config.model), get_model(config.model)
     optimizer = get_optimizer(config, policy)
@@ -310,25 +312,34 @@ async def train(config: Config, tasks: list[Task]) -> None:
                 global_reward_stats = [trace.reward for trace in traces]
 
                 # Get preprocessed training batch from dataloader
-                preprocessed_traces = dataloader.get_training_batch()
+                training_samples = dataloader.get_training_batch()
 
                 # Store these for later use in metrics
-                global_advantage_stats = [sample.advantage for sample in preprocessed_traces]
+                global_advantage_stats = []
+                for sample in training_samples:
+                    if sample.advantage is not None:
+                        global_advantage_stats.extend(sample.advantage.view(-1).tolist())
 
                 # Distribute preprocessed samples in groups across ranks
-                gpu_batch_size = len(preprocessed_traces) // num_gpus
-                rank_samples = [
-                    preprocessed_traces[i : i + gpu_batch_size]
-                    for i in range(0, len(preprocessed_traces), gpu_batch_size)
-                ]
+                total_samples = len(training_samples)
+                base_per_rank = total_samples // num_gpus
+                remainder = total_samples % num_gpus
+                rank_samples: list[list[Any]] = []
+                offset = 0
+                for rank in range(num_gpus):
+                    chunk_size = base_per_rank + (1 if rank < remainder else 0)
+                    if chunk_size == 0:
+                        rank_samples.append([])
+                        continue
+                    rank_samples.append(training_samples[offset : offset + chunk_size])
+                    offset += chunk_size
 
                 # Log distribution info
                 console.info(
-                    f"Distributing {len(preprocessed_traces)} samples as {gpu_batch_size} sized batches across {num_gpus} GPUs"  # noqa: E501
+                    f"Distributing {total_samples} samples across {num_gpus} GPUs"
                 )
-                for rank in range(num_gpus):
-                    n_samples = len(rank_samples[rank])
-                    console.info(f"  Rank {rank}: {n_samples} samples")
+                for rank, samples_for_rank in enumerate(rank_samples):
+                    console.info(f"  Rank {rank}: {len(samples_for_rank)} samples")
 
                 console.section_title(f"Training on {len(traces)} traces")
                 episode_time_value = episode_time
@@ -355,8 +366,7 @@ async def train(config: Config, tasks: list[Task]) -> None:
                 # Use the global statistics we collected before distribution
                 if global_reward_stats is not None and global_advantage_stats is not None:
                     for adv in global_advantage_stats:
-                        if adv is not None:
-                            collector.log(advantage=adv)
+                        collector.log(advantage=adv)
                     for rew in global_reward_stats:
                         if rew is not None:
                             collector.log(reward=rew)
@@ -365,9 +375,8 @@ async def train(config: Config, tasks: list[Task]) -> None:
                     console.warning("Global statistics not available, using partial data")
                     for sample in my_samples:
                         if sample.advantage is not None:
-                            collector.log(advantage=sample.advantage)
-                        if sample.reward is not None:
-                            collector.log(reward=sample.reward)
+                            for adv in sample.advantage.view(-1).tolist():
+                                collector.log(advantage=adv)
 
                 # Get updated stats after adding reward/advantage
                 last_metrics = collector.get_stats()

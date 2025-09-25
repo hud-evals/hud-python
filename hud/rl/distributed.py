@@ -14,7 +14,6 @@ def setup_distributed() -> None:
         # Initialize process group
         dist.init_process_group("nccl")
 
-
 def get_local_rank() -> int:
     """Get local rank from environment."""
     return int(os.environ.get("LOCAL_RANK", 0))
