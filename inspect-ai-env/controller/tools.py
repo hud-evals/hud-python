@@ -1,8 +1,19 @@
 """Controller tools that call the environment API."""
 
 import json
+import httpx
+import logging
+import sys
+
 from controller import mcp, http_client
 from hud.tools.types import EvaluationResult
+
+logging.basicConfig(
+    stream=sys.stderr,
+    level=logging.INFO,
+    format="[%(levelname)s] %(asctime)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
@@ -19,26 +30,42 @@ async def setup(target_eval: str, model: str) -> str:
 
 @mcp.tool()
 async def evaluate(eval_config: dict = {}) -> EvaluationResult:
-    """Evaluate progress toward the target count and return a reward and done flag."""
-    if not http_client:
-        raise RuntimeError("HTTP client not initialized")
-    if not http_client:
-        raise RuntimeError("HTTP client not initialized")
-    resp = await http_client.get("/health")
-    status = resp.json().get("content", "error")
-    data = {}
-    if status in ["ready", "ok"]:
-        resp = await http_client.post("/evaluate", json=eval_config)
-        data = resp.json()
-    else:
+    """
+    Triggers a long-running evaluation on the backend API and returns
+    immediately with the trace_id for tracking.
+    """
+    try:
+        response = await http_client.post(
+            "/evaluate",
+            json={"eval_config": eval_config},
+            timeout=15.0,
+        )
+
+        # Raise an exception if the API returns an error (e.g., 400, 500)
+        response.raise_for_status()
+
+        data = response.json()
+        logger.warning(f"data received by mcp: {data}")
+        trace_id = data.get("trace_id")
+        assert trace_id is not None
+
+        return EvaluationResult(
+            reward=0.0,
+            done=False,
+            isError=False,
+            content=f"Evaluation successfully started. Track with trace_id: {trace_id}",
+        )
+
+    except httpx.HTTPStatusError as e:
+        # The API server responded with an error
         return EvaluationResult(
             reward=0.0,
             done=False,
             isError=True,
-            content=f"{status}  {str(status.json())}",
+            content=f"API Error: {e.response.text}",
         )
-
-    return EvaluationResult(
-        reward=data.get("reward", 0.0),
-        done=str(data.get("done", False), content=str(data)),
-    )
+    except httpx.RequestError as e:
+        # A network-level error occurred (e.g., connection refused)
+        return EvaluationResult(
+            reward=0.0, done=False, isError=True, content=f"Connection Error: {e}"
+        )

@@ -1,15 +1,15 @@
 """Minimal FastAPI environment server (HTTP-based)."""
 
-import os
 import logging
 import sys
-import traceback
-import subprocess
+import uuid
+
 from fastapi import FastAPI
 from pydantic import BaseModel
+import asyncio
+import traceback
 
-
-from .utils import run_command
+from .utils import run_eval_and_log
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -48,23 +48,25 @@ def reset(payload: ResetPayload):
     extra_stdout = ""
     extra_stderr = ""
 
-    try:
-        # some evals have extra installation needed
-        extra_stdout, extra_stderr = run_command(
-            ["uv", "pip", "install", f"inspect-ai[{_target_eval}]"]
-        )
-    except Exception as e:
-        pass
+    # try:
+    #     # some evals have extra installation needed
+    #     extra_stdout, extra_stderr = run_command(
+    #         ["uv", "pip", "install", f"inspect-ai[{_target_eval}]"]
+    #     )
+    # except Exception as e:
+    #     pass
     _status = "ready"
     return {"ok": True}
 
 
 @app.post("/evaluate")
-def evaluate(eval_config: dict = {}):
+async def evaluate(eval_config: dict):
+    """
+    Creates and starts a new evaluation.
+    Returns immediately with a trace_id to track the evaluation.
+    """
     global _status
-    logger.warning(
-        f"starting inspect-eval run. info: eval_config: {eval_config}, type {type(eval_config)}"
-    )
+
     eval_params = []
     if eval_config != {}:
         for k, v in eval_config.items():
@@ -74,28 +76,32 @@ def evaluate(eval_config: dict = {}):
         f"starting inspect-eval run. info: eval_config: {eval_params}, type {type(eval_params)}"
     )
     try:
-        stdout, stderr = run_command(
-            [
-                "inspect",
-                "eval",
-                f"inspect_evals/{_target_eval}",
-                "--model",
-                _model,
-            ]
-            + eval_params
-        )
-        logger.warning(f"full commands: {["inspect","eval",f"inspect_evals/{_target_eval}","--model",_model,] + eval_params}"
-        logger.warning(f"run_command result: {stdout}\n{stderr}")
 
+        full_commands = [
+            "inspect",
+            "eval",
+            f"inspect_evals/{_target_eval}",
+            "--model",
+            _model,
+        ] + eval_params
+        full_commands = [str(x) for x in full_commands]
+        logger.warning(f"full commands: {full_commands}")
+
+        trace_id = f"inspectai_{_target_eval}_{_model}_{str(uuid.uuid4())[:5]}"
+
+        # Create the background task using asyncio.create_task to get a handle to it
+        task = asyncio.create_task(run_eval_and_log(trace_id, full_commands))
+
+        # Store the task handle in our registry so we can check its status
+        # evaluation_tasks[trace_id] = task
         _status = "ok"
-        return {"ok": True, "info": f"stdout: {stdout}, stderr: {stderr}"}
+        return {"ok": True, "content": {"trace_id": trace_id}}
+
     except Exception as e:
         _status = "error"
-        return {
-            "ok": False,
-            "content": str(eval_config),
-            "info": f"{traceback.format_exc()}",
-        }
+        logger.warning(
+            f"Something has gone terribly wrong...\n{traceback.format_exc()}"
+        )
 
 
 @app.get("/state")
