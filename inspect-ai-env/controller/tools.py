@@ -66,3 +66,35 @@ async def evaluate(eval_config: dict = {}) -> EvaluationResult:
         return EvaluationResult(
             reward=0.0, done=False, isError=True, content=f"Connection Error: {e}"
         )
+
+
+@mcp.tool()
+async def get_status() -> str:
+    """
+    Checks and returns the status of the long-running benchmark process.
+    The response will indicate if the process is 'running', 'not_running', or 'completed_or_crashed'.
+    """
+    if not http_client:
+        raise RuntimeError("HTTP client not initialized")
+
+    print("Sending request to GET /status")
+    resp = await http_client.get("/status")
+
+    # Return the server's JSON response as a string
+    return json.dumps(resp.json())
+
+
+@mcp.tool()
+async def stop() -> str:
+    """
+    Stops the currently running benchmark process.
+    This will gracefully terminate the process and release the lock.
+    """
+    if not http_client:
+        raise RuntimeError("HTTP client not initialized")
+
+    print("Sending request to POST /stop")
+    resp = await http_client.post("/stop")
+
+    # Return the server's JSON response as a string
+    return json.dumps(resp.json())
