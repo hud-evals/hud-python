@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import time
 import traceback
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 import questionary
@@ -28,6 +29,9 @@ from rich.table import Table
 
 if TYPE_CHECKING:
     from rich.status import Status
+    from hud.utils.task_logger import TaskLogger
+
+from hud.settings import settings
 # HUD Brand Colors - Optimized for both light and dark modes
 GOLD = "rgb(192,150,12)"  # #c0960c - Primary brand color
 RED = "rgb(220,50,47)"  # Slightly muted red that works on both backgrounds
@@ -50,6 +54,28 @@ class HUDConsole:
         self._stdout_console = Console(stderr=False)
         self._stderr_console = Console(stderr=True)
         self._logger = logger or logging.getLogger()
+        self._default_logger_name = self._logger.name or "hud"
+
+    def _get_task_logger(self) -> TaskLogger | None:
+        """Return the current task logger if per-task logging is enabled."""
+        if not settings.enable_task_file_logging:
+            return None
+
+        try:
+            from hud.otel.context import get_current_task_logger
+        except Exception:
+            return None
+
+        return get_current_task_logger()
+
+    def _log_to_task_file(self, message: str, level: int = logging.INFO) -> None:
+        """Mirror console output into the current task log file."""
+        task_logger = self._get_task_logger()
+        if not task_logger:
+            return
+
+        logger_name = self._logger.name or self._default_logger_name
+        task_logger.log_console_message(str(message), level=level, logger_name=logger_name)
 
     def header(self, title: str, icon: str = "🚀", stderr: bool = True) -> None:
         """Print a header panel with gold border.
@@ -383,6 +409,7 @@ class HUDConsole:
             stderr: If True, output to stderr (default), otherwise stdout
         """
         if self._logger.isEnabledFor(logging.DEBUG):
+            self._log_to_task_file(message, logging.DEBUG)
             self.dim_info(message, "", stderr=stderr)
 
     def info_log(self, message: str, stderr: bool = True) -> None:
@@ -393,6 +420,7 @@ class HUDConsole:
             stderr: If True, output to stderr (default), otherwise stdout
         """
         if self._logger.isEnabledFor(logging.INFO):
+            self._log_to_task_file(message, logging.INFO)
             self.info(message, stderr=stderr)
 
     def progress_log(self, message: str, stderr: bool = True) -> None:
@@ -403,6 +431,7 @@ class HUDConsole:
             stderr: If True, output to stderr (default), otherwise stdout
         """
         if self._logger.isEnabledFor(logging.INFO):
+            self._log_to_task_file(message, logging.INFO)
             self.progress_message(message, stderr=stderr)
 
     def progress(self, initial: str = "", stderr: bool = True) -> _ProgressContext:
@@ -432,6 +461,7 @@ class HUDConsole:
             stderr: If True, output to stderr (default), otherwise stdout
         """
         if self._logger.isEnabledFor(logging.INFO):
+            self._log_to_task_file(message, logging.INFO)
             self.success(message, stderr=stderr)
 
     def warning_log(self, message: str, stderr: bool = True) -> None:
@@ -442,6 +472,7 @@ class HUDConsole:
             stderr: If True, output to stderr (default), otherwise stdout
         """
         if self._logger.isEnabledFor(logging.WARNING):
+            self._log_to_task_file(message, logging.WARNING)
             self.warning(message, stderr=stderr)
 
     def error_log(self, message: str, stderr: bool = True) -> None:
@@ -452,6 +483,12 @@ class HUDConsole:
             stderr: If True, output to stderr (default), otherwise stdout
         """
         if self._logger.isEnabledFor(logging.ERROR):
+            tb = traceback.format_exc()
+            if "NoneType: None" not in tb:
+                log_message = f"{message}\n{tb}".rstrip()
+            else:
+                log_message = message
+            self._log_to_task_file(log_message, logging.ERROR)
             self.error(message, stderr=stderr)
 
     def select(

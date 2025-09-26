@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextvars
 import logging
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from opentelemetry import baggage, context
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
 from hud.settings import settings
 from hud.shared import make_request, make_request_sync
 from hud.utils.async_utils import fire_and_forget
+from hud.utils.task_logger import TaskLogHandler, TaskLogger
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,9 @@ current_mcp_tool_steps: contextvars.ContextVar[int] = contextvars.ContextVar(
 current_agent_steps: contextvars.ContextVar[int] = contextvars.ContextVar(
     "current_agent_steps", default=0
 )
+
+# Task logger context variable
+_current_task_logger: ContextVar[TaskLogger | None] = ContextVar("task_logger", default=None)
 
 # Keys for OpenTelemetry baggage
 TASK_RUN_ID_KEY = "hud.task_run_id"
@@ -119,6 +124,11 @@ def get_agent_steps() -> int:
 
     # Fallback to contextvars
     return current_agent_steps.get()
+
+
+def get_current_task_logger() -> TaskLogger | None:
+    """Get the current task logger from context."""
+    return _current_task_logger.get()
 
 
 def increment_base_mcp_steps() -> int:
@@ -459,6 +469,9 @@ class trace:
         self._otel_token: object | None = None
         self._task_run_token = None
         self._root_token = None
+        self._task_logger: TaskLogger | None = None
+        self._task_logger_token: contextvars.Token[TaskLogger | None] | None = None
+        self._task_log_handler: TaskLogHandler | None = None
 
     def __enter__(self) -> str:
         """Enter the trace context and return the task_run_id."""
@@ -493,6 +506,30 @@ class trace:
             attributes=span_attrs,
         )
         self._span = self._span_manager.__enter__()
+
+        if settings.enable_task_file_logging:
+            try:
+                self._task_logger = TaskLogger(
+                    task_run_id=self.task_run_id,
+                    task_id=self.task_id,
+                    task_name=self.span_name,
+                )
+                self._task_logger_token = _current_task_logger.set(self._task_logger)
+
+                self._task_log_handler = TaskLogHandler(self._task_logger)
+                self._task_log_handler.setLevel(logging.DEBUG)
+                root_logger = logging.getLogger()
+                if self._task_log_handler not in root_logger.handlers:
+                    root_logger.addHandler(self._task_log_handler)
+            except Exception as err:  # pragma: no cover - defensive logging
+                logger.exception(
+                    "Failed to initialize task logger for task_run_id=%s: %s",
+                    self.task_run_id,
+                    err,
+                )
+                self._task_logger = None
+                self._task_logger_token = None
+                self._task_log_handler = None
 
         # Update task status to running if root (only for HUD backend)
         if self.is_root and settings.telemetry_enabled and settings.api_key:
@@ -566,5 +603,31 @@ class trace:
             current_task_run_id.reset(self._task_run_token)  # type: ignore
         if self._root_token is not None:
             is_root_trace_var.reset(self._root_token)  # type: ignore
+
+        if self._task_logger:
+            try:
+                self._task_logger.cleanup()
+            except Exception as err:  # pragma: no cover - best effort cleanup
+                logger.debug(
+                    "Failed to cleanup task logger for task_run_id=%s: %s",
+                    self.task_run_id,
+                    err,
+                )
+        if self._task_logger_token is not None:
+            try:
+                _current_task_logger.reset(self._task_logger_token)
+            except (LookupError, ValueError):
+                _current_task_logger.set(None)
+        self._task_logger = None
+        self._task_logger_token = None
+
+        if self._task_log_handler:
+            root_logger = logging.getLogger()
+            try:
+                root_logger.removeHandler(self._task_log_handler)
+            except (ValueError, AttributeError):
+                pass
+            self._task_log_handler.close()
+            self._task_log_handler = None
 
         logger.debug("Ended HUD trace context for task_run_id=%s", self.task_run_id)

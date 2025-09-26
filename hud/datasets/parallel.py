@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
     from hud.agents import MCPAgent
 
+from hud.settings import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -85,6 +87,15 @@ def _process_worker(
 
     # Reinitialize telemetry in this process
     configure_telemetry()
+
+    if settings.enable_task_file_logging:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s - %(name)s - %(message)s",
+            datefmt="%H:%M:%S",
+        )
+        logging.getLogger("hud.agents").setLevel(logging.DEBUG)
+        logging.getLogger("hud.agents.base").setLevel(logging.DEBUG)
 
     # Dynamically import the agent class
     try:

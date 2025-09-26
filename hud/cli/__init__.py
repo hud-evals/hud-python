@@ -966,6 +966,18 @@ def eval(
         "-vv",
         help="Enable debug-level logs for maximum visibility",
     ),
+    task_file_logging: bool = typer.Option(
+        False,
+        "--task-file-logging",
+        "--per-task",
+        help="Enable per-task file logging for debugging",
+        is_flag=True,
+    ),
+    task_log_dir: str | None = typer.Option(
+        None,
+        "--task-log-dir",
+        help="Directory for task log files",
+    ),
     vllm_base_url: str | None = typer.Option(
         None,
         "--vllm-base-url",
@@ -1090,6 +1102,8 @@ def eval(
         max_concurrent_per_worker=max_concurrent_per_worker,
         verbose=verbose,
         very_verbose=very_verbose,
+        task_file_logging=task_file_logging,
+        task_log_dir=task_log_dir,
         vllm_base_url=vllm_base_url,
         group_size=group_size,
         integration_test=integration_test,

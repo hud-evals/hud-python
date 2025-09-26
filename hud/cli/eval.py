@@ -616,6 +616,18 @@ def eval_command(
         "-vv",
         help="Enable debug-level logs for maximum visibility",
     ),
+    task_file_logging: bool = typer.Option(
+        False,
+        "--task-file-logging",
+        "--per-task",
+        help="Enable per-task file logging for debugging",
+        is_flag=True,
+    ),
+    task_log_dir: str | None = typer.Option(
+        None,
+        "--task-log-dir",
+        help="Directory for task log files",
+    ),
     vllm_base_url: str | None = typer.Option(
         None,
         "--vllm-base-url",
@@ -674,7 +686,18 @@ def eval_command(
     """
     from hud.settings import settings
 
-    if very_verbose:
+    if task_file_logging:
+        settings.enable_task_file_logging = True
+        if task_log_dir is not None:
+            settings.task_log_directory = task_log_dir
+        settings.task_log_level = "DEBUG"
+    elif task_log_dir is not None:
+        settings.task_log_directory = task_log_dir
+
+    task_logging_enabled = settings.enable_task_file_logging
+    debug_logging = very_verbose or task_logging_enabled
+
+    if debug_logging:
         logging.basicConfig(
             level=logging.DEBUG,
             format="%(asctime)s - %(name)s - %(message)s",

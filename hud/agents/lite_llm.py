@@ -1,91 +1,46 @@
 """LiteLLM MCP Agent implementation.
-
-This module defines :class:`LiteAgent`, a thin wrapper around
-``GenericOpenAIChatAgent`` which swaps out the underlying transport for
-`litellm` and adds support for LiteLLM-specific tooling features such as
-prompt caching.  The base class is kept intentionally stateless to make
-composition easy, so the only differences in this subclass are the
-return type of :meth:`get_tool_schemas`, the format of system messages and
-tool result messages, and the mechanism used to invoke the chat
-completion endpoint.
-
-Several subtle issues existed in the original implementation which
-prevented the agent from operating reliably:
-
-* ``litellm`` is an optional dependency.  If it is not available at
-  runtime we must fall back to the generic OpenAI semantics rather
-  than attempting to use a missing module.  The original code would
-  attempt to call ``litellm.acompletion`` unconditionally, which
-  raises an ``ImportError``.
-* ``transform_mcp_tool_to_openai_tool`` from the ``litellm`` package
-  returns a ``ChatCompletionToolParam`` object.  The OpenAI and
-  LiteLLM APIs expect a plain dictionary for tools, so we must
-  convert this Pydantic model to a native ``dict``.  Without this
-  conversion the underlying JSON encoder cannot serialise the
-  ``ChatCompletionToolParam`` instance.
-* The original code used the ``strict`` keyword argument when
-  invoking ``zip``.  This argument was only introduced in Python
-  3.11.  To maintain compatibility with Python 3.8–3.10 we avoid
-  passing it.
-
-The changes below address these issues by deferring import of
-``litellm`` until runtime, converting tool schemas into plain
-dictionaries, and simplifying ``zip`` calls.  See individual comments
-inline for further details.
+Same OpenAI chat-completions shape + MCP tool plumbing,
+but transport is LiteLLM and (optionally) tools are shaped by LiteLLM's MCP transformer.
 """
 
 from __future__ import annotations
 
+import copy
 import logging
-import asyncio
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar
 
-try:
-    import litellm  # type: ignore[import]
-except Exception:
-    # If litellm isn't installed the module will remain None.  The
-    # fallback transport will be provided by the base Generic agent.
-    litellm = None  # type: ignore[assignment]
-
-try:
-    # Prefer LiteLLM's built-in MCP -> OpenAI tool transformer (handles
-    # Bedrock nuances).  If this import fails we fall back to the
-    # GenericOpenAIChatAgent implementation which sanitises schemas.
-    from litellm.experimental_mcp_client.tools import (
-        transform_mcp_tool_to_openai_tool,  # type: ignore[import]
-    )
-except Exception:  # pragma: no cover - optional dependency
-    transform_mcp_tool_to_openai_tool = None  # type: ignore[assignment]
-
-import mcp.types as types
-
-from hud.types import MCPToolCall, MCPToolResult
+import litellm
 
 from .openai_chat_generic import GenericOpenAIChatAgent
+from ..utils.hud_console import HUDConsole
 
 logger = logging.getLogger(__name__)
+
+# Prefer LiteLLM's built-in MCP -> OpenAI tool transformer (handles Bedrock nuances)
+try:
+    from litellm.experimental_mcp_client.tools import (
+        transform_mcp_tool_to_openai_tool,
+    )
+except Exception:  # pragma: no cover - optional dependency
+    transform_mcp_tool_to_openai_tool = None  # type: ignore
 
 
 class LiteAgent(GenericOpenAIChatAgent):
     """
-    Same OpenAI chat-completions shape + MCP tool plumbing, but the
-    transport is provided by ``litellm`` when available.  When
-    LiteLLM's tool transformer is present we use it to shape our tool
-    schemas, otherwise we fall back to the generic OpenAI
-    transformation defined in the base class.
+    Same OpenAI chat-completions shape + MCP tool plumbing,
+    but transport is LiteLLM and (optionally) tools are shaped by LiteLLM's MCP transformer.
     """
 
-    metadata: ClassVar[Dict[str, Any]] = {}
+    metadata: ClassVar[dict[str, Any]] = {}
 
     def __init__(
         self,
         *,
         model_name: str = "gpt-4o-mini",
-        completion_kwargs: Dict[str, Any] | None = None,
+        completion_kwargs: dict[str, Any] | None = None,
         **agent_kwargs: Any,
     ) -> None:
-        # We don't need an OpenAI client; pass None.  All other
-        # arguments are forwarded to GenericOpenAIChatAgent.
+        # We don't need an OpenAI client; pass None
         super().__init__(
             openai_client=None,
             model_name=model_name,
@@ -93,244 +48,144 @@ class LiteAgent(GenericOpenAIChatAgent):
             **agent_kwargs,
         )
 
-    def get_tool_schemas(self) -> List[Dict[str, Any]]:
-        """Return OpenAI-compatible tool schemas.
+        # Initialize HUD console for better logging
+        self.hud_console = HUDConsole(logger=logger)
+        self.hud_console.debug(f"LiteLLM agent initialized with model: {model_name}")
 
-        When ``transform_mcp_tool_to_openai_tool`` is available from
-        ``litellm``, it returns a ``ChatCompletionToolParam`` instance
-        that must be converted to a native ``dict``.  Otherwise we
-        delegate to the base class to handle schema sanitisation.
-        """
+        if completion_kwargs:
+            self.hud_console.debug(f"Completion kwargs: {completion_kwargs}")
+
+    def get_tool_schemas(self) -> list[dict]:
+        # Prefer LiteLLM's stricter transformer (handles Bedrock & friends)
         if transform_mcp_tool_to_openai_tool is not None:
-            tools: List[Dict[str, Any]] = []
-            for t in self.get_available_tools():
-                openai_tool_obj = transform_mcp_tool_to_openai_tool(t)
-                # ``transform_mcp_tool_to_openai_tool`` returns a
-                # ``ChatCompletionToolParam`` (a Pydantic model).  To
-                # ensure compatibility with both LiteLLM and OpenAI
-                # clients we convert it into a plain dict.  Pydantic v2
-                # uses ``model_dump`` while v1 uses ``dict``.
-                if hasattr(openai_tool_obj, "model_dump"):
-                    openai_tool: Dict[str, Any] = openai_tool_obj.model_dump(exclude_none=True)  # type: ignore[assignment]
-                elif hasattr(openai_tool_obj, "dict"):
-                    openai_tool = openai_tool_obj.dict(exclude_none=True)  # type: ignore[assignment]
-                else:
-                    openai_tool = openai_tool_obj  # type: ignore[assignment]
-                # Sanitize the function parameters to ensure OpenAI-compliant
-                # schemas (e.g. add ``items`` to array types, select appropriate
-                # variants from anyOf).  The transformed tool will always
-                # include a ``function`` entry with ``parameters``; if not,
-                # leave it unchanged.
-                try:
-                    fn = openai_tool.get("function")
-                    if fn and isinstance(fn, dict):
-                        params = fn.get("parameters")
-                        if params and isinstance(params, dict):
-                            sanitized = GenericOpenAIChatAgent._sanitize_schema_for_openai(self, params)  # type: ignore[attr-defined]
-                            fn["parameters"] = sanitized  # type: ignore[index]
-                except Exception:
-                    # If sanitization fails, leave schema unchanged
-                    pass
-                tools.append(openai_tool)  # type: ignore[arg-type]
-            return tools
-        # Fallback to the generic OpenAI sanitiser
-        return GenericOpenAIChatAgent.get_tool_schemas(self)
-
-    async def get_system_messages(self) -> List[Any]:  # type: ignore[override]
-        """Get system messages with caching support.
-
-        The system prompt is returned as a single text block marked
-        ``ephemeral`` so that LiteLLM's prompt caching middleware can
-        recognise it as not being persisted between requests.
-        """
-        return [
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": self.system_prompt,
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ],
-            }
-        ]
-
-    async def format_blocks(self, blocks: List[types.ContentBlock]) -> List[Any]:  # type: ignore[override]
-        """Format user-provided content blocks with caching support."""
-        content: List[Dict[str, Any]] = []
-        for block in blocks:
-            if isinstance(block, types.TextContent):
-                content.append(
-                    {
-                        "type": "text",
-                        "text": block.text,
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                )
-            elif isinstance(block, types.ImageContent):
-                content.append(
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{block.mimeType};base64,{block.data}"},
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                )
-        return [{"role": "user", "content": content}]
-
-    async def format_tool_results(
-        self,
-        tool_calls: List[MCPToolCall],
-        tool_results: List[MCPToolResult],
-    ) -> List[Any]:  # type: ignore[override]
-        """Render MCP tool results with caching support.
-
-        The OpenAI and LiteLLM APIs only support string content for tool
-        messages.  When images are present, they are returned as a
-        separate user message.  For compatibility with Python
-        versions prior to 3.11 we avoid passing ``strict=False`` to
-        ``zip``; instead we simply iterate over the shortest list.
-        """
-        rendered: List[Dict[str, Any]] = []
-        image_parts: List[Dict[str, Any]] = []
-        # iterate over the overlapping portion of tool_calls and tool_results
-        for call, res in zip(tool_calls, tool_results):
-            text_parts: List[str] = []
-            items = res.content
-            # Use structuredContent.result if available, otherwise use content
-            if not res.content and res.structuredContent:
-                items = [res.structuredContent.get("result", res.content)]
-            for item in items:
-                if isinstance(item, dict):
-                    if item.get("type") == "text":
-                        text_parts.append(item.get("text", ""))
-                    elif item.get("type") == "image":
-                        mime_type = item.get("mimeType", "image/png")
-                        data = item.get("data", "")
-                        image_parts.append(
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:{mime_type};base64,{data}"},
-                                "cache_control": {"type": "ephemeral"},
-                            }
-                        )
-                elif isinstance(item, types.TextContent):
-                    text_parts.append(item.text)
-                elif isinstance(item, types.ImageContent):
-                    image_parts.append(
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{item.mimeType};base64,{item.data}"},
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    )
-            text_content = "".join(text_parts) if text_parts else "Tool executed successfully"
-            rendered.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": call.id,
-                    "content": text_content,
-                }
-            )
-        # If there are images, add the last image as a separate user message.
-        # LiteLLM/OpenAI currently support only one image per message; we
-        # therefore take the most recent image.  We prefix it with a
-        # short text so that the client knows why the image is being
-        # shown.
-        if image_parts:
-            content_with_images: List[Dict[str, Any]] = [
-                {
-                    "type": "text",
-                    "text": "Tool returned the following:",
-                    "cache_control": {"type": "ephemeral"},
-                },
-                image_parts[-1],
+            tools = [
+                transform_mcp_tool_to_openai_tool(t)  # returns ChatCompletionToolParam-like dict
+                for t in self.get_available_tools()
             ]
-            rendered.append(
-                {
-                    "role": "user",
-                    "content": content_with_images,
-                }
-            )
-        return rendered
+            self.hud_console.debug(f"Using LiteLLM MCP transformer for {len(tools)} tools")
+            return tools
+        # Fallback to the generic OpenAI sanitizer
+        tools = GenericOpenAIChatAgent.get_tool_schemas(self)
+        self.hud_console.debug(f"Using generic OpenAI transformer for {len(tools)} tools")
+        return tools
+
+    def _add_prompt_caching(self, messages: list[dict]) -> list[dict]:
+        """Add prompt caching to messages for models that support it."""
+        # Check if model supports prompt caching
+        try:
+            from litellm.utils import supports_prompt_caching
+            if not supports_prompt_caching(self.model_name):
+                self.hud_console.debug(f"Model {self.model_name} does not support prompt caching, skipping")
+                return messages
+        except (ImportError, AttributeError):
+            # If function not available, apply caching universally and let LiteLLM handle it
+            self.hud_console.debug("litellm.utils.supports_prompt_caching not available, applying caching universally")
+
+        self.hud_console.debug(f"Adding prompt caching to messages for model: {self.model_name}")
+        messages_cached = copy.deepcopy(messages)
+
+        # Mark last user message with cache control
+        if (
+            messages_cached
+            and isinstance(messages_cached[-1], dict)
+            and messages_cached[-1].get("role") == "user"
+        ):
+            content = messages_cached[-1].get("content")
+
+            # Handle string content - convert to list format for caching
+            if isinstance(content, str):
+                messages_cached[-1]["content"] = [
+                    {
+                        "type": "text",
+                        "text": content,
+                        "cache_control": {"type": "ephemeral"}
+                    }
+                ]
+                self.hud_console.debug("Added caching to string content (converted to list format)")
+            # Handle list content (already in structured format)
+            elif isinstance(content, list):
+                cached_blocks = 0
+                for block in content:
+                    if isinstance(block, dict):
+                        block_type = block.get("type")
+                        if block_type in ["text", "image", "tool_use", "tool_result"]:
+                            block["cache_control"] = {"type": "ephemeral"}
+                            cached_blocks += 1
+                self.hud_console.debug(f"Added caching to {cached_blocks} content blocks")
+
+        return messages_cached
+
+    def _add_tools_caching(self, tools: list[dict] | None) -> list[dict] | None:
+        """Add caching to tools for models that support it."""
+        if not tools:
+            return tools
+
+        # Check if model supports prompt caching (which also covers tools caching)
+        try:
+            from litellm.utils import supports_prompt_caching
+            if not supports_prompt_caching(self.model_name):
+                self.hud_console.debug(f"Model {self.model_name} does not support tools caching, skipping")
+                return tools
+        except (ImportError, AttributeError):
+            # If function not available, apply caching universally and let LiteLLM handle it
+            self.hud_console.debug("litellm.utils.supports_prompt_caching not available, applying tools caching universally")
+
+        self.hud_console.debug(f"Adding caching to {len(tools)} tools for model: {self.model_name}")
+        tools_cached = copy.deepcopy(tools)
+
+        # Add cache control to function definitions
+        cached_tools = 0
+        for tool in tools_cached:
+            if isinstance(tool, dict) and tool.get("type") == "function":
+                function = tool.get("function", {})
+                if isinstance(function, dict):
+                    function["cache_control"] = {"type": "ephemeral"}
+                    cached_tools += 1
+
+        self.hud_console.debug(f"Added caching to {cached_tools} function tools")
+        return tools_cached
 
     async def _invoke_chat_completion(
         self,
         *,
-        messages: List[Any],
-        tools: List[Dict[str, Any]] | None,
-        extra: Dict[str, Any],
-    ) -> Any:  # type: ignore[override]
-        """Invoke the underlying LLM via LiteLLM when available.
+        messages: list[Any],
+        tools: list[dict] | None,
+        extra: dict[str, Any],
+    ):
+        self.hud_console.debug(f"Invoking LiteLLM completion with model: {self.model_name}")
+        self.hud_console.debug(f"Messages count: {len(messages)}")
+        self.hud_console.debug(f"Tools count: {len(tools) if tools else 0}")
 
-        If ``litellm`` is installed we delegate to ``litellm.acompletion``.
-        Otherwise we defer to the base class implementation which uses
-        the OpenAI client.  This allows the agent to function even
-        when LiteLLM isn't installed.
-        """
-        if litellm is None:
-            # Defer to the generic implementation which will raise if
-            # ``openai_client`` is missing.  This mirrors the original
-            # behaviour when LiteLLM is unavailable.
-            return await super()._invoke_chat_completion(messages=messages, tools=tools, extra=extra)
+        if extra:
+            self.hud_console.debug(f"Extra parameters: {list(extra.keys())}")
 
-        # On LiteLLM we tolerate ``None`` for tools and drop the
-        # ``tool_choice`` parameter when no tools are provided.  Set
-        # ``tool_choice='auto'`` explicitly when tools are present.
-        # Additionally pull retry-related parameters from the caller
-        # configuration.  ``num_retries`` controls the total number of
-        # attempts (default 3).  ``retry_backoff`` sets the base delay
-        # in seconds for exponential backoff (default 1).
-        # Pop these keys from ``extra`` so they are not forwarded to
-        # ``litellm.acompletion`` where they may not be supported.
-        max_attempts = extra.pop("num_retries", None)
-        base_delay = extra.pop("retry_backoff", None)
+        # Apply caching to messages and tools
+        messages_cached = self._add_prompt_caching(messages)
+        tools_cached = self._add_tools_caching(tools)
+
         try:
-            # ``completion_kwargs`` on the agent can also specify retry
-            # configuration.  Only set if not already provided via
-            # ``extra``.
-            if max_attempts is None:
-                max_attempts = self.completion_kwargs.get("num_retries")  # type: ignore[index]
-            if base_delay is None:
-                base_delay = self.completion_kwargs.get("retry_backoff")  # type: ignore[index]
-        except Exception:
-            # completion_kwargs may be None or not indexable
-            pass
-        # Fallback defaults
-        if not isinstance(max_attempts, int) or max_attempts <= 0:
-            max_attempts = 3
-        if not isinstance(base_delay, (int, float)) or base_delay <= 0:
-            base_delay = 1.0
+            self.hud_console.debug("Calling litellm.acompletion...")
+            response = await litellm.acompletion(
+                model=self.model_name,
+                messages=messages_cached,
+                tools=tools_cached or None,  # LiteLLM tolerates None better than []
+                **extra,
+            )
 
-        params: Dict[str, Any] = {**extra, "model": self.model_name, "messages": messages}
-        if tools:
-            params["tools"] = tools
-            params["tool_choice"] = "auto"
+            # Log response details
+            if hasattr(response, 'usage') and response.usage:
+                usage = response.usage
+                self.hud_console.debug(f"Token usage - Input: {usage.prompt_tokens}, Output: {usage.completion_tokens}")
 
-        for attempt in range(max_attempts):
-            try:
-                # ``litellm.acompletion`` is asynchronous.  See
-                # https://docs.litellm.ai/docs/completion/function_call for
-                # details on available parameters.
-                return await litellm.acompletion(**params)
-            except Exception as e:
-                # Identify rate limit errors.  ``litellm`` exposes
-                # ``RateLimitError`` on the module; if not present,
-                # fallback to checking the class name.  Only retry
-                # rate-limit errors with backoff; re-raise others.
-                rate_limit_error = False
-                if litellm is not None and hasattr(litellm, "RateLimitError"):
-                    rate_limit_error = isinstance(e, litellm.RateLimitError)  # type: ignore[attr-defined]
-                # Fallback: check the exception's class name for RateLimit
-                if not rate_limit_error and "RateLimit" in e.__class__.__name__:
-                    rate_limit_error = True
-                if rate_limit_error and attempt < max_attempts - 1:
-                    delay = float(base_delay) * (2 ** attempt)
-                    logger.warning(
-                        f"Rate limit encountered on attempt {attempt + 1} of {max_attempts}; "
-                        f"sleeping {delay:.1f}s before retrying: {e}"
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-                # For all other exceptions or exhausted retries, re-raise
-                raise
+                # Log cache statistics if available
+                if hasattr(usage, 'cache_read_input_tokens') and usage.cache_read_input_tokens:
+                    self.hud_console.info(f"🔄 Cache read tokens: {usage.cache_read_input_tokens}")
+                if hasattr(usage, 'cache_creation_input_tokens') and usage.cache_creation_input_tokens:
+                    self.hud_console.info(f"💾 Cache creation tokens: {usage.cache_creation_input_tokens}")
+
+            self.hud_console.debug("LiteLLM completion successful")
+            return response
+
+        except Exception as e:
+            self.hud_console.error(f"LiteLLM completion failed: {e}")
+            raise

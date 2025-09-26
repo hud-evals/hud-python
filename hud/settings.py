@@ -124,6 +124,25 @@ class Settings(BaseSettings):
         validation_alias="HUD_LOG_STREAM",
     )
 
+    # Task logging configuration
+    enable_task_file_logging: bool = Field(
+        default=False,
+        description="Enable per-task file logging",
+        validation_alias="HUD_ENABLE_TASK_FILE_LOGGING",
+    )
+
+    task_log_directory: str = Field(
+        default="task_logs",
+        description="Directory for task log files",
+        validation_alias="HUD_TASK_LOG_DIRECTORY",
+    )
+
+    task_log_level: str = Field(
+        default="DEBUG",
+        description="Log level for task files",
+        validation_alias="HUD_TASK_LOG_LEVEL",
+    )
+
 
 # Create a singleton instance
 settings = Settings()

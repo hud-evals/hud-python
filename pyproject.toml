@@ -40,6 +40,7 @@ dependencies = [
     # AI providers
     "anthropic",
     "openai",
+    "litellm>=1.55.0",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
