@@ -120,13 +120,24 @@ class GenericOpenAIChatAgent(MCPAgent):
         sanitized: Dict[str, Any] = {}
         for key, value in schema.items():
             if key == "anyOf" and isinstance(value, list):
-                # Handle anyOf patterns (usually for nullable fields)
+                # Handle anyOf patterns (usually for nullable fields).  OpenAI
+                # does not support anyOf, so pick a single variant.  Prefer
+                # non-array types if available to avoid array schemas that
+                # require additional processing.
                 non_null_types = [
                     v for v in value if not (isinstance(v, dict) and v.get("type") == "null")
                 ]
                 if non_null_types:
-                    # Use the first non-null type
-                    sanitized.update(self._sanitize_schema_for_openai(non_null_types[0]))
+                    # Choose the first variant that is not an array, falling
+                    # back to the first non-null variant.
+                    selected = None
+                    for candidate in non_null_types:
+                        if isinstance(candidate, dict) and candidate.get("type") != "array":
+                            selected = candidate
+                            break
+                    if selected is None:
+                        selected = non_null_types[0]
+                    sanitized.update(self._sanitize_schema_for_openai(selected))
                 else:
                     sanitized["type"] = "string"  # Fallback
             elif key == "prefixItems":
@@ -161,6 +172,11 @@ class GenericOpenAIChatAgent(MCPAgent):
             ):
                 # These are supported by OpenAI
                 sanitized[key] = value
+        # If the schema represents an array but does not specify
+        # the item type, default to an array of strings.  OpenAI
+        # requires ``items`` on array schemas.
+        if sanitized.get("type") == "array" and "items" not in sanitized:
+            sanitized["items"] = {"type": "string"}
         return sanitized or {"type": "object"}
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
