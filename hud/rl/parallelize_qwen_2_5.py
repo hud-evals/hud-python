@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp import MixedPrecisionPolicy, CPUOffloadPolicy, fully_shard
+from torch.distributed.fsdp import MixedPrecisionPolicy, CPUOffloadPolicy, fully_shard, FSDPModule
 from transformers import Qwen2ForCausalLM, Qwen2_5_VLForConditionalGeneration
+import torch.nn as nn
 
 from hud.rl.model import apply_ddp
 from hud.rl.parallel_dims import ParallelDims
@@ -25,10 +26,26 @@ def apply_fsdp_lm(
         fully_shard(block, mesh=dp_mesh, mp_policy=policy, reshard_after_forward=reshard_after_forward)
 
     if hasattr(model, "config") and not model.config.tie_word_embeddings:
-        fully_shard(model.model.embed_tokens, mesh=dp_mesh, mp_policy=policy, reshard_after_forward=reshard_after_forward)
-        fully_shard([model.lm_head, model.model.norm], mesh=dp_mesh, mp_policy=policy, reshard_after_forward=False)
-    
-    console.info_log("Applied FSDP to the model")
+        fully_shard(
+            model.model.embed_tokens,
+            mesh=dp_mesh,
+            mp_policy=policy,
+            reshard_after_forward=reshard_after_forward,
+        )
+        fully_shard(
+            model.model.norm,
+            mesh=dp_mesh,
+            mp_policy=policy,
+            reshard_after_forward=False,
+        )
+        fully_shard(
+            model.lm_head,
+            mesh=dp_mesh,
+            mp_policy=policy,
+            reshard_after_forward=False,
+        )
+
+    fully_shard(model, mesh=dp_mesh, mp_policy=policy, reshard_after_forward=reshard_after_forward)
 
 def apply_fsdp_vl(
     model: Qwen2_5_VLForConditionalGeneration,
@@ -52,27 +69,44 @@ def apply_fsdp_vl(
         fully_shard(block, mesh=dp_mesh, mp_policy=policy, reshard_after_forward=reshard_after_forward)
 
     if hasattr(model, "config") and not model.config.tie_word_embeddings:
-        fully_shard(model.model.language_model.embed_tokens, mesh=dp_mesh, mp_policy=policy, reshard_after_forward=reshard_after_forward)
-        fully_shard([model.lm_head, model.model.language_model.norm], mesh=dp_mesh, mp_policy=policy, reshard_after_forward=False)
+        fully_shard(
+            model.model.language_model.embed_tokens,
+            mesh=dp_mesh,
+            mp_policy=policy,
+            reshard_after_forward=reshard_after_forward,
+        )
+        fully_shard(
+            model.model.language_model.norm,
+            mesh=dp_mesh,
+            mp_policy=policy,
+            reshard_after_forward=False,
+        )
+        fully_shard(
+            model.lm_head,
+            mesh=dp_mesh,
+            mp_policy=policy,
+            reshard_after_forward=False,
+        )
 
-    console.info_log("Applied FSDP to the model")
+    fully_shard(model, mesh=dp_mesh, mp_policy=policy, reshard_after_forward=reshard_after_forward)
 
 def parallelize_qwen(
-    model: Qwen2ForCausalLM | Qwen2_5_VLForConditionalGeneration,
+    model: nn.Module,
     parallel_dims: ParallelDims,
-):
+) -> nn.Module:
     """
     Apply data parallelism (DDP/FSDP/HSDP) to the model.
 
-    NOTE: The passed-in model preferably should be on meta device. Otherwise,
-    the model must fit on GPU or CPU memory.
+    NOTE: Ensure the model fits in available CPU or GPU memory before sharding.
     """
     world_mesh = parallel_dims.world_mesh
 
     if parallel_dims.fsdp_enabled:
         # apply FSDP or HSDP
         if parallel_dims.dp_replicate_enabled:
-            dp_mesh_dim_names = ("dp_replicate")
+            dp_mesh_dim_names = ("dp_replicate", "dp_shard")
+        else:
+            dp_mesh_dim_names = ("dp_shard",)
 
         if isinstance(model, Qwen2ForCausalLM):
             apply_fsdp_lm(model, world_mesh[tuple(dp_mesh_dim_names)], cpu_offload=False, reshard_after_forward=False)
@@ -91,5 +125,6 @@ def parallelize_qwen(
             model,
             world_mesh,
         )
+        console.info_log("Applied DDP to the model")
 
     return model

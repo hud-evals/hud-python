@@ -1,7 +1,7 @@
 from typing import Literal, TypeAlias
 from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator, computed_field
+from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator
 
 # Simple type alias for attention implementations
 AttnImplementation: TypeAlias = Literal["eager", "flash_attention_2", "sdpa"]
@@ -48,41 +48,6 @@ class BaseConfig(BaseModel):
         self.validate_config()
 
 
-class LoRAConfig(BaseConfig):
-    r: int = Field(default=8, ge=1, le=64, description="LoRA rank parameter - controls the size of the adaptation")
-    alpha: int = Field(default=16, ge=1, description="LoRA alpha parameter - scaling factor for the adaptation")
-    dropout: float = Field(default=0.05, ge=0.0, le=1.0, description="LoRA dropout rate")
-    target_modules: tuple[str, ...] = Field(
-        default=(
-            "q_proj",
-            "k_proj", 
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ),
-        description="List of modules to apply LoRA to"
-    )
-    
-    @field_validator("alpha")
-    @classmethod
-    def validate_alpha(cls, v: int) -> int:
-        # This will be validated after r is set in validate_config
-        return v
-    
-    def validate_config(self) -> None:
-        super().validate_config()
-        
-        if self.alpha < self.r:
-            raise ValueError(
-                f"LoRA alpha ({self.alpha}) should be >= LoRA rank ({self.r})"
-            )
-        
-        if not self.target_modules:
-            raise ValueError("target_modules cannot be empty")
-
-
 class ProcessorConfig(BaseConfig): 
     min_pixels: int = Field(default=256 * 28 * 28, ge=1, description="Minimum number of pixels for image processing")
     max_pixels: int = Field(default=512 * 28 * 28, ge=1, description="Maximum number of pixels for image processing")
@@ -99,10 +64,6 @@ class ProcessorConfig(BaseConfig):
 class ModelConfig(BaseConfig):
     base_model: str = ""
 
-    lora: LoRAConfig = Field(
-        default_factory=LoRAConfig,
-        description="LoRA configuration"
-    )
     processor: ProcessorConfig = Field(
         default_factory=ProcessorConfig,
         description="Image processor configuration"
@@ -272,7 +233,7 @@ class Config(BaseConfig):
 
     # Paths
     out_dir: str = Field(default="./checkpoints", description="Output directory for checkpoints")
-    adapter_prefix: str = Field(default="cua-grpo-step", description="Prefix for adapter files")
+    checkpoint_prefix: str = Field(default="cua-grpo-step", description="Prefix for checkpoint directories")
 
     # Misc
     seed: int = Field(default=1234, description="Random seed for reproducibility")
@@ -307,7 +268,7 @@ class Config(BaseConfig):
             stats_interval=d.get("stats_interval", 1),
             verbose=d.get("verbose", False),
             out_dir=d.get("out_dir", "./checkpoints"),
-            adapter_prefix=d.get("adapter_prefix", "cua-grpo-step"),
+            checkpoint_prefix=d.get("checkpoint_prefix", "cua-grpo-step"),
             seed=d.get("seed", 1234),
         )
 
@@ -323,6 +284,6 @@ class Config(BaseConfig):
             "stats_interval": self.stats_interval,
             "verbose": self.verbose,
             "out_dir": self.out_dir,
-            "adapter_prefix": self.adapter_prefix,
+            "checkpoint_prefix": self.checkpoint_prefix,
             "seed": self.seed,
         }

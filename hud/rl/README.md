@@ -10,15 +10,14 @@ uv pip install flash-attn --no-build-isolation
 
 Launch a vllm server with:
 ```bash
-export VLLM_ALLOW_RUNTIME_LORA_UPDATING=True
 export TOKENIZERS_PARALLELISM=false
 export VLLM_LOGGING_LEVEL=INFO
 export CUDA_VISIBLE_DEVICES=7 # Set this to your last GPU
 
 uv run vllm serve Qwen/Qwen2.5-VL-3B-Instruct \
     --api-key token-abc123 --host 0.0.0.0 --port 8000 --tensor-parallel-size 1 --trust-remote-code \
-    --max-model-len 16384 --enable-lora --max-lora-rank 64 --max-cpu-loras 4 --enable-auto-tool-choice \
-    --tool-call-parser hermes --disable-log-requests --dtype auto
+    --max-model-len 16384 --enable-auto-tool-choice --tool-call-parser hermes --disable-log-requests \
+    --dtype auto
 ```
 
 And training with (replace 2 with your spare GPUs):

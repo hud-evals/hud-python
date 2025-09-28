@@ -11,25 +11,28 @@ class RankAwareHUDConsole(HUDConsole):
         """Add rank prefix if available."""
         rank = os.environ.get("RANK")
         if rank is not None:
-            return f"[rank {rank}] {msg}"
+            return f"\\[rank {rank}] {msg}"
         return msg
 
-    def info(self, msg: str) -> None:
-        super().info(self._format_msg(msg))
+    def info(self, msg: str, stderr: bool = True) -> None:
+        super().info(self._format_msg(msg), stderr=stderr)
 
-    def info_log(self, msg: str) -> None:
-        super().info_log(self._format_msg(msg))
+    def info_log(self, msg: str, stderr: bool = True) -> None:
+        super().info_log(msg, stderr=stderr)
 
-    def warning(self, msg: str) -> None:
-        super().warning(self._format_msg(msg))
+    def warning(self, msg: str, stderr: bool = True) -> None:
+        super().warning(self._format_msg(msg), stderr=stderr)
 
-    def warning_log(self, msg: str) -> None:
-        super().warning_log(self._format_msg(msg))
+    def warning_log(self, msg: str, stderr: bool = True) -> None:
+        super().warning_log(msg, stderr=stderr)
 
-    def error(self, msg: str) -> None:
-        super().error(self._format_msg(msg))
+    def error(self, msg: str, stderr: bool = True) -> None:
+        super().error(self._format_msg(msg), stderr=stderr)
 
 
+def setup_logger() -> RankAwareHUDConsole:
 # Single shared instance that automatically adds rank info
-logger = logging.getLogger("hud.rl")
-console = RankAwareHUDConsole(logger=logger)
+    logger = logging.getLogger("hud.rl")
+    return RankAwareHUDConsole(logger=logger)
+
+console = setup_logger()
