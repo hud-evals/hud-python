@@ -9,6 +9,7 @@ import time
 import httpx
 from controller import mcp, http_client, ENV_SERVER_URL
 from hud.tools import PlaywrightTool, HudComputerTool, AnthropicComputerTool, OpenAIComputerTool
+from . import OpenAIComputerToolWithRecord
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,8 @@ playwright = PlaywrightTool(cdp_url=_cdp_ws) if _cdp_ws else PlaywrightTool()
 # Let it auto-detect the best available executor (pyautogui likely)
 computer = HudComputerTool(display_num=1)
 anthropic_computer = AnthropicComputerTool(display_num=1)
-openai_computer = OpenAIComputerTool(display_num=1)
+# openai_computer = OpenAIComputerTool(display_num=1)
+openai_computer = OpenAIComputerToolWithRecord(display_num=1)
 
 # Register them with MCP
 mcp.tool(playwright)

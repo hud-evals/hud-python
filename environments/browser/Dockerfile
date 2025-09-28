@@ -50,7 +50,6 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # Install all dependencies from single pyproject.toml
 COPY pyproject.toml .
-COPY controller/ ./controller/
 
 # Install everything from the main pyproject.toml
 RUN uv pip install --system --break-system-packages -e .
@@ -60,6 +59,9 @@ RUN python3 -m playwright install chromium --with-deps
 
 # Layer 3: Copy the rest of environment folder (source code)
 COPY environment/ /app/environment/
+
+COPY controller/ ./controller/
+
 
 # Auto-discover and install/build all frontend apps
 RUN set -e; \
@@ -88,6 +90,7 @@ ENV MCP_TRANSPORT="stdio"
 ENV HUD_LOG_STREAM="stderr"
 ENV PYTHONUNBUFFERED="1"
 ENV PYTHONWARNINGS="ignore::SyntaxWarning:pyautogui"
+ENV DISPLAY=":1"
 
 # Expose ports
 EXPOSE 8000 8080 3000-3200 5000-5200
