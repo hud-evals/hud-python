@@ -21,6 +21,7 @@ import concurrent.futures as cf
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+import httpx
 
 from mcp.types import ClientRequest, ServerResult
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
@@ -323,6 +324,11 @@ class HudSpanExporter(SpanExporter):
         self._api_key = api_key
         # Track pending export futures so we can force-flush on shutdown
         self._pending_futures: list[cf.Future[SpanExportResult]] = []
+        # Persistent HTTP client to reuse connections
+        self._client = httpx.Client(
+            timeout=30.0,
+            limits=httpx.Limits(max_connections=2000, max_keepalive_connections=512, keepalive_expiry=15.0),
+        )
 
     # ------------------------------------------------------------------
     # Core API
@@ -378,6 +384,7 @@ class HudSpanExporter(SpanExporter):
                             url=url,
                             json=payload,
                             api_key=self._api_key,
+                            client=self._client,
                         )
                     except Exception as exc:
                         logger.exception("HUD exporter failed to send spans for task %s: %s", run_id, exc)
@@ -435,6 +442,7 @@ class HudSpanExporter(SpanExporter):
                         url=url,
                         json=payload,
                         api_key=self._api_key,
+                        client=self._client,
                     )
                 except Exception as exc:
                     logger.exception("HUD exporter failed to send spans for task %s: %s", run_id, exc)
@@ -452,6 +460,11 @@ class HudSpanExporter(SpanExporter):
             pass
         finally:
             self._pending_futures.clear()
+        # Close persistent client
+        try:
+            self._client.close()
+        except Exception:
+            pass
 
     def force_flush(self, timeout_millis: int | None = None) -> bool:  # type: ignore[override]
         # Wait for pending export futures

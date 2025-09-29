@@ -23,7 +23,6 @@ from hud.shared import make_request
 from hud.telemetry.job import Job, _print_job_url, _print_job_complete_url, get_current_job
 from hud.telemetry.trace import Trace
 from hud.utils.task_tracking import track_task
-from hud.utils.task_tracking import wait_all_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -119,11 +118,6 @@ class AsyncTrace:
         if self._otel_trace:
             self._otel_trace.__exit__(exc_type, exc_val, exc_tb)
         
-        # Ensure any pending telemetry tasks complete quickly
-        try:
-            await wait_all_tasks(timeout=5.0)
-        except Exception:
-            pass
         
         logger.debug(f"Ended async trace for task_run_id={self.task_run_id}")
 
@@ -211,11 +205,6 @@ class AsyncJob:
         # Restore old job
         _current_job = self._old_job
         
-        # Ensure any pending telemetry tasks complete quickly
-        try:
-            await wait_all_tasks(timeout=5.0)
-        except Exception:
-            pass
         
         logger.debug(f"Ended async job {self.job.id}")
 
