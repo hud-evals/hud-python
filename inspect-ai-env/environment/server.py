@@ -1,21 +1,17 @@
 """Minimal FastAPI environment server (HTTP-based)."""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import Any, Dict, List, Optional, Union
-import asyncio
+from typing import Any, Dict, List, Optional
 import json
 import logging
 import sys
 import uuid
-import time
-from datetime import datetime
 from importlib import import_module
 
 from inspect_ai import Task
-from inspect_ai.solver import TaskState, Generate
-from inspect_ai.scorer import Target
-from inspect_ai.model import ChatMessageUser, ChatMessageAssistant
+from inspect_ai.solver import TaskState
+from inspect_ai.model import ChatMessageUser, ModelOutput
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -121,35 +117,7 @@ def create_task_state_from_sample(
     return state
 
 
-class Sample(BaseModel):
-    """Sample model matching inspect_ai Sample structure"""
-    input: Union[str, List[Dict[str, Any]]]
-    target: Union[str, List[str]] = ""
-    choices: Optional[List[str]] = None
-    id: Union[int, str, None] = None
-    metadata: Optional[Dict[str, Any]] = None
-    sandbox: Optional[Dict[str, Any]] = None
-    files: Optional[Dict[str, str]] = None
-    setup: Optional[str] = None
-
-
-class SampleProcessRequest(BaseModel):
-    """Request to process a single sample"""
-    sample: Sample
-    task_config: Optional[Dict[str, Any]] = None
-    eval_spec: Optional[Dict[str, Any]] = None
-
-
-class SampleResult(BaseModel):
-    """Result of processing a single sample"""
-    sample_id: Union[int, str]
-    success: bool
-    setup_output: Optional[str] = None
-    solver_output: Optional[str] = None
-    score: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    processing_time: Optional[float] = None
-    timestamp: str
+# Sample-related models removed - using evaluate endpoint only
 
 
 @app.get("/health")
@@ -186,7 +154,76 @@ class EvaluateRequest(BaseModel):
     """Request to run an inspect_ai evaluation"""
     eval_name: str
     task_params: Optional[Dict[str, Any]] = None
+    sample: Optional[Dict[str, Any]] = None
     limit: Optional[int] = None
+
+
+class ModelGenerateRequest(BaseModel):
+    """Request from HUD model provider to generate a response"""
+    messages: List[Dict[str, Any]]
+    tools: List[Dict[str, Any]] = []
+    tool_choice: Optional[Any] = None
+    config: Dict[str, Any] = {}
+
+
+@app.post("/model/generate")
+async def model_generate(request: ModelGenerateRequest):
+    """
+    Handle model generate() calls from the HUD ModelAPI provider.
+
+    This endpoint receives generate() calls from inspect_ai running in Docker
+    and forwards them to your external agent via HTTP callback.
+
+    Set AGENT_CALLBACK_URL environment variable to your agent's endpoint.
+    Example: AGENT_CALLBACK_URL=http://host.docker.internal:9000/generate
+    """
+    import os
+    import httpx
+
+    logger.info(f"Model generate called with {len(request.messages)} messages")
+
+    # Get callback URL from environment
+    callback_url = os.getenv("AGENT_CALLBACK_URL")
+
+    if not callback_url:
+        # No callback URL configured, return mock response
+        logger.warning("No AGENT_CALLBACK_URL configured, returning mock response")
+        last_message = request.messages[-1] if request.messages else {}
+        user_content = last_message.get("content", "")
+
+        return {
+            "content": f"Mock response to: {user_content[:100]}...",
+            "model": "hud/agent",
+            "stop_reason": "stop"
+        }
+
+    try:
+        # Forward to external agent
+        logger.info(f"Forwarding to agent at {callback_url}")
+
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            response = await client.post(
+                callback_url,
+                json={
+                    "messages": request.messages,
+                    "tools": request.tools,
+                    "config": request.config
+                }
+            )
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(f"Received response from agent: {len(result.get('content', ''))} chars")
+
+            return result
+
+    except Exception as e:
+        logger.error(f"Error calling agent: {e}")
+        return {
+            "content": f"Error calling agent: {str(e)}",
+            "model": "hud/agent",
+            "stop_reason": "error"
+        }
 
 
 @app.post("/evaluate")
@@ -202,14 +239,18 @@ async def evaluate(request: EvaluateRequest):
     """
     eval_name = request.eval_name
     task_params = request.task_params or {}
+    sample_data = request.sample
     limit = request.limit
 
-    logger.info(f"Starting evaluation: {eval_name} with params: {task_params}, limit: {limit}")
+    logger.info(f"Starting evaluation: {eval_name} with params: {task_params}, sample: {sample_data is not None}, limit: {limit}")
 
     try:
         # Import inspect_ai's eval function
         from inspect_ai import eval as inspect_eval
         from inspect_ai.log import read_eval_log
+
+        # Import and register the HUD model provider
+        from environment.hud_model import HUDAgentModel  # noqa: F401
 
         # Load the eval task
         eval_spec = {
@@ -218,17 +259,33 @@ async def evaluate(request: EvaluateRequest):
         }
         task = load_eval_task(eval_spec)
 
-        # Limit dataset if requested
-        if limit:
-            task.dataset = task.dataset[:limit]
+        # Filter dataset based on parameters
+        if sample_data is not None:
+            # Process single sample provided directly (for parallel processing)
+            from inspect_ai.dataset import Sample
 
-        logger.info(f"Running eval with {len(task.dataset)} samples")
+            # Convert dict to Sample object
+            sample = Sample(
+                id=sample_data.get("id"),
+                input=sample_data.get("input"),
+                target=sample_data.get("target"),
+                metadata=sample_data.get("metadata", {}),
+                sandbox=sample_data.get("sandbox")
+            )
+            task.dataset = [sample]
+            logger.info(f"Processing single sample: {sample.id}")
+        elif limit:
+            # Limit number of samples
+            task.dataset = task.dataset[:limit]
+            logger.info(f"Running eval with {len(task.dataset)} samples (limited)")
+        else:
+            logger.info(f"Running eval with {len(task.dataset)} samples (full dataset)")
 
         # Run the evaluation using inspect_ai
-        # This will use the eval's native solver and scorer
+        # Use the HUD model provider which will route calls back through MCP
         logs = await inspect_eval(
             task,
-            model="openai/gpt-4o-mini",  # TODO: Make this configurable
+            model="hud/agent",  # Routes to your HUD agent
             log_dir="logs"
         )
 
@@ -265,264 +322,5 @@ async def evaluate(request: EvaluateRequest):
         }
 
 
-@app.post("/process_sample")
-async def process_sample(request: SampleProcessRequest) -> SampleResult:
-    """
-    Process a single sample through the setup -> solver -> scorer pipeline.
-    This is the main endpoint for inspect-ai integration.
-    """
-    sample = request.sample
-    sample_id = sample.id or str(uuid.uuid4())
-
-    logger.info(f"Processing sample {sample_id}")
-    start_time = time.time()
-
-    # Mark as processing
-    _processing_status[sample_id] = "processing"
-
-    try:
-        # Step 1: Setup phase
-        setup_output = await run_sample_setup(sample, request.task_config, request.eval_spec)
-        logger.info(f"Setup completed for sample {sample_id}")
-
-        # Step 2: Solver phase (main execution)
-        solver_output = await run_sample_solver(sample, setup_output, request.task_config, request.eval_spec)
-        logger.info(f"Solver completed for sample {sample_id}")
-
-        # Step 3: Scoring phase
-        score = await run_sample_scorer(sample, solver_output, request.task_config, request.eval_spec)
-        logger.info(f"Scoring completed for sample {sample_id}")
-
-        processing_time = time.time() - start_time
-
-        result = SampleResult(
-            sample_id=sample_id,
-            success=True,
-            setup_output=setup_output,
-            solver_output=solver_output,
-            score=score,
-            processing_time=processing_time,
-            timestamp=datetime.now().isoformat()
-        )
-
-        # Store result
-        _sample_results[sample_id] = result
-        _processing_status[sample_id] = "completed"
-
-        return result
-
-    except Exception as e:
-        logger.error(f"Error processing sample {sample_id}: {e}")
-        processing_time = time.time() - start_time
-
-        result = SampleResult(
-            sample_id=sample_id,
-            success=False,
-            error=str(e),
-            processing_time=processing_time,
-            timestamp=datetime.now().isoformat()
-        )
-
-        _sample_results[sample_id] = result
-        _processing_status[sample_id] = "error"
-
-        return result
-
-
-@app.get("/sample_result/{sample_id}")
-def get_sample_result(sample_id: str):
-    """Get the result of a processed sample"""
-    if sample_id not in _sample_results:
-        raise HTTPException(status_code=404, detail="Sample result not found")
-    return _sample_results[sample_id]
-
-
-@app.get("/sample_status/{sample_id}")
-def get_sample_status(sample_id: str):
-    """Get the processing status of a sample"""
-    status = _processing_status.get(sample_id, "not_found")
-    return {"sample_id": sample_id, "status": status}
-
-
-async def run_sample_setup(sample: Sample, task_config: Dict[str, Any] = None, eval_spec: Dict[str, Any] = None) -> str:
-    """
-    Custom setup logic for the sample.
-    Override this method to implement your specific setup requirements.
-    """
-    setup_commands = []
-
-    if eval_spec and "setup_commands" in eval_spec:
-        setup_commands.extend(eval_spec["setup_commands"])
-
-    if sample.setup:
-        setup_commands.append(sample.setup)
-
-    # For now, just simulate setup execution
-    if setup_commands:
-        logger.info(f"Executing setup commands: {setup_commands}")
-        await asyncio.sleep(0.1)  # Simulate work
-        return f"Setup completed: {'; '.join(setup_commands)}"
-    else:
-        return "No setup required"
-
-
-async def run_sample_solver(sample: Sample, setup_output: str, task_config: Dict[str, Any] = None, eval_spec: Dict[str, Any] = None) -> str:
-    """
-    Custom solver logic for the sample.
-    This is where your Docker container agent or custom solver runs.
-
-    Args:
-        sample: The sample to solve
-        setup_output: Output from the setup phase
-        task_config: Task configuration
-        eval_spec: Eval specification with eval_name and task_params
-
-    Returns:
-        str: The solver output (model completion)
-    """
-    solver_type = eval_spec.get("solver_type", "custom_agent") if eval_spec else "custom_agent"
-
-    logger.info(f"Running solver type: {solver_type} for sample: {sample.id}")
-
-    # Option 1: Use your custom Docker container agent
-    if solver_type == "custom_agent":
-        # TODO: Integrate with your Docker container here
-        # This is where you'd send the sample to your custom agent
-        # and get back the solution
-
-        # For now, using a placeholder that demonstrates the expected format
-        # For MBPP, this should return Python code
-        # For SWE-bench, this should return git diff or patch
-        output = await run_custom_docker_agent(sample, eval_spec)
-
-    # Option 2: Use the eval's default solver (inspect_ai's basic_agent, generate(), etc.)
-    elif solver_type == "eval_default":
-        # Load the eval task and use its solver
-        task = load_eval_task(eval_spec)
-
-        # The eval's solver would typically run here
-        # This requires running inspect_ai's solve pipeline, which is complex
-        # For now, we'll focus on custom_agent mode
-        raise NotImplementedError("eval_default solver not yet implemented - use custom_agent")
-
-    else:
-        raise ValueError(f"Unknown solver_type: {solver_type}")
-
-    return output
-
-
-async def run_custom_docker_agent(sample: Sample, eval_spec: Dict[str, Any]) -> str:
-    """
-    This function is called from within the Docker container's environment server.
-
-    IMPORTANT: The actual agent that will solve this sample is running OUTSIDE
-    this Docker container, in run_task.py. The agent calls the process_sample MCP tool,
-    which routes here.
-
-    Your custom solving logic should go here. This could be:
-    - Running a local model
-    - Calling an API
-    - Executing code in a sandbox
-    - Or whatever custom logic you need
-
-    For now, this is a placeholder that returns eval-specific mock responses.
-    In production, you would implement your actual solving logic here.
-
-    Args:
-        sample: The sample to solve
-        eval_spec: Eval specification
-
-    Returns:
-        str: The solver output (format depends on eval type)
-    """
-    eval_name = eval_spec.get("eval_name", "unknown")
-
-    logger.info(f"Custom solver for eval: {eval_name}, sample: {sample.id}")
-    logger.info(f"Sample input: {str(sample.input)[:200]}...")
-
-    # TODO: Replace this with your actual solving logic
-    # For example:
-    # - Use a local LLM
-    # - Call an external API
-    # - Run code generation model
-    # - Execute multi-step reasoning
-
-    # Simulate some processing time
-    await asyncio.sleep(0.1)
-
-    # Return eval-specific placeholder responses
-    # In production, your agent would generate real solutions
-    if eval_name == "mbpp":
-        # For MBPP, return Python code wrapped in markdown
-        # The MBPP scorer will execute this code against test cases
-        return f"```python\ndef solution():\n    # TODO: Implement solution for: {sample.input[:50]}...\n    pass\n```"
-    elif eval_name == "swe_bench":
-        # For SWE-bench, return code changes/patches
-        return f"# Modified files for issue: {sample.id}\n# TODO: Implement solution"
-    else:
-        # Generic response
-        return f"Agent output for {eval_name}: Processing {sample.input[:100]}..."
-
-
-async def run_sample_scorer(sample: Sample, solver_output: str, task_config: Dict[str, Any] = None, eval_spec: Dict[str, Any] = None) -> Dict[str, Any]:
-    """
-    Score the sample using the eval's native scorer.
-
-    Args:
-        sample: The sample that was processed
-        solver_output: The output from the solver
-        task_config: Task configuration
-        eval_spec: Eval specification with eval_name and task_params
-
-    Returns:
-        Dict: Score results with value, explanation, and metadata
-    """
-    if not eval_spec or not eval_spec.get("eval_name"):
-        logger.warning("No eval_spec provided, using simple string match scoring")
-        return {
-            "value": 1.0 if sample.target and str(sample.target) in solver_output else 0.0,
-            "explanation": "Simple string match scoring (no eval specified)"
-        }
-
-    try:
-        # Load the eval task to get its scorer
-        task = load_eval_task(eval_spec)
-
-        logger.info(f"Using native scorer for eval: {eval_spec['eval_name']}")
-
-        # Create TaskState from the sample and solver output
-        task_state = create_task_state_from_sample(
-            sample,
-            solver_output,
-            model_name=eval_spec.get("model_name", "custom_agent")
-        )
-
-        # Create Target from the sample
-        target = Target(sample.target)
-
-        # Run the eval's scorer
-        score_result = await task.scorer(task_state, target)
-
-        # Convert Score object to dict
-        score_dict = {
-            "value": score_result.value,
-            "explanation": score_result.explanation or "",
-            "answer": score_result.answer or solver_output,
-        }
-
-        # Include metadata if present
-        if score_result.metadata:
-            score_dict["metadata"] = score_result.metadata
-
-        logger.info(f"Score result: {score_dict['value']}")
-
-        return score_dict
-
-    except Exception as e:
-        logger.error(f"Error running eval scorer: {e}", exc_info=True)
-        # Fallback to simple scoring
-        return {
-            "value": 0.0,
-            "explanation": f"Scorer error: {str(e)}",
-            "error": str(e)
-        }
+# Note: process_sample endpoint and related functions removed
+# Use the evaluate endpoint instead which runs full inspect_ai evaluations

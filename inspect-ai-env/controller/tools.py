@@ -26,20 +26,25 @@ async def setup() -> str:
 
 
 @mcp.tool()
-async def evaluate(eval_name: str, task_params: dict = {}, limit: int = None) -> EvaluationResult:
+async def evaluate(eval_name: str, task_params: dict = {}, sample: dict = None, limit: int = None) -> EvaluationResult:
     """
     Run a full inspect_ai evaluation using the eval's native solver and scorer.
 
     Args:
         eval_name: Name of the eval (e.g., "mbpp", "swe_bench", "gpqa")
         task_params: Parameters to pass to the eval's task function (e.g., {"temperature": 0.5})
-        limit: Optional limit on number of samples to evaluate
+        sample: Optional single sample dict to process. If provided, only this sample is evaluated.
+                This is used for parallel processing where each container gets one sample.
+                Sample should be in inspect_ai Sample format (id, input, target, metadata, etc.)
+        limit: Optional limit on number of samples to evaluate (only used if sample is None)
 
     This will:
     - Load the eval from inspect_evals
     - Use the eval's native solver (generate(), basic_agent(), etc.)
     - Use the eval's native scorer
     - Return results with scores and metrics
+
+    For parallel processing: Pass a single sample dict. The eval will be run with just that one sample.
     """
     try:
         response = await http_client.post(
@@ -47,6 +52,7 @@ async def evaluate(eval_name: str, task_params: dict = {}, limit: int = None) ->
             json={
                 "eval_name": eval_name,
                 "task_params": task_params,
+                "sample": sample,
                 "limit": limit
             },
             timeout=600.0,  # 10 minutes for full eval runs
@@ -134,77 +140,9 @@ async def stop() -> str:
     return json.dumps(resp.json())
 
 
-@mcp.tool()
-async def process_sample(
-    sample_data: dict,
-    task_config: dict = None,
-    eval_spec: dict = None
-) -> str:
-    """
-    Process a single Sample record through the setup -> solver -> scorer pipeline.
-
-    Args:
-        sample_data: Sample data dict with fields: input, target, choices, id, metadata, sandbox, files, setup
-        task_config: Optional task configuration (timeouts, limits, etc.)
-        eval_spec: Optional evaluation specification (setup_commands, solver_type, scorer_config)
-
-    Returns:
-        JSON string with processing result including success status, outputs, and score
-    """
-    if not http_client:
-        raise RuntimeError("HTTP client not initialized")
-
-    request_data = {
-        "sample": sample_data,
-        "task_config": task_config or {},
-        "eval_spec": eval_spec or {}
-    }
-
-    logger.info(f"Processing sample {sample_data.get('id', 'unknown')}")
-
-    try:
-        resp = await http_client.post("/process_sample", json=request_data, timeout=60.0)
-        resp.raise_for_status()
-        result = resp.json()
-
-        logger.info(f"Sample processing completed: success={result.get('success')}")
-        return json.dumps(result)
-
-    except httpx.HTTPStatusError as e:
-        error_msg = f"Sample processing failed: {e.response.text}"
-        logger.error(error_msg)
-        return json.dumps({"success": False, "error": error_msg})
-
-    except httpx.RequestError as e:
-        error_msg = f"Request failed: {e}"
-        logger.error(error_msg)
-        return json.dumps({"success": False, "error": error_msg})
-
-
-@mcp.tool()
-async def get_sample_result(sample_id: str) -> str:
-    """
-    Get the result of a previously processed sample by its ID.
-
-    Args:
-        sample_id: The ID of the sample to retrieve results for
-
-    Returns:
-        JSON string with the sample result or error message
-    """
-    if not http_client:
-        raise RuntimeError("HTTP client not initialized")
-
-    try:
-        resp = await http_client.get(f"/sample_result/{sample_id}")
-        resp.raise_for_status()
-        return json.dumps(resp.json())
-
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            return json.dumps({"error": "Sample result not found"})
-        else:
-            return json.dumps({"error": f"Failed to get sample result: {e.response.text}"})
-
-    except httpx.RequestError as e:
-        return json.dumps({"error": f"Request failed: {e}"})
+# process_sample and get_sample_result tools removed
+# Use the evaluate tool instead for full inspect_ai evaluations
+#
+# Agent routing is done via HTTP callback (AGENT_CALLBACK_URL env var)
+# instead of MCP tools, since the environment server needs to call
+# the external agent directly

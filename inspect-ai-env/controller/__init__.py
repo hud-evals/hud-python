@@ -21,11 +21,10 @@ httpx_logger.setLevel(logging.WARNING)  # Only show warnings and errors
 httpcore_logger = logging.getLogger("httpcore")
 httpcore_logger.setLevel(logging.WARNING)  # Only show warnings and errors
 
-mcp = MCPServer()
+mcp = MCPServer(name="inspect_ai_env")
 
-ENV_SERVER_PORT = os.getenv("ENV_SERVER_PORT", 8005)
 http_client = httpx.AsyncClient(
-    base_url=f"http://localhost:{ENV_SERVER_PORT}", timeout=10.0
+    base_url="http://localhost:8000", timeout=10.0
 )
 
 # Import tools and hooks to register them with the server

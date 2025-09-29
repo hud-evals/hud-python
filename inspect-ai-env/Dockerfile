@@ -42,4 +42,4 @@ RUN which hud
 
 # Start context server in background, then run controller with hot-reload
 # Disable access logs to prevent stdout corruption
-CMD ["sh", "-c", "./download-eval.sh && uvicorn environment.server:app --host 0.0.0.0 --port $ENV_SERVER_PORT --reload --log-level warning --reload-dir environment & sleep 0.5 && exec hud run controller --reload"]
+CMD ["sh", "-c", "./download-eval.sh && uvicorn environment.server:app --host 0.0.0.0 --port 8000 --reload --log-level warning --reload-dir environment & sleep 0.5 && exec hud run controller --reload"]
