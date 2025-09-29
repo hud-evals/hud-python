@@ -88,6 +88,33 @@ class Job:
                 )
             except Exception as e:
                 logger.warning("Failed to update job status: %s", e)
+    
+    def update_status_fire_and_forget(self, status: str) -> None:
+        """Update job status without blocking (fire-and-forget)."""
+        self.status = status
+        if settings.telemetry_enabled:
+            from hud.utils.async_utils import fire_and_forget
+            
+            async def _update():
+                try:
+                    payload = {
+                        "name": self.name,
+                        "status": status,
+                        "metadata": self.metadata,
+                    }
+                    if self.dataset_link:
+                        payload["dataset_link"] = self.dataset_link
+                    
+                    await make_request(
+                        method="POST",
+                        url=f"{settings.hud_telemetry_url}/jobs/{self.id}/status",
+                        json=payload,
+                        api_key=settings.api_key,
+                    )
+                except Exception as e:
+                    logger.warning("Failed to update job status: %s", e)
+            
+            fire_and_forget(_update(), f"update job {self.id} status to {status}")
 
     async def log(self, metrics: dict[str, Any]) -> None:
         """Log metrics to the job.
@@ -245,18 +272,18 @@ def job(
     _current_job = job_obj
 
     try:
-        # Update status to running synchronously to ensure job is registered before tasks start
-        job_obj.update_status_sync("running")
+        # Update status to running (fire-and-forget to avoid blocking)
+        job_obj.update_status_fire_and_forget("running")
         # Print the nice job URL box
         _print_job_url(job_obj.id, job_obj.name)
         yield job_obj
-        # Update status to completed synchronously to ensure it completes before process exit
-        job_obj.update_status_sync("completed")
+        # Update status to completed (fire-and-forget to avoid blocking)
+        job_obj.update_status_fire_and_forget("completed")
         # Print job completion message
         _print_job_complete_url(job_obj.id, job_obj.name, error_occurred=False)
     except Exception:
-        # Update status to failed synchronously to ensure it completes before process exit
-        job_obj.update_status_sync("failed")
+        # Update status to failed (fire-and-forget to avoid blocking)
+        job_obj.update_status_fire_and_forget("failed")
         # Print job failure message
         _print_job_complete_url(job_obj.id, job_obj.name, error_occurred=True)
         raise

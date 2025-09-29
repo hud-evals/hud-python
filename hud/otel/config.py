@@ -94,9 +94,11 @@ def configure_telemetry(
 
     # HUD exporter (only if enabled and API key is available)
     if settings.telemetry_enabled and settings.api_key:
+        # Use the HudSpanExporter directly (it now handles async context internally)
         exporter = HudSpanExporter(
             telemetry_url=settings.hud_telemetry_url, api_key=settings.api_key
         )
+        
         # Export more continuously to avoid big end flushes
         provider.add_span_processor(
             BatchSpanProcessor(

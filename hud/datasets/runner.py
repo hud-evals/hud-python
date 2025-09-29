@@ -67,6 +67,7 @@ async def run_dataset(
     """
     # Import here to avoid circular imports
     import hud
+    from hud.telemetry.async_context import async_job, async_trace
 
     dataset_link = None
 
@@ -93,7 +94,8 @@ async def run_dataset(
         except Exception:
             logger.warning("Failed to extract dataset verification info")
 
-    with hud.job(name, metadata=job_metadata, dataset_link=dataset_link) as job_obj:
+    # Use async job context manager
+    async with async_job(name, metadata=job_metadata, dataset_link=dataset_link) as job_obj:
         # Run tasks with semaphore for concurrency control
         sem = asyncio.Semaphore(max_concurrent)
         results: list[Any | None] = [None] * len(dataset)
@@ -107,7 +109,8 @@ async def run_dataset(
                 # Ensure task_id is a string for baggage propagation
                 raw_task_id = task_dict.get("id")
                 safe_task_id = str(raw_task_id) if raw_task_id is not None else None
-                with hud.trace(task_name, job_id=job_obj.id, task_id=safe_task_id):
+                # Use async trace context manager
+                async with async_trace(task_name, job_id=job_obj.id, task_id=safe_task_id):
                     # Convert dict to Task here, at trace level
                     task = Task(**task_dict)
 
@@ -122,5 +125,25 @@ async def run_dataset(
             *[_worker(i, task, max_steps=max_steps) for i, task in enumerate(dataset)],
             return_exceptions=True,  # Don't fail entire batch on one error
         )
+    
+    # Wait for all tracked tasks to complete (job/trace exits already tried a short wait)
+    from hud.utils.task_tracking import wait_all_tasks
+    completed = await wait_all_tasks(timeout=20.0)
+    if completed > 0:
+        logger.info(f"Waited for {completed} telemetry tasks to complete")
+    
+    # Flush telemetry - this ensures BatchSpanProcessor exports pending spans
+    from hud.otel.config import is_telemetry_configured
+    if is_telemetry_configured():
+        try:
+            from opentelemetry import trace
+            from opentelemetry.sdk.trace import TracerProvider
+            provider = trace.get_tracer_provider()
+            # Check if it's an SDK TracerProvider (not the default no-op one)
+            if isinstance(provider, TracerProvider):
+                provider.force_flush(timeout_millis=20000)  # 20 second timeout
+                logger.info("Telemetry provider flushed successfully")
+        except Exception as e:
+            logger.warning(f"Failed to flush telemetry: {e}")
 
     return results
