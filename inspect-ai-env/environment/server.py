@@ -132,8 +132,63 @@ def act():
     return {"count": _count}
 
 
+class SetupRequest(BaseModel):
+    """Request to setup/reset environment with optional eval-specific installs"""
+    eval_name: Optional[str] = None
+
+
+@app.post("/setup")
+async def setup(request: SetupRequest):
+    """
+    Setup environment with optional eval-specific installations.
+
+    Some evals require extra dependencies (e.g., swe_bench needs swebench and docker).
+    If eval_name is provided, this automatically tries to install inspect_evals[eval_name]
+    using uv pip install. Uses try/except to gracefully handle evals without extra deps.
+    """
+    global _count
+    _count = 0
+    _sample_results.clear()
+    _processing_status.clear()
+
+    install_log = []
+
+    # Try to install eval-specific extras if eval_name provided
+    if request.eval_name:
+        import subprocess
+
+        try:
+            logger.info(f"Attempting to install extras for eval: {request.eval_name}")
+            cmd = ["uv", "pip", "install", f"inspect_evals[{request.eval_name}]"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+            if result.returncode == 0:
+                install_log.append(f"✅ Installed inspect_evals[{request.eval_name}]")
+                logger.info(f"Successfully installed extras for {request.eval_name}")
+            else:
+                # Not an error - eval might not have extras
+                stderr_lower = result.stderr.lower()
+                if "no extras" in stderr_lower or "does not exist" in stderr_lower:
+                    install_log.append(f"ℹ️  No extra dependencies needed for {request.eval_name}")
+                    logger.info(f"No extra dependencies found for {request.eval_name} (this is normal)")
+                else:
+                    # Actual error
+                    install_log.append(f"⚠️  Warning: Could not install extras for {request.eval_name}: {result.stderr[:200]}")
+                    logger.warning(f"Could not install extras for {request.eval_name}: {result.stderr}")
+
+        except subprocess.TimeoutExpired:
+            install_log.append(f"⚠️  Installation timed out after 5 minutes")
+            logger.warning("Installation timed out")
+        except Exception as e:
+            install_log.append(f"⚠️  Installation error: {str(e)[:200]}")
+            logger.warning(f"Installation error: {str(e)}")
+
+    return {"ok": True, "install_log": install_log}
+
+
 @app.post("/reset")
 def reset():
+    """Legacy reset endpoint - redirects to setup without installs"""
     global _count
     _count = 0
     _sample_results.clear()

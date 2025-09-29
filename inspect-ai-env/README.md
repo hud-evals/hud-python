@@ -115,10 +115,28 @@ asyncio.run(run_eval())
 
 ### MCP Tools (controller/tools.py)
 
-**`setup()`** - Initialize the environment
+**`setup(eval_name)`** - Initialize the environment
 ```python
+# Basic setup (no extra installs)
 await client.call_tool(name="setup")
+
+# Setup with automatic eval-specific dependency installation
+await client.call_tool(
+    name="setup",
+    arguments={"eval_name": "swe_bench"}
+)
 ```
+
+**Note**: When you provide an `eval_name`, the setup tool automatically attempts to install
+eval-specific dependencies using `uv pip install inspect_evals[eval_name]`. This handles evals that
+need extra packages:
+- `swe_bench` → `swebench>=3.0.15`, `docker`
+- `mathematics` → `sympy`, `antlr4-python3-runtime==4.13.2`
+- `mle_bench` → `mlebench`, `docker`
+- etc.
+
+The installation is done with try/except, so evals without extra dependencies (like `mbpp`)
+won't cause errors.
 
 **`evaluate(eval_name, task_params, limit)`** - Run full evaluation
 ```python

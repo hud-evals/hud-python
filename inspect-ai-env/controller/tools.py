@@ -17,11 +17,25 @@ logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
-async def setup() -> str:
-    """Initialize or reset the environment to its starting state."""
+async def setup(eval_name: str = None) -> str:
+    """
+    Initialize or reset the environment to its starting state.
+
+    Args:
+        eval_name: Optional eval name (e.g., "swe_bench", "mbpp"). If provided,
+                   will attempt to install eval-specific dependencies automatically.
+
+    Some evals require additional dependencies (e.g., swe_bench needs swebench>=3.0.15 and docker).
+    When eval_name is provided, this tool automatically tries to install inspect_evals[eval_name]
+    with a try/except to handle evals that don't have extra dependencies.
+    """
     if not http_client:
         raise RuntimeError("HTTP client not initialized")
-    resp = await http_client.post("/reset")
+
+    resp = await http_client.post(
+        "/setup",
+        json={"eval_name": eval_name}
+    )
     return json.dumps({"status": "ready", "content": resp.json()})
 
 

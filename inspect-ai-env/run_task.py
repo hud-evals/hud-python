@@ -93,8 +93,11 @@ async def run_single_sample(
         print("🔧 Initializing MCP client...")
         await client.initialize()
 
-        print("📋 Running setup...")
-        setup_result = await client.call_tool(name="setup")
+        print(f"📋 Running setup for {eval_name}...")
+        setup_result = await client.call_tool(
+            name="setup",
+            arguments={"eval_name": eval_name}
+        )
         print(f"✅ Setup: {setup_result.content}")
 
         sample_id = sample_dict.get("id", "unknown")
@@ -168,8 +171,11 @@ async def run_batch(
         print("🔧 Initializing MCP client...")
         await client.initialize()
 
-        print("📋 Running setup...")
-        setup_result = await client.call_tool(name="setup")
+        print(f"📋 Running setup for {eval_name}...")
+        setup_result = await client.call_tool(
+            name="setup",
+            arguments={"eval_name": eval_name}
+        )
         print(f"✅ Setup: {setup_result.content}")
 
         print(f"\n🔄 Running evaluation: {eval_name}")
