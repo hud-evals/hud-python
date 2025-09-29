@@ -5,9 +5,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
-from typing import Optional
+
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Add current directory to sys.path to enable importing local inspect_evals
 if str(Path.cwd()) not in sys.path:
@@ -160,7 +165,6 @@ async def main():
     parser = argparse.ArgumentParser(
         description="Run inspect_ai evaluations with HUD integration"
     )
-    parser.add_argument("eval_name", help="Name of eval (e.g., mbpp, swe_bench, gpqa)")
     parser.add_argument(
         "sample_index",
         type=int,
@@ -169,18 +173,24 @@ async def main():
 
     args = parser.parse_args()
 
+    # Load eval name from environment
+    eval_name = os.getenv("TARGET_EVAL")
+    if not eval_name:
+        print("❌ TARGET_EVAL environment variable not set")
+        sys.exit(1)
+
     # Parse task params
     with open("tasks.json", "r") as f:
         task_params = json.load(f)
 
     print("🚀 Inspect AI Evaluation with HUD Integration")
     print("=" * 60)
-    print(f"📝 Eval: {args.eval_name}")
+    print(f"📝 Eval: {eval_name}")
 
     if args.sample_index is not None:
         print("\n📦 Loading eval dataset...")
         try:
-            dataset = load_eval_dataset(args.eval_name, task_params)
+            dataset = load_eval_dataset(eval_name, task_params)
             print(f"   Dataset size: {len(dataset)} samples")
 
             if args.sample_index < 0 or args.sample_index >= len(dataset):
@@ -199,7 +209,7 @@ async def main():
 
         # Run single sample
         result = await run_single_sample(
-            args.eval_name, sample_dict, task_params=task_params
+            eval_name, sample_dict, task_params=task_params
         )
 
     else:
