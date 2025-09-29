@@ -22,6 +22,8 @@ RUN uv pip install -e .
 # Create inspect_evals directory (eval will be downloaded at runtime)
 RUN mkdir -p inspect_evals
 RUN mkdir -p logs
+# Create custom_evals directory for user-provided evals
+RUN mkdir -p custom_evals
 
 COPY controller/ ./controller/
 COPY environment/ ./environment/

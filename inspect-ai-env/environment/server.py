@@ -34,11 +34,24 @@ def load_eval_task(eval_spec: Dict[str, Any]) -> Task:
 
     Args:
         eval_spec: Dict containing:
-            - eval_name: Name of the eval (e.g., "mbpp", "swe_bench")
+            - eval_name: Name/path of the eval. Can be:
+                * Simple name: "mbpp" → imports from inspect_evals.mbpp
+                * Module path: "custom_evals.my_eval" → imports from that module path
+                * Full path with function: "custom_evals.my_eval:my_task_fn"
             - task_params: Optional parameters to pass to the task function
 
     Returns:
         Task: The instantiated inspect_ai Task object
+
+    Examples:
+        # Official inspect_evals
+        {"eval_name": "mbpp"}  → import inspect_evals.mbpp; mbpp()
+
+        # Custom eval (auto-detect function name)
+        {"eval_name": "custom_evals.my_eval"}  → import custom_evals.my_eval; my_eval()
+
+        # Custom eval with explicit function
+        {"eval_name": "custom_evals.my_eval:custom_task"}  → import custom_evals.my_eval; custom_task()
     """
     eval_name = eval_spec.get("eval_name")
     if not eval_name:
@@ -51,11 +64,40 @@ def load_eval_task(eval_spec: Dict[str, Any]) -> Task:
         return _task_cache[cache_key]
 
     try:
-        # Import the eval module from inspect_evals
-        eval_module = import_module(f"inspect_evals.{eval_name}")
+        # Parse eval_name to extract module path and optional function name
+        if ":" in eval_name:
+            # Explicit function name: "custom_evals.my_eval:my_task_fn"
+            module_path, function_name = eval_name.split(":", 1)
+        else:
+            module_path = eval_name
+            function_name = None
 
-        # Get the task function (typically named same as the module)
-        task_fn = getattr(eval_module, eval_name)
+        # Determine the full module path
+        if "." in module_path:
+            # Already a full path like "custom_evals.my_eval"
+            full_module_path = module_path
+            # Default function name is the last part of the module path
+            if not function_name:
+                function_name = module_path.split(".")[-1]
+        else:
+            # Simple name like "mbpp" → assume inspect_evals
+            full_module_path = f"inspect_evals.{module_path}"
+            if not function_name:
+                function_name = module_path
+
+        logger.info(f"Attempting to import: {full_module_path}")
+
+        # Import the eval module
+        eval_module = import_module(full_module_path)
+
+        # Get the task function
+        if not hasattr(eval_module, function_name):
+            raise AttributeError(
+                f"Module '{full_module_path}' does not have function '{function_name}'. "
+                f"Available: {dir(eval_module)}"
+            )
+
+        task_fn = getattr(eval_module, function_name)
 
         # Instantiate the task with custom parameters
         task_params = eval_spec.get("task_params", {})
@@ -68,9 +110,15 @@ def load_eval_task(eval_spec: Dict[str, Any]) -> Task:
         return task
 
     except ImportError as e:
-        raise ValueError(f"Could not import eval '{eval_name}': {e}")
+        raise ValueError(
+            f"Could not import eval '{eval_name}'. "
+            f"For custom evals, ensure the module is in /app/custom_evals/ and accessible. "
+            f"Error: {e}"
+        )
     except AttributeError as e:
-        raise ValueError(f"Eval '{eval_name}' does not have a task function named '{eval_name}': {e}")
+        raise ValueError(f"Eval loading error: {e}")
+    except Exception as e:
+        raise ValueError(f"Unexpected error loading eval '{eval_name}': {e}")
 
 
 def create_task_state_from_sample(

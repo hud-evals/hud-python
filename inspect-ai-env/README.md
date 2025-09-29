@@ -463,6 +463,172 @@ timeout=600.0,  # 10 minutes
 4. **Scale Up**: Run full evaluations
 5. **Monitor Costs**: Track token usage through your agent
 
+## Using Custom Evals
+
+You can run your own custom evals that are compatible with inspect_ai format but not in the official inspect_evals package.
+
+### Quick Start: Run the Example
+
+We include an example custom eval to help you get started:
+
+```bash
+# Build with custom_evals directory mounted (it's already in the repo)
+cd hud-python/inspect-ai-env
+hud dev --build
+
+# Run the example eval
+python run_task.py custom_evals.example_eval --limit 2
+
+# Or with parameters
+python run_task.py custom_evals.example_eval:example_eval_with_params \
+    --task-params '{"difficulty": "medium"}'
+```
+
+The example eval is in `custom_evals/example_eval/example_eval.py` - use it as a template!
+
+### Directory Structure
+
+Mount your custom eval code into the Docker container at `/app/custom_evals/`:
+
+```
+custom_evals/
+├── __init__.py
+└── my_eval/
+    ├── __init__.py
+    └── my_eval.py  # Contains your task function
+```
+
+### Task Function Format
+
+Your custom eval should follow the inspect_ai Task format:
+
+```python
+# custom_evals/my_eval/my_eval.py
+from inspect_ai import Task, task
+from inspect_ai.dataset import Sample
+from inspect_ai.solver import generate, system_message
+from inspect_ai.scorer import match
+
+@task
+def my_eval():
+    """My custom evaluation task."""
+    return Task(
+        dataset=[
+            Sample(input="What is 2+2?", target="4"),
+            Sample(input="What is 3+3?", target="6"),
+        ],
+        solver=[
+            system_message("You are a helpful assistant."),
+            generate()
+        ],
+        scorer=match()
+    )
+```
+
+### Mounting Custom Evals
+
+Update your `docker-compose.yml` or use volume mounts:
+
+```yaml
+# docker-compose.yml
+services:
+  inspect-ai-env:
+    volumes:
+      - ./my_custom_evals:/app/custom_evals
+```
+
+Or with `hud dev`:
+
+```bash
+# Add volume mount to your HUD configuration
+hud dev --build -v ./my_custom_evals:/app/custom_evals
+```
+
+### Running Custom Evals
+
+Use the module path as the eval_name:
+
+```python
+from hud.clients import MCPClient
+
+client = MCPClient(mcp_config={
+    "inspect_ai_env": {"url": "http://localhost:8765/mcp"}
+})
+await client.initialize()
+
+# Setup with custom eval name
+await client.call_tool(name="setup", arguments={"eval_name": "custom_evals.my_eval"})
+
+# Run evaluation
+result = await client.call_tool(
+    name="evaluate",
+    arguments={
+        "eval_name": "custom_evals.my_eval",  # Module path
+        "limit": 2
+    }
+)
+```
+
+### Advanced: Explicit Function Names
+
+If your task function has a different name than the module:
+
+```python
+# custom_evals/my_eval/my_eval.py
+@task
+def custom_task_function():  # Different from module name
+    return Task(...)
+```
+
+Specify it explicitly:
+
+```python
+result = await client.call_tool(
+    name="evaluate",
+    arguments={
+        "eval_name": "custom_evals.my_eval:custom_task_function",  # module:function
+        "limit": 2
+    }
+)
+```
+
+### Custom Dataset Files
+
+You can also load datasets from files in your custom eval:
+
+```python
+from inspect_ai.dataset import json_dataset
+
+@task
+def my_eval(dataset_path: str = "dataset.jsonl"):
+    return Task(
+        dataset=json_dataset(dataset_path),
+        solver=[...],
+        scorer=[...]
+    )
+```
+
+Mount the dataset file alongside your code:
+
+```bash
+hud dev --build \
+  -v ./my_custom_evals:/app/custom_evals \
+  -v ./my_datasets:/app/datasets
+```
+
+Then pass the path:
+
+```python
+result = await client.call_tool(
+    name="evaluate",
+    arguments={
+        "eval_name": "custom_evals.my_eval",
+        "task_params": {"dataset_path": "/app/datasets/my_data.jsonl"},
+        "limit": 10
+    }
+)
+```
+
 ## Additional Resources
 
 - Inspect AI docs: https://inspect.ai-safety-institute.org.uk/

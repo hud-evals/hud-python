@@ -37,18 +37,57 @@ from hud.clients import MCPClient
 
 
 def load_eval_dataset(eval_name: str, task_params: dict = None):
-    """Load an eval's dataset to extract samples."""
+    """
+    Load an eval's dataset to extract samples.
+
+    Supports both official inspect_evals and custom evals.
+
+    Args:
+        eval_name: Can be:
+            - Simple name: "mbpp" → loads from inspect_evals.mbpp
+            - Module path: "custom_evals.my_eval" → loads from that path
+            - With function: "custom_evals.my_eval:my_task" → explicit function
+
+    Returns:
+        Dataset from the loaded task
+    """
     from importlib import import_module
 
     try:
-        eval_module = import_module(f"inspect_evals.{eval_name}")
-        task_fn = getattr(eval_module, eval_name)
+        # Parse eval_name
+        if ":" in eval_name:
+            module_path, function_name = eval_name.split(":", 1)
+        else:
+            module_path = eval_name
+            function_name = None
+
+        # Determine full module path
+        if "." in module_path:
+            # Custom eval with dots: "custom_evals.my_eval"
+            full_module_path = module_path
+            if not function_name:
+                function_name = module_path.split(".")[-1]
+        else:
+            # Simple name: "mbpp" → "inspect_evals.mbpp"
+            full_module_path = f"inspect_evals.{module_path}"
+            if not function_name:
+                function_name = module_path
+
+        # Import and get task function
+        eval_module = import_module(full_module_path)
+        task_fn = getattr(eval_module, function_name)
         task = task_fn(**(task_params or {}))
         return task.dataset
+
     except ImportError as e:
-        raise ValueError(f"Could not import eval '{eval_name}': {e}")
+        raise ValueError(
+            f"Could not import eval '{eval_name}'. "
+            f"For custom evals, ensure the module is accessible. Error: {e}"
+        )
     except AttributeError as e:
-        raise ValueError(f"Eval '{eval_name}' does not have a task function: {e}")
+        raise ValueError(
+            f"Eval '{eval_name}' does not have function '{function_name}': {e}"
+        )
 
 
 def sample_to_dict(sample) -> dict:
