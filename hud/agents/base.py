@@ -56,7 +56,7 @@ class MCPAgent(ABC):
         disallowed_tools: list[str] | None = None,
         # Messages
         system_prompt: str = GLOBAL_SYSTEM_PROMPT,
-        append_setup_output: bool = True,
+        append_setup_output: bool = False,
         initial_screenshot: bool = True,
         # Misc
         model_name: str = "mcp-agent",
