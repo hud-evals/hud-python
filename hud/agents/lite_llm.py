@@ -58,16 +58,77 @@ class LiteAgent(GenericOpenAIChatAgent):
     def get_tool_schemas(self) -> list[dict]:
         # Prefer LiteLLM's stricter transformer (handles Bedrock & friends)
         if transform_mcp_tool_to_openai_tool is not None:
-            tools = [
-                transform_mcp_tool_to_openai_tool(t)  # returns ChatCompletionToolParam-like dict
-                for t in self.get_available_tools()
-            ]
-            self.hud_console.debug(f"Using LiteLLM MCP transformer for {len(tools)} tools")
-            return tools
+            try:
+                tools = [
+                    transform_mcp_tool_to_openai_tool(t)  # returns ChatCompletionToolParam-like dict
+                    for t in self.get_available_tools()
+                ]
+                sanitized_tools = [self._sanitize_for_openrouter(tool) for tool in tools]
+                self.hud_console.debug(
+                    f"Using LiteLLM MCP transformer with OpenRouter fixes for {len(sanitized_tools)} tools"
+                )
+                return sanitized_tools
+            except Exception as transform_err:  # pragma: no cover - best effort logging
+                self.hud_console.warning(
+                    f"LiteLLM transformer failed: {transform_err}, falling back to generic sanitizer"
+                )
         # Fallback to the generic OpenAI sanitizer
         tools = GenericOpenAIChatAgent.get_tool_schemas(self)
-        self.hud_console.debug(f"Using generic OpenAI transformer for {len(tools)} tools")
+        self.hud_console.debug(f"Using HUD generic OpenAI transformer for {len(tools)} tools")
         return tools
+
+    def _sanitize_for_openrouter(self, tool: dict[str, Any]) -> dict[str, Any]:
+        """Sanitize tool schemas to satisfy stricter OpenRouter/Azure validation."""
+        tool_copy = copy.deepcopy(tool)
+
+        if isinstance(tool_copy, dict):
+            function_block = tool_copy.get("function")
+            if isinstance(function_block, dict) and "parameters" in function_block:
+                function_block["parameters"] = self._fix_array_schemas(function_block["parameters"])
+
+        return tool_copy
+
+    def _fix_array_schemas(self, schema: Any) -> Any:
+        """Recursively ensure array schemas include an items definition."""
+        if isinstance(schema, list):
+            return [self._fix_array_schemas(item) for item in schema]
+
+        if not isinstance(schema, dict):
+            return schema
+
+        fixed: dict[str, Any] = {}
+        for key, value in schema.items():
+            if key in {"anyOf", "allOf", "oneOf"} and isinstance(value, list):
+                fixed[key] = [self._fix_array_schemas(variant) for variant in value]
+            elif key in {"properties", "patternProperties"} and isinstance(value, dict):
+                fixed[key] = {
+                    property_key: self._fix_array_schemas(property_value)
+                    for property_key, property_value in value.items()
+                }
+            elif key in {"items", "prefixItems"} and isinstance(value, list):
+                fixed[key] = [self._fix_array_schemas(item) for item in value]
+            elif key == "items" and isinstance(value, dict):
+                fixed[key] = self._fix_array_schemas(value)
+            elif isinstance(value, dict):
+                fixed[key] = self._fix_array_schemas(value)
+            else:
+                fixed[key] = value
+
+        if fixed.get("type") == "array" and "items" not in fixed:
+            prefix_items = fixed.get("prefixItems")
+            if isinstance(prefix_items, list) and prefix_items:
+                first_prefix = prefix_items[0]
+                if isinstance(first_prefix, dict):
+                    inferred_items = copy.deepcopy(first_prefix)
+                    inferred_items.setdefault("type", "string")
+                else:
+                    inferred_items = {"type": "string"}
+            else:
+                inferred_items = {"type": "string"}
+
+            fixed["items"] = inferred_items
+
+        return fixed
 
     def _add_prompt_caching(self, messages: list[dict]) -> list[dict]:
         """Add prompt caching to messages for models that support it."""
@@ -187,5 +248,33 @@ class LiteAgent(GenericOpenAIChatAgent):
             return response
 
         except Exception as e:
-            self.hud_console.error(f"LiteLLM completion failed: {e}")
+            error_msg = f"LiteLLM completion failed: {e}"
+
+            task_run_id = None
+            try:
+                from hud.otel.context import get_current_task_run_id
+
+                task_run_id = get_current_task_run_id()
+            except Exception as context_err:
+                logger.debug(
+                    "Failed to fetch task context for LiteLLM error logging: %s",
+                    context_err,
+                )
+
+            if task_run_id:
+                record = logging.LogRecord(
+                    name=logger.name,
+                    level=logging.ERROR,
+                    pathname=__file__,
+                    lineno=0,
+                    msg=error_msg,
+                    args=(),
+                    exc_info=(type(e), e, e.__traceback__),
+                )
+                record.hud_task_run_id = task_run_id
+                logger.handle(record)
+            else:
+                logger.error(error_msg, exc_info=(type(e), e, e.__traceback__))
+
+            self.hud_console.error(error_msg)
             raise

@@ -192,10 +192,35 @@ async def sheets_from_xlsx(
             logger.info(f"Downloaded {len(file_bytes)} bytes")
 
             # Create Google Drive service
-            scopes = ["https://www.googleapis.com/auth/drive"]
+            # Use minimal scopes so it behaves like rclone and avoids verification pain
+            scopes = [
+                "https://www.googleapis.com/auth/drive.file",
+                "https://www.googleapis.com/auth/spreadsheets",
+            ]
             gcp_creds = get_gcp_credentials()
-            credentials = Credentials.from_service_account_info(gcp_creds, scopes=scopes)
+
+            # Handle both service account and OAuth user credentials
+            if gcp_creds.get("type") == "service_account":
+                credentials = Credentials.from_service_account_info(gcp_creds, scopes=scopes)
+            else:
+                # Handle OAuth user credentials
+                from google.oauth2.credentials import Credentials as UserCredentials
+                # 🚫 Do NOT force a user quota project (causes 403 unless API is enabled there)
+                gcp_creds.pop("quota_project_id", None)
+                # Also sanitize any env override just in case
+                os.environ.pop("GOOGLE_CLOUD_QUOTA_PROJECT", None)
+                credentials = UserCredentials(
+                    token=None,
+                    refresh_token=gcp_creds.get("refresh_token"),
+                    token_uri=gcp_creds.get("token_uri"),
+                    client_id=gcp_creds.get("client_id"),
+                    client_secret=gcp_creds.get("client_secret"),
+                    scopes=scopes,
+                )
+
+            # Use credentials directly without quota project (like rclone)
             drive_service = build("drive", "v3", credentials=credentials)
+            logger.info("Using OAuth client project for quota (like rclone)")
 
             # Upload to Google Drive with conversion
             file_metadata = {
@@ -286,10 +311,35 @@ async def sheets_from_bytes(
         logger.info(f"Decoded {len(file_bytes)} bytes")
 
         # Create Google Drive service
-        scopes = ["https://www.googleapis.com/auth/drive"]
+        # Use minimal scopes so it behaves like rclone and avoids verification pain
+        scopes = [
+            "https://www.googleapis.com/auth/drive.file",
+            "https://www.googleapis.com/auth/spreadsheets",
+        ]
         gcp_creds = get_gcp_credentials()
-        credentials = Credentials.from_service_account_info(gcp_creds, scopes=scopes)
+
+        # Handle both service account and OAuth user credentials
+        if gcp_creds.get("type") == "service_account":
+            credentials = Credentials.from_service_account_info(gcp_creds, scopes=scopes)
+        else:
+            # Handle OAuth user credentials
+            from google.oauth2.credentials import Credentials as UserCredentials
+            # 🚫 Do NOT force a user quota project (causes 403 unless API is enabled there)
+            gcp_creds.pop("quota_project_id", None)
+            # Also sanitize any env override just in case
+            os.environ.pop("GOOGLE_CLOUD_QUOTA_PROJECT", None)
+            credentials = UserCredentials(
+                token=None,
+                refresh_token=gcp_creds.get("refresh_token"),
+                token_uri=gcp_creds.get("token_uri"),
+                client_id=gcp_creds.get("client_id"),
+                client_secret=gcp_creds.get("client_secret"),
+                scopes=scopes,
+            )
+
+        # Use credentials directly without quota project (like rclone)
         drive_service = build("drive", "v3", credentials=credentials)
+        logger.info("Using OAuth client project for quota (like rclone)")
 
         # Upload to Google Drive with conversion
         file_metadata = {

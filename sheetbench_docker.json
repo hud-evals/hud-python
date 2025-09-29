@@ -1,0 +1,17 @@
+{
+  "prompt": "Complete the financial analysis task in the spreadsheet environment.",
+  "mcp_config": {
+    "browser": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "-p", "8080:8080", "hudevals/hud-browser:latest"]
+    }
+  },
+  "setup_tool": {
+    "name": "setup",
+    "arguments": {"name": "sheet_setup"}
+  },
+  "evaluate_tool": {
+    "name": "evaluate",
+    "arguments": {"name": "sheet_completed"}
+  }
+}

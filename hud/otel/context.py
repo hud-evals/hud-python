@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import contextvars
 import logging
+import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Dict, Set
 
 from opentelemetry import baggage, context
 from opentelemetry import trace as otel_trace
@@ -26,6 +27,22 @@ from hud.utils.async_utils import fire_and_forget
 from hud.utils.task_logger import TaskLogHandler, TaskLogger
 
 logger = logging.getLogger(__name__)
+
+_handler_lock = threading.RLock()
+_active_handlers: Dict[str, Set[logging.Handler]] = {}
+
+
+class _TaskRunStampFilter(logging.Filter):
+    """Ensure log records carry the originating task_run_id for handler routing."""
+
+    def __init__(self, task_run_id: str) -> None:
+        super().__init__()
+        self.task_run_id = task_run_id
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401 - logging API
+        if not hasattr(record, "hud_task_run_id") or record.hud_task_run_id is None:
+            record.hud_task_run_id = self.task_run_id
+        return True
 
 # Context variables for task tracking
 current_task_run_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -472,6 +489,7 @@ class trace:
         self._task_logger: TaskLogger | None = None
         self._task_logger_token: contextvars.Token[TaskLogger | None] | None = None
         self._task_log_handler: TaskLogHandler | None = None
+        self._task_log_filter: logging.Filter | None = None
 
     def __enter__(self) -> str:
         """Enter the trace context and return the task_run_id."""
@@ -518,9 +536,15 @@ class trace:
 
                 self._task_log_handler = TaskLogHandler(self._task_logger)
                 self._task_log_handler.setLevel(logging.DEBUG)
-                root_logger = logging.getLogger()
-                if self._task_log_handler not in root_logger.handlers:
-                    root_logger.addHandler(self._task_log_handler)
+                self._task_log_filter = _TaskRunStampFilter(self.task_run_id)
+                self._task_log_handler.addFilter(self._task_log_filter)
+
+                with _handler_lock:
+                    root_logger = logging.getLogger()
+                    handlers_for_task = _active_handlers.setdefault(self.task_run_id, set())
+                    if self._task_log_handler not in root_logger.handlers:
+                        root_logger.addHandler(self._task_log_handler)
+                    handlers_for_task.add(self._task_log_handler)
             except Exception as err:  # pragma: no cover - defensive logging
                 logger.exception(
                     "Failed to initialize task logger for task_run_id=%s: %s",
@@ -544,7 +568,17 @@ class trace:
             if not self.job_id:
                 _print_trace_url(self.task_run_id)
 
-        logger.debug("Started HUD trace context for task_run_id=%s", self.task_run_id)
+        debug_record = logging.LogRecord(
+            name=logger.name,
+            level=logging.DEBUG,
+            pathname=__file__,
+            lineno=0,
+            msg="Started HUD trace context for task_run_id=%s",
+            args=(self.task_run_id,),
+            exc_info=None,
+        )
+        debug_record.hud_task_run_id = self.task_run_id
+        logger.handle(debug_record)
         return self.task_run_id
 
     def __exit__(
@@ -622,12 +656,44 @@ class trace:
         self._task_logger_token = None
 
         if self._task_log_handler:
-            root_logger = logging.getLogger()
-            try:
-                root_logger.removeHandler(self._task_log_handler)
-            except (ValueError, AttributeError):
-                pass
-            self._task_log_handler.close()
+            with _handler_lock:
+                root_logger = logging.getLogger()
+                try:
+                    if self._task_log_filter:
+                        try:
+                            self._task_log_handler.removeFilter(self._task_log_filter)
+                        except ValueError as filter_err:
+                            logger.debug(
+                                "Handler cleanup warning for task_run_id=%s: %s",
+                                self.task_run_id,
+                                filter_err,
+                            )
+
+                    if self._task_log_handler in root_logger.handlers:
+                        root_logger.removeHandler(self._task_log_handler)
+                except (ValueError, AttributeError) as handler_err:
+                    logger.debug(
+                        "Handler cleanup warning for task_run_id=%s: %s",
+                        self.task_run_id,
+                        handler_err,
+                    )
+                finally:
+                    task_handlers = _active_handlers.get(self.task_run_id)
+                    if task_handlers is not None:
+                        task_handlers.discard(self._task_log_handler)
+                        if not task_handlers:
+                            _active_handlers.pop(self.task_run_id, None)
+
+                    try:
+                        self._task_log_handler.close()
+                    except Exception as close_err:
+                        logger.debug(
+                            "Handler close warning for task_run_id=%s: %s",
+                            self.task_run_id,
+                            close_err,
+                        )
+
             self._task_log_handler = None
+        self._task_log_filter = None
 
         logger.debug("Ended HUD trace context for task_run_id=%s", self.task_run_id)

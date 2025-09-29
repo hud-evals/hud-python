@@ -16,6 +16,8 @@ try:
 except ImportError:  # pragma: no cover - typing only during runtime issues
     MCPToolCall = MCPToolResult = Task = Trace = Any  # type: ignore
 
+logger = logging.getLogger(__name__)
+
 
 def _json_default(value: Any) -> Any:
     """Best-effort serializer for complex objects."""
@@ -219,12 +221,16 @@ class TaskLogHandler(logging.Handler):
     def __init__(self, task_logger: TaskLogger) -> None:
         super().__init__()
         self.task_logger = task_logger
+        self.task_run_id = task_logger.task_run_id
         self.setFormatter(
             logging.Formatter("%(asctime)s - %(name)s - %(message)s", datefmt="%H:%M:%S")
         )
 
     def emit(self, record: logging.LogRecord) -> None:
         if getattr(record, "_hud_console_logged", False):
+            return
+
+        if not self._should_process_record(record):
             return
 
         file_handler = getattr(self.task_logger, "_file_handler", None)
@@ -241,6 +247,48 @@ class TaskLogHandler(logging.Handler):
                 file_handler.release()
         except Exception:
             self.handleError(record)
+
+    def _should_process_record(self, record: logging.LogRecord) -> bool:
+        """Determine whether this handler should process the record."""
+        record_task_id = getattr(record, "hud_task_run_id", None)
+        if record_task_id == self.task_run_id:
+            return True
+
+        try:
+            from hud.otel.context import get_current_task_logger, get_current_task_run_id
+
+            current_logger = get_current_task_logger()
+            if current_logger is not None and current_logger is self.task_logger:
+                return True
+
+            current_task_run_id = get_current_task_run_id()
+            if current_task_run_id is not None:
+                return current_task_run_id == self.task_run_id
+        except Exception as exc:
+            logger.debug(
+                "Context lookup failed in TaskLogHandler for task_run_id=%s: %s",
+                self.task_run_id,
+                exc,
+            )
+
+        if record_task_id is None:
+            return record.levelno >= logging.CRITICAL
+
+        return False
+
+    def log_diagnostic_info(self) -> None:
+        """Log diagnostic information about handler state."""
+        root_logger = logging.getLogger()
+        handler_count = sum(
+            1 for handler in root_logger.handlers if isinstance(handler, TaskLogHandler)
+        )
+
+        logger.debug(
+            "Task Logger Diagnostics - task_run_id=%s, handler_count=%d, file=%s",
+            self.task_run_id,
+            handler_count,
+            getattr(self.task_logger, "log_path", "<unknown>"),
+        )
 
 
 __all__ = ["TaskLogger", "TaskLogHandler"]

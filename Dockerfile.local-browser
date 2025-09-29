@@ -1,0 +1,26 @@
+# Start from the existing remote browser image
+FROM hudevals/hud-remote-browser:0.1.1
+
+# Install chromium, X11, and VNC tools for local execution with monitoring
+RUN apt-get update && apt-get install -y \
+    chromium \
+    xvfb \
+    x11-utils \
+    curl \
+    x11vnc \
+    websockify \
+    novnc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy our local kernel provider implementation
+COPY environments/remote_browser/src/hud_controller/providers/kernel.py /app/src/hud_controller/providers/kernel.py
+COPY environments/remote_browser/src/hud_controller/providers/__init__.py /app/src/hud_controller/providers/__init__.py
+
+# Copy modified sheets setup with OAuth support
+COPY environments/remote_browser/src/hud_controller/setup/sheets.py /app/src/hud_controller/setup/sheets.py
+
+# Copy VNC test script
+COPY test_vnc.py /app/test_vnc.py
+
+# The image already has the entrypoint set up
+# No need to change anything else

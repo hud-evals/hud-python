@@ -5,7 +5,7 @@ from .anchorbrowser import AnchorBrowserProvider
 from .browserbase import BrowserBaseProvider
 from .steel import SteelProvider
 from .hyperbrowser import HyperBrowserProvider
-# from .kernel import KernelProvider  # Not yet implemented
+from .kernel import KernelProvider
 
 __all__ = [
     "BrowserProvider",
@@ -13,7 +13,7 @@ __all__ = [
     "BrowserBaseProvider",
     "SteelProvider",
     "HyperBrowserProvider",
-    # "KernelProvider",  # Not yet implemented
+    "KernelProvider",
 ]
 
 # Provider registry for easy lookup
@@ -22,7 +22,7 @@ PROVIDERS = {
     "browserbase": BrowserBaseProvider,
     "steel": SteelProvider,
     "hyperbrowser": HyperBrowserProvider,
-    # "kernel": KernelProvider,  # Not yet implemented
+    "kernel": KernelProvider,
 }
 
 
