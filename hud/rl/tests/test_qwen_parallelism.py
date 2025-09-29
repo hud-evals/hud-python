@@ -1,8 +1,3 @@
-"""
-Test suite for Qwen model parallelism strategies.
-Tests DDP, FSDP, and HSDP with different configurations for both LM and VL models.
-"""
-
 import os
 import torch
 import torch.distributed as dist
@@ -49,15 +44,15 @@ def cleanup():
         dist.destroy_process_group()
 
 def generate_lm_dummy_input(batch_size=2, seq_len=128, vocab_size=151936):
-    input_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
+    generator = torch.Generator()
+    generator.manual_seed(42)
+    input_ids = torch.randint(0, vocab_size, (batch_size, seq_len), generator=generator)
     return {"input_ids": input_ids}
 
 
 def generate_vl_dummy_input(
     processor,
     batch_size: int = 2,
-    seq_len_unused: int = 64,
-    vocab_size_unused: int = 151936,
     img_size: int = 224,
 ):
     image_token = getattr(processor, "image_token", "<|image_pad|>")
