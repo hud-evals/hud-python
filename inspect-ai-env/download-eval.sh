@@ -44,5 +44,8 @@ mkdir -p "${CWD}/inspect_evals"
 # Copy the specific eval from the temporary repo to its final destination.
 cp -r "${TEMP_REPO_DIR}/src/inspect_evals/${TARGET_EVAL}" "${TARGET_DIR}"
 
+# Create __init__.py to make inspect_evals a proper Python package
+touch "${CWD}/inspect_evals/__init__.py"
+
 echo "Successfully downloaded '${TARGET_EVAL}' to '${TARGET_DIR}'"
 # The 'trap' command will now execute, cleaning up the temporary directory.

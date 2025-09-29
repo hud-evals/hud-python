@@ -12,11 +12,17 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 # Copy and install dependencies
 COPY docker_pyproject.toml pyproject.toml
 RUN pip install uv
+
 # Create a virtual environment
 RUN uv venv /opt/venv
 
-# Set the PATH to include the venv's bin directory
+# Set the PATH and VIRTUAL_ENV BEFORE running uv commands
+# This ensures uv installs packages into the correct venv
+ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
+
+# Now install dependencies into the activated venv
+RUN uv sync
 RUN uv pip install -e .
 
 # Create inspect_evals directory (eval will be downloaded at runtime)

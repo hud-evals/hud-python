@@ -32,24 +32,24 @@ async def setup(eval_name: str = None) -> str:
     if not http_client:
         raise RuntimeError("HTTP client not initialized")
 
-    resp = await http_client.post(
-        "/setup",
-        json={"eval_name": eval_name}
-    )
+    resp = await http_client.post("/setup", json={"eval_name": eval_name})
     return json.dumps({"status": "ready", "content": resp.json()})
 
 
 @mcp.tool()
-async def evaluate(eval_name: str, task_params: dict = {}, sample: dict = None, limit: int = None) -> EvaluationResult:
+async def evaluate(
+    eval_name: str, sample: dict, task_params: dict = {}, limit: int = None
+) -> EvaluationResult:
     """
     Run a full inspect_ai evaluation using the eval's native solver and scorer.
 
     Args:
         eval_name: Name of the eval (e.g., "mbpp", "swe_bench", "gpqa")
-        task_params: Parameters to pass to the eval's task function (e.g., {"temperature": 0.5})
-        sample: Optional single sample dict to process. If provided, only this sample is evaluated.
+        sample: Single sample dict to process.
                 This is used for parallel processing where each container gets one sample.
                 Sample should be in inspect_ai Sample format (id, input, target, metadata, etc.)
+        task_params: Parameters to pass to the eval's task function (e.g., {"temperature": 0.5})
+
         limit: Optional limit on number of samples to evaluate (only used if sample is None)
 
     This will:
@@ -67,9 +67,9 @@ async def evaluate(eval_name: str, task_params: dict = {}, sample: dict = None, 
                 "eval_name": eval_name,
                 "task_params": task_params,
                 "sample": sample,
-                "limit": limit
+                "limit": limit,
             },
-            timeout=600.0,  # 10 minutes for full eval runs
+            timeout=60.0,
         )
 
         # Raise an exception if the API returns an error (e.g., 400, 500)
@@ -125,8 +125,8 @@ async def evaluate(eval_name: str, task_params: dict = {}, sample: dict = None, 
 @mcp.tool()
 async def get_status() -> str:
     """
-    Checks and returns the status of the long-running benchmark process.
-    The response will indicate if the process is 'running', 'not_running', or 'completed_or_crashed'.
+    Checks and returns the status of the process.
+    The response will indicate if the process is 'not_started', 'running', or 'completed', or 'crashed'.
     """
     if not http_client:
         raise RuntimeError("HTTP client not initialized")
@@ -150,13 +150,4 @@ async def stop() -> str:
     print("Sending request to POST /stop")
     resp = await http_client.post("/stop")
 
-    # Return the server's JSON response as a string
     return json.dumps(resp.json())
-
-
-# process_sample and get_sample_result tools removed
-# Use the evaluate tool instead for full inspect_ai evaluations
-#
-# Agent routing is done via HTTP callback (AGENT_CALLBACK_URL env var)
-# instead of MCP tools, since the environment server needs to call
-# the external agent directly
