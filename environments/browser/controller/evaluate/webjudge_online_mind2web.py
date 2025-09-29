@@ -470,10 +470,22 @@ async def webjudge_online_mind2web(
                 "error": "No screenshot history available"
             }
 
-        # Get action history
-        # TODO: Record action history in computer tools
+        # Get action history from file
         action_history = []
-        last_actions = [f"{action['type']}: {action['details']}" for action in action_history[-10:]]  # Last 10 actions
+        try:
+            action_history_file = "/action_history/action_history.txt"
+            if os.path.exists(action_history_file):
+                with open(action_history_file, "r", encoding="utf-8") as f:
+                    action_history = [line.strip() for line in f if line.strip()]
+                logging.info(f"Loaded {len(action_history)} actions from history file")
+            else:
+                logging.warning("No action history file found")
+        except Exception as e:
+            logging.warning(f"Failed to load action history: {e}")
+            action_history = []
+
+        # Get last 10 actions for evaluation
+        last_actions = action_history[-10:] if action_history else []
 
         logging.info(f"Found {len(screenshot_history)} screenshots and {len(action_history)} actions")
 

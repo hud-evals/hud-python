@@ -9,7 +9,7 @@ from controller.tools import playwright
 logger = logging.getLogger(__name__)
 
 
-@mcp.tool(name="setup.todo_seed")
+@mcp.tool(name="setup_todo_seed")
 async def todo_seed(num_items: int = 5):
     """Seed database with default test todos.
 
@@ -55,7 +55,7 @@ async def todo_seed(num_items: int = 5):
         return {"error": f"Failed to seed database: {str(e)}"}
 
 
-@mcp.tool(name="setup.todo_reset")
+@mcp.tool(name="setup_todo_reset")
 async def todo_reset():
     """Reset database to empty state.
 
@@ -82,7 +82,7 @@ async def todo_reset():
         return {"error": f"Failed to reset database: {str(e)}"}
 
 
-@mcp.tool(name="setup.todo_custom_seed")
+@mcp.tool(name="setup_todo_custom_seed")
 async def todo_custom_seed(items: List[Dict[str, Any]]):
     """Seed database with custom todo items.
 

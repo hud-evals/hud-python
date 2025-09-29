@@ -38,7 +38,7 @@ class AnthropicComputerToolWithRecord(AnthropicComputerTool):
             rescale_images=rescale_images,
             name=name,
             title=title,
-            description=description ,
+            description=description,
             **kwargs,
         )
         self.screenshot_history = []
@@ -46,15 +46,10 @@ class AnthropicComputerToolWithRecord(AnthropicComputerTool):
             str,
             list[Callable[..., Awaitable[Any]]],
         ] = {}  # DELETE after hud-python version bump
+        self.add_callback("on_screenshot_action", self._on_screenshot_action)
+        self.add_callback("on_recorded_action", self._on_recorded_action)
         
-        # Try to add callback if available
-        if hasattr(self, 'add_callback'):
-            logger.info("Callback system available, adding screenshot callback")
-            self.add_callback("on_screenshot_action", self._on_screenshot_action)
-        else:
-            logger.error("Callback system not available - missing add_callback method")
-        
-    async def _on_screenshot_action(self, **kwargs) -> None:
+    async def _on_screenshot_action(self, **_) -> None:
         """Callback function to take and save screenshots to /screenshot directory"""
         try:
             # Check if executor is available and properly initialized
@@ -69,8 +64,6 @@ class AnthropicComputerToolWithRecord(AnthropicComputerTool):
 
             screenshot_base64 = await self.executor.screenshot()
             if screenshot_base64:
-
-
                 # Create screenshot directory if it doesn't exist
                 screenshot_dir = "/screenshot"
                 os.makedirs(screenshot_dir, exist_ok=True)
@@ -89,59 +82,163 @@ class AnthropicComputerToolWithRecord(AnthropicComputerTool):
 
         except Exception as e:
             logger.debug(f"Screenshot callback failed (this is normal during initialization): {e}")
-            # Don't log as error since this is expected during initialization
+
+    async def _on_recorded_action(self, action=None, coordinate=None, text=None,
+                                  start_coordinate=None, scroll_direction=None,
+                                  scroll_amount=None, **_):
+        """Record action in unified representation format
+
+        Creates unified action representations like:
+        - <coordinate=[123, 456]> -> CLICK
+        - <coordinate=[123, 456]> -> TYPE hello@example.com
+        - <start=[100, 200], end=[300, 400]> -> DRAG
+        """
+        if not action:
+            return
+
+        try:
+            # Create unified action representation
+            action_repr = self._to_action_repr(
+                action, coordinate, text, start_coordinate, scroll_direction, scroll_amount
+            )
+
+            # Dump to file
+            action_history_dir = "/action_history"
+            os.makedirs(action_history_dir, exist_ok=True)
+            action_file = os.path.join(action_history_dir, "action_history.txt")
+
+            with open(action_file, "a", encoding="utf-8") as f:
+                f.write(f"{action_repr}\n")
+
+            logger.info(f"Recorded action: {action_repr}")
+
+        except Exception as e:
+            logger.warning(f"Failed to record action: {e}")
 
     async def __call__(
         self,
-        type: str = Field(..., description="The action type to perform"),
-        # Coordinate parameters
-        x: int | None = Field(None, description="X coordinate for click/move/scroll actions"),
-        y: int | None = Field(None, description="Y coordinate for click/move/scroll actions"),
-        # Button parameter
-        button: str | None = Field(
-            None, description="Mouse button for click actions (left, right, middle, wheel)"
+        action: str = Field(..., description="The action to perform on the computer"),
+        coordinate: list[int] | tuple[int, int] | None = Field(
+            None, description="The coordinate to interact with on the computer [x, y]"
         ),
-        # Text parameter
-        text: str | None = Field(None, description="Text to type or response text"),
-        # Scroll parameters
-        scroll_x: int | None = Field(None, description="Horizontal scroll amount"),
-        scroll_y: int | None = Field(None, description="Vertical scroll amount"),
-        # Wait parameter
-        ms: int | None = Field(None, description="Time to wait in milliseconds"),
-        # Key press parameter
-        keys: list[str] | None = Field(None, description="Keys to press"),
-        # Drag parameter
-        path: list[dict[str, int]] | None = Field(
-            None, description="Path for drag actions as list of {x, y} dicts"
+        text: str | None = Field(
+            None, description="The text to type on the computer or key to press"
         ),
-        # Custom action parameter
-        action: str | None = Field(None, description="Custom action name"),
+        start_coordinate: list[int] | tuple[int, int] | None = Field(
+            None, description="The starting coordinate for drag actions [x, y]"
+        ),
+        scroll_direction: str | None = Field(
+            None, description="The direction to scroll (up, down, left, right)"
+        ),
+        scroll_amount: int | None = Field(None, description="The amount to scroll"),
+        duration: float | None = Field(None, description="The duration of the action in seconds"),
+        take_screenshot_on_click: bool = Field(
+            True, description="Whether to take a screenshot after clicking"
+        ),
     ) -> list[ContentBlock]:
-        """Overriding OpenAIComputerTool.__call__()"""
-        result = await super().__call__(
-            type=type, x=x, y=y, button=button, 
-            text=text, scroll_x=scroll_x, scroll_y=scroll_y,
-            ms=ms, keys=keys, path=path, action=action
-        )
-        screenshot_action_type = {
+        
+        result = await super().__call__(action=action, coordinate=coordinate, text=text, 
+                                  start_coordinate=start_coordinate, scroll_direction=scroll_direction,
+                                  scroll_amount=scroll_amount, duration=duration, 
+                                  take_screenshot_on_click=take_screenshot_on_click
+                                )
+        screenshot_actions = {
             "screenshot",
+            "left_click",
             "click",
             "double_click",
-            "scroll",
-            "type",
+            "triple_click",
+            "right_click",
+            "middle_click",
+            "mouse_move",
             "move",
-            "keypress",
+            "type",
+            "key",
+            "scroll",
+            "left_click_drag",
             "drag",
             "wait",
+            "hold_key",
+            "left_mouse_down",
+            "left_mouse_up",
         }
-        logger.info(f"debug action type: {type}")
-        if type in screenshot_action_type:
-            if hasattr(self, '_trigger_callbacks'):
-                await self._trigger_callbacks("on_screenshot_action")
-            else:
-                logger.warning("_trigger_callbacks method not available")
+        if (
+            action in screenshot_actions
+            and action != "screenshot"
+            and take_screenshot_on_click
+        ):
+            await self._trigger_callbacks("on_screenshot_action")
+        recorded_actions = {
+            "left_click",
+            "click",
+            "double_click",
+            "triple_click",
+            "right_click",
+            "middle_click",
+            "type",
+            "key",
+            "scroll",
+            "left_click_drag",
+            "drag",
+        }
+        if (action in recorded_actions):
+            await self._trigger_callbacks("on_recorded_action",
+                                         action=action,
+                                         coordinate=coordinate,
+                                         text=text,
+                                         start_coordinate=start_coordinate,
+                                         scroll_direction=scroll_direction,
+                                         scroll_amount=scroll_amount)
         return result
 
+
+    def _to_action_repr(self, action, coordinate=None, text=None,
+                        start_coordinate=None, scroll_direction=None,
+                        scroll_amount=None):
+        """Create unified action representation following AgentRewardBench format
+
+        Format examples:
+        - <coordinate=[123, 456]> -> CLICK
+        - <coordinate=[123, 456]> -> TYPE hello@example.com
+        - <start=[100, 200], end=[300, 400]> -> DRAG
+        - <coordinate=[123, 456], direction=up, amount=3> -> SCROLL
+        """
+
+        # Normalize action names to uppercase
+        action_name = action.upper().replace("LEFT_", "").replace("_", "")
+        if action_name == "LEFTCLICK":
+            action_name = "CLICK"
+        elif action_name == "LEFTCLICKDRAG":
+            action_name = "DRAG"
+
+        # Build element attributes part
+        attributes = []
+
+        if coordinate:
+            attributes.append(f"coordinate={coordinate}")
+
+        if start_coordinate and action_name == "DRAG":
+            attributes.append(f"start={start_coordinate}")
+            if coordinate:
+                attributes.append(f"end={coordinate}")
+
+        if scroll_direction:
+            attributes.append(f"direction={scroll_direction}")
+
+        if scroll_amount:
+            attributes.append(f"amount={scroll_amount}")
+
+        # Create element part
+        element_part = f"<{', '.join(attributes)}>" if attributes else "<>"
+
+        # Create action part
+        if text and action_name in ["TYPE", "KEY"]:
+            action_part = f"{action_name} {text}"
+        else:
+            action_part = action_name
+
+        return f"{element_part} -> {action_part}"
+    
     # Delete After hud-python version bump
     def add_callback(self, event_type: str, callback: Callable[..., Awaitable[Any]]):
         """Register a callback function for specific event
