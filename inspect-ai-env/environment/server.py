@@ -1,20 +1,21 @@
 """Minimal FastAPI environment server (HTTP-based)."""
 
-import logging
-import sys
-import os
-import warnings
-from datetime import datetime
-import signal
-import subprocess
-import time
-
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from typing import Any, Dict, List, Optional, Union
 import asyncio
-import traceback
+import json
+import logging
+import sys
+import uuid
+import time
+from datetime import datetime
+from importlib import import_module
 
-from .utils import run_eval_and_log
+from inspect_ai import Task
+from inspect_ai.solver import TaskState, Generate
+from inspect_ai.scorer import Target
+from inspect_ai.model import ChatMessageUser, ChatMessageAssistant
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -23,196 +24,505 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+app = FastAPI(title="Inspect AI Sample Processing Environment")
 
-# globals for tracking state
-
-LOCK_FILE_PATH = "/tmp/long_running_process.lock"
-LOG_FILE_PATH = "/tmp/benchmark.log"
-_model = ""
-_target_eval = ""
-
-app = FastAPI(title="Inspect-AI eval-wrapper API")
+_count = 0
+_sample_results = {}  # Store results by sample_id
+_processing_status = {}  # Track processing status
+_task_cache = {}  # Cache loaded eval tasks by eval_name
 
 
-def is_pid_running(pid):
-    if pid is None:
-        return False
+def load_eval_task(eval_spec: Dict[str, Any]) -> Task:
+    """
+    Dynamically load and instantiate an inspect_evals Task.
+
+    Args:
+        eval_spec: Dict containing:
+            - eval_name: Name of the eval (e.g., "mbpp", "swe_bench")
+            - task_params: Optional parameters to pass to the task function
+
+    Returns:
+        Task: The instantiated inspect_ai Task object
+    """
+    eval_name = eval_spec.get("eval_name")
+    if not eval_name:
+        raise ValueError("eval_spec must contain 'eval_name'")
+
+    # Check cache first
+    cache_key = f"{eval_name}:{json.dumps(eval_spec.get('task_params', {}), sort_keys=True)}"
+    if cache_key in _task_cache:
+        logger.info(f"Using cached task for {eval_name}")
+        return _task_cache[cache_key]
+
     try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    else:
-        return True
+        # Import the eval module from inspect_evals
+        eval_module = import_module(f"inspect_evals.{eval_name}")
+
+        # Get the task function (typically named same as the module)
+        task_fn = getattr(eval_module, eval_name)
+
+        # Instantiate the task with custom parameters
+        task_params = eval_spec.get("task_params", {})
+        logger.info(f"Loading eval: {eval_name} with params: {task_params}")
+        task = task_fn(**task_params)
+
+        # Cache the task
+        _task_cache[cache_key] = task
+
+        return task
+
+    except ImportError as e:
+        raise ValueError(f"Could not import eval '{eval_name}': {e}")
+    except AttributeError as e:
+        raise ValueError(f"Eval '{eval_name}' does not have a task function named '{eval_name}': {e}")
 
 
-def get_pid_from_lock_file():
-    try:
-        with open(LOCK_FILE_PATH, "r") as f:
-            return int(f.read().strip())
-    except (IOError, ValueError):
-        return None
+def create_task_state_from_sample(
+    sample: Sample,
+    solver_output: str,
+    model_name: str = "custom_agent"
+) -> TaskState:
+    """
+    Create an inspect_ai TaskState from a Sample and solver output.
+
+    Args:
+        sample: The Sample being processed
+        solver_output: The output from your custom solver/agent
+        model_name: Name to use for the model in the task state
+
+    Returns:
+        TaskState: Populated TaskState for scoring
+    """
+    from inspect_ai.solver import TaskState
+    from inspect_ai.model import ChatMessageUser, ChatMessageAssistant, ModelOutput
+
+    # Create message history
+    messages = [
+        ChatMessageUser(content=str(sample.input))
+    ]
+
+    # Create the model output
+    output = ModelOutput(
+        model=model_name,
+        completion=solver_output,
+        stop_reason="stop"
+    )
+
+    # Create TaskState
+    state = TaskState(
+        sample_id=sample.id,
+        epoch=0,
+        input=str(sample.input),
+        messages=messages,
+        output=output,
+        metadata=sample.metadata or {}
+    )
+
+    return state
 
 
-def get_process_status():
-    """Internal function to check process status and clean up stale locks."""
-    pid = get_pid_from_lock_file()
+class Sample(BaseModel):
+    """Sample model matching inspect_ai Sample structure"""
+    input: Union[str, List[Dict[str, Any]]]
+    target: Union[str, List[str]] = ""
+    choices: Optional[List[str]] = None
+    id: Union[int, str, None] = None
+    metadata: Optional[Dict[str, Any]] = None
+    sandbox: Optional[Dict[str, Any]] = None
+    files: Optional[Dict[str, str]] = None
+    setup: Optional[str] = None
 
-    if pid is None:
-        return {"status": "not_running"}
 
-    if is_pid_running(pid):
-        return {"status": "running", "pid": pid, "log_path": LOG_FILE_PATH}
-    else:
-        try:
-            os.remove(LOCK_FILE_PATH)
-        except OSError:
-            pass
+class SampleProcessRequest(BaseModel):
+    """Request to process a single sample"""
+    sample: Sample
+    task_config: Optional[Dict[str, Any]] = None
+    eval_spec: Optional[Dict[str, Any]] = None
 
-        return {
-            "status": "completed_or_crashed",
-            "message": f"Process with PID {pid} is no longer running. Stale lock file removed.",
-        }
+
+class SampleResult(BaseModel):
+    """Result of processing a single sample"""
+    sample_id: Union[int, str]
+    success: bool
+    setup_output: Optional[str] = None
+    solver_output: Optional[str] = None
+    score: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    processing_time: Optional[float] = None
+    timestamp: str
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "content": {"status": get_process_status()}}
+    return {"status": "ok"}
+
+
+@app.post("/act")
+def act():
+    global _count
+    _count += 1
+    return {"count": _count}
 
 
 @app.post("/reset")
 def reset():
-    """Setup and/or reset the environment.
-    This is where we'd do a check for extra installation requirements
-    of a specific inspect eval, and satisfy those. e.g. sweval"""
-
-    global _target_eval, _model
-    _target_eval = os.getenv("TARGET_EVAL", "specify_target_eval_in_the_.env")
-    _model = os.getenv("MODEL", "specify_model_in_the_.env")
-    logger.warning(f"Set up model and eval. Model: {_model}, Eval: {_target_eval}")
-    # TODO: setup local model if needed
-    # TODO: extra install step
-    extra_stdout = ""
-    extra_stderr = ""
-
-    # try:
-    #     # some evals have extra installation needed
-    #     extra_stdout, extra_stderr = run_command(
-    #         ["uv", "pip", "install", f"inspect-ai[{_target_eval}]"]
-    #     )
-    # except Exception as e:
-    #     pass
-
+    global _count
+    _count = 0
+    _sample_results.clear()
+    _processing_status.clear()
     return {"ok": True}
-
-
-@app.post("/evaluate")
-async def evaluate(eval_config: dict):
-    """
-    Creates and starts a new evaluation.
-    Returns immediately with a trace_id to track the evaluation.
-    """
-
-    eval_params = []
-    if eval_config != {}:
-        for k, v in eval_config.items():
-            eval_params.append(f"--{k}")
-            eval_params.append(v)
-    logger.warning(
-        f"starting inspect-eval run. info: eval_config: {eval_params}, type {type(eval_params)}"
-    )
-
-    full_commands = [
-        "uv",
-        "run",
-        "inspect",
-        "eval",
-        f"/app/inspect_evals/{_target_eval}",
-        "--model",
-        _model,
-    ] + eval_params
-    full_commands = [str(x) for x in full_commands]
-    logger.warning(f"full commands: {full_commands}")
-
-    trace_id = f"inspectai_{_target_eval}_{_model.split('/')[-1]}_{datetime.now().strftime('%y%m%d_%H%M%S')}"
-
-    # --- Atomic Lock Acquisition ---
-    try:
-        flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
-        fd = os.open(LOCK_FILE_PATH, flags)
-    except FileExistsError:
-        raise HTTPException(
-            status_code=409,
-            detail="An Inspect-ai process is already running.",  # Conflict
-        )
-
-    # --- If Lock Acquired, Launch the Process ---
-    try:
-
-        log_file = open(LOG_FILE_PATH, "w")
-
-        process = subprocess.Popen(full_commands, stdout=log_file, stderr=log_file)
-
-        with os.fdopen(fd, "w") as f:
-            f.write(str(process.pid))
-
-        return {
-            "message": "Process launched successfully.",
-            "pid": process.pid,
-            "trace_id": trace_id,
-        }
-
-    except Exception as e:
-        os.remove(LOCK_FILE_PATH)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Something has gone terribly wrong...\n{traceback.format_exc()}. Failed to launch process: {str(e)}",
-        )
 
 
 @app.get("/state")
 def state():
     return {
-        "model": _model,
-        "target_eval": _target_eval,
-        "status": get_process_status(),
+        "count": _count,
+        "total_samples_processed": len(_sample_results),
+        "currently_processing": len([k for k, v in _processing_status.items() if v == "processing"])
     }
 
 
-@app.post("/stop")
-async def stop_process():
-    """Stops the running process gracefully."""
-    pid = get_pid_from_lock_file()
+class EvaluateRequest(BaseModel):
+    """Request to run an inspect_ai evaluation"""
+    eval_name: str
+    task_params: Optional[Dict[str, Any]] = None
+    limit: Optional[int] = None
 
-    if pid is None or not is_pid_running(pid):
-        if os.path.exists(LOCK_FILE_PATH):
-            os.remove(LOCK_FILE_PATH)
-        raise HTTPException(status_code=404, detail="No process is currently running.")
+
+@app.post("/evaluate")
+async def evaluate(request: EvaluateRequest):
+    """
+    Run a full inspect_ai evaluation using the eval's native solver and scorer.
+
+    This executes the eval exactly as inspect_ai would, using:
+    - The eval's dataset
+    - The eval's native solver (generate(), basic_agent(), etc.)
+    - The eval's native scorer
+    - The eval's sandbox configuration
+    """
+    eval_name = request.eval_name
+    task_params = request.task_params or {}
+    limit = request.limit
+
+    logger.info(f"Starting evaluation: {eval_name} with params: {task_params}, limit: {limit}")
 
     try:
-        # 1. Graceful shutdown with SIGTERM
-        os.kill(pid, signal.SIGTERM)
-        for _ in range(10):
-            if not is_pid_running(pid):
-                break
-            time.sleep(0.5)
+        # Import inspect_ai's eval function
+        from inspect_ai import eval as inspect_eval
+        from inspect_ai.log import read_eval_log
 
-        # 2. Force kill if still alive
-        if is_pid_running(pid):
-            os.kill(pid, signal.SIGKILL)
-            time.sleep(0.5)
+        # Load the eval task
+        eval_spec = {
+            "eval_name": eval_name,
+            "task_params": task_params
+        }
+        task = load_eval_task(eval_spec)
 
-        # 3. Clean up
-        os.remove(LOCK_FILE_PATH)
+        # Limit dataset if requested
+        if limit:
+            task.dataset = task.dataset[:limit]
 
-        if not is_pid_running(pid):
-            return {"message": f"Process {pid} stopped successfully."}
+        logger.info(f"Running eval with {len(task.dataset)} samples")
+
+        # Run the evaluation using inspect_ai
+        # This will use the eval's native solver and scorer
+        logs = await inspect_eval(
+            task,
+            model="openai/gpt-4o-mini",  # TODO: Make this configurable
+            log_dir="logs"
+        )
+
+        # Parse results
+        log = logs[0] if logs else None
+        if log:
+            results = {
+                "status": log.status,
+                "eval_name": eval_name,
+                "samples_completed": len([s for s in log.samples if s.score]),
+                "total_samples": len(log.samples),
+                "scores": {
+                    metric: value.value
+                    for metric, value in (log.results.metrics if log.results else {}).items()
+                }
+            }
         else:
-            raise HTTPException(
-                status_code=500, detail=f"Failed to stop process {pid}."
-            )
+            results = {"status": "no_log", "eval_name": eval_name}
+
+        logger.info(f"Evaluation complete: {results}")
+
+        return {
+            "trace_id": str(uuid.uuid4()),
+            "status": "completed",
+            "results": results
+        }
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"An error occurred while stopping the process: {str(e)}",
+        logger.error(f"Evaluation failed: {e}", exc_info=True)
+        return {
+            "trace_id": str(uuid.uuid4()),
+            "status": "error",
+            "error": str(e)
+        }
+
+
+@app.post("/process_sample")
+async def process_sample(request: SampleProcessRequest) -> SampleResult:
+    """
+    Process a single sample through the setup -> solver -> scorer pipeline.
+    This is the main endpoint for inspect-ai integration.
+    """
+    sample = request.sample
+    sample_id = sample.id or str(uuid.uuid4())
+
+    logger.info(f"Processing sample {sample_id}")
+    start_time = time.time()
+
+    # Mark as processing
+    _processing_status[sample_id] = "processing"
+
+    try:
+        # Step 1: Setup phase
+        setup_output = await run_sample_setup(sample, request.task_config, request.eval_spec)
+        logger.info(f"Setup completed for sample {sample_id}")
+
+        # Step 2: Solver phase (main execution)
+        solver_output = await run_sample_solver(sample, setup_output, request.task_config, request.eval_spec)
+        logger.info(f"Solver completed for sample {sample_id}")
+
+        # Step 3: Scoring phase
+        score = await run_sample_scorer(sample, solver_output, request.task_config, request.eval_spec)
+        logger.info(f"Scoring completed for sample {sample_id}")
+
+        processing_time = time.time() - start_time
+
+        result = SampleResult(
+            sample_id=sample_id,
+            success=True,
+            setup_output=setup_output,
+            solver_output=solver_output,
+            score=score,
+            processing_time=processing_time,
+            timestamp=datetime.now().isoformat()
         )
+
+        # Store result
+        _sample_results[sample_id] = result
+        _processing_status[sample_id] = "completed"
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error processing sample {sample_id}: {e}")
+        processing_time = time.time() - start_time
+
+        result = SampleResult(
+            sample_id=sample_id,
+            success=False,
+            error=str(e),
+            processing_time=processing_time,
+            timestamp=datetime.now().isoformat()
+        )
+
+        _sample_results[sample_id] = result
+        _processing_status[sample_id] = "error"
+
+        return result
+
+
+@app.get("/sample_result/{sample_id}")
+def get_sample_result(sample_id: str):
+    """Get the result of a processed sample"""
+    if sample_id not in _sample_results:
+        raise HTTPException(status_code=404, detail="Sample result not found")
+    return _sample_results[sample_id]
+
+
+@app.get("/sample_status/{sample_id}")
+def get_sample_status(sample_id: str):
+    """Get the processing status of a sample"""
+    status = _processing_status.get(sample_id, "not_found")
+    return {"sample_id": sample_id, "status": status}
+
+
+async def run_sample_setup(sample: Sample, task_config: Dict[str, Any] = None, eval_spec: Dict[str, Any] = None) -> str:
+    """
+    Custom setup logic for the sample.
+    Override this method to implement your specific setup requirements.
+    """
+    setup_commands = []
+
+    if eval_spec and "setup_commands" in eval_spec:
+        setup_commands.extend(eval_spec["setup_commands"])
+
+    if sample.setup:
+        setup_commands.append(sample.setup)
+
+    # For now, just simulate setup execution
+    if setup_commands:
+        logger.info(f"Executing setup commands: {setup_commands}")
+        await asyncio.sleep(0.1)  # Simulate work
+        return f"Setup completed: {'; '.join(setup_commands)}"
+    else:
+        return "No setup required"
+
+
+async def run_sample_solver(sample: Sample, setup_output: str, task_config: Dict[str, Any] = None, eval_spec: Dict[str, Any] = None) -> str:
+    """
+    Custom solver logic for the sample.
+    This is where your Docker container agent or custom solver runs.
+
+    Args:
+        sample: The sample to solve
+        setup_output: Output from the setup phase
+        task_config: Task configuration
+        eval_spec: Eval specification with eval_name and task_params
+
+    Returns:
+        str: The solver output (model completion)
+    """
+    solver_type = eval_spec.get("solver_type", "custom_agent") if eval_spec else "custom_agent"
+
+    logger.info(f"Running solver type: {solver_type} for sample: {sample.id}")
+
+    # Option 1: Use your custom Docker container agent
+    if solver_type == "custom_agent":
+        # TODO: Integrate with your Docker container here
+        # This is where you'd send the sample to your custom agent
+        # and get back the solution
+
+        # For now, using a placeholder that demonstrates the expected format
+        # For MBPP, this should return Python code
+        # For SWE-bench, this should return git diff or patch
+        output = await run_custom_docker_agent(sample, eval_spec)
+
+    # Option 2: Use the eval's default solver (inspect_ai's basic_agent, generate(), etc.)
+    elif solver_type == "eval_default":
+        # Load the eval task and use its solver
+        task = load_eval_task(eval_spec)
+
+        # The eval's solver would typically run here
+        # This requires running inspect_ai's solve pipeline, which is complex
+        # For now, we'll focus on custom_agent mode
+        raise NotImplementedError("eval_default solver not yet implemented - use custom_agent")
+
+    else:
+        raise ValueError(f"Unknown solver_type: {solver_type}")
+
+    return output
+
+
+async def run_custom_docker_agent(sample: Sample, eval_spec: Dict[str, Any]) -> str:
+    """
+    This function is called from within the Docker container's environment server.
+
+    IMPORTANT: The actual agent that will solve this sample is running OUTSIDE
+    this Docker container, in run_task.py. The agent calls the process_sample MCP tool,
+    which routes here.
+
+    Your custom solving logic should go here. This could be:
+    - Running a local model
+    - Calling an API
+    - Executing code in a sandbox
+    - Or whatever custom logic you need
+
+    For now, this is a placeholder that returns eval-specific mock responses.
+    In production, you would implement your actual solving logic here.
+
+    Args:
+        sample: The sample to solve
+        eval_spec: Eval specification
+
+    Returns:
+        str: The solver output (format depends on eval type)
+    """
+    eval_name = eval_spec.get("eval_name", "unknown")
+
+    logger.info(f"Custom solver for eval: {eval_name}, sample: {sample.id}")
+    logger.info(f"Sample input: {str(sample.input)[:200]}...")
+
+    # TODO: Replace this with your actual solving logic
+    # For example:
+    # - Use a local LLM
+    # - Call an external API
+    # - Run code generation model
+    # - Execute multi-step reasoning
+
+    # Simulate some processing time
+    await asyncio.sleep(0.1)
+
+    # Return eval-specific placeholder responses
+    # In production, your agent would generate real solutions
+    if eval_name == "mbpp":
+        # For MBPP, return Python code wrapped in markdown
+        # The MBPP scorer will execute this code against test cases
+        return f"```python\ndef solution():\n    # TODO: Implement solution for: {sample.input[:50]}...\n    pass\n```"
+    elif eval_name == "swe_bench":
+        # For SWE-bench, return code changes/patches
+        return f"# Modified files for issue: {sample.id}\n# TODO: Implement solution"
+    else:
+        # Generic response
+        return f"Agent output for {eval_name}: Processing {sample.input[:100]}..."
+
+
+async def run_sample_scorer(sample: Sample, solver_output: str, task_config: Dict[str, Any] = None, eval_spec: Dict[str, Any] = None) -> Dict[str, Any]:
+    """
+    Score the sample using the eval's native scorer.
+
+    Args:
+        sample: The sample that was processed
+        solver_output: The output from the solver
+        task_config: Task configuration
+        eval_spec: Eval specification with eval_name and task_params
+
+    Returns:
+        Dict: Score results with value, explanation, and metadata
+    """
+    if not eval_spec or not eval_spec.get("eval_name"):
+        logger.warning("No eval_spec provided, using simple string match scoring")
+        return {
+            "value": 1.0 if sample.target and str(sample.target) in solver_output else 0.0,
+            "explanation": "Simple string match scoring (no eval specified)"
+        }
+
+    try:
+        # Load the eval task to get its scorer
+        task = load_eval_task(eval_spec)
+
+        logger.info(f"Using native scorer for eval: {eval_spec['eval_name']}")
+
+        # Create TaskState from the sample and solver output
+        task_state = create_task_state_from_sample(
+            sample,
+            solver_output,
+            model_name=eval_spec.get("model_name", "custom_agent")
+        )
+
+        # Create Target from the sample
+        target = Target(sample.target)
+
+        # Run the eval's scorer
+        score_result = await task.scorer(task_state, target)
+
+        # Convert Score object to dict
+        score_dict = {
+            "value": score_result.value,
+            "explanation": score_result.explanation or "",
+            "answer": score_result.answer or solver_output,
+        }
+
+        # Include metadata if present
+        if score_result.metadata:
+            score_dict["metadata"] = score_result.metadata
+
+        logger.info(f"Score result: {score_dict['value']}")
+
+        return score_dict
+
+    except Exception as e:
+        logger.error(f"Error running eval scorer: {e}", exc_info=True)
+        # Fallback to simple scoring
+        return {
+            "value": 0.0,
+            "explanation": f"Scorer error: {str(e)}",
+            "error": str(e)
+        }

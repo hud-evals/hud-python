@@ -1,6 +1,6 @@
 [
   {
-    "prompt": "n/a",
+    "prompt": "Process inspect-ai samples through custom environment pipeline",
     "mcp_config": {
       "inspect_ai_env": {
         "url": "http://localhost:8765/mcp"
@@ -12,9 +12,37 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "eval_config":{
+        "eval_config": {
           "limit": 3
+        }
       }
+    },
+    "sample_processing": {
+      "jsonl_file": "samples.jsonl",
+      "limit": 5,
+      "agent_config": {
+        "type": "claude",
+        "model": "claude-3-5-sonnet-20241022",
+        "initial_screenshot": false,
+        "allowed_tools": ["process_sample", "get_sample_result", "setup", "get_status", "stop"],
+        "disallowed_tools": []
+      },
+      "task_config": {
+        "max_messages": 20,
+        "timeout": 300,
+        "sandbox_type": "docker"
+      },
+      "eval_spec": {
+        "eval_name": "mbpp",
+        "task_params": {
+          "temperature": 0.5
+        },
+        "setup_commands": [
+          "pip install requests",
+          "echo 'Environment setup complete'"
+        ],
+        "solver_type": "custom_agent",
+        "model_name": "custom_agent"
       }
     }
   }

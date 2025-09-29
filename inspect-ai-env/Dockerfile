@@ -10,28 +10,35 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 # Example: RUN entrypoint.sh
 
 # Copy and install dependencies
-COPY pyproject.toml pyproject.toml
+COPY docker_pyproject.toml pyproject.toml
 RUN pip install uv
 # Create a virtual environment
 RUN uv venv /opt/venv
 
 # Set the PATH to include the venv's bin directory
 ENV PATH="/opt/venv/bin:$PATH"
+RUN uv pip install -e .
 
 # Create inspect_evals directory (eval will be downloaded at runtime)
 RUN mkdir -p inspect_evals
+RUN mkdir -p logs
 
 COPY controller/ ./controller/
 COPY environment/ ./environment/
 COPY download-eval.sh ./download-eval.sh
 RUN chmod +x download-eval.sh
 
-RUN uv pip install -e .
-RUN uv pip list
-RUN ls -a
 
-ENV ENV_SERVER_PORT=8005
-ENV COLUMNS=120
+
+# --- Verification Steps ---
+# The following commands help you verify the installation during the build.
+# 1. List the contents of the virtual environment's bin directory to ensure 'hud' is there.
+RUN ls -l /opt/venv/bin
+
+# 2. Ask the shell to locate the 'hud' command using the updated PATH.
+RUN which hud
+
+
 
 # Start context server in background, then run controller with hot-reload
 # Disable access logs to prevent stdout corruption

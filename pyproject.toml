@@ -40,6 +40,7 @@ dependencies = [
     # AI providers
     "anthropic",
     "openai",
+    "inspect-ai>=0.3.133",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
