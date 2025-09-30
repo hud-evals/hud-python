@@ -7,6 +7,7 @@ import tarfile
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 import httpx
 import questionary
@@ -170,8 +171,37 @@ def _download_tarball_subdir(
             os.remove(tmp_path)
 
 
+async def analyze_external_mcp_server(url: str) -> list[Any]:
+    """Fetch raw tool schemas from an external MCP server.
+    
+    Args:
+        url: MCP server URL (e.g., https://mcp.deepwiki.com/sse)
+        
+    Returns:
+        List of raw tool objects
+    """
+    from hud.clients import MCPClient
+    
+    config = {"external": {"url": url}}
+    client = MCPClient(mcp_config=config, auto_trace=False)
+    
+    try:
+        await client.initialize()
+        tools = await client.list_tools()
+        return tools
+    finally:
+        try:
+            await client.shutdown()
+        except Exception:
+            pass
+
+
 def create_environment(
-    name: str | None, directory: str, force: bool, preset: str | None = None, from_mcp: bool = False
+    name: str | None,
+    directory: str,
+    force: bool,
+    preset: str | None = None,
+    from_mcp: str | None = None,
 ) -> None:
     """Create a new HUD environment by downloading a preset from the repo."""
 
@@ -187,7 +217,7 @@ def create_environment(
         target_dir = Path(directory) / name
 
     # Handle --from-mcp flag
-    if from_mcp:
+    if from_mcp is not None:
         preset_normalized = "from-mcp"
         env_folder = "from_mcp_template"
         branch = "from-mcp-init"
@@ -276,3 +306,20 @@ def create_environment(
 
     hud_console.info("\n3. Review the README in this preset for specific instructions.")
     hud_console.info("\n4. Customize as needed.")
+
+    # Analyze external MCP server if URL provided
+    if from_mcp is not None:
+        import asyncio
+        import json
+        hud_console.section_title("Fetching tools from MCP server")
+        try:
+            tools = asyncio.run(analyze_external_mcp_server(from_mcp))
+            hud_console.success(f"Found {len(tools)} tools")
+            # Print raw JSON schema
+            print(json.dumps([{
+                "name": t.name,
+                "description": t.description,
+                "inputSchema": t.inputSchema
+            } for t in tools], indent=2))
+        except Exception as e:
+            hud_console.warning(f"Could not fetch tools: {e}")
