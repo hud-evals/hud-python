@@ -17,14 +17,16 @@ logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
-async def setup(eval_name: str = None) -> str:
+async def setup(eval_name: str, model_name: str) -> str:
     """
     Initialize or reset the environment to its starting state.
     """
     if not http_client:
         raise RuntimeError("HTTP client not initialized")
 
-    resp = await http_client.post("/reset", json={"eval_name": eval_name})
+    resp = await http_client.post(
+        "/reset", json={"eval_name": eval_name, "model_name": model_name}
+    )
     return json.dumps({"status": "ready", "content": resp.json()})
 
 

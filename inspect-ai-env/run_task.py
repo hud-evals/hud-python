@@ -20,6 +20,7 @@ if str(Path.cwd()) not in sys.path:
     sys.path.insert(0, str(Path.cwd()))
 
 from hud.clients import MCPClient
+from hud.agents import GenericOpenAIChatAgent
 
 
 async def run_single_sample(
@@ -48,7 +49,8 @@ async def run_single_sample(
 
         print(f"📋 Running setup for {eval_name}...")
         setup_result = await client.call_tool(
-            name="setup", arguments={"eval_name": eval_name}
+            name="setup",
+            arguments={"eval_name": eval_name, "model_name": os.getenv("MODEL")},
         )
         print(f"✅ Setup: {setup_result.content}")
 

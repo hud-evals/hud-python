@@ -1,1 +1,1 @@
-"""Blank environment package."""
+"""Inspect AI Environment package."""

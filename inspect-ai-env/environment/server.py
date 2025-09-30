@@ -29,8 +29,6 @@ from inspect_ai.solver import TaskState
 from inspect_ai.model import ChatMessageUser, ModelOutput
 
 from .utils import (
-    # load_eval_task,
-    # create_task_state_from_sample,
     is_pid_running,
     get_lock_data,
     write_lock_data,
@@ -54,15 +52,15 @@ _model = ""
 _target_eval = ""
 _process = None  # Store the subprocess.Popen object
 _processing_status = {}  # Track processing status
-_task_cache = {}  # Cache loaded eval tasks by eval_name
 
 app = FastAPI(title="Inspect-AI eval-wrapper API")
 
 
 class SetupRequest(BaseModel):
-    """Request to setup/reset environment with optional eval-specific installs"""
+    """Request to setup/reset environment and model_wrapper"""
 
-    eval_name: Optional[str] = None
+    eval_name: str
+    model_name: str
 
 
 class EvaluateRequest(BaseModel):
@@ -105,8 +103,15 @@ async def reset(request: SetupRequest):
     If eval_name is provided, this automatically tries to install inspect_evals[eval_name]
     using uv pip install. Uses try/except to gracefully handle evals without extra deps.
     """
+    global _model, _target_eval
 
     _processing_status.clear()
+
+    # Store model and eval names
+    _model = request.model_name
+    _target_eval = request.eval_name
+
+    logger.info(f"Reset: model={_model}, eval={_target_eval}")
 
     install_log = []
 
@@ -298,7 +303,7 @@ async def evaluate(eval_config: dict):
         "eval",
         f"/app/inspect_evals/{_target_eval}",
         "--model",
-        _model,
+        f"hud/{_model}",  # Use HUD model wrapper
         "--sandbox",
         "local",
         "--log-dir",
