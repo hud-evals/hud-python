@@ -29,8 +29,11 @@ async def run_dataset(
     auto_respond: bool = False,
     custom_system_prompt: str | None = None,
 ) -> list[Any]:
-    """
-    Run all tasks in a dataset with automatic job tracking.
+    """Run all tasks in a dataset with automatic job and telemetry tracking.
+    
+    This function handles concurrent task execution with proper telemetry collection.
+    All tasks are executed in parallel up to `max_concurrent`, with full telemetry
+    automatically uploaded to the HUD platform.
 
     Args:
         name: Name for the job
@@ -38,7 +41,9 @@ async def run_dataset(
                 Dataset object, OR list of Task objects
         agent_class: Agent class to instantiate (e.g., ClaudeAgent)
         agent_config: Configuration/kwargs for agent (model, etc.)
-        max_concurrent: Maximum parallel task execution
+        max_concurrent: Maximum parallel task execution. Higher values improve throughput
+                       but may increase memory usage. Recommended: 30-200 depending on
+                       task complexity and available resources.
         metadata: Optional metadata for the job
         max_steps: Maximum steps per task
         split: Dataset split to use when loading from string (default: "train")
@@ -46,16 +51,18 @@ async def run_dataset(
         custom_system_prompt: Override system prompt for all tasks
 
     Returns:
-        List of results from agent.run() in dataset order
+        List of results from agent.run() in dataset order. Telemetry is automatically
+        collected and uploaded for all tasks.
 
     Example:
         >>> from hud.agents import ClaudeAgent
-        >>> # Option 1: From dataset string identifier
+        >>> # Basic usage with dataset identifier
         >>> results = await run_dataset(
         ...     "SheetBench Eval",
         ...     "hud-evals/SheetBench-50",
         ...     ClaudeAgent,
         ...     {"model": "claude-3-5-sonnet-20241022"},
+        ...     max_concurrent=100,  # Adjust based on your needs
         ... )
         >>> # Option 2: From HuggingFace dataset object
         >>> from datasets import load_dataset
@@ -64,10 +71,13 @@ async def run_dataset(
         >>> # Option 3: From list of dicts
         >>> tasks = [{"prompt": "...", "mcp_config": {...}, ...}, ...]
         >>> results = await run_dataset("browser_eval", tasks, ClaudeAgent)
+
+    Note:
+        Telemetry collection and upload is handled automatically. The function ensures
+        all telemetry is flushed before returning, even at high concurrency levels.
     """
     # Import here to avoid circular imports
-    import hud
-    from hud.telemetry.async_context import async_job, async_trace
+    from hud.telemetry import async_job, async_trace
 
     dataset_link = None
 
@@ -126,24 +136,39 @@ async def run_dataset(
             return_exceptions=True,  # Don't fail entire batch on one error
         )
     
-    # Wait for all tracked tasks to complete (job/trace exits already tried a short wait)
-    from hud.utils.task_tracking import wait_all_tasks
-    completed = await wait_all_tasks(timeout=20.0)
-    if completed > 0:
-        logger.info(f"Waited for {completed} telemetry tasks to complete")
+    # Ensure all telemetry is uploaded before returning
+    await _flush_telemetry()
     
-    # Flush telemetry - this ensures BatchSpanProcessor exports pending spans
+    return results
+
+
+async def _flush_telemetry() -> None:
+    """Flush all pending telemetry operations.
+    
+    Ensures complete telemetry upload by:
+    1. Waiting for all async status updates to complete
+    2. Forcing OpenTelemetry span processor to export remaining spans
+    
+    This prevents telemetry loss at high concurrency (200+ tasks) by ensuring
+    all operations complete before process exit.
+    """
     from hud.otel.config import is_telemetry_configured
+    from hud.utils.task_tracking import wait_all_tasks
+    
+    # Step 1: Wait for async status updates (job/trace status)
+    completed_tasks = await wait_all_tasks(timeout=20.0)
+    if completed_tasks > 0:
+        logger.debug(f"Completed {completed_tasks} pending telemetry tasks")
+    
+    # Step 2: Flush OpenTelemetry span exports
     if is_telemetry_configured():
         try:
             from opentelemetry import trace
             from opentelemetry.sdk.trace import TracerProvider
+            
             provider = trace.get_tracer_provider()
-            # Check if it's an SDK TracerProvider (not the default no-op one)
             if isinstance(provider, TracerProvider):
-                provider.force_flush(timeout_millis=20000)  # 20 second timeout
-                logger.info("Telemetry provider flushed successfully")
+                provider.force_flush(timeout_millis=20000)
+                logger.debug("OpenTelemetry spans flushed successfully")
         except Exception as e:
-            logger.warning(f"Failed to flush telemetry: {e}")
-
-    return results
+            logger.warning(f"Failed to flush OpenTelemetry: {e}")

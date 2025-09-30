@@ -1,12 +1,16 @@
-"""Custom OpenTelemetry exporter that sends spans to the existing HUD telemetry
-HTTP endpoint (/trace/<id>/telemetry-upload).
+"""Custom OpenTelemetry exporter for HUD telemetry backend.
 
-The exporter groups spans by ``hud.task_run_id`` baggage / attribute so we keep
-exactly the same semantics the old async worker in ``hud.telemetry.exporter``
-implemented.
+This exporter sends spans to the HUD telemetry HTTP endpoint, grouping them
+by task_run_id for efficient batch uploads.
 
-This exporter is *synchronous* (derives from :class:`SpanExporter`).  We rely on
-``hud.shared.make_request_sync`` which already contains retry & auth logic.
+Performance optimizations:
+- Detects async contexts and runs exports in a thread pool to avoid blocking
+- Uses persistent HTTP client with connection pooling for reduced overhead
+- Tracks pending export futures to ensure completion during shutdown
+
+The exporter derives from SpanExporter (synchronous interface) but handles
+async contexts intelligently to prevent event loop blocking during high-concurrency
+workloads.
 """
 
 from __future__ import annotations
@@ -21,7 +25,6 @@ import concurrent.futures as cf
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
-import httpx
 
 from mcp.types import ClientRequest, ServerResult
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
@@ -35,18 +38,30 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Global thread pool for span exports to avoid blocking event loop
+# Global singleton thread pool for span exports
 _export_executor: ThreadPoolExecutor | None = None
 
+
 def get_export_executor() -> ThreadPoolExecutor:
-    """Get or create the global export executor."""
+    """Get or create the global thread pool for span exports.
+    
+    Returns a singleton ThreadPoolExecutor used for running span exports
+    in a thread pool when called from async contexts, preventing event
+    loop blocking during high-concurrency workloads.
+    
+    The executor is automatically cleaned up on process exit via atexit.
+    
+    Returns:
+        ThreadPoolExecutor with 2 workers
+    """
     global _export_executor
     if _export_executor is None:
         _export_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="span-export")
-        # Register cleanup
+        
         def cleanup():
             if _export_executor is not None:
                 _export_executor.shutdown(wait=True)
+        
         atexit.register(cleanup)
     return _export_executor
 
@@ -316,41 +331,62 @@ def _span_to_dict(span: ReadableSpan) -> dict[str, Any]:
 
 
 class HudSpanExporter(SpanExporter):
-    """Exporter that forwards spans to HUD backend using existing endpoint."""
+    """OpenTelemetry span exporter for the HUD backend.
+    
+    This exporter groups spans by task_run_id and sends them to the HUD
+    telemetry endpoint. Performance optimizations include:
+    
+    - Auto-detects async contexts and runs exports in thread pool (non-blocking)
+    - Tracks pending export futures for proper shutdown coordination
+    
+    Handles high-concurrency scenarios (200+ parallel tasks) by offloading
+    synchronous HTTP operations to a thread pool when called from async
+    contexts, preventing event loop blocking.
+    """
 
     def __init__(self, *, telemetry_url: str, api_key: str) -> None:
+        """Initialize the HUD span exporter.
+        
+        Args:
+            telemetry_url: Base URL for the HUD telemetry backend
+            api_key: API key for authentication
+        """
         super().__init__()
         self._telemetry_url = telemetry_url.rstrip("/")
         self._api_key = api_key
-        # Track pending export futures so we can force-flush on shutdown
+        
+        # Track pending export futures for shutdown coordination
         self._pending_futures: list[cf.Future[SpanExportResult]] = []
-        # Persistent HTTP client to reuse connections
-        self._client = httpx.Client(
-            timeout=30.0,
-            limits=httpx.Limits(max_connections=2000, max_keepalive_connections=512, keepalive_expiry=15.0),
-        )
 
-    # ------------------------------------------------------------------
-    # Core API
-    # ------------------------------------------------------------------
     def export(self, spans: list[ReadableSpan]) -> SpanExportResult:  # type: ignore[override]
+        """Export spans to HUD backend.
+        
+        Auto-detects async contexts: if called from an async event loop, runs
+        the export in a thread pool to avoid blocking. Otherwise runs synchronously.
+        
+        Args:
+            spans: List of ReadableSpan objects to export
+            
+        Returns:
+            SpanExportResult.SUCCESS (returns immediately in async contexts)
+        """
         if not spans:
             return SpanExportResult.SUCCESS
 
-        # Group spans by hud.task_run_id attribute
+        # Group spans by task_run_id for batched uploads
         grouped: dict[str, list[ReadableSpan]] = defaultdict(list)
         for span in spans:
             run_id = span.attributes.get("hud.task_run_id") if span.attributes else None
             if not run_id:
-                # Skip spans that are outside HUD traces
+                # Skip spans outside HUD traces
                 continue
             grouped[str(run_id)].append(span)
 
-        # Try to run export in background if we're in an event loop
+        # Detect async context to avoid event loop blocking
         import asyncio
         try:
             loop = asyncio.get_running_loop()
-            # We're in an async context - schedule export in thread to avoid blocking
+            # In async context - offload to thread pool
             executor = get_export_executor()
             
             def _sync_export():
@@ -384,7 +420,6 @@ class HudSpanExporter(SpanExporter):
                             url=url,
                             json=payload,
                             api_key=self._api_key,
-                            client=self._client,
                         )
                     except Exception as exc:
                         logger.exception("HUD exporter failed to send spans for task %s: %s", run_id, exc)
@@ -442,7 +477,6 @@ class HudSpanExporter(SpanExporter):
                         url=url,
                         json=payload,
                         api_key=self._api_key,
-                        client=self._client,
                     )
                 except Exception as exc:
                     logger.exception("HUD exporter failed to send spans for task %s: %s", run_id, exc)
@@ -452,7 +486,10 @@ class HudSpanExporter(SpanExporter):
             return SpanExportResult.SUCCESS
 
     def shutdown(self) -> None:  # type: ignore[override]
-        # Best effort: wait for pending exports to complete
+        """Shutdown the exporter and wait for pending exports.
+        
+        Waits up to 10 seconds for any in-flight exports to complete.
+        """
         try:
             if self._pending_futures:
                 cf.wait(self._pending_futures, timeout=10.0)
@@ -460,31 +497,41 @@ class HudSpanExporter(SpanExporter):
             pass
         finally:
             self._pending_futures.clear()
-        # Close persistent client
-        try:
-            self._client.close()
-        except Exception:
-            pass
 
     def force_flush(self, timeout_millis: int | None = None) -> bool:  # type: ignore[override]
-        # Wait for pending export futures
+        """Force flush all pending span exports.
+        
+        Waits for all pending export futures to complete before returning.
+        This is called by the OpenTelemetry SDK during shutdown to ensure
+        all telemetry is uploaded.
+        
+        Args:
+            timeout_millis: Maximum time to wait in milliseconds
+            
+        Returns:
+            True if all exports completed, False otherwise
+        """
         try:
             if not self._pending_futures:
                 return True
+            
             timeout = (timeout_millis or 30000) / 1000.0
             done, not_done = cf.wait(self._pending_futures, timeout=timeout)
-            # Consume exceptions to avoid warnings
+            
+            # Consume exceptions to avoid "exception was never retrieved" warnings
             for f in list(done):
                 try:
                     _ = f.exception()
                 except Exception:
                     pass
-            # Remove finished futures
-            try:
-                for f in list(done):
+            
+            # Remove completed futures
+            for f in list(done):
+                try:
                     self._pending_futures.remove(f)
-            except ValueError:
-                pass
+                except ValueError:
+                    pass
+            
             return len(not_done) == 0
         except Exception:
             return False

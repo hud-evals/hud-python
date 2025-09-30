@@ -1,57 +1,71 @@
-"""Global task tracking for async operations in HUD SDK.
+"""Task tracking for async telemetry operations.
 
-This module provides a centralized way to track all async tasks created
-during telemetry operations, ensuring they complete before process shutdown.
+This module provides infrastructure to track async tasks created during
+telemetry operations (status updates, metric logging) to ensure they
+complete before process shutdown, preventing telemetry loss.
+
+The task tracker uses WeakSet to avoid keeping tasks alive, allowing
+them to be garbage collected naturally while still providing visibility
+into pending operations.
+
+This is an internal module used by async context managers and cleanup
+routines. Users typically don't interact with it directly.
 """
 
 import asyncio
 import logging
-from typing import Set, Optional
+from typing import Optional
 from weakref import WeakSet
 
 logger = logging.getLogger(__name__)
 
-# Global task tracker instance
+# Module exports
+__all__ = ["track_task", "wait_all_tasks", "TaskTracker"]
+
+# Global singleton task tracker
 _global_tracker: Optional['TaskTracker'] = None
 
 
 class TaskTracker:
-    """Tracks all async tasks to ensure completion before shutdown."""
+    """Tracks async tasks to ensure completion before shutdown.
+    
+    Uses WeakSet to track tasks without preventing garbage collection.
+    This allows natural task lifecycle while providing visibility into
+    pending operations for cleanup coordination.
+    """
     
     def __init__(self):
-        # Use WeakSet to avoid keeping tasks alive
         self._tasks: WeakSet[asyncio.Task] = WeakSet()
         self._lock = asyncio.Lock()
     
-    def track_task(self, coro, name: str = "task") -> asyncio.Task:
+    def track_task(self, coro, name: str = "task") -> asyncio.Task | None:
         """Create and track an async task.
         
         Args:
             coro: The coroutine to run
-            name: Description of the task for debugging
+            name: Descriptive name for debugging and logging
             
         Returns:
-            The created task
+            The created asyncio.Task, or None if no event loop is available
         """
         try:
             task = asyncio.create_task(coro, name=name)
             self._tasks.add(task)
             
-            # Log errors from tasks
-            def log_exception(task):
-                if not task.cancelled():
-                    exc = task.exception()
+            # Log errors from completed tasks
+            def log_exception(completed_task):
+                if not completed_task.cancelled():
+                    exc = completed_task.exception()
                     if exc:
                         logger.warning(f"Task '{name}' failed: {exc}")
             
             task.add_done_callback(log_exception)
-            logger.debug(f"Tracking task '{name}', total active: {len(self._tasks)}")
+            logger.debug(f"Tracking task '{name}' (total active: {len(self._tasks)})")
             return task
             
         except RuntimeError as e:
-            # No event loop
+            # No event loop - fall back to fire_and_forget
             logger.warning(f"Cannot track task '{name}': {e}")
-            # Fall back to fire_and_forget
             from hud.utils.async_utils import fire_and_forget
             fire_and_forget(coro, name)
             return None
@@ -109,19 +123,35 @@ def get_global_tracker() -> TaskTracker:
     return _global_tracker
 
 
-def track_task(coro, name: str = "task") -> asyncio.Task:
-    """Track a task using the global tracker.
+def track_task(coro, name: str = "task") -> asyncio.Task | None:
+    """Create and track an async task for telemetry operations.
     
-    This is a convenience function that uses the global tracker.
+    This is a convenience function that uses the global tracker to ensure
+    the task completes before shutdown. Used internally by async context
+    managers for status updates and metric logging.
+    
+    Args:
+        coro: The coroutine to track
+        name: Descriptive name for debugging
+        
+    Returns:
+        The created task, or None if no event loop is available
     """
     tracker = get_global_tracker()
     return tracker.track_task(coro, name)
 
 
 async def wait_all_tasks(timeout: float = 30.0) -> int:
-    """Wait for all globally tracked tasks.
+    """Wait for all tracked telemetry tasks to complete.
     
-    This is a convenience function that uses the global tracker.
+    This ensures that all async telemetry operations (status updates, logs)
+    complete before the calling function returns, preventing telemetry loss.
+    
+    Args:
+        timeout: Maximum time to wait for tasks in seconds
+        
+    Returns:
+        Number of tasks that completed
     """
     tracker = get_global_tracker()
     return await tracker.wait_all(timeout)
