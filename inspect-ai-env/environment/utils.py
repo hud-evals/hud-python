@@ -1,13 +1,14 @@
-from typing import Dict, Any
-from pathlib import Path
+# from typing import Dict, Any
+# from pathlib import Path
 import logging
 import sys
 import psutil
+import json
 
-# Add current directory to sys.path to enable importing local inspect_evals
-if str(Path.cwd()) not in sys.path:
-    sys.path.insert(0, str(Path.cwd()))
-from inspect_ai import Task
+# # Add current directory to sys.path to enable importing local inspect_evals
+# if str(Path.cwd()) not in sys.path:
+#     sys.path.insert(0, str(Path.cwd()))
+# from inspect_ai import Task
 
 logging.basicConfig(
     stream=sys.stderr,

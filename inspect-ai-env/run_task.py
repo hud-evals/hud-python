@@ -8,6 +8,7 @@ import json
 import os
 import sys
 from pathlib import Path
+import traceback
 
 from dotenv import load_dotenv
 
@@ -65,25 +66,31 @@ async def run_single_sample(
                 "sample": sample_dict,
             },
         )
+        result = json.loads(result.content[0].text)
+        print(f"\n📊 Results:\n{result}")
 
-        if result.isError:
-            print(f"❌ Evaluation failed: {result.content}")
-            return {"sample_id": sample_id, "success": False, "error": result.content}
+        if result.get("isError"):
+            print(f"❌ Evaluation failed: {result.get('content')}")
+            return {
+                "sample_id": sample_id,
+                "success": False,
+                "error": result.get("content"),
+            }
 
         print(f"✅ Evaluation complete!")
-        print(f"\n📊 Results:\n{result.content}")
 
         return {
             "sample_id": sample_id,
             "success": True,
-            "reward": result.reward,
-            "content": result.content,
+            "reward": result.get("reward"),
+            "content": result.get("content"),
         }
 
     except Exception as e:
         print(f"❌ Exception during evaluation: {e}")
         if "connection" in str(e).lower():
             print("💡 Make sure 'hud dev --build' is running in another terminal")
+        traceback.print_exc()
         return {
             "sample_id": sample_dict.get("id", "unknown"),
             "success": False,
