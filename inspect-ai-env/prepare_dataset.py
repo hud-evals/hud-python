@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -26,7 +27,7 @@ if str(Path.cwd()) not in sys.path:
     sys.path.insert(0, str(Path.cwd()))
 
 
-def load_eval_dataset(eval_name: str, task_params: dict = None):
+def load_eval_dataset(eval_name: str):
     """
     Load an eval's dataset to extract samples.
 
@@ -66,7 +67,7 @@ def load_eval_dataset(eval_name: str, task_params: dict = None):
         # Import and get task function
         eval_module = import_module(full_module_path)
         task_fn = getattr(eval_module, function_name)
-        task = task_fn(**(task_params or {}))
+        task = task_fn()
         return task.dataset
 
     except ImportError as e:
@@ -99,16 +100,14 @@ def prepare_dataset(eval_name: str, hud_api_key: str) -> None:
     saving as JSONL with one task per line.
 
     Args:
-        eval_name: Name of the eval (e.g., "mbpp", "swe_bench")
-        task_params: Optional parameters for the eval's task function
-        OUTPUT_FILE: Output JSONL file path
-        mcp_url: MCP server URL for the tasks
+        eval_name: Name of the eval (e.g., "mbpp", "swe_bench") that you set in your .env
+        hud_api_key: your personal HUD_API_KEY that you have gotten from the website and set in your .env
     """
     print(f"\n📦 Preparing dataset for {eval_name}...")
 
     # Load eval dataset
     try:
-        dataset = load_eval_dataset(eval_name, task_params)
+        dataset = load_eval_dataset(eval_name)
         print(f"   Dataset size: {len(dataset)} samples")
     except Exception as e:
         print(f"❌ Failed to load dataset: {e}")
@@ -121,23 +120,18 @@ def prepare_dataset(eval_name: str, hud_api_key: str) -> None:
 
         # Create HUD Task format
         task = {
-            "id": f"{eval_name}_{sample_dict.get('id', i)}",
+            "id": f"{sample_dict.get('id', i)}",
             "prompt": sample_dict.get("input", ""),
-            "mcp_config": MCP_CONFIG.format(HUD_API_KEY=hud_api_key),
+            "mcp_config": MCP_CONFIG,  # .format(HUD_API_KEY=hud_api_key),
             "setup_tool": {"name": "setup", "arguments": {"eval_name": eval_name}},
             "evaluate_tool": {
                 "name": "evaluate",
                 "arguments": {
                     "eval_name": eval_name,
-                    "task_params": task_params or {},
                     "sample": sample_dict,
                 },
             },
-            "metadata": {
-                "eval_name": eval_name,
-                "sample_id": sample_dict.get("id"),
-                "target": sample_dict.get("target"),
-            },
+            "metadata": {},
         }
         tasks.append(task)
 
@@ -166,8 +160,12 @@ def main():
     # Get eval name from environment
     hud_api_key = os.getenv("HUD_API_KEY")
     if not hud_api_key:
-        print("❌ HUD_API_KEY not set in .env file")
+        print(
+            "❌ HUD_API_KEY not set in .env file. Get this from the website after you login and set in .env"
+        )
         sys.exit(1)
+
+    subprocess.run(["./download-eval.sh"], check=True)
 
     # Prepare dataset
     prepare_dataset(eval_name, hud_api_key)

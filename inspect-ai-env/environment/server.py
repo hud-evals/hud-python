@@ -130,14 +130,13 @@ def load_eval_task(eval_spec: Dict[str, Any]) -> Task:
 
 
 def create_task_state_from_sample(
-    sample: Sample, solver_output: str, model_name: str = "custom_agent"
+    sample: Sample, model_name: str = "custom_agent"
 ) -> TaskState:
     """
     Create an inspect_ai TaskState from a Sample and solver output.
 
     Args:
         sample: The Sample being processed
-        solver_output: The output from your custom solver/agent
         model_name: Name to use for the model in the task state
 
     Returns:
@@ -376,27 +375,16 @@ async def evaluate(request: EvaluateRequest):
         eval_spec = {"eval_name": eval_name, "task_params": task_params}
         task = load_eval_task(eval_spec)
 
-        # Filter dataset based on parameters
-        if sample_data is not None:
-            # Process single sample provided directly (for parallel processing)
-            from inspect_ai.dataset import Sample
-
-            # Convert dict to Sample object
-            sample = Sample(
-                id=sample_data.get("id"),
-                input=sample_data.get("input"),
-                target=sample_data.get("target"),
-                metadata=sample_data.get("metadata", {}),
-                sandbox=sample_data.get("sandbox"),
-            )
-            task.dataset = [sample]
-            logger.info(f"Processing single sample: {sample.id}")
-        elif limit:
-            # Limit number of samples
-            task.dataset = task.dataset[:limit]
-            logger.info(f"Running eval with {len(task.dataset)} samples (limited)")
-        else:
-            logger.info(f"Running eval with {len(task.dataset)} samples (full dataset)")
+        # Convert dict to Sample object
+        sample = Sample(
+            id=sample_data.get("id"),
+            input=sample_data.get("input"),
+            target=sample_data.get("target"),
+            metadata=sample_data.get("metadata", {}),
+            sandbox=sample_data.get("sandbox"),
+        )
+        task.dataset = [sample]
+        logger.info(f"Processing single sample: {sample.id}")
 
         # Run the evaluation using inspect_ai
         # Use the HUD model provider which will route calls back through MCP

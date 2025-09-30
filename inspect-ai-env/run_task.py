@@ -21,71 +21,6 @@ if str(Path.cwd()) not in sys.path:
 from hud.clients import MCPClient
 
 
-def load_eval_dataset(eval_name: str, task_params: dict = None):
-    """
-    Load an eval's dataset to extract samples.
-
-    Supports both official inspect_evals and custom evals.
-
-    Args:
-        eval_name: Can be:
-            - Simple name: "mbpp" → loads from inspect_evals.mbpp
-            - Module path: "custom_evals.my_eval" → loads from that path
-            - With function: "custom_evals.my_eval:my_task" → explicit function
-
-    Returns:
-        Dataset from the loaded task
-    """
-    from importlib import import_module
-
-    try:
-        # Parse eval_name
-        if ":" in eval_name:
-            module_path, function_name = eval_name.split(":", 1)
-        else:
-            module_path = eval_name
-            function_name = None
-
-        # Determine full module path
-        if "." in module_path:
-            # Custom eval with dots: "custom_evals.my_eval"
-            full_module_path = module_path
-            if not function_name:
-                function_name = module_path.split(".")[-1]
-        else:
-            # Simple name: "mbpp" → "inspect_evals.mbpp"
-            full_module_path = f"inspect_evals.{module_path}"
-            if not function_name:
-                function_name = module_path
-
-        # Import and get task function
-        eval_module = import_module(full_module_path)
-        task_fn = getattr(eval_module, function_name)
-        task = task_fn(**(task_params or {}))
-        return task.dataset
-
-    except ImportError as e:
-        raise ValueError(
-            f"Could not import eval '{eval_name}'. "
-            f"For custom evals, ensure the module is accessible. Error: {e}"
-        )
-    except AttributeError as e:
-        raise ValueError(
-            f"Eval '{eval_name}' does not have function '{function_name}': {e}"
-        )
-
-
-def sample_to_dict(sample) -> dict:
-    """Convert inspect_ai Sample object to dict for JSON serialization."""
-    return {
-        "id": sample.id,
-        "input": str(sample.input) if sample.input else None,
-        "target": sample.target,
-        "metadata": sample.metadata or {},
-        "sandbox": sample.sandbox,
-    }
-
-
 async def run_single_sample(
     eval_name: str, sample_dict: dict, task_params: dict = None, mcp_config: dict = None
 ) -> dict:
@@ -166,9 +101,9 @@ async def main():
         description="Run inspect_ai evaluations with HUD integration"
     )
     parser.add_argument(
-        "sample_index",
-        type=int,
-        help="Sample index to process",
+        "sample_id",
+        type=str,
+        help="Sample id to process",
     )
 
     args = parser.parse_args()
@@ -187,35 +122,26 @@ async def main():
     print("=" * 60)
     print(f"📝 Eval: {eval_name}")
 
-    if args.sample_index is not None:
-        print("\n📦 Loading eval dataset...")
-        try:
-            dataset = load_eval_dataset(eval_name, task_params)
-            print(f"   Dataset size: {len(dataset)} samples")
-
-            if args.sample_index < 0 or args.sample_index >= len(dataset):
-                print(
-                    f"❌ Sample index {args.sample_index} out of range (dataset has {len(dataset)} samples)"
-                )
-                sys.exit(1)
-
-            sample = dataset[args.sample_index]
-            sample_dict = sample_to_dict(sample)
-            print(f"   Sample ID: {sample_dict['id']}")
-
-        except Exception as e:
-            print(f"❌ Failed to load dataset: {e}")
-            sys.exit(1)
-
-        # Run single sample
-        result = await run_single_sample(
-            eval_name, sample_dict, task_params=task_params
-        )
-
-    else:
+    if args.sample_id is None:
         print("❌ Must specify sample_index")
         parser.print_help()
         sys.exit(1)
+
+    target_sample_dict = None
+    with open("samples.jsonl", "r") as f:
+        for sample in f:
+            sample_dict = json.loads(sample)
+            if sample_dict.get("id") == args.sample_id:
+                target_sample_dict = sample_dict
+
+    if target_sample_dict is None:
+        print(f"❌ Could not find {args.sample_id} in samples.json")
+        sys.exit(1)
+
+    # Run single sample
+    result = await run_single_sample(
+        eval_name, target_sample_dict, task_params=task_params
+    )
 
     # Exit with appropriate code
     sys.exit(0 if result.get("success") else 1)
