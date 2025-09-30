@@ -3,20 +3,6 @@ import random
 
 import torch
 
-
-def set_seed(seed: int) -> None:
-    """Set random seeds for reproducibility."""
-    random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-
-
-def ensure_dir(path: str) -> None:
-    """Create directory if it doesn't exist."""
-    os.makedirs(path, exist_ok=True)
-
-
 def get_memory_usage() -> float:
     if torch.cuda.is_available():
         torch.cuda.synchronize()

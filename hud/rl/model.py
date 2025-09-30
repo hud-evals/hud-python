@@ -18,7 +18,7 @@ except ImportError:
     LIGER_AVAILABLE = False
 
 from hud.rl.logger import console
-from hud.rl.config import ModelConfig
+from hud.rl.config import ModelConfig, ProcessorConfig
 
 def freeze_vision_tower(model: nn.Module) -> None:
     for name, module in model.named_modules():
@@ -64,17 +64,16 @@ def get_model(config: ModelConfig) -> nn.Module:
 
     return model
 
-def get_processor(config: ModelConfig) -> ProcessorMixin:
+def get_processor(base_model: str, config: ProcessorConfig) -> ProcessorMixin:
     try:
         processor = AutoProcessor.from_pretrained(
-            config.base_model, 
-            trust_remote_code=config.trust_remote_code,
-            **config.processor.model_dump()
+            base_model, 
+            **config.model_dump()
         )
         return processor
     except ValueError:
         console.info_log("Processor not available, falling back to tokenizer")
-        return AutoTokenizer.from_pretrained(config.base_model, trust_remote_code=config.trust_remote_code)
+        return AutoTokenizer.from_pretrained(base_model)
     except Exception as e:
         console.warning(f"Failed to load processor: {e}")
         raise e
@@ -83,8 +82,8 @@ def apply_ddp(model: nn.Module, dp_mesh: DeviceMesh) -> None:
     replicate(model, device_mesh=dp_mesh, bucket_cap_mb=100)
 
 if __name__ == "__main__":
-    config = ModelConfig(base_model="Qwen/Qwen2.5-VL-3B-Instruct")
+    model = get_model(ModelConfig(base_model="Qwen/Qwen2.5-VL-3B-Instruct"))
+    config = ProcessorConfig(min_pixels=256 * 28 * 28, max_pixels=512 * 28 * 28)
 
-    model = get_model(config)
-    processor = get_processor(config)
+    processor = get_processor("Qwen/Qwen2.5-VL-3B-Instruct", config)
     _ = model, processor

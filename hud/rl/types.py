@@ -25,6 +25,7 @@ class TrainingSample(BaseModel):
 
     # Tokenized inputs to the model (model.forward(**inputs))
     inputs: ProcessedInputs
+    temperature: torch.Tensor
     old_logprobs: torch.Tensor | None = Field(default=None)
     ref_logprobs: torch.Tensor | None = Field(default=None)
     advantage: torch.Tensor | None = Field(default=None)
@@ -38,6 +39,7 @@ class TrainingSample(BaseModel):
             "pixel_values": self.inputs["pixel_values"].to(device) if self.inputs["pixel_values"] is not None else None,
             "image_grid_thw": self.inputs["image_grid_thw"].to(device) if self.inputs["image_grid_thw"] is not None else None,
         }
+        self.temperature = self.temperature.to(device)
         self.advantage = self.advantage.to(device) if self.advantage is not None else None
         self.old_logprobs = self.old_logprobs.to(device) if self.old_logprobs is not None else None
         self.ref_logprobs = self.ref_logprobs.to(device) if self.ref_logprobs is not None else None

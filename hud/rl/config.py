@@ -1,13 +1,9 @@
-from typing import Literal, TypeAlias
+from typing import Literal
 from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator
 
-# Simple type alias for attention implementations
-AttnImplementation: TypeAlias = Literal["eager", "flash_attention_2", "sdpa"]
-
 import re
-
 
 PATTERN = re.compile(r"^Qwen/Qwen2\.5.*", re.IGNORECASE)
 
@@ -51,6 +47,7 @@ class BaseConfig(BaseModel):
 class ProcessorConfig(BaseConfig): 
     min_pixels: int = Field(default=256 * 28 * 28, ge=1, description="Minimum number of pixels for image processing")
     max_pixels: int = Field(default=512 * 28 * 28, ge=1, description="Maximum number of pixels for image processing")
+    trust_remote_code: bool = Field(default=True, description="Whether to trust remote code from HuggingFace")
     
     def validate_config(self) -> None:
         super().validate_config()
@@ -63,12 +60,7 @@ class ProcessorConfig(BaseConfig):
 
 class ModelConfig(BaseConfig):
     base_model: str = ""
-
-    processor: ProcessorConfig = Field(
-        default_factory=ProcessorConfig,
-        description="Image processor configuration"
-    )
-    attn_implementation: AttnImplementation = Field(default="flash_attention_2")
+    attn_implementation: Literal["eager", "flash_attention_2", "sdpa"] = Field(default="flash_attention_2")
     trust_remote_code: bool = Field(
         default=True,
         description="Whether to trust remote code from HuggingFace"
@@ -81,8 +73,6 @@ class ModelConfig(BaseConfig):
         default=True,
         description="Whether to freeze the vision tower parameters during training"
     )
-
-
 
     @model_validator(mode='after')
     def validate_dependencies(self) -> 'ModelConfig':
@@ -106,8 +96,38 @@ class ModelConfig(BaseConfig):
         super().validate_config()
 
 
+class OptimizerConfig(BaseConfig):
+    lr: float = Field(default=3e-5, gt=0.0, description="Learning rate")
+    use_8bit_optimizer: bool = Field(default=True, description="Use 8-bit Adam optimizer")
+    adam_betas: tuple[float, float] = Field(default=(0.9, 0.999), description="Adam beta parameters")
+    adam_eps: float = Field(default=1e-8, gt=0.0, description="Adam epsilon")
+
+    @field_validator("adam_betas")
+    @classmethod
+    def validate_adam_betas(cls, v: tuple[float, float]) -> tuple[float, float]:
+        if len(v) != 2:
+            raise ValueError("adam_betas must be a tuple of 2 floats")
+        if not (0.0 <= v[0] < 1.0 and 0.0 <= v[1] < 1.0):
+            raise ValueError("adam_betas values must be in [0, 1)")
+        return v
+
+
+class CheckpointConfig(BaseConfig):
+    out_dir: str = Field(default="./checkpoints", description="Output directory for checkpoints")
+    checkpoint_prefix: str = Field(default="cua-grpo-step", description="Prefix for checkpoint directories")
+
+
 class TrainingConfig(BaseConfig):
-    """Training hyperparameters."""
+    # Model and processor configuration
+    model: ModelConfig = Field(default_factory=ModelConfig, description="Model configuration")
+    processor: ProcessorConfig = Field(default_factory=ProcessorConfig, description="Image processor configuration")
+
+    # Checkpoint configuration
+    checkpoint: CheckpointConfig = Field(default_factory=CheckpointConfig, description="Checkpoint configuration")
+
+    # Parallelization
+    dp_replicate: int = Field(default=1, ge=1, description="Data parallel replicate. To run DDP, set to num_devices")
+    dp_shard: int = Field(default=1, ge=1, description="Data parallel shard. To run FSDP, set to num_devices")
 
     # Training parameters
     training_steps: int = Field(default=100, ge=1, description="Number of training steps")
@@ -140,27 +160,14 @@ class TrainingConfig(BaseConfig):
     top_eps: float = Field(default=0.2, ge=0.0, le=1.0, description="Top epsilon for PPO clipping")
     bottom_eps: float = Field(default=0.1, ge=0.0, le=1.0, description="Bottom epsilon for PPO clipping")
 
-    # Training hyperparameters
-    lr: float = Field(default=3e-5, gt=0.0, description="Learning rate")
+    # Gradient clipping
     grad_clip: float = Field(default=1.0, gt=0.0, description="Gradient clipping value")
 
-    # Adam hyperparameters
-    use_8bit_optimizer: bool = Field(default=True, description="Use 8-bit Adam optimizer")
-    adam_betas: tuple[float, float] = Field(default=(0.9, 0.999), description="Adam beta parameters")
-    adam_eps: float = Field(default=1e-8, gt=0.0, description="Adam epsilon")
+    # Optimizer configuration
+    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig, description="Optimizer configuration")
 
-    @field_validator("adam_betas")
-    @classmethod
-    def validate_adam_betas(cls, v: tuple[float, float]) -> tuple[float, float]:
-        if len(v) != 2:
-            raise ValueError("adam_betas must be a tuple of 2 floats")
-        if not (0.0 <= v[0] < 1.0 and 0.0 <= v[1] < 1.0):
-            raise ValueError("adam_betas values must be in [0, 1)")
-        return v
-
-    def validate_config(self) -> None:
-        super().validate_config()
-
+    @model_validator(mode='after')
+    def validate_model(self) -> 'TrainingConfig':
         if self.mini_batch_size > self.batch_size:
             raise ValueError(
                 f"mini_batch_size ({self.mini_batch_size}) cannot be greater than "
@@ -172,6 +179,7 @@ class TrainingConfig(BaseConfig):
                 f"top_eps ({self.top_eps}) must be >= bottom_eps ({self.bottom_eps})"
             )
 
+        return self
 
 class ActorConfig(BaseConfig):
     base_model: str = ""
@@ -221,7 +229,6 @@ class Config(BaseConfig):
         description="Base model name shared across model and actor configurations"
     )
 
-    model: ModelConfig = Field(default_factory=ModelConfig, description="Model configuration")
     training: TrainingConfig = Field(default_factory=TrainingConfig, description="Training configuration")
     actor: ActorConfig = Field(default_factory=ActorConfig, description="Actor configuration")
 
@@ -230,10 +237,6 @@ class Config(BaseConfig):
     job_id: str | None = Field(default=None, description="Use existing job ID if provided")
     stats_interval: int = Field(default=1, ge=1, description="Statistics collection interval")
     verbose: bool = Field(default=False, description="Enable verbose logging")
-
-    # Paths
-    out_dir: str = Field(default="./checkpoints", description="Output directory for checkpoints")
-    checkpoint_prefix: str = Field(default="cua-grpo-step", description="Prefix for checkpoint directories")
 
     # Misc
     seed: int = Field(default=1234, description="Random seed for reproducibility")
@@ -247,28 +250,24 @@ class Config(BaseConfig):
     @model_validator(mode='after')
     def propagate_base_model(self) -> 'Config':
         """Propagate base_model to sub-configs."""
-        self.model.base_model = self.base_model
+        self.training.model.base_model = self.base_model
         self.actor.base_model = self.base_model
         return self
 
     @classmethod
     def from_dict(cls, d: dict) -> "Config":
         """Create config from dictionary."""
-        model = ModelConfig.model_validate(d.get("model", {}))
         training = TrainingConfig.model_validate(d.get("training", {}))
         actor = ActorConfig.model_validate(d.get("actor", {}))
 
         return cls(
             base_model=d.get("base_model", "Qwen/Qwen2.5-VL-3B-Instruct"),
-            model=model,
             training=training,
             actor=actor,
             job_name=d.get("job_name", "RL Training"),
             job_id=d.get("job_id"),
             stats_interval=d.get("stats_interval", 1),
             verbose=d.get("verbose", False),
-            out_dir=d.get("out_dir", "./checkpoints"),
-            checkpoint_prefix=d.get("checkpoint_prefix", "cua-grpo-step"),
             seed=d.get("seed", 1234),
         )
 
@@ -276,14 +275,11 @@ class Config(BaseConfig):
         """Convert config to dictionary."""
         return {
             "base_model": self.base_model,
-            "model": self.model.model_dump(),
             "training": self.training.model_dump(),
             "actor": self.actor.model_dump(),
             "job_name": self.job_name,
             "job_id": self.job_id,
             "stats_interval": self.stats_interval,
             "verbose": self.verbose,
-            "out_dir": self.out_dir,
-            "checkpoint_prefix": self.checkpoint_prefix,
             "seed": self.seed,
         }

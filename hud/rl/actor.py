@@ -72,6 +72,7 @@ class Actor:
             result = await agent.run(task, max_steps=self.config.max_steps_per_episode)
 
         result.info["tool_spec"] = agent.get_tool_schemas()
+        result.info["temperature"] = self.config.temperature
 
         return result
 
