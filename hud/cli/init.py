@@ -171,7 +171,7 @@ def _download_tarball_subdir(
 
 
 def create_environment(
-    name: str | None, directory: str, force: bool, preset: str | None = None
+    name: str | None, directory: str, force: bool, preset: str | None = None, from_mcp: bool = False
 ) -> None:
     """Create a new HUD environment by downloading a preset from the repo."""
 
@@ -186,14 +186,22 @@ def create_environment(
     else:
         target_dir = Path(directory) / name
 
-    # Choose preset
-    preset_normalized = (preset or "").strip().lower() if preset else _prompt_for_preset()
-    if preset_normalized not in PRESET_MAP:
-        hud_console.warning(
-            f"Unknown preset '{preset_normalized}', defaulting to 'blank' "
-            "(available: blank, deep-research, browser)"
-        )
-        preset_normalized = "blank"
+    # Handle --from-mcp flag
+    if from_mcp:
+        preset_normalized = "from-mcp"
+        env_folder = "from_mcp_template"
+        branch = "from-mcp-init"
+    else:
+        # Choose preset
+        preset_normalized = (preset or "").strip().lower() if preset else _prompt_for_preset()
+        if preset_normalized not in PRESET_MAP:
+            hud_console.warning(
+                f"Unknown preset '{preset_normalized}', defaulting to 'blank' "
+                "(available: blank, deep-research, browser)"
+            )
+            preset_normalized = "blank"
+        env_folder = PRESET_MAP[preset_normalized]
+        branch = GITHUB_BRANCH
 
     # Check if directory exists
     if target_dir.exists() and any(target_dir.iterdir()):
@@ -204,9 +212,8 @@ def create_environment(
         else:
             hud_console.warning(f"Overwriting existing files in {target_dir}")
 
-    # Download preset from GitHub
-    env_folder = PRESET_MAP[preset_normalized]
-    if env_folder is None:
+    # Validate env_folder (already set above based on from_mcp flag)
+    if not from_mcp and env_folder is None:
         hud_console.error("Internal error: preset mapping missing folder name")
         raise typer.Exit(1)
 
@@ -214,7 +221,7 @@ def create_environment(
     hud_console.section_title("Downloading template from public SDK")
     source_url = (
         f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/tree/"
-        f"{GITHUB_BRANCH}/environments/{env_folder}"
+        f"{branch}/environments/{env_folder}"
     )
     hud_console.info("Source: " + source_url)
 
@@ -223,10 +230,11 @@ def create_environment(
     started = time.time()
     files_created_dl: list[str] = []
     try:
+        assert env_folder is not None  # Already validated above
         _download_tarball_subdir(
             owner=GITHUB_OWNER,
             repo=GITHUB_REPO,
-            ref=GITHUB_BRANCH,
+            ref=branch,
             subdir=env_folder,
             dest_dir=target_dir,
             files_created=files_created_dl,
