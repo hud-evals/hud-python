@@ -51,9 +51,9 @@ from hud.datasets import Task, run_dataset, run_dataset_parallel, run_dataset_pa
 logger = logging.getLogger(__name__)
 
 # Uncomment to enable logging
-# logging.basicConfig(
-#     level=logging.INFO, format="%(asctime)s - %(name)s - %(message)s", datefmt="%H:%M:%S"
-# )
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(message)s", datefmt="%H:%M:%S"
+)
 
 # ---------------------------------------------------------------------------
 # Agent factory helpers
@@ -155,12 +155,14 @@ async def run_full_dataset(
         agent_class = OperatorAgent
         agent_config: dict[str, Any] = {
             "allowed_tools": allowed_tools or ["openai_computer"],
+            "validate_api_key": False,
         }
     else:
         agent_class = ClaudeAgent
         agent_config = {
             "model": model or "claude-sonnet-4-20250514",
             "allowed_tools": allowed_tools or ["anthropic_computer"],
+            "validate_api_key": False,
         }
 
     eval_name = f"Evaluation {dataset_name.split('/')[-1]}"
