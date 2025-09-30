@@ -20,25 +20,17 @@ logger = logging.getLogger(__name__)
 async def setup(eval_name: str = None) -> str:
     """
     Initialize or reset the environment to its starting state.
-
-    Args:
-        eval_name: Optional eval name (e.g., "swe_bench", "mbpp"). If provided,
-                   will attempt to install eval-specific dependencies automatically.
-
-    Some evals require additional dependencies (e.g., swe_bench needs swebench>=3.0.15 and docker).
-    When eval_name is provided, this tool automatically tries to install inspect_evals[eval_name]
-    with a try/except to handle evals that don't have extra dependencies.
     """
     if not http_client:
         raise RuntimeError("HTTP client not initialized")
 
-    resp = await http_client.post("/setup", json={"eval_name": eval_name})
+    resp = await http_client.post("/reset", json={"eval_name": eval_name})
     return json.dumps({"status": "ready", "content": resp.json()})
 
 
 @mcp.tool()
 async def evaluate(
-    eval_name: str, sample: dict, task_params: dict = {}, limit: int = None
+    eval_name: str, sample: dict, task_params: dict = {}
 ) -> EvaluationResult:
     """
     Run a full inspect_ai evaluation using the eval's native solver and scorer.
@@ -46,30 +38,14 @@ async def evaluate(
     Args:
         eval_name: Name of the eval (e.g., "mbpp", "swe_bench", "gpqa")
         sample: Single sample dict to process.
-                This is used for parallel processing where each container gets one sample.
                 Sample should be in inspect_ai Sample format (id, input, target, metadata, etc.)
         task_params: Parameters to pass to the eval's task function (e.g., {"temperature": 0.5})
 
-        limit: Optional limit on number of samples to evaluate (only used if sample is None)
-
-    This will:
-    - Load the eval from inspect_evals
-    - Use the eval's native solver (generate(), basic_agent(), etc.)
-    - Use the eval's native scorer
-    - Return results with scores and metrics
-
-    For parallel processing: Pass a single sample dict. The eval will be run with just that one sample.
     """
     try:
         response = await http_client.post(
             "/evaluate",
-            json={
-                "eval_name": eval_name,
-                "task_params": task_params,
-                "sample": sample,
-                "limit": limit,
-            },
-            timeout=60.0,
+            json={"eval_name": eval_name, "task_params": task_params, "sample": sample},
         )
 
         # Raise an exception if the API returns an error (e.g., 400, 500)

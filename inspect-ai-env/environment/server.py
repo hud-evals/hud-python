@@ -1,23 +1,43 @@
 """Minimal FastAPI environment server (HTTP-based)."""
 
-from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
-import json
 import logging
 import sys
+import os
+from datetime import datetime
+import signal
+import subprocess
+import time
+import psutil
+import traceback
+import json
+
+from fastapi import FastAPI, HTTPException
+
+from pydantic import BaseModel
+from typing import Any, Dict, List, Optional
 import uuid
-from importlib import import_module
+
+# from importlib import import_module
 from pathlib import Path
 
 # Add current directory to sys.path to enable importing local inspect_evals
 if str(Path.cwd()) not in sys.path:
     sys.path.insert(0, str(Path.cwd()))
-
 from inspect_ai import Task
 from inspect_ai.dataset import Sample
 from inspect_ai.solver import TaskState
 from inspect_ai.model import ChatMessageUser, ModelOutput
+
+from .utils import (
+    # load_eval_task,
+    # create_task_state_from_sample,
+    is_pid_running,
+    get_lock_data,
+    write_lock_data,
+    get_process_status,
+    LOG_FILE_PATH,
+    LOCK_FILE_PATH,
+)
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -26,157 +46,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Inspect AI Sample Processing Environment")
 
-_count = 0
-_sample_results = {}  # Store results by sample_id
+# globals for tracking state
+
+
+_model = ""
+_target_eval = ""
+_process = None  # Store the subprocess.Popen object
 _processing_status = {}  # Track processing status
 _task_cache = {}  # Cache loaded eval tasks by eval_name
 
-
-def load_eval_task(eval_spec: Dict[str, Any]) -> Task:
-    """
-    Dynamically load and instantiate an inspect_evals Task.
-
-    Args:
-        eval_spec: Dict containing:
-            - eval_name: Name/path of the eval. Can be:
-                * Simple name: "mbpp" → imports from inspect_evals.mbpp
-                * Module path: "custom_evals.my_eval" → imports from that module path
-                * Full path with function: "custom_evals.my_eval:my_task_fn"
-            - task_params: Optional parameters to pass to the task function
-
-    Returns:
-        Task: The instantiated inspect_ai Task object
-
-    Examples:
-        # Official inspect_evals
-        {"eval_name": "mbpp"}  → import inspect_evals.mbpp; mbpp()
-
-        # Custom eval (auto-detect function name)
-        {"eval_name": "custom_evals.my_eval"}  → import custom_evals.my_eval; my_eval()
-
-        # Custom eval with explicit function
-        {"eval_name": "custom_evals.my_eval:custom_task"}  → import custom_evals.my_eval; custom_task()
-    """
-    eval_name = eval_spec.get("eval_name")
-    if not eval_name:
-        raise ValueError("eval_spec must contain 'eval_name'")
-
-    # Check cache first
-    cache_key = (
-        f"{eval_name}:{json.dumps(eval_spec.get('task_params', {}), sort_keys=True)}"
-    )
-    if cache_key in _task_cache:
-        logger.info(f"Using cached task for {eval_name}")
-        return _task_cache[cache_key]
-
-    try:
-        # Parse eval_name to extract module path and optional function name
-        if ":" in eval_name:
-            # Explicit function name: "custom_evals.my_eval:my_task_fn"
-            module_path, function_name = eval_name.split(":", 1)
-        else:
-            module_path = eval_name
-            function_name = None
-
-        # Determine the full module path
-        if "." in module_path:
-            # Already a full path like "custom_evals.my_eval"
-            full_module_path = module_path
-            # Default function name is the last part of the module path
-            if not function_name:
-                function_name = module_path.split(".")[-1]
-        else:
-            # Simple name like "mbpp" → assume inspect_evals
-            full_module_path = f"inspect_evals.{module_path}"
-            if not function_name:
-                function_name = module_path
-
-        logger.info(f"Attempting to import: {full_module_path}")
-
-        # Import the eval module
-        eval_module = import_module(full_module_path)
-
-        # Get the task function
-        if not hasattr(eval_module, function_name):
-            raise AttributeError(
-                f"Module '{full_module_path}' does not have function '{function_name}'. "
-                f"Available: {dir(eval_module)}"
-            )
-
-        task_fn = getattr(eval_module, function_name)
-
-        # Instantiate the task with custom parameters
-        task_params = eval_spec.get("task_params", {})
-        logger.info(f"Loading eval: {eval_name} with params: {task_params}")
-        task = task_fn(**task_params)
-
-        # Cache the task
-        _task_cache[cache_key] = task
-
-        return task
-
-    except ImportError as e:
-        raise ValueError(
-            f"Could not import eval '{eval_name}'. "
-            f"For custom evals, ensure the module is in /app/custom_evals/ and accessible. "
-            f"Error: {e}"
-        )
-    except AttributeError as e:
-        raise ValueError(f"Eval loading error: {e}")
-    except Exception as e:
-        raise ValueError(f"Unexpected error loading eval '{eval_name}': {e}")
-
-
-def create_task_state_from_sample(
-    sample: Sample, model_name: str = "custom_agent"
-) -> TaskState:
-    """
-    Create an inspect_ai TaskState from a Sample and solver output.
-
-    Args:
-        sample: The Sample being processed
-        model_name: Name to use for the model in the task state
-
-    Returns:
-        TaskState: Populated TaskState for scoring
-    """
-    from inspect_ai.solver import TaskState
-    from inspect_ai.model import ChatMessageUser, ChatMessageAssistant, ModelOutput
-
-    # Create message history
-    messages = [ChatMessageUser(content=str(sample.input))]
-
-    # Create the model output
-    output = ModelOutput(model=model_name, completion=solver_output, stop_reason="stop")
-
-    # Create TaskState
-    state = TaskState(
-        sample_id=sample.id,
-        epoch=0,
-        input=str(sample.input),
-        messages=messages,
-        output=output,
-        metadata=sample.metadata or {},
-    )
-
-    return state
-
-
-# Sample-related models removed - using evaluate endpoint only
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
-@app.post("/act")
-def act():
-    global _count
-    _count += 1
-    return {"count": _count}
+app = FastAPI(title="Inspect-AI eval-wrapper API")
 
 
 class SetupRequest(BaseModel):
@@ -185,8 +65,39 @@ class SetupRequest(BaseModel):
     eval_name: Optional[str] = None
 
 
-@app.post("/setup")
-async def setup(request: SetupRequest):
+class EvaluateRequest(BaseModel):
+    """Request to run an inspect_ai evaluation"""
+
+    eval_name: str
+    task_params: Optional[Dict[str, Any]] = None
+    sample: Optional[Dict[str, Any]] = None
+
+
+class ModelGenerateRequest(BaseModel):
+    """Request from HUD model provider to generate a response"""
+
+    messages: List[Dict[str, Any]]
+    tools: List[Dict[str, Any]] = []
+    tool_choice: Optional[Any] = None
+    config: Dict[str, Any] = {}
+
+
+@app.get("/health")
+def health():
+    return {"ok": True, "content": {"status": get_process_status()}}
+
+
+@app.get("/status")
+def status():
+    return {
+        "model": _model,
+        "target_eval": _target_eval,
+        "status": get_process_status(),
+    }
+
+
+@app.post("/reset")
+async def reset(request: SetupRequest):
     """
     Setup environment with optional eval-specific installations.
 
@@ -194,9 +105,7 @@ async def setup(request: SetupRequest):
     If eval_name is provided, this automatically tries to install inspect_evals[eval_name]
     using uv pip install. Uses try/except to gracefully handle evals without extra deps.
     """
-    global _count
-    _count = 0
-    _sample_results.clear()
+
     _processing_status.clear()
 
     install_log = []
@@ -240,45 +149,6 @@ async def setup(request: SetupRequest):
             logger.warning(f"Installation error: {str(e)}")
 
     return {"ok": True, "install_log": install_log}
-
-
-@app.post("/reset")
-def reset():
-    """Legacy reset endpoint - redirects to setup without installs"""
-    global _count
-    _count = 0
-    _sample_results.clear()
-    _processing_status.clear()
-    return {"ok": True}
-
-
-@app.get("/state")
-def state():
-    return {
-        "count": _count,
-        "total_samples_processed": len(_sample_results),
-        "currently_processing": len(
-            [k for k, v in _processing_status.items() if v == "processing"]
-        ),
-    }
-
-
-class EvaluateRequest(BaseModel):
-    """Request to run an inspect_ai evaluation"""
-
-    eval_name: str
-    task_params: Optional[Dict[str, Any]] = None
-    sample: Optional[Dict[str, Any]] = None
-    limit: Optional[int] = None
-
-
-class ModelGenerateRequest(BaseModel):
-    """Request from HUD model provider to generate a response"""
-
-    messages: List[Dict[str, Any]]
-    tools: List[Dict[str, Any]] = []
-    tool_choice: Optional[Any] = None
-    config: Dict[str, Any] = {}
 
 
 @app.post("/model/generate")
@@ -343,85 +213,274 @@ async def model_generate(request: ModelGenerateRequest):
         }
 
 
+# @app.post("/evaluate")
+# async def evaluate(request: EvaluateRequest):
+#     """
+#     Run a full inspect_ai evaluation using the eval's native solver and scorer.
+
+#     This executes the eval exactly as inspect_ai would, using:
+#     - The eval's dataset
+#     - The eval's native solver (generate(), basic_agent(), etc.)
+#     - The eval's native scorer
+#     - The eval's sandbox configuration
+#     """
+#     eval_name = request.eval_name
+#     task_params = request.task_params or {}
+#     sample_data = request.sample
+#     limit = request.limit
+
+#     logger.info(
+#         f"Starting evaluation: {eval_name} with params: {task_params}, sample: {sample_data is not None}, limit: {limit}"
+#     )
+
+#     try:
+
+#         # Parse results
+#         log = logs[0] if logs else None
+#         if log:
+#             results = {
+#                 "status": log.status,
+#                 "eval_name": eval_name,
+#                 "samples_completed": len([s for s in log.samples if s.score]),
+#                 "total_samples": len(log.samples),
+#                 "scores": {
+#                     metric: value.value
+#                     for metric, value in (
+#                         log.results.metrics if log.results else {}
+#                     ).items()
+#                 },
+#             }
+#         else:
+#             results = {"status": "no_log", "eval_name": eval_name}
+
+#         logger.info(f"Evaluation complete: {results}")
+
+#         return {
+#             "trace_id": str(uuid.uuid4()),
+#             "status": "completed",
+#             "results": results,
+#         }
+
+#     except Exception as e:
+#         logger.error(f"Evaluation failed: {e}", exc_info=True)
+#         return {"trace_id": str(uuid.uuid4()), "status": "error", "error": str(e)}
+
+
 @app.post("/evaluate")
-async def evaluate(request: EvaluateRequest):
+async def evaluate(eval_config: dict):
     """
-    Run a full inspect_ai evaluation using the eval's native solver and scorer.
-
-    This executes the eval exactly as inspect_ai would, using:
-    - The eval's dataset
-    - The eval's native solver (generate(), basic_agent(), etc.)
-    - The eval's native scorer
-    - The eval's sandbox configuration
+    Creates and starts a new evaluation.
+    Returns immediately with a trace_id to track the evaluation.
     """
-    eval_name = request.eval_name
-    task_params = request.task_params or {}
-    sample_data = request.sample
-    limit = request.limit
+    global _process
 
-    logger.info(
-        f"Starting evaluation: {eval_name} with params: {task_params}, sample: {sample_data is not None}, limit: {limit}"
+    # Check if there's already a lock (running or completed process)
+    lock_data = get_lock_data()
+    if lock_data is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="An Inspect-ai process is already running or has completed. Call /reset to clear.",
+        )
+
+    eval_params = []
+    if eval_config != {}:
+        for k, v in eval_config.items():
+            eval_params.append(f"--{k}")
+            eval_params.append(v)
+    logger.warning(
+        f"starting inspect-eval run. info: eval_config: {eval_params}, type {type(eval_params)}"
     )
 
+    full_commands = [
+        "uv",
+        "run",
+        "inspect",
+        "eval",
+        f"/app/inspect_evals/{_target_eval}",
+        "--model",
+        _model,
+        "--sandbox",
+        "local",
+        "--log-dir",
+        "logs",
+    ] + eval_params
+    full_commands = [str(x) for x in full_commands]
+    logger.warning(f"full commands: {full_commands}")
+
+    trace_id = f"inspectai_{_target_eval}_{_model.split('/')[-1]}_{datetime.now().strftime('%y%m%d_%H%M%S')}"
+
+    # --- Launch the Process ---
     try:
-        # Import inspect_ai's eval function
-        from inspect_ai import eval as inspect_eval
-        from inspect_ai.log import read_eval_log
+        log_file = open(LOG_FILE_PATH, "w")
+        _process = subprocess.Popen(full_commands, stdout=log_file, stderr=log_file)
 
-        # Import and register the HUD model provider
-        from environment.hud_model import HUDAgentModel  # noqa: F401
+        # # Import inspect_ai's eval function
+        # from inspect_ai import eval as inspect_eval
+        # from inspect_ai.log import read_eval_log
 
-        # Load the eval task
-        eval_spec = {"eval_name": eval_name, "task_params": task_params}
-        task = load_eval_task(eval_spec)
+        # # Import and register the HUD model provider
+        # from environment.hud_model import HUDAgentModel  # noqa: F401
 
-        # Convert dict to Sample object
-        sample = Sample(
-            id=sample_data.get("id"),
-            input=sample_data.get("input"),
-            target=sample_data.get("target"),
-            metadata=sample_data.get("metadata", {}),
-            sandbox=sample_data.get("sandbox"),
-        )
-        task.dataset = [sample]
-        logger.info(f"Processing single sample: {sample.id}")
+        # # Load the eval task
+        # eval_spec = {"eval_name": eval_name, "task_params": task_params}
+        # task = load_eval_task(eval_spec)
+
+        # # Convert dict to Sample object
+        # sample = Sample(
+        #     id=sample_data.get("id"),
+        #     input=sample_data.get("input"),
+        #     target=sample_data.get("target"),
+        #     metadata=sample_data.get("metadata", {}),
+        #     sandbox=sample_data.get("sandbox"),
+        # )
+        # task.dataset = [sample]
+        # logger.info(f"Processing single sample: {sample.id}")
 
         # Run the evaluation using inspect_ai
         # Use the HUD model provider which will route calls back through MCP
-        logs = await inspect_eval(
-            task, model="hud/agent", log_dir="logs"  # Routes to your HUD agent
-        )
+        # logs = await inspect_eval(
+        #     task, model="hud/agent", log_dir="logs"  # Routes to your HUD agent
+        # )
 
-        # Parse results
-        log = logs[0] if logs else None
-        if log:
-            results = {
-                "status": log.status,
-                "eval_name": eval_name,
-                "samples_completed": len([s for s in log.samples if s.score]),
-                "total_samples": len(log.samples),
-                "scores": {
-                    metric: value.value
-                    for metric, value in (
-                        log.results.metrics if log.results else {}
-                    ).items()
-                },
-            }
-        else:
-            results = {"status": "no_log", "eval_name": eval_name}
-
-        logger.info(f"Evaluation complete: {results}")
+        # Write initial lock data with running status
+        lock_data = {
+            "status": "running",
+            "pid": _process.pid,
+            "trace_id": trace_id,
+            "started_at": datetime.now().isoformat(),
+        }
+        write_lock_data(lock_data)
 
         return {
-            "trace_id": str(uuid.uuid4()),
-            "status": "completed",
-            "results": results,
+            "message": "Process launched successfully.",
+            "pid": _process.pid,
+            "trace_id": trace_id,
         }
 
     except Exception as e:
-        logger.error(f"Evaluation failed: {e}", exc_info=True)
-        return {"trace_id": str(uuid.uuid4()), "status": "error", "error": str(e)}
+        # Clean up on failure
+        if os.path.exists(LOCK_FILE_PATH):
+            os.remove(LOCK_FILE_PATH)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Something has gone terribly wrong...\n{traceback.format_exc()}. Failed to launch process: {str(e)}",
+        )
 
 
-# Note: process_sample endpoint and related functions removed
-# Use the evaluate endpoint instead which runs full inspect_ai evaluations
+@app.post("/stop")
+async def stop_process():
+    """Stops the running process gracefully."""
+    global _process
+
+    lock_data = get_lock_data()
+    if lock_data is None:
+        raise HTTPException(status_code=404, detail="No process is currently running.")
+
+    # If already completed or crashed, just return
+    if lock_data.get("status") in ["completed", "crashed", "stopped"]:
+        return {
+            "message": f"Process already {lock_data['status']}. Call /reset to clear."
+        }
+
+    pid = lock_data.get("pid")
+    if pid is None or not is_pid_running(pid):
+        # Update status to crashed since process is gone
+        status_data = {
+            "status": "crashed",
+            "message": "Process was no longer running when stop was called",
+        }
+        write_lock_data(status_data)
+        raise HTTPException(status_code=404, detail="No process is currently running.")
+
+    try:
+        # Use the subprocess object if available for more reliable termination
+        if _process and _process.poll() is None:  # Process is still running
+            # 1. Graceful termination
+            _process.terminate()
+
+            # Wait for graceful shutdown
+            try:
+                _process.wait(timeout=3.0)  # Wait up to 3 seconds
+                process_stopped = True
+            except subprocess.TimeoutExpired:
+                # 2. Force kill if still alive
+                _process.kill()
+                try:
+                    _process.wait(timeout=2.0)  # Wait up to 2 more seconds
+                    process_stopped = True
+                except subprocess.TimeoutExpired:
+                    process_stopped = False
+        else:
+            # Fallback: use PID-based killing if subprocess object not available
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+            except (OSError, ProcessLookupError):
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except (OSError, ProcessLookupError):
+                    pass
+
+            # Wait briefly for graceful shutdown
+            for _ in range(15):  # 3 seconds total
+                if not is_pid_running(pid):
+                    process_stopped = True
+                    break
+                time.sleep(0.2)
+            else:
+                # Force kill
+                try:
+                    os.killpg(os.getpgid(pid), signal.SIGKILL)
+                except (OSError, ProcessLookupError):
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except (OSError, ProcessLookupError):
+                        pass
+
+                # Wait a bit more
+                for _ in range(10):  # 2 more seconds
+                    if not is_pid_running(pid):
+                        process_stopped = True
+                        break
+                    time.sleep(0.2)
+                else:
+                    process_stopped = False
+
+        # Update lock with appropriate status
+        if process_stopped:
+            status_data = {
+                "status": "stopped",
+                "message": "Process was manually stopped. It can be resumed.",
+                "return_code": -1,
+            }
+            write_lock_data(status_data)
+            return {"message": f"Eval process {pid} stopped successfully."}
+        else:
+            status_data = {
+                "status": "stopping",
+                "message": "Stop signal sent but process may still be running. Check status again.",
+                "return_code": -1,
+                "stop_requested_at": datetime.now().isoformat(),
+            }
+            write_lock_data(status_data)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to stop eval process {pid}. Process may still be running.",
+            )
+
+    except Exception as e:
+        # Update the lock to indicate stop was attempted
+        status_data = {
+            "status": "stopping",
+            "message": f"Stop attempted but encountered error: {str(e)}",
+            "return_code": -1,
+            "stop_requested_at": datetime.now().isoformat(),
+        }
+        write_lock_data(status_data)
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"An error occurred while stopping the process: {str(e)}.",
+        )
+
+
+# TODO: add resume endpoint
