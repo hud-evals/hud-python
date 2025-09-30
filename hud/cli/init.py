@@ -171,6 +171,60 @@ def _download_tarball_subdir(
             os.remove(tmp_path)
 
 
+def _generate_tool_stubs(tools_file: Path, tools: list[Any]) -> None:
+    """Generate tool stub functions from MCP tool schemas.
+    
+    Args:
+        tools_file: Path to controller/tools.py file
+        tools: List of tool objects from MCP server
+    """
+    # Read existing file
+    content = tools_file.read_text()
+    
+    # Generate tool functions
+    tool_functions = []
+    for tool in tools:
+        # Extract schema info
+        schema = tool.inputSchema if hasattr(tool, "inputSchema") else {}
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
+        
+        # Build function parameters
+        params = []
+        for prop_name, prop_info in properties.items():
+            prop_type = prop_info.get("type", "str")
+            # Map JSON schema types to Python types
+            python_type = {
+                "string": "str",
+                "number": "float",
+                "integer": "int",
+                "boolean": "bool",
+                "array": "list",
+                "object": "dict",
+            }.get(prop_type, "Any")
+            
+            # Add optional marker if not required
+            if prop_name not in required:
+                python_type = f"{python_type} | None = None"
+            
+            params.append(f"{prop_name}: {python_type}")
+        
+        params_str = ", ".join(params) if params else ""
+        
+        # Build function
+        func = f'''
+@mcp.tool
+async def {tool.name}({params_str}) -> str:
+    """{tool.description}"""
+    raise NotImplementedError("TODO: Implement {tool.name}")
+'''
+        tool_functions.append(func)
+    
+    # Append to file
+    new_content = content.rstrip() + "\n\n" + "\n".join(tool_functions) + "\n"
+    tools_file.write_text(new_content)
+
+
 async def analyze_external_mcp_server(url: str) -> list[Any]:
     """Fetch raw tool schemas from an external MCP server.
     
@@ -310,16 +364,18 @@ def create_environment(
     # Analyze external MCP server if URL provided
     if from_mcp is not None:
         import asyncio
-        import json
         hud_console.section_title("Fetching tools from MCP server")
         try:
             tools = asyncio.run(analyze_external_mcp_server(from_mcp))
-            hud_console.success(f"Found {len(tools)} tools")
-            # Print raw JSON schema
-            print(json.dumps([{
-                "name": t.name,
-                "description": t.description,
-                "inputSchema": t.inputSchema
-            } for t in tools], indent=2))
+            hud_console.success(f"Found {len(tools)} tools from {from_mcp}")
+            
+            # Generate tool stubs and write to tools.py
+            tools_file = target_dir / "controller" / "tools.py"
+            if tools_file.exists():
+                hud_console.info(f"Generating tool stubs in {tools_file.relative_to(target_dir)}")
+                _generate_tool_stubs(tools_file, tools)
+                hud_console.success(f"Generated {len(tools)} tool stubs")
+            else:
+                hud_console.warning(f"tools.py not found at {tools_file}")
         except Exception as e:
             hud_console.warning(f"Could not fetch tools: {e}")
