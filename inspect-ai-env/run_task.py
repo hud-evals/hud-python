@@ -24,7 +24,7 @@ from hud.agents import GenericOpenAIChatAgent
 
 
 async def run_single_sample(
-    eval_name: str, sample_dict: dict, task_params: dict = None, mcp_config: dict = None
+    eval_name: str, sample_dict: dict, task_params: dict = {}, mcp_config: dict = None
 ) -> dict:
     """
     Run evaluation on a single sample.
@@ -60,11 +60,15 @@ async def run_single_sample(
         if task_params:
             print(f"   Task params: {task_params}")
 
+        eval_config = (
+            task_params.get("evaluate_tool", {})
+            .get("arguments", {})
+            .get("eval_config", {})
+        )
         result = await client.call_tool(
             name="evaluate",
             arguments={
-                "eval_name": eval_name,
-                "task_params": task_params or {},
+                "eval_config": eval_config,
                 "sample": sample_dict,
             },
         )

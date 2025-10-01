@@ -31,23 +31,18 @@ async def setup(eval_name: str, model_name: str) -> str:
 
 
 @mcp.tool()
-async def evaluate(
-    eval_name: str, sample: dict, task_params: dict = {}
-) -> EvaluationResult:
+async def evaluate(sample: dict, eval_config: dict = {}) -> EvaluationResult:
     """
-    Run a full inspect_ai evaluation using the eval's native solver and scorer.
 
-    Args:
-        eval_name: Name of the eval (e.g., "mbpp", "swe_bench", "gpqa")
-        sample: Single sample dict to process.
-                Sample should be in inspect_ai Sample format (id, input, target, metadata, etc.)
-        task_params: Parameters to pass to the eval's task function (e.g., {"temperature": 0.5})
+    sample: Single sample dict to process.
+            Sample should be in inspect_ai Sample format (id, input, target, metadata, etc.)
+    eval_config: Parameters to pass to the eval's task function (e.g., {"temperature": 0.5})
 
     """
     try:
         response = await http_client.post(
             "/evaluate",
-            json={"eval_name": eval_name, "task_params": task_params, "sample": sample},
+            json={"eval_config": eval_config, "sample": sample},
         )
 
         # Raise an exception if the API returns an error (e.g., 400, 500)

@@ -18,7 +18,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 LOCK_FILE_PATH = "/tmp/long_running_process.lock"
-LOG_FILE_PATH = "/tmp/benchmark.log"
+LOG_FILE_PATH = "/app/logs/benchmark.log"
 
 
 # def load_eval_task(eval_spec: Dict[str, Any]) -> Task:

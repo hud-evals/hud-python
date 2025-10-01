@@ -10,6 +10,7 @@ import time
 import psutil
 import traceback
 import json
+import tempfile
 
 from fastapi import FastAPI, HTTPException
 
@@ -37,6 +38,9 @@ from .utils import (
     LOCK_FILE_PATH,
 )
 
+# Import HUD model to register it with Inspect AI
+from .hud_model import HUDAgentModel  # noqa: F401
+
 logging.basicConfig(
     stream=sys.stderr,
     level=logging.INFO,
@@ -51,7 +55,7 @@ logger = logging.getLogger(__name__)
 _model = ""
 _target_eval = ""
 _process = None  # Store the subprocess.Popen object
-_processing_status = {}  # Track processing status
+
 
 app = FastAPI(title="Inspect-AI eval-wrapper API")
 
@@ -103,9 +107,11 @@ async def reset(request: SetupRequest):
     If eval_name is provided, this automatically tries to install inspect_evals[eval_name]
     using uv pip install. Uses try/except to gracefully handle evals without extra deps.
     """
-    global _model, _target_eval
-
-    _processing_status.clear()
+    global _model, _target_eval, _process
+    # Clear any existing lock and process state
+    if os.path.exists(LOCK_FILE_PATH):
+        os.remove(LOCK_FILE_PATH)
+    _process = None
 
     # Store model and eval names
     _model = request.model_name
@@ -218,61 +224,8 @@ async def model_generate(request: ModelGenerateRequest):
         }
 
 
-# @app.post("/evaluate")
-# async def evaluate(request: EvaluateRequest):
-#     """
-#     Run a full inspect_ai evaluation using the eval's native solver and scorer.
-
-#     This executes the eval exactly as inspect_ai would, using:
-#     - The eval's dataset
-#     - The eval's native solver (generate(), basic_agent(), etc.)
-#     - The eval's native scorer
-#     - The eval's sandbox configuration
-#     """
-#     eval_name = request.eval_name
-#     task_params = request.task_params or {}
-#     sample_data = request.sample
-#     limit = request.limit
-
-#     logger.info(
-#         f"Starting evaluation: {eval_name} with params: {task_params}, sample: {sample_data is not None}, limit: {limit}"
-#     )
-
-#     try:
-
-#         # Parse results
-#         log = logs[0] if logs else None
-#         if log:
-#             results = {
-#                 "status": log.status,
-#                 "eval_name": eval_name,
-#                 "samples_completed": len([s for s in log.samples if s.score]),
-#                 "total_samples": len(log.samples),
-#                 "scores": {
-#                     metric: value.value
-#                     for metric, value in (
-#                         log.results.metrics if log.results else {}
-#                     ).items()
-#                 },
-#             }
-#         else:
-#             results = {"status": "no_log", "eval_name": eval_name}
-
-#         logger.info(f"Evaluation complete: {results}")
-
-#         return {
-#             "trace_id": str(uuid.uuid4()),
-#             "status": "completed",
-#             "results": results,
-#         }
-
-#     except Exception as e:
-#         logger.error(f"Evaluation failed: {e}", exc_info=True)
-#         return {"trace_id": str(uuid.uuid4()), "status": "error", "error": str(e)}
-
-
 @app.post("/evaluate")
-async def evaluate(eval_config: dict):
+async def evaluate(eval_config: dict, sample: dict):
     """
     Creates and starts a new evaluation.
     Returns immediately with a trace_id to track the evaluation.
@@ -296,19 +249,39 @@ async def evaluate(eval_config: dict):
         f"starting inspect-eval run. info: eval_config: {eval_params}, type {type(eval_params)}"
     )
 
+    # Write sample to temp file
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.jsonl', delete=False, dir='/tmp') as f:
+        json.dump(sample, f)
+        f.write('\n')
+        sample_file = f.name
+    logger.info(f"Wrote sample to {sample_file}")
+
+    # Build the Python command with proper newlines for function definitions
+    python_code = f"""
+import os
+from inspect_ai.dataset import json_dataset
+import inspect_ai.dataset
+
+def hf_dataset(*args, **kwargs):
+    sample_file = os.getenv('SAMPLE_FILE')
+    return json_dataset(sample_file, sample_fields=kwargs.get('sample_fields'))
+
+inspect_ai.dataset.hf_dataset = hf_dataset
+
+import sys
+sys.path.insert(0, '/app')
+from environment.hud_model import HUDAgentModel
+from inspect_ai._cli.eval import eval_command
+eval_command(['/app/inspect_evals/{_target_eval}', '--model', 'hud/{_model}', '--sandbox', 'local', '--log-dir', 'logs'] + {eval_params})
+""".strip()
+
     full_commands = [
         "uv",
         "run",
-        "inspect",
-        "eval",
-        f"/app/inspect_evals/{_target_eval}",
-        "--model",
-        f"hud/{_model}",  # Use HUD model wrapper
-        "--sandbox",
-        "local",
-        "--log-dir",
-        "logs",
-    ] + eval_params
+        "python",
+        "-c",
+        python_code,
+    ]
     full_commands = [str(x) for x in full_commands]
     logger.warning(f"full commands: {full_commands}")
 
@@ -317,7 +290,10 @@ async def evaluate(eval_config: dict):
     # --- Launch the Process ---
     try:
         log_file = open(LOG_FILE_PATH, "w")
-        _process = subprocess.Popen(full_commands, stdout=log_file, stderr=log_file)
+        # Pass sample file path via environment variable
+        env = os.environ.copy()
+        env['SAMPLE_FILE'] = sample_file
+        _process = subprocess.Popen(full_commands, stdout=log_file, stderr=log_file, env=env)
 
         # # Import inspect_ai's eval function
         # from inspect_ai import eval as inspect_eval

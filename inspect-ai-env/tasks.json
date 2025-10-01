@@ -12,11 +12,12 @@
       "name": "evaluate",
       "arguments": {
         "eval_config": {
-          "max_messages": 20,
-        "timeout": 300,
-        "sandbox_type": "local"
+          "message-limit": "20", 
+          "sandbox": "local"
         }
       }
     }
 
-    }
+}
+
+
