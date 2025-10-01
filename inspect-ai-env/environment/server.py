@@ -1,45 +1,25 @@
-"""Minimal FastAPI environment server (HTTP-based)."""
+"""Sandbox Environment Server for Inspect AI Evals
+
+This server provides sandbox capabilities (file operations, command execution)
+for running inspect_ai evaluations. It does NOT orchestrate the eval - that's
+Hud's job. This is purely the sandbox/environment layer.
+"""
 
 import logging
 import sys
 import os
-from datetime import datetime
-import signal
 import subprocess
-import time
-import psutil
-import traceback
-import json
 import tempfile
+from pathlib import Path
+from typing import Any
+
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException
-
 from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
-import uuid
-
-# from importlib import import_module
-from pathlib import Path
-
-# Add current directory to sys.path to enable importing local inspect_evals
-if str(Path.cwd()) not in sys.path:
-    sys.path.insert(0, str(Path.cwd()))
-from inspect_ai import Task
-from inspect_ai.dataset import Sample
-from inspect_ai.solver import TaskState
-from inspect_ai.model import ChatMessageUser, ModelOutput
-
-from .utils import (
-    is_pid_running,
-    get_lock_data,
-    write_lock_data,
-    get_process_status,
-    LOG_FILE_PATH,
-    LOCK_FILE_PATH,
-)
-
-# Import HUD model to register it with Inspect AI
-from .hud_model import HUDAgentModel  # noqa: F401
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -49,419 +29,271 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# globals for tracking state
+app = FastAPI(title="Inspect AI Sandbox Environment")
 
 
-_model = ""
-_target_eval = ""
-_process = None  # Store the subprocess.Popen object
-
-
-app = FastAPI(title="Inspect-AI eval-wrapper API")
+# Global sandbox state
+_sandbox_initialized = False
+_sandbox_dir: Path | None = None
+_eval_name: str | None = None
+_sample_id: str | None = None
 
 
 class SetupRequest(BaseModel):
-    """Request to setup/reset environment and model_wrapper"""
+    """Request to initialize sandbox for a specific sample."""
 
     eval_name: str
-    model_name: str
+    sample_id: str
 
 
-class EvaluateRequest(BaseModel):
-    """Request to run an inspect_ai evaluation"""
+class ExecRequest(BaseModel):
+    """Request to execute a command in the sandbox."""
 
-    eval_name: str
-    task_params: Optional[Dict[str, Any]] = None
-    sample: Optional[Dict[str, Any]] = None
+    cmd: list[str]
+    timeout: int = 30
+    cwd: str | None = None
 
 
-class ModelGenerateRequest(BaseModel):
-    """Request from HUD model provider to generate a response"""
+class WriteFileRequest(BaseModel):
+    """Request to write a file in the sandbox."""
 
-    messages: List[Dict[str, Any]]
-    tools: List[Dict[str, Any]] = []
-    tool_choice: Optional[Any] = None
-    config: Dict[str, Any] = {}
+    path: str
+    content: str
+
+
+class ReadFileRequest(BaseModel):
+    """Request to read a file from the sandbox."""
+
+    path: str
+
+
+class ListFilesRequest(BaseModel):
+    """Request to list files in a directory."""
+
+    path: str = "."
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "content": {"status": get_process_status()}}
-
-
-@app.get("/status")
-def status():
+    """Health check endpoint."""
     return {
-        "model": _model,
-        "target_eval": _target_eval,
-        "status": get_process_status(),
+        "ok": True,
+        "content": {
+            "initialized": _sandbox_initialized,
+            "eval_name": _eval_name,
+            "sample_id": _sample_id,
+        },
     }
 
 
 @app.post("/reset")
 async def reset(request: SetupRequest):
     """
-    Setup environment with optional eval-specific installations.
+    Initialize sandbox environment for a specific sample.
 
-    Some evals require extra dependencies (e.g., swe_bench needs swebench and docker).
-    If eval_name is provided, this automatically tries to install inspect_evals[eval_name]
-    using uv pip install. Uses try/except to gracefully handle evals without extra deps.
+    This creates a clean working directory and prepares the sandbox
+    for the agent to work in.
     """
-    global _model, _target_eval, _process
-    # Clear any existing lock and process state
-    if os.path.exists(LOCK_FILE_PATH):
-        os.remove(LOCK_FILE_PATH)
-    _process = None
+    global _sandbox_initialized, _sandbox_dir, _eval_name, _sample_id
 
-    # Store model and eval names
-    _model = request.model_name
-    _target_eval = request.eval_name
+    _eval_name = request.eval_name
+    _sample_id = request.sample_id
 
-    logger.info(f"Reset: model={_model}, eval={_target_eval}")
+    # Create a temporary working directory for this sample
+    # In production, you might want to use a more permanent location
+    _sandbox_dir = Path(tempfile.mkdtemp(prefix=f"{_eval_name}_{_sample_id}_"))
 
-    install_log = []
-
-    # Try to install eval-specific extras if eval_name provided
-    if request.eval_name:
-        import subprocess
-
-        try:
-            logger.info(f"Attempting to install extras for eval: {request.eval_name}")
-            cmd = ["uv", "pip", "install", f"inspect_evals[{request.eval_name}]"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-
-            if result.returncode == 0:
-                install_log.append(f"✅ Installed inspect_evals[{request.eval_name}]")
-                logger.info(f"Successfully installed extras for {request.eval_name}")
-            else:
-                # Not an error - eval might not have extras
-                stderr_lower = result.stderr.lower()
-                if "no extras" in stderr_lower or "does not exist" in stderr_lower:
-                    install_log.append(
-                        f"ℹ️  No extra dependencies needed for {request.eval_name}"
-                    )
-                    logger.info(
-                        f"No extra dependencies found for {request.eval_name} (this is normal)"
-                    )
-                else:
-                    # Actual error
-                    install_log.append(
-                        f"⚠️  Warning: Could not install extras for {request.eval_name}: {result.stderr[:200]}"
-                    )
-                    logger.warning(
-                        f"Could not install extras for {request.eval_name}: {result.stderr}"
-                    )
-
-        except subprocess.TimeoutExpired:
-            install_log.append(f"⚠️  Installation timed out after 5 minutes")
-            logger.warning("Installation timed out")
-        except Exception as e:
-            install_log.append(f"⚠️  Installation error: {str(e)[:200]}")
-            logger.warning(f"Installation error: {str(e)}")
-
-    return {"ok": True, "install_log": install_log}
-
-
-@app.post("/model/generate")
-async def model_generate(request: ModelGenerateRequest):
-    """
-    Handle model generate() calls from the HUD ModelAPI provider.
-
-    This endpoint receives generate() calls from inspect_ai running in Docker
-    and forwards them to your external agent via HTTP callback.
-
-    Set AGENT_CALLBACK_URL environment variable to your agent's endpoint.
-    Example: AGENT_CALLBACK_URL=http://host.docker.internal:9000/generate
-    """
-    import os
-    import httpx
-
-    logger.info(f"Model generate called with {len(request.messages)} messages")
-
-    # Get callback URL from environment
-    callback_url = os.getenv("AGENT_CALLBACK_URL")
-
-    if not callback_url:
-        # No callback URL configured, return mock response
-        logger.warning("No AGENT_CALLBACK_URL configured, returning mock response")
-        last_message = request.messages[-1] if request.messages else {}
-        user_content = last_message.get("content", "")
-
-        return {
-            "content": f"Mock response to: {user_content[:100]}...",
-            "model": "hud/agent",
-            "stop_reason": "stop",
-        }
-
-    try:
-        # Forward to external agent
-        logger.info(f"Forwarding to agent at {callback_url}")
-
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            response = await client.post(
-                callback_url,
-                json={
-                    "messages": request.messages,
-                    "tools": request.tools,
-                    "config": request.config,
-                },
-            )
-            response.raise_for_status()
-
-            result = response.json()
-            logger.info(
-                f"Received response from agent: {len(result.get('content', ''))} chars"
-            )
-
-            return result
-
-    except Exception as e:
-        logger.error(f"Error calling agent: {e}")
-        return {
-            "content": f"Error calling agent: {str(e)}",
-            "model": "hud/agent",
-            "stop_reason": "error",
-        }
-
-
-@app.post("/evaluate")
-async def evaluate(eval_config: dict, sample: dict):
-    """
-    Creates and starts a new evaluation.
-    Returns immediately with a trace_id to track the evaluation.
-    """
-    global _process
-
-    # Check if there's already a lock (running or completed process)
-    lock_data = get_lock_data()
-    if lock_data is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="An Inspect-ai process is already running or has completed. Call /reset to clear.",
-        )
-
-    eval_params = []
-    if eval_config != {}:
-        for k, v in eval_config.items():
-            eval_params.append(f"--{k}")
-            eval_params.append(v)
-    logger.warning(
-        f"starting inspect-eval run. info: eval_config: {eval_params}, type {type(eval_params)}"
+    logger.info(
+        f"Initialized sandbox for {_eval_name} sample {_sample_id} at {_sandbox_dir}"
     )
 
-    # Write sample to temp file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.jsonl', delete=False, dir='/tmp') as f:
-        json.dump(sample, f)
-        f.write('\n')
-        sample_file = f.name
-    logger.info(f"Wrote sample to {sample_file}")
+    _sandbox_initialized = True
 
-    # Build the Python command with proper newlines for function definitions
-    python_code = f"""
-import os
-from inspect_ai.dataset import json_dataset
-import inspect_ai.dataset
+    return {
+        "ok": True,
+        "sandbox_dir": str(_sandbox_dir),
+        "eval_name": _eval_name,
+        "sample_id": _sample_id,
+    }
 
-def hf_dataset(*args, **kwargs):
-    sample_file = os.getenv('SAMPLE_FILE')
-    return json_dataset(sample_file, sample_fields=kwargs.get('sample_fields'))
 
-inspect_ai.dataset.hf_dataset = hf_dataset
+@app.post("/exec")
+async def exec_command(request: ExecRequest):
+    """
+    Execute a command in the sandbox.
 
-import sys
-sys.path.insert(0, '/app')
-from environment.hud_model import HUDAgentModel
-from inspect_ai._cli.eval import eval_command
-eval_command(['/app/inspect_evals/{_target_eval}', '--model', 'hud/{_model}', '--sandbox', 'local', '--log-dir', 'logs'] + {eval_params})
-""".strip()
-
-    full_commands = [
-        "uv",
-        "run",
-        "python",
-        "-c",
-        python_code,
-    ]
-    full_commands = [str(x) for x in full_commands]
-    logger.warning(f"full commands: {full_commands}")
-
-    trace_id = f"inspectai_{_target_eval}_{_model.split('/')[-1]}_{datetime.now().strftime('%y%m%d_%H%M%S')}"
-
-    # --- Launch the Process ---
-    try:
-        log_file = open(LOG_FILE_PATH, "w")
-        # Pass sample file path via environment variable
-        env = os.environ.copy()
-        env['SAMPLE_FILE'] = sample_file
-        _process = subprocess.Popen(full_commands, stdout=log_file, stderr=log_file, env=env)
-
-        # # Import inspect_ai's eval function
-        # from inspect_ai import eval as inspect_eval
-        # from inspect_ai.log import read_eval_log
-
-        # # Import and register the HUD model provider
-        # from environment.hud_model import HUDAgentModel  # noqa: F401
-
-        # # Load the eval task
-        # eval_spec = {"eval_name": eval_name, "task_params": task_params}
-        # task = load_eval_task(eval_spec)
-
-        # # Convert dict to Sample object
-        # sample = Sample(
-        #     id=sample_data.get("id"),
-        #     input=sample_data.get("input"),
-        #     target=sample_data.get("target"),
-        #     metadata=sample_data.get("metadata", {}),
-        #     sandbox=sample_data.get("sandbox"),
-        # )
-        # task.dataset = [sample]
-        # logger.info(f"Processing single sample: {sample.id}")
-
-        # Run the evaluation using inspect_ai
-        # Use the HUD model provider which will route calls back through MCP
-        # logs = await inspect_eval(
-        #     task, model="hud/agent", log_dir="logs"  # Routes to your HUD agent
-        # )
-
-        # Write initial lock data with running status
-        lock_data = {
-            "status": "running",
-            "pid": _process.pid,
-            "trace_id": trace_id,
-            "started_at": datetime.now().isoformat(),
-        }
-        write_lock_data(lock_data)
-
-        return {
-            "message": "Process launched successfully.",
-            "pid": _process.pid,
-            "trace_id": trace_id,
-        }
-
-    except Exception as e:
-        # Clean up on failure
-        if os.path.exists(LOCK_FILE_PATH):
-            os.remove(LOCK_FILE_PATH)
+    This is the primary tool for running code, tests, etc.
+    """
+    if not _sandbox_initialized:
         raise HTTPException(
-            status_code=500,
-            detail=f"Something has gone terribly wrong...\n{traceback.format_exc()}. Failed to launch process: {str(e)}",
+            status_code=400, detail="Sandbox not initialized. Call /reset first."
         )
 
+    # Determine working directory
+    if request.cwd:
+        cwd = _sandbox_dir / request.cwd
+    else:
+        cwd = _sandbox_dir
 
-@app.post("/stop")
-async def stop_process():
-    """Stops the running process gracefully."""
-    global _process
-
-    lock_data = get_lock_data()
-    if lock_data is None:
-        raise HTTPException(status_code=404, detail="No process is currently running.")
-
-    # If already completed or crashed, just return
-    if lock_data.get("status") in ["completed", "crashed", "stopped"]:
-        return {
-            "message": f"Process already {lock_data['status']}. Call /reset to clear."
-        }
-
-    pid = lock_data.get("pid")
-    if pid is None or not is_pid_running(pid):
-        # Update status to crashed since process is gone
-        status_data = {
-            "status": "crashed",
-            "message": "Process was no longer running when stop was called",
-        }
-        write_lock_data(status_data)
-        raise HTTPException(status_code=404, detail="No process is currently running.")
+    logger.info(f"Executing command: {' '.join(request.cmd)} in {cwd}")
 
     try:
-        # Use the subprocess object if available for more reliable termination
-        if _process and _process.poll() is None:  # Process is still running
-            # 1. Graceful termination
-            _process.terminate()
+        result = subprocess.run(
+            request.cmd,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=request.timeout,
+        )
 
-            # Wait for graceful shutdown
-            try:
-                _process.wait(timeout=3.0)  # Wait up to 3 seconds
-                process_stopped = True
-            except subprocess.TimeoutExpired:
-                # 2. Force kill if still alive
-                _process.kill()
-                try:
-                    _process.wait(timeout=2.0)  # Wait up to 2 more seconds
-                    process_stopped = True
-                except subprocess.TimeoutExpired:
-                    process_stopped = False
-        else:
-            # Fallback: use PID-based killing if subprocess object not available
-            try:
-                os.killpg(os.getpgid(pid), signal.SIGTERM)
-            except (OSError, ProcessLookupError):
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                except (OSError, ProcessLookupError):
-                    pass
+        return {
+            "success": result.returncode == 0,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
 
-            # Wait briefly for graceful shutdown
-            for _ in range(15):  # 3 seconds total
-                if not is_pid_running(pid):
-                    process_stopped = True
-                    break
-                time.sleep(0.2)
-            else:
-                # Force kill
-                try:
-                    os.killpg(os.getpgid(pid), signal.SIGKILL)
-                except (OSError, ProcessLookupError):
-                    try:
-                        os.kill(pid, signal.SIGKILL)
-                    except (OSError, ProcessLookupError):
-                        pass
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "returncode": -1,
+            "stdout": "",
+            "stderr": f"Command timed out after {request.timeout} seconds",
+        }
+    except Exception as e:
+        logger.error(f"Error executing command: {e}")
+        return {
+            "success": False,
+            "returncode": -1,
+            "stdout": "",
+            "stderr": str(e),
+        }
 
-                # Wait a bit more
-                for _ in range(10):  # 2 more seconds
-                    if not is_pid_running(pid):
-                        process_stopped = True
-                        break
-                    time.sleep(0.2)
-                else:
-                    process_stopped = False
 
-        # Update lock with appropriate status
-        if process_stopped:
-            status_data = {
-                "status": "stopped",
-                "message": "Process was manually stopped. It can be resumed.",
-                "return_code": -1,
-            }
-            write_lock_data(status_data)
-            return {"message": f"Eval process {pid} stopped successfully."}
-        else:
-            status_data = {
-                "status": "stopping",
-                "message": "Stop signal sent but process may still be running. Check status again.",
-                "return_code": -1,
-                "stop_requested_at": datetime.now().isoformat(),
-            }
-            write_lock_data(status_data)
+@app.post("/write_file")
+async def write_file(request: WriteFileRequest):
+    """Write a file in the sandbox."""
+    if not _sandbox_initialized:
+        raise HTTPException(
+            status_code=400, detail="Sandbox not initialized. Call /reset first."
+        )
+
+    file_path = _sandbox_dir / request.path
+
+    try:
+        # Create parent directories if needed
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write file
+        file_path.write_text(request.content)
+
+        logger.info(f"Wrote file: {file_path}")
+
+        return {"ok": True, "path": str(file_path)}
+
+    except Exception as e:
+        logger.error(f"Error writing file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/read_file")
+async def read_file(request: ReadFileRequest):
+    """Read a file from the sandbox."""
+    if not _sandbox_initialized:
+        raise HTTPException(
+            status_code=400, detail="Sandbox not initialized. Call /reset first."
+        )
+
+    file_path = _sandbox_dir / request.path
+
+    try:
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"File not found: {request.path}")
+
+        content = file_path.read_text()
+
+        return {"ok": True, "content": content, "path": str(file_path)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reading file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/list_files")
+async def list_files(request: ListFilesRequest):
+    """List files in a directory within the sandbox."""
+    if not _sandbox_initialized:
+        raise HTTPException(
+            status_code=400, detail="Sandbox not initialized. Call /reset first."
+        )
+
+    dir_path = _sandbox_dir / request.path
+
+    try:
+        if not dir_path.exists():
             raise HTTPException(
-                status_code=500,
-                detail=f"Failed to stop eval process {pid}. Process may still be running.",
+                status_code=404, detail=f"Directory not found: {request.path}"
             )
 
+        if not dir_path.is_dir():
+            raise HTTPException(
+                status_code=400, detail=f"Not a directory: {request.path}"
+            )
+
+        # List files and directories
+        entries = []
+        for entry in dir_path.iterdir():
+            entries.append(
+                {
+                    "name": entry.name,
+                    "path": str(entry.relative_to(_sandbox_dir)),
+                    "is_file": entry.is_file(),
+                    "is_dir": entry.is_dir(),
+                    "size": entry.stat().st_size if entry.is_file() else None,
+                }
+            )
+
+        return {"ok": True, "entries": entries, "path": str(dir_path)}
+
+    except HTTPException:
+        raise
     except Exception as e:
-        # Update the lock to indicate stop was attempted
-        status_data = {
-            "status": "stopping",
-            "message": f"Stop attempted but encountered error: {str(e)}",
-            "return_code": -1,
-            "stop_requested_at": datetime.now().isoformat(),
-        }
-        write_lock_data(status_data)
-
-        raise HTTPException(
-            status_code=500,
-            detail=f"An error occurred while stopping the process: {str(e)}.",
-        )
+        logger.error(f"Error listing files: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# TODO: add resume endpoint
+@app.get("/capabilities")
+async def capabilities():
+    """
+    Return the capabilities of this sandbox.
+
+    This allows Hud to understand what operations are supported.
+    """
+    return {
+        "capabilities": ["exec", "file_ops"],
+        "tools": [
+            {
+                "name": "exec",
+                "description": "Execute commands in sandbox",
+                "supported": True,
+            },
+            {
+                "name": "write_file",
+                "description": "Write files in sandbox",
+                "supported": True,
+            },
+            {
+                "name": "read_file",
+                "description": "Read files from sandbox",
+                "supported": True,
+            },
+            {
+                "name": "list_files",
+                "description": "List files in sandbox directory",
+                "supported": True,
+            },
+        ],
+        "sandbox_type": "docker",
+    }
