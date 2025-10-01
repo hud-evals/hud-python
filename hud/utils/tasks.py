@@ -9,7 +9,9 @@ from hud.utils.hud_console import HUDConsole
 hud_console = HUDConsole()
 
 
-def load_tasks(tasks_input: str | list[dict], *, raw: bool = False) -> list[Task] | list[dict]:
+def load_tasks(
+    tasks_input: str | list[dict], *, raw: bool = False, task_id: str | None = None
+) -> list[Task] | list[dict]:
     """Load tasks from various sources.
 
     Args:
@@ -30,7 +32,10 @@ def load_tasks(tasks_input: str | list[dict], *, raw: bool = False) -> list[Task
         # Direct list of task dicts
         hud_console.info(f"Loading {len(tasks_input)} tasks from provided list")
         if raw:
-            return [item for item in tasks_input if isinstance(item, dict)]
+            raw_items = [item for item in tasks_input if isinstance(item, dict)]
+            if task_id:
+                raw_items = [item for item in raw_items if item.get("id") == task_id]
+            return raw_items
         for item in tasks_input:
             task = Task(**item)
             tasks.append(task)
@@ -49,7 +54,10 @@ def load_tasks(tasks_input: str | list[dict], *, raw: bool = False) -> list[Task
                             f"JSON file must contain an array of tasks, got {type(data)}"
                         )
                     if raw:
-                        return [item for item in data if isinstance(item, dict)]
+                        raw_items = [item for item in data if isinstance(item, dict)]
+                        if task_id:
+                            raw_items = [item for item in raw_items if item.get("id") == task_id]
+                        return raw_items
                     for item in data:
                         task = Task(**item)
                         tasks.append(task)
@@ -71,6 +79,8 @@ def load_tasks(tasks_input: str | list[dict], *, raw: bool = False) -> list[Task
                                 f"Invalid JSONL format: expected dict or list of dicts, got {type(item)}"  # noqa: E501
                             )
                     if raw:
+                        if task_id:
+                            raw_items = [item for item in raw_items if item.get("id") == task_id]
                         return raw_items
                     for it in raw_items:
                         task = Task(**it)
@@ -104,6 +114,8 @@ def load_tasks(tasks_input: str | list[dict], *, raw: bool = False) -> list[Task
                         )
                     raw_rows.append(item)
                 if raw:
+                    if task_id:
+                        raw_rows = [item for item in raw_rows if item.get("id") == task_id]
                     return raw_rows
                 for row in raw_rows:
                     task = Task(**row)
@@ -123,5 +135,8 @@ def load_tasks(tasks_input: str | list[dict], *, raw: bool = False) -> list[Task
 
     else:
         raise TypeError(f"tasks_input must be str or list, got {type(tasks_input)}")
+
+    if task_id and not raw:
+        tasks = [task for task in tasks if getattr(task, "id", None) == task_id]
 
     return tasks

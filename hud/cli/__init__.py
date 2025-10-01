@@ -976,6 +976,16 @@ def eval(
         "--group-size",
         help="Number of times to run each task (similar to RL training)",
     ),
+    task_id: str | None = typer.Option(
+        None,
+        "--task-id",
+        help="Specific task ID to run from the dataset (e.g., 'eee45d01')",
+    ),
+    list_ids: bool = typer.Option(
+        False,
+        "--list-ids",
+        help="List all task IDs in the dataset and exit",
+    ),
     integration_test: bool = typer.Option(
         False,
         "--integration-test",
@@ -1092,6 +1102,8 @@ def eval(
         very_verbose=very_verbose,
         vllm_base_url=vllm_base_url,
         group_size=group_size,
+        task_id=task_id,
+        list_ids=list_ids,
         integration_test=integration_test,
     )
 

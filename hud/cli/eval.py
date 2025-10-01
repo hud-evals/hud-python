@@ -196,6 +196,7 @@ async def run_single_task(
     verbose: bool = False,
     vllm_base_url: str | None = None,
     group_size: int = 1,
+    task_id: str | None = None,
 ) -> None:
     """Load one task and execute it, or detect if JSON contains a list and run as dataset."""
 
@@ -211,6 +212,22 @@ async def run_single_task(
         )
         raise typer.Exit(1) from e
 
+    def pick_task(tasks: list[Task], *, fallback_message: str, empty_message: str) -> Task:
+        if task_id:
+            filtered_tasks = [t for t in tasks if getattr(t, "id", None) == task_id]
+            if not filtered_tasks:
+                hud_console.error(f"Task with ID '{task_id}' not found in dataset")
+                raise typer.Exit(1)
+            hud_console.info(f"Found task with ID: {task_id}")
+            return filtered_tasks[0]
+
+        if not tasks:
+            hud_console.error(empty_message)
+            raise typer.Exit(1)
+
+        hud_console.info(fallback_message)
+        return tasks[0]
+
     path = Path(source)
     if path.exists() and (path.suffix in [".json", ".jsonl"]):
         hud_console.info("📊 Loading task file…")
@@ -225,23 +242,25 @@ async def run_single_task(
         except Exception as e:
             hud_console.debug(f"Eval preflight env check skipped: {e}")
 
-        # Single task - use the first (and only) task
-        task = tasks[0]
-        hud_console.info("Found 1 task, running as single task…")
+        # Single task - use the first (and only) task or selected task via ID
+        task = pick_task(
+            tasks,
+            fallback_message="Found 1 task, running as single task…",
+            empty_message=f"No tasks found in: {source}",
+        )
 
     else:
         # Load from HuggingFace dataset or non-file source
         hud_console.info(f"📊 Loading tasks from: {source}…")
         tasks: list[Task] = load_tasks(source)  # type: ignore[assignment]
 
-        if not tasks:
-            hud_console.error(f"No tasks found in: {source}")
-            raise typer.Exit(1)
-
-        # Single task - use the first task
-        task = tasks[0]
-        hud_console.info(
-            "Using first task from dataset (run with --full to run the entire dataset)..."
+        # Single task - use the first task or selected task via ID
+        task = pick_task(
+            tasks,
+            fallback_message=(
+                "Using first task from dataset (run with --full to run the entire dataset)..."
+            ),
+            empty_message=f"No tasks found in: {source}",
         )
 
     task_prompt = task.prompt[:50] + "..." if len(task.prompt) > 50 else task.prompt
@@ -634,6 +653,16 @@ def eval_command(
         "--group-size",
         help="Number of times to run each task (similar to RL training)",
     ),
+    task_id: str | None = typer.Option(
+        None,
+        "--task-id",
+        help="Specific task ID to run from the dataset (e.g., 'eee45d01')",
+    ),
+    list_ids: bool = typer.Option(
+        False,
+        "--list-ids",
+        help="List all task IDs in the dataset and exit",
+    ),
     integration_test: bool = typer.Option(
         False,
         "--integration-test",
@@ -725,6 +754,31 @@ def eval_command(
         hud_console.info("Get your API key at: https://hud.so")
         hud_console.info("Set it in your environment or run: hud set HUD_API_KEY=your-key-here")
 
+    # Handle --list-ids flag first (before any heavy processing)
+    if list_ids:
+        try:
+            from hud.utils.tasks import load_tasks
+        except ImportError as e:
+            hud_console.error(
+                "Dataset dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
+
+        hud_console.info(f"📊 Loading task IDs from: {source}...")
+        tasks: list[Task] = load_tasks(source)  # type: ignore[assignment]
+
+        if not tasks:
+            hud_console.error(f"No tasks found in: {source}")
+            raise typer.Exit(1)
+
+        hud_console.info(f"Found {len(tasks)} tasks:")
+        for i, task in enumerate(tasks):
+            task_id_display = getattr(task, "id", f"<no-id-{i}>")
+            hud_console.info(f"  {task_id_display}: {task.prompt}")
+
+        return
+
     # Parse allowed tools
     allowed_tools_list = (
         [t.strip() for t in allowed_tools.split(",") if t.strip()] if allowed_tools else None
@@ -763,5 +817,6 @@ def eval_command(
                 verbose=very_verbose or verbose,
                 vllm_base_url=vllm_base_url,
                 group_size=group_size,
+                task_id=task_id,
             )
         )
