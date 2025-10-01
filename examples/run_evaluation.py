@@ -51,9 +51,9 @@ from hud.datasets import Task, run_dataset, run_dataset_parallel, run_dataset_pa
 logger = logging.getLogger(__name__)
 
 # Uncomment to enable logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(message)s", datefmt="%H:%M:%S"
-)
+# logging.basicConfig(
+#     level=logging.INFO, format="%(asctime)s - %(name)s - %(message)s", datefmt="%H:%M:%S"
+# )
 
 # ---------------------------------------------------------------------------
 # Agent factory helpers
