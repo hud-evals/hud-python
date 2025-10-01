@@ -8,14 +8,13 @@ from transformers import ProcessorMixin, PreTrainedTokenizer
 from PIL import Image
 from transformers.utils.chat_template_utils import render_jinja_template
 
-from hud.rl.logger import console
 from hud.rl.types import ProcessedInputs
 
 from hud.types import Trace
 
 
 def preprocess_traces(traces: list[Trace], processor: Union[PreTrainedTokenizer, ProcessorMixin]) -> list[ProcessedInputs]:
-    processed_inputs = []
+    processed_inputs: list[ProcessedInputs] = []
     for trace in traces:
         if not trace.messages:
             continue
@@ -48,17 +47,12 @@ def preprocess_traces(traces: list[Trace], processor: Union[PreTrainedTokenizer,
             inputs = processor(
             text=text_list,
             return_offsets_mapping=False,
-        )  # type: ignore
+        ) # type: ignore
 
         assistant_masks = build_assistant_masks(inputs["input_ids"], tokenizer)  # type: ignore
         mask_tensor = torch.tensor(assistant_masks, dtype=torch.long)
 
-        # Ensure mask_tensor is 2D before slicing
-        if mask_tensor.dim() == 1:
-            mask_tensor = mask_tensor.unsqueeze(0)
-
-        # Slice to align with targets [B, T-1]
-        inputs["assistant_mask"] = mask_tensor[:, 1:].bool()
+        inputs["assistant_mask"] = mask_tensor
 
         inputs.convert_to_tensors(tensor_type="pt")
 
@@ -137,13 +131,18 @@ def build_assistant_masks(input_ids: list[list[int]], tokenizer: PreTrainedToken
                 if i_tok < len(seq) and tokenizer.decode([seq[i_tok]]) == "\n":
                     i_tok += 1
 
+                # Skip leading spaces after assistant\n
+                while i_tok < len(seq) and tokenizer.decode([seq[i_tok]]).strip() == "":
+                    i_tok += 1
+
                 # Mark tokens until we hit <|im_end|>
                 while i_tok < len(seq) and seq[i_tok] != id_im_end:
                     mask[i_tok] = 1
                     i_tok += 1
+                
+                # Include the <|im_end|> token
+                mask[i_tok] = 1
 
-                # Skip the <|im_end|> token
-                i_tok += 1
             else:
                 i_tok += 1
 

@@ -44,14 +44,11 @@ def visualize_tokenization(input_ids, assistant_mask, tokenizer):
             if len(display_token) > 8:
                 display_token = display_token[:7] + "…"
 
-            # Determine style based on mask
-            # assistant_mask[j] tells us if we train to predict token j+1
-            # So token i should be green if assistant_mask[i-1] is True
             if i == 0:
                 # First token is never predicted (no previous token)
                 style = "dim white"
-            elif i <= len(assistant_mask):
-                style = "bold green" if assistant_mask[i-1] else "dim white"
+            elif i < len(assistant_mask):
+                style = "bold green" if assistant_mask[i] else "dim white"
             else:
                 style = "dim red"
 
@@ -74,8 +71,8 @@ def visualize_tokenization(input_ids, assistant_mask, tokenizer):
 
         if i == 0:
             full_text.append(token, style="dim white")
-        elif i <= len(assistant_mask):
-            if assistant_mask[i-1]:
+        elif i < len(assistant_mask):
+            if assistant_mask[i]:
                 full_text.append(token, style="bold green")
             else:
                 full_text.append(token, style="dim white")
@@ -112,7 +109,7 @@ def main():
     processor = Qwen2VLProcessor.from_pretrained(model_name)
 
     # Process and visualize all traces
-    num_to_show = len(traces)
+    num_to_show = 5 # len(traces)
 
     for i in range(num_to_show):
         console.print(f"\n[bold cyan]{'=' * 100}[/bold cyan]")
