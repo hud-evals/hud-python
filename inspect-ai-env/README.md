@@ -184,6 +184,43 @@ Customize sandbox connection in `mcp_config` (default is local Docker):
 }
 ```
 
+## Known Issues
+
+### Dataset Preparation Dependencies
+
+**Issue**: Some inspect_ai evals require heavy dependencies during dataset loading (e.g., `hydra-core`, `jinja2`, `torch`, `tiktoken`, `nltk`, `lxml`). Since `prepare_dataset.py` runs on the **host** (not in Docker), these dependencies would need to be installed in your host Python environment.
+
+**Why This Happens**: Some evals do complex processing during dataset loading:
+- `agent_bench`: Generates Docker compose files per sample using jinja2 templates
+- `abstention_bench`: Uses hydra/omegaconf to load YAML configurations
+- `bold`: Loads PyTorch models during dataset initialization
+- `infinite_bench`: Uses tiktoken for token counting in samples
+
+**Solution (Planned)**: Hud will pre-process these complex evals in an environment with all dependencies, then upload the prepared datasets to HuggingFace. This will allow dataset loading without heavyweight dependencies.
+
+**Current Workarounds**:
+
+1. **Skip complex evals**: Many evals work fine without extra deps (bbh, mmlu, mbpp, math, etc.)
+
+2. **Install deps on host** (temporary):
+   ```bash
+   uv pip install hydra-core jinja2 torch tiktoken nltk lxml
+   ```
+
+3. **Use pre-processed datasets** (when available): Coming soon - simplified HF datasets for complex evals
+
+### Deprecated HuggingFace Dataset Scripts
+
+Some evals use custom dataset loading scripts that are deprecated in newer HuggingFace `datasets` versions:
+- `apps`, `bbq`, `medqa`: Error "Dataset scripts are no longer supported"
+
+These will be migrated to modern HuggingFace dataset formats.
+
+### Gated Datasets
+
+Some datasets require manual access approval:
+- `gaia`, `hle`, `mask`, `lingoly`: Visit the dataset page on HuggingFace to request access
+
 ## Troubleshooting
 
 ### Import Errors

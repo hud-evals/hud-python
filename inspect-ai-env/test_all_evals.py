@@ -26,6 +26,21 @@ def read_eval_list(file_path: str = "available_evals.txt") -> list[str]:
     return evals
 
 
+def read_confirmed_working(file_path: str) -> set[str]:
+    """Read list of confirmed working eval names from file."""
+    if not Path(file_path).exists():
+        return set()
+    with open(file_path) as f:
+        return {line.strip() for line in f if line.strip()}
+
+
+def append_confirmed_working(eval_name: str, file_path: str) -> None:
+    """Append an eval name to the confirmed working file."""
+    with open(file_path, "a") as f:
+        f.write(f"{eval_name}\n")
+    print(f"  💾 Saved to {file_path}")
+
+
 def check_mcp_server(url: str = "http://localhost:8765/mcp", timeout: float = 2.0) -> bool:
     """
     Check if MCP server is reachable.
@@ -251,6 +266,12 @@ def main():
         action="store_true",
         help="Skip execution testing (only test dataset preparation)",
     )
+    parser.add_argument(
+        "--confirmed-working",
+        type=str,
+        default="confirmed_working.txt",
+        help="File containing confirmed working evals to skip (default: confirmed_working.txt)",
+    )
     args = parser.parse_args()
 
     print("🧪 Testing inspect_evals with our framework\n")
@@ -279,6 +300,19 @@ def main():
         print("❌ available_evals.txt not found. Run list_all_evals.py first.")
         sys.exit(1)
 
+    # Load confirmed working evals to skip
+    confirmed_working = read_confirmed_working(args.confirmed_working)
+    if confirmed_working:
+        print(f"📋 Loaded {len(confirmed_working)} confirmed working evals from {args.confirmed_working}")
+        # Filter out confirmed working evals
+        original_count = len(eval_list)
+        eval_list = [e for e in eval_list if e not in confirmed_working]
+        skipped_count = original_count - len(eval_list)
+        if skipped_count > 0:
+            print(f"⏩ Skipping {skipped_count} already confirmed working evals\n")
+    else:
+        print(f"📋 No confirmed working file found at {args.confirmed_working}\n")
+
     # Apply limit if specified (random sample)
     if args.limit:
         if args.limit < len(eval_list):
@@ -301,6 +335,14 @@ def main():
         print(f"[{i}/{len(eval_list)}]", end=" ")
         result = test_eval(eval_name, test_execution=test_execution)
         results.append(result)
+
+        # If eval passed both prep and exec, immediately save to confirmed_working
+        if (
+            result["status"] == "PASS"
+            and result.get("prep_status") == "PASS"
+            and (not test_execution or result.get("exec_status") == "PASS")
+        ):
+            append_confirmed_working(eval_name, args.confirmed_working)
 
         # Save results incrementally after each eval
         with open(output_file, "w") as f:

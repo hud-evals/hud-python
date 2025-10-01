@@ -223,7 +223,9 @@ def prepare_dataset(
     if deps_installed:
         print(f"\n✅ Dependencies installed successfully!")
         print(f"⚠️  Please run the command again to use the newly installed packages:")
-        print(f"    uv run python prepare_dataset.py --eval {eval_name} {f'--limit {limit}' if limit else ''}")
+        print(
+            f"    uv run python prepare_dataset.py --eval {eval_name} {f'--limit {limit}' if limit else ''}"
+        )
         sys.exit(0)
 
     # Add default params for evals that need them
@@ -236,6 +238,15 @@ def prepare_dataset(
         if "build_docker_images" not in task_params:
             task_params["build_docker_images"] = False
             print(f"   ℹ️  Setting build_docker_images=False for dataset preparation")
+
+    # Set default model for inspect_ai if not already set
+    # Some evals require a model during task loading for LLM-as-a-judge scoring
+    # This is only used for task definition; actual scoring uses the agent's model
+    if not os.getenv("INSPECT_EVAL_MODEL"):
+        default_model = "openai/gpt-4o"
+        os.environ["INSPECT_EVAL_MODEL"] = default_model
+        print(f"   ℹ️  Set INSPECT_EVAL_MODEL={default_model} for task loading")
+        print(f"      (Actual scoring will use your chosen agent model)")
 
     # Load eval task
     try:
@@ -270,7 +281,7 @@ def prepare_dataset(
         print(f"✅ Saved {len(hud_tasks)} tasks to {output_file}")
         print(f"\n💡 Usage:")
         print(f"   1. Start the sandbox: hud dev --build")
-        print(f"   2. Run evaluation: hud eval {output_file} --agent claude")
+        print(f"   2. Run evaluation: hud eval {output_file} claude")
 
     except Exception as e:
         print(f"❌ Failed to convert tasks: {e}")
@@ -291,7 +302,10 @@ def main():
         "If not provided, uses TARGET_EVAL environment variable.",
     )
     parser.add_argument(
-        "--output", type=str, default=OUTPUT_FILE, help=f"Output file (default: {OUTPUT_FILE})"
+        "--output",
+        type=str,
+        default=OUTPUT_FILE,
+        help=f"Output file (default: {OUTPUT_FILE})",
     )
     parser.add_argument(
         "--limit",
@@ -308,13 +322,17 @@ def main():
 
     # Check if output file already exists
     if os.path.exists(args.output):
-        print(f"❌ {args.output} already exists. Please remove it first or use --output to specify a different file.")
+        print(
+            f"❌ {args.output} already exists. Please remove it first or use --output to specify a different file."
+        )
         sys.exit(1)
 
     # Get eval name
     eval_name = args.eval or os.getenv("TARGET_EVAL")
     if not eval_name:
-        print("❌ No eval specified. Use --eval or set TARGET_EVAL environment variable.")
+        print(
+            "❌ No eval specified. Use --eval or set TARGET_EVAL environment variable."
+        )
         parser.print_help()
         sys.exit(1)
 

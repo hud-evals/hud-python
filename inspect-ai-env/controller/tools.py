@@ -287,7 +287,11 @@ async def git_commit(message: str, path: str = ".", add_all: bool = True) -> str
 
 
 @mcp.tool()
-async def evaluate(sample: dict, solution_file: str = "solution.py") -> EvaluationResult:
+async def evaluate(
+    sample: dict,
+    solution_file: str = "solution.py",
+    scorer_model: str | None = None
+) -> EvaluationResult:
     """
     Evaluate the agent's solution against the sample's expected target.
 
@@ -297,11 +301,16 @@ async def evaluate(sample: dict, solution_file: str = "solution.py") -> Evaluati
     Args:
         sample: The original sample data (from task metadata)
         solution_file: Path to file containing agent's solution (default: "solution.py")
+        scorer_model: Model to use for LLM-as-a-judge scoring (e.g., "openai/gpt-4o")
 
     Returns:
         EvaluationResult with reward and done flag
     """
     global _current_task, _eval_name
+
+    # Log scorer model if provided
+    if scorer_model:
+        logger.info(f"Using scorer model: {scorer_model}")
 
     try:
         # Get agent's output from the solution file

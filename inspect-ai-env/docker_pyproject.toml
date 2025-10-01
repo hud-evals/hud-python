@@ -3,7 +3,19 @@ name = "inspect_ai_env"
 version = "0.1.0"
 description = "A minimal HUD environment"
 requires-python = ">=3.11"
-dependencies = [ "hud-python==0.4.44", "fastapi", "uvicorn[standard]", "httpx>=0.28.1", "psutil", "inspect-ai",]
+dependencies = [
+    "hud-python==0.4.44",
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx>=0.28.1",
+    "psutil",
+    "inspect-ai",
+    "hydra-core",
+    "jinja2",
+    "torch",
+    "tiktoken",
+    "nltk",
+]
 
 [build-system]
 requires = [ "hatchling",]
