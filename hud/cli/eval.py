@@ -68,6 +68,28 @@ def get_available_models() -> list[dict[str, str | None]]:
         return []
 
 
+def _is_litellm_claude_model(model: str | None) -> bool:
+    if not model:
+        return False
+    normalized = model.lower()
+    return "anthropic" in normalized or "claude" in normalized
+
+
+def _select_litellm_agent(model: str | None) -> tuple[type[Any], dict[str, Any]]:
+    from hud.agents.lite_llm import LiteAgent
+
+    if _is_litellm_claude_model(model):
+        from hud.agents.litellm_claude import LiteLLMClaudeAgent
+
+        return LiteLLMClaudeAgent, {
+            "model": model or "openrouter/anthropic/claude-sonnet-4",
+        }
+
+    return LiteAgent, {
+        "model_name": model or "gpt-4o-mini",
+    }
+
+
 def build_agent(
     agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"],
     *,
@@ -147,7 +169,7 @@ def build_agent(
 
     elif agent_type == "litellm":
         try:
-            from hud.agents.lite_llm import LiteAgent
+            agent_class, agent_kwargs = _select_litellm_agent(model)
         except ImportError as e:
             hud_console.error(
                 "LiteLLM agent dependencies are not installed. "
@@ -155,11 +177,10 @@ def build_agent(
             )
             raise typer.Exit(1) from e
 
-        return LiteAgent(
-            model_name=model or "gpt-4o-mini",
-            allowed_tools=allowed_tools,
-            verbose=verbose,
-        )
+        agent_kwargs["verbose"] = verbose
+        agent_kwargs["allowed_tools"] = allowed_tools
+
+        return agent_class(**agent_kwargs)
 
     # Fallback Claude agent (Anthropic)
     try:
@@ -303,13 +324,16 @@ async def run_single_task(
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
     elif agent_type == "litellm":
-        from hud.agents.lite_llm import LiteAgent
+        try:
+            agent_class, agent_config = _select_litellm_agent(model)
+        except ImportError as e:
+            hud_console.error(
+                "LiteLLM agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
 
-        agent_class = LiteAgent
-        agent_config = {
-            "model_name": model or "gpt-4o-mini",
-            "verbose": verbose,
-        }
+        agent_config["verbose"] = verbose
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
     elif agent_type == "claude":
@@ -459,9 +483,7 @@ async def run_full_dataset(
 
     elif agent_type == "litellm":
         try:
-            from hud.agents.lite_llm import LiteAgent
-
-            agent_class = LiteAgent
+            agent_class, agent_config = _select_litellm_agent(model)
         except ImportError as e:
             hud_console.error(
                 "LiteLLM agent dependencies are not installed. "
@@ -469,10 +491,7 @@ async def run_full_dataset(
             )
             raise typer.Exit(1) from e
 
-        agent_config = {
-            "model_name": model or "gpt-4o-mini",
-            "verbose": verbose,
-        }
+        agent_config["verbose"] = verbose
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
 
