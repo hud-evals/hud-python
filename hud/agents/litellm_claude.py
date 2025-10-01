@@ -55,7 +55,7 @@ class LiteLLMClaudeAgent(MCPAgent):
         super().__init__(**kwargs)
 
         self.model = model
-        self.model_name = f"litellm-{self.model}"
+        self.model_name = self.model
         self.max_tokens = max_tokens
         self.use_computer_beta = use_computer_beta
         self.completion_kwargs = completion_kwargs or {}
@@ -92,13 +92,8 @@ class LiteLLMClaudeAgent(MCPAgent):
     #
 
     async def get_system_messages(self) -> list[dict[str, Any]]:
-        # LiteLLM accepts a system message in chat.completions format
-        return [
-            {
-                "role": "system",
-                "content": [{"type": "text", "text": self.system_prompt}],
-            }
-        ]
+        # Anthropic expects the system prompt as a top-level argument, not a chat message.
+        return []
 
     async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[dict[str, Any]]:
         """Convert MCP content blocks to LiteLLM chat message format."""
@@ -107,12 +102,15 @@ class LiteLLMClaudeAgent(MCPAgent):
             if isinstance(block, types.TextContent):
                 parts.append({"type": "text", "text": block.text})
             elif isinstance(block, types.ImageContent):
-                # Use image_url with data URI (what LiteLLM's docs show for Anthropic tools)
                 mime = getattr(block, "mimeType", "image/png")
                 parts.append(
                     {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{mime};base64,{block.data}"},
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": mime,
+                            "data": block.data,
+                        },
                     }
                 )
         return [{"role": "user", "content": parts}]
@@ -131,12 +129,30 @@ class LiteLLMClaudeAgent(MCPAgent):
         # Build request
         request_kwargs = self._build_litellm_request(messages_cached)
 
-        try:
-            response = await litellm.acompletion(**request_kwargs)
-        except Exception as e:
-            err = f"Error from LiteLLM: {e}"
-            self.hud_console.warning_log(err)
-            return AgentResponse(content=err, tool_calls=[], done=True, isError=True, raw=None)
+        attempt_messages = messages_cached
+        while True:
+            try:
+                request_kwargs["messages"] = attempt_messages
+                response = await litellm.acompletion(**request_kwargs)
+                break
+            except Exception as e:
+                msg = str(e).lower()
+                too_long = (
+                    "prompt is too long" in msg
+                    or "request_too_large" in msg
+                    or "413" in msg
+                )
+                if too_long and len(attempt_messages) > 21:
+                    attempt_messages = [attempt_messages[0], *attempt_messages[-20:]]
+                    self.hud_console.warning(
+                        "Prompt too long via LiteLLM; truncating history and retrying"
+                    )
+                    continue
+                err = f"Error from LiteLLM: {e}"
+                self.hud_console.warning_log(err)
+                return AgentResponse(
+                    content=err, tool_calls=[], done=True, isError=True, raw=None
+                )
 
         choice = response.choices[0]
         msg = choice.message  # OpenAI-style ChatCompletionMessage proxy from LiteLLM
@@ -203,7 +219,14 @@ class LiteLLMClaudeAgent(MCPAgent):
                     tool_input = block.get("input", {})
                     if not isinstance(tool_input, dict):
                         tool_input = {}
-                    result.tool_calls.append(MCPToolCall(id=tool_id, name=mcp_name, arguments=tool_input))
+                    result.tool_calls.append(
+                        MCPToolCall(
+                            id=tool_id,
+                            name=mcp_name,
+                            arguments=tool_input,
+                            claude_name=tool_name,
+                        )
+                    )
                     tool_calls_found = True
                 elif btype == "text":
                     plain_text += block.get("text", "")
@@ -296,9 +319,13 @@ class LiteLLMClaudeAgent(MCPAgent):
             claude_tools.append(
                 {
                     "type": ctype,
-                    "name": "computer",
-                    "display_width_px": self.metadata["display_width"],
-                    "display_height_px": self.metadata["display_height"],
+                    "function": {
+                        "name": "computer",
+                        "parameters": {
+                            "display_width_px": self.metadata["display_width"],
+                            "display_height_px": self.metadata["display_height"],
+                        },
+                    },
                 }
             )
             self._claude_to_mcp_tool_map["computer"] = selected_computer_tool.name
@@ -340,18 +367,6 @@ class LiteLLMClaudeAgent(MCPAgent):
         # Claude 3.5 Sonnet era
         return "computer_20241022"
 
-    def _computer_beta_header(self) -> str:
-        """Return the Anthropic beta tag matching the selected computer tool."""
-        ctype = None
-        for tool in self.claude_tools:
-            if isinstance(tool, dict) and str(tool.get("type", "")).startswith("computer_"):
-                ctype = tool["type"]
-                break
-        if ctype == "computer_20250124":
-            return "computer-use-2025-01-24"
-        # default / legacy
-        return "computer-use-2024-10-22"
-
     def _build_litellm_request(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
         """
         Build the kwargs for litellm.acompletion(...) matching the Anthropic MCP flow.
@@ -363,25 +378,14 @@ class LiteLLMClaudeAgent(MCPAgent):
             "model": self.model,
             "messages": messages,
             "tools": self.claude_tools,
-            "tool_choice": "auto",  # Anthropic supports this via LiteLLM
+            "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
             "max_tokens": self.max_tokens,
             # Be resilient when routing to non-Anthropic backends (OpenRouter, etc.)
             "drop_params": True,
             **extra,
         }
 
-        # Opt into computer-use beta where appropriate
-        if self.use_computer_beta and any(
-            t.get("type", "").startswith("computer_") for t in self.claude_tools
-        ):
-            beta = self._computer_beta_header()
-
-            # Pass both forms; LiteLLM will forward what applies per provider
-            # - "betas" works on Anthropic API; "extra_headers" covers proxy/Bedrock paths.
-            existing_headers = kwargs.get("extra_headers", {}) or {}
-            existing_headers.setdefault("anthropic-beta", beta)
-            kwargs["extra_headers"] = existing_headers
-            kwargs.setdefault("betas", [beta])
+        kwargs["system"] = self.system_prompt
 
         return kwargs
 
@@ -401,8 +405,12 @@ class LiteLLMClaudeAgent(MCPAgent):
         content = last.get("content")
         if isinstance(content, list):
             for block in content:
-                if isinstance(block, dict) and block.get("type") in {"text", "image_url"}:
-                    # Anthropic example allows cache_control on text blocks; we include it on both
+                if isinstance(block, dict) and block.get("type") in {
+                    "text",
+                    "image",
+                    "tool_use",
+                    "tool_result",
+                }:
                     block["cache_control"] = {"type": "ephemeral"}  # type: ignore[typeddict-item]
         return msgs
 
