@@ -140,7 +140,7 @@ def trace(
     else:
         # Use a placeholder for custom backends
         logger.warning(
-            "HUD API key is not set, using a placeholder for the task run ID. If this looks wrong, check your API key." # noqa: E501
+            "HUD API key is not set, using a placeholder for the task run ID. If this looks wrong, check your API key."  # noqa: E501
         )
         task_run_id = str(uuid.uuid4())
 

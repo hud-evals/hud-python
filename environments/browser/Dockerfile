@@ -48,17 +48,20 @@ WORKDIR /app
 # Install git for dependency installation
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
-# Install all dependencies from single pyproject.toml
-COPY pyproject.toml .
-COPY controller/ ./controller/
-
-# Install everything from the main pyproject.toml
-RUN uv pip install --system --break-system-packages -e .
-
-# Install Playwright browsers once for the whole system
+# Install Playwright
+RUN uv pip install --system --break-system-packages playwright
 RUN python3 -m playwright install chromium --with-deps
 
-# Layer 3: Copy the rest of environment folder (source code)
+# Layer 1: Install server dependencies
+COPY server/pyproject.toml /app/server/
+RUN cd /app/server && uv pip install --system --break-system-packages .
+
+# Layer 2: Install environment dependencies
+COPY environment/pyproject.toml /app/environment/
+RUN cd /app/environment && uv pip install --system --break-system-packages .
+
+# Layer 3: Copy source code (changes here don't invalidate dependency layers)
+COPY server/ /app/server/
 COPY environment/ /app/environment/
 
 # Auto-discover and install/build all frontend apps
@@ -88,13 +91,19 @@ ENV MCP_TRANSPORT="stdio"
 ENV HUD_LOG_STREAM="stderr"
 ENV PYTHONUNBUFFERED="1"
 ENV PYTHONWARNINGS="ignore::SyntaxWarning:pyautogui"
+ENV DISPLAY=":1"
+ENV PYTHONPATH=/app
 
 # Expose ports
 EXPOSE 8000 8080 3000-3200 5000-5200
 
-# Simple startup: environment server in background, controller with hot-reload
+# Simple startup: HUD_DEV=1 enables hot-reload; otherwise run production
 CMD ["sh", "-c", "\
-    cd /app && uv run --no-sync uvicorn environment.server:app --host 0.0.0.0 --port 8000 --reload --log-level info >&2 & \
-    sleep 5 && \
-    cd /app && exec hud run controller --reload\
-"] 
+    if [ \"${HUD_DEV:-0}\" = \"1\" ]; then \
+      uvicorn environment.server:app --host 0.0.0.0 --port 8000 --reload --log-level warning >&2 & \
+      sleep 5 && cd /app/server && exec hud dev server.main --stdio; \
+    else \
+      uvicorn environment.server:app --host 0.0.0.0 --port 8000 --log-level warning >&2 & \
+      sleep 5 && cd /app/server && exec python3 -m server.main; \
+    fi\
+"]

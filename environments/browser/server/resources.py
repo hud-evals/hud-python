@@ -4,15 +4,18 @@ import json
 import os
 from datetime import datetime
 
-from controller import mcp
+from hud.server import MCPRouter
+
+# Create router for this module
+router = MCPRouter()
 
 
-@mcp.resource("telemetry://live")
+@router.resource("telemetry://live")
 async def get_telemetry() -> str:
     """MCP resource containing telemetry data including VNC live_url."""
     telemetry_data = {
         "live_url": "http://localhost:8080/vnc.html",
-        "display": os.getenv("DISPLAY", ":1"),
+        "display": os.getenv("DISPLAY", ":0"),
         "vnc_port": 8080,
         "websockify_port": 8080,
         "status": "ready",

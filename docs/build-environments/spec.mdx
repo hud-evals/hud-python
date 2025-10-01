@@ -114,7 +114,9 @@ The same structure is used by `hud init`’s template and by programmatic tasks.
       }
     }
   },
-  "agent_tools": ["act"],
+  "agent_config": {
+    "allowed_tools": ["act"]
+  },
   "setup_tool": { "name": "setup", "arguments": {} },
   "evaluate_tool": { "name": "evaluate", "arguments": {"target": 10} }
 }
@@ -132,7 +134,9 @@ The same structure is used by `hud init`’s template and by programmatic tasks.
         "args": ["run", "--rm", "-i", "my-env:latest"]
       }
     },
-    "agent_tools": ["act"],
+    "agent_config": {
+      "allowed_tools": ["act"]
+    },
     "setup_tool": { "name": "setup", "arguments": {} },
     "evaluate_tool": { "name": "evaluate", "arguments": {"target": 10} }
   }

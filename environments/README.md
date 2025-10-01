@@ -156,24 +156,24 @@ For Python-based MCP environments, use this standard structure:
 ```
 my-environment/
 ├── Dockerfile
-├── pyproject.toml          # Package definition with dependencies
-├── README.md               # Environment documentation
-└── src/
-    └── my_module/          # Your Python package
-        ├── __init__.py
-        ├── server.py       # MCP server entry point
-        ├── context.py      # Core stateful environment logic (optional)
-        ├── tools/          # Interactive tools (move, click, type, etc.)
-        │   ├── __init__.py
-        │   └── move.py     # Example: custom tool inheriting from BaseTool
-        ├── setup/          # Setup functions (modular approach)
-        │   ├── __init__.py # Creates SetupTool instance & exports decorator
-        │   ├── basic.py    # Basic setup functions
-        │   └── advanced.py # Advanced setup functions
-        └── evaluate/       # Evaluator functions (modular approach)
-            ├── __init__.py # Creates EvaluateTool instance & exports decorator
-            ├── checks.py   # Basic evaluation checks
-            └── metrics.py  # Advanced metrics evaluators
+├── README.md
+├── server/                 # MCP server package
+│   ├── pyproject.toml      # MCP dependencies (hud-python, etc.)
+│   ├── __init__.py         # Empty package marker
+│   ├── main.py             # mcp = MCPServer() + lifecycle hooks
+│   ├── tools.py            # router = MCPRouter() + @router.tool decorators
+│   ├── setup/              # Setup router (modular approach)
+│   │   ├── __init__.py
+│   │   ├── basic.py        # Basic setup functions
+│   │   └── advanced.py     # Advanced setup functions
+│   └── evaluate/           # Evaluate router (modular approach)
+│       ├── __init__.py
+│       ├── checks.py       # Basic evaluation checks
+│       └── metrics.py      # Advanced metrics evaluators
+└── environment/            # Backend service package
+    ├── pyproject.toml      # Backend dependencies (fastapi, uvicorn)
+    ├── __init__.py
+    └── server.py           # FastAPI app with /health, /act, /reset, /state
 ```
 
 This structure enables:
@@ -607,51 +607,62 @@ Once all of the above works you can unleash *hundreds* of concurrent agents on y
 
 ## Phase 5 – Hot-Reload Development
 
-To enable rapid development without Docker rebuilds, we can mount the source code and use hot-reload. The HUD CLI provides a built-in development proxy that handles all the complexity:
+For rapid local development, run the controller and environment servers separately. This enables instant code updates without Docker rebuilds.
 
+### Development Setup
+
+You'll need **two terminal windows** for local development:
+
+#### Terminal 1: MCP Server
 ```bash
-# Navigate to your environment directory
-cd environments/my-environment
+cd environments/my-environment/server
+hud dev                  # Auto-detects and runs with hot-reload
 
-# Start the development proxy with hot-reload
-hud dev --build
-
-# Output:
-# 📦 Using cached image: hud-my-environment:dev
-# "hud-my-environment": {
-#   "url": "http://localhost:8765/mcp"
-# }
-# ✨ Add to Cursor: cursor://anysphere.cursor-deeplink/mcp/install?name=...
-# 🌐 Reloading proxy live, press Ctrl+C to stop
+# Optional flags:
+hud dev --inspector      # Launch MCP Inspector
+hud dev --interactive    # Launch interactive testing mode
+hud dev --stdio          # Use stdio transport (default: HTTP)
+hud dev --watch ../shared  # Watch additional directories
 ```
 
-This command:
-- Auto-detects or builds your Docker image with `:dev` tag
-- Mounts `./src` to `/app/src` for instant code updates
-- Uses watchfiles to monitor file changes and restart automatically
-- Exposes an HTTP endpoint for Cursor integration
-- Caches the image name in `pyproject.toml` for faster subsequent runs
+The `hud dev` command:
+- Auto-detects the MCP module in the current directory
+- Watches for file changes and reloads automatically
+- Runs on HTTP by default (http://localhost:8765/mcp)
+- Can launch MCP Inspector for testing tools
+- Can launch interactive mode for manual testing
 
-#### Quick Cursor Setup
+#### Terminal 2: Environment Server (Backend)
+```bash
+cd environments/my-environment/environment
+uvicorn server:app --reload  # Standard uvicorn with hot-reload
+```
 
-Either click the deeplink URL from the output, or manually add to `.cursor/mcp.json`:
+For the backend, we simply use `uvicorn` directly since it already provides excellent hot-reload capabilities.
+
+### Development Workflow
+
+1. Start both servers in separate terminals
+2. Edit code in either `server/` or `environment/` - changes reload automatically
+3. Test changes immediately without rebuilding Docker images
+4. Use MCP Inspector or interactive mode to test tools
+5. When ready, build the complete Docker image: `hud build`
+
+### Quick Cursor Setup
+
+Add to `.cursor/mcp.json` (or use the deeplink from `hud dev` output):
 
 ```json
 {
   "mcpServers": {
-    "hud-my-environment": {
+    "my-environment-dev": {
       "url": "http://localhost:8765/mcp"
     }
   }
 }
 ```
 
-### Development Workflow
-
-1. Keep `hud dev` running in one terminal - it automatically handles reloads
-2. Edit your code in `src/` - changes take effect immediately
-3. Test changes in another terminal with `hud analyze` or the interactive mode
-4. Use Cursor/Claude to iterate quickly on your environment
+**Note**: Make sure both MCP server and environment backend are running when using with Cursor or agents.
 
 ### Process Separation for Stateful Environments
 

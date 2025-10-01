@@ -1,40 +1,39 @@
 # Browser Environment
 
-A browser automation environment for HUD that provides GUI access and web app interaction capabilities. This environment supports hot-reloading during development while maintaining persistent state.
+Browser automation environment with GUI access for testing web applications. Includes sample apps (2048, Todo) and supports hot-reload development.
 
-## Quick Start
+## Architecture
 
-### Interactive Development
+**`environment/`** - Produces structured data
+- FastAPI backend with X11/VNC services (Linux-only)
+- Launches and manages web apps (Next.js frontends + Python backends)
+- Exposes HTTP endpoints for app control and state
+
+**`server/`** - Wraps data in MCP tools
+- Browser automation tools (Playwright, computer vision)
+- Setup tools (launch apps, seed data)
+- Evaluation tools (check game state, todo completion)
+
+**Why separate?** The environment backend requires X11/VNC/Chromium (Docker-only). The MCP server tools can be edited with hot-reload, while the heavy environment stays running.
+
+## Development
+
+This environment **requires Docker** due to X11/VNC dependencies.
+
 ```bash
-# 1. Configure your API keys (optional - only needed for evaluation)
-# Edit .env file to add your HUD_API_KEY and ANTHROPIC_API_KEY
+# Build first (creates hud-browser:0.1.0)
+hud build
 
-# 2. Start the environment (optional: with inspector)
-hud dev --build --inspector
-
-# 3. Choose your preferred way to test:
-
-# Option A: Run the task with Claude (requires ANTHROPIC_API_KEY)
-hud eval tasks.json --agent claude
-
-# Option B: Interactive notebook test_env.ipynb (great for learning!)
-# Requires installation:
-pip install hud-python[agents]
-
-# Option C: Simple Python script (runs all tasks from tasks.json)
-python test_task.py
+# Start with hot-reload
+hud dev
 ```
 
-## How HUD Environments Work
+When you run `hud dev` in an environment with a Dockerfile, it automatically:
+- Detects Docker mode is needed
+- Mounts `server/` and `environment/` as volumes
+- Enables hot-reload for both layers
 
-The environment is split into two components:
-
-- **`env.py`** - Stateful logic that persists across reloads
-- **`server.py`** - MCP server with tools (reloads on file changes)
-
-This separation is crucial for `hud dev` - it allows you to modify the MCP tools and see changes immediately without losing the environment state. The environment runs as a separate process and communicates via socket, while the server can be restarted freely.
-
-If you are ever seeing issues with the environment itself, running `hud dev --full-reload` will reload both the environment and the server.
+Edit files in `server/` or `environment/` and they reload inside the container!
 
 ## Publishing Your Environment
 

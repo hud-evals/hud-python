@@ -1,18 +1,43 @@
-"""Controller lifecycle hooks.
-
-Provides a shutdown hook that:
-- Requests the environment backend to shutdown
-- Closes local tool/resources (Playwright, HTTP client)
-"""
+"""Browser server - MCP tools for browser automation."""
 
 import contextlib
 import logging
 import sys
+from hud.server import MCPServer
+from hud.tools import HudComputerTool, AnthropicComputerTool, OpenAIComputerTool
 
-from controller import mcp, http_client
-from controller.tools import playwright
-
+# Configure logging
+logging.basicConfig(
+    stream=sys.stderr,
+    level=logging.INFO,
+    format="[%(levelname)s] %(asctime)s | %(name)s | %(message)s",
+)
 logger = logging.getLogger(__name__)
+
+# MCP server instance
+mcp = MCPServer(name="HUD Browser Environment")
+
+from server.shared import ENV_SERVER_URL, http_client, playwright
+
+# Register tools
+mcp.tool(playwright)
+mcp.tool(HudComputerTool(display_num=1))
+mcp.tool(AnthropicComputerTool(display_num=1))
+mcp.tool(OpenAIComputerTool(display_num=1))
+
+# Import and register routers
+from server.tools import router as tools_router
+from server.resources import router as resources_router
+from server.setup import router as setup_router
+from server.evaluate import router as evaluate_router
+
+# Include regular routers
+mcp.include_router(tools_router)
+mcp.include_router(resources_router)
+
+# Include hidden routers (tools dispatched through single tool)
+mcp.include_router(setup_router, hidden=True)
+mcp.include_router(evaluate_router, hidden=True)
 
 
 async def shutdown_env() -> str:
@@ -50,3 +75,10 @@ async def on_shutdown() -> None:
             await http_client.aclose()
         except Exception as exc:  # noqa: BLE001
             logger.warning("HTTP client close failed: %s", exc)
+
+
+__all__ = ["mcp", "http_client", "ENV_SERVER_URL"]
+
+
+if __name__ == "__main__":
+    mcp.run()

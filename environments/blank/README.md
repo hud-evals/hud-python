@@ -1,63 +1,76 @@
-# test-test
+# Blank Environment
 
-## Environment design pattern
-- Controller (Think of this as a frontend in web development)
-  - Creates the UX and manages the lifecycle of an app (in this case for an agent)
-  - Define `mcp = MCPServer()` and register `@mcp.tool` as tools the agent can interact with
-- Environment (Think of this as a backend in web development)
-  - Owns all long‑lived states of the environment and exposes the environment data structure
-  - Expose simple HTTP endpoints (`/health`, `/act`, `/reset`, `/state`)
+Minimal starter template for building HUD environments.
+See [docs](https://docs.hud.so/build-environments) for the complete environment design workflow.
 
-IMPORTANT: Make sure all logs are going to stderr instead of stdio, which is reserved for MCP communication
+## Architecture
 
-### Testing your environment
+**`environment/`** - Produces structured data
+- Owns all state (game logic, browser sessions, databases, etc.)
+- Exposes HTTP endpoints `/health`, `/act`, `/reset`, `/state` that return structured information about the environment state
+
+**`server/`** - Wraps data in MCP tools
+- Calls environment endpoints to get structured data for the agent, and environment setup/evaluation
+- Agents and tasks interact only with these tools!
+
+**Why separate?** Edit tools for the agent or tasks without restarting the heavy environment backend.
+
+## Development
+
 ```bash
-# 1. Configure your API keys (optional - only needed for evaluation)
-# Edit .env file to add your HUD_API_KEY and ANTHROPIC_API_KEY
+# Terminal 1 - Environment backend
+cd environment
+uv run uvicorn server:app --reload
 
-# 2. Start the environment (optional: with --inspector or --interactive)
-hud dev --build --interactive
-
-# 3. Choose your preferred way to test:
-
-# Option A: Run the task with Claude (requires ANTHROPIC_API_KEY)
-hud eval tasks.json --agent claude
-
-# Option B: Interactive notebook test_env.ipynb (great for learning!)
-
-# Option C: Simple Python script (runs all tasks from tasks.json)
-python test_task.py
+# Terminal 2 - MCP server
+cd server
+uv run hud dev
 ```
 
-## Iterating on your environment
-This is usually the process for making any environment better:
+Uncomment the `setup` tool in `server/tools.py`, save, and watch it reload.
+Visit http://localhost:8765/docs to see the new tool appear instantly.
+
+In general, we recommend starting work on the environment backend first, then developing the MCP server to expose the right things to the agent.
+
+For complex environments that require many dependencies, we recommend running `hud dev` in the environment root:
 ```bash
-# 1. Start the environment and interact with it directly (or give MCP server to an agent):
-hud dev --build --interactive
+cd ..
+hud dev
+```
 
-# 2. If the environment cannot start or fails inexplicably:
-hud debug test_env:dev # Or your env name that appears when you run hud dev
-# After fixing the error, go back to 1.
-
-# 3. When the environment is in a stable state:
+## Tasks & Evaluation
+```bash
+# Build first in the global folder with the Dockerfile (creates blank:0.1.0)
 hud build
-hud push # Requires docker login
-
-# 4. As soon as it's pushed to the newest version, make sure tasks have it updated and run:
-hud rl
-# This is a good test to see if your environment and tasks are high quality!
-
-## Layout
 ```
-controller/
-  __init__.py   # mcp + shared HTTP client
-  __main__.py   # python -m controller → mcp.run()
-  hooks.py      # @mcp.initialize / @mcp.shutdown
-  tools.py      # @mcp.tool act / setup / evaluate
 
-./environment
-  ├── __init__.py
-  └── server.py       # FastAPI app: /health, /act, /reset, /state
+Your `tasks.json` uses `docker run` to launch the environment:
+
+```json
+{
+  "prompt": "Your task prompt",
+  "mcp_config": {
+    "local": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "blank:0.1.0"]
+    }
+  }
+}
+```
+
+**Commands:**
+```bash
+# Build first
+hud build
+
+# Test task locally
+hud eval tasks.json
+
+# Push environment for remote running
+hud push
+
+# Production RL training
+hud rl tasks.json  # Auto-converts docker→remote, builds & pushes if needed
 ```
 
 ## Publishing Your Environment

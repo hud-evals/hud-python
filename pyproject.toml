@@ -1,6 +1,6 @@
 [project]
 name = "hud-python"
-version = "0.4.47"
+version = "0.4.49"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
@@ -209,9 +209,6 @@ lint.ignore = [
 
 [tool.ruff.format]
 docstring-code-format = true
-
-[tool.ruff.lint.isort]
-required-imports = ["from __future__ import annotations"]
 
 [tool.ruff.lint.flake8-type-checking]
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]

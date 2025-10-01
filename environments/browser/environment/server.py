@@ -12,6 +12,7 @@ from typing import Optional, Dict, List, Any, Set
 import socket
 from contextlib import asynccontextmanager
 import shutil
+import httpx
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -149,6 +150,7 @@ class ServiceManager:
                     "--disable-web-security",
                     "--disable-features=IsolateOrigins,site-per-process",
                     "--display=:1",
+                    "--start-maximized",
                 ],
                 env={**os.environ, "DISPLAY": ":1"},
             )
@@ -159,7 +161,9 @@ class ServiceManager:
             await self._wait_for_port(self.cdp_port, "CDP", timeout=30)
 
             # Open a default page so the browser window is visible
-            default_context = await self._browser.new_context()
+            default_context = await self._browser.new_context(
+                viewport={"width": 1920, "height": 1080}, no_viewport=False
+            )
             default_page = await default_context.new_page()
             await default_page.goto("about:blank")
             logger.info("Opened default browser page")
@@ -355,6 +359,42 @@ class ServiceManager:
             await asyncio.sleep(0.2)
         raise TimeoutError(f"Port {port} did not become available for {service_name}")
 
+    async def get_cdp_websocket_url(self) -> str | None:
+        """Discover the actual CDP WebSocket URL from Chrome's /json/version endpoint."""
+        if not self.cdp_port:
+            return None
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"http://localhost:{self.cdp_port}/json/version", timeout=5.0
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    # Chrome returns webSocketDebuggerUrl in /json/version response
+                    websocket_url = data.get("webSocketDebuggerUrl")
+                    if websocket_url:
+                        return websocket_url
+
+                # Fallback: try /json/list to find a browser target
+                response = await client.get(
+                    f"http://localhost:{self.cdp_port}/json/list", timeout=5.0
+                )
+                if response.status_code == 200:
+                    targets = response.json()
+                    # Look for a browser target (type 'page' or title containing 'about:blank')
+                    for target in targets:
+                        if target.get("type") == "page" or "about:blank" in target.get("url", ""):
+                            websocket_url = target.get("webSocketDebuggerUrl")
+                            if websocket_url:
+                                return websocket_url
+
+        except Exception as e:
+            logger.warning(f"Failed to discover CDP WebSocket URL: {e}")
+
+        # Final fallback to generic path (may not work)
+        return f"ws://localhost:{self.cdp_port}/devtools/browser"
+
 
 # Global service manager instance
 service_manager = ServiceManager()
@@ -436,9 +476,13 @@ async def get_cdp():
     """Return the CDP websocket URL for connecting Playwright/Chromium clients."""
     if service_manager.cdp_port is None:
         raise HTTPException(status_code=503, detail="CDP not available")
-    # Browser root websocket path varies; most clients accept ws://host:port/devtools/browser
-    # The exact UUID path can be discovered via /json/version, but controllers can use that as well.
-    return {"ws": f"ws://localhost:{service_manager.cdp_port}/devtools/browser"}
+
+    # Discover the actual CDP WebSocket URL from Chrome
+    websocket_url = await service_manager.get_cdp_websocket_url()
+    if not websocket_url:
+        raise HTTPException(status_code=503, detail="CDP WebSocket URL not available")
+
+    return {"ws": websocket_url}
 
 
 @app.post("/shutdown")

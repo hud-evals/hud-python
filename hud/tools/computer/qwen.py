@@ -64,12 +64,20 @@ class QwenComputerTool(HudComputerTool):
             description
             or f"""
 Use a mouse and keyboard to interact with a computer, and take screenshots.
-* This is an interface to a desktop GUI. You do not have access to a terminal or applications menu. You must click on desktop icons to start applications.
-* Some applications may take time to start or process actions, so you may need to wait and take successive screenshots to see the results of your actions. E.g. if you click on Firefox and a window doesn't open, try wait and taking another screenshot.
+* This is an interface to a desktop GUI. You do not have access to a terminal or
+applications menu. You must click on desktop icons to start applications.
+* Some applications may take time to start or process actions, so you may need to
+wait and take successive screenshots to see the results of your actions. E.g. if you
+click on Firefox and a window doesn't open, try wait and taking another screenshot.
 * The screen's resolution is {width}x{height}.
-* Whenever you intend to move the cursor to click on an element like an icon, you should consult a screenshot to determine the coordinates of the element before moving the cursor.
-* If you tried clicking on a program or link but it failed to load, even after waiting, try adjusting your cursor position so that the tip of the cursor visually falls on the element that you want to click.
-* Make sure to click any buttons, links, icons, etc with the cursor tip in the center of the element. Don't click boxes on their edges.
+* Whenever you intend to move the cursor to click on an element like an icon, you
+should consult a screenshot to determine the coordinates of the element before
+moving the cursor.
+* If you tried clicking on a program or link but it failed to load, even after
+waiting, try adjusting your cursor position so that the tip of the cursor visually
+falls on the element that you want to click.
+* Make sure to click any buttons, links, icons, etc with the cursor tip in the
+center of the element. Don't click boxes on their edges.
 """.strip()
         )
 
@@ -99,19 +107,28 @@ Use a mouse and keyboard to interact with a computer, and take screenshots.
                     "action": {
                         "description": """
 The action to perform. The available actions are:
-* `key`: Performs key down presses on the arguments passed in order, then performs key releases in reverse order.
+* `key`: Performs key down presses on the arguments passed in order, then performs
+key releases in reverse order.
 * `type`: Type a string of text on the keyboard.
-* `mouse_move`: Move the cursor to a specified (x, y) pixel coordinate on the screen.
-* `left_click`: Click the left mouse button at a specified (x, y) pixel coordinate on the screen.
-* `left_click_drag`: Click and drag the cursor to a specified (x, y) pixel coordinate on the screen.
-* `right_click`: Click the right mouse button at a specified (x, y) pixel coordinate on the screen.
-* `middle_click`: Click the middle mouse button at a specified (x, y) pixel coordinate on the screen.
-* `double_click`: Double-click the left mouse button at a specified (x, y) pixel coordinate on the screen.
-* `triple_click`: Triple-click the left mouse button at a specified (x, y) pixel coordinate on the screen.
+* `mouse_move`: Move the cursor to a specified (x, y) pixel coordinate on the
+screen.
+* `left_click`: Click the left mouse button at a specified (x, y) pixel coordinate
+on the screen.
+* `left_click_drag`: Click and drag the cursor to a specified (x, y) pixel
+coordinate on the screen.
+* `right_click`: Click the right mouse button at a specified (x, y) pixel
+coordinate on the screen.
+* `middle_click`: Click the middle mouse button at a specified (x, y) pixel
+coordinate on the screen.
+* `double_click`: Double-click the left mouse button at a specified (x, y) pixel
+coordinate on the screen.
+* `triple_click`: Triple-click the left mouse button at a specified (x, y) pixel
+coordinate on the screen.
 * `scroll`: Performs a scroll of the mouse scroll wheel.
 * `hscroll`: Performs a horizontal scroll.
 * `wait`: Wait specified seconds for the change to happen.
-* `terminate`: Terminate the current task and report its completion status (NOT SUPPORTED).
+* `terminate`: Terminate the current task and report its completion status
+(NOT SUPPORTED).
 * `answer`: Answer a question (NOT SUPPORTED).
 """.strip(),
                         "enum": [
@@ -141,11 +158,18 @@ The action to perform. The available actions are:
                         "type": "string",
                     },
                     "coordinate": {
-                        "description": "(x, y): The x (pixels from the left edge) and y (pixels from the top edge) coordinates to move the mouse to.",
+                        "description": (
+                            "(x, y): The x (pixels from the left edge) and y "
+                            "(pixels from the top edge) coordinates to move the mouse to."
+                        ),
                         "type": "array",
                     },
                     "pixels": {
-                        "description": "The amount of scrolling to perform. Positive values scroll up, negative values scroll down. Required only by `action=scroll` and `action=hscroll`.",
+                        "description": (
+                            "The amount of scrolling to perform. Positive values scroll up, "
+                            "negative values scroll down. Required only by `action=scroll` "
+                            "and `action=hscroll`."
+                        ),
                         "type": "number",
                     },
                     "time": {
@@ -153,7 +177,9 @@ The action to perform. The available actions are:
                         "type": "number",
                     },
                     "status": {
-                        "description": "The status of the task. Required only by `action=terminate`.",
+                        "description": (
+                            "The status of the task. Required only by `action=terminate`."
+                        ),
                         "type": "string",
                         "enum": ["success", "failure"],
                     },
@@ -190,7 +216,9 @@ The action to perform. The available actions are:
             raise McpError(
                 ErrorData(
                     code=INVALID_PARAMS,
-                    message="terminate action is not supported for computer control. This is a no-op.",
+                    message=(
+                        "terminate action is not supported for computer control. This is a no-op."
+                    ),
                 )
             )
 

@@ -261,7 +261,6 @@ async def run_dataset_parallel_manual(
     max_steps: int = 10,
     split: str = "train",
     auto_respond: bool = False,
-    custom_system_prompt: str | None = None,
 ) -> list[Any]:
     """
     Run all tasks in a dataset using process-based parallelism with manual configuration.
@@ -282,7 +281,6 @@ async def run_dataset_parallel_manual(
         max_steps: Maximum steps per task
         split: Dataset split when loading from string
         auto_respond: Whether to use ResponseAgent
-        custom_system_prompt: Override system prompt for all tasks
 
     Returns:
         List of results in the same order as the input dataset
@@ -349,14 +347,6 @@ async def run_dataset_parallel_manual(
     else:
         raise ValueError(f"Dataset must be string, Dataset, or list, got {type(dataset)}")
 
-    # Apply custom system prompt if provided
-    if custom_system_prompt:
-        for task_dict in task_dicts:
-            if "system_prompt" not in task_dict:
-                task_dict["system_prompt"] = custom_system_prompt
-            else:
-                task_dict["system_prompt"] += "\n" + custom_system_prompt
-
     # Prepare job metadata
     job_metadata = metadata or {}
     job_metadata.update(
@@ -379,8 +369,6 @@ async def run_dataset_parallel_manual(
             dataset_link = f"{project}/{dataset_name}"
         except Exception:
             logger.warning("Failed to extract dataset verification info")
-
-    # task_dicts = task_dicts[:10]
 
     # Create job context
     with hud.job(name, metadata=job_metadata, dataset_link=dataset_link) as job_obj:

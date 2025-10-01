@@ -148,11 +148,12 @@ class GRPOLearner:
 
         # Add LoRA adapters or load existing adapter
         policy.config.use_cache = False
-        
+
         if model_cfg.adapter_path:
             # Load existing adapter as baseline
             self.log(f"Loading existing LoRA adapter from: {model_cfg.adapter_path}")
             from peft import PeftModel
+
             policy = PeftModel.from_pretrained(policy, model_cfg.adapter_path)
             # Enable adapter training
             policy.train()

@@ -22,7 +22,7 @@ Pydantic model that defines an agent's objective, setup, and evaluation criteria
 | `mcp_config` | `dict[str, Any]` | MCP server configuration | Required |
 | `setup_tool` | `MCPToolCall \| list[MCPToolCall] \| None` | Tool(s) to prepare environment | `None` |
 | `evaluate_tool` | `MCPToolCall \| list[MCPToolCall] \| None` | Tool(s) to score performance | `None` |
-| `system_prompt` | `str \| None` | Additional system prompt | `None` |
+| `agent_config` | `dict[str, Any] \| None` | Agent configuration (system_prompt, allowed_tools, etc.) | `None` |
 | `metadata` | `dict[str, Any]` | Extra task metadata | `{}` |
 
 ### Environment Variable Substitution
@@ -455,14 +455,18 @@ task = Task(
     mcp_config={...},
     setup_tool={...},
     evaluate_tool={...},
-    system_prompt="Be very careful with form fields"
+    agent_config={
+        "system_prompt": "Be very careful with form fields",
+        "allowed_tools": ["computer", "search"],
+        "append_setup_output": True
+    }
 )
 
 agent = ClaudeAgent()
 
 # When agent.run(task) is called:
 # 1. If no mcp_client, creates one from task.mcp_config
-# 2. Adds task.system_prompt to agent's system prompt
+# 2. Applies task.agent_config to agent (system_prompt, allowed_tools, etc.)
 # 3. Adds lifecycle tools to agent.lifecycle_tools
 # 4. Runs setup_tool (hidden from agent)
 # 5. Executes task.prompt
@@ -470,11 +474,23 @@ agent = ClaudeAgent()
 # 7. Returns Trace with evaluation reward
 ```
 
+### Agent Config Options
+
+The `agent_config` field supports the following options:
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `system_prompt` | `str` | Custom system prompt appended to agent's default |
+| `allowed_tools` | `list[str]` | Tools the agent can use (replaces `agent_tools`) |
+| `disallowed_tools` | `list[str]` | Tools to exclude from the agent |
+| `append_setup_output` | `bool` | Include setup output in first message (default: True) |
+| `initial_screenshot` | `bool` | Take screenshot before first action (default: True) |
+
 ## Best Practices
 
 1. **Use UUIDs for task IDs** - Required for HuggingFace datasets
 2. **Save dictionaries, not objects** - Preserves env var templates
-3. **Include system_prompt.txt** - Upload to dataset repo root
+3. **Use agent_config for agent settings** - Centralize agent configuration in one place
 4. **Use metadata for filtering** - Category, difficulty, tags
 5. **Test locally first** - Before uploading to HuggingFace
 6. **Version your datasets** - Use meaningful repo names

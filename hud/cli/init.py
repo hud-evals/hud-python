@@ -29,9 +29,12 @@ SKIP_DIR_NAMES = {"node_modules", "__pycache__", "dist", "build", ".next", ".git
 
 # Files that need placeholder replacement
 PLACEHOLDER_FILES = {
-    "pyproject.toml",
+    "server/pyproject.toml",
+    "environment/pyproject.toml",
+    "server/main.py",
+    "server/README.md",
+    "environment/README.md",
     "tasks.json",
-    "src/controller/server.py",
     "test_env.ipynb",
     "README.md",
 }
@@ -48,7 +51,7 @@ def _replace_placeholders(target_dir: Path, env_name: str) -> list[str]:
         List of files that were modified
     """
     modified_files = []
-    placeholder = "test_test"
+    placeholder = "blank"  # Placeholder used in blank environment template
 
     # Normalize environment name for use in code/configs
     # Replace spaces and special chars with underscores for Python identifiers
@@ -240,17 +243,18 @@ def create_environment(
         f"Downloaded {len(files_created_dl)} files in {duration_ms} ms into {target_dir}"
     )
 
-    # Replace placeholders in template files
-    hud_console.section_title("Customizing template files")
-    modified_files = _replace_placeholders(target_dir, name)
-    if modified_files:
-        hud_console.success(f"Replaced placeholders in {len(modified_files)} files:")
-        for file in modified_files[:5]:  # Show first 5 files
-            hud_console.status_item(file, "updated")
-        if len(modified_files) > 5:
-            hud_console.info(f"... and {len(modified_files) - 5} more files")
-    else:
-        hud_console.info("No placeholder replacements needed")
+    # Replace placeholders in template files (only for blank preset)
+    if preset_normalized == "blank":
+        hud_console.section_title("Customizing template files")
+        modified_files = _replace_placeholders(target_dir, name)
+        if modified_files:
+            hud_console.success(f"Replaced placeholders in {len(modified_files)} files:")
+            for file in modified_files[:5]:  # Show first 5 files
+                hud_console.status_item(file, "updated")
+            if len(modified_files) > 5:
+                hud_console.info(f"... and {len(modified_files) - 5} more files")
+        else:
+            hud_console.info("No placeholder replacements needed")
 
     hud_console.section_title("Top-level files and folders")
     for entry in sorted(os.listdir(target_dir)):

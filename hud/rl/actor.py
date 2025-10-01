@@ -151,7 +151,9 @@ if __name__ == "__main__":
                 "name": "evaluate",
                 "arguments": {"name": "game_2048_max_number", "arguments": {"target": 128}},
             },
-            "system_prompt": "You are an expert 2048 game player. Use arrow keys to reach the target tile. First take a screenshot, then make strategic moves.",  # noqa: E501
+            "agent_config": {
+                "system_prompt": "You are an expert 2048 game player. Use arrow keys to reach the target tile. First take a screenshot, then make strategic moves.",  # noqa: E501
+            },
         }
 
         task = Task(**task_data)

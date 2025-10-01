@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import sys
 from pathlib import Path
@@ -39,6 +38,7 @@ app = typer.Typer(
     help="🚀 HUD CLI for MCP environment analysis and debugging",
     add_completion=False,
     rich_markup_mode="rich",
+    pretty_exceptions_enable=False,  # Disable Rich's verbose tracebacks
 )
 
 console = Console()
@@ -352,76 +352,71 @@ def version() -> None:
 def dev(
     params: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
         None,
-        help="Environment directory followed by optional Docker arguments (e.g., '. -e KEY=value')",
+        help="Module path or extra Docker args (when using --docker)",
     ),
-    image: str | None = typer.Option(
-        None, "--image", "-i", help="Docker image name (overrides auto-detection)"
+    docker: bool = typer.Option(
+        False,
+        "--docker",
+        help="Run in Docker with volume mounts for hot-reload (for complex environments)",
     ),
-    build: bool = typer.Option(False, "--build", "-b", help="Build image before starting"),
-    no_cache: bool = typer.Option(False, "--no-cache", help="Force rebuild without cache"),
-    transport: str = typer.Option(
-        "http", "--transport", "-t", help="Transport protocol: http (default) or stdio"
+    stdio: bool = typer.Option(
+        False,
+        "--stdio",
+        help="Use stdio transport (default: HTTP)",
     ),
     port: int = typer.Option(8765, "--port", "-p", help="HTTP server port (ignored for stdio)"),
-    no_reload: bool = typer.Option(False, "--no-reload", help="Disable hot-reload"),
-    full_reload: bool = typer.Option(
-        False,
-        "--full-reload",
-        help="Restart entire container on file changes (instead of just server process)",
-    ),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show server logs"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed logs"),
     inspector: bool = typer.Option(
         False, "--inspector", help="Launch MCP Inspector (HTTP mode only)"
     ),
-    no_logs: bool = typer.Option(False, "--no-logs", help="Disable streaming Docker logs"),
     interactive: bool = typer.Option(
         False, "--interactive", help="Launch interactive testing mode (HTTP mode only)"
     ),
+    watch: list[str] = typer.Option(  # noqa: B008
+        None,
+        "--watch",
+        help="Additional directories to watch for changes (default: current directory)",
+    ),
 ) -> None:
-    """🔥 Development mode - interactive MCP environment.
+    """🔥 Development mode - run MCP server with hot-reload.
 
-    Runs your MCP environment in Docker with mounted source for development.
-    The container's CMD determines reload behavior.
+    TWO MODES:
+
+    1. Python Module:
+       hud dev                    # Auto-detects module
+       hud dev server.main        # Explicit module
+
+    2. Docker with Volume Mounts (Complex environments like 'browser'):
+       hud dev --docker           # Auto-detects image from hud.lock.yaml
+       hud dev --docker -p 8080:8080  # With extra Docker args
+
+    The server must define 'mcp' in its __init__.py or main.py.
 
     Examples:
         hud dev                      # Auto-detect in current directory
-        hud dev environments/browser # Specific directory
-        hud dev . --build            # Build image first
-        hud dev . --image custom:tag # Use specific image
-        hud dev . --no-cache         # Force clean rebuild
-        hud dev . --verbose          # Show detailed logs
-        hud dev . --transport stdio  # Use stdio proxy for multiple connections
-        hud dev . --inspector        # Launch MCP Inspector (HTTP mode only)
-        hud dev . --interactive      # Launch interactive testing mode (HTTP mode only)
-        hud dev . --no-logs          # Disable Docker log streaming
+        hud dev controller           # Run specific module
+        hud dev --inspector          # Launch MCP Inspector
+        hud dev --interactive        # Launch interactive testing mode
+        hud dev --stdio              # Use stdio transport
+        hud dev --watch ../shared    # Watch additional directories
 
-        # With Docker arguments (after all options):
-        hud dev . -e BROWSER_PROVIDER=anchorbrowser -e ANCHOR_API_KEY=xxx
-        hud dev . -e API_KEY=secret -v /tmp/data:/data --network host
-        hud dev . --build -e DEBUG=true --memory 2g
+    For environment backend servers, use uvicorn directly:
+        uvicorn server:app --reload
     """
-    # Parse directory and Docker arguments
-    if params:
-        directory = params[0]
-        docker_args = params[1:] if len(params) > 1 else []
-    else:
-        directory = "."
-        docker_args = []
+    # Extract module from params if provided (first param when not --docker)
+    module = params[0] if params and not docker else None
+    docker_args = params if docker else []
 
     run_mcp_dev_server(
-        directory,
-        image,
-        build,
-        no_cache,
-        transport,
+        module,
+        stdio,
         port,
-        no_reload,
-        full_reload,
         verbose,
         inspector,
-        no_logs,
         interactive,
-        docker_args,
+        watch,
+        docker=docker,
+        docker_args=docker_args,
     )
 
 
@@ -429,17 +424,13 @@ def dev(
 def run(
     params: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
         None,
-        help="Python file/module/package or Docker image followed by optional arguments",
+        help="Docker image followed by optional Docker run arguments "
+        "(e.g., 'my-image:latest -e KEY=value')",
     ),
     local: bool = typer.Option(
         False,
         "--local",
         help="Run locally with Docker (default: remote via mcp.hud.so)",
-    ),
-    remote: bool = typer.Option(
-        False,
-        "--remote",
-        help="Run remotely via mcp.hud.so (default)",
     ),
     transport: str = typer.Option(
         "stdio",
@@ -474,180 +465,54 @@ def run(
         "-v",
         help="Show detailed output",
     ),
-    interactive: bool = typer.Option(
-        False,
-        "--interactive",
-        help="Launch interactive testing mode (HTTP transport only)",
-    ),
-    reload: bool = typer.Option(
-        False,
-        "--reload",
-        help="Enable auto-reload on file changes (local Python files only)",
-    ),
-    watch: list[str] = typer.Option(  # noqa: B008
-        None,
-        "--watch",
-        help="Directories to watch for changes (can be used multiple times). Defaults to current directory.",  # noqa: E501
-    ),
-    cmd: str | None = typer.Option(
-        None,
-        "--cmd",
-        help="Command to run as MCP server (e.g., 'python -m controller')",
-    ),
 ) -> None:
-    """🚀 Run MCP server.
+    """🚀 Run Docker image as MCP server.
 
-    Modes:
-    - Python (decorator-based): pass a dotted module path. Example: hud run controller
-      The module is imported, decorators register implicitly, and the server runs.
-      Use --reload to watch the module/package directory.
+    A simple wrapper around 'docker run' that can launch images locally or remotely.
+    By default, runs remotely via mcp.hud.so. Use --local to run with local Docker.
 
-    - Command: use --cmd to run any command as an MCP server. Example: hud run --cmd "python -m controller"
-      Works with Docker, binaries, or any executable. Supports --reload.
+    For local Python development with hot-reload, use 'hud dev' instead.
 
-    - Docker image: pass a Docker image name (optionally with --local to run locally).
-    """  # noqa: E501
-    if not params and not cmd:
-        typer.echo("❌ Dotted module path, Docker image, or --cmd is required")
+    Examples:
+        hud run my-image:latest                    # Run remotely (default)
+        hud run my-image:latest --local            # Run with local Docker
+        hud run my-image:latest -e KEY=value       # Remote with env vars
+        hud run my-image:latest --local -e KEY=val # Local with env vars
+        hud run my-image:latest --transport http   # Use HTTP transport
+    """
+    if not params:
+        console.print("[red]❌ Docker image is required[/red]")
+        console.print("\nExamples:")
+        console.print("  hud run my-image:latest              # Run remotely (default)")
+        console.print("  hud run my-image:latest --local      # Run with local Docker")
+        console.print("\n[yellow]For local Python development:[/yellow]")
+        console.print("  hud dev                              # Run with hot-reload")
         raise typer.Exit(1)
 
-    # Handle --cmd mode
-    if cmd:
-        import asyncio
+    image = params[0]
+    docker_args = params[1:] if len(params) > 1 else []
 
-        from .utils.package_runner import run_package_as_mcp
+    # Check if user accidentally passed a module path
+    from pathlib import Path
 
-        asyncio.run(
-            run_package_as_mcp(
-                cmd,  # Pass command string
-                transport=transport,
-                port=port,
-                verbose=verbose,
-                reload=reload,
-                watch_paths=watch if watch else None,
-            )
-        )
-        return
-
-    first_param = params[0]
-    extra_args = params[1:] if len(params) > 1 else []
-
-    # Guard: strip accidental nested 'run' token from positional args,
-    # which can happen with nested invocations or reload wrappers.
-    if first_param == "run" and extra_args:
-        first_param, extra_args = extra_args[0], extra_args[1:]
-
-    # Try to interpret first_param as module[:attr] or file[:attr]
-    target = first_param
-    server_attr = "mcp"
-    if ":" in target:
-        target, server_attr = target.split(":", 1)
-
-    # Only allow dotted import paths or python files for Python mode
-    import importlib.util as _importlib_util
-
-    # Ensure current working directory is importable for local packages like 'controller'
-    try:
-        import sys as _sys
-        from pathlib import Path as _Path
-
-        cwd_str = str(_Path.cwd())
-        if cwd_str not in _sys.path:
-            _sys.path.insert(0, cwd_str)
-    except Exception:  # noqa: S110
-        pass
-    try:
-        # If given a file path, detect and import via file spec
-        from pathlib import Path as _Path
-
-        if target.endswith(".py") and _Path(target).exists():
-            spec = _importlib_util.spec_from_file_location("_hud_module", target)
-        else:
-            spec = _importlib_util.find_spec(target)
-    except Exception:
-        spec = None
-
-    # Fallback: treat a local package directory (e.g. 'controller') as a module target
-    from pathlib import Path as _Path
-
-    pkg_dir = _Path(target)
-    is_pkg_dir = pkg_dir.is_dir() and (pkg_dir / "__init__.py").exists()
-
-    is_python_target = (spec is not None) or is_pkg_dir
-
-    if is_python_target and not (local or remote):
-        # Python file/package mode - use implicit MCP server
-        import asyncio
-
-        from .utils.package_runner import run_package_as_mcp, run_with_reload
-
-        if reload:
-            # Run with watchfiles reload
-            # Use user-provided watch paths or compute from module
-            if watch:
-                watch_paths = watch
-            else:
-                # Compute a watch path that works for dotted modules as well
-                watch_paths = [target]
-                if spec is not None:
-                    origin = getattr(spec, "origin", None)
-                    sublocs = getattr(spec, "submodule_search_locations", None)
-                    if origin:
-                        p = _Path(origin)
-                        # If package __init__.py, watch the package directory
-                        watch_paths = [str(p.parent if p.name == "__init__.py" else p)]
-                    elif sublocs:
-                        with contextlib.suppress(Exception):
-                            watch_paths = [next(iter(sublocs))]
-
-            # Always run as subprocess when using reload to enable proper file watching
-            # This ensures the parent process can watch files while the child runs the server
-            run_with_reload(
-                None,  # This forces subprocess mode for both stdio and http
-                watch_paths,
-                verbose=verbose,
-            )
-        else:
-            # Run normally (but still pass reload=False for consistency)
-            asyncio.run(
-                run_package_as_mcp(
-                    target,
-                    transport=transport,
-                    port=port,
-                    verbose=verbose,
-                    server_attr=server_attr,
-                    reload=False,  # Explicitly pass reload state
-                    watch_paths=None,
-                )
-            )
-        return
-
-    # Docker image mode
-    image = first_param
-    docker_args = extra_args
-
-    # Handle conflicting flags
-    if local and remote:
-        typer.echo("❌ Cannot use both --local and --remote")
+    if not any(c in image for c in [":", "/"]) and (
+        Path(image).is_dir() or Path(image).is_file() or "." in image
+    ):
+        console.print(f"[yellow]⚠️  '{image}' looks like a module path, not a Docker image[/yellow]")
+        console.print("\n[green]For local Python development, use:[/green]")
+        console.print(f"  hud dev {image}")
+        console.print("\n[green]For Docker images:[/green]")
+        console.print("  hud run my-image:latest")
         raise typer.Exit(1)
 
     # Default to remote if not explicitly local
-    is_local = local and not remote
-
-    # Check for interactive mode restrictions
-    if interactive:
-        if transport != "http":
-            typer.echo("❌ Interactive mode requires HTTP transport (use --transport http)")
-            raise typer.Exit(1)
-        if not is_local:
-            typer.echo("❌ Interactive mode is only available for local execution (use --local)")
-            raise typer.Exit(1)
+    is_local = local
 
     if is_local:
         # Local Docker execution
         from .utils.runner import run_mcp_server
 
-        run_mcp_server(image, docker_args, transport, port, verbose, interactive)
+        run_mcp_server(image, docker_args, transport, port, verbose, interactive=False)
     else:
         # Remote execution via proxy
         from .utils.remote_runner import run_remote_server
@@ -935,8 +800,8 @@ def eval(
         "--max-concurrent",
         help="Max concurrent tasks (prevents rate limits in both asyncio and parallel modes)",
     ),
-    max_steps: int = typer.Option(
-        30,
+    max_steps: int | None = typer.Option(
+        None,
         "--max-steps",
         help="Maximum steps per task (default: 10 for single, 50 for full)",
     ),

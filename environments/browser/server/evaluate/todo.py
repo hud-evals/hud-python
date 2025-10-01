@@ -2,12 +2,16 @@
 
 import logging
 
-from controller import mcp, http_client
+from server.main import http_client
+from hud.server import MCPRouter
 
 logger = logging.getLogger(__name__)
 
+# Create router for this module
+router = MCPRouter()
 
-@mcp.tool
+
+@router.tool
 async def todo_completed(expected_count: int):
     """Check if expected number of todos are completed.
 
@@ -64,7 +68,7 @@ async def todo_completed(expected_count: int):
         }
 
 
-@mcp.tool
+@router.tool
 async def todo_exists(title: str):
     """Check if a todo with specific title exists.
 
@@ -115,7 +119,7 @@ async def todo_exists(title: str):
         }
 
 
-@mcp.tool
+@router.tool
 async def todo_completion_rate(target_rate: float = 0.5):
     """Check if completion rate meets target.
 
@@ -177,7 +181,7 @@ async def todo_completion_rate(target_rate: float = 0.5):
         }
 
 
-@mcp.tool
+@router.tool
 async def todo_total_count(min_count: int = 1):
     """Check if total todo count meets minimum.
 

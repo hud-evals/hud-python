@@ -326,7 +326,7 @@ class ClaudeAgent(MCPAgent):
         selected_computer_tool = None
 
         for priority_name in computer_tool_priority:
-            for tool in self._available_tools:
+            for tool in self.get_available_tools():
                 # Check both exact match and suffix match (for prefixed tools)
                 if tool.name == priority_name or tool.name.endswith(f"_{priority_name}"):
                     selected_computer_tool = tool
@@ -350,13 +350,12 @@ class ClaudeAgent(MCPAgent):
             )
 
         # Add other non-computer tools
-        for tool in self._available_tools:
-            # Skip computer tools (already handled) and lifecycle tools
-            is_computer_tool = any(
+        for tool in self.get_available_tools():
+            # Skip computer tools (already handled)
+            if any(
                 tool.name == priority_name or tool.name.endswith(f"_{priority_name}")
                 for priority_name in computer_tool_priority
-            )
-            if is_computer_tool or tool.name in self.lifecycle_tools:
+            ):
                 continue
 
             claude_tool = {

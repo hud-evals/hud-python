@@ -17,6 +17,8 @@ class IntegrationTestRunner(MCPAgent):
             # Initialize using base to set up client and telemetry correctly
             await self.initialize(task)
 
+            self.console.info(f"Full system prompt: {self.system_prompt}")
+
             # Validate task shape
             if not getattr(task, "integration_test_tool", None):
                 raise ValueError(

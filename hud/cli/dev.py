@@ -1,63 +1,510 @@
-"""MCP Development Proxy - Hot-reload environments with MCP over HTTP."""
+"""MCP Development Server - Hot-reload Python modules."""
 
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
+import importlib
+import importlib.util
+import logging
+import os
 import subprocess
+import sys
+import threading
 from pathlib import Path
 from typing import Any
 
-import click
-from fastmcp import FastMCP
-
 from hud.utils.hud_console import HUDConsole
 
-from .utils.docker import get_docker_cmd
-from .utils.environment import (
-    build_environment,
-    get_image_name,
-    image_exists,
-    update_pyproject_toml,
-)
-
-# Global hud_console instance
 hud_console = HUDConsole()
 
 
-def build_and_update(directory: str | Path, image_name: str, no_cache: bool = False) -> None:
-    """Build Docker image and update pyproject.toml."""
-    if not build_environment(directory, image_name, no_cache):
-        raise click.Abort
+def show_dev_server_info(
+    server_name: str,
+    port: int,
+    transport: str,
+    inspector: bool,
+    interactive: bool,
+    env_dir: Path | None = None,
+) -> str:
+    """Show consistent server info for both Python and Docker modes.
+
+    Returns the Cursor deeplink URL.
+    """
+    import base64
+    import json
+
+    # Generate Cursor deeplink
+    server_config = {"url": f"http://localhost:{port}/mcp"}
+    config_json = json.dumps(server_config, indent=2)
+    config_base64 = base64.b64encode(config_json.encode()).decode()
+    cursor_deeplink = (
+        f"cursor://anysphere.cursor-deeplink/mcp/install?name={server_name}&config={config_base64}"
+    )
+
+    # Server section
+    hud_console.section_title("Server")
+    hud_console.info(f"{hud_console.sym.ITEM} {server_name}")
+    if transport == "http":
+        hud_console.info(f"{hud_console.sym.ITEM} http://localhost:{port}/mcp")
+    else:
+        hud_console.info(f"{hud_console.sym.ITEM} (stdio)")
+
+    # Quick Links (only for HTTP mode)
+    if transport == "http":
+        hud_console.section_title("Quick Links")
+        hud_console.info(f"{hud_console.sym.ITEM} Docs: http://localhost:{port}/docs")
+        hud_console.info(f"{hud_console.sym.ITEM} Cursor: {cursor_deeplink}")
+
+        # Check for VNC (browser environment)
+        if env_dir and (env_dir / "environment" / "server.py").exists():
+            try:
+                content = (env_dir / "environment" / "server.py").read_text()
+                if "x11vnc" in content.lower() or "vnc" in content.lower():
+                    hud_console.info(f"{hud_console.sym.ITEM} VNC: http://localhost:8080/vnc.html")
+            except Exception:  # noqa: S110
+                pass
+
+        # Inspector/Interactive status
+        if inspector or interactive:
+            hud_console.info("")
+            if inspector:
+                hud_console.info(f"{hud_console.sym.SUCCESS} Inspector launching...")
+            if interactive:
+                hud_console.info(f"{hud_console.sym.SUCCESS} Interactive mode enabled")
+
+    hud_console.info("")
+    hud_console.info(f"{hud_console.sym.SUCCESS} Hot-reload enabled")
+    hud_console.info("")
+
+    return cursor_deeplink
 
 
-def create_proxy_server(
-    directory: str | Path,
-    image_name: str,
-    no_reload: bool = False,
-    full_reload: bool = False,
-    verbose: bool = False,
-    docker_args: list[str] | None = None,
-    interactive: bool = False,
-) -> FastMCP:
-    """Create an HTTP proxy server that forwards to Docker container with hot-reload."""
-    project_path = Path(directory)
+def auto_detect_module() -> tuple[str, Path | None] | tuple[None, None]:
+    """Auto-detect MCP module in current directory.
 
-    # Get the original CMD from the image
-    original_cmd = get_docker_cmd(image_name)
-    if not original_cmd:
-        hud_console.warning(f"Could not extract CMD from {image_name}, using default")
-        original_cmd = ["python", "-m", "hud_controller.server"]
+    Looks for 'mcp' defined in either __init__.py or server.py.
 
-    # Generate unique container name from image to avoid conflicts between multiple instances
-    import os
+    Returns:
+        Tuple of (module_name, parent_dir_to_add_to_path) or (None, None)
+    """
+    cwd = Path.cwd()
 
-    pid = str(os.getpid())[-6:]  # Last 6 digits of process ID for uniqueness
+    # First check __init__.py
+    init_file = cwd / "__init__.py"
+    if init_file.exists():
+        try:
+            content = init_file.read_text(encoding="utf-8")
+            if "mcp" in content and ("= MCPServer" in content or "= FastMCP" in content):
+                return (cwd.name, None)
+        except Exception:  # noqa: S110
+            pass
+
+    # Then check main.py in current directory
+    main_file = cwd / "main.py"
+    if main_file.exists() and init_file.exists():
+        try:
+            content = main_file.read_text(encoding="utf-8")
+            if "mcp" in content and ("= MCPServer" in content or "= FastMCP" in content):
+                # Need to import as package.main, add parent to sys.path
+                return (f"{cwd.name}.main", cwd.parent)
+        except Exception:  # noqa: S110
+            pass
+
+    return (None, None)
+
+
+def should_use_docker_mode(cwd: Path) -> bool:
+    """Check if environment requires Docker mode (has Dockerfile in current dir)."""
+    return (cwd / "Dockerfile").exists()
+
+
+async def run_mcp_module(
+    module_name: str,
+    transport: str,
+    port: int,
+    verbose: bool,
+    inspector: bool,
+    interactive: bool,
+) -> None:
+    """Run an MCP module directly."""
+    # Check if this is a reload (not first run)
+    is_reload = os.environ.get("_HUD_DEV_RELOAD") == "1"
+
+    # Configure logging
+    if verbose:
+        logging.basicConfig(
+            stream=sys.stderr, level=logging.DEBUG, format="[%(levelname)s] %(message)s"
+        )
+    else:
+        # Suppress tracebacks in logs unless verbose
+        logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(message)s")
+
+        # Suppress FastMCP's verbose error logging
+        logging.getLogger("fastmcp.tools.tool_manager").setLevel(logging.WARNING)
+
+        # On reload, suppress most startup logs
+        if is_reload:
+            logging.getLogger("hud.server.server").setLevel(logging.ERROR)
+            logging.getLogger("mcp.server").setLevel(logging.ERROR)
+            logging.getLogger("mcp.server.streamable_http_manager").setLevel(logging.ERROR)
+
+            # Suppress deprecation warnings on reload
+            import warnings
+
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+    # Ensure proper directory is in sys.path based on module name
+    cwd = Path.cwd()
+    if "." in module_name:
+        # For package.module imports (like server.server), add parent to sys.path
+        parent = str(cwd.parent)
+        if parent not in sys.path:
+            sys.path.insert(0, parent)
+    else:
+        # For simple module imports, add current directory
+        cwd_str = str(cwd)
+        if cwd_str not in sys.path:
+            sys.path.insert(0, cwd_str)
+
+    # Import the module
+    try:
+        module = importlib.import_module(module_name)
+    except Exception as e:
+        hud_console.error(f"Failed to import module '{module_name}'")
+        hud_console.info(f"Error: {e}")
+        hud_console.info("")
+        hud_console.info("[bold cyan]Troubleshooting:[/bold cyan]")
+        hud_console.info("  • Verify module exists and is importable")
+        hud_console.info("  • Check for __init__.py in module directory")
+        hud_console.info("  • Check for import errors in the module")
+        if verbose:
+            import traceback
+
+            hud_console.info("")
+            hud_console.info("[bold cyan]Full traceback:[/bold cyan]")
+            hud_console.info(traceback.format_exc())
+        sys.exit(1)
+
+    # Look for 'mcp' attribute - check module __dict__ directly
+    # Debug: print what's in the module
+    if verbose:
+        hud_console.info(f"Module attributes: {dir(module)}")
+        module_dict = module.__dict__ if hasattr(module, "__dict__") else {}
+        hud_console.info(f"Module __dict__ keys: {list(module_dict.keys())}")
+
+    mcp_server = None
+
+    # Try different ways to access the mcp variable
+    if hasattr(module, "mcp"):
+        mcp_server = module.mcp
+    elif hasattr(module, "__dict__") and "mcp" in module.__dict__:
+        mcp_server = module.__dict__["mcp"]
+
+    if mcp_server is None:
+        hud_console.error(f"Module '{module_name}' does not have 'mcp' defined")
+        hud_console.info("")
+        available = [k for k in dir(module) if not k.startswith("_")]
+        hud_console.info(f"Available in module: {available}")
+        hud_console.info("")
+        hud_console.info("[bold cyan]Expected structure:[/bold cyan]")
+        hud_console.info("  from hud.server import MCPServer")
+        hud_console.info("  mcp = MCPServer(name='my-server')")
+        raise AttributeError(f"Module '{module_name}' must define 'mcp'")
+
+    # Only show full header on first run, brief message on reload
+    if is_reload:
+        hud_console.info(f"{hud_console.sym.SUCCESS} Reloaded")
+        # Run server without showing full UI
+    else:
+        # Show full header on first run
+        hud_console.info("")
+        hud_console.header("HUD Development Server")
+
+    # Show server info only on first run
+    if not is_reload:
+        show_dev_server_info(
+            server_name=mcp_server.name or "mcp-server",
+            port=port,
+            transport=transport,
+            inspector=inspector,
+            interactive=interactive,
+            env_dir=Path.cwd().parent if (Path.cwd().parent / "environment").exists() else None,
+        )
+
+    # Check if there's an environment backend and remind user to start it (first run only)
+    if not is_reload:
+        cwd = Path.cwd()
+        env_dir = cwd.parent / "environment"
+        if env_dir.exists() and (env_dir / "server.py").exists():
+            hud_console.info("")
+            hud_console.info(
+                f"{hud_console.sym.FLOW} Don't forget to start the environment backend:"
+            )
+            hud_console.info("   cd ../environment && uvicorn server:app --reload")
+
+        # Launch inspector if requested (first run only)
+        if inspector and transport == "http":
+            await launch_inspector(port)
+
+        # Launch interactive mode if requested (first run only)
+        if interactive and transport == "http":
+            launch_interactive_thread(port, verbose)
+
+        hud_console.info("")
+
+    # Configure server options
+    run_kwargs = {
+        "transport": transport,
+        "show_banner": False,
+    }
+
+    if transport == "http":
+        run_kwargs["port"] = port
+        run_kwargs["path"] = "/mcp"
+        run_kwargs["host"] = "0.0.0.0"  # noqa: S104
+        run_kwargs["log_level"] = "INFO" if verbose else "ERROR"
+
+    # Run the server
+    await mcp_server.run_async(**run_kwargs)
+
+
+async def launch_inspector(port: int) -> None:
+    """Launch MCP Inspector in background."""
+    await asyncio.sleep(2)
+
+    try:
+        import platform
+        import urllib.parse
+
+        server_url = f"http://localhost:{port}/mcp"
+        encoded_url = urllib.parse.quote(server_url)
+        inspector_url = f"http://localhost:6274/?transport=streamable-http&serverUrl={encoded_url}"
+
+        hud_console.section_title("MCP Inspector")
+        hud_console.link(inspector_url)
+
+        env = os.environ.copy()
+        env["DANGEROUSLY_OMIT_AUTH"] = "true"
+        env["MCP_AUTO_OPEN_ENABLED"] = "true"
+
+        cmd = ["npx", "--yes", "@modelcontextprotocol/inspector"]
+
+        if platform.system() == "Windows":
+            subprocess.Popen(  # noqa: S602, ASYNC220
+                cmd,
+                env=env,
+                shell=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            subprocess.Popen(  # noqa: S603, ASYNC220
+                cmd,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+    except Exception as e:
+        hud_console.error(f"Failed to launch inspector: {e}")
+
+
+def launch_interactive_thread(port: int, verbose: bool) -> None:
+    """Launch interactive testing mode in separate thread."""
+    import time
+
+    def run_interactive() -> None:
+        time.sleep(2)
+
+        try:
+            hud_console.section_title("Interactive Mode")
+            hud_console.info("Starting interactive testing mode...")
+
+            from .utils.interactive import run_interactive_mode
+
+            server_url = f"http://localhost:{port}/mcp"
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(run_interactive_mode(server_url, verbose))
+            finally:
+                loop.close()
+
+        except Exception as e:
+            if verbose:
+                hud_console.error(f"Interactive mode error: {e}")
+
+    interactive_thread = threading.Thread(target=run_interactive, daemon=True)
+    interactive_thread.start()
+
+
+def run_with_reload(
+    module_name: str,
+    watch_paths: list[str],
+    transport: str,
+    port: int,
+    verbose: bool,
+    inspector: bool,
+    interactive: bool,
+) -> None:
+    """Run module with file watching and auto-reload."""
+    try:
+        import watchfiles
+    except ImportError:
+        hud_console.error("watchfiles required. Install: pip install watchfiles")
+        sys.exit(1)
+
+    # Resolve watch paths
+    resolved_paths = []
+    for path_str in watch_paths:
+        path = Path(path_str).resolve()
+        if path.is_file():
+            resolved_paths.append(str(path.parent))
+        else:
+            resolved_paths.append(str(path))
+
+    if verbose:
+        hud_console.info(f"Watching: {', '.join(resolved_paths)}")
+
+    import signal
+
+    process = None
+    stop_event = threading.Event()
+    is_first_run = True
+
+    def handle_signal(signum: int, frame: Any) -> None:
+        if process:
+            process.terminate()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    while True:
+        cmd = [sys.executable, "-m", "hud", "dev", module_name, f"--port={port}"]
+
+        if transport == "stdio":
+            cmd.append("--stdio")
+
+        if verbose:
+            cmd.append("--verbose")
+            hud_console.info(f"Starting: {' '.join(cmd)}")
+
+        # Mark as reload after first run to suppress logs
+        env = {**os.environ, "_HUD_DEV_CHILD": "1"}
+        if not is_first_run:
+            env["_HUD_DEV_RELOAD"] = "1"
+
+        process = subprocess.Popen(  # noqa: S603
+            cmd, env=env
+        )
+
+        is_first_run = False
+
+        try:
+            stop_event = threading.Event()
+
+            def _wait_and_set(
+                stop_event: threading.Event, process: subprocess.Popen[bytes]
+            ) -> None:
+                try:
+                    if process is not None:
+                        process.wait()
+                finally:
+                    stop_event.set()
+
+            threading.Thread(target=_wait_and_set, args=(stop_event, process), daemon=True).start()
+
+            for changes in watchfiles.watch(*resolved_paths, stop_event=stop_event):
+                relevant_changes = [
+                    (change_type, path)
+                    for change_type, path in changes
+                    if any(path.endswith(ext) for ext in [".py", ".json", ".toml", ".yaml"])
+                    and "__pycache__" not in path
+                    and not Path(path).name.startswith(".")
+                ]
+
+                if relevant_changes:
+                    hud_console.flow("File changes detected, reloading...")
+                    if verbose:
+                        for change_type, path in relevant_changes:
+                            hud_console.info(f"  {change_type}: {path}")
+
+                    if process is not None:
+                        process.terminate()
+                    try:
+                        if process is not None:
+                            process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        if process is not None:
+                            process.kill()
+                            process.wait()
+
+                    import time
+
+                    time.sleep(0.1)
+                    break
+
+        except KeyboardInterrupt:
+            if process:
+                process.terminate()
+                process.wait()
+            break
+
+
+def run_docker_dev_server(
+    port: int, verbose: bool, inspector: bool, interactive: bool, docker_args: list[str]
+) -> None:
+    """Run MCP server in Docker with volume mounts, expose via local HTTP proxy."""
+    import typer
+    import yaml
+
+    from hud.server import MCPServer
+
+    cwd = Path.cwd()
+
+    # Find environment directory (current or parent with hud.lock.yaml)
+    env_dir = cwd
+    lock_path = env_dir / "hud.lock.yaml"
+
+    if not lock_path.exists():
+        # Try parent directory
+        if (cwd.parent / "hud.lock.yaml").exists():
+            env_dir = cwd.parent
+            lock_path = env_dir / "hud.lock.yaml"
+        else:
+            hud_console.error("No hud.lock.yaml found")
+            hud_console.info("Run 'hud build' first to create an image")
+            raise typer.Exit(1)
+
+    # Load lock file to get image name
+    try:
+        with open(lock_path) as f:
+            lock_data = yaml.safe_load(f)
+
+        # Get image from new or legacy format
+        images = lock_data.get("images", {})
+        image_name = images.get("local") or lock_data.get("image")
+
+        if not image_name:
+            hud_console.error("No image reference found in hud.lock.yaml")
+            raise typer.Exit(1)
+
+        # Strip digest if present
+        if "@" in image_name:
+            image_name = image_name.split("@")[0]
+
+    except Exception as e:
+        hud_console.error(f"Failed to read lock file: {e}")
+        raise typer.Exit(1) from e
+
+    # Generate unique container name
+    pid = str(os.getpid())[-6:]
     base_name = image_name.replace(":", "-").replace("/", "-")
-    container_name = f"{base_name}-{pid}"
+    container_name = f"{base_name}-dev-{pid}"
 
-    # Build the docker run command
+    # Build docker run command with volume mounts
     docker_cmd = [
         "docker",
         "run",
@@ -65,17 +512,22 @@ def create_proxy_server(
         "-i",
         "--name",
         container_name,
+        # Mount both server and environment for hot-reload
         "-v",
-        f"{project_path.absolute()}:/app:rw",
+        f"{env_dir.absolute()}/server:/app/server:rw",
+        "-v",
+        f"{env_dir.absolute()}/environment:/app/environment:rw",
         "-e",
         "PYTHONPATH=/app",
         "-e",
-        "PYTHONUNBUFFERED=1",  # Ensure Python output is not buffered
+        "PYTHONUNBUFFERED=1",
+        "-e",
+        "HUD_DEV=1",
     ]
 
-    # Check for .env file in the project directory and add env vars
-    env_file = project_path / ".env"
-    loaded_env_vars = {}
+    # Load .env file if present
+    env_file = env_dir / ".env"
+    loaded_env_vars: dict[str, str] = {}
     if env_file.exists():
         try:
             from hud.cli.utils.config import parse_env_file
@@ -85,9 +537,7 @@ def create_proxy_server(
             for key, value in loaded_env_vars.items():
                 docker_cmd.extend(["-e", f"{key}={value}"])
             if verbose and loaded_env_vars:
-                hud_console.info(
-                    f"Loaded {len(loaded_env_vars)} environment variable(s) from .env file"
-                )
+                hud_console.info(f"Loaded {len(loaded_env_vars)} env var(s) from .env")
         except Exception as e:
             hud_console.warning(f"Failed to load .env file: {e}")
 
@@ -95,734 +545,155 @@ def create_proxy_server(
     if docker_args:
         docker_cmd.extend(docker_args)
 
-    # Append the image name and CMD
+    # Append the image name
     docker_cmd.append(image_name)
-    if original_cmd:
-        docker_cmd.extend(original_cmd)
 
-    # Disable hot-reload if interactive mode is enabled
-    if interactive:
-        no_reload = True
+    # Print startup info
+    hud_console.header("HUD Development Mode (Docker)")
 
-    # Validate reload options
-    if no_reload and full_reload:
-        hud_console.warning("Cannot use --full-reload with --no-reload, ignoring --full-reload")
-        full_reload = False
+    if verbose:
+        hud_console.section_title("Docker Command")
+        hud_console.info(" ".join(docker_cmd))
 
-    # Create configuration following MCPConfig schema
-    config = {
-        "mcpServers": {
-            "default": {
-                "command": docker_cmd[0],
-                "args": docker_cmd[1:] if len(docker_cmd) > 1 else [],
-                # transport defaults to stdio
-            }
+    # Create MCP config pointing to the Docker container's stdio
+    mcp_config = {
+        "docker": {
+            "command": docker_cmd[0],
+            "args": docker_cmd[1:],
         }
     }
 
-    # Debug output - only if verbose
-    if verbose:
-        if full_reload:
-            hud_console.info("Mode: Full reload (container restart on file changes)")
-            hud_console.info("Note: Full container restart not yet implemented")
-        else:
-            hud_console.info("Mode: Container manages its own reload")
-            hud_console.info("The container's CMD determines reload behavior")
-        hud_console.command_example(f"docker logs -f {container_name}", "View container logs")
+    # Show consistent server info
+    show_dev_server_info(
+        server_name=image_name,
+        port=port,
+        transport="http",  # Docker mode always uses HTTP proxy
+        inspector=inspector,
+        interactive=interactive,
+        env_dir=env_dir,
+    )
 
-        # Show the full Docker command if there are environment variables (from .env or args)
-        has_env_from_args = docker_args and any(
-            arg == "-e" or arg.startswith("--env") for arg in docker_args
-        )
-        has_env_from_file = bool(loaded_env_vars)
-        if has_env_from_args or has_env_from_file:
-            hud_console.info("")
-            hud_console.info("Docker command with environment variables:")
-            hud_console.info(" ".join(docker_cmd))
-
-    # Create the HTTP proxy server using config
-    try:
-        proxy = FastMCP.as_proxy(config, name=f"HUD Dev Proxy - {image_name}")
-    except Exception as e:
-        hud_console.error(f"Failed to create proxy server: {e}")
-        hud_console.info("")
-        hud_console.info("💡 Tip: Run the following command to debug the container:")
-        hud_console.info(f"   hud debug {image_name}")
-        raise
-
-    return proxy
-
-
-async def start_mcp_proxy(
-    directory: str | Path,
-    image_name: str,
-    transport: str,
-    port: int,
-    no_reload: bool = False,
-    full_reload: bool = False,
-    verbose: bool = False,
-    inspector: bool = False,
-    no_logs: bool = False,
-    interactive: bool = False,
-    docker_args: list[str] | None = None,
-) -> None:
-    """Start the MCP development proxy server."""
-    # Suppress FastMCP's verbose output FIRST
-    import asyncio
-    import logging
-    import os
-    import signal
-    import sys
-
-    from .utils.logging import find_free_port
-
-    # Always disable the banner - we have our own output
-    os.environ["FASTMCP_DISABLE_BANNER"] = "1"
-
-    # Configure logging BEFORE creating proxy
+    # Suppress logs unless verbose
     if not verbose:
-        # Create a filter to block the specific "Starting MCP server" message
-        class _BlockStartingMCPFilter(logging.Filter):
-            def filter(self, record: logging.LogRecord) -> bool:
-                return "Starting MCP server" not in record.getMessage()
+        logging.getLogger("fastmcp").setLevel(logging.ERROR)
+        logging.getLogger("mcp").setLevel(logging.ERROR)
+        logging.getLogger("uvicorn").setLevel(logging.ERROR)
+        os.environ["FASTMCP_DISABLE_BANNER"] = "1"
 
-        # Set environment variable for FastMCP logging
-        os.environ["FASTMCP_LOG_LEVEL"] = "ERROR"
-        os.environ["LOG_LEVEL"] = "ERROR"
-        os.environ["UVICORN_LOG_LEVEL"] = "ERROR"
-        # Suppress uvicorn's annoying shutdown messages
-        os.environ["UVICORN_ACCESS_LOG"] = "0"
+    # Note about hot-reload behavior
+    hud_console.dim_info(
+        "",
+        "Container restarts on file changes (mounted volumes), if changing tools run hud dev again",
+    )
+    hud_console.info("")
 
-        # Configure logging to suppress INFO
-        logging.basicConfig(level=logging.ERROR, force=True)
+    # Create and run proxy with HUD helpers
+    async def run_proxy() -> None:
+        from fastmcp import FastMCP
 
-        # Set root logger to ERROR to suppress all INFO messages
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.ERROR)
+        # Create FastMCP proxy to Docker stdio
+        fastmcp_proxy = FastMCP.as_proxy(mcp_config, name="HUD Docker Dev Proxy")
 
-        # Add filter to all handlers
-        block_filter = _BlockStartingMCPFilter()
-        for handler in root_logger.handlers:
-            handler.addFilter(block_filter)
+        # Wrap in MCPServer to get /docs and REST wrappers
+        proxy = MCPServer(name="HUD Docker Dev Proxy")
 
-        # Also specifically suppress these loggers
-        for logger_name in [
-            "fastmcp",
-            "fastmcp.server",
-            "fastmcp.server.server",
-            "FastMCP",
-            "FastMCP.fastmcp.server.server",
-            "mcp",
-            "mcp.server",
-            "mcp.server.lowlevel",
-            "mcp.server.lowlevel.server",
-            "uvicorn",
-            "uvicorn.access",
-            "uvicorn.error",
-            "hud.server",
-            "hud.server.server",
-        ]:
-            logger = logging.getLogger(logger_name)
-            logger.setLevel(logging.ERROR)
-            # Add filter to this logger too
-            logger.addFilter(block_filter)
+        # Import all tools from the FastMCP proxy
+        await proxy.import_server(fastmcp_proxy)
 
-        # Suppress deprecation warnings
-        import warnings
-
-        warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-    # CRITICAL: For stdio transport, ALL output must go to stderr
-    if transport == "stdio":
-        # Configure root logger to use stderr
-        root_logger = logging.getLogger()
-        root_logger.handlers.clear()
-        stderr_handler = logging.StreamHandler(sys.stderr)
-        root_logger.addHandler(stderr_handler)
-
-    # Validate project directory exists
-    project_path = Path(directory)
-    if not project_path.exists():
-        hud_console.error(f"Project directory not found: {project_path}")
-        raise click.Abort
-
-    # Extract container name from the proxy configuration (must match create_proxy_server naming)
-    import os
-
-    pid = str(os.getpid())[-6:]  # Last 6 digits of process ID for uniqueness
-    base_name = image_name.replace(":", "-").replace("/", "-")
-    container_name = f"{base_name}-{pid}"
-
-    # Remove any existing container with the same name (silently)
-    # Note: The proxy creates containers on-demand when clients connect
-    try:  # noqa: SIM105
-        subprocess.run(  # noqa: S603, ASYNC221
-            ["docker", "rm", "-f", container_name],  # noqa: S607
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,  # Don't raise error if container doesn't exist
-        )
-    except Exception:  # noqa: S110
-        pass
-
-    if transport == "stdio":
-        if verbose:
-            hud_console.info("Starting stdio proxy (each connection gets its own container)")
-    else:
-        # Find available port for HTTP
-        actual_port = find_free_port(port)
-        if actual_port is None:
-            hud_console.error(f"No available ports found starting from {port}")
-            raise click.Abort
-
-        if actual_port != port and verbose:
-            hud_console.warning(f"Port {port} in use, using port {actual_port} instead")
-
-        # Launch MCP Inspector if requested
+        # Launch inspector if requested
         if inspector:
-            server_url = f"http://localhost:{actual_port}/mcp"
-
-            # Function to launch inspector in background
-            async def launch_inspector() -> None:
-                """Launch MCP Inspector and capture its output to extract the URL."""
-                # Wait for server to be ready
-                await asyncio.sleep(3)
-
-                try:
-                    import platform
-                    import urllib.parse
-
-                    # Build the direct URL with query params to auto-connect
-                    encoded_url = urllib.parse.quote(server_url)
-                    inspector_url = (
-                        f"http://localhost:6274/?transport=streamable-http&serverUrl={encoded_url}"
-                    )
-
-                    # Print inspector info cleanly
-                    hud_console.section_title("MCP Inspector")
-                    hud_console.link(inspector_url)
-
-                    # Set environment to disable auth (for development only)
-                    env = os.environ.copy()
-                    env["DANGEROUSLY_OMIT_AUTH"] = "true"
-                    env["MCP_AUTO_OPEN_ENABLED"] = "true"
-
-                    # Launch inspector
-                    cmd = ["npx", "--yes", "@modelcontextprotocol/inspector"]
-
-                    # Run in background, suppressing output to avoid log interference
-                    if platform.system() == "Windows":
-                        subprocess.Popen(  # noqa: S602, ASYNC220
-                            cmd,
-                            env=env,
-                            shell=True,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        )
-                    else:
-                        subprocess.Popen(  # noqa: S603, ASYNC220
-                            cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                        )
-
-                except (FileNotFoundError, Exception):
-                    # Silently fail - inspector is optional
-                    hud_console.error("Failed to launch inspector")
-
-            # Launch inspector asynchronously so it doesn't block
-            asyncio.create_task(launch_inspector())  # noqa: RUF006
+            await launch_inspector(port)
 
         # Launch interactive mode if requested
         if interactive:
-            if transport != "http":
-                hud_console.warning("Interactive mode only works with HTTP transport")
-            else:
-                server_url = f"http://localhost:{actual_port}/mcp"
+            launch_interactive_thread(port, verbose)
 
-                # Function to launch interactive mode in a separate thread
-                def launch_interactive_thread() -> None:
-                    """Launch interactive testing mode in a separate thread."""
-                    import time
-
-                    # Wait for server to be ready
-                    time.sleep(3)
-
-                    try:
-                        hud_console.section_title("Interactive Mode")
-                        hud_console.info("Starting interactive testing mode...")
-                        hud_console.info("Press Ctrl+C in the interactive session to exit")
-
-                        # Import and run interactive mode in a new event loop
-                        from .utils.interactive import run_interactive_mode
-
-                        # Create a new event loop for the thread
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        try:
-                            loop.run_until_complete(run_interactive_mode(server_url, verbose))
-                        finally:
-                            loop.close()
-
-                    except Exception as e:
-                        # Log error but don't crash the server
-                        if verbose:
-                            hud_console.error(f"Interactive mode error: {e}")
-
-                # Launch interactive mode in a separate thread
-                import threading
-
-                interactive_thread = threading.Thread(target=launch_interactive_thread, daemon=True)
-                interactive_thread.start()
-
-    # Function to stream Docker logs
-    async def stream_docker_logs() -> None:
-        """Stream Docker container logs asynchronously.
-
-        Note: The Docker container is created on-demand when the first client connects.
-        Any environment variables passed via -e flags are included when the container starts.
-        """
-        log_hud_console = hud_console
-
-        # Always show waiting message
-        log_hud_console.info("")  # Empty line for spacing
-        log_hud_console.progress_message(
-            "⏳ Waiting for first client connection to start container..."
+        # Run proxy with HTTP transport
+        await proxy.run_async(
+            transport="http",
+            host="0.0.0.0",  # noqa: S104
+            port=port,
+            path="/mcp",
+            log_level="error" if not verbose else "info",
+            show_banner=False,
         )
-        log_hud_console.info(f"📋 Looking for container: {container_name}")  # noqa: G004
-
-        # Keep trying to stream logs - container is created on demand
-        has_shown_started = False
-        while True:
-            # Check if container exists first (silently)
-            check_result = await asyncio.create_subprocess_exec(
-                "docker",
-                "ps",
-                "--format",
-                "{{.Names}}",
-                "--filter",
-                f"name={container_name}",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            stdout, _ = await check_result.communicate()
-
-            # If container doesn't exist, wait and retry
-            if container_name not in stdout.decode():
-                await asyncio.sleep(1)
-                continue
-
-            # Container exists! Show success if first time
-            if not has_shown_started:
-                log_hud_console.success("Container started! Streaming logs...")
-                has_shown_started = True
-
-            # Now stream the logs
-            try:
-                process = await asyncio.create_subprocess_exec(
-                    "docker",
-                    "logs",
-                    "-f",
-                    container_name,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.STDOUT,  # Combine streams for simplicity
-                )
-
-                if process.stdout:
-                    async for line in process.stdout:
-                        decoded_line = line.decode().rstrip()
-                        if not decoded_line:  # Skip empty lines
-                            continue
-
-                        # Skip docker daemon errors (these happen when container is removed)
-                        if "Error response from daemon" in decoded_line:
-                            continue
-
-                        # Show all logs with gold formatting like hud debug
-                        # Format all logs in gold/dim style like hud debug's stderr
-                        # Use stdout console to avoid stderr redirection when not verbose
-                        log_hud_console._stdout_console.print(
-                            f"[rgb(192,150,12)]■[/rgb(192,150,12)] {decoded_line}", highlight=False
-                        )
-
-                # Process ended - container might have been removed
-                await process.wait()
-
-                # Check if container still exists
-                await asyncio.sleep(1)
-                continue  # Loop back to check if container exists
-
-            except Exception as e:
-                # Some unexpected error - show it so we can debug
-                log_hud_console.warning(f"Failed to stream Docker logs: {e}")  # noqa: G004
-                if verbose:
-                    import traceback
-
-                    log_hud_console.warning(f"Traceback: {traceback.format_exc()}")  # noqa: G004
-                await asyncio.sleep(1)
-
-    # Import contextlib here so it's available in the finally block
-    import contextlib
-
-    # CRITICAL: Create proxy AFTER all logging setup to prevent it from resetting logging config
-    # This is important because FastMCP might initialize loggers during creation
-    proxy = create_proxy_server(
-        directory, image_name, no_reload, full_reload, verbose, docker_args or [], interactive
-    )
-
-    # Set up signal handlers for graceful shutdown
-    shutdown_event = asyncio.Event()
-
-    def signal_handler(signum: int, frame: Any) -> None:
-        """Handle signals by setting shutdown event."""
-        hud_console.info(f"\n📡 Received signal {signum}, shutting down gracefully...")
-        shutdown_event.set()
-
-    # Register signal handlers - SIGINT is available on all platforms
-    signal.signal(signal.SIGINT, signal_handler)
-
-    # SIGTERM is not available on Windows
-    if hasattr(signal, "SIGTERM"):
-        signal.signal(signal.SIGTERM, signal_handler)
-
-    # One more attempt to suppress the FastMCP server log
-    if not verbose:
-        # Re-apply the filter in case new handlers were created
-        class BlockStartingMCPFilter(logging.Filter):
-            def filter(self, record: logging.LogRecord) -> bool:
-                return "Starting MCP server" not in record.getMessage()
-
-        block_filter = BlockStartingMCPFilter()
-
-        # Apply to all loggers again - comprehensive list
-        for logger_name in [
-            "",  # root logger
-            "fastmcp",
-            "fastmcp.server",
-            "fastmcp.server.server",
-            "FastMCP",
-            "FastMCP.fastmcp.server.server",
-            "mcp",
-            "mcp.server",
-            "mcp.server.lowlevel",
-            "mcp.server.lowlevel.server",
-            "uvicorn",
-            "uvicorn.access",
-            "uvicorn.error",
-            "hud.server",
-            "hud.server.server",
-        ]:
-            logger = logging.getLogger(logger_name)
-            logger.setLevel(logging.ERROR)
-            logger.addFilter(block_filter)
-            for handler in logger.handlers:
-                handler.addFilter(block_filter)
-
-    # Track if container has been stopped to avoid duplicate stops
-    container_stopped = False
-
-    # Function to stop the container gracefully
-    async def stop_container() -> None:
-        """Stop the Docker container gracefully with SIGTERM, wait 30s, then SIGKILL if needed."""
-        nonlocal container_stopped
-        if container_stopped:
-            return  # Already stopped, don't do it again
-
-        try:
-            # Check if container exists
-            check_result = await asyncio.create_subprocess_exec(
-                "docker",
-                "ps",
-                "--format",
-                "{{.Names}}",
-                "--filter",
-                f"name={container_name}",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            stdout, _ = await check_result.communicate()
-
-            if container_name in stdout.decode():
-                hud_console.info("🛑 Stopping container gracefully...")
-                # Stop with 30 second timeout before SIGKILL
-                stop_result = await asyncio.create_subprocess_exec(
-                    "docker",
-                    "stop",
-                    "--time=30",
-                    container_name,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                await stop_result.communicate()
-                hud_console.success("Container stopped successfully")
-                container_stopped = True
-        except Exception as e:
-            hud_console.warning(f"Failed to stop container: {e}")
 
     try:
-        # Start Docker logs streaming if enabled
-        log_task = None
-        if not no_logs:
-            log_task = asyncio.create_task(stream_docker_logs())
-
-        if transport == "stdio":
-            # Run with stdio transport
-            await proxy.run_async(
-                transport="stdio", log_level="ERROR" if not verbose else "INFO", show_banner=False
-            )
-        else:
-            # Run with HTTP transport
-            # Temporarily redirect stderr to suppress uvicorn shutdown messages
-            import contextlib
-            import io
-
-            if not verbose:
-                # Create a dummy file to swallow unwanted stderr output
-                with contextlib.redirect_stderr(io.StringIO()):
-                    await proxy.run_async(
-                        transport="http",
-                        host="0.0.0.0",  # noqa: S104
-                        port=actual_port,
-                        path="/mcp",  # Serve at /mcp endpoint
-                        log_level="ERROR",
-                        show_banner=False,
-                    )
-            else:
-                await proxy.run_async(
-                    transport="http",
-                    host="0.0.0.0",  # noqa: S104
-                    port=actual_port,
-                    path="/mcp",  # Serve at /mcp endpoint
-                    log_level="INFO",
-                    show_banner=False,
-                )
-    except (ConnectionError, OSError) as e:
-        hud_console.error(f"Failed to connect to Docker container: {e}")
-        hud_console.info("")
-        hud_console.info("💡 Tip: Run the following command to debug the container:")
-        hud_console.info(f"   hud debug {image_name}")
-        hud_console.info("")
-        hud_console.info("Common issues:")
-        hud_console.info("  • Container failed to start or crashed immediately")
-        hud_console.info("  • Server initialization failed")
-        hud_console.info("  • Port binding conflicts")
-        raise
+        asyncio.run(run_proxy())
     except KeyboardInterrupt:
-        hud_console.info("\n👋 Shutting down...")
-
-        # Stop the container before showing next steps
-        await stop_container()
-
-        # Show next steps tutorial
-        if not interactive:  # Only show if not in interactive mode
-            hud_console.section_title("Next Steps")
-            hud_console.info("🏗️  Ready to test with real agents? Run:")
-            hud_console.info(f"    [cyan]hud build {directory}[/cyan]")
-            hud_console.info("")
-            hud_console.info("This will:")
-            hud_console.info("  1. Build your environment image")
-            hud_console.info("  2. Generate a hud.lock.yaml file")
-            hud_console.info("  3. Prepare it for testing with agents")
-            hud_console.info("")
-            hud_console.info("Then you can:")
-            hud_console.info("  • Test locally: [cyan]hud run <image>[/cyan]")
-            hud_console.info("  • Push to registry: [cyan]hud push --image <registry/name>[/cyan]")
-    except Exception as e:
-        # Suppress the graceful shutdown error and other FastMCP/uvicorn internal errors
-        error_msg = str(e)
-        if not any(
-            x in error_msg
-            for x in [
-                "timeout graceful shutdown exceeded",
-                "Cancel 0 running task(s)",
-                "Application shutdown complete",
-            ]
-        ):
-            hud_console.error(f"Unexpected error: {e}")
-    finally:
-        # Cancel log streaming task if it exists
-        if log_task and not log_task.done():
-            log_task.cancel()
-            try:
-                await log_task
-            except asyncio.CancelledError:
-                contextlib.suppress(asyncio.CancelledError)
-
-        # Always try to stop container on exit
-        await stop_container()
+        hud_console.info("\n\nStopping...")
+        raise typer.Exit(0) from None
 
 
 def run_mcp_dev_server(
-    directory: str = ".",
-    image: str | None = None,
-    build: bool = False,
-    no_cache: bool = False,
-    transport: str = "http",
-    port: int = 8765,
-    no_reload: bool = False,
-    full_reload: bool = False,
-    verbose: bool = False,
-    inspector: bool = False,
-    no_logs: bool = False,
-    interactive: bool = False,
+    module: str | None,
+    stdio: bool,
+    port: int,
+    verbose: bool,
+    inspector: bool,
+    interactive: bool,
+    watch: list[str] | None,
+    docker: bool = False,
     docker_args: list[str] | None = None,
 ) -> None:
-    """Run MCP development server with hot-reload.
+    """Run MCP development server with hot-reload."""
+    docker_args = docker_args or []
+    cwd = Path.cwd()
 
-    This command starts a development proxy that:
-    - Auto-detects or builds Docker images
-    - Mounts local source code for hot-reload
-    - Exposes an HTTP endpoint for MCP clients
+    # Auto-detect Docker mode if Dockerfile present and no module specified
+    if not docker and module is None and should_use_docker_mode(cwd):
+        hud_console.note("Detected Dockerfile - using Docker mode with volume mounts")
+        hud_console.dim_info("Tip", "Use 'hud dev --help' to see all options")
+        hud_console.info("")
+        run_docker_dev_server(port, verbose, inspector, interactive, docker_args)
+        return
 
-    Examples:
-        hud dev .                    # Auto-detect image from directory
-        hud dev . --build            # Build image first
-        hud dev . --image custom:tag # Use specific image
-        hud dev . --no-cache         # Force clean rebuild
-    """
-    # Ensure directory exists
-    if not Path(directory).exists():
-        hud_console.error(f"Directory not found: {directory}")
-        raise click.Abort
+    # Route to Docker mode if explicitly requested
+    if docker:
+        run_docker_dev_server(port, verbose, inspector, interactive, docker_args)
+        return
 
-    # No external dependencies needed for hot-reload anymore!
+    transport = "stdio" if stdio else "http"
 
-    # Resolve image name
-    resolved_image, source = get_image_name(directory, image)
+    # Auto-detect module if not provided
+    if module is None:
+        module, extra_path = auto_detect_module()
+        if module is None:
+            hud_console.error("Could not auto-detect MCP module in current directory")
+            hud_console.info("")
+            hud_console.info("[bold cyan]Expected:[/bold cyan]")
+            hud_console.info("  • __init__.py file in current directory")
+            hud_console.info("  • Module must define 'mcp' variable")
+            hud_console.info("")
+            hud_console.info("[bold cyan]Examples:[/bold cyan]")
+            hud_console.info("  hud dev controller")
+            hud_console.info("  cd controller && hud dev")
+            hud_console.info("  hud dev --docker  # For Docker-based environments")
+            hud_console.info("")
+            import sys
 
-    # Update pyproject.toml with auto-generated name if needed
-    if source == "auto":
-        update_pyproject_toml(directory, resolved_image)
+            sys.exit(1)
 
-    # Build if requested
-    if build or no_cache:
-        build_and_update(directory, resolved_image, no_cache)
+        if verbose:
+            hud_console.info(f"Auto-detected: {module}")
+            if extra_path:
+                hud_console.info(f"Adding to sys.path: {extra_path}")
 
-    # Check if image exists
-    if not image_exists(resolved_image) and not build:
-        if click.confirm(f"Image {resolved_image} not found. Build it now?"):
-            build_and_update(directory, resolved_image)
+        # Add extra path to sys.path if needed (for package imports)
+        if extra_path:
+            import sys
+
+            sys.path.insert(0, str(extra_path))
         else:
-            raise click.Abort
+            extra_path = None
 
-    # Generate server name from image
-    server_name = resolved_image.split(":")[0] if ":" in resolved_image else resolved_image
+    # Determine watch paths
+    watch_paths = watch if watch else ["."]
 
-    # For HTTP transport, find available port first
-    actual_port = port
-    if transport == "http":
-        from .utils.logging import find_free_port
+    # Check if child process
+    is_child = os.environ.get("_HUD_DEV_CHILD") == "1"
 
-        actual_port = find_free_port(port)
-        if actual_port is None:
-            hud_console.error(f"No available ports found starting from {port}")
-            raise click.Abort
-        if actual_port != port and verbose:
-            hud_console.warning(f"Port {port} in use, using port {actual_port}")
-
-    # Create config
-    if transport == "stdio":
-        server_config = {"command": "hud", "args": ["dev", directory, "--transport", "stdio"]}
-        # For stdio, include docker args in the command
-        if docker_args:
-            server_config["args"].extend(docker_args)
+    if is_child:
+        asyncio.run(run_mcp_module(module, transport, port, verbose, False, False))
     else:
-        server_config = {"url": f"http://localhost:{actual_port}/mcp"}
-        # Note: Environment variables are passed to the Docker container via the proxy,
-        # not included in the client configuration
-
-    # For the deeplink, we only need the server config
-    server_config_json = json.dumps(server_config, indent=2)
-    config_base64 = base64.b64encode(server_config_json.encode()).decode()
-
-    # Generate deeplink
-    deeplink = (
-        f"cursor://anysphere.cursor-deeplink/mcp/install?name={server_name}&config={config_base64}"
-    )
-
-    # Show header with gold border
-    hud_console.info("")  # Empty line before header
-    hud_console.header("HUD Development Server")
-
-    # Always show the Docker image being used as the first thing after header
-    hud_console.section_title("Docker Image")
-    if source == "cache":
-        hud_console.info(f"📦 {resolved_image}")
-    elif source == "auto":
-        hud_console.info(f"🔧 {resolved_image} (auto-generated)")
-    elif source == "override":
-        hud_console.info(f"🎯 {resolved_image} (specified)")
-    else:
-        hud_console.info(f"🐳 {resolved_image}")
-
-    hud_console.progress_message(
-        f"❗ If any issues arise, run `hud debug {resolved_image}` to debug the container"
-    )
-
-    # Show environment variables if provided
-    if docker_args and any(arg == "-e" or arg.startswith("--env") for arg in docker_args):
-        hud_console.section_title("Environment Variables")
-        hud_console.info(
-            "The following environment variables will be passed to the Docker container:"
-        )
-        i = 0
-        while i < len(docker_args):
-            if docker_args[i] == "-e" and i + 1 < len(docker_args):
-                hud_console.info(f"  • {docker_args[i + 1]}")
-                i += 2
-            elif docker_args[i].startswith("--env="):
-                hud_console.info(f"  • {docker_args[i][6:]}")
-                i += 1
-            elif docker_args[i] == "--env" and i + 1 < len(docker_args):
-                hud_console.info(f"  • {docker_args[i + 1]}")
-                i += 2
-            else:
-                i += 1
-
-    # Show hints about inspector and interactive mode
-    if transport == "http":
-        if not inspector and not interactive:
-            hud_console.progress_message("💡 Run with --inspector to launch MCP Inspector")
-            hud_console.progress_message("🧪 Run with --interactive for interactive testing mode")
-        elif not inspector:
-            hud_console.progress_message("💡 Run with --inspector to launch MCP Inspector")
-        elif not interactive:
-            hud_console.progress_message("🧪 Run with --interactive for interactive testing mode")
-
-    # Show configuration as JSON (just the server config, not wrapped)
-    full_config = {}
-    full_config[server_name] = server_config
-
-    hud_console.section_title("MCP Configuration (add this to any agent/client)")
-    hud_console.json_config(json.dumps(full_config, indent=2))
-
-    # Show connection info
-    hud_console.section_title(
-        "Connect to Cursor (be careful with multiple windows as that may interfere with the proxy)"
-    )
-    hud_console.link(deeplink)
-
-    hud_console.info("")  # Empty line
-
-    try:
-        asyncio.run(
-            start_mcp_proxy(
-                directory,
-                resolved_image,
-                transport,
-                port,
-                no_reload,
-                full_reload,
-                verbose,
-                inspector,
-                no_logs,
-                interactive,
-                docker_args or [],
-            )
-        )
-    except Exception as e:
-        hud_console.error(f"Failed to start MCP server: {e}")
-        hud_console.info("")
-        hud_console.info("💡 Tip: Run the following command to debug the container:")
-        hud_console.info(f"   hud debug {resolved_image}")
-        hud_console.info("")
-        hud_console.info("This will help identify connection issues or initialization failures.")
-        raise
+        run_with_reload(module, watch_paths, transport, port, verbose, inspector, interactive)

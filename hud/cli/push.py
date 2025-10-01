@@ -163,10 +163,7 @@ def push_environment(
         lock_data = yaml.safe_load(f)
 
     # Handle both old and new lock file formats
-    local_image = lock_data.get("image", "")
-    if not local_image and "build" in lock_data:
-        # New format might have image elsewhere
-        local_image = lock_data.get("image", "")
+    local_image = lock_data.get("images", {}).get("local") or lock_data.get("image", "")
 
     # Get internal version from lock file
     internal_version = lock_data.get("build", {}).get("version", None)
@@ -293,7 +290,7 @@ def push_environment(
     # Push the image
     hud_console.progress_message(f"Pushing {image} to registry...")
 
-    # Show push output
+    # Show push output (filtered for cleaner display)
     process = subprocess.Popen(  # noqa: S603
         ["docker", "push", image],  # noqa: S607
         stdout=subprocess.PIPE,
@@ -303,8 +300,27 @@ def push_environment(
         errors="replace",
     )
 
+    # Filter output to only show meaningful progress
+    layers_pushed = 0
     for line in process.stdout or []:
-        hud_console.info(line.rstrip())
+        line = line.rstrip()
+        # Only show: digest, pushed, mounted, or error lines
+        if any(
+            keyword in line.lower()
+            for keyword in ["digest:", "pushed", "mounted", "error", "denied"]
+        ):
+            if "pushed" in line.lower():
+                layers_pushed += 1
+            if (
+                verbose
+                or "error" in line.lower()
+                or "denied" in line.lower()
+                or "digest:" in line.lower()
+            ):
+                hud_console.info(line)
+
+    if layers_pushed > 0 and not verbose:
+        hud_console.info(f"Pushed {layers_pushed} layer(s)")
 
     process.wait()
 
@@ -331,8 +347,10 @@ def push_environment(
     hud_console.section_title("Pushed Image")
     hud_console.status_item("Registry", pushed_digest, primary=True)
 
-    # Update the lock file with registry information
-    lock_data["image"] = pushed_digest
+    # Update the lock file with pushed image reference
+    if "images" not in lock_data:
+        lock_data["images"] = {}
+    lock_data["images"]["pushed"] = image
 
     # Add push information
     from datetime import UTC, datetime
@@ -348,7 +366,7 @@ def push_environment(
     with open(lock_path, "w") as f:
         yaml.dump(lock_data, f, default_flow_style=False, sort_keys=False)
 
-    hud_console.success("Updated lock file with registry image")
+    hud_console.success("Updated lock file with pushed image reference")
 
     # Upload lock file to HUD registry
     try:

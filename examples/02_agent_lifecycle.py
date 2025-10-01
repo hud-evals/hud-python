@@ -33,7 +33,7 @@ async def main():
                     "url": "https://mcp.hud.so/v3/mcp",
                     "headers": {
                         "Authorization": "Bearer ${HUD_API_KEY}",  # Automatically filled from env
-                        "Mcp-Image": "hudpython/hud-browser:latest",
+                        "Mcp-Image": "hudevals/hud-browser:0.1.6",
                     },
                 }
             },

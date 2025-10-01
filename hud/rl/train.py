@@ -95,7 +95,7 @@ async def train(config: Config, tasks: list[Task]) -> None:
         if is_main_process()
         else None
     )
-    
+
     # Load initial adapter if provided
     if is_main_process() and config.model.adapter_path and vllm:
         hud_console.info(f"Loading baseline adapter from: {config.model.adapter_path}")

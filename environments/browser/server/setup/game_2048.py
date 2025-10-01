@@ -3,12 +3,16 @@
 import logging
 from typing import List
 
-from controller import http_client, mcp
+from server.main import http_client
+from hud.server import MCPRouter
 
 logger = logging.getLogger(__name__)
 
+# Create router for this module
+router = MCPRouter()
 
-@mcp.tool
+
+@router.tool
 async def game_2048_board(board_size: int = 4, target_tile: int = 2048):
     """Initialize new game with specified board size and target tile.
 
@@ -46,7 +50,7 @@ async def game_2048_board(board_size: int = 4, target_tile: int = 2048):
         return {"error": f"Failed to initialize game: {str(e)}"}
 
 
-@mcp.tool
+@router.tool
 async def game_2048_set_board(board: List[List[int]], score: int = 0, moves: int = 0):
     """Set specific board configuration for testing.
 
@@ -87,7 +91,7 @@ async def game_2048_set_board(board: List[List[int]], score: int = 0, moves: int
         return {"error": f"Failed to set board: {str(e)}"}
 
 
-@mcp.tool
+@router.tool
 async def game_2048_near_win(target_tile: int = 2048):
     """Set board close to winning (with tiles near target).
 
@@ -131,7 +135,7 @@ async def game_2048_near_win(target_tile: int = 2048):
         return {"error": f"Failed to set near-win board: {str(e)}"}
 
 
-@mcp.tool
+@router.tool
 async def game_2048_reset():
     """Reset game to initial state.
 

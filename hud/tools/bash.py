@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .base import BaseTool
 from .types import ContentResult, ToolError
@@ -140,7 +140,7 @@ class BashTool(BaseTool):
         self.env = value
 
     async def __call__(
-        self, command: str | None = None, restart: bool = False, **kwargs: Any
+        self, command: str | None = None, restart: bool = False
     ) -> list[ContentBlock]:
         if restart:
             if self.session:

@@ -2,17 +2,21 @@ FROM public.ecr.aws/docker/library/python:3.11-bookworm
 
 WORKDIR /app
 
-# Install git for dependency installation
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
-# Copy and install dependencies
-COPY pyproject.toml ./
-COPY controller/ ./controller/
+# Copy and install MCP server dependencies
+COPY server/pyproject.toml ./server/
+RUN pip install --no-cache-dir ./server
+
+# Copy and install environment dependencies
+COPY environment/pyproject.toml ./environment/
+RUN pip install --no-cache-dir ./environment
+
+# Copy source code after dependencies
+COPY server/ ./server/
 COPY environment/ ./environment/
-RUN pip install --no-cache-dir -e .
 
 ENV ENV_SERVER_PORT=8005
 
-# Start context server in background, then run controller with hot-reload
-# Disable access logs to prevent stdout corruption
-CMD ["sh", "-c", "uvicorn environment.server:app --host 0.0.0.0 --port $ENV_SERVER_PORT --reload --log-level warning --reload-dir environment & sleep 0.5 && exec hud run controller --reload"]
+# Start environment server in background, then run MCP server with hot-reload
+CMD ["sh", "-c", "uvicorn environment.server:app --host 0.0.0.0 --port $ENV_SERVER_PORT --log-level warning --reload >&2 & sleep 0.5 && hud dev server.main --stdio"]

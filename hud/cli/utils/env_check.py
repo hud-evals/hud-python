@@ -175,16 +175,16 @@ def ensure_built(env_dir: Path, *, interactive: bool = True) -> dict[str, Any]:
             _print_section("Added files", diffs.get("added", []))
             _print_section("Removed files", diffs.get("removed", []))
 
-            if interactive:
-                if hud_console.confirm("Rebuild now (runs 'hud build')?", default=True):
-                    require_docker_running()
-                    build_environment(str(env_dir), platform="linux/amd64")
-                    with open(lock_path) as f:
-                        lock_data = yaml.safe_load(f) or {}
-                else:
-                    hud_console.hint("Continuing without rebuild; this may use an outdated image.")
+            # if interactive:
+            if hud_console.confirm("Rebuild now (runs 'hud build')?", default=True):
+                require_docker_running()
+                build_environment(str(env_dir), platform="linux/amd64")
+                with open(lock_path) as f:
+                    lock_data = yaml.safe_load(f) or {}
             else:
-                hud_console.hint("Run 'hud build' to update the image before proceeding.")
+                hud_console.hint("Continuing without rebuild; this may use an outdated image.")
+            # else:
+            #     hud_console.hint("Run 'hud build' to update the image before proceeding.")
         elif not stored_hash:
             hud_console.dim_info(
                 "Info",

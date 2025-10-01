@@ -43,11 +43,10 @@ class Task(BaseModel):
     setup_tool: MCPToolCall | list[MCPToolCall] | None = None
     evaluate_tool: MCPToolCall | list[MCPToolCall] | None = None
     integration_test_tool: MCPToolCall | list[MCPToolCall] | None = None
-    agent_tools: list[str] | None = None
-    system_prompt: str | None = None
+    agent_config: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("mcp_config", "metadata", mode="before")
+    @field_validator("mcp_config", "metadata", "agent_config", mode="before")
     @classmethod
     def parse_json_strings(cls, v: Any) -> Any:
         """Parse JSON strings into dictionaries."""

@@ -41,7 +41,7 @@ EXCLUDE_FILES = {
 }
 
 INCLUDE_FILES = {"Dockerfile", "pyproject.toml"}
-INCLUDE_DIRS = {"controller", "environment"}
+INCLUDE_DIRS = {"server", "mcp", "controller", "environment"}
 
 
 def iter_source_files(root: Path) -> Iterable[Path]:

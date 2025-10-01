@@ -4,74 +4,72 @@ description: "From `hud init` to production in five steps"
 icon: "cube"
 ---
 
-Ready to let any agent control your software? hud environments wrap apps, games, APIs – anything Docker-able – in the Model Context Protocol (MCP).
+Build MCP environments that wrap any software for agent interaction. Think of it in three phases:
 
-This page is a **hands-on quick-start**. Follow it end-to-end, then jump to advanced docs when you need more.
+**Phase 1: Environment** - Wrap software in MCP tools
+**Phase 2: Tasks** - Define evaluation scenarios
+**Phase 3: Agents** - Run evaluations and training
 
-## 1 · Create a project (1 min)
+## Phase 1 · Create a project (2 min)
 
 ```bash
 # Pick a template: blank, deep-research, browser
 hud init my-env
+cd my-env
 ```
 
-`hud init` drops in the latest template from the SDK:
-
-```
-my-env/
-├── Dockerfile
-├── pyproject.toml          # deps & metadata
-├── controller/             # MCP frontend (stateless)
-│   ├── __init__.py         # mcp = MCPServer()
-│   ├── __main__.py         # python -m controller → mcp.run()
-│   ├── hooks.py            # @mcp.initialize / @mcp.shutdown
-│   └── tools.py            # @mcp.tool act / setup / evaluate
-└── environment/            # FastAPI backend (stateful)
-    └── server.py           # /health /act /reset /state
-```
-
-## 2 · Run the dev loop (2 min)
+Start development servers:
 
 ```bash
-# Build once, then hot-reload forever
-hud dev --build --interactive
-```
+# Terminal 1 - Environment backend
+cd environment && uv run uvicorn server:app --reload
 
-* `hud dev` mounts your source, restarts the controller on save, and leaves backend state intact.
-* Use ↑ ↓ ↵ to call tools live.
+# Terminal 2 - MCP server  
+cd server && uv run hud dev
+```
 
 ### Edit-save-test flow
-1. Open `controller/tools.py`, add or tweak a tool.
-2. Save – the controller restarts instantly.
-3. In the interactive UI press ↵ to re-run the tool.
+1. Open `server/tools.py`, add or tweak a tool.
+2. Save – the mcp restarts instantly.
+3. Visit `http://localhost:8765/docs` to test tools/
 
-## 3 · Debug if necessary
+## Phase 2 · Write Tasks (2 min)
 
-If the controller fails to start or tools disappear, run the 5-phase checker:
+Build your environment image first (in the global folder):
 
 ```bash
-hud debug my-env:dev   # deep compliance check – only when something is broken
+hud build
 ```
 
-and follow the hints it prints.
+Create `tasks.json` using `docker run`:
 
-## 4 · Build & push (1 min)
-
-```bash
-hud build         # creates hud.lock.yaml & production image
-hud push          # push to registry (needs HUD_API_KEY & docker login)
+```json
+{
+  "prompt": "Complete task",
+  "mcp_config": {
+    "local": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "my-env:0.1.0"]
+    }
+  },
+  ...your setup and evaluation tools
+}
 ```
 
-After a successful push, the lock file records the unique immutable digest.
+See [Task System](/core-concepts/task-system) or the `hud init` README for details.
 
-## 5 · Use it in RL / evals (optional)
+## Phase 3: Run Agents
 
 ```bash
-# Convert local tasks → remote and launch RL flow
+# Test with agents
+hud eval tasks.json
+
+# Deploy to registry
+hud push
+
+# Train agents on your tasks
 hud rl tasks.json
 ```
-
-The CLI will build / push if you forgot, then run training against the cloud service.
 
 ---
 

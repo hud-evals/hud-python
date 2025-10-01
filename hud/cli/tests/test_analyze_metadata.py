@@ -214,6 +214,7 @@ class TestAnalyzeFromMetadata:
 
     @mock.patch("hud.cli.utils.metadata.check_local_cache")
     @mock.patch("hud.cli.utils.metadata.fetch_lock_from_registry")
+    @mock.patch("hud.cli.utils.metadata.hud_console")
     @mock.patch("hud.cli.utils.metadata.console")
     async def test_analyze_not_found(self, mock_console, mock_hud_console, mock_fetch, mock_check):
         """Test when environment not found anywhere."""
@@ -222,9 +223,9 @@ class TestAnalyzeFromMetadata:
 
         await analyze_from_metadata("test/notfound:latest", "json", verbose=False)
 
-        # Should show error
+        # Should show error via hud_console
         mock_hud_console.error.assert_called_with("Environment metadata not found")
-        # Should print suggestions
+        # Should print suggestions via console
         mock_console.print.assert_called()
 
     @mock.patch("hud.cli.utils.metadata.check_local_cache")

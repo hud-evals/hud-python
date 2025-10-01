@@ -22,7 +22,7 @@ class TestColors:
         assert Colors.YELLOW == "\033[93m"
         assert Colors.GOLD == "\033[33m"
         assert Colors.RED == "\033[91m"
-        assert Colors.GRAY == "\033[90m"
+        assert Colors.GRAY == "\033[37m"
         assert Colors.ENDC == "\033[0m"
         assert Colors.BOLD == "\033[1m"
 

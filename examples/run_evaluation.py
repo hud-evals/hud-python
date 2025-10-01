@@ -13,22 +13,22 @@ Prerequisites:
 Usage examples
 ──────────────
 # Run a single OSWorld-Verified task with OpenAI Operator agent (default single-task mode)
-python examples/run_evaluation.py hud-evals/OSWorld-Verified-XLang --agent openai
+python examples/run_evaluation.py hud-evals/OSWorld-Verified-Gold --agent openai
 
 # Same but with detailed agent step logs visible
-python examples/run_evaluation.py hud-evals/OSWorld-Verified-XLang --agent openai --verbose
+python examples/run_evaluation.py hud-evals/OSWorld-Verified-Gold --agent openai --verbose
 
 # Enable debug-level logs for maximum visibility
-python examples/run_evaluation.py hud-evals/OSWorld-Verified-XLang --agent openai --very-verbose
+python examples/run_evaluation.py hud-evals/OSWorld-Verified-Gold --agent openai --very-verbose
 
 # Evaluate the FULL SheetBench dataset with Claude (Single Process concurrency)
 python examples/run_evaluation.py hud-evals/SheetBench-50 --full --agent claude --max-concurrent 25
 
 # Run OSWorld-Verified dataset full with PARALLEL execution (300+ tasks)
-python examples/run_evaluation.py hud-evals/OSWorld-Verified-XLang --agent openai --full --parallel
+python examples/run_evaluation.py hud-evals/OSWorld-Verified-Gold --agent openai --full --parallel
 
 # Parallel mode with manual configuration (8 workers, 10 concurrent per worker)
-python examples/run_evaluation.py hud-evals/OSWorld-Verified-XLang --agent openai --full --parallel --max-workers 8 --max-concurrent-per-worker 10
+python examples/run_evaluation.py hud-evals/OSWorld-Verified-Gold --agent openai --full --parallel --max-workers 8 --max-concurrent-per-worker 10
 
 # Custom max steps per task (useful for complex tasks)
 python examples/run_evaluation.py hud-evals/SheetBench-50 --full --max-steps 100

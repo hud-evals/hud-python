@@ -10,7 +10,7 @@ Endpoints (FastAPI)
 
 Run (dev)
 ```bash
-uv run uvicorn environment.server:app --reload --port 8005
+uv run uvicorn server:app --reload --port 8005
 ```
 
 Principle: treat like a backend. Keep long‑lived state here; add endpoints as tools need them.

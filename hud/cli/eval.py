@@ -199,6 +199,8 @@ async def run_single_task(
 ) -> None:
     """Load one task and execute it, or detect if JSON contains a list and run as dataset."""
 
+    # Provide early feedback to user
+    hud_console.info("🔧 Initializing evaluation...")
     # Import Task and run_dataset lazily
     try:
         from hud.utils.tasks import load_tasks
@@ -318,7 +320,10 @@ async def run_single_task(
         )
         display_group_statistics(stats, show_details=True)
     else:
-        # Original single-run logic
+        # Enable agent step logging for single task mode
+        logging.getLogger("hud.agents").setLevel(logging.INFO)
+        logging.getLogger("hud.agents.base").setLevel(logging.INFO)
+
         with hud.trace(name=task_prompt):
             agent = build_agent(
                 agent_type,
@@ -352,6 +357,9 @@ async def run_full_dataset(
     Uses either asyncio-based run_dataset or process-based parallel execution
     depending on the parallel flag."""
 
+    # Provide early feedback to user
+    hud_console.info("🔧 Initializing evaluation...")
+
     # Import run_dataset lazily
     try:
         from hud.datasets import run_dataset, run_dataset_parallel, run_dataset_parallel_manual
@@ -367,7 +375,7 @@ async def run_full_dataset(
     hud_console.info(f"📊 Loading tasks from: {source}…")
     tasks: list[Task] = load_tasks(source)  # type: ignore[assignment]
 
-    if not tasks:
+    if len(tasks) == 0:
         hud_console.error(f"No tasks found in: {source}")
         raise typer.Exit(1)
 
@@ -646,10 +654,10 @@ def eval_command(
         hud eval hud-evals/SheetBench-50 --full --agent claude
 
         # Run large dataset with PARALLEL execution (auto-optimized)
-        hud eval hud-evals/OSWorld-Verified-XLang --full --parallel
+        hud eval hud-evals/OSWorld-Verified-Gold --full --parallel
 
         # Parallel mode with manual configuration (16 workers, 25 tasks each)
-        hud eval hud-evals/OSWorld-Verified-XLang --full --parallel --max-workers 16
+        hud eval hud-evals/OSWorld-Verified-Gold --full --parallel --max-workers 16
 
         # Limit total concurrent tasks to prevent rate limits
         hud eval hud-evals/SheetBench-50 --full --parallel --max-concurrent 20
@@ -674,6 +682,8 @@ def eval_command(
     """
     from hud.settings import settings
 
+    # Always configure basic logging so agent steps can be logged
+    # Set to INFO by default for consistency with run_evaluation.py
     if very_verbose:
         logging.basicConfig(
             level=logging.DEBUG,
@@ -683,11 +693,6 @@ def eval_command(
         logging.getLogger("hud.agents").setLevel(logging.DEBUG)
         logging.getLogger("hud.agents.base").setLevel(logging.DEBUG)
     elif verbose:
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(name)s - %(message)s",
-            datefmt="%H:%M:%S",
-        )
         logging.getLogger("hud.agents").setLevel(logging.INFO)
         logging.getLogger("hud.agents.base").setLevel(logging.INFO)
 

@@ -1,9 +1,35 @@
 """Controller bridges MCP tools to the DeepResearch environment HTTP API."""
 
 from typing import List, Dict
+import httpx
+import os
+import sys
+import logging
 
-from controller import mcp, http_client
 from hud.tools.types import EvaluationResult
+
+from hud.server import MCPServer
+
+# Configure logging
+logging.basicConfig(
+    stream=sys.stderr,
+    level=logging.INFO,
+    format="[%(levelname)s] %(asctime)s | %(name)s | %(message)s",
+    force=True,  # Force all loggers to use stderr
+)
+
+# MCP server (frontend/controller)
+mcp = MCPServer(name="deepresearch")
+
+# Environment server URL (backend)
+ENV_SERVER_URL = os.getenv("ENV_SERVER_URL", "http://localhost:8000")
+
+# Shared HTTP client to talk to the environment
+http_client = httpx.AsyncClient(
+    base_url=ENV_SERVER_URL,
+    timeout=30.0,
+    headers={"User-Agent": "HUD-DeepResearch-Controller/1.0"},
+)
 
 
 @mcp.initialize

@@ -326,9 +326,6 @@ class TestBaseMCPAgent:
         """Test getting tool schemas."""
         agent = MockMCPAgent()
 
-        # Add setup to lifecycle tools to test filtering
-        agent.lifecycle_tools = ["setup"]
-
         agent._available_tools = [
             types.Tool(name="tool1", description="Tool 1", inputSchema={"type": "object"}),
             types.Tool(name="setup", description="Setup", inputSchema={"type": "object"}),
@@ -598,7 +595,7 @@ class TestMCPAgentExtended:
         agent = MockAgentExtended(mcp_client=mock_client, allowed_tools=["tool1", "tool3"])
         await agent.initialize("test")
 
-        available_names = [tool.name for tool in agent._available_tools]
+        available_names = [tool.name for tool in agent.get_available_tools()]
         assert "tool1" in available_names
         assert "tool3" in available_names
         assert "tool2" not in available_names
@@ -617,7 +614,7 @@ class TestMCPAgentExtended:
         agent = MockAgentExtended(mcp_client=mock_client, disallowed_tools=["tool2"])
         await agent.initialize("test")
 
-        available_names = [tool.name for tool in agent._available_tools]
+        available_names = [tool.name for tool in agent.get_available_tools()]
         assert "tool1" in available_names
         assert "tool3" in available_names
         assert "tool2" not in available_names

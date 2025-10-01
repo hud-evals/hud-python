@@ -3,12 +3,16 @@
 import logging
 import math
 
-from controller import mcp, http_client
+from server.main import http_client
+from hud.server import MCPRouter
 
 logger = logging.getLogger(__name__)
 
+# Create router for this module
+router = MCPRouter()
 
-@mcp.tool
+
+@router.tool
 async def game_2048_max_number(target: int):
     """Check if player reached target tile value.
 
@@ -68,7 +72,7 @@ async def game_2048_max_number(target: int):
         }
 
 
-@mcp.tool
+@router.tool
 async def game_2048_efficiency(min_ratio: float):
     """Evaluate game efficiency based on score/moves ratio.
 
@@ -122,7 +126,7 @@ async def game_2048_efficiency(min_ratio: float):
         }
 
 
-@mcp.tool
+@router.tool
 async def game_2048_score_reached(target_score: int):
     """Check if player reached target score.
 
@@ -171,7 +175,7 @@ async def game_2048_score_reached(target_score: int):
         }
 
 
-@mcp.tool
+@router.tool
 async def game_2048_game_won():
     """Check if game is won (reached target tile).
 

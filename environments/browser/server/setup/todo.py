@@ -3,13 +3,17 @@
 import logging
 from typing import Dict, Any, List
 
-from controller import mcp, http_client
-from controller.tools import playwright
+from server.main import http_client
+from server.tools import playwright
+from hud.server import MCPRouter
 
 logger = logging.getLogger(__name__)
 
+# Create router for this module
+router = MCPRouter()
 
-@mcp.tool(name="setup.todo_seed")
+
+@router.tool()
 async def todo_seed(num_items: int = 5):
     """Seed database with default test todos.
 
@@ -55,7 +59,7 @@ async def todo_seed(num_items: int = 5):
         return {"error": f"Failed to seed database: {str(e)}"}
 
 
-@mcp.tool(name="setup.todo_reset")
+@router.tool()
 async def todo_reset():
     """Reset database to empty state.
 
@@ -82,7 +86,7 @@ async def todo_reset():
         return {"error": f"Failed to reset database: {str(e)}"}
 
 
-@mcp.tool(name="setup.todo_custom_seed")
+@router.tool()
 async def todo_custom_seed(items: List[Dict[str, Any]]):
     """Seed database with custom todo items.
 

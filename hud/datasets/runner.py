@@ -27,7 +27,6 @@ async def run_dataset(
     max_steps: int = 10,
     split: str = "train",
     auto_respond: bool = False,
-    custom_system_prompt: str | None = None,
 ) -> list[Any]:
     """Run all tasks in a dataset with automatic job and telemetry tracking.
     
@@ -48,7 +47,6 @@ async def run_dataset(
         max_steps: Maximum steps per task
         split: Dataset split to use when loading from string (default: "train")
         auto_respond: Whether to use auto-response agent
-        custom_system_prompt: Override system prompt for all tasks
 
     Returns:
         List of results from agent.run() in dataset order. Telemetry is automatically
@@ -111,18 +109,15 @@ async def run_dataset(
 
         async def _worker(index: int, task_dict: Any, max_steps: int = 10) -> None:
             async with sem:
-                try:
-                    # Create trace for this task
-                    task_name = task_dict.get("prompt") or f"Task {index}"
-                    if custom_system_prompt and "system_prompt" not in task_dict:
-                        task_dict["system_prompt"] = custom_system_prompt
-                    # Ensure task_id is a string for baggage propagation
-                    raw_task_id = task_dict.get("id")
-                    safe_task_id = str(raw_task_id) if raw_task_id is not None else None
-                    # Use async trace for non-blocking telemetry
-                    async with hud.async_trace(task_name, job_id=job_obj.id, task_id=safe_task_id):
-                        # Convert dict to Task here, at trace level
-                        task = Task(**task_dict)
+                # Create trace for this task
+                task_name = task_dict.get("prompt") or f"Task {index}"
+
+                # Ensure task_id is a string for baggage propagation
+                raw_task_id = task_dict.get("id")
+                safe_task_id = str(raw_task_id) if raw_task_id is not None else None
+                with hud.trace(task_name, job_id=job_obj.id, task_id=safe_task_id):
+                    # Convert dict to Task here, at trace level
+                    task = Task(**task_dict)
 
                         agent = agent_class(**(agent_config or {}))
 

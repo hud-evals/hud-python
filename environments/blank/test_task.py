@@ -1,7 +1,6 @@
 #!/usr/bin/env python
-"""Simple example of running tasks from tasks.json.
-
-Make sure to run 'hud dev --build' in another terminal first, and install hud-python[agents]
+"""
+Simple example of running tasks from tasks.json. Make sure to have run hud build.
 """
 
 from __future__ import annotations
