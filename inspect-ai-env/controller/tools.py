@@ -8,6 +8,7 @@ import json
 import httpx
 import logging
 import sys
+import os
 from typing import Any
 
 from controller import mcp, http_client
@@ -37,8 +38,6 @@ async def setup(eval_name: str, sample_id: str, task_data: dict | None = None) -
     """
     Initialize sandbox environment for a specific sample.
 
-    This also stores the task information needed for scoring.
-
     Args:
         eval_name: Name of the eval (e.g., "mbpp")
         sample_id: ID of the sample being evaluated
@@ -55,12 +54,6 @@ async def setup(eval_name: str, sample_id: str, task_data: dict | None = None) -
     )
 
     _eval_name = eval_name
-
-    # Store task data if provided (for scoring)
-    if task_data:
-        # TODO: Deserialize and store task for scoring
-        # For now, we'll load it on-demand in evaluate()
-        pass
 
     result = resp.json()
     return json.dumps(
@@ -122,7 +115,9 @@ async def write_file(path: str, content: str) -> str:
     if not http_client:
         raise RuntimeError("HTTP client not initialized")
 
-    resp = await http_client.post("/write_file", json={"path": path, "content": content})
+    resp = await http_client.post(
+        "/write_file", json={"path": path, "content": content}
+    )
 
     result = resp.json()
     return f"File written successfully: {result.get('path')}"
@@ -204,7 +199,9 @@ async def git_clone(url: str, path: str = ".") -> str:
         raise RuntimeError("HTTP client not initialized")
 
     try:
-        resp = await http_client.post("/exec", json={"cmd": ["git", "clone", url, path], "timeout": 300})
+        resp = await http_client.post(
+            "/exec", json={"cmd": ["git", "clone", url, path], "timeout": 300}
+        )
         result = resp.json()
 
         if result["returncode"] == 0:
@@ -265,13 +262,18 @@ async def git_commit(message: str, path: str = ".", add_all: bool = True) -> str
     try:
         # Stage changes if requested
         if add_all:
-            resp = await http_client.post("/exec", json={"cmd": ["git", "-C", path, "add", "-A"], "timeout": 30})
+            resp = await http_client.post(
+                "/exec", json={"cmd": ["git", "-C", path, "add", "-A"], "timeout": 30}
+            )
             result = resp.json()
             if result["returncode"] != 0:
                 return f"Error staging changes: {result.get('stderr', 'Unknown error')}"
 
         # Commit
-        resp = await http_client.post("/exec", json={"cmd": ["git", "-C", path, "commit", "-m", message], "timeout": 30})
+        resp = await http_client.post(
+            "/exec",
+            json={"cmd": ["git", "-C", path, "commit", "-m", message], "timeout": 30},
+        )
         result = resp.json()
 
         if result["returncode"] == 0:
@@ -279,7 +281,10 @@ async def git_commit(message: str, path: str = ".", add_all: bool = True) -> str
         else:
             stderr = result.get("stderr", "")
             # Check if there's nothing to commit
-            if "nothing to commit" in stderr.lower() or "no changes added to commit" in stderr.lower():
+            if (
+                "nothing to commit" in stderr.lower()
+                or "no changes added to commit" in stderr.lower()
+            ):
                 return "No changes to commit"
             return f"Error committing changes: {stderr}"
     except httpx.HTTPStatusError as e:
@@ -288,9 +293,7 @@ async def git_commit(message: str, path: str = ".", add_all: bool = True) -> str
 
 @mcp.tool()
 async def evaluate(
-    sample: dict,
-    solution_file: str = "solution.py",
-    scorer_model: str | None = None
+    sample: dict, solution_file: str = "solution.py", scorer_model: str | None = None
 ) -> EvaluationResult:
     """
     Evaluate the agent's solution against the sample's expected target.
@@ -332,8 +335,12 @@ async def evaluate(
                 if py_files:
                     # Try to read the first .py file
                     actual_file = py_files[0]["name"]
-                    logger.info(f"Found {actual_file}, using it instead of {solution_file}")
-                    resp = await http_client.post("/read_file", json={"path": actual_file})
+                    logger.info(
+                        f"Found {actual_file}, using it instead of {solution_file}"
+                    )
+                    resp = await http_client.post(
+                        "/read_file", json={"path": actual_file}
+                    )
                     agent_output = resp.json().get("content", "")
                 else:
                     file_list = ", ".join([f["name"] for f in files])
@@ -368,6 +375,7 @@ async def evaluate(
             try:
                 # Only load the scorer, not the entire task/dataset
                 from inspect_loader import load_scorer_only
+
                 scorer = load_scorer_only(_eval_name)
                 logger.info(f"Loaded scorer for {_eval_name}")
             except Exception as e:
@@ -437,4 +445,94 @@ async def evaluate(
             done=True,
             isError=True,
             content=f"Evaluation error: {str(e)}",
+        )
+
+
+@mcp.tool()
+async def auto_evaluate(
+    judge_prompt: str,
+    agent_output: str,
+    expected_output: str | None = None,
+    model: str = "gpt-4o",
+    temperature: float = 0.0,
+    max_tokens: int = 500,
+) -> EvaluationResult:
+    """
+    Evaluate agent output using an LLM-as-a-judge.
+
+    Args:
+        judge_prompt: The system prompt for the judge model
+        agent_output: The agent's output to evaluate
+        expected_output: Optional expected/target output for comparison
+        model: OpenAI model to use (default: "gpt-4o")
+        temperature: Temperature for the judge model (default: 0.0)
+        max_tokens: Max tokens for judge response (default: 500)
+
+    Returns:
+        EvaluationResult with reward based on judge's decision
+    """
+    try:
+        # Get OpenAI API key from environment
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if openai_api_key is None:
+            logger.error("OPENAI_API_KEY environment variable not set")
+            return EvaluationResult(
+                reward=0.0,
+                done=False,
+                isError=True,
+                content="OPENAI_API_KEY environment variable not set",
+            )
+
+        logger.info(f"Creating OpenAI client for LLM-as-judge evaluation...")
+
+        # Import openai here to avoid issues if not installed
+        import openai
+
+        # Create OpenAI client
+        client = openai.OpenAI(api_key=openai_api_key)
+        logger.info("OpenAI client created successfully")
+
+        # Build user prompt
+        user_content = f"Agent Output:\n{agent_output}"
+        if expected_output:
+            user_content += f"\n\nExpected Output:\n{expected_output}"
+
+        messages = [
+            {"role": "system", "content": judge_prompt},
+            {"role": "user", "content": user_content},
+        ]
+
+        # Call judge model
+        logger.info(f"Calling {model} for evaluation...")
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+        result_text = response.choices[0].message.content.strip()
+        logger.info(f"Judge response: {result_text[:200]}...")
+
+        # Parse result - look for common success indicators
+        result_lower = result_text.lower()
+        success = any(
+            indicator in result_lower
+            for indicator in ["success", "correct", "pass", "yes"]
+        )
+
+        return EvaluationResult(
+            reward=1.0 if success else 0.0,
+            done=True,
+            isError=False,
+            content=result_text,
+        )
+
+    except Exception as e:
+        logger.error(f"LLM-as-judge evaluation failed: {e}", exc_info=True)
+        return EvaluationResult(
+            reward=0.0,
+            done=True,
+            isError=True,
+            content=f"Judge evaluation error: {str(e)}",
         )
