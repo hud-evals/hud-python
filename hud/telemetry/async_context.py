@@ -1,20 +1,27 @@
 """Async context managers for HUD telemetry.
 
-This module provides async versions of the trace and job context managers
-for use in async code. These context managers properly handle async I/O
-operations without blocking the event loop, enabling high-concurrency
-workloads like parallel task execution in datasets.
+Provides async versions of trace and job context managers for high-concurrency
+async code. These prevent event loop blocking by using async I/O operations.
+
+Usage:
+    >>> import hud
+    >>> async with hud.async_job("My Job") as job:
+    ...     async with hud.async_trace("Task", job_id=job.id) as trace:
+    ...         await do_work()
+
+When to use:
+    - High-concurrency scenarios (200+ parallel tasks)
+    - Custom async evaluation loops
+    - Async frameworks with HUD telemetry integration
+
+When NOT to use:
+    - Typical scripts/notebooks → use `hud.trace()` and `hud.job()`
+    - Low concurrency (< 30 tasks) → standard context managers are fine
+    - Synchronous code → must use `hud.trace()` and `hud.job()`
 
 Note:
-    This module is primarily for internal use by `run_dataset()` and similar
-    high-concurrency evaluation functions. Most users should use the standard
-    `hud.trace()` and `hud.job()` context managers, which work fine for typical
-    usage patterns.
-    
-    Use these async versions when:
-    - Writing custom high-concurrency evaluation loops
-    - Building async frameworks that manage many parallel tasks
-    - Integrating HUD telemetry into existing async applications
+    The `run_dataset()` function automatically uses these async context managers
+    internally, so most users don't need to use them directly.
 """
 
 from __future__ import annotations
@@ -261,7 +268,8 @@ def async_trace(
         AsyncTrace context manager
     
     Example:
-        >>> async with async_trace("Process Data") as trace:
+        >>> import hud
+        >>> async with hud.async_trace("Process Data") as trace:
         ...     result = await process_async()
         ...     await trace.log({"items_processed": len(result)})
     
@@ -295,9 +303,10 @@ def async_job(
         AsyncJob context manager
     
     Example:
-        >>> async with async_job("Batch Processing") as job:
+        >>> import hud
+        >>> async with hud.async_job("Batch Processing") as job:
         ...     for item in items:
-        ...         async with async_trace(f"Process {item.id}", job_id=job.id):
+        ...         async with hud.async_trace(f"Process {item.id}", job_id=job.id):
         ...             await process(item)
     
     Note:

@@ -76,8 +76,7 @@ async def run_dataset(
         Telemetry collection and upload is handled automatically. The function ensures
         all telemetry is flushed before returning, even at high concurrency levels.
     """
-    # Import here to avoid circular imports
-    from hud.telemetry import async_job, async_trace
+    import hud  # Import here to avoid circular imports
 
     dataset_link = None
 
@@ -104,37 +103,46 @@ async def run_dataset(
         except Exception:
             logger.warning("Failed to extract dataset verification info")
 
-    # Use async job context manager
-    async with async_job(name, metadata=job_metadata, dataset_link=dataset_link) as job_obj:
+    # Use async job context manager for high-concurrency telemetry
+    async with hud.async_job(name, metadata=job_metadata, dataset_link=dataset_link) as job_obj:
         # Run tasks with semaphore for concurrency control
         sem = asyncio.Semaphore(max_concurrent)
         results: list[Any | None] = [None] * len(dataset)
 
         async def _worker(index: int, task_dict: Any, max_steps: int = 10) -> None:
             async with sem:
-                # Create trace for this task
-                task_name = task_dict.get("prompt") or f"Task {index}"
-                if custom_system_prompt and "system_prompt" not in task_dict:
-                    task_dict["system_prompt"] = custom_system_prompt
-                # Ensure task_id is a string for baggage propagation
-                raw_task_id = task_dict.get("id")
-                safe_task_id = str(raw_task_id) if raw_task_id is not None else None
-                # Use async trace context manager
-                async with async_trace(task_name, job_id=job_obj.id, task_id=safe_task_id):
-                    # Convert dict to Task here, at trace level
-                    task = Task(**task_dict)
+                try:
+                    # Create trace for this task
+                    task_name = task_dict.get("prompt") or f"Task {index}"
+                    if custom_system_prompt and "system_prompt" not in task_dict:
+                        task_dict["system_prompt"] = custom_system_prompt
+                    # Ensure task_id is a string for baggage propagation
+                    raw_task_id = task_dict.get("id")
+                    safe_task_id = str(raw_task_id) if raw_task_id is not None else None
+                    # Use async trace for non-blocking telemetry
+                    async with hud.async_trace(task_name, job_id=job_obj.id, task_id=safe_task_id):
+                        # Convert dict to Task here, at trace level
+                        task = Task(**task_dict)
 
-                    agent = agent_class(**(agent_config or {}))
+                        agent = agent_class(**(agent_config or {}))
 
-                    if auto_respond:
-                        agent.response_agent = ResponseAgent()
-                    results[index] = await agent.run(task, max_steps=max_steps)
+                        if auto_respond:
+                            agent.response_agent = ResponseAgent()
+                        results[index] = await agent.run(task, max_steps=max_steps)
+                except Exception as e:
+                    logger.error(f"Task {index} failed: {e}", exc_info=True)
+                    results[index] = None
 
         # Execute all tasks
-        await asyncio.gather(
+        worker_results = await asyncio.gather(
             *[_worker(i, task, max_steps=max_steps) for i, task in enumerate(dataset)],
             return_exceptions=True,  # Don't fail entire batch on one error
         )
+        
+        # Log any exceptions that occurred
+        for i, result in enumerate(worker_results):
+            if isinstance(result, Exception):
+                logger.error(f"Worker {i} failed with exception: {result}", exc_info=result)
     
     # Ensure all telemetry is uploaded before returning
     await _flush_telemetry()

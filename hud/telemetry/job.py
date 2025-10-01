@@ -241,9 +241,9 @@ def job(
     job_id: str | None = None,
     dataset_link: str | None = None,
 ) -> Generator[Job, None, None]:
-    """Context manager for job tracking.
+    """Context manager for job tracking and organization.
 
-    Groups related tasks together under a single job for tracking and organization.
+    Groups related tasks together under a single job for tracking and visualization.
 
     Args:
         name: Human-readable job name
@@ -255,10 +255,24 @@ def job(
         Job: The job object
 
     Example:
-        with hud.job("training_run", {"model": "gpt-4"}) as job:
-            for epoch in range(10):
-                with hud.trace(f"epoch_{epoch}", job_id=job.id):
-                    train_epoch()
+        >>> import hud
+        >>> 
+        >>> # Synchronous code
+        >>> with hud.job("training_run", {"model": "gpt-4"}) as job:
+        ...     for epoch in range(10):
+        ...         with hud.trace(f"epoch_{epoch}", job_id=job.id):
+        ...             train_epoch()
+        >>> 
+        >>> # For async code with HIGH CONCURRENCY (200+ tasks), use async_job
+        >>> async with hud.async_job("batch_processing") as job:
+        ...     for item in items:
+        ...         async with hud.async_trace(f"process_{item}", job_id=job.id):
+        ...             await process(item)
+
+    Note:
+        For simple async code (< 30 parallel tasks), this context manager works fine.
+        Use `hud.async_job()` only for high-concurrency scenarios (200+ parallel tasks)
+        where event loop blocking becomes an issue.
     """
     global _current_job
 

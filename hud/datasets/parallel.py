@@ -111,13 +111,13 @@ def _process_worker(
             """Process a single task with telemetry tracking."""
             async with sem:
                 try:
-                    # Create trace for this task (linked to the job) - match original format
+                    # Create trace for this task (linked to the job)
                     task_name = task_dict.get("prompt") or f"Task {index}"
 
                     # Use the job_id to group all tasks under the same job
                     raw_task_id = task_dict.get("id")
                     safe_task_id = str(raw_task_id) if raw_task_id is not None else None
-                    with hud.trace(task_name, job_id=job_id, task_id=safe_task_id):
+                    async with hud.async_trace(task_name, job_id=job_id, task_id=safe_task_id):
                         # Convert dict to Task
                         task = Task(**task_dict)
 
