@@ -92,7 +92,9 @@ class MCPUseHUDClient(BaseHUDClient):
         try:
             assert self._client is not None  # noqa: S101
             self._sessions = await self._client.create_all_sessions()
-            hud_console.info(f"Created {len(self._sessions)} MCP sessions")
+            session_count = len(self._sessions)
+            session_text = "session" if session_count == 1 else "sessions"
+            hud_console.info(f"Created {session_count} MCP {session_text}")
 
             # Configure validation for all sessions based on client setting
             try:
