@@ -52,7 +52,7 @@ def preprocess_traces(traces: list[Trace], processor: Union[PreTrainedTokenizer,
         assistant_masks = build_assistant_masks(inputs["input_ids"], tokenizer)  # type: ignore
         mask_tensor = torch.tensor(assistant_masks, dtype=torch.long)
 
-        inputs["assistant_mask"] = mask_tensor
+        inputs["assistant_mask"] = mask_tensor.bool()
 
         inputs.convert_to_tensors(tensor_type="pt")
 
