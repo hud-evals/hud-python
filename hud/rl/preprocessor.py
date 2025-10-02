@@ -56,6 +56,11 @@ def preprocess_traces(traces: list[Trace], processor: Union[PreTrainedTokenizer,
 
         inputs.convert_to_tensors(tensor_type="pt")
 
+        if "pixel_values" not in inputs:
+            inputs["pixel_values"] = None
+        if "image_grid_thw" not in inputs:
+            inputs["image_grid_thw"] = None
+
         processed_inputs.append(inputs)  # type: ignore
 
     return processed_inputs
