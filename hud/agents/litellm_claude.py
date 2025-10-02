@@ -1,42 +1,56 @@
 """LiteLLM-powered Claude MCP Agent.
 
-This mirrors the MCP behavior of hud/agents/claude.py (Anthropic SDK),
-but routes requests through LiteLLM (e.g., model="openrouter/anthropic/claude-sonnet-4")
-and preserves:
-- Anthropic Computer Use tool mapping ("computer_2025-01-24" / "computer_2024-10-22")
-- Ephemeral prompt caching blocks ("cache_control": {"type": "ephemeral"})
-- The same MCP tool plumbing and result formatting (tool_use <-> tool_result)
+Mirrors the MCP behavior of hud/agents/claude.py (Anthropic SDK) while using
+LiteLLM for transport. Keeps Anthropic tool-use semantics, including prompt
+caching and computer-use tooling when the provider supports it.
 """
 
 from __future__ import annotations
 
+import copy
+import json
 import logging
-from typing import Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import litellm
+from litellm.exceptions import APIError, BadRequestError
 import mcp.types as types
 
 import hud
-from hud.settings import settings  # not used here, but kept for parity
+from hud.settings import settings
 from hud.tools.computer.settings import computer_settings
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 
 from .base import MCPAgent
 
+if TYPE_CHECKING:
+    from anthropic.types.beta import (
+        BetaCacheControlEphemeralParam,
+        BetaContentBlockParam,
+        BetaImageBlockParam,
+        BetaMessageParam,
+        BetaTextBlockParam,
+        BetaToolResultBlockParam,
+    )
+else:  # pragma: no cover - fallback when anthropic types are absent at runtime
+    BetaCacheControlEphemeralParam = dict  # type: ignore
+    BetaContentBlockParam = dict  # type: ignore
+    BetaImageBlockParam = dict  # type: ignore
+    BetaMessageParam = dict  # type: ignore
+    BetaTextBlockParam = dict  # type: ignore
+    BetaToolResultBlockParam = dict  # type: ignore
+
 logger = logging.getLogger(__name__)
+
+ANTHROPIC_MODEL_ALIASES: dict[str, str] = {
+    "claude-sonnet-4": "claude-sonnet-4-20250514",
+    "anthropic/claude-sonnet-4": "anthropic/claude-sonnet-4-20250514",
+}
 
 
 class LiteLLMClaudeAgent(MCPAgent):
-    """
-    Claude-style MCP agent (like hud/agents/claude.py) implemented on LiteLLM.
-
-    Key points:
-    - Exposes Anthropic tool specs (computer + function tools) to the model
-    - Converts Anthropic tool_use blocks into MCP tool calls
-    - Sends MCP tool results back as Anthropic tool_result blocks
-    - Uses LiteLLM acompletion() for transport
-    """
+    """Claude-style MCP agent implemented on top of LiteLLM."""
 
     metadata: ClassVar[dict[str, Any]] = {
         "display_width": computer_settings.ANTHROPIC_COMPUTER_WIDTH,
@@ -46,10 +60,11 @@ class LiteLLMClaudeAgent(MCPAgent):
     def __init__(
         self,
         *,
-        model: str = "openrouter/anthropic/claude-sonnet-4",
+        model: str = "anthropic/claude-sonnet-4-20250514",
         max_tokens: int = 4096,
         use_computer_beta: bool = True,
         completion_kwargs: dict[str, Any] | None = None,
+        validate_api_key: bool = True,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -60,22 +75,27 @@ class LiteLLMClaudeAgent(MCPAgent):
         self.use_computer_beta = use_computer_beta
         self.completion_kwargs = completion_kwargs or {}
         self.hud_console = HUDConsole(logger=logger)
+        self._resolved_completion_kwargs: dict[str, Any] = dict(self.completion_kwargs)
+        self._transport_provider: str | None = None
+        self._litellm_model = self.model
+        self._validate_api_key = validate_api_key
+        self._anthropic_key_validated = False
+        self._computer_tool_type: str | None = None
 
-        # Claude tool mapping (Claude tool name -> MCP tool name)
         self._claude_to_mcp_tool_map: dict[str, str] = {}
         self.claude_tools: list[dict] = []
 
-        # Append Claude-ish operating instructions (same spirit as claude.py)
         claude_instructions = """
-        You are Claude (via LiteLLM). Be thorough, accurate, and autonomous.
+        You are Claude, an AI assistant created by Anthropic. You are helpful, harmless, and honest.
 
-        When using tools:
-        1) Think through observations and next steps
-        2) Use tools decisively (no confirmation prompts)
-        3) Verify outcomes and continue until the task is complete
-        4) Prefer minimal steps and clear explanations
+        When working on tasks:
+        1. Be thorough and systematic in your approach
+        2. Complete tasks autonomously without asking for confirmation
+        3. Use available tools efficiently to accomplish your goals
+        4. Verify your actions and ensure task completion
+        5. Be precise and accurate in all operations
 
-        You have access to Anthropic-style tools (including computer use).
+        Remember: You are expected to complete tasks autonomously. The user trusts you to accomplish what they asked.
         """.strip()
 
         if self.system_prompt:
@@ -83,58 +103,90 @@ class LiteLLMClaudeAgent(MCPAgent):
         else:
             self.system_prompt = claude_instructions
 
+        self._resolve_transport_layer()
+
     async def initialize(self, task: Any = None) -> None:
         await super().initialize(task)
         self._convert_tools_for_claude()
 
-    #
-    # Message formatting (OpenAI-chat-like content blocks that LiteLLM accepts)
-    #
-
-    async def get_system_messages(self) -> list[dict[str, Any]]:
-        # Anthropic expects the system prompt as a top-level argument, not a chat message.
+    async def get_system_messages(self) -> list[BetaMessageParam]:
         return []
 
-    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[dict[str, Any]]:
-        """Convert MCP content blocks to LiteLLM chat message format."""
-        parts: list[dict[str, Any]] = []
+    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[BetaMessageParam]:
+        anthropic_blocks: list[BetaContentBlockParam] = []
+
         for block in blocks:
             if isinstance(block, types.TextContent):
-                parts.append({"type": "text", "text": block.text})
-            elif isinstance(block, types.ImageContent):
-                mime = getattr(block, "mimeType", "image/png")
-                parts.append(
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": mime,
-                            "data": block.data,
+                anthropic_blocks.append(
+                    cast(
+                        "BetaTextBlockParam",
+                        {
+                            "type": "text",
+                            "text": block.text,
                         },
-                    }
+                    )
                 )
-        return [{"role": "user", "content": parts}]
+            elif isinstance(block, types.ImageContent):
+                anthropic_blocks.append(
+                    cast(
+                        "BetaImageBlockParam",
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": block.mimeType,
+                                "data": block.data,
+                            },
+                        },
+                    )
+                )
+            else:
+                anthropic_blocks.append(cast("BetaContentBlockParam", block))
 
-    #
-    # Main step: call LiteLLM and parse tool_use / text / thinking
-    #
+        return [
+            cast(
+                "BetaMessageParam",
+                {
+                    "role": "user",
+                    "content": anthropic_blocks,
+                },
+            )
+        ]
 
     @hud.instrument(span_type="agent", record_args=False, record_result=True)
-    async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
-        current_messages = messages.copy()
+    async def get_response(self, messages: list[BetaMessageParam]) -> AgentResponse:
+        current_messages = list(messages)
 
-        # Add Anthropic ephemeral cache control to the most recent user message blocks
-        messages_cached = self._add_prompt_caching(current_messages)
-
-        # Build request
-        request_kwargs = self._build_litellm_request(messages_cached)
-
-        attempt_messages = messages_cached
         while True:
+            messages_cached = self._add_prompt_caching(current_messages)
+            request_kwargs = self._build_litellm_request(messages_cached)
+
             try:
-                request_kwargs["messages"] = attempt_messages
                 response = await litellm.acompletion(**request_kwargs)
                 break
+            except BadRequestError as e:
+                if self._maybe_adjust_computer_tool(e):
+                    continue
+
+                error_text = f"LiteLLM BadRequestError: {e}"
+                self.hud_console.error(error_text)
+                return AgentResponse(
+                    content=error_text,
+                    tool_calls=[],
+                    done=True,
+                    isError=True,
+                    raw=e,
+                )
+            except APIError as e:
+                error_text = f"LiteLLM APIError: {e}"
+                self.hud_console.error(error_text)
+                return AgentResponse(
+                    content=error_text,
+                    tool_calls=[],
+                    done=True,
+                    isError=True,
+                    raw=e,
+                )
             except Exception as e:
                 msg = str(e).lower()
                 too_long = (
@@ -142,80 +194,71 @@ class LiteLLMClaudeAgent(MCPAgent):
                     or "request_too_large" in msg
                     or "413" in msg
                 )
-                if too_long and len(attempt_messages) > 21:
-                    attempt_messages = [attempt_messages[0], *attempt_messages[-20:]]
+                if too_long and len(current_messages) > 21:
                     self.hud_console.warning(
-                        "Prompt too long via LiteLLM; truncating history and retrying"
+                        "Prompt too long via LiteLLM; truncating message history"
                     )
+                    current_messages = [current_messages[0], *current_messages[-20:]]
                     continue
-                err = f"Error from LiteLLM: {e}"
-                self.hud_console.warning_log(err)
-                return AgentResponse(
-                    content=err, tool_calls=[], done=True, isError=True, raw=None
+                raise
+
+        message_obj, finish_reason = _extract_message_and_finish_reason(response)
+
+        assistant_payload: dict[str, Any] = {
+            "role": _get_field(message_obj, "role", "assistant"),
+        }
+
+        content_blocks = _get_field(message_obj, "content")
+        messages.append(assistant_payload)
+
+        tool_calls_seen: set[str | None] = set()
+        result = AgentResponse(content="", tool_calls=[], done=True, raw=response)
+        assistant_tool_calls_payload: list[dict[str, Any]] = []
+
+        openai_style_tool_calls = _get_field(message_obj, "tool_calls")
+        if openai_style_tool_calls:
+            for tc in openai_style_tool_calls:
+                tc_id = _get_field(tc, "id")
+                func_spec = _get_field(tc, "function", {})
+                try:
+                    arguments = _safe_json_loads(_get_field(func_spec, "arguments"))
+                except Exception:
+                    arguments = {}
+                if not isinstance(arguments, dict):
+                    arguments = {}
+                name = _get_field(func_spec, "name")
+                if isinstance(name, str) and name in self._claude_to_mcp_tool_map:
+                    name = self._claude_to_mcp_tool_map[name]
+                result.tool_calls.append(
+                    MCPToolCall(id=tc_id, name=name, arguments=arguments)
                 )
-
-        choice = response.choices[0]
-        msg = choice.message  # OpenAI-style ChatCompletionMessage proxy from LiteLLM
-
-        # Make sure this assistant message is appended to history for the loop
-        assistant_payload: dict[str, Any] = {"role": "assistant"}
-        if getattr(msg, "content", None) is not None:
-            assistant_payload["content"] = msg.content
-        if getattr(msg, "tool_calls", None):
-            # Serialize in OpenAI tool_calls shape if present
-            serialized = []
-            for tc in msg.tool_calls:
-                serialized.append(
+                tool_calls_seen.add(tc_id)
+                result.done = False
+                assistant_tool_calls_payload.append(
                     {
-                        "id": tc.id,
+                        "id": tc_id,
                         "type": "function",
                         "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
+                            "name": _get_field(func_spec, "name"),
+                            "arguments": _get_field(func_spec, "arguments", "{}"),
                         },
                     }
                 )
-            assistant_payload["tool_calls"] = serialized
-        messages.append(assistant_payload)
 
-        # Parse result into MCPAgentResponse
-        result = AgentResponse(content="", tool_calls=[], done=True, raw=response)
+        text_content = ""
+        thinking_content = ""
 
-        # Try both shapes:
-        # 1) OpenAI-style function `tool_calls`
-        # 2) Anthropic-style 'tool_use' blocks inside `content` (for computer use)
-        tool_calls_found = False
-
-        # (1) OpenAI / function tools
-        if getattr(msg, "tool_calls", None):
-            for tc in msg.tool_calls:
-                try:
-                    args = _safe_json_loads(tc.function.arguments)
-                except Exception:
-                    args = {}
-                if not isinstance(args, dict):
-                    args = {}
-                name = tc.function.name
-                if name in self._claude_to_mcp_tool_map:
-                    name = self._claude_to_mcp_tool_map[name]
-                result.tool_calls.append(MCPToolCall(id=tc.id, name=name, arguments=args))
-            tool_calls_found = len(result.tool_calls) > 0
-
-        # (2) Anthropic / tool_use blocks
-        # LiteLLM returns assistant.content either as str or list[dict{type,...}]
-        content_blocks = getattr(msg, "content", None)
         if isinstance(content_blocks, list):
-            thinking_text = ""
-            plain_text = ""
             for block in content_blocks:
                 if not isinstance(block, dict):
                     continue
-                btype = block.get("type")
-                if btype == "tool_use":
-                    # Convert to MCP tool call
+                block_type = block.get("type")
+                if block_type == "tool_use":
                     tool_name = block.get("name", "")
                     mcp_name = self._claude_to_mcp_tool_map.get(tool_name, tool_name)
                     tool_id = block.get("id")
+                    if tool_id in tool_calls_seen:
+                        continue
                     tool_input = block.get("input", {})
                     if not isinstance(tool_input, dict):
                         tool_input = {}
@@ -227,200 +270,461 @@ class LiteLLMClaudeAgent(MCPAgent):
                             claude_name=tool_name,
                         )
                     )
-                    tool_calls_found = True
-                elif btype == "text":
-                    plain_text += block.get("text", "")
-                elif btype == "thinking":
-                    # Optional: some Anthropic models expose thinking blocks via LiteLLM
-                    thinking_text += f"Thinking: {block.get('thinking', '')}\n"
+                    tool_calls_seen.add(tool_id)
+                    result.done = False
+                    assistant_tool_calls_payload.append(
+                        {
+                            "id": tool_id,
+                            "type": "function",
+                            "function": {
+                                "name": tool_name,
+                                "arguments": json.dumps(tool_input),
+                            },
+                        }
+                    )
+                elif block_type == "text":
+                    text_content += block.get("text", "")
+                elif block_type == "thinking":
+                    thinking_content += f"Thinking: {block.get('thinking', '')}\n"
+        elif isinstance(content_blocks, str):
+            text_content += content_blocks
 
-            # Accumulate text/thinking into result.content (when no immediate tool calls)
-            if not tool_calls_found:
-                result.content = (thinking_text + plain_text).strip()
+        if thinking_content:
+            result.content = thinking_content + text_content
         else:
-            # Assistant content may just be a string
-            if isinstance(content_blocks, str) and not tool_calls_found:
-                result.content = content_blocks
+            result.content = text_content
 
-        # Mark done only if the model did not request tools or we hit length
-        result.done = not tool_calls_found or choice.finish_reason == "length"
+        if finish_reason == "tool_use":
+            result.done = False
+
+        assistant_text = (thinking_content + text_content).strip()
+        assistant_payload["content"] = assistant_text if assistant_text else ""
+        if assistant_tool_calls_payload:
+            assistant_payload["tool_calls"] = assistant_tool_calls_payload
+
         return result
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
     ) -> list[dict[str, Any]]:
-        """
-        Return Anthropic tool_result blocks embedded in a single user message.
+        rendered: list[dict[str, Any]] = []
+        image_parts: list[dict[str, Any]] = []
 
-        LiteLLM passes this through to Anthropic correctly. We keep base64 image
-        blocks for screenshots (computer use) and text blocks for logs.
-        """
-        user_content: list[dict[str, Any]] = []
+        for call, res in zip(tool_calls, tool_results, strict=False):
+            tool_call_id = call.id
+            if not tool_call_id:
+                self.hud_console.warning(f"No tool_call_id for result from {call.name}")
+                continue
 
-        for call, res in zip(tool_calls, tool_results, strict=True):
-            # Anthropic tool_result wants: {"type": "tool_result", "tool_use_id": <id>, "content": [ ... ]}
-            tool_result_blocks: list[dict[str, Any]] = []
+            text_fragments: list[str] = []
+            content_items: Sequence[Any]
+            if res.content:
+                content_items = res.content
+            elif res.structuredContent:
+                content_items = [res.structuredContent.get("result", "")]
+            else:
+                content_items = []
 
             if res.isError:
                 error_msg = "Tool execution failed"
-                for c in res.content:
-                    if isinstance(c, types.TextContent):
-                        error_msg = c.text
+                for item in content_items:
+                    if isinstance(item, types.TextContent):
+                        error_msg = item.text
                         break
-                tool_result_blocks.append({"type": "text", "text": f"Error: {error_msg}"})
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        error_msg = item.get("text", error_msg)
+                        break
+                text_fragments.append(f"Error: {error_msg}")
             else:
-                for c in res.content:
-                    if isinstance(c, types.TextContent):
-                        tool_result_blocks.append({"type": "text", "text": c.text})
-                    elif isinstance(c, types.ImageContent):
-                        # Anthropic expects "image" with source base64 (not image_url) inside tool_result
-                        tool_result_blocks.append(
+                for item in content_items:
+                    if isinstance(item, types.TextContent):
+                        text_fragments.append(item.text)
+                    elif isinstance(item, types.ImageContent):
+                        mime = getattr(item, "mimeType", "image/png")
+                        image_parts.append(
                             {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": getattr(c, "mimeType", "image/png"),
-                                    "data": c.data,
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{mime};base64,{item.data}",
                                 },
                             }
                         )
+                    elif isinstance(item, dict):
+                        if item.get("type") == "text":
+                            text_fragments.append(item.get("text", ""))
+                        elif item.get("type") == "image":
+                            mime = item.get("mimeType", "image/png")
+                            data = item.get("data", "")
+                            image_parts.append(
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:{mime};base64,{data}",
+                                    },
+                                }
+                            )
 
-            # Only include tool_result if we have a tool_use_id
-            if call.id:
-                user_content.append(
-                    {"type": "tool_result", "tool_use_id": call.id, "content": tool_result_blocks}
-                )
+            content_text = "\n".join(fragment for fragment in text_fragments if fragment).strip()
+            rendered.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": content_text or "",
+                }
+            )
 
-        # One "user" message containing all tool_result blocks
-        return [{"role": "user", "content": user_content}]
+        if image_parts:
+            rendered.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Tool returned the following images:"},
+                        *image_parts,
+                    ],
+                }
+            )
 
-    #
-    # Helpers
-    #
+        return rendered
+
+    async def create_user_message(self, text: str) -> BetaMessageParam:
+        return cast("BetaMessageParam", {"role": "user", "content": text})
 
     def _convert_tools_for_claude(self) -> list[dict]:
-        """Build Anthropic tool specs from available MCP tools (same logic as hud/agents/claude.py)."""
         claude_tools: list[dict] = []
-        self._claude_to_mcp_tool_map.clear()
+        self._claude_to_mcp_tool_map = {}
 
-        # Prefer Anthropic computer MCP tool, with common suffix fallback
         computer_tool_priority = ["anthropic_computer", "computer_anthropic", "computer"]
         selected_computer_tool = None
+
         for priority_name in computer_tool_priority:
-            for t in self._available_tools:
-                if t.name == priority_name or t.name.endswith(f"_{priority_name}"):
-                    selected_computer_tool = t
+            for tool in self._available_tools:
+                if tool.name == priority_name or tool.name.endswith(f"_{priority_name}"):
+                    selected_computer_tool = tool
                     break
             if selected_computer_tool:
                 break
 
-        if selected_computer_tool:
-            ctype = self._choose_computer_tool_type()  # "computer_20250124" or "computer_20241022"
-            claude_tools.append(
-                {
-                    "type": ctype,
-                    "function": {
-                        "name": "computer",
-                        "parameters": {
-                            "display_width_px": self.metadata["display_width"],
-                            "display_height_px": self.metadata["display_height"],
-                        },
-                    },
-                }
-            )
-            self._claude_to_mcp_tool_map["computer"] = selected_computer_tool.name
-            self.hud_console.debug(f"Using '{selected_computer_tool.name}' as MCP computer tool")
+        self._computer_tool_type = None
 
-        # Add non-computer tools as Anthropic function-style tools (input_schema)
-        for t in self._available_tools:
-            is_computer = any(
-                t.name == p or t.name.endswith(f"_{p}") for p in computer_tool_priority
+        if selected_computer_tool:
+            claude_tool = {
+                "type": self._choose_computer_tool_type(),
+                "name": "computer",
+                "display_width_px": self.metadata["display_width"],
+                "display_height_px": self.metadata["display_height"],
+            }
+            self._computer_tool_type = claude_tool["type"]
+            self._claude_to_mcp_tool_map["computer"] = selected_computer_tool.name
+            claude_tools.append(claude_tool)
+            self.hud_console.debug(
+                f"Using {selected_computer_tool.name} as computer tool for Claude"
             )
-            if is_computer or t.name in self.lifecycle_tools:
+
+        for tool in self._available_tools:
+            is_computer_tool = any(
+                tool.name == priority_name or tool.name.endswith(f"_{priority_name}")
+                for priority_name in computer_tool_priority
+            )
+            if is_computer_tool or tool.name in self.lifecycle_tools:
                 continue
 
-            claude_tools.append(
-                {
-                    "name": t.name,
-                    "description": t.description or f"Execute {t.name}",
-                    "input_schema": t.inputSchema
-                    or {
-                        "type": "object",
-                        "properties": {},
-                    },
-                }
-            )
-            self._claude_to_mcp_tool_map[t.name] = t.name
+            claude_tool = {
+                "name": tool.name,
+                "description": tool.description or f"Execute {tool.name}",
+                "input_schema": tool.inputSchema
+                or {
+                    "type": "object",
+                    "properties": {},
+                },
+            }
+            self._claude_to_mcp_tool_map[tool.name] = tool.name
+            claude_tools.append(claude_tool)
 
         self.claude_tools = claude_tools
         return claude_tools
 
     def _choose_computer_tool_type(self) -> str:
-        """Heuristic: pick the correct Anthropic computer tool tag based on model."""
-        name = (self.model or "").lower()
-
-        # Latest models (Claude 4 Sonnet, Claude 3.7 Sonnet) use 2025-01-24
-        newer_markers = ("sonnet-4", "claude-4", "3-7-sonnet", "202502", "202503")
-        if any(m in name for m in newer_markers):
-            return "computer_20250124"
-
-        # Claude 3.5 Sonnet era
         return "computer_20241022"
 
-    def _build_litellm_request(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
-        """
-        Build the kwargs for litellm.acompletion(...) matching the Anthropic MCP flow.
-        """
+    def _is_openrouter_model(self) -> bool:
+        return self._transport_provider == "openrouter"
+
+    def _build_litellm_request(self, messages: list[BetaMessageParam]) -> dict[str, Any]:
         protected = {"model", "messages", "tools", "tool_choice", "max_tokens"}
-        extra = {k: v for k, v in (self.completion_kwargs or {}).items() if k not in protected}
+        extra = {k: v for k, v in self._resolved_completion_kwargs.items() if k not in protected}
+
+        tools_payload = self._prepare_tools_for_transport()
+
+        model_name = self._litellm_model
+        if self._transport_provider == "anthropic" and not model_name.startswith("anthropic/"):
+            model_name = f"anthropic/{model_name}"
 
         kwargs: dict[str, Any] = {
-            "model": self.model,
+            "model": model_name,
             "messages": messages,
-            "tools": self.claude_tools,
-            "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
+            "tools": tools_payload,
             "max_tokens": self.max_tokens,
-            # Be resilient when routing to non-Anthropic backends (OpenRouter, etc.)
+            "system": self.system_prompt,
             "drop_params": True,
             **extra,
         }
 
-        kwargs["system"] = self.system_prompt
+        if self._is_openrouter_model():
+            kwargs["tool_choice"] = "auto"
+            kwargs["parallel_tool_calls"] = False
+        else:
+            kwargs["tool_choice"] = "auto"
+
+        if not self._is_openrouter_model():
+            beta_headers: list[str] = []
+            if self.use_computer_beta:
+                if self._computer_tool_type == "computer_20250124":
+                    beta_headers.append("computer-use-2025-01-24")
+                else:
+                    beta_headers.append("computer-use-2024-10-22")
+            # prompt caching beta keeps parity with claude.py (Anthropic requires header)
+            if beta_headers:
+                beta_headers.append("prompt-caching-2024-07-31")
+
+            if beta_headers:
+                extra_headers: dict[str, str] = kwargs.setdefault("extra_headers", {})  # type: ignore[assignment]
+                existing = extra_headers.get("anthropic-beta")
+                merged = set(filter(None, (existing.split(",") if existing else [])))
+                merged.update(beta_headers)
+                extra_headers["anthropic-beta"] = ",".join(sorted(merged))
 
         return kwargs
 
-    def _add_prompt_caching(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """
-        Mark the *last user message's* content blocks as ephemeral cacheable for Anthropic.
-        (Other providers ignore this safely; LiteLLM drops unsupported params.)
-        """
-        msgs = list(messages)
-        if not msgs:
-            return msgs
+    def _prepare_tools_for_transport(self) -> list[dict[str, Any]]:
+        prepared: list[dict[str, Any]] = []
+        for tool in self.claude_tools:
+            tool_type = tool.get("type")
+            name = tool.get("name")
+            description = tool.get("description")
+            input_schema = tool.get("input_schema")
 
-        last = msgs[-1]
-        if last.get("role") != "user":
-            return msgs
+            if isinstance(tool_type, str) and tool_type.startswith("computer_"):
+                params = {
+                    "display_width_px": tool.get("display_width_px"),
+                    "display_height_px": tool.get("display_height_px"),
+                }
+                display_number = tool.get("display_number")
+                if display_number is not None:
+                    params["display_number"] = display_number
 
-        content = last.get("content")
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") in {
-                    "text",
-                    "image",
-                    "tool_use",
-                    "tool_result",
-                }:
-                    block["cache_control"] = {"type": "ephemeral"}  # type: ignore[typeddict-item]
-        return msgs
+                computer_payload: dict[str, Any] = dict(tool)
+                computer_payload["function"] = {
+                    "name": name or "computer",
+                    "parameters": params,
+                }
+
+                prepared.append(computer_payload)
+                continue
+
+            if self._transport_provider == "anthropic":
+                prepared.append(dict(tool))
+                continue
+
+            prepared.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": description,
+                        "parameters": input_schema,
+                    },
+                    "name": name,
+                    "description": description,
+                    "input_schema": input_schema,
+                }
+            )
+
+        return prepared
+
+    def _resolve_transport_layer(self) -> None:
+        self._litellm_model = self.model
+        self._resolved_completion_kwargs = dict(self.completion_kwargs)
+        self._transport_provider = None
+
+        if self.model.startswith("openrouter/anthropic/") and self.use_computer_beta:
+            anthro_model = self.model.split("openrouter/", 1)[1]
+            anthro_model = ANTHROPIC_MODEL_ALIASES.get(anthro_model, anthro_model)
+            if not anthro_model.startswith("anthropic/"):
+                anthro_model = f"anthropic/{anthro_model}"
+
+            anthro_key = self._resolved_completion_kwargs.get("api_key") or settings.anthropic_api_key
+            if not anthro_key:
+                raise ValueError(
+                    "Anthropic API key not found. Set ANTHROPIC_API_KEY or include 'api_key' in completion_kwargs to enable computer use via LiteLLM."
+                )
+
+            for key in ("api_base", "base_url", "headers", "extra_headers", "custom_headers"):
+                self._resolved_completion_kwargs.pop(key, None)
+
+            self._resolved_completion_kwargs["api_key"] = anthro_key
+            self._litellm_model = anthro_model
+            self._transport_provider = "anthropic"
+            self.hud_console.info(
+                "Routing Anthropic computer-use model through Anthropic API because OpenRouter does not yet support computer-use payloads."
+            )
+        elif self.model.startswith("openrouter/"):
+            self._transport_provider = "openrouter"
+        elif self.model.startswith("anthropic/"):
+            mapped = ANTHROPIC_MODEL_ALIASES.get(self.model, self.model)
+            self._litellm_model = mapped
+            self._transport_provider = "anthropic"
+        else:
+            # Assume bare model names refer to Anthropic catalog for parity with claude.py
+            # (LiteLLM expects provider prefixes for routing.)
+            self._transport_provider = "anthropic"
+            mapped = ANTHROPIC_MODEL_ALIASES.get(self.model, self.model)
+            if not mapped.startswith("anthropic/"):
+                mapped = f"anthropic/{mapped}"
+            self._litellm_model = mapped
+            self._resolved_completion_kwargs.pop("custom_llm_provider", None)
+
+        if self._transport_provider == "openrouter" and self.use_computer_beta:
+            # For OpenRouter, fall back to Anthropic routing to maintain computer-use parity.
+            remainder = self.model.split("openrouter/", 1)[1]
+            if remainder.startswith("anthropic/"):
+                anthro_model = ANTHROPIC_MODEL_ALIASES.get(remainder, remainder)
+            else:
+                anthro_model = None
+
+            if anthro_model:
+                for key in ("api_base", "base_url", "headers", "extra_headers", "custom_headers"):
+                    self._resolved_completion_kwargs.pop(key, None)
+
+                self._litellm_model = anthro_model
+                self._transport_provider = "anthropic"
+                if self._resolved_completion_kwargs.get("api_key") is None:
+                    self._resolved_completion_kwargs["api_key"] = settings.anthropic_api_key
+                self._resolved_completion_kwargs.pop("custom_llm_provider", None)
+                self.hud_console.info(
+                    "Automatically switching OpenRouter Anthropic model to Anthropic API for computer use support."
+                )
+
+        if self._transport_provider == "anthropic":
+            anthro_key = self._resolved_completion_kwargs.get("api_key") or settings.anthropic_api_key
+            if not anthro_key:
+                raise ValueError(
+                    "Anthropic API key not found. Set ANTHROPIC_API_KEY or include 'api_key' in completion_kwargs."
+                )
+            self._resolved_completion_kwargs["api_key"] = anthro_key
+            mapped_model = ANTHROPIC_MODEL_ALIASES.get(self._litellm_model, self._litellm_model)
+            if not mapped_model.startswith("anthropic/"):
+                mapped_model = f"anthropic/{mapped_model}"
+            self._litellm_model = mapped_model
+            self._resolved_completion_kwargs.pop("custom_llm_provider", None)
+
+            self._ensure_anthropic_key_valid(anthro_key)
+
+    def _set_computer_tool_type(self, new_type: str) -> None:
+        if self._computer_tool_type == new_type:
+            return
+        updated = False
+        for tool in self.claude_tools:
+            if isinstance(tool.get("type"), str) and tool["type"].startswith("computer_"):
+                tool["type"] = new_type
+                updated = True
+        if updated:
+            self.hud_console.warning(
+                f"Switching Anthropic computer tool type to {new_type} for LiteLLM compatibility"
+            )
+        self._computer_tool_type = new_type
+
+    def _maybe_adjust_computer_tool(self, error: Exception) -> bool:
+        message = str(error)
+        if (
+            self._computer_tool_type == "computer_20250124"
+            and "computer_20250124" in message
+            and "does not match any of the expected tags" in message
+        ):
+            self._set_computer_tool_type("computer_20241022")
+            return True
+        if (
+            self._computer_tool_type == "computer_20241022"
+            and "computer_20241022" in message
+            and ("computer_20250124" in message or "Did you mean" in message)
+        ):
+            self._set_computer_tool_type("computer_20250124")
+            return True
+        return False
+
+    def _ensure_anthropic_key_valid(self, api_key: str) -> None:
+        if not self._validate_api_key or self._anthropic_key_validated:
+            return
+
+        try:
+            from anthropic import Anthropic
+
+            Anthropic(api_key=api_key).models.list()
+            self._anthropic_key_validated = True
+        except Exception as exc:  # pragma: no cover - Anthropic client validation
+            raise ValueError(f"Anthropic API key is invalid: {exc}") from exc
+
+    def _add_prompt_caching(self, messages: list[BetaMessageParam]) -> list[BetaMessageParam]:
+        messages_cached = copy.deepcopy(messages)
+
+        if (
+            messages_cached
+            and isinstance(messages_cached[-1], dict)
+            and messages_cached[-1].get("role") == "user"
+        ):
+            last_content = messages_cached[-1].get("content")
+            if isinstance(last_content, list):
+                for block in last_content:
+                    if isinstance(block, dict):
+                        block_type = block.get("type")
+                        if block_type in {"text", "image", "tool_use", "tool_result"}:
+                            cache_control: BetaCacheControlEphemeralParam = {"type": "ephemeral"}
+                            block["cache_control"] = cache_control  # type: ignore[index]
+
+        return messages_cached
 
 
-def _safe_json_loads(s: str | None) -> Any:
+def _safe_json_loads(raw: str | None) -> Any:
     import json
 
-    if not s:
+    if not raw:
         return {}
-    try:
-        return json.loads(s)
-    except Exception:
-        return {}
+    return json.loads(raw)
+
+
+def _extract_message_and_finish_reason(response: Any) -> tuple[Any, str | None]:
+    if hasattr(response, "choices"):
+        choices = getattr(response, "choices")
+        if choices:
+            choice = choices[0]
+            return _get_field(choice, "message", {}), _get_field(choice, "finish_reason")
+    if isinstance(response, dict) and response.get("choices"):
+        choice = response["choices"][0]
+        return choice.get("message", {}), choice.get("finish_reason")
+    if isinstance(response, dict):
+        return response, response.get("stop_reason")
+    return response, None
+
+
+def _get_field(obj: Any, key: str, default: Any | None = None) -> Any:
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    if hasattr(obj, key):
+        return getattr(obj, key)
+    return default
+
+
+def base64_to_content_block(base64: str) -> BetaImageBlockParam:
+    return {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": base64},
+    }
+
+
+def text_to_content_block(text: str) -> BetaTextBlockParam:
+    return {"type": "text", "text": text}
+
+
+def tool_use_content_block(
+    tool_use_id: str, content: list[BetaTextBlockParam | BetaImageBlockParam]
+) -> BetaToolResultBlockParam:
+    return {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}

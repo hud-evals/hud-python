@@ -82,7 +82,7 @@ def _select_litellm_agent(model: str | None) -> tuple[type[Any], dict[str, Any]]
         from hud.agents.litellm_claude import LiteLLMClaudeAgent
 
         return LiteLLMClaudeAgent, {
-            "model": model or "openrouter/anthropic/claude-sonnet-4",
+            "model": model or "anthropic/claude-sonnet-4-20250514",
         }
 
     return LiteAgent, {
