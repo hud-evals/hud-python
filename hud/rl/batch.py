@@ -8,6 +8,7 @@ from hud.rl.types import ProcessedInputs, TrainingSample
 def batch_samples(
     samples: Sequence[TrainingSample],
     mini_batch_size: int,
+    num_gpus: int,
     pad_token_id: int,
 ) -> list[list[TrainingSample]]:
     sample_list = list(samples)
@@ -16,23 +17,19 @@ def batch_samples(
 
     minibatches = _prepare_minibatches(sample_list, mini_batch_size, pad_token_id)
 
-    from hud.rl.distributed import get_world_size
-
-    world_size = get_world_size()
-
-    if world_size == 1:
+    if num_gpus == 1:
         return [minibatches]
 
-    num_padding = world_size - (len(minibatches) % world_size)
+    num_padding = num_gpus - (len(minibatches) % num_gpus)
 
-    if num_padding < world_size and len(minibatches) > 0:
+    if num_padding < num_gpus and len(minibatches) > 0:
         dummy_batch = _create_dummy_batch(minibatches[0])
         minibatches.extend([dummy_batch] * num_padding)
 
-    per_gpu_count = len(minibatches) // world_size
+    per_gpu_count = len(minibatches) // num_gpus
     batches_per_gpu: list[list[TrainingSample]] = []
 
-    for _ in range(world_size):
+    for _ in range(num_gpus):
         gpu_batches: list[TrainingSample] = []
         for _ in range(per_gpu_count):
             gpu_batches.append(minibatches.pop(0))

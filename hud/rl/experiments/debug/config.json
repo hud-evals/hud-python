@@ -5,17 +5,18 @@
     "max_pixels": 200704,
     "trust_remote_code": true
   },
-  "training_steps": 1,
+  "training_steps": 2,
   "shuffle_dataset": false,
-  "batch_size": 24,
-  "mini_batch_size": 1,
-  "group_size": 4,
+  "batch_size": 64,
+  "mini_batch_size": 4,
+  "group_size": 8,
+  "num_gpus": 2,
   "rewards": {
     "scale_rewards": "group",
     "leave_one_out": false
   },
   "buffer_steps": 4,
-  "select_strategy": "variance",
+  "select_strategy": "recent",
   "training": {
     "model": {
       "attn_implementation": "flash_attention_2",
@@ -54,8 +55,7 @@
     "max_new_tokens": 1024,
     "vllm_base_url": "http://localhost:8000/v1",
     "vllm_api_key": "token-abc123",
-    "force_tool_choice": true,
-    "allowed_tools": null,
+    "force_tool_choice": false,
     "request_timeout": 45,
     "episode_timeout_sec": 600
   },

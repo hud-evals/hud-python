@@ -77,7 +77,7 @@ class Buffer(ABC):
 
         incomplete = [
             task for task in self.current_taskset
-            if len(self.task_traces[self._task_key(task)]) < self.group_size
+            if self._needs_more_traces(task)
         ]
 
         batched_tasks: list[Task] = []
@@ -94,6 +94,10 @@ class Buffer(ABC):
     @abstractmethod
     def sample_traces(self, n: int) -> list[Trace]:
         raise NotImplementedError
+
+    def _needs_more_traces(self, task: Task) -> bool:
+        task_key = self._task_key(task)
+        return len(self.task_traces[task_key]) < self.group_size
 
     def update(self, **kwargs) -> None:
         pass
@@ -143,6 +147,8 @@ class ReplayBuffer(Buffer):
         super().__init__(tasks, group_size, shuffle_dataset)
         self.select_strategy = select_strategy
         self.buffer_steps = buffer_steps
+        self._total_groups: defaultdict[str, int] = defaultdict(int)
+        self._consumed_groups: defaultdict[str, int] = defaultdict(int)
 
     def _max_traces_per_task(self) -> int | None:
         if self.buffer_steps <= 0:
@@ -154,11 +160,32 @@ class ReplayBuffer(Buffer):
 
         max_traces = self._max_traces_per_task()
         if max_traces is None:
+            task_items = list(self.task_traces.items())
+        else:
+            task_items = []
+            for task_id, task_traces in list(self.task_traces.items()):
+                if len(task_traces) > max_traces:
+                    self.task_traces[task_id] = task_traces[-max_traces:]
+                    task_traces = self.task_traces[task_id]
+                task_items.append((task_id, task_traces))
+
+        if max_traces is None:
+            task_items = list(self.task_traces.items())
+
+        for task_id, task_traces in task_items:
+            self._recompute_group_counters(task_id, task_traces)
+
+    def _recompute_group_counters(self, task_id: str, task_traces: list[Trace]) -> None:
+        total_groups = len(task_traces) // self.group_size
+        if total_groups == 0:
+            self._total_groups.pop(task_id, None)
+            self._consumed_groups.pop(task_id, None)
             return
 
-        for task_id, task_traces in list(self.task_traces.items()):
-            if len(task_traces) > max_traces:
-                self.task_traces[task_id] = task_traces[-max_traces:]
+        self._total_groups[task_id] = total_groups
+        consumed = self._consumed_groups.get(task_id, 0)
+        if consumed > total_groups:
+            self._consumed_groups[task_id] = total_groups
 
     def sample_traces(self, n: int) -> list[Trace]:
         available_task_ids = self._tasks_ready()
@@ -169,9 +196,13 @@ class ReplayBuffer(Buffer):
 
         if self.select_strategy == "random":
             chosen_task_ids = self._choose_random_task_ids(available_task_ids, n)
-            return self._gather_random_traces(chosen_task_ids)
+            sampled = self._gather_random_traces(chosen_task_ids)
+            self._mark_consumed(chosen_task_ids)
+            return sampled
 
-        return self._gather_high_variance_traces(available_task_ids, n)
+        chosen_task_ids, sampled = self._gather_high_variance_traces(available_task_ids, n)
+        self._mark_consumed(chosen_task_ids)
+        return sampled
 
     def _choose_random_task_ids(self, task_ids: list[str], n: int) -> list[str]:
         return random.sample(task_ids, n)
@@ -186,7 +217,7 @@ class ReplayBuffer(Buffer):
                 sampled.extend(random.sample(task_traces, self.group_size))
         return sampled
 
-    def _gather_high_variance_traces(self, task_ids: list[str], n: int) -> list[Trace]:
+    def _gather_high_variance_traces(self, task_ids: list[str], n: int) -> tuple[list[str], list[Trace]]:
         scored_ids = [
             (task_id, _variance([_reward_value(tr) for tr in self.task_traces[task_id]]))
             for task_id in task_ids
@@ -197,7 +228,7 @@ class ReplayBuffer(Buffer):
         sampled: list[Trace] = []
         for task_id in top_task_ids:
             sampled.extend(self._select_with_earlier_injection(task_id))
-        return sampled
+        return top_task_ids, sampled
 
     def _select_with_earlier_injection(self, task_id: str) -> list[Trace]:
         task_traces = self.task_traces[task_id]
@@ -221,12 +252,31 @@ class ReplayBuffer(Buffer):
 
         return selected
 
+    def _mark_consumed(self, task_ids: list[str]) -> None:
+        for task_id in task_ids:
+            total = self._total_groups.get(task_id, 0)
+            consumed = self._consumed_groups.get(task_id, 0)
+            if consumed < total:
+                self._consumed_groups[task_id] = consumed + 1
+
     @property
     def info(self) -> dict[str, int | float | str]:
         base = super().info
         base["select_strategy"] = self.select_strategy
         base["buffer_steps"] = self.buffer_steps
         return base
+
+    def completed_groups(self) -> int:
+        return sum(
+            max(self._total_groups[task_id] - self._consumed_groups.get(task_id, 0), 0)
+            for task_id in self._total_groups
+        )
+
+    def _needs_more_traces(self, task: Task) -> bool:
+        task_key = self._task_key(task)
+        total = self._total_groups.get(task_key, 0)
+        consumed = self._consumed_groups.get(task_key, 0)
+        return (total - consumed) <= 0
 
 
 def create_buffer(

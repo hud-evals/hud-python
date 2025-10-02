@@ -21,7 +21,6 @@ class Actor:
             api_key=self.config.vllm_api_key,
             request_timeout=self.config.request_timeout,
             model_name=self.config.base_model,
-            allowed_tools=self.config.allowed_tools,
             append_setup_output=False,
             verbose=self.config.verbose,
             completion_kwargs={
@@ -107,7 +106,7 @@ if __name__ == "__main__":
                     "command": "sh",
                     "args": [
                         "-c",
-                        "docker run --rm --platform linux/amd64 -i -e AGENT_DISPLAY_WIDTH=588 -e AGENT_DISPLAY_HEIGHT=336 hud-browser 2>/dev/null",
+                        "docker run --rm -i -e AGENT_DISPLAY_WIDTH=588 -e AGENT_DISPLAY_HEIGHT=336 hudevals/hud-browser:0.1.7",
                     ],
                 }
             },
