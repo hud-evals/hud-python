@@ -47,7 +47,7 @@ class LiteAgent(GenericOpenAIChatAgent):
             **agent_kwargs,
         )
 
-    def get_tool_schemas(self) -> list[dict]:
+    def get_tool_schemas(self) -> list[Any]:
         # Prefer LiteLLM's stricter transformer (handles Bedrock & friends)
         if transform_mcp_tool_to_openai_tool is not None:
             return [
