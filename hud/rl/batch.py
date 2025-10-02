@@ -1,21 +1,9 @@
 import copy
-from typing import Sequence, TYPE_CHECKING
+from typing import Sequence
 
 import torch
 
 from hud.rl.types import ProcessedInputs, TrainingSample
-
-if TYPE_CHECKING:
-    from transformers.processing_utils import ProcessorMixin
-
-
-def resolve_pad_token_id(processor: "ProcessorMixin") -> int:
-    tokenizer = getattr(processor, "tokenizer", processor)
-    pad_token_id = getattr(tokenizer, "pad_token_id", None)
-    if pad_token_id is None:
-        return 0
-    return int(pad_token_id)
-
 
 def batch_samples(
     samples: Sequence[TrainingSample],

@@ -1,9 +1,10 @@
+import re
+import uuid
+import math
 from typing import Literal
 from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator
-
-import re
 
 PATTERN = re.compile(r"^Qwen/Qwen2\.5.*", re.IGNORECASE)
 
@@ -118,49 +119,27 @@ class CheckpointConfig(BaseConfig):
 
 
 class TrainingConfig(BaseConfig):
-    # Model and processor configuration
+    # Model and checkpoint configuration
     model: ModelConfig = Field(default_factory=ModelConfig, description="Model configuration")
-    processor: ProcessorConfig = Field(default_factory=ProcessorConfig, description="Image processor configuration")
-
-    # Checkpoint configuration
     checkpoint: CheckpointConfig = Field(default_factory=CheckpointConfig, description="Checkpoint configuration")
 
     # Parallelization
     dp_replicate: int = Field(default=1, ge=1, description="Data parallel replicate. To run DDP, set to num_devices")
     dp_shard: int = Field(default=1, ge=1, description="Data parallel shard. To run FSDP, set to num_devices")
 
-    # Training parameters
-    training_steps: int = Field(default=100, ge=1, description="Number of training steps")
-    shuffle_dataset: bool = Field(default=False, description="Whether to shuffle the dataset")
+    # Optimization
     save_every_batches: int = Field(default=1, ge=1, description="Save checkpoint every N batches")
-
-    # Batching parameters
     epochs: int = Field(default=2, ge=1, description="Number of training epochs")
-    batch_size: int = Field(default=24, ge=1, description="Batch size for training")
-    group_size: int = Field(default=4, ge=1, description="Group size for batching")
-    mini_batch_size: int = Field(default=1, ge=1, description="Mini-batch size")
     update_after_group: bool = Field(default=True, description="Whether to update the policy after each task group")
     accumulate_over_minibatches: bool = Field(default=False, description="Whether to accumulate over minibatches")
 
-    # Advantage calculation parameters
-    scale_rewards: Literal["group", "batch", "none"] = Field(default="group", description="Reward scaling strategy")
-    leave_one_out: bool = Field(default=False, description="RLOO scaling factor G/(G-1), only applies when scale_rewards='none'")
-
-    # Replay buffer parameters
-    buffer_steps: int = Field(default=4, ge=0, description="Number of buffer steps")
-    select_strategy: Literal["recent", "variance", "random"] = Field(default="variance", description="Buffer selection strategy")
-
-    # Aggregation parameters
+    # Aggregation and loss parameters
     ppo_mode: Literal["per_token", "per_trace"] = Field(default="per_token", description="PPO mode")
     token_agg: Literal["mean", "sum"] = Field(default="mean", description="Token aggregation method")
-
-    # Regularization parameters
     kl_beta: float = Field(default=0.0, ge=0.0, description="KL divergence coefficient")
     entropy_beta: float = Field(default=0.0, ge=0.0, description="Entropy coefficient")
     top_eps: float = Field(default=0.2, ge=0.0, le=1.0, description="Top epsilon for PPO clipping")
     bottom_eps: float = Field(default=0.1, ge=0.0, le=1.0, description="Bottom epsilon for PPO clipping")
-
-    # Gradient clipping
     grad_clip: float = Field(default=1.0, gt=0.0, description="Gradient clipping value")
 
     # Optimizer configuration
@@ -168,18 +147,16 @@ class TrainingConfig(BaseConfig):
 
     @model_validator(mode='after')
     def validate_model(self) -> 'TrainingConfig':
-        if self.mini_batch_size > self.batch_size:
-            raise ValueError(
-                f"mini_batch_size ({self.mini_batch_size}) cannot be greater than "
-                f"batch_size ({self.batch_size})"
-            )
-
         if self.top_eps < self.bottom_eps:
             raise ValueError(
                 f"top_eps ({self.top_eps}) must be >= bottom_eps ({self.bottom_eps})"
             )
 
         return self
+
+class RewardConfig(BaseConfig):
+    scale_rewards: Literal["group", "batch", "none"] = Field(default="group", description="Reward scaling strategy")
+    leave_one_out: bool = Field(default=False, description="RLOO scaling factor G/(G-1), only applies when scale_rewards='none'")
 
 class ActorConfig(BaseConfig):
     base_model: str = ""
@@ -221,24 +198,31 @@ class ActorConfig(BaseConfig):
 
 
 class Config(BaseConfig):
-    """Main configuration combining all sub-configs."""
+    """Top-level RL configuration with rollout and trainer settings."""
 
-    # Main model specification - shared across model and actor configs
     base_model: str = Field(
         default="Qwen/Qwen2.5-VL-3B-Instruct",
         description="Base model name shared across model and actor configurations"
     )
 
-    training: TrainingConfig = Field(default_factory=TrainingConfig, description="Training configuration")
+    processor: ProcessorConfig = Field(default_factory=ProcessorConfig, description="Processor configuration")
+
+    training_steps: int = Field(default=100, ge=1, description="Number of training steps")
+    shuffle_dataset: bool = Field(default=False, description="Whether to shuffle the dataset")
+    batch_size: int = Field(default=24, ge=1, description="Global batch size for training")
+    mini_batch_size: int = Field(default=1, ge=1, description="Mini-batch size")
+    group_size: int = Field(default=4, ge=1, description="Group size i.e. number of rollouts per prompt")
+    rewards: RewardConfig = Field(default_factory=RewardConfig, description="Reward scaling configuration")
+    buffer_steps: int = Field(default=4, ge=0, description="Number of buffer steps")
+    select_strategy: Literal["recent", "variance", "random"] = Field(default="variance", description="Buffer selection strategy")
+
+    training: TrainingConfig = Field(default_factory=TrainingConfig, description="Trainer configuration")
     actor: ActorConfig = Field(default_factory=ActorConfig, description="Actor configuration")
 
-    # Telemetry configuration
     job_name: str = Field(default="RL Training", description="Job name for telemetry")
-    job_id: str | None = Field(default=None, description="Use existing job ID if provided")
+    job_id: str = Field(default=str(uuid.uuid4()), description="Job ID for telemetry")
     stats_interval: int = Field(default=1, ge=1, description="Statistics collection interval")
     verbose: bool = Field(default=False, description="Enable verbose logging")
-
-    # Misc
     seed: int = Field(default=1234, description="Random seed for reproducibility")
 
     @field_validator("base_model")
@@ -254,32 +238,33 @@ class Config(BaseConfig):
         self.actor.base_model = self.base_model
         return self
 
-    @classmethod
-    def from_dict(cls, d: dict) -> "Config":
-        """Create config from dictionary."""
-        training = TrainingConfig.model_validate(d.get("training", {}))
-        actor = ActorConfig.model_validate(d.get("actor", {}))
+    @model_validator(mode='after')
+    def validate_batching(self) -> 'Config':
+        """Ensure batch sizing aligns with group collection and distributed layout."""
+        if self.batch_size % self.group_size != 0:
+            raise ValueError(
+                f"batch_size ({self.batch_size}) must be divisible by group_size ({self.group_size})"
+            )
 
-        return cls(
-            base_model=d.get("base_model", "Qwen/Qwen2.5-VL-3B-Instruct"),
-            training=training,
-            actor=actor,
-            job_name=d.get("job_name", "RL Training"),
-            job_id=d.get("job_id"),
-            stats_interval=d.get("stats_interval", 1),
-            verbose=d.get("verbose", False),
-            seed=d.get("seed", 1234),
-        )
+        world_size = self.expected_world_size
+        if world_size <= 0:
+            raise ValueError("Expected world size must be at least 1")
 
-    def to_dict(self) -> dict:
-        """Convert config to dictionary."""
-        return {
-            "base_model": self.base_model,
-            "training": self.training.model_dump(),
-            "actor": self.actor.model_dump(),
-            "job_name": self.job_name,
-            "job_id": self.job_id,
-            "stats_interval": self.stats_interval,
-            "verbose": self.verbose,
-            "seed": self.seed,
-        }
+        per_rank_total = self.batch_size // world_size
+        if per_rank_total == 0:
+            raise ValueError(
+                "batch_size must be at least the configured world size so each rank receives samples"
+            )
+
+        return self
+
+    @property
+    def expected_world_size(self) -> int:
+        return max(1, self.training.dp_replicate * self.training.dp_shard)
+
+    @property
+    def grad_accumulation_steps(self) -> int:
+        """Number of microbatches each rank processes before an optimizer step."""
+        world_size = self.expected_world_size
+        total_microbatches = max(1, math.ceil(self.batch_size / self.mini_batch_size))
+        return max(1, math.ceil(total_microbatches / world_size))

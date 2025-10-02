@@ -1,47 +1,51 @@
 {
-  "model": {
-    "base_model": "Qwen/Qwen2.5-VL-3B-Instruct",
-    "lora_r": 8,
-    "lora_alpha": 16,
-    "lora_dropout": 0.05,
-    "target_modules": [
-      "q_proj",
-      "k_proj", 
-      "v_proj",
-      "o_proj",
-      "gate_proj",
-      "up_proj",
-      "down_proj"
-    ],
-    "attn_implementation": "flash_attention_2",
-    "use_liger": true,
-    "gradient_checkpointing": true
+  "base_model": "Qwen/Qwen2.5-VL-3B-Instruct",
+  "processor": {
+    "min_pixels": 50176,
+    "max_pixels": 200704,
+    "trust_remote_code": true
   },
+  "training_steps": 1,
+  "shuffle_dataset": false,
+  "batch_size": 24,
+  "mini_batch_size": 1,
+  "group_size": 4,
+  "rewards": {
+    "scale_rewards": "group",
+    "leave_one_out": false
+  },
+  "buffer_steps": 4,
+  "select_strategy": "variance",
   "training": {
-    "training_steps": 1,
-    "shuffle_dataset": false,
+    "model": {
+      "attn_implementation": "flash_attention_2",
+      "trust_remote_code": true,
+      "use_liger": true,
+      "freeze_vision_tower": true
+    },
+    "checkpoint": {
+      "out_dir": "./checkpoints",
+      "checkpoint_prefix": "cua-grpo-step"
+    },
+    "dp_replicate": 1,
+    "dp_shard": 1,
     "save_every_batches": 1,
     "epochs": 1,
-    "batch_size": 24,
-    "group_size": 4,
-    "mini_batch_size": 1,
     "update_after_group": true,
     "accumulate_over_minibatches": false,
-    "scale_rewards": "group",
-    "leave_one_out": false,
-    "buffer_steps": 4,
-    "select_strategy": "variance",
     "ppo_mode": "per_token",
     "token_agg": "mean",
     "kl_beta": 0.0,
     "entropy_beta": 0.0,
     "top_eps": 0.2,
     "bottom_eps": 0.1,
-    "lr": 3e-5,
     "grad_clip": 1.0,
-    "use_8bit_optimizer": true,
-    "adam_betas": [0.9, 0.999],
-    "adam_eps": 1e-8
+    "optimizer": {
+      "lr": 3e-5,
+      "use_8bit_optimizer": true,
+      "adam_betas": [0.9, 0.999],
+      "adam_eps": 1e-8
+    }
   },
   "actor": {
     "max_steps_per_episode": 5,
@@ -55,11 +59,8 @@
     "request_timeout": 45,
     "episode_timeout_sec": 600
   },
-  "job_name": "j-test-rl",
-  "job_id": null,
+  "job_name": "j-test-run",
   "stats_interval": 1,
   "verbose": false,
-  "out_dir": "./checkpoints",
-  "adapter_prefix": "cua-grpo-step",
   "seed": 1234
 }

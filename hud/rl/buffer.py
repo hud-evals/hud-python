@@ -1,328 +1,243 @@
 import random
 from abc import ABC, abstractmethod
-from collections import deque
-from typing import TYPE_CHECKING
+from collections import defaultdict
 
-from hud.rl.logger import console
 from hud.types import Task, Trace
 
-if TYPE_CHECKING:
-    from hud.rl.config import Config
+
+def _reward_value(trace: Trace) -> float:
+    value = getattr(trace, "reward", 0.0)
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _variance(values: list[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    mean = sum(values) / len(values)
+    return sum((v - mean) ** 2 for v in values) / len(values)
 
 
 class Buffer(ABC):
-    """Abstract base class for managing tasks and traces with sampling strategies."""
+    """Base class that keeps track of tasks, traces, and group sampling."""
 
-    def __init__(self, tasks: list[Task], config: "Config") -> None:
-        self.config = config
-        self.batch_size = config.training.batch_size
-        self.group_size = config.training.group_size
-        self.training_steps = config.training.training_steps
+    def __init__(self, tasks: list[Task], group_size: int, shuffle_dataset: bool = False) -> None:
+        self.group_size = group_size
+        self._initialize_tasks(tasks, shuffle_dataset)
+        self.task_traces: defaultdict[str, list[Trace]] = defaultdict(list)
 
-        # Validate group and batch sizes
-        if self.group_size > self.batch_size:
-            raise ValueError(
-                f"Group size is greater than batch size, {self.group_size} > {self.batch_size}"
-            )
-        if self.batch_size % self.group_size != 0:
-            raise ValueError(
-                f"A batch cannot have irregular groups, {self.group_size} % {self.batch_size} != 0"
-            )
-
-        self.groups_per_batch = self.batch_size // self.group_size
-        self.number_of_tasks = self.training_steps * self.groups_per_batch
-
-        # Initialize task queue with provided tasks
-        self.task_queue: deque[Task] = deque()
-        self._initialize_tasks(tasks)
-
-        # Initialize trace buffer
-        self.trace_buffer: deque[Trace] = deque(
-            maxlen=config.training.buffer_steps * config.training.batch_size
-        )
-
-    def _initialize_tasks(self, tasks: list[Task]) -> None:
+    def _initialize_tasks(self, tasks: list[Task], shuffle: bool) -> None:
         if not tasks:
             raise ValueError("No tasks provided to buffer")
 
-        # Shuffle if configured
-        if self.config.training.shuffle_dataset:
-            random.shuffle(tasks)
+        self.tasks = list(tasks)
+        if shuffle:
+            random.shuffle(self.tasks)
 
-        # Fill task queue to match number of training steps
-        while len(self.task_queue) < self.number_of_tasks:
-            for task in tasks:
-                self.task_queue.append(task)
-                if len(self.task_queue) >= self.number_of_tasks:
-                    break
+        self.current_task_idx = 0
+        self.current_taskset: list[Task] = []
 
-    def add_tasks(self, tasks: list[Task]) -> None:
-        for task in tasks:
-            self.task_queue.append(task)
+    def _task_key(self, task: Task) -> str:
+        task_id = getattr(task, "id", None)
+        if task_id is None:
+            raise ValueError("Task is missing required id")
+        return str(task_id)
+
+    def _trace_task_key(self, trace: Trace) -> str:
+        task = getattr(trace, "task", None)
+        assert task is not None and getattr(task, "id", None), "Trace must include a task with an id"
+        return str(task.id)
+
+    def _tasks_ready(self) -> list[str]:
+        return [task_id for task_id, traces in self.task_traces.items() if len(traces) >= self.group_size]
 
     def add_traces(self, traces: list[Trace]) -> None:
         for trace in traces:
-            self.trace_buffer.append(trace)
+            if getattr(trace, "isError", False):
+                continue
+            task_key = self._trace_task_key(trace)
+            self.task_traces[task_key].append(trace)
 
-    def sample_tasks(self, n: int | None = None) -> list[Task]:
-        if n is None:
-            n = self.groups_per_batch
+    def sample_tasks(self, n: int) -> list[Task]:
+        if not self.current_taskset:
+            requested = min(n, len(self.tasks))
+            selected_keys = {self._task_key(task) for task in self.current_taskset}
 
-        tasks = []
-        for _ in range(n):
-            if self.task_queue:
-                tasks.append(self.task_queue.popleft())
+            while len(self.current_taskset) < requested:
+                task = self.tasks[self.current_task_idx]
+                self.current_task_idx = (self.current_task_idx + 1) % len(self.tasks)
 
-        # Create groups where each task is repeated group_size times
-        result = []
-        for task in tasks:
-            result.extend([task] * self.group_size)
-        return result
+                task_key = self._task_key(task)
+                if task_key in selected_keys:
+                    continue
+                selected_keys.add(task_key)
+                self.current_taskset.append(task)
+
+        incomplete = [
+            task for task in self.current_taskset
+            if len(self.task_traces[self._task_key(task)]) < self.group_size
+        ]
+
+        batched_tasks: list[Task] = []
+        for task in incomplete:
+            batched_tasks.extend([task] * self.group_size)
+        return batched_tasks
+
+    def reset(self) -> None:
+        self.current_taskset.clear()
+
+    def completed_groups(self) -> int:
+        return sum(1 for traces in self.task_traces.values() if len(traces) >= self.group_size)
 
     @abstractmethod
-    def sample_traces(self, batch_size: int | None = None) -> list[Trace]:
+    def sample_traces(self, n: int) -> list[Trace]:
         raise NotImplementedError
 
     def update(self, **kwargs) -> None:
         pass
 
     def __len__(self) -> int:
-        return len(self.task_queue)
+        return sum(len(traces) for traces in self.task_traces.values())
 
     @property
     def info(self) -> dict[str, int | float | str]:
         return {
-            "remaining_tasks": len(self.task_queue),
-            "total_traces": len(self.trace_buffer),
-            "training_steps": self.training_steps,
+            "total_traces": len(self),
+            "completed_groups": self.completed_groups(),
+            "total_tasks": len(self.tasks),
             "group_size": self.group_size,
-            "batch_size": self.batch_size,
         }
 
 
 class SimpleBuffer(Buffer):
-    """Simple buffer with recent sampling strategy."""
+    """Buffer that always returns the most recent group for each task."""
 
-    def sample_traces(self, batch_size: int | None = None) -> list[Trace]:
-        """Sample most recent traces (FIFO)."""
-        if batch_size is None:
-            batch_size = self.batch_size
+    def sample_traces(self, n: int) -> list[Trace]:
+        task_ids = self._tasks_ready()
+        n = min(n, len(task_ids))
+        sampled_traces: list[Trace] = []
+        for task_id in task_ids[:n]:
+            sampled_traces.extend(self.task_traces[task_id][-self.group_size:])
+        return sampled_traces
 
-        if len(self.trace_buffer) < batch_size:
-            console.warning(f"Buffer has {len(self.trace_buffer)} traces, requested {batch_size}")
-            return list(self.trace_buffer)
-
-        # Return most recent traces
-        return list(self.trace_buffer)[-batch_size:]
-
+    def reset(self) -> None:
+        for task in self.current_taskset:
+            task_key = self._task_key(task)
+            self.task_traces[task_key].clear()
+        super().reset()
 
 
 class ReplayBuffer(Buffer):
-    """Replay buffer with configurable sampling strategy (recent, random, variance)."""
+    """Buffer that keeps a window of past traces and can replay them."""
 
-    def __init__(self, tasks: list[Task], config: Config) -> None:
-        super().__init__(tasks, config)
-        self.select_strategy = config.training.select_strategy
+    def __init__(
+        self,
+        tasks: list[Task],
+        group_size: int,
+        select_strategy: str,
+        buffer_steps: int,
+        shuffle_dataset: bool = False,
+    ) -> None:
+        super().__init__(tasks, group_size, shuffle_dataset)
+        self.select_strategy = select_strategy
+        self.buffer_steps = buffer_steps
 
-    def sample_traces(self, batch_size: int | None = None) -> list[Trace]:
-        if batch_size is None:
-            batch_size = self.batch_size
+    def _max_traces_per_task(self) -> int | None:
+        if self.buffer_steps <= 0:
+            return None
+        return self.buffer_steps * self.group_size
 
-        if self.select_strategy == "recent":
-            if len(self.trace_buffer) < batch_size:
-                return list(self.trace_buffer)
-            return list(self.trace_buffer)[-batch_size:]
-        elif self.select_strategy == "random":
-            if len(self.trace_buffer) < batch_size:
-                return list(self.trace_buffer)
-            return random.sample(list(self.trace_buffer), batch_size)
-        elif self.select_strategy == "variance":
-            return self._sample_high_variance_traces()
-        else:
-            raise ValueError(f"Invalid select strategy: {self.select_strategy}")
+    def add_traces(self, traces: list[Trace]) -> None:
+        super().add_traces(traces)
+
+        max_traces = self._max_traces_per_task()
+        if max_traces is None:
+            return
+
+        for task_id, task_traces in list(self.task_traces.items()):
+            if len(task_traces) > max_traces:
+                self.task_traces[task_id] = task_traces[-max_traces:]
+
+    def sample_traces(self, n: int) -> list[Trace]:
+        available_task_ids = self._tasks_ready()
+        if not available_task_ids:
+            return []
+
+        n = min(n, len(available_task_ids))
+
+        if self.select_strategy == "random":
+            chosen_task_ids = self._choose_random_task_ids(available_task_ids, n)
+            return self._gather_random_traces(chosen_task_ids)
+
+        return self._gather_high_variance_traces(available_task_ids, n)
+
+    def _choose_random_task_ids(self, task_ids: list[str], n: int) -> list[str]:
+        return random.sample(task_ids, n)
+
+    def _gather_random_traces(self, task_ids: list[str]) -> list[Trace]:
+        sampled: list[Trace] = []
+        for task_id in task_ids:
+            task_traces = self.task_traces[task_id]
+            if len(task_traces) <= self.group_size:
+                sampled.extend(task_traces[-self.group_size:])
+            else:
+                sampled.extend(random.sample(task_traces, self.group_size))
+        return sampled
+
+    def _gather_high_variance_traces(self, task_ids: list[str], n: int) -> list[Trace]:
+        scored_ids = [
+            (task_id, _variance([_reward_value(tr) for tr in self.task_traces[task_id]]))
+            for task_id in task_ids
+        ]
+        scored_ids.sort(key=lambda item: item[1], reverse=True)
+
+        top_task_ids = [task_id for task_id, _ in scored_ids[:n]]
+        sampled: list[Trace] = []
+        for task_id in top_task_ids:
+            sampled.extend(self._select_with_earlier_injection(task_id))
+        return sampled
+
+    def _select_with_earlier_injection(self, task_id: str) -> list[Trace]:
+        task_traces = self.task_traces[task_id]
+        if len(task_traces) <= self.group_size:
+            return list(task_traces)
+
+        recent = list(task_traces[-self.group_size:])
+        earlier = list(task_traces[:-self.group_size])
+        if not earlier:
+            return recent
+
+        mean_reward = sum(_reward_value(tr) for tr in task_traces) / len(task_traces)
+        earlier.sort(key=lambda tr: abs(_reward_value(tr) - mean_reward), reverse=True)
+
+        inject_count = min(len(earlier), max(1, self.group_size // 2))
+        selected = earlier[:inject_count]
+
+        remaining = self.group_size - len(selected)
+        if remaining > 0:
+            selected.extend(recent[-remaining:])
+
+        return selected
 
     @property
     def info(self) -> dict[str, int | float | str]:
-        base_info = super().info
-        base_info["select_strategy"] = self.select_strategy
-        return base_info
+        base = super().info
+        base["select_strategy"] = self.select_strategy
+        base["buffer_steps"] = self.buffer_steps
+        return base
 
-    def _extract_group_key(self, trace: Trace) -> tuple[str, str]:
-        """Return a stable grouping key for a trace.
 
-        Preference order:
-        1) task.id when present (kind='id')
-        2) task.prompt exact string (kind='prompt') when id is None
-        3) 'NA' for missing/errored entries (kind='NA')
-        """
-        if getattr(trace, "isError", False):
-            return ("NA", "NA")
-
-        task = getattr(trace, "task", None)
-        if task is None:
-            return ("NA", "NA")
-
-        tid = getattr(task, "id", None)
-        if tid is not None:
-            return ("id", str(tid))
-
-        prompt = getattr(task, "prompt", None)
-        if prompt:
-            return ("prompt", str(prompt))
-
-        return ("NA", "NA")
-
-    def _validate_and_split_groups(
-        self, recent_traces: list[Trace]
-    ) -> tuple[list[list[Trace]], list[tuple[str, str]]]:
-        """Validate and split recent traces into homogeneous groups by id or prompt.
-
-        - Uses id when present; otherwise falls back to prompt equality.
-        - Any NA/error traces are excluded and the group is filled by duplicating
-          existing valid members in that group.
-        - Always returns len == groups_per_batch groups of size == group_size.
-        """
-        from collections import Counter
-
-        groups_per_batch = self.batch_size // self.group_size
-
-        window_keys = [self._extract_group_key(t) for t in recent_traces]
-        window_counter = Counter(k for k in window_keys if k[0] != "NA")
-
-        validated_groups: list[list[Trace]] = []
-        selected_keys: list[tuple[str, str]] = []
-
-        for g_idx in range(groups_per_batch):
-            start = g_idx * self.group_size
-            end = start + self.group_size
-            chunk = recent_traces[start:end]
-
-            key_counts = Counter()
-            per_item_keys: list[tuple[str, str]] = []
-            for tr in chunk:
-                k = self._extract_group_key(tr)
-                per_item_keys.append(k)
-                if k[0] != "NA":
-                    key_counts[k] += 1
-
-            if key_counts:
-                best_key = key_counts.most_common(1)[0][0]
-            elif window_counter:
-                best_key = window_counter.most_common(1)[0][0]
-            else:
-                best_key = ("NA", "NA")
-
-            homogeneous = [tr for tr, k in zip(chunk, per_item_keys, strict=False) if k == best_key]
-
-            while len(homogeneous) < self.group_size:
-                if homogeneous:
-                    homogeneous.append(homogeneous[-1])
-                else:
-                    idx = next((i for i, wk in enumerate(window_keys) if wk[0] != "NA"), None)
-                    if idx is not None:
-                        homogeneous.append(recent_traces[idx])
-                    elif chunk:
-                        homogeneous.append(chunk[0])
-                    else:
-                        homogeneous.append(recent_traces[0])
-
-            validated_groups.append(homogeneous)
-            selected_keys.append(best_key)
-
-        return validated_groups, selected_keys
-
-    def _sample_high_variance_traces(self) -> list[Trace]:
-        from collections import Counter, defaultdict, deque
-
-        buf_list = list(self.trace_buffer)
-        if len(buf_list) < self.batch_size:
-            console.warning(
-                f"[group-sampler] Buffer has only {len(buf_list)} traces, need {self.batch_size}"
-            )
-            while len(buf_list) < self.batch_size:
-                take = min(len(buf_list) or 1, self.batch_size - len(buf_list))
-                buf_list.extend(buf_list[:take])
-        recent_traces = buf_list[-self.batch_size :]
-
-        recent_keys = [self._extract_group_key(t) for t in recent_traces]
-        console.info(f"[group-sampler] recent-window histogram: {Counter(recent_keys)}")
-
-        console.info(
-            f"[group-sampler] Building earlier traces lookup, buffer size: {len(buf_list)}"
-        )
-        earlier_traces_by_key: dict[tuple[str, str], deque[Trace]] = defaultdict(deque)
-        for tr in buf_list[: -self.batch_size]:
-            k = self._extract_group_key(tr)
-            if k[0] != "NA":
-                earlier_traces_by_key[k].append(tr)
-
-        groups, group_keys = self._validate_and_split_groups(recent_traces)
-
-        final_traces: list[Trace] = []
-        for g_idx, (homogeneous, target_key) in enumerate(zip(groups, group_keys, strict=False)):
-
-            def current_mean(h: list[Trace]) -> float:
-                if not h:
-                    return 0.0
-                vals = [float(getattr(t, "reward", 0.0) or 0.0) for t in h]
-                return sum(vals) / len(vals)
-
-            pool = earlier_traces_by_key.get(target_key, deque())
-            if pool:
-                pool_vals = [float(getattr(tr, "reward", 0.0) or 0.0) for tr in list(pool)]
-                if pool_vals:
-                    pool_mean = sum(pool_vals) / len(pool_vals)
-                    pool_var = sum((v - pool_mean) * (v - pool_mean) for v in pool_vals) / len(
-                        pool_vals
-                    )
-                    console.info(
-                        f"[group-sampler] Group {g_idx}: earlier-pool size={len(pool_vals)} "
-                        f"mean={pool_mean:.4f} std={(pool_var**0.5):.4f}"
-                    )
-
-                replace_k = max(1, self.group_size // 4)
-                replace_k = min(replace_k, len(pool), self.group_size)
-
-                if replace_k > 0:
-                    mu = current_mean(homogeneous)
-                    pool_list = list(pool)
-                    pool_indices = list(range(len(pool_list)))
-                    pool_indices.sort(
-                        key=lambda i: abs(
-                            (float(getattr(pool_list[i], "reward", 0.0) or 0.0)) - mu
-                        ),
-                        reverse=True,
-                    )
-                    chosen_pool_idx = set(pool_indices[:replace_k])
-                    replacements = [pool_list[i] for i in pool_indices[:replace_k]]
-
-                    remaining = [tr for i, tr in enumerate(pool_list) if i not in chosen_pool_idx]
-                    earlier_traces_by_key[target_key] = deque(remaining)
-
-                    group_indices = list(range(len(homogeneous)))
-                    mu = current_mean(homogeneous)
-                    group_indices.sort(
-                        key=lambda i: abs(
-                            (float(getattr(homogeneous[i], "reward", 0.0) or 0.0)) - mu
-                        )
-                    )
-                    target_positions = group_indices[:replace_k]
-
-                    for pos, new_tr in zip(target_positions, replacements, strict=False):
-                        homogeneous[pos] = new_tr
-
-            if any(self._extract_group_key(t) != target_key for t in homogeneous):
-                raise RuntimeError(f"Group {g_idx} is not homogeneous after sampling")
-            final_traces.extend(homogeneous)
-
-        for i in range(0, len(final_traces), self.group_size):
-            block = final_traces[i : i + self.group_size]
-            keys = {self._extract_group_key(t) for t in block}
-            if len(keys) != 1:
-                raise RuntimeError(f"Homogeneity validation failed for block starting at index {i}")
-
-        console.info(
-            f"[group-sampler] final histogram: "
-            f"{Counter(self._extract_group_key(t) for t in final_traces)}"
-        )
-        return final_traces
+def create_buffer(
+    tasks: list[Task],
+    group_size: int,
+    select_strategy: str,
+    buffer_steps: int = 0,
+    shuffle_dataset: bool = False,
+) -> Buffer:
+    if select_strategy == "recent":
+        return SimpleBuffer(tasks, group_size, shuffle_dataset)
+    if select_strategy in {"random", "variance"}:
+        return ReplayBuffer(tasks, group_size, select_strategy, buffer_steps, shuffle_dataset)
+    raise ValueError(f"Invalid select_strategy: {select_strategy}. Expected 'recent', 'random', or 'variance'.")
