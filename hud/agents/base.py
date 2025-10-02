@@ -55,6 +55,7 @@ class MCPAgent(ABC):
         # Filtering
         allowed_tools: list[str] | None = None,
         disallowed_tools: list[str] | None = None,
+        response_tool_name: str | None = None,
         # Messages
         system_prompt: str = GLOBAL_SYSTEM_PROMPT,
         append_setup_output: bool = True,
@@ -74,6 +75,7 @@ class MCPAgent(ABC):
                 that provides `mcp_config`.
             allowed_tools: Names of tools to allow (None means allow all).
             disallowed_tools: Names of tools to always exclude.
+            response_tool_name: Name of the tool to use for response.
             system_prompt: System prompt to seed the conversation.
             append_setup_output: Whether to append setup tool output to the
                 first turn's messages.
@@ -108,7 +110,7 @@ class MCPAgent(ABC):
 
         # Initialize these here so methods can be called before initialize()
         self._tool_map: dict[str, types.Tool] = {}  # Simplified: just name to tool
-        self.response_tool_name = None
+        self.response_tool_name = response_tool_name
 
         # Trace
         self._auto_trace = auto_trace
@@ -168,6 +170,8 @@ class MCPAgent(ABC):
                     self.disallowed_tools.extend(task.agent_config["disallowed_tools"])
                 else:  # If disallowed_tools is None, we overwrite it
                     self.disallowed_tools = task.agent_config["disallowed_tools"]
+            if "response_tool_name" in task.agent_config:
+                self.response_tool_name = task.agent_config["response_tool_name"]
 
         all_tools = await self.mcp_client.list_tools()
         self._available_tools = []
