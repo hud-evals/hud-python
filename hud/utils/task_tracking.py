@@ -14,7 +14,8 @@ routines. Users typically don't interact with it directly.
 
 import asyncio
 import logging
-from typing import Optional
+from collections.abc import Coroutine
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class TaskTracker:
         self._lock = asyncio.Lock()
 
     def track_task(
-        self, coro: asyncio.coroutines.Coroutine, name: str = "task"
+        self, coro: Coroutine[Any, Any, Any], name: str = "task"
     ) -> asyncio.Task | None:
         """Create and track an async task.
 
@@ -135,7 +136,7 @@ def get_global_tracker() -> TaskTracker:
     return _global_tracker
 
 
-def track_task(coro: asyncio.coroutines.Coroutine, name: str = "task") -> asyncio.Task | None:
+def track_task(coro: Coroutine[Any, Any, Any], name: str = "task") -> asyncio.Task | None:
     """Create and track an async task for telemetry operations.
 
     This is a convenience function that uses the global tracker to ensure

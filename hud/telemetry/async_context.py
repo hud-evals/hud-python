@@ -28,7 +28,10 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from types import TracebackType
 
 from hud.otel import configure_telemetry
 from hud.otel.context import (
@@ -128,7 +131,7 @@ class AsyncTrace:
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
-        exc_tb: object,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async trace context."""
         # Send async status update if this is a root trace
@@ -220,7 +223,7 @@ class AsyncJob:
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
-        exc_tb: object,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async job context."""
         global _current_job
