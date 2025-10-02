@@ -98,7 +98,7 @@ def configure_telemetry(
         exporter = HudSpanExporter(
             telemetry_url=settings.hud_telemetry_url, api_key=settings.api_key
         )
-        
+
         # Batch exports for efficiency while maintaining reasonable real-time visibility
         provider.add_span_processor(
             BatchSpanProcessor(

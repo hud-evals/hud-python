@@ -6,7 +6,7 @@ Standard Usage:
     >>> import hud
     >>> with hud.trace("My Task"):
     ...     do_work()
-    
+
     >>> with hud.job("My Job") as job:
     ...     with hud.trace("Task", job_id=job.id):
     ...         do_work()

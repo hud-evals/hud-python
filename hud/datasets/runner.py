@@ -29,7 +29,7 @@ async def run_dataset(
     auto_respond: bool = False,
 ) -> list[Any]:
     """Run all tasks in a dataset with automatic job and telemetry tracking.
-    
+
     This function handles concurrent task execution with proper telemetry collection.
     All tasks are executed in parallel up to `max_concurrent`, with full telemetry
     automatically uploaded to the HUD platform.
@@ -117,7 +117,7 @@ async def run_dataset(
                     raw_task_id = task_dict.get("id")
                     safe_task_id = str(raw_task_id) if raw_task_id is not None else None
                     async with hud.async_trace(task_name, job_id=job_obj.id, task_id=safe_task_id):
-                    # with hud.trace(task_name, job_id=job_obj.id, task_id=safe_task_id):
+                        # with hud.trace(task_name, job_id=job_obj.id, task_id=safe_task_id):
                         # Convert dict to Task here, at trace level
                         task = Task(**task_dict)
 
@@ -135,25 +135,25 @@ async def run_dataset(
             *[_worker(i, task, max_steps=max_steps) for i, task in enumerate(dataset)],
             return_exceptions=True,  # Don't fail entire batch on one error
         )
-        
+
         # Log any exceptions that occurred
         for i, result in enumerate(worker_results):
             if isinstance(result, Exception):
                 logger.error(f"Worker {i} failed with exception: {result}", exc_info=result)
-    
+
     # Ensure all telemetry is uploaded before returning
     await _flush_telemetry()
-    
+
     return results
 
 
 async def _flush_telemetry() -> None:
     """Flush all pending telemetry operations.
-    
+
     Ensures complete telemetry upload by:
     1. Waiting for all async status updates to complete
     2. Forcing OpenTelemetry span processor to export remaining spans
-    
+
     This prevents telemetry loss at high concurrency (200+ tasks) by ensuring
     all operations complete before process exit.
     """
@@ -162,18 +162,18 @@ async def _flush_telemetry() -> None:
     from hud.utils import hud_console
 
     hud_console.info("Uploading telemetry...")
-    
+
     # Step 1: Wait for async status updates (job/trace status)
     completed_tasks = await wait_all_tasks(timeout=20.0)
     if completed_tasks > 0:
         hud_console.info(f"Completed {completed_tasks} pending telemetry tasks")
-    
+
     # Step 2: Flush OpenTelemetry span exports
     if is_telemetry_configured():
         try:
             from opentelemetry import trace
             from opentelemetry.sdk.trace import TracerProvider
-            
+
             provider = trace.get_tracer_provider()
             if isinstance(provider, TracerProvider):
                 provider.force_flush(timeout_millis=20000)

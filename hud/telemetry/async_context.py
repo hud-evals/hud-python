@@ -36,7 +36,7 @@ from hud.otel.context import (
     trace as OtelTrace,
     _update_task_status_async,
     _print_trace_url,
-    _print_trace_complete_url
+    _print_trace_complete_url,
 )
 from hud.settings import settings
 from hud.shared import make_request
@@ -55,20 +55,20 @@ _current_job: Optional[Job] = None
 
 class AsyncTrace:
     """Async context manager for HUD trace tracking.
-    
+
     This is the async equivalent of `hud.trace()`, designed for use in
     high-concurrency async contexts. It tracks task execution with automatic
     status updates that don't block the event loop.
-    
+
     The context manager:
     - Creates a unique task_run_id for telemetry correlation
     - Sends async status updates ("running", "completed", "error")
     - Integrates with OpenTelemetry for span collection
     - Tracks all async operations for proper cleanup
-    
+
     Use `async_trace()` helper function instead of instantiating directly.
     """
-    
+
     def __init__(
         self,
         name: str = "Test task from hud",
@@ -86,12 +86,12 @@ class AsyncTrace:
         self.task_run_id = str(uuid.uuid4())
         self.trace_obj = Trace(self.task_run_id, name, job_id, task_id)
         self._otel_trace = None
-    
+
     async def __aenter__(self) -> Trace:
         """Enter the async trace context."""
         # Ensure telemetry is configured
         configure_telemetry()
-        
+
         # Start the OpenTelemetry span
         self._otel_trace = OtelTrace(
             self.task_run_id,
@@ -102,7 +102,7 @@ class AsyncTrace:
             task_id=self.task_id,
         )
         self._otel_trace.__enter__()
-        
+
         # Send async status update if this is a root trace
         if self.root and settings.telemetry_enabled and settings.api_key:
             track_task(
@@ -111,24 +111,24 @@ class AsyncTrace:
                     "running",
                     job_id=self.job_id,
                     trace_name=self.name,
-                    task_id=self.task_id
+                    task_id=self.task_id,
                 ),
-                name=f"trace-status-{self.task_run_id[:8]}"
+                name=f"trace-status-{self.task_run_id[:8]}",
             )
-            
+
             # Print trace URL if not part of a job
             if not self.job_id:
                 _print_trace_url(self.task_run_id)
-        
+
         logger.debug(f"Started trace: {self.name} ({self.task_run_id})")
         return self.trace_obj
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Exit the async trace context."""
         # Send async status update if this is a root trace
         if self.root and settings.telemetry_enabled and settings.api_key:
             status = "error" if exc_type else "completed"
-            
+
             track_task(
                 _update_task_status_async(
                     self.task_run_id,
@@ -136,38 +136,38 @@ class AsyncTrace:
                     job_id=self.job_id,
                     error_message=str(exc_val) if exc_val else None,
                     trace_name=self.name,
-                    task_id=self.task_id
+                    task_id=self.task_id,
                 ),
-                name=f"trace-status-{self.task_run_id[:8]}-{status}"
+                name=f"trace-status-{self.task_run_id[:8]}-{status}",
             )
-            
+
             # Print completion message if not part of a job
             if not self.job_id:
                 _print_trace_complete_url(self.task_run_id, error_occurred=bool(exc_type))
-        
+
         # Close the OpenTelemetry span
         if self._otel_trace:
             self._otel_trace.__exit__(exc_type, exc_val, exc_tb)
-        
+
         logger.debug(f"Ended trace: {self.name} ({self.task_run_id})")
 
 
 class AsyncJob:
     """Async context manager for HUD job tracking.
-    
+
     This is the async equivalent of `hud.job()`, designed for grouping
     related tasks in high-concurrency async contexts. It manages job
     status updates without blocking the event loop.
-    
+
     The context manager:
     - Creates or uses a provided job_id
     - Sends async status updates ("running", "completed", "failed")
     - Associates all child traces with this job
     - Tracks async operations for proper cleanup
-    
+
     Use `async_job()` helper function instead of instantiating directly.
     """
-    
+
     def __init__(
         self,
         name: str,
@@ -177,15 +177,15 @@ class AsyncJob:
     ):
         self.job_id = job_id or str(uuid.uuid4())
         self.job = Job(self.job_id, name, metadata, dataset_link)
-    
+
     async def __aenter__(self) -> Job:
         """Enter the async job context."""
         global _current_job
-        
+
         # Save previous job and set this as current
         self._old_job = _current_job
         _current_job = self.job
-        
+
         # Send async status update
         if settings.telemetry_enabled:
             payload = {
@@ -195,7 +195,7 @@ class AsyncJob:
             }
             if self.job.dataset_link:
                 payload["dataset_link"] = self.job.dataset_link
-            
+
             track_task(
                 make_request(
                     method="POST",
@@ -203,17 +203,17 @@ class AsyncJob:
                     json=payload,
                     api_key=settings.api_key,
                 ),
-                name=f"job-status-{self.job.id[:8]}-running"
+                name=f"job-status-{self.job.id[:8]}-running",
             )
-        
+
         _print_job_url(self.job.id, self.job.name)
         logger.debug(f"Started job: {self.job.name} ({self.job.id})")
         return self.job
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Exit the async job context."""
         global _current_job
-        
+
         # Send async status update
         if settings.telemetry_enabled:
             status = "failed" if exc_type else "completed"
@@ -224,7 +224,7 @@ class AsyncJob:
             }
             if self.job.dataset_link:
                 payload["dataset_link"] = self.job.dataset_link
-            
+
             track_task(
                 make_request(
                     method="POST",
@@ -232,14 +232,14 @@ class AsyncJob:
                     json=payload,
                     api_key=settings.api_key,
                 ),
-                name=f"job-status-{self.job.id[:8]}-{status}"
+                name=f"job-status-{self.job.id[:8]}-{status}",
             )
-        
+
         _print_job_complete_url(self.job.id, self.job.name, error_occurred=bool(exc_type))
-        
+
         # Restore previous job
         _current_job = self._old_job
-        
+
         logger.debug(f"Ended job: {self.job.name} ({self.job.id})")
 
 
@@ -252,27 +252,27 @@ def async_trace(
     task_id: str | None = None,
 ) -> AsyncTrace:
     """Create an async trace context for telemetry tracking.
-    
+
     This is the async equivalent of `hud.trace()` for use in high-concurrency
     async contexts. Status updates are sent asynchronously and tracked to ensure
     completion before shutdown.
-    
+
     Args:
         name: Descriptive name for this trace/task
         root: Whether this is a root trace (updates task status)
         attrs: Additional attributes to attach to the trace
         job_id: Optional job ID to associate with this trace
         task_id: Optional task ID for custom task identifiers
-    
+
     Returns:
         AsyncTrace context manager
-    
+
     Example:
         >>> import hud
         >>> async with hud.async_trace("Process Data") as trace:
         ...     result = await process_async()
         ...     await trace.log({"items_processed": len(result)})
-    
+
     Note:
         Most users should use `hud.trace()` which works fine for typical usage.
         Use this async version only in high-concurrency scenarios (200+ parallel
@@ -288,27 +288,27 @@ def async_job(
     dataset_link: str | None = None,
 ) -> AsyncJob:
     """Create an async job context for grouping related tasks.
-    
+
     This is the async equivalent of `hud.job()` for use in high-concurrency
     async contexts. Job status updates are sent asynchronously and tracked
     to ensure completion before shutdown.
-    
+
     Args:
         name: Human-readable job name
         metadata: Optional metadata dictionary
         job_id: Optional job ID (auto-generated if not provided)
         dataset_link: Optional HuggingFace dataset identifier
-    
+
     Returns:
         AsyncJob context manager
-    
+
     Example:
         >>> import hud
         >>> async with hud.async_job("Batch Processing") as job:
         ...     for item in items:
         ...         async with hud.async_trace(f"Process {item.id}", job_id=job.id):
         ...             await process(item)
-    
+
     Note:
         Most users should use `hud.job()` which works fine for typical usage.
         Use this async version only in high-concurrency scenarios (200+ parallel

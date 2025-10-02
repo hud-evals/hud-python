@@ -88,13 +88,13 @@ class Job:
                 )
             except Exception as e:
                 logger.warning("Failed to update job status: %s", e)
-    
+
     def update_status_fire_and_forget(self, status: str) -> None:
         """Update job status without blocking (fire-and-forget)."""
         self.status = status
         if settings.telemetry_enabled:
             from hud.utils.async_utils import fire_and_forget
-            
+
             async def _update():
                 try:
                     payload = {
@@ -104,7 +104,7 @@ class Job:
                     }
                     if self.dataset_link:
                         payload["dataset_link"] = self.dataset_link
-                    
+
                     await make_request(
                         method="POST",
                         url=f"{settings.hud_telemetry_url}/jobs/{self.id}/status",
@@ -113,7 +113,7 @@ class Job:
                     )
                 except Exception as e:
                     logger.warning("Failed to update job status: %s", e)
-            
+
             fire_and_forget(_update(), f"update job {self.id} status to {status}")
 
     async def log(self, metrics: dict[str, Any]) -> None:
@@ -256,13 +256,11 @@ def job(
 
     Example:
         >>> import hud
-        >>> 
         >>> # Synchronous code
         >>> with hud.job("training_run", {"model": "gpt-4"}) as job:
         ...     for epoch in range(10):
         ...         with hud.trace(f"epoch_{epoch}", job_id=job.id):
         ...             train_epoch()
-        >>> 
         >>> # For async code with HIGH CONCURRENCY (200+ tasks), use async_job
         >>> async with hud.async_job("batch_processing") as job:
         ...     for item in items:
