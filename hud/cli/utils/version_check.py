@@ -15,6 +15,7 @@ but is skipped for help and version commands to keep them fast.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
@@ -85,7 +86,7 @@ def _load_cache() -> VersionInfo | None:
         return None
 
     try:
-        with open(VERSION_CACHE_FILE, "r") as f:
+        with open(VERSION_CACHE_FILE) as f:
             data = json.load(f)
 
         # Check if cache is still valid
@@ -98,7 +99,7 @@ def _load_cache() -> VersionInfo | None:
             is_outdated=data["is_outdated"],
             checked_at=data["checked_at"],
         )
-    except Exception:  # noqa: S110
+    except Exception:
         # If cache is corrupted, return None
         return None
 
@@ -145,7 +146,7 @@ def _compare_versions(current: str, latest: str) -> bool:
         current_v = version.parse(current)
         latest_v = version.parse(latest)
         return latest_v > current_v
-    except Exception:  # noqa: S110
+    except Exception:
         # If we can't parse versions, assume no update needed
         return False
 
@@ -238,9 +239,7 @@ def force_version_check() -> VersionInfo | None:
     """
     # Clear the cache to force a fresh check
     if VERSION_CACHE_FILE.exists():
-        try:
+        with contextlib.suppress(Exception):
             VERSION_CACHE_FILE.unlink()
-        except Exception:  # noqa: S110
-            pass
 
     return check_for_updates()

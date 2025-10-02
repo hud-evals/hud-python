@@ -860,7 +860,7 @@ def eval(
             hud_console.info(
                 "Usage: hud eval <source> or create a task JSON file (e.g., task.json, tasks.jsonl)"
             )
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
     # Import eval_command lazily to avoid importing agent dependencies
     try:
@@ -1113,8 +1113,9 @@ def main() -> None:
     # Skip only on help-only commands
     if not (len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"])):
         from .utils.version_check import display_update_prompt
+
         display_update_prompt()
-    
+
     # Handle --version flag before Typer parses args
     if "--version" in sys.argv:
         try:

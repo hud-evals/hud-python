@@ -21,7 +21,7 @@ def find_tasks_file(tasks_file: str | None, msg: str = "Select a tasks file") ->
     if not all_files:
         # No task files found - raise a clear exception
         raise FileNotFoundError("No task JSON or JSONL files found in current directory")
-    
+
     if len(all_files) == 1:
         return str(all_files[0])
     else:
