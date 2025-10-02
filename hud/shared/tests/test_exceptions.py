@@ -7,7 +7,7 @@ classification and helpful hints for users.
 from __future__ import annotations
 
 import json
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import httpx
 import pytest

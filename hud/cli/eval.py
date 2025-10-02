@@ -777,8 +777,9 @@ def eval_command(
 
             # Count successes
             successful = sum(1 for r in results if getattr(r, "reward", 0) > 0.7)
+            success_rate = 100 * successful / len(results)
             hud_console.info(
-                f"Successful tasks: {successful}/{len(results)} ({100 * successful / len(results):.1f}%)"
+                f"Successful tasks: {successful}/{len(results)} ({success_rate:.1f}%)"
             )
             hud_console.info("=" * 50)
     else:
