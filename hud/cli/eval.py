@@ -346,24 +346,18 @@ async def run_full_dataset(
     allowed_tools: list[str] | None = None,
     max_concurrent: int = 30,
     max_steps: int = 10,
-    parallel: bool = False,
-    max_workers: int | None = None,
-    max_concurrent_per_worker: int = 25,
     verbose: bool = False,
     vllm_base_url: str | None = None,
     group_size: int = 1,
 ) -> list[Any]:
-    """Run evaluation across the entire dataset.
-
-    Uses either asyncio-based run_dataset or process-based parallel execution
-    depending on the parallel flag."""
+    """Run evaluation across the entire dataset using asyncio-based concurrency."""
 
     # Provide early feedback to user
     hud_console.info("🔧 Initializing evaluation...")
 
     # Import run_dataset lazily
     try:
-        from hud.datasets import run_dataset, run_dataset_parallel, run_dataset_parallel_manual
+        from hud.datasets import run_dataset
         from hud.utils.tasks import load_tasks
     except ImportError as e:
         hud_console.error(
@@ -473,6 +467,7 @@ async def run_full_dataset(
         agent_config = {
             "model": model or "claude-sonnet-4-20250514",
             "verbose": verbose,
+            "validate_api_key": False,
         }
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
@@ -506,9 +501,7 @@ async def run_full_dataset(
                 agent_class=agent_class,
                 agent_config=agent_config,
                 group_size=group_size,
-                max_parallel_episodes=max_concurrent
-                if not parallel
-                else max_concurrent_per_worker * (max_workers or 4),
+                max_parallel_episodes=max_concurrent,
                 max_steps=max_steps,
                 verbose=verbose,
                 job_id=job.id,
@@ -520,49 +513,18 @@ async def run_full_dataset(
         # Return stats for consistency with other modes
         return stats
 
-    # Original logic for non-grouped evaluation
-    elif parallel:
-        hud_console.info(
-            f"🚀 Running PARALLEL evaluation (workers: {max_workers or 'auto'}, max_concurrent: {max_concurrent})…"  # noqa: E501
-        )
-        if max_workers is None:
-            # Use auto-optimization (now the default run_dataset_parallel)
-            return await run_dataset_parallel(
-                name=f"Evaluation {dataset_name}",
-                dataset=dataset_or_tasks,
-                agent_class=agent_class,
-                agent_config=agent_config,
-                max_concurrent=max_concurrent,
-                metadata={"dataset": source, "parallel": True},
-                max_steps=max_steps,
-                auto_respond=True,
-            )
-        else:
-            # Use manual configuration
-            return await run_dataset_parallel_manual(
-                name=f"Evaluation {dataset_name}",
-                dataset=dataset_or_tasks,
-                agent_class=agent_class,
-                agent_config=agent_config,
-                max_workers=max_workers,
-                max_concurrent_per_worker=max_concurrent_per_worker,
-                max_concurrent=max_concurrent,
-                metadata={"dataset": source, "parallel": True},
-                max_steps=max_steps,
-                auto_respond=True,
-            )
-    else:
-        hud_console.info(f"🚀 Running evaluation (max_concurrent: {max_concurrent})…")
-        return await run_dataset(
-            name=f"Evaluation {dataset_name}",
-            dataset=dataset_or_tasks,
-            agent_class=agent_class,
-            agent_config=agent_config,
-            max_concurrent=max_concurrent,
-            metadata={"dataset": source},
-            max_steps=max_steps,
-            auto_respond=True,
-        )
+    # Run evaluation with asyncio-based concurrency
+    hud_console.info(f"🚀 Running evaluation (max_concurrent: {max_concurrent})…")
+    return await run_dataset(
+        name=f"Evaluation {dataset_name}",
+        dataset=dataset_or_tasks,
+        agent_class=agent_class,
+        agent_config=agent_config,
+        max_concurrent=max_concurrent,
+        metadata={"dataset": source},
+        max_steps=max_steps,
+        auto_respond=True,
+    )
 
 
 def eval_command(
@@ -591,33 +553,22 @@ def eval_command(
         help="Comma-separated list of allowed tools",
     ),
     max_concurrent: int = typer.Option(
-        30,
+        50,
         "--max-concurrent",
-        help="Concurrency level for asyncio mode (ignored in parallel mode)",
+        help=(
+            "Maximum concurrent tasks (1-200 recommended, prevents rate limits "
+            "and resource exhaustion)"
+        ),
     ),
     max_steps: int | None = typer.Option(
         None,
         "--max-steps",
         help="Maximum steps per task (default: 10 for single, 50 for full)",
     ),
-    parallel: bool = typer.Option(
-        False,
-        "--parallel",
-        help="Use process-based parallel execution for large datasets (100+ tasks)",
-    ),
-    max_workers: int | None = typer.Option(
-        None,
-        "--max-workers",
-        help="Number of worker processes for parallel mode (auto-optimized if not set)",
-    ),
-    max_concurrent_per_worker: int = typer.Option(
-        20,
-        "--max-concurrent-per-worker",
-        help="Maximum concurrent tasks per worker in parallel mode",
-    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
+        "-v",
         help="Enable verbose output from the agent",
     ),
     very_verbose: bool = typer.Option(
@@ -652,23 +603,20 @@ def eval_command(
         # Evaluate a single task from SheetBench
         hud eval hud-evals/SheetBench-50
 
-        # Evaluate the FULL SheetBench dataset with Claude (asyncio mode)
+        # Evaluate the FULL SheetBench dataset with Claude
         hud eval hud-evals/SheetBench-50 --full --agent claude
 
-        # Run large dataset with PARALLEL execution (auto-optimized)
-        hud eval hud-evals/OSWorld-Verified-Gold --full --parallel
+        # Run with higher concurrency for faster evaluation
+        hud eval hud-evals/OSWorld-Verified-Gold --full --max-concurrent 100
 
-        # Parallel mode with manual configuration (16 workers, 25 tasks each)
-        hud eval hud-evals/OSWorld-Verified-Gold --full --parallel --max-workers 16
-
-        # Limit total concurrent tasks to prevent rate limits
-        hud eval hud-evals/SheetBench-50 --full --parallel --max-concurrent 20
+        # Limit concurrent tasks to prevent rate limits
+        hud eval hud-evals/SheetBench-50 --full --max-concurrent 20
 
         # Run a single task from a JSON file
         hud eval task.json
 
-        # Run multiple tasks from a JSON file with parallel execution
-        hud eval tasks.json --full --parallel
+        # Run multiple tasks from a JSON file
+        hud eval tasks.json --full
 
         # Run with OpenAI Operator agent
         hud eval hud-evals/OSWorld-Gold-Beta --agent openai
@@ -750,9 +698,6 @@ def eval_command(
                 allowed_tools=allowed_tools_list,
                 max_concurrent=max_concurrent,
                 max_steps=max_steps,
-                parallel=parallel,
-                max_workers=max_workers,
-                max_concurrent_per_worker=max_concurrent_per_worker,
                 verbose=very_verbose or verbose,
                 vllm_base_url=vllm_base_url,
                 group_size=group_size,
@@ -769,18 +714,12 @@ def eval_command(
             hud_console.info(f"Total tasks: {len(results)}")
             hud_console.info(f"Time elapsed: {elapsed:.2f} seconds")
             hud_console.info(f"Throughput: {len(results) / elapsed:.2f} tasks/second")
-
-            if parallel:
-                hud_console.info(f"Execution mode: PARALLEL (workers: {max_workers or 'auto'})")
-            else:
-                hud_console.info(f"Execution mode: ASYNCIO (max_concurrent: {max_concurrent})")
+            hud_console.info(f"Execution mode: ASYNCIO (max_concurrent: {max_concurrent})")
 
             # Count successes
             successful = sum(1 for r in results if getattr(r, "reward", 0) > 0.7)
             success_rate = 100 * successful / len(results)
-            hud_console.info(
-                f"Successful tasks: {successful}/{len(results)} ({success_rate:.1f}%)"
-            )
+            hud_console.info(f"Successful tasks: {successful}/{len(results)} ({success_rate:.1f}%)")
             hud_console.info("=" * 50)
     else:
         asyncio.run(

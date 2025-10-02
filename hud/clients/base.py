@@ -170,7 +170,7 @@ class BaseHUDClient(AgentMCPClient):
         if self._initialized:
             await self._disconnect()
             self._initialized = False
-            hud_console.info("Shutdown completed")
+            hud_console.info("Environment Shutdown completed")
         else:
             hud_console.debug("Client was not initialized, skipping disconnect")
 

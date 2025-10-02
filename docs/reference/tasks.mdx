@@ -107,20 +107,31 @@ print(f"Result: {result.reward}")
 - Quick iteration cycle
 - Easy to debug environment issues
 
-### Step 2: Batch Testing with Asyncio
+### Step 2: Full Dataset Evaluation
 
-Once single tasks work reliably, test with batches using asyncio for rich logging:
+Once single tasks work reliably, scale up to full dataset evaluation:
 
 ```python
 from hud.datasets import run_dataset
 
-# Moderate concurrency for clear logs
+# Start with moderate concurrency
 results = await run_dataset(
-    name="Debug Evaluation",
-    dataset="hud-evals/YourDataset",
+    name="SheetBench Evaluation",
+    dataset="hud-evals/SheetBench-50",
     agent_class=ClaudeAgent,
-    max_concurrent=30,  # Good balance of speed and log clarity
-    max_steps=50
+    max_concurrent=50,  # Good starting point
+    max_steps=50,
+    auto_respond=True
+)
+
+# Scale up for larger datasets (adjust based on API rate limits)
+results = await run_dataset(
+    name="Large Dataset Evaluation",
+    dataset="hud-evals/OSWorld-Verified-Gold",
+    agent_class=ClaudeAgent,
+    max_concurrent=100,  # Higher concurrency for speed
+    max_steps=50,
+    auto_respond=True
 )
 ```
 
@@ -128,96 +139,41 @@ results = await run_dataset(
 - See all agent logs in CLI in real-time
 - Catch intermittent environment issues
 - Validate agent behavior at scale
-- Easy to spot patterns in failures
+- Efficient asyncio-based concurrency
 
-### Step 3: Production Parallel Evaluation
-
-After confirming stability, use parallel runners for maximum speed:
-
-```python
-from hud.datasets import run_dataset
-
-# Fast evaluation once everything is stable
-results = await run_dataset_parallel(
-    name="Production Eval",
-    dataset="hud-evals/Large-Dataset-1000",
-    agent_class=ClaudeAgent,
-    max_concurrent=50  # Prevent rate limits
-)
-```
-
-**Benefits:**
-- Maximum throughput (1000s of tasks)
-- True process-based parallelism
-- Efficient resource utilization
-
-<Warning>
-**Important:** Multiprocess parallelization makes debugging harder as logs from different processes interleave. Always validate your agent and environment with single tasks and asyncio batches before using parallel runners. This progression ensures you catch issues early when they're easiest to debug.
-</Warning>
+**Concurrency Guidelines:**
+- Start with `max_concurrent=50` and adjust based on results
+- Increase to 100-200 for faster evaluation (if API limits allow)
+- Decrease to 10-20 if hitting rate limits
+- Most datasets work well with 50-100 concurrent tasks
 
 ### Quick Reference
 
 | Stage | Method | Concurrency | Use Case | Debugging |
 |-------|--------|-------------|----------|-----------|
 | Development | Single task | 1 | Initial debugging | Excellent |
-| Testing | `run_dataset` | 30 | Validate at scale | Good |
-| Production | `run_dataset_parallel` | 1000s | Fast evaluation | Limited |
+| Production | `run_dataset` | 50-200 | Full evaluation | Good |
 
 ## Dataset Functions
 
-### run_dataset_parallel (Automatic)
+### run_dataset
 
 ```python
 from hud.datasets import run_dataset
 
-# Automatic optimization - recommended for most cases
-results = await run_dataset_parallel(
-    name="My Evaluation",
+# Run full dataset with asyncio-based concurrency
+results = await run_dataset(
+    name="SheetBench Evaluation",
     dataset="hud-evals/SheetBench-50",  # or Dataset object or list[dict]
     agent_class=ClaudeAgent,
-    agent_config={"model": "claude-3-5-sonnet"},
-    max_steps=50
-    # Automatically optimizes worker processes based on CPU cores
+    agent_config={"model": "claude-sonnet-4-20250514", "validate_api_key": False},
+    max_concurrent=50,  # Adjust based on API rate limits (1-200)
+    max_steps=50,
+    auto_respond=True  # Automatically handle response continuations
 )
 ```
 
-Run all tasks with automatic process-based parallelization.
-
-### run_dataset_parallel_manual (Full Control)
-
-```python
-from hud.datasets import run_dataset_parallel_manual
-
-# Manual control over parallelization
-results = await run_dataset_parallel_manual(
-    name="My Evaluation",
-    dataset="hud-evals/SheetBench-50",
-    agent_class=ClaudeAgent,
-    agent_config={"model": "claude-3-5-sonnet"},
-    max_workers=8,                # 8 worker processes
-    max_concurrent_per_worker=10, # 10 concurrent tasks per worker
-    max_steps=50
-)
-
-# Or with total concurrent limit
-results = await run_dataset_parallel_manual(
-    name="Rate Limited Eval",
-    dataset=dataset,
-    agent_class=ClaudeAgent,
-    max_workers=8,
-    max_concurrent=20,  # Max 20 total concurrent (overrides per-worker)
-    max_steps=50
-)
-```
-
-Run all tasks with manual control over parallelization settings.
-
-**Manual Parallelism Control Parameters:**
-| Parameter | Type | Description | Default |
-|-----------|------|-------------|---------|
-| `max_workers` | `int \| None` | Number of worker processes | `None` (auto) |
-| `max_concurrent_per_worker` | `int` | Concurrent tasks within each worker | `10` |
-| `max_concurrent` | `int \| None` | Total concurrent limit (overrides per-worker) | `None` |
+Run all tasks with asyncio-based concurrency for optimal performance and debuggability.
 
 **Parameters:**
 | Parameter | Type | Description | Default |
@@ -226,26 +182,26 @@ Run all tasks with manual control over parallelization settings.
 | `dataset` | `str \| Dataset \| list[dict]` | HF dataset ID, Dataset object, or task dicts | Required |
 | `agent_class` | `type[MCPAgent]` | Agent class to instantiate | Required |
 | `agent_config` | `dict[str, Any] \| None` | Constructor kwargs for agent | `None` |
-
+| `max_concurrent` | `int` | Maximum concurrent tasks (1-200 recommended) | `30` |
 | `metadata` | `dict[str, Any] \| None` | Job metadata | `None` |
-| `max_steps` | `int` | Max steps per task | `40` |
+| `max_steps` | `int` | Max steps per task | `10` |
 | `split` | `str` | Dataset split when loading by ID | `"train"` |
 | `auto_respond` | `bool` | Use ResponseAgent for continuations | `False` |
-| `custom_system_prompt` | `str \| None` | Override dataset system prompt | `None` |
 
-**Returns:** `list[Trace]` - Results in dataset order
+**Returns:** `list[Any]` - Results in dataset order
 
 **Features:**
-- Automatic job tracking with `hud.job()`
-- System prompt loading from dataset's `system_prompt.txt`
-- Parallel execution with semaphore control
+- Automatic job tracking with `hud.async_job()`
+- Per-task trace tracking with `hud.async_trace()`
+- Efficient asyncio-based concurrency with semaphores
+- Automatic telemetry flushing
 - Progress tracking with individual traces
 - Graceful error handling (continues on failures)
 
 **Example:**
 ```python
 # From HuggingFace dataset ID
-results = await run_dataset_parallel(
+results = await run_dataset(
     "SheetBench Evaluation",
     "hud-evals/SheetBench-50",
     ClaudeAgent,
@@ -255,7 +211,7 @@ results = await run_dataset_parallel(
 # From Dataset object
 from datasets import load_dataset
 dataset = load_dataset("hud-evals/OSWorld-Verified", split="train")
-results = await run_dataset_parallel("OSWorld Test", dataset, OperatorAgent)
+results = await run_dataset("OSWorld Test", dataset, OperatorAgent)
 
 # From list of dicts
 tasks = [
@@ -265,7 +221,7 @@ tasks = [
         "setup_tool": {"name": "setup"}
     }
 ]
-results = await run_dataset_parallel("Custom", tasks, ClaudeAgent)
+results = await run_dataset("Custom", tasks, ClaudeAgent)
 ```
 
 ### fetch_system_prompt_from_dataset
@@ -356,7 +312,7 @@ sample_task = dataset[0]
 task = Task(**sample_task)  # Auto-converts dict to Task
 
 # Or run all tasks
-results = await run_dataset_parallel(
+results = await run_dataset(
     "Full SheetBench Evaluation",
     dataset,
     ClaudeAgent,
@@ -510,7 +466,7 @@ login_tasks = [
 ]
 
 # Convert and run
-results = await run_dataset_parallel(
+results = await run_dataset(
     "Login Tasks Only",
     login_tasks,
     ClaudeAgent
@@ -521,7 +477,7 @@ results = await run_dataset_parallel(
 
 ```python
 # Override dataset system prompt
-results = await run_dataset_parallel(
+results = await run_dataset(
     "Custom Evaluation",
     "hud-evals/SheetBench-50",
     ClaudeAgent,
