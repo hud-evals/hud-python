@@ -339,7 +339,7 @@ async def main() -> None:
             print(f"Execution mode: ASYNCIO (max_concurrent: {args.max_concurrent})")
 
         # Count successes
-        successful = sum(1 for r in results if getattr(r, "reward", 0) > 0)
+        successful = sum(1 for r in results if getattr(r, "reward", 0) > 0.7)
         print(
             f"Successful tasks: {successful}/{len(results)} ({100 * successful / len(results):.1f}%)"
         )

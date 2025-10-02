@@ -300,6 +300,7 @@ async def run_single_task(
         agent_config = {
             "model": model or "claude-sonnet-4-20250514",
             "verbose": verbose,
+            "validate_api_key": False,
         }
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
@@ -434,7 +435,7 @@ async def run_full_dataset(
             )
             raise typer.Exit(1) from e
 
-        agent_config = {"verbose": verbose}
+        agent_config = {"verbose": verbose, "validate_api_key": False}
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
 
@@ -560,6 +561,7 @@ async def run_full_dataset(
             max_concurrent=max_concurrent,
             metadata={"dataset": source},
             max_steps=max_steps,
+            auto_respond=True,
         )
 
 
@@ -736,7 +738,11 @@ def eval_command(
 
     # Run evaluation
     if full:
-        asyncio.run(
+        import time
+
+        start_time = time.time()
+
+        results = asyncio.run(
             run_full_dataset(
                 source,
                 agent_type=agent,
@@ -752,6 +758,29 @@ def eval_command(
                 group_size=group_size,
             )
         )
+
+        elapsed = time.time() - start_time
+
+        # Print statistics (only for non-grouped mode)
+        if group_size == 1 and results:
+            hud_console.info("\n" + "=" * 50)
+            hud_console.success("📊 Evaluation Complete!")
+            hud_console.info("=" * 50)
+            hud_console.info(f"Total tasks: {len(results)}")
+            hud_console.info(f"Time elapsed: {elapsed:.2f} seconds")
+            hud_console.info(f"Throughput: {len(results) / elapsed:.2f} tasks/second")
+
+            if parallel:
+                hud_console.info(f"Execution mode: PARALLEL (workers: {max_workers or 'auto'})")
+            else:
+                hud_console.info(f"Execution mode: ASYNCIO (max_concurrent: {max_concurrent})")
+
+            # Count successes
+            successful = sum(1 for r in results if getattr(r, "reward", 0) > 0.7)
+            hud_console.info(
+                f"Successful tasks: {successful}/{len(results)} ({100 * successful / len(results):.1f}%)"
+            )
+            hud_console.info("=" * 50)
     else:
         asyncio.run(
             run_single_task(
