@@ -26,31 +26,32 @@ Note:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 from hud.otel import configure_telemetry
 from hud.otel.context import (
-    trace as OtelTrace,
-    _update_task_status_async,
-    _print_trace_url,
     _print_trace_complete_url,
+    _print_trace_url,
+    _update_task_status_async,
+)
+from hud.otel.context import (
+    trace as OtelTrace,
 )
 from hud.settings import settings
 from hud.shared import make_request
-from hud.telemetry.job import Job, _print_job_url, _print_job_complete_url, get_current_job
+from hud.telemetry.job import Job, _print_job_complete_url, _print_job_url
 from hud.telemetry.trace import Trace
 from hud.utils.task_tracking import track_task
 
 logger = logging.getLogger(__name__)
 
 # Module exports
-__all__ = ["async_trace", "async_job", "AsyncTrace", "AsyncJob"]
+__all__ = ["AsyncJob", "AsyncTrace", "async_job", "async_trace"]
 
 # Global state for current job
-_current_job: Optional[Job] = None
+_current_job: Job | None = None
 
 
 class AsyncTrace:
@@ -77,7 +78,7 @@ class AsyncTrace:
         attrs: dict[str, Any] | None = None,
         job_id: str | None = None,
         task_id: str | None = None,
-    ):
+    ) -> None:
         self.name = name
         self.root = root
         self.attrs = attrs or {}
@@ -120,10 +121,15 @@ class AsyncTrace:
             if not self.job_id:
                 _print_trace_url(self.task_run_id)
 
-        logger.debug(f"Started trace: {self.name} ({self.task_run_id})")
+        logger.debug("Started trace: %s (%s)", self.name, self.task_run_id)
         return self.trace_obj
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
         """Exit the async trace context."""
         # Send async status update if this is a root trace
         if self.root and settings.telemetry_enabled and settings.api_key:
@@ -149,7 +155,7 @@ class AsyncTrace:
         if self._otel_trace:
             self._otel_trace.__exit__(exc_type, exc_val, exc_tb)
 
-        logger.debug(f"Ended trace: {self.name} ({self.task_run_id})")
+        logger.debug("Ended trace: %s (%s)", self.name, self.task_run_id)
 
 
 class AsyncJob:
@@ -174,7 +180,7 @@ class AsyncJob:
         metadata: dict[str, Any] | None = None,
         job_id: str | None = None,
         dataset_link: str | None = None,
-    ):
+    ) -> None:
         self.job_id = job_id or str(uuid.uuid4())
         self.job = Job(self.job_id, name, metadata, dataset_link)
 
@@ -207,10 +213,15 @@ class AsyncJob:
             )
 
         _print_job_url(self.job.id, self.job.name)
-        logger.debug(f"Started job: {self.job.name} ({self.job.id})")
+        logger.debug("Started job: %s (%s)", self.job.name, self.job.id)
         return self.job
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
         """Exit the async job context."""
         global _current_job
 
@@ -240,7 +251,7 @@ class AsyncJob:
         # Restore previous job
         _current_job = self._old_job
 
-        logger.debug(f"Ended job: {self.job.name} ({self.job.id})")
+        logger.debug("Ended job: %s (%s)", self.job.name, self.job.id)
 
 
 def async_trace(

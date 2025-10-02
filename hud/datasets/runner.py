@@ -127,7 +127,7 @@ async def run_dataset(
                             agent.response_agent = ResponseAgent()
                         results[index] = await agent.run(task, max_steps=max_steps)
                 except Exception as e:
-                    logger.error(f"Task {index} failed: {e}", exc_info=True)
+                    logger.exception("Task %s failed: %s", index, e)
                     results[index] = None
 
         # Execute all tasks
@@ -139,7 +139,7 @@ async def run_dataset(
         # Log any exceptions that occurred
         for i, result in enumerate(worker_results):
             if isinstance(result, Exception):
-                logger.error(f"Worker {i} failed with exception: {result}", exc_info=result)
+                logger.error("Worker %s failed with exception: %s", i, result, exc_info=result)
 
     # Ensure all telemetry is uploaded before returning
     await _flush_telemetry()
@@ -158,13 +158,13 @@ async def _flush_telemetry() -> None:
     all operations complete before process exit.
     """
     from hud.otel.config import is_telemetry_configured
-    from hud.utils.task_tracking import wait_all_tasks
     from hud.utils import hud_console
+    from hud.utils.task_tracking import wait_all_tasks
 
     hud_console.info("Uploading telemetry...")
 
     # Step 1: Wait for async status updates (job/trace status)
-    completed_tasks = await wait_all_tasks(timeout=20.0)
+    completed_tasks = await wait_all_tasks(timeout_seconds=20.0)
     if completed_tasks > 0:
         hud_console.info(f"Completed {completed_tasks} pending telemetry tasks")
 
@@ -179,6 +179,6 @@ async def _flush_telemetry() -> None:
                 provider.force_flush(timeout_millis=20000)
                 logger.debug("OpenTelemetry spans flushed successfully")
         except Exception as e:
-            logger.warning(f"Failed to flush OpenTelemetry: {e}")
+            logger.warning("Failed to flush OpenTelemetry: %s", e)
 
     hud_console.info("Telemetry uploaded successfully")

@@ -19,7 +19,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Module exports
-__all__ = ["track_task", "wait_all_tasks", "TaskTracker"]
+__all__ = ["TaskTracker", "track_task", "wait_all_tasks"]
 
 # Global singleton task tracker
 _global_tracker: Optional["TaskTracker"] = None
@@ -32,11 +32,13 @@ class TaskTracker:
     Tasks are removed from the set when they finish via callback.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._tasks: set[asyncio.Task] = set()
         self._lock = asyncio.Lock()
 
-    def track_task(self, coro, name: str = "task") -> asyncio.Task | None:
+    def track_task(
+        self, coro: asyncio.coroutines.Coroutine, name: str = "task"
+    ) -> asyncio.Task | None:
         """Create and track an async task.
 
         Args:
@@ -51,30 +53,30 @@ class TaskTracker:
             self._tasks.add(task)
 
             # Remove task from set when it completes and log any errors
-            def cleanup_and_log(completed_task):
+            def cleanup_and_log(completed_task: asyncio.Task) -> None:
                 self._tasks.discard(completed_task)
                 if not completed_task.cancelled():
                     exc = completed_task.exception()
                     if exc:
-                        logger.warning(f"Task '{name}' failed: {exc}")
+                        logger.warning("Task '%s' failed: %s", name, exc)
 
             task.add_done_callback(cleanup_and_log)
-            logger.debug(f"Tracking task '{name}' (total active: {len(self._tasks)})")
+            logger.debug("Tracking task '%s' (total active: %d)", name, len(self._tasks))
             return task
 
         except RuntimeError as e:
             # No event loop - fall back to fire_and_forget
-            logger.warning(f"Cannot track task '{name}': {e}")
+            logger.warning("Cannot track task '%s': %s", name, e)
             from hud.utils.async_utils import fire_and_forget
 
             fire_and_forget(coro, name)
             return None
 
-    async def wait_all(self, timeout: float = 30.0) -> int:
+    async def wait_all(self, *, timeout_seconds: float = 30.0) -> int:
         """Wait for all tracked tasks to complete.
 
         Args:
-            timeout: Maximum time to wait
+            timeout_seconds: Maximum time to wait in seconds
 
         Returns:
             Number of tasks that were waited for
@@ -87,25 +89,37 @@ class TaskTracker:
                 logger.debug("No pending tasks to wait for")
                 return 0
 
-            logger.info(f"Waiting for {len(pending)} pending tasks...")
+            logger.info("Waiting for %d pending tasks...", len(pending))
 
             try:
-                # Wait with timeout
-                done, still_pending = await asyncio.wait(
-                    pending, timeout=timeout, return_when=asyncio.ALL_COMPLETED
-                )
+                # Wait with timeout using asyncio.timeout context manager
+                async with asyncio.timeout(timeout_seconds):
+                    done, still_pending = await asyncio.wait(
+                        pending, return_when=asyncio.ALL_COMPLETED
+                    )
 
-                if still_pending:
-                    logger.warning(f"{len(still_pending)} tasks still pending after {timeout}s")
-                    # Cancel them
-                    for task in still_pending:
-                        task.cancel()
+                    if still_pending:
+                        logger.warning(
+                            "%d tasks still pending after %ss", len(still_pending), timeout_seconds
+                        )
+                        # Cancel them
+                        for task in still_pending:
+                            task.cancel()
 
-                logger.info(f"Completed {len(done)} tasks")
-                return len(done)
+                    logger.info("Completed %d tasks", len(done))
+                    return len(done)
 
+            except TimeoutError:
+                # Timeout occurred - cancel remaining tasks
+                remaining = [t for t in pending if not t.done()]
+                logger.warning("%d tasks timed out after %ss", len(remaining), timeout_seconds)
+                for task in remaining:
+                    task.cancel()
+                # Return count of completed tasks
+                completed = len([t for t in pending if t.done()])
+                return completed
             except Exception as e:
-                logger.error(f"Error waiting for tasks: {e}")
+                logger.error("Error waiting for tasks: %s", e)
                 return 0
 
     def get_pending_count(self) -> int:
@@ -121,7 +135,7 @@ def get_global_tracker() -> TaskTracker:
     return _global_tracker
 
 
-def track_task(coro, name: str = "task") -> asyncio.Task | None:
+def track_task(coro: asyncio.coroutines.Coroutine, name: str = "task") -> asyncio.Task | None:
     """Create and track an async task for telemetry operations.
 
     This is a convenience function that uses the global tracker to ensure
@@ -139,17 +153,17 @@ def track_task(coro, name: str = "task") -> asyncio.Task | None:
     return tracker.track_task(coro, name)
 
 
-async def wait_all_tasks(timeout: float = 30.0) -> int:
+async def wait_all_tasks(*, timeout_seconds: float = 30.0) -> int:
     """Wait for all tracked telemetry tasks to complete.
 
     This ensures that all async telemetry operations (status updates, logs)
     complete before the calling function returns, preventing telemetry loss.
 
     Args:
-        timeout: Maximum time to wait for tasks in seconds
+        timeout_seconds: Maximum time to wait for tasks in seconds
 
     Returns:
         Number of tasks that completed
     """
     tracker = get_global_tracker()
-    return await tracker.wait_all(timeout)
+    return await tracker.wait_all(timeout_seconds=timeout_seconds)

@@ -37,16 +37,14 @@ from .replay import clear_trace, get_trace
 from .trace import Trace, trace
 
 __all__ = [
-    # Standard synchronous APIs (for typical usage)
     "Job",
     "Trace",
+    "async_job",
+    "async_trace",
     "clear_trace",
     "create_job",
     "get_trace",
     "instrument",
     "job",
     "trace",
-    # Async APIs (for high-concurrency scenarios)
-    "async_job",
-    "async_trace",
 ]

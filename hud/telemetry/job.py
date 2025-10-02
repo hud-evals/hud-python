@@ -95,7 +95,7 @@ class Job:
         if settings.telemetry_enabled:
             from hud.utils.async_utils import fire_and_forget
 
-            async def _update():
+            async def _update() -> None:
                 try:
                     payload = {
                         "name": self.name,

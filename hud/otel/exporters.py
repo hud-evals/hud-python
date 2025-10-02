@@ -16,12 +16,11 @@ workloads.
 from __future__ import annotations
 
 import atexit
+import concurrent.futures as cf
 import contextlib
 import json
 import logging
-import time
 from collections import defaultdict
-import concurrent.futures as cf
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -59,7 +58,7 @@ def get_export_executor() -> ThreadPoolExecutor:
         # Use 50 workers to handle high-volume parallel uploads efficiently
         _export_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="span-export")
 
-        def cleanup():
+        def cleanup() -> None:
             if _export_executor is not None:
                 _export_executor.shutdown(wait=True)
 
@@ -391,7 +390,7 @@ class HudSpanExporter(SpanExporter):
             # In async context - offload to thread pool
             executor = get_export_executor()
 
-            def _sync_export():
+            def _sync_export() -> SpanExportResult:
                 # Send each group synchronously (retry inside make_request_sync)
                 for run_id, span_batch in grouped.items():
                     try:
@@ -436,16 +435,12 @@ class HudSpanExporter(SpanExporter):
             self._pending_futures.append(future)  # type: ignore[list-item]
 
             def _cleanup_done(f: cf.Future[SpanExportResult]) -> None:
-                try:
+                with contextlib.suppress(Exception):
                     # Consume exception to avoid "exception was never retrieved"
                     _ = f.exception()
-                except Exception:
-                    pass
                 # Remove from pending list
-                try:
+                with contextlib.suppress(ValueError):
                     self._pending_futures.remove(f)
-                except ValueError:
-                    pass
 
             future.add_done_callback(_cleanup_done)  # type: ignore[arg-type]
             # Don't wait for it - return immediately
@@ -500,9 +495,8 @@ class HudSpanExporter(SpanExporter):
         """
         try:
             if self._pending_futures:
-                cf.wait(self._pending_futures, timeout=10.0)
-        except Exception:
-            pass
+                with contextlib.suppress(Exception):
+                    cf.wait(self._pending_futures, timeout=10.0)
         finally:
             self._pending_futures.clear()
 
@@ -526,27 +520,23 @@ class HudSpanExporter(SpanExporter):
             total_pending = len(self._pending_futures)
             if total_pending > 10:
                 # Show progress for large batches
-                logger.info(f"Flushing {total_pending} pending telemetry uploads...")
+                logger.info("Flushing %d pending telemetry uploads...", total_pending)
 
             timeout = (timeout_millis or 30000) / 1000.0
             done, not_done = cf.wait(self._pending_futures, timeout=timeout)
 
             # Consume exceptions to avoid "exception was never retrieved" warnings
             for f in list(done):
-                try:
+                with contextlib.suppress(Exception):
                     _ = f.exception()
-                except Exception:
-                    pass
 
             # Remove completed futures
             for f in list(done):
-                try:
+                with contextlib.suppress(ValueError):
                     self._pending_futures.remove(f)
-                except ValueError:
-                    pass
 
             if total_pending > 10:
-                logger.info(f"Completed {len(done)}/{total_pending} telemetry uploads")
+                logger.info("Completed %d/%d telemetry uploads", len(done), total_pending)
 
             return len(not_done) == 0
         except Exception:
