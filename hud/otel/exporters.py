@@ -52,11 +52,12 @@ def get_export_executor() -> ThreadPoolExecutor:
     The executor is automatically cleaned up on process exit via atexit.
     
     Returns:
-        ThreadPoolExecutor with 2 workers
+        ThreadPoolExecutor with 50 workers for high-throughput parallel uploads
     """
     global _export_executor
     if _export_executor is None:
-        _export_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="span-export")
+        # Use 50 workers to handle high-volume parallel uploads efficiently
+        _export_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="span-export")
         
         def cleanup():
             if _export_executor is not None:
@@ -515,6 +516,11 @@ class HudSpanExporter(SpanExporter):
             if not self._pending_futures:
                 return True
             
+            total_pending = len(self._pending_futures)
+            if total_pending > 10:
+                # Show progress for large batches
+                logger.info(f"Flushing {total_pending} pending telemetry uploads...")
+            
             timeout = (timeout_millis or 30000) / 1000.0
             done, not_done = cf.wait(self._pending_futures, timeout=timeout)
             
@@ -531,6 +537,9 @@ class HudSpanExporter(SpanExporter):
                     self._pending_futures.remove(f)
                 except ValueError:
                     pass
+            
+            if total_pending > 10:
+                logger.info(f"Completed {len(done)}/{total_pending} telemetry uploads")
             
             return len(not_done) == 0
         except Exception:

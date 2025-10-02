@@ -109,15 +109,17 @@ async def run_dataset(
 
         async def _worker(index: int, task_dict: Any, max_steps: int = 10) -> None:
             async with sem:
-                # Create trace for this task
-                task_name = task_dict.get("prompt") or f"Task {index}"
+                try:
+                    # Create trace for this task
+                    task_name = task_dict.get("prompt") or f"Task {index}"
 
-                # Ensure task_id is a string for baggage propagation
-                raw_task_id = task_dict.get("id")
-                safe_task_id = str(raw_task_id) if raw_task_id is not None else None
-                with hud.trace(task_name, job_id=job_obj.id, task_id=safe_task_id):
-                    # Convert dict to Task here, at trace level
-                    task = Task(**task_dict)
+                    # Ensure task_id is a string for baggage propagation
+                    raw_task_id = task_dict.get("id")
+                    safe_task_id = str(raw_task_id) if raw_task_id is not None else None
+                    async with hud.async_trace(task_name, job_id=job_obj.id, task_id=safe_task_id):
+                    # with hud.trace(task_name, job_id=job_obj.id, task_id=safe_task_id):
+                        # Convert dict to Task here, at trace level
+                        task = Task(**task_dict)
 
                         agent = agent_class(**(agent_config or {}))
 
@@ -157,11 +159,14 @@ async def _flush_telemetry() -> None:
     """
     from hud.otel.config import is_telemetry_configured
     from hud.utils.task_tracking import wait_all_tasks
+    from hud.utils import hud_console
+
+    hud_console.info("Uploading telemetry...")
     
     # Step 1: Wait for async status updates (job/trace status)
     completed_tasks = await wait_all_tasks(timeout=20.0)
     if completed_tasks > 0:
-        logger.debug(f"Completed {completed_tasks} pending telemetry tasks")
+        hud_console.info(f"Completed {completed_tasks} pending telemetry tasks")
     
     # Step 2: Flush OpenTelemetry span exports
     if is_telemetry_configured():
@@ -175,3 +180,5 @@ async def _flush_telemetry() -> None:
                 logger.debug("OpenTelemetry spans flushed successfully")
         except Exception as e:
             logger.warning(f"Failed to flush OpenTelemetry: {e}")
+
+    hud_console.info("Telemetry uploaded successfully")

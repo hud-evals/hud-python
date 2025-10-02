@@ -4,9 +4,9 @@ This module provides infrastructure to track async tasks created during
 telemetry operations (status updates, metric logging) to ensure they
 complete before process shutdown, preventing telemetry loss.
 
-The task tracker uses WeakSet to avoid keeping tasks alive, allowing
-them to be garbage collected naturally while still providing visibility
-into pending operations.
+The task tracker maintains strong references to tasks and explicitly cleans
+them up when they complete via callbacks. This ensures tasks are not garbage
+collected before they finish executing.
 
 This is an internal module used by async context managers and cleanup
 routines. Users typically don't interact with it directly.
@@ -15,7 +15,6 @@ routines. Users typically don't interact with it directly.
 import asyncio
 import logging
 from typing import Optional
-from weakref import WeakSet
 
 logger = logging.getLogger(__name__)
 
@@ -29,13 +28,12 @@ _global_tracker: Optional['TaskTracker'] = None
 class TaskTracker:
     """Tracks async tasks to ensure completion before shutdown.
     
-    Uses WeakSet to track tasks without preventing garbage collection.
-    This allows natural task lifecycle while providing visibility into
-    pending operations for cleanup coordination.
+    Uses a regular set with explicit cleanup to ensure tasks complete.
+    Tasks are removed from the set when they finish via callback.
     """
     
     def __init__(self):
-        self._tasks: WeakSet[asyncio.Task] = WeakSet()
+        self._tasks: set[asyncio.Task] = set()
         self._lock = asyncio.Lock()
     
     def track_task(self, coro, name: str = "task") -> asyncio.Task | None:
@@ -52,14 +50,15 @@ class TaskTracker:
             task = asyncio.create_task(coro, name=name)
             self._tasks.add(task)
             
-            # Log errors from completed tasks
-            def log_exception(completed_task):
+            # Remove task from set when it completes and log any errors
+            def cleanup_and_log(completed_task):
+                self._tasks.discard(completed_task)
                 if not completed_task.cancelled():
                     exc = completed_task.exception()
                     if exc:
                         logger.warning(f"Task '{name}' failed: {exc}")
             
-            task.add_done_callback(log_exception)
+            task.add_done_callback(cleanup_and_log)
             logger.debug(f"Tracking task '{name}' (total active: {len(self._tasks)})")
             return task
             
