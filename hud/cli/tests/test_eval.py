@@ -332,6 +332,7 @@ class TestRunDatasetToolFiltering:
             patch.object(ClaudeAgent, "_run_context", mock_run_context),
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_client_instance),
+            patch("hud.settings.settings.anthropic_api_key", "sk-test-key"),
         ):
             # Run the dataset
             await run_dataset(
@@ -400,6 +401,7 @@ class TestRunDatasetToolFiltering:
             patch.object(ClaudeAgent, "_run_context", mock_run_context),
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_client_instance),
+            patch("hud.settings.settings.anthropic_api_key", "sk-test-key"),
         ):
             # Run the dataset
             await run_dataset(
@@ -500,6 +502,7 @@ class TestSystemPromptHandling:
             patch.object(ClaudeAgent, "_run_context", mock_run_context),
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_mcp_client),
+            patch("hud.settings.settings.anthropic_api_key", "sk-test-key"),
         ):
             # Run the dataset
             await run_dataset(
@@ -551,6 +554,7 @@ class TestSystemPromptHandling:
             patch.object(ClaudeAgent, "_run_context", mock_run_context),
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_mcp_client),
+            patch("hud.settings.settings.anthropic_api_key", "sk-test-key"),
         ):
             # Run the dataset
             await run_dataset(

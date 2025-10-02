@@ -69,11 +69,6 @@ class HudException(Exception):
             elif isinstance(exc_value, Exception):
                 # Try to convert to a specific HudException
                 result = cls._analyze_exception(exc_value, message or str(exc_value))
-                # If we couldn't categorize it (still base HudException),
-                # just re-raise the original exception
-                if type(result) is HudException:
-                    # Re-raise the original exception unchanged
-                    raise exc_value from None
                 return result
 
         # Normal creation
