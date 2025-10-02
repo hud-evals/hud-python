@@ -796,7 +796,7 @@ def eval(
         help="Comma-separated list of allowed tools",
     ),
     max_concurrent: int = typer.Option(
-        50,
+        30,
         "--max-concurrent",
         help="Maximum concurrent tasks (1-200 recommended, prevents rate limits)",
     ),
@@ -853,14 +853,14 @@ def eval(
 
             source = find_tasks_file(None, msg="Select a tasks file to run")
             hud_console.success(f"Selected: {source}")
-        except Exception as e:
+        except (FileNotFoundError, Exception):
             hud_console.error(
                 "No source provided and no task/eval JSON files found in current directory"
             )
             hud_console.info(
                 "Usage: hud eval <source> or create a task JSON file (e.g., task.json, tasks.jsonl)"
             )
-            raise typer.Exit(1) from e
+            raise typer.Exit(1)
 
     # Import eval_command lazily to avoid importing agent dependencies
     try:
@@ -1109,6 +1109,12 @@ def set(
 
 def main() -> None:
     """Main entry point for the CLI."""
+    # Check for updates (including on --version command)
+    # Skip only on help-only commands
+    if not (len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"])):
+        from .utils.version_check import display_update_prompt
+        display_update_prompt()
+    
     # Handle --version flag before Typer parses args
     if "--version" in sys.argv:
         try:
