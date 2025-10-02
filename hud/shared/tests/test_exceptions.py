@@ -17,6 +17,7 @@ from hud.shared.exceptions import (
     HudClientError,
     HudConfigError,
     HudException,
+    HudMCPError,
     HudRateLimitError,
     HudRequestError,
     HudTimeoutError,
@@ -243,6 +244,7 @@ class TestMCPErrorHandling:
     @pytest.mark.asyncio
     async def test_mcp_error_handling(self):
         """Test that McpError is handled appropriately."""
+
         # Create a mock McpError class
         class McpError(Exception):
             pass
