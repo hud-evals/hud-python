@@ -127,7 +127,15 @@ async def run(config: Config, tasks: list[Task]) -> None:
                     )
                 )
 
-            training_batch = batch_samples(samples, config.mini_batch_size, pad_token_id)
+            training_batch = batch_samples(samples, config.mini_batch_size, config.num_gpus, pad_token_id)
+
+            # For now we just log the advantages for the training batch
+            for gpu_idx, gpu_batches in enumerate(training_batch):
+                for batch_idx, sample in enumerate(gpu_batches):
+                    console.info(
+                        f"GPU {gpu_idx} | Batch {batch_idx} | "
+                        f"Advantages: {sample.advantage.tolist()}"
+                    )
 
             # Reset buffer for next batch
             buffer.reset()
@@ -163,7 +171,7 @@ async def _main_async() -> None:
     else:
         raise ValueError("Requires tasks via --tasks or --tasks-json")
 
-    await run(config, tasks)
+    await run(config, tasks) # type: ignore
 
 
 def main() -> None:
