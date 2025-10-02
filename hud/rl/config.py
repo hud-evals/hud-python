@@ -173,19 +173,10 @@ class ActorConfig(BaseConfig):
     vllm_api_key: str = Field(default="token-abc123", description="vLLM API key")
     max_new_tokens: int = Field(default=1024, ge=1, le=4096, description="Maximum new tokens to generate")
     force_tool_choice: bool = Field(default=True, description="Force tool choice when available")
-    allowed_tools: list[str] | None = Field(default=None, description="List of allowed tools (None = all)")
 
     # Timeouts
     request_timeout: int = Field(default=45, ge=1, le=300, description="Request timeout in seconds")
     episode_timeout_sec: int = Field(default=600, ge=1, le=3600, description="Episode timeout in seconds")
-
-
-    @field_validator("allowed_tools")
-    @classmethod
-    def validate_allowed_tools(cls, v: list[str] | None) -> list[str] | None:
-        if v is not None and len(v) == 0:
-            raise ValueError("allowed_tools cannot be an empty list, use None to allow all tools")
-        return v
 
     def validate_config(self) -> None:
         super().validate_config()
@@ -207,6 +198,7 @@ class Config(BaseConfig):
 
     processor: ProcessorConfig = Field(default_factory=ProcessorConfig, description="Processor configuration")
 
+    num_gpus: int = Field(default=1, ge=1, description="Number of GPUs to use for training")
     training_steps: int = Field(default=100, ge=1, description="Number of training steps")
     shuffle_dataset: bool = Field(default=False, description="Whether to shuffle the dataset")
     batch_size: int = Field(default=24, ge=1, description="Global batch size for training")
