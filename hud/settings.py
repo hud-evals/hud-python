@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings.sources import DotEnvSettingsSource, PydanticBaseSettingsSource
 
 
 class Settings(BaseSettings):
@@ -13,6 +16,41 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="allow")
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """
+        Customize settings source precedence to include a user-level env file.
+
+        Precedence (highest to lowest):
+        - init_settings (explicit kwargs)
+        - env_settings (process environment)
+        - dotenv_settings (project .env)
+        - user_dotenv_settings (~/.hud/.env)  ← added
+        - file_secret_settings
+        """
+
+        user_env_path = Path.home() / ".hud" / ".env"
+        user_dotenv_settings = DotEnvSettingsSource(
+            settings_cls,
+            env_file=user_env_path,
+            env_file_encoding="utf-8",
+        )
+
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            user_dotenv_settings,
+            file_secret_settings,
+        )
 
     hud_telemetry_url: str = Field(
         default="https://telemetry.hud.so/v3/api",

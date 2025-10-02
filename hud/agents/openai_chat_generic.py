@@ -42,7 +42,7 @@ class GenericOpenAIChatAgent(MCPAgent):
     def __init__(
         self,
         *,
-        openai_client: AsyncOpenAI,
+        openai_client: AsyncOpenAI | None,
         model_name: str = "gpt-4o-mini",
         completion_kwargs: dict[str, Any] | None = None,
         **agent_kwargs: Any,
@@ -171,6 +171,23 @@ class GenericOpenAIChatAgent(MCPAgent):
             openai_tools.append(openai_tool)
         return openai_tools
 
+    async def _invoke_chat_completion(
+        self,
+        *,
+        messages: list[Any],
+        tools: list[dict] | None,
+        extra: dict[str, Any],
+    ) -> Any:
+        if self.oai is None:
+            raise ValueError("openai_client is required for GenericOpenAIChatAgent")
+        # default transport = OpenAI SDK
+        return await self.oai.chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+            tools=tools,  # type: ignore ready ChatCompletionToolParam-shaped
+            **extra,
+        )  # type: ignore
+
     @instrument(
         span_type="agent",
         record_args=False,
@@ -180,17 +197,16 @@ class GenericOpenAIChatAgent(MCPAgent):
         """Send chat request to OpenAI and convert the response."""
 
         # Convert MCP tool schemas to OpenAI format
-        mcp_schemas = self.get_tool_schemas()
+        tools = cast("list[ChatCompletionToolParam]", self.get_tool_schemas())
 
         protected_keys = {"model", "messages", "tools"}
         extra = {k: v for k, v in (self.completion_kwargs or {}).items() if k not in protected_keys}
 
         try:
-            response = await self.oai.chat.completions.create(
-                model=self.model_name,
+            response = await self._invoke_chat_completion(
                 messages=messages,
-                tools=cast("list[ChatCompletionToolParam]", mcp_schemas),
-                **extra,
+                tools=tools,  # type: ignore
+                extra=extra,
             )
         except Exception as e:
             error_content = f"Error getting response {e}"

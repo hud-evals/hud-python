@@ -11,6 +11,7 @@ import requests
 import typer
 import yaml
 
+from hud.cli.utils.env_check import ensure_built
 from hud.utils.hud_console import HUDConsole
 
 
@@ -131,6 +132,14 @@ def push_environment(
 
     # Find hud.lock.yaml in specified directory
     env_dir = Path(directory)
+
+    # Ensure environment is built and up-to-date (hash-based); interactive prompt
+    try:
+        ensure_built(env_dir, interactive=True)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        HUDConsole().debug(f"Skipping pre-push build check: {e}")
     lock_path = env_dir / "hud.lock.yaml"
 
     if not lock_path.exists():
@@ -144,7 +153,7 @@ def push_environment(
         hud_console.warning("A HUD API key is required to push environments.")
         hud_console.info("\nTo get started:")
         hud_console.info("1. Get your API key at: https://hud.so/settings")
-        hud_console.command_example("export HUD_API_KEY=your-key-here", "Set your API key")
+        hud_console.info("Set it in your environment or run: hud set HUD_API_KEY=your-key-here")
         hud_console.command_example("hud push", "Try again")
         hud_console.info("")
         raise typer.Exit(1)
@@ -154,10 +163,7 @@ def push_environment(
         lock_data = yaml.safe_load(f)
 
     # Handle both old and new lock file formats
-    local_image = lock_data.get("image", "")
-    if not local_image and "build" in lock_data:
-        # New format might have image elsewhere
-        local_image = lock_data.get("image", "")
+    local_image = lock_data.get("images", {}).get("local") or lock_data.get("image", "")
 
     # Get internal version from lock file
     internal_version = lock_data.get("build", {}).get("version", None)
@@ -284,7 +290,7 @@ def push_environment(
     # Push the image
     hud_console.progress_message(f"Pushing {image} to registry...")
 
-    # Show push output
+    # Show push output (filtered for cleaner display)
     process = subprocess.Popen(  # noqa: S603
         ["docker", "push", image],  # noqa: S607
         stdout=subprocess.PIPE,
@@ -294,8 +300,27 @@ def push_environment(
         errors="replace",
     )
 
+    # Filter output to only show meaningful progress
+    layers_pushed = 0
     for line in process.stdout or []:
-        hud_console.info(line.rstrip())
+        line = line.rstrip()
+        # Only show: digest, pushed, mounted, or error lines
+        if any(
+            keyword in line.lower()
+            for keyword in ["digest:", "pushed", "mounted", "error", "denied"]
+        ):
+            if "pushed" in line.lower():
+                layers_pushed += 1
+            if (
+                verbose
+                or "error" in line.lower()
+                or "denied" in line.lower()
+                or "digest:" in line.lower()
+            ):
+                hud_console.info(line)
+
+    if layers_pushed > 0 and not verbose:
+        hud_console.info(f"Pushed {layers_pushed} layer(s)")
 
     process.wait()
 
@@ -322,8 +347,10 @@ def push_environment(
     hud_console.section_title("Pushed Image")
     hud_console.status_item("Registry", pushed_digest, primary=True)
 
-    # Update the lock file with registry information
-    lock_data["image"] = pushed_digest
+    # Update the lock file with pushed image reference
+    if "images" not in lock_data:
+        lock_data["images"] = {}
+    lock_data["images"]["pushed"] = image
 
     # Add push information
     from datetime import UTC, datetime
@@ -339,7 +366,7 @@ def push_environment(
     with open(lock_path, "w") as f:
         yaml.dump(lock_data, f, default_flow_style=False, sort_keys=False)
 
-    hud_console.success("Updated lock file with registry image")
+    hud_console.success("Updated lock file with pushed image reference")
 
     # Upload lock file to HUD registry
     try:
@@ -414,6 +441,7 @@ def push_environment(
             hud_console.error("Authentication failed")
             hud_console.info("Check your HUD_API_KEY is valid")
             hud_console.info("Get a new key at: https://hud.so/settings")
+            hud_console.info("Set it in your environment or run: hud set HUD_API_KEY=your-key-here")
         elif response.status_code == 403:
             hud_console.error("Permission denied")
             hud_console.info("You may not have access to push to this namespace")

@@ -107,10 +107,8 @@ The base `MCPAgent` class handles the entire execution loop. When you call `agen
 **Tool Discovery & Filtering**
 ```python
 agent = ClaudeAgent(
-    api_key="...",
     allowed_tools=["anthropic_computer"],  # Only these tools
     disallowed_tools=["openai_computer"],  # Never these tools
-    lifecycle_tools=["setup", "evaluate"]  # Hidden from LLM
 )
 ```
 
@@ -224,7 +222,7 @@ async def test_agent():
         )
         
         # Use your custom agent
-        agent = MyOpenAIAgent(api_key=os.getenv("OPENAI_API_KEY"))
+        agent = MyAgent()
         result = await agent.run(task)
         print(f"Reward: {result.reward}")
 
@@ -240,84 +238,29 @@ from hud.agents import ClaudeAgent, OperatorAgent
 
 # Claude (Anthropic)
 claude_agent = ClaudeAgent(
-    model="claude-4-sonnet-20241022",
-    api_key=os.getenv("ANTHROPIC_API_KEY")
+    model="claude-sonnet-4-20250514",
 )
 
 # Operator (OpenAI-based)
-operator_agent = OperatorAgent(
-    api_key=os.getenv("OPENAI_API_KEY")
-)
+operator_agent = OperatorAgent()
 ```
-
-These handle all the formatting details for you, but creating your own gives you full control.
-
-## Common Pitfalls & Solutions
-
-### 1. Using Wrong Tool List
-```python
-# ❌ Wrong - uses all tools including lifecycle ones
-for tool in self._available_tools:
-    ...
-
-# ✅ Correct - uses filtered tools
-for tool in self.get_available_tools():
-    ...
-```
-
-### 2. Not Handling Tool IDs
-```python
-# ❌ Wrong - missing tool call ID
-MCPToolCall(name="click", arguments={...})
-
-# ✅ Correct - includes ID for correlation
-MCPToolCall(
-    name="click",
-    arguments={...},
-    id=tc.id  # From your LLM's response
-)
-```
-
-### 3. Incorrect Content Extraction
-```python
-# ❌ Wrong - assumes result.content is a string
-content = result.content
-
-# ✅ Correct - extracts from content blocks
-content = ""
-if result.content:
-    for block in result.content:
-        if hasattr(block, 'text'):
-            content += block.text
-```
-
-### 4. Missing Error Handling
-```python
-# ✅ Good practice - check for errors
-if result.isError:
-    # Handle error case
-    content = f"Tool error: {result.content}"
-```
-
-### 5. Environment-Specific Behavior
-
-Different MCP servers behave differently:
-
-- **Browser environments**: May include screenshots in setup output
-- **CLI environments**: Text-only responses
-- **Response tools**: Some servers auto-detect them, others need explicit handling
 
 Always test your agent with the actual MCP servers you'll use in production.
 
 ## Next Steps
 
 <CardGroup cols={2}>
-<Card title="Leaderboards" icon="trophy" href="/evaluate-agents/leaderboards">
-  Track and compare agent performance
+<Card title="Benchmarks" icon="flask" href="/evaluate-agents/benchmarks">
+  Create, run, and publish evaluations
 </Card>
 
-<Card title="Create Benchmarks" icon="flask" href="/evaluate-agents/create-benchmarks">
-  Build custom evaluation datasets
+<Card title="Agents Reference" icon="book" href="/reference/agents">
+  API details and built-in agents
 </Card>
 </CardGroup>
 
+## See Also
+
+- [`hud eval`](/reference/cli/eval) - Run agents on tasks/datasets from the CLI
+- [`hud rl`](/reference/cli/rl) - Train agents with GRPO on your datasets
+- [Agents (SDK Reference)](/reference/agents) – API details and built-in agents

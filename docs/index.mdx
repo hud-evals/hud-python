@@ -5,11 +5,11 @@ icon: "book"
 ---
 
 <Note>
-**Version 0.4.33** - Latest stable release
+**Version 0.4.51** - Latest stable release
 </Note>
 
 <CardGroup cols={3}>
-<Card title="I want to evaluate agents" icon="robot" href="/evaluate-agents">
+<Card title="I want to evaluate agents" icon="robot" href="/evaluate-agents/create-agents">
   Test Claude, Operator, or custom agents on benchmarks like SheetBench and OSWorld
 </Card>
 
@@ -17,7 +17,7 @@ icon: "book"
   Wrap any software in dockerized MCP for scalable and generalizable agent evaluation
 </Card>
 
-<Card title="I want to train agents" icon="brain" href="/train-agents">
+<Card title="I want to train agents" icon="brain" href="/train-agents/quickstart">
   Use reinforcement learning and GRPO on evaluations to improve agent performance
 </Card>
 </CardGroup>
@@ -45,10 +45,10 @@ graph LR
 ## Why HUD?
 
 - **🔌 MCP-native**: Any agent can connect to any environment
-- **📡 Live telemetry**: Debug every tool call at [app.hud.so](https://app.hud.so)
+- **📡 Live telemetry**: Debug every tool call at [hud.so](https://hud.so)
 - **🚀 Production-ready**: From local Docker to cloud scale
 - **🎯 Built-in benchmarks**: OSWorld-Verified, SheetBench-50, and more
-- **🔧 CLI tools**: Debug, analyze, create environments with `hud debug` and `hud analyze`
+ - **🔧 CLI tools**: Create, develop, run, and train with `hud init`, `hud dev`, `hud run`, `hud eval`, `hud rl`
 
 <CardGroup cols={2}>
 <Card title="3-minute quickstart" icon="bolt" href="/quickstart">

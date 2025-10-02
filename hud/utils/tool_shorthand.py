@@ -10,7 +10,8 @@ def _is_call_like(obj: Any) -> bool:
         return True
     if len(obj) == 1:
         _, v = next(iter(obj.items()))
-        return isinstance(v, dict)
+        if isinstance(v, dict):
+            return "name" in v or (len(v) == 1 and isinstance(next(iter(v.values())), dict))
     return False
 
 
@@ -19,9 +20,9 @@ def _to_call_dict(obj: Any) -> Any:
 
     Rules:
     - If obj is a dict with {name, arguments}: return {name, arguments: recurse(arguments)}
-    - Else if obj is a single-key dict {k: v}: return {name: k, arguments: recurse(v)}
+    - Else if obj is a single-key dict {k: v} where v looks call-like: return {name: k, arguments: recurse(v)}
     - Else: return obj unchanged (leaf arguments/value)
-    """
+    """  # noqa: E501
     if isinstance(obj, dict):
         if "name" in obj and "arguments" in obj:
             args = obj.get("arguments")
@@ -31,8 +32,10 @@ def _to_call_dict(obj: Any) -> Any:
             return {"name": obj.get("name"), "arguments": args}
         if len(obj) == 1:
             k, v = next(iter(obj.items()))
-            if isinstance(v, dict):
+            # Only convert single-key dicts if the value looks like it could be a call
+            if isinstance(v, dict) and _is_call_like(v):
                 return {"name": k, "arguments": _to_call_dict(v)}
+            # Otherwise, leave it as-is (this is the innermost arguments dict)
             return obj
     return obj
 

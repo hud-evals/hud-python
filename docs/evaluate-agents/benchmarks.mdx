@@ -1,0 +1,113 @@
+---
+title: "Benchmarks"
+description: "Create, run, and publish agent evaluations"
+icon: "flask"
+---
+
+This page covers how to build datasets, run evaluations, and publish results.
+
+## Quick Start
+
+- CLI
+
+```bash
+# Run a local tasks file (interactive agent selection)
+hud eval tasks.json
+
+# Run a hosted dataset with Claude
+hud eval hud-evals/SheetBench-50 claude --full
+```
+
+- SDK
+
+```python
+from hud.agents import ClaudeAgent
+from hud.datasets import run_dataset
+
+results = await run_dataset(
+    name="SheetBench Eval",
+    dataset="hud-evals/SheetBench-50",
+    agent_class=ClaudeAgent,
+    max_concurrent=50,
+)
+```
+
+## Build Benchmarks
+
+### Explore Evaluators
+
+```bash
+hud analyze hudpython/hud-remote-browser:latest
+```
+
+### Create Tasks
+
+```python
+import uuid
+
+web_tasks = []
+web_tasks.append({
+    "id": str(uuid.uuid4()),
+    "prompt": "Navigate to the documentation page",
+    "mcp_config": {
+        "hud": {
+            "url": "https://mcp.hud.so/v3/mcp",
+            "headers": {
+                "Authorization": "Bearer ${HUD_API_KEY}",
+                "Mcp-Image": "hudpython/hud-remote-browser:latest"
+            }
+        }
+    },
+    "setup_tool": {"name": "setup", "arguments": {"name": "navigate", "arguments": {"url": "https://example.com"}}},
+    "evaluate_tool": {"name": "evaluate", "arguments": {"name": "url_match", "arguments": {"pattern": ".*/docs.*"}}},
+    "metadata": {"difficulty": "easy", "category": "navigation"}
+})
+```
+
+### Save to HuggingFace
+
+```python
+from hud.datasets import save_tasks
+
+save_tasks(
+  web_tasks,
+  repo_id="my-org/web-navigation-benchmark",
+  private=False,
+  tags=["web", "navigation", "automation"],
+)
+```
+
+## Leaderboards
+
+After running, visit your dataset leaderboard and publish a scorecard:
+
+```python
+from hud.datasets import run_dataset
+from hud.agents import ClaudeAgent
+
+results = await run_dataset(
+    name="Claude Sonnet SheetBench",
+    dataset="hud-evals/SheetBench-50",
+    agent_class=ClaudeAgent,
+)
+
+# Open https://hud.so/leaderboards/hud-evals/SheetBench-50
+# Click "My Jobs" to see runs and create a scorecard
+```
+
+## Best Practices
+
+- Clear, measurable prompts (binary or graded)
+- Isolated task state and deterministic setup
+- Use metadata tags (category, difficulty)
+- Validate locally, then parallelize
+- Version datasets; include a `system_prompt.txt`
+
+## See Also
+
+- [`hud eval`](/reference/cli/eval)
+- [`hud rl`](/reference/cli/rl)
+- [Tasks](/reference/tasks)
+- [Agents (SDK)](/reference/agents)
+
+

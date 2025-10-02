@@ -23,10 +23,11 @@ Enhanced FastMCP server with Docker-friendly features for building HUD environme
 
 **Key Features:**
 1. **SIGTERM handling** - Graceful shutdown in containers via custom runner
-2. **Initialize decorator** - Async setup during MCP initialize request  
-3. **Shutdown decorator** - Cleanup after lifespan context ends
-4. **Enhanced add_tool()** - Automatically handles BaseTool instances
-5. **FastMCP inheritance** - All FastMCP methods available (`mount`, `resource`, `tool`)
+2. **Initialize decorator** - Async setup during MCP initialize request (stdout is temporarily redirected to stderr during initialization to avoid corrupting MCP output)
+3. **Shutdown decorator** - Runs only on SIGTERM (container termination), not on hot‑reload/SIGINT
+4. **Enhanced add_tool()** - Automatically handles `BaseTool` instances and raw FastMCP Tool objects
+5. **Tool decorator passthrough** - `@mcp.tool` returns the original function for easy composition
+6. **FastMCP inheritance** - All FastMCP methods available (`mount`, `resource`, `tool`)
 
 ### Decorators
 
@@ -65,7 +66,7 @@ async def setup_environment(ctx):
 
 #### @shutdown  
 
-Run cleanup after server lifespan ends:
+Run cleanup on SIGTERM (container termination only):
 
 ```python
 @mcp.shutdown
@@ -142,10 +143,18 @@ async def get_telemetry():
 if __name__ == "__main__":
     # Run with SIGTERM handling (stdio by default)
     mcp.run()
-    
-    # Or specify transport
+
+    # Or use development transports (HTTP/SSE)
+    mcp.run(transport="http", port=8765)
     mcp.run(transport="sse", port=8080)
 ```
+
+When using HTTP/SSE, HUD development helper endpoints are available:
+
+- `GET /hud` – overview
+- `GET /hud/tools` – list tools with schemas
+- `GET /hud/resources` – list resources
+- `GET /hud/prompts` – list prompts
 
 ## Real Environment Examples
 
@@ -332,20 +341,13 @@ async def shutdown_environment():
 my-environment/
 ├── Dockerfile
 ├── pyproject.toml
-├── README.md
-└── src/
-    └── hud_controller/          # Standard package name
-        ├── __init__.py
-        ├── server.py            # Entry point with MCPServer
-        ├── context.py           # Environment state (optional)
-        ├── setup/               # Setup hub (optional)
-        │   ├── __init__.py      # Creates BaseHub("setup")
-        │   └── *.py             # Setup functions
-        ├── evaluate/            # Evaluate hub (optional)
-        │   ├── __init__.py      # Creates BaseHub("evaluate")
-        │   └── *.py             # Evaluator functions
-        └── tools/               # Custom tools (optional)
-            └── *.py             # Tool implementations
+├── controller/                 # MCP controller (stdio)
+│   ├── __init__.py             # mcp = MCPServer()
+│   ├── __main__.py             # python -m controller → mcp.run()
+│   ├── hooks.py                # @mcp.initialize / @mcp.shutdown
+│   └── tools.py                # @mcp.tool(...)
+└── environment/                # Optional backend (HTTP/IPC)
+    └── server.py               # e.g., FastAPI app
 ```
 
 ### Dockerfile
@@ -355,15 +357,16 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies
+# Copy and install
 COPY pyproject.toml ./
-RUN pip install -e .
+COPY controller/ ./controller/
+COPY environment/ ./environment/
+RUN pip install --no-cache-dir -e .
 
-# Copy source
-COPY src/ ./src/
+ENV ENV_SERVER_PORT=8005
 
-# Critical: stdio transport for MCP
-CMD ["python", "-m", "hud_controller.server"]
+# Start optional backend, then MCP controller on stdio
+CMD ["sh", "-c", "uvicorn environment.server:app --host 0.0.0.0 --port $ENV_SERVER_PORT --log-level warning & python -m controller"]
 ```
 
 ### Hub Module Pattern
@@ -482,6 +485,6 @@ async def test():
 
 ## See Also
 
-- [Build Environments](/build-environments) - Conceptual guide
+- [Build Environments](/build-environments) - Getting started guide
 - [Tools](/reference/tools) - Tool implementation reference
-- [Advanced Design](/build-environments/registry) - Hub pattern details
+- [Environment Spec](/build-environments/spec) - Technical specification and architecture

@@ -111,7 +111,7 @@ def configure_telemetry(
         # Error if no exporters are configured
         raise ValueError(
             "No telemetry backend configured. Either:\n"
-            "1. Set HUD_API_KEY environment variable for HUD telemetry (https://app.hud.so)\n"
+            "1. Set HUD_API_KEY environment variable for HUD telemetry (https://hud.so)\n"
             "2. Use enable_otlp=True with configure_telemetry() for alternative backends (e.g., Jaeger)\n"  # noqa: E501
         )
     elif not settings.telemetry_enabled:

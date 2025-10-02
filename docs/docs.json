@@ -24,50 +24,45 @@
   ],
   "topbarCtaButton": {
     "name": "Dashboard",
-    "url": "https://app.hud.so"
+    "url": "https://hud.so"
   },
   "navigation": {
     "versions": [
       {
-        "version": "0.4.33",
+        "version": "0.4.51",
         "groups": [
           {
             "group": "Get Started",
             "pages": ["index", "quickstart", "llm-quickstart"]
           },
           {
-            "group": "Core Concepts",
+            "group": "Ideas",
             "pages": [
               "core-concepts/mcp-protocol",
               "core-concepts/architecture", 
-              "core-concepts/task-system"
+              "core-concepts/task-system",
+              "core-concepts/tricks"
             ]
           },
           {
-            "group": "Evaluate Agents",
-            "pages": [
-              "evaluate-agents/index",
-              "evaluate-agents/create-agents",
-              "evaluate-agents/leaderboards",
-              "evaluate-agents/create-benchmarks"
-            ]
-          },
-          {
-            "group": "Build Environments",
+            "group": "Environments",
             "pages": [
               "build-environments/index",
-              "build-environments/quickstart-todo",
-              "build-environments/docker-to-mcp",
-              "build-environments/registry"
+              "build-environments/spec"
             ]
           },
           {
-            "group": "Train Agents",
+            "group": "RL",
             "pages": [
-              "train-agents/index",
-              "train-agents/rl-quickstart",
-              "train-agents/verifiers-gym",
-              "train-agents/datasets"
+              "train-agents/quickstart",
+              "train-agents/tasks"
+            ]
+          },
+          {
+            "group": "Agents",
+            "pages": [
+              "evaluate-agents/create-agents",
+              "evaluate-agents/benchmarks"
             ]
           },
           {
@@ -78,10 +73,12 @@
               "reference/cli/dev",
               "reference/cli/build",
               "reference/cli/push",
-              "reference/cli/pull",
               "reference/cli/analyze",
               "reference/cli/debug",
-              "reference/cli/run"
+              "reference/cli/run",
+              "reference/cli/eval",
+              "reference/cli/rl",
+              "reference/cli/misc"
             ]
           },
           {
@@ -108,6 +105,18 @@
     }
   },
   "seo": {
-    "indexHiddenPages": false
+    "indexHiddenPages": false,
+    "metatags": {
+      "charset": "UTF-8",
+      "viewport": "width=device-width, initial-scale=1",
+      "robots": "index, follow",
+      "description": "OSS Evaluations and RL Environments SDK for AI Agent Developers.",
+      "og:title": "HUD Documentation — Evaluations and RL Environments.",
+      "og:description": "OSS Evaluations and RL Environments SDK",
+      "og:site_name": "hud",
+      "twitter:site": "@hud_evals",
+      "twitter:title": "hud docs",
+      "twitter:description": "OSS Evaluations and RL Environments SDK"
+    }
   }
 }

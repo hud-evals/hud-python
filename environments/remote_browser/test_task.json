@@ -1,12 +1,8 @@
 {
     "prompt": "Calculate from the RawData tab the z-scores from the mean close price for each row. Return, starting in ANSWER!A1 and descending to ANSWER!A5, the 5 dates with the greatest absolute value of standard deviations from the mean",
     "mcp_config": {
-        "hud": {
-            "url": "https://mcp.hud.so/v3/mcp", 
-            "headers": {
-                "Authorization": "Bearer ${HUD_API_KEY}", 
-                "Mcp-Image": "hud-remote-browser:dev"
-            }
+        "test_browser": {
+          "url": "http://localhost:8765/mcp"
         }
     },
     "id": "6e4744c7-b2c9-4bb6-807e-2cc144a4e8c2",

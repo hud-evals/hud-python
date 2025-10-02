@@ -1,10 +1,10 @@
 ---
 title: "hud init"
-description: "Create a new HUD environment with minimal boilerplate"
+description: "Create a new HUD environment from a preset"
 icon: "sparkles"
 ---
 
-The `hud init` command creates a new HUD environment from scratch with all the essential files needed to build, test, and deploy an MCP server.
+The `hud init` command scaffolds a working MCP environment using templates from the public SDK.
 
 ## Usage
 
@@ -15,10 +15,14 @@ hud init [NAME] [OPTIONS]
 ## Arguments
 
 <ParamField path="name" type="string">
-  Environment name. If not provided, uses the current directory name.
+  Environment name. If omitted, the current directory name is used.
 </ParamField>
 
 ## Options
+
+<ParamField path="--preset" type="string" default="blank">
+  Template preset: `blank`, `deep-research`, or `browser`. Short: `-p`
+</ParamField>
 
 <ParamField path="--dir" type="string" default=".">
   Target directory where the environment will be created. Short: `-d`
@@ -30,174 +34,82 @@ hud init [NAME] [OPTIONS]
 
 ## What It Creates
 
-The command generates a minimal but complete HUD environment structure:
+A minimal but complete environment with controller/frontend and optional backend:
 
 ```
 my-env/
-├── Dockerfile              # Container configuration
-├── pyproject.toml          # Dependencies and metadata
-├── README.md              # Basic documentation
-└── src/
-    └── hud_controller/
-        ├── context.py     # Persistent state management
-        └── server.py      # MCP server implementation
+├── Dockerfile                # Container configuration
+├── pyproject.toml            # Dependencies and metadata
+├── README.md                 # Template instructions
+├── tasks.json                # Example tasks
+├── controller/               # MCP server (stdio)
+│   ├── __init__.py           # mcp = MCPServer()
+│   ├── __main__.py           # python -m controller → mcp.run()
+│   ├── hooks.py              # @mcp.initialize / @mcp.shutdown
+│   └── tools.py              # @mcp.tool act / setup / evaluate
+└── environment/              # Backend (FastAPI example)
+    └── server.py             # /health /act /reset /state
 ```
 
-### Generated Files
-
-<Tabs>
-<Tab title="server.py">
-Minimal MCP server with required tools:
-
-```python
-from hud.server import MCPServer
-from hud.server.context import attach_context
-
-mcp = MCPServer(name="my-env")
-ctx = None
-
-@mcp.initialize
-async def init(init_ctx):
-    global ctx
-    ctx = attach_context("/tmp/hud_ctx.sock")
-
-@mcp.tool()
-async def act() -> str:
-    """Perform an action."""
-    return f"Action #{ctx.act()}"
-
-@mcp.tool()
-async def setup() -> str:
-    """Required for HUD environments."""
-    return "Ready"
-
-@mcp.tool()
-async def evaluate() -> dict:
-    """Required for HUD environments."""
-    return {"count": ctx.get_count()}
-
-if __name__ == "__main__":
-    mcp.run()
-```
-</Tab>
-
-<Tab title="context.py">
-Persistent state that survives hot-reloads:
-
-```python
-from hud.server.context import run_context_server
-import asyncio
-
-class Context:
-    def __init__(self):
-        self.count = 0
-
-    def act(self):
-        self.count += 1
-        return self.count
-
-    def get_count(self):
-        return self.count
-
-if __name__ == "__main__":
-    asyncio.run(run_context_server(Context()))
-```
-</Tab>
-
-<Tab title="Dockerfile">
-Production-ready container setup:
+### Dockerfile (template)
 
 ```dockerfile
-FROM python:3.10-slim
-RUN pip install uv
+FROM python:3.11-slim
 WORKDIR /app
-COPY pyproject.toml .
-RUN uv pip install --system -e .
-COPY src/ src/
-CMD ["python", "-m", "hud_controller.server"]
+
+COPY pyproject.toml ./
+COPY controller/ ./controller/
+COPY environment/ ./environment/
+RUN pip install --no-cache-dir -e .
+
+ENV ENV_SERVER_PORT=8005
+
+# Start backend then launch MCP controller on stdio
+CMD ["sh", "-c", "uvicorn environment.server:app --host 0.0.0.0 --port $ENV_SERVER_PORT --log-level warning & python -m controller"]
 ```
-</Tab>
 
-<Tab title="pyproject.toml">
-Project configuration with HUD metadata:
-
-```toml
-[project]
-name = "my-env"
-version = "0.1.0"
-dependencies = ["hud[sdk]"]
-
-[tool.hud]
-image = "hud-my-env:dev"
-```
-</Tab>
-</Tabs>
+<Note>
+Templates may include hot-reload flags for development. Remove them for production images.
+</Note>
 
 ## Examples
 
-### Basic Usage
-
-Create an environment in a new directory:
-
 ```bash
-hud init my-env
-cd my-env
-```
-
-### Current Directory
-
-Initialize in the current directory using its name:
-
-```bash
-mkdir awesome-tool && cd awesome-tool
+# Choose preset interactively (default blank)
 hud init
-```
 
-### Custom Location
+# Create a blank template in a new directory
+hud init my-env -p blank
 
-Create in a specific directory:
+# Browser presets
+hud init my-browser -p browser
 
-```bash
-hud init my-env --dir ~/projects
-cd ~/projects/my-env
-```
+# Deep research preset (remote browser)
+hud init my-deep -p deep-research
 
-### Overwrite Existing
-
-Force overwrite existing files:
-
-```bash
-hud init my-env --force
+# Force overwrite
+hud init my-env -p blank --force
 ```
 
 ## Next Steps
 
-After creating your environment:
-
 <Steps>
 <Step title="Start Development">
-Run with hot-reload and interactive testing:
+Run with hot-reload and choose your preferred UI:
 ```bash
-hud dev . --interactive
+# Inspector (HTTP, visual)
+hud dev --inspector
+
+# Interactive TUI (arrow keys)
+hud dev --interactive
 ```
 </Step>
 
-<Step title="Add Your Logic">
-Edit `src/hud_controller/server.py` to add custom tools:
-```python
-@mcp.tool()
-async def my_custom_tool(text: str) -> str:
-    """Process some text."""
-    return text.upper()
-```
+<Step title="Edit Tools">
+Add tools in `controller/tools.py`; use `@mcp.tool`.
 </Step>
 
-<Step title="Test Your Tools">
-In interactive mode, use arrow keys to select and test tools
-</Step>
-
-<Step title="Build for Production">
-When ready, build and share:
+<Step title="Build & Push">
 ```bash
 hud build
 hud push
@@ -205,44 +117,15 @@ hud push
 </Step>
 </Steps>
 
-## Key Concepts
+## Presets
 
-### Required Tools
-
-Every HUD environment must implement:
-- `setup()` - Initialize the environment
-- `evaluate()` - Return environment state for evaluation
-
-### Context Pattern
-
-The context pattern separates state from server logic:
-- State persists across hot-reloads
-- Server reconnects to existing context
-- Enables rapid development iteration
-
-### Minimal Dependencies
-
-The template uses only essential dependencies:
-- `hud[sdk]` - Core HUD functionality
-- No unnecessary packages
-- Production-ready from the start
-
-## Tips
-
-<Tip>
-The generated environment is immediately runnable with `hud dev`. No additional setup required!
-</Tip>
-
-<Note>
-Environment names are converted to valid Docker image names automatically (underscores → hyphens).
-</Note>
-
-<Warning>
-Use `--force` carefully as it will overwrite existing files without confirmation.
-</Warning>
+- **blank**: Minimal controller + FastAPI backend with `/health`, `/act`, `/reset`, `/state` and example tools.
+- **browser**: Local browser environment preset.
+- **deep-research**: Remote browser environment preset (maps to `remote_browser`).
 
 ## See Also
 
-- [hud dev](/reference/cli/dev) - Start development with hot-reload
-- [hud build](/reference/cli/build) - Build production images
-- [Build Environments Guide](/build-environments) - Complete environment development guide
+- [Build Environments](/build-environments) – Quickstart tutorial
+- [Technical Spec](/build-environments/spec) – Exact runtime requirements
+- [hud dev](/reference/cli/dev) – Hot-reload server
+- [hud build](/reference/cli/build) – Build production images

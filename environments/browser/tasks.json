@@ -1,0 +1,37 @@
+[
+    {
+      "id": "browser_2048_512",
+      "prompt": "Play the browser-based 2048 game and try to reach the 512 tile. Start by taking a screenshot, then make strategic moves using arrow keys.",
+      "mcp_config": {
+        "local": {
+          "command": "docker",
+          "args": ["run", "--rm", "-i", "browser:latest"]
+        }
+      },
+      "agent_config": {
+        "allowed_tools": ["playwright", "computer", "anthropic_computer", "openai_computer"],
+        "append_setup_output": true,
+        "system_prompt": "You are an expert 2048 game player using a browser interface. Your goal is to reach the tile specified by the user.\n\nHOW 2048 WORKS:\n- 4x4 grid with numbered tiles (2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048...)\n- When you move, all tiles slide in that direction\n- When two tiles with SAME number touch, they merge into one (2+2=4, 4+4=8, etc.)\n- After each move, a new tile (2 or 4) appears randomly\n- Game ends when grid is full and no merges possible\n\nBROWSER INTERACTION USING THE COMPUTER TOOL:\n1. FIRST TURN ONLY - TAKE SCREENSHOT:\n   Use: {\"name\": \"computer\", \"arguments\": {\"action\": \"screenshot\"}}\n   After that, the environment returns an image with each successful move.\n\n2. MAKE MOVES - Use the computer tool with action=\"press\" and keys parameter (list of strings):\n   - Move up: {\"name\": \"computer\", \"arguments\": {\"action\": \"press\", \"keys\": [\"up\"]}}\n   - Move down: {\"name\": \"computer\", \"arguments\": {\"action\": \"press\", \"keys\": [\"down\"]}}\n   - Move left: {\"name\": \"computer\", \"arguments\": {\"action\": \"press\", \"keys\": [\"left\"]}}\n   - Move right: {\"name\": \"computer\", \"arguments\": {\"action\": \"press\", \"keys\": [\"right\"]}}\n\nCRITICAL RULES:\n- Make exactly ONE move per turn using arrow keys\n- Continue until target or game ends; no confirmations needed.\n\nStrategy: keep highest tiles in a corner; maintain order; avoid random moves."
+      },
+      "setup_tool": {
+        "name": "launch_app",
+        "arguments": {
+          "app_name": "2048"
+        }
+      },
+      "evaluate_tool": {
+        "name": "evaluate",
+        "arguments": {
+          "name": "game_2048_max_number",
+          "arguments": {
+            "target": 512
+          }
+        }
+      },
+      "metadata": {
+        "task_type": "browser_2048",
+        "difficulty": "hard",
+        "target": 512
+      }
+    }
+  ]

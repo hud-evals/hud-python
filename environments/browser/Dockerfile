@@ -1,54 +1,109 @@
-FROM hudpython/novnc-base:latest
-# Install package
+# syntax=docker/dockerfile:1
+FROM ubuntu:24.04 AS setup
+
+# Update and install core dependencies (including working Chromium browser)
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends \
+  vim \
+  openssl \
+  ca-certificates \
+  curl \
+  wget \
+  sudo \
+  bash \
+  net-tools \
+  novnc \
+  x11vnc \
+  xvfb \
+  xfce4 \
+  locales \
+  libpq5 \
+  sqlite3 \
+  dbus-x11 \
+  xfce4-terminal \
+  xfonts-base \
+  xdotool \
+  psmisc \
+  scrot \
+  pm-utils \
+  build-essential \
+  unzip \
+  xauth \
+  gnupg \
+  gpg \
+  jq \
+  git \
+  build-essential \
+  nodejs \
+  npm
+
+RUN update-ca-certificates
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# Set working directory
 WORKDIR /app
-COPY pyproject.toml .
-COPY src/ ./src/
-RUN uv pip install --system --break-system-packages -e .
 
-# Copy apps
-COPY apps/ /app/apps/
+# Install git for dependency installation
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
-# Make launch scripts executable
-RUN find /app/apps -name "launch.py" -type f -exec chmod +x {} \;
+# Install Playwright
+RUN uv pip install --system --break-system-packages playwright
+RUN python3 -m playwright install chromium --with-deps
 
-# Pre-install npm dependencies for all frontend apps
-RUN for app in /app/apps/*/frontend; do \
-        if [ -f "$app/package.json" ]; then \
-            echo "Installing npm dependencies for $app"; \
-            cd "$app" && npm install; \
-            echo "Building Next.js app in $app"; \
-            npm run build || echo "Build failed for $app (might not be Next.js)"; \
-            cd -; \
-        fi \
+# Layer 1: Install server dependencies
+COPY server/pyproject.toml /app/server/
+RUN cd /app/server && uv pip install --system --break-system-packages .
+
+# Layer 2: Install environment dependencies
+COPY environment/pyproject.toml /app/environment/
+RUN cd /app/environment && uv pip install --system --break-system-packages .
+
+# Layer 3: Copy source code (changes here don't invalidate dependency layers)
+COPY server/ /app/server/
+COPY environment/ /app/environment/
+
+# Auto-discover and install/build all frontend apps
+RUN set -e; \
+    for pkg in $(find /app/environment -type f -path '*/frontend/package.json'); do \
+        app_dir=$(dirname "$pkg"); \
+        echo "Installing dependencies in $app_dir"; \
+        if [ -f "$app_dir/package-lock.json" ]; then \
+            (cd "$app_dir" && npm ci --no-audit --no-fund); \
+        else \
+            (cd "$app_dir" && npm install --no-audit --no-fund); \
+        fi; \
+    done && \
+    for pkg in $(find /app/environment -type f -path '*/frontend/package.json'); do \
+        app_dir=$(dirname "$pkg"); \
+        if [ -f "$app_dir/next.config.js" ]; then \
+            echo "Building Next.js app in $app_dir"; \
+            (cd "$app_dir" && npm run build); \
+        fi; \
     done
 
-# Set defaults
+# Make scripts executable
+RUN find /app/environment -name "*.py" -type f -exec chmod +x {} \;
+
+# Environment configuration
 ENV MCP_TRANSPORT="stdio"
 ENV HUD_LOG_STREAM="stderr"
 ENV PYTHONUNBUFFERED="1"
-# Suppress warnings - use module-specific filter for pyautogui
 ENV PYTHONWARNINGS="ignore::SyntaxWarning:pyautogui"
+ENV DISPLAY=":1"
+ENV PYTHONPATH=/app
 
-# Expose all the ports we need
-EXPOSE 8080 8040-8050 3000-3010 5000-5010
+# Expose ports
+EXPOSE 8000 8080 3000-3200 5000-5200
 
-# Start X11, context server in background, then run MCP server
-# The persistent services survive hot-reloads when running hud dev
+# Simple startup: HUD_DEV=1 enables hot-reload; otherwise run production
 CMD ["sh", "-c", "\
-    # Start X11 if not already running \
-    if [ ! -e /tmp/.X11-unix/X1 ]; then \
-        Xvfb :1 -screen 0 1920x1080x24 >/dev/null 2>&1 & \
-        # Wait for X11 \
-        while [ ! -e /tmp/.X11-unix/X1 ]; do sleep 0.1; done; \
-    fi && \
-    export DISPLAY=:1 && \
-    # Start context server in background \
-    python3 -m hud_controller.context >&2 & \
-    # Start VNC services \
-    x11vnc -display :1 -forever -shared -nopw >/dev/null 2>&1 & \
-    websockify --web /usr/share/novnc 8080 localhost:5900 >/dev/null 2>&1 & \
-    # Wait a bit for services to start \
-    sleep 3 && \
-    # Run MCP server in foreground with exec \
-    exec hud-controller mcp \
-"] 
+    if [ \"${HUD_DEV:-0}\" = \"1\" ]; then \
+      uvicorn environment.server:app --host 0.0.0.0 --port 8000 --reload --log-level warning >&2 & \
+      sleep 5 && cd /app/server && exec hud dev server.main --stdio; \
+    else \
+      uvicorn environment.server:app --host 0.0.0.0 --port 8000 --log-level warning >&2 & \
+      sleep 5 && cd /app/server && exec python3 -m server.main; \
+    fi\
+"]

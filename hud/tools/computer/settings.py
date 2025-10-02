@@ -62,6 +62,17 @@ class ComputerSettings(BaseSettings):
         validation_alias="OPENAI_COMPUTER_HEIGHT",
     )
 
+    QWEN_COMPUTER_WIDTH: int = Field(
+        default=1920,
+        description="Width of the display to use for the Qwen computer tools",
+        validation_alias="QWEN_COMPUTER_WIDTH",
+    )
+    QWEN_COMPUTER_HEIGHT: int = Field(
+        default=1080,
+        description="Height of the display to use for the Qwen computer tools",
+        validation_alias="QWEN_COMPUTER_HEIGHT",
+    )
+
     HUD_RESCALE_IMAGES: bool = Field(
         default=False,
         description="Whether to rescale images to the agent width and height",
@@ -76,6 +87,11 @@ class ComputerSettings(BaseSettings):
         default=True,
         description="Whether to rescale images to the agent width and height",
         validation_alias="OPENAI_RESCALE_IMAGES",
+    )
+    QWEN_RESCALE_IMAGES: bool = Field(
+        default=True,
+        description="Whether to rescale images to the agent width and height",
+        validation_alias="QWEN_RESCALE_IMAGES",
     )
 
 

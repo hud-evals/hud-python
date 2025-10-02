@@ -5,19 +5,22 @@ from __future__ import annotations
 import logging
 import traceback
 from typing import Any
+from urllib.parse import urlparse
 
 from mcp import Implementation, types
 from mcp.shared.exceptions import McpError
 from mcp_use.client import MCPClient as MCPUseClient
 from mcp_use.session import MCPSession as MCPUseSession
+from mcp_use.types.http import HttpOptions
 from pydantic import AnyUrl
 
+from hud.settings import settings
 from hud.types import MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 from hud.version import __version__ as hud_version
 
 from .base import BaseHUDClient
-from .utils.mcp_use_retry import patch_all_sessions
+from .utils.retry_transport import create_retry_httpx_client
 
 logger = logging.getLogger(__name__)
 hud_console = HUDConsole(logger=logger)
@@ -30,7 +33,11 @@ class MCPUseHUDClient(BaseHUDClient):
         name="hud-mcp-use", title="hud MCP-use Client", version=hud_version
     )
 
-    def __init__(self, mcp_config: dict[str, dict[str, Any]] | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        mcp_config: dict[str, dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> None:
         """
         Initialize MCP-use client.
 
@@ -51,6 +58,12 @@ class MCPUseHUDClient(BaseHUDClient):
             str, tuple[str, types.Tool, types.Tool]
         ] = {}  # server_name, original_tool, prefixed_tool
         self._client: Any | None = None  # Will be MCPUseClient when available
+        # Transport options for MCP-use (disable_sse_fallback, httpx_client_factory, etc.)
+        # Default to retry-enabled HTTPX client if factory not provided
+        self._http_options: HttpOptions = HttpOptions(
+            httpx_client_factory=create_retry_httpx_client,
+            disable_sse_fallback=True,
+        )
 
     async def _connect(self, mcp_config: dict[str, dict[str, Any]]) -> None:
         """Create all sessions for MCP-use client."""
@@ -58,18 +71,28 @@ class MCPUseHUDClient(BaseHUDClient):
             logger.warning("Client is already connected, cannot connect again")
             return
 
+        # If a server target matches HUD's MCP host and no auth is provided,
+        # inject the HUD API key as a Bearer token to avoid OAuth browser flow.
+        try:
+            hud_mcp_host = urlparse(settings.hud_mcp_url).netloc
+            if mcp_config and settings.api_key and hud_mcp_host:
+                for server_cfg in mcp_config.values():
+                    server_url = server_cfg.get("url")
+                    if not server_url:
+                        continue
+                    if urlparse(server_url).netloc == hud_mcp_host and not server_cfg.get("auth"):
+                        server_cfg["auth"] = settings.api_key
+        except Exception:
+            logger.warning("Failed to parse HUD MCP URL")
+
         config = {"mcpServers": mcp_config}
         if MCPUseClient is None:
             raise ImportError("MCPUseClient is not available")
-        self._client = MCPUseClient.from_dict(config)
+        self._client = MCPUseClient.from_dict(config, http_options=self._http_options)
         try:
             assert self._client is not None  # noqa: S101
             self._sessions = await self._client.create_all_sessions()
             hud_console.info(f"Created {len(self._sessions)} MCP sessions")
-
-            # Patch all sessions with retry logic
-            patch_all_sessions(self._sessions)
-            hud_console.debug("Applied retry logic to all MCP sessions")
 
             # Configure validation for all sessions based on client setting
             try:

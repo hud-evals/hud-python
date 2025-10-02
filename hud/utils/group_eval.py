@@ -189,7 +189,7 @@ def display_group_statistics(stats: list[dict[str, Any]], show_details: bool = T
     hud_console.info(f"Overall mean reward: {overall_mean:.3f} ± {overall_std:.3f}")
 
     # Detailed table
-    if show_details and len(stats) <= 20:  # Only show for reasonable dataset sizes
+    if show_details and len(stats) <= 50:  # Only show for reasonable dataset sizes
         table = Table(title="\nPer-Task Performance Distribution")
         table.add_column("Task", style="cyan", no_wrap=True)
         table.add_column("Mean±Std", justify="right", style="green")
@@ -216,7 +216,7 @@ def display_group_statistics(stats: list[dict[str, Any]], show_details: bool = T
     # High variance tasks
     high_variance_tasks = [s for s in stats if s["std_reward"] > 0.3 and s["group_size"] > 1]
     if high_variance_tasks:
-        hud_console.warning(f"\n⚠️  {len(high_variance_tasks)} tasks show high variance (std > 0.3)")
+        hud_console.warning(f"\n{len(high_variance_tasks)} tasks show high variance (std > 0.3)")
         for task in high_variance_tasks[:3]:
             hud_console.info(
                 f"  • {task['task_id']}: μ={task['mean_reward']:.3f}, σ={task['std_reward']:.3f}"  # noqa: RUF001

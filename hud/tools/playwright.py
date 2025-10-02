@@ -280,7 +280,7 @@ class PlaywrightTool(BaseTool):
 
         try:
             # Always return base64 encoded screenshot as ToolResult
-            screenshot_bytes = await self.page.screenshot(full_page=True)
+            screenshot_bytes = await self.page.screenshot(full_page=False)
             import base64
 
             screenshot_b64 = base64.b64encode(screenshot_bytes).decode()

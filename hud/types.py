@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import uuid
@@ -41,11 +42,11 @@ class Task(BaseModel):
     mcp_config: dict[str, Any]
     setup_tool: MCPToolCall | list[MCPToolCall] | None = None
     evaluate_tool: MCPToolCall | list[MCPToolCall] | None = None
-    agent_tools: list[str] | None = None
-    system_prompt: str | None = None
+    integration_test_tool: MCPToolCall | list[MCPToolCall] | None = None
+    agent_config: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("mcp_config", "metadata", mode="before")
+    @field_validator("mcp_config", "metadata", "agent_config", mode="before")
     @classmethod
     def parse_json_strings(cls, v: Any) -> Any:
         """Parse JSON strings into dictionaries."""
@@ -58,7 +59,7 @@ class Task(BaseModel):
                 raise HudConfigError(f"Invalid JSON string: {e}") from e
         return v
 
-    @field_validator("setup_tool", "evaluate_tool", mode="before")
+    @field_validator("setup_tool", "evaluate_tool", "integration_test_tool", mode="before")
     @classmethod
     def convert_dict_to_tool_call(cls, v: Any, info: Any) -> Any:
         """Convert dict (with shorthands) to MCPToolCall instance.
@@ -107,7 +108,13 @@ class Task(BaseModel):
 
         # Start with current environment variables
         mapping = dict(os.environ)
-        mapping.update(settings.model_dump())
+        # Include settings (from process env, project .env, and user .env)
+        settings_dict = settings.model_dump()
+        mapping.update(settings_dict)
+        # Add UPPERCASE aliases for settings keys
+        for _key, _val in settings_dict.items():
+            with contextlib.suppress(Exception):
+                mapping[_key.upper()] = _val
 
         if settings.api_key:
             mapping["HUD_API_KEY"] = settings.api_key
@@ -208,7 +215,7 @@ class AgentResponse(BaseModel):
     tool_calls: list[MCPToolCall] = Field(default_factory=list)
     done: bool = Field(default=False)
 
-    # --- TELEMETRY [app.hud.so] ---
+    # --- TELEMETRY [hud.so] ---
     # Responses
     content: str | None = Field(default=None)
     reasoning: str | None = Field(default=None)

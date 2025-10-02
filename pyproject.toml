@@ -1,6 +1,6 @@
 [project]
 name = "hud-python"
-version = "0.4.33"
+version = "0.4.51"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
@@ -11,12 +11,12 @@ license = { file = "LICENSE" }
 dependencies = [
     # Core dependencies - minimal for MCP servers and CLI
     "httpx>=0.23.0,<1",
-    "pydantic>=2,<3",
-    "pydantic-settings>=2,<3",
+    "pydantic>=2.6,<3",
+    "pydantic-settings>=2.2,<3",
     # MCP dependencies
     "hud-mcp-python-sdk>=3.13.2",
     "hud-fastmcp-python-sdk>=0.1.2",
-    "hud-mcp-use-python-sdk>=2.3.16",
+    "hud-mcp-use-python-sdk==2.3.20",
     "pathspec>=0.12.1",
     "wrapt>=1.14.0",
     # CLI dependencies
@@ -26,6 +26,8 @@ dependencies = [
     "watchfiles>=0.21.0",
     "questionary==2.1.0",
     "prompt-toolkit==3.0.51",
+    # Terminal library with mouse support for JSON viewer
+    "blessed>=1.20.0",
     # Telemetry
     "opentelemetry-instrumentation-mcp==0.47.0",
     "opentelemetry-api>=1.34.1",
@@ -116,25 +118,8 @@ packages = ["hud"]
 [tool.hatch.build.targets.wheel.force-include]
 "hud/py.typed" = "hud/py.typed"
 
-
 [project.optional-dependencies]
-# Agent dependencies - AI capabilities + telemetry + datasets
-agent = [
-    "langchain",
-    "langchain-openai",
-    "langchain-anthropic",
-    # Jupyter support
-    "ipykernel",
-    "ipython <9",
-    "jupyter_client",
-    "jupyter_core",
-    "dotenv>=0.9.9",
-]
-
-agents = ["hud-python[agent]"]
-
 rl = [
-    "hud-python[agent]",
     "peft>=0.17.1",
     "vllm==0.10.1.1",
     "bitsandbytes>=0.41.0 ; sys_platform == 'linux'",  # For 8-bit optimizers (Linux only)
@@ -146,7 +131,16 @@ rl = [
 # Development dependencies - includes testing, linting, and automation tools
 dev = [
     # Include agent dependencies
-    "hud-python[agent]",
+    "langchain",
+    "langchain-openai",
+    "langchain-anthropic",
+    "litellm>=1.55.0",
+    # Jupyter support
+    "ipykernel",
+    "ipython <9",
+    "jupyter_client",
+    "jupyter_core",
+    "dotenv>=0.9.9",
     # Testing and linting
     "ruff >=0.11.8",
     "pytest >=8.1.1,<9",
@@ -165,6 +159,12 @@ dev = [
     "aiodocker>=0.24.0",
     "setuptools",
 ]
+
+# Agent dependencies extend dev
+agent = ["hud-python[dev]"]
+
+agents = ["hud-python[agent]"]
+
 
 [tool.ruff]
 target-version = "py311"
@@ -209,9 +209,6 @@ lint.ignore = [
 
 [tool.ruff.format]
 docstring-code-format = true
-
-[tool.ruff.lint.isort]
-required-imports = ["from __future__ import annotations"]
 
 [tool.ruff.lint.flake8-type-checking]
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]

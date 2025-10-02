@@ -1,0 +1,100 @@
+---
+title: "hud eval"
+description: "Run agents on tasks or datasets"
+icon: "robot"
+---
+
+The `hud eval` command runs an agent on a tasks file or a HuggingFace dataset.
+
+## Usage
+
+```bash
+hud eval [SOURCE] [AGENT] [OPTIONS]
+```
+
+## Arguments
+
+<ParamField path="source" type="string">
+  HuggingFace dataset (e.g., `hud-evals/SheetBench-50`) or task JSON/JSONL file. If omitted, looks for a tasks file in the current directory.
+</ParamField>
+
+<ParamField path="agent" type="string">
+  Agent backend to use: `claude`, `openai`, or `vllm`. If omitted, an interactive selector appears (including HUD hosted models).
+</ParamField>
+
+## Options
+
+<ParamField path="--full" type="boolean" default="false">
+  Run the entire dataset (omit for single-task debug mode)
+</ParamField>
+
+<ParamField path="--model" type="string">
+  Model name for the chosen agent (required for some agents)
+</ParamField>
+
+<ParamField path="--allowed-tools" type="string">
+  Comma-separated list of allowed tools
+</ParamField>
+
+<ParamField path="--max-concurrent" type="integer" default="50">
+  Max concurrent tasks
+</ParamField>
+
+<ParamField path="--max-steps" type="integer" default="30">
+  Maximum steps per task (default varies by mode)
+</ParamField>
+
+<ParamField path="--parallel" type="boolean" default="false">
+  Use process-based parallel execution for large datasets (100+ tasks)
+</ParamField>
+
+<ParamField path="--max-workers" type="integer">
+  Number of worker processes for parallel mode (auto-optimized if not set)
+</ParamField>
+
+<ParamField path="--max-concurrent-per-worker" type="integer" default="20">
+  Maximum concurrent tasks per worker in parallel mode
+</ParamField>
+
+<ParamField path="--verbose" type="boolean" default="false">
+  Enable verbose agent output
+</ParamField>
+
+<ParamField path="--vllm-base-url" type="string">
+  Base URL for vLLM server (when using `--agent vllm` or HUD hosted models)
+</ParamField>
+
+<ParamField path="--group-size" type="integer" default="1">
+  Number of times to run each task (mini-batch style)
+</ParamField>
+
+## Examples
+
+```bash
+# Minimal (interactive agent selection)
+hud eval tasks.json
+
+# Entire dataset with Claude
+hud eval hud-evals/SheetBench-50 claude --full
+
+# vLLM with explicit base URL
+hud eval tasks.json vllm --model llama3.1 --vllm-base-url http://localhost:8000
+
+# Limit tools and concurrency
+hud eval tasks.json claude --allowed-tools click,type --max-concurrent 10
+```
+
+## Notes
+
+- If you select a HUD hosted model, `hud eval` will route through vLLM with the appropriate base model.
+- When `SOURCE` is omitted, an interactive file picker helps locate a tasks file.
+
+## See Also
+
+- [`hud rl`](/reference/cli/rl)
+- [`hud run`](/reference/cli/run)
+- [`hud analyze`](/reference/cli/analyze)
+
+## Pricing & Billing
+
+See hosted vLLM and training GPU rates in the [Training Quickstart → Pricing](/train-agents/quickstart#pricing). Manage usage and billing at `https://hud.so/project/billing`.

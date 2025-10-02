@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -54,6 +55,7 @@ class MCPAgent(ABC):
         # Filtering
         allowed_tools: list[str] | None = None,
         disallowed_tools: list[str] | None = None,
+        response_tool_name: str | None = None,
         # Messages
         system_prompt: str = GLOBAL_SYSTEM_PROMPT,
         append_setup_output: bool = True,
@@ -73,6 +75,7 @@ class MCPAgent(ABC):
                 that provides `mcp_config`.
             allowed_tools: Names of tools to allow (None means allow all).
             disallowed_tools: Names of tools to always exclude.
+            response_tool_name: Name of the tool to use for response.
             system_prompt: System prompt to seed the conversation.
             append_setup_output: Whether to append setup tool output to the
                 first turn's messages.
@@ -96,12 +99,9 @@ class MCPAgent(ABC):
             self.console.set_verbose(True)
 
         # User filtering
-        self.allowed_tools = allowed_tools
-        self.disallowed_tools = disallowed_tools or []
-
-        # Task filtering
-        self.agent_tools = None
-        self.lifecycle_tools = []
+        self.allowed_tools: list[str] | None = allowed_tools
+        self.disallowed_tools: list[str] | None = disallowed_tools
+        self._available_tools: list[types.Tool] | None = None
 
         # Messages
         self.system_prompt = system_prompt
@@ -109,9 +109,8 @@ class MCPAgent(ABC):
         self.initial_screenshot = initial_screenshot
 
         # Initialize these here so methods can be called before initialize()
-        self._available_tools: list[types.Tool] = []
         self._tool_map: dict[str, types.Tool] = {}  # Simplified: just name to tool
-        self.response_tool_name = None
+        self.response_tool_name = response_tool_name
 
         # Trace
         self._auto_trace = auto_trace
@@ -146,37 +145,54 @@ class MCPAgent(ABC):
         except Exception as e:
             self._handle_connection_error(e)
 
-        # If task is provided, add lifecycle tools
-        if isinstance(task, Task):
-            if task.agent_tools:
-                self.agent_tools = task.agent_tools
-            if task.setup_tool:
-                if isinstance(task.setup_tool, list):
-                    for tool in task.setup_tool:
-                        if not self.agent_tools or (
-                            self.agent_tools and tool.name not in self.agent_tools
-                        ):
-                            self.lifecycle_tools.append(tool.name)
-                elif not self.agent_tools or (
-                    self.agent_tools and task.setup_tool.name not in self.agent_tools
-                ):
-                    self.lifecycle_tools.append(task.setup_tool.name)
-            if task.evaluate_tool:
-                if isinstance(task.evaluate_tool, list):
-                    for tool in task.evaluate_tool:
-                        if not self.agent_tools or (
-                            self.agent_tools and tool.name not in self.agent_tools
-                        ):
-                            self.lifecycle_tools.append(tool.name)
-                elif not self.agent_tools or (
-                    self.agent_tools and task.evaluate_tool.name not in self.agent_tools
-                ):
-                    self.lifecycle_tools.append(task.evaluate_tool.name)
-            if task.system_prompt:
-                self.system_prompt += "\n\n" + task.system_prompt
+        # If task is provided, apply agent_config and add lifecycle tools
+        if isinstance(task, Task) and task.agent_config:
+            if task.agent_config.get("system_prompt"):
+                self.system_prompt += "\n\n" + task.agent_config["system_prompt"]
+            if "append_setup_output" in task.agent_config:
+                self.append_setup_output = task.agent_config["append_setup_output"]
+            if "initial_screenshot" in task.agent_config:
+                self.initial_screenshot = task.agent_config["initial_screenshot"]
+            if "allowed_tools" in task.agent_config:
+                # If allowed_tools has already been set, we take the intersection of the two
+                # If the list had been empty, we were allowing all tools, so we overwrite this
+                if isinstance(self.allowed_tools, list) and len(self.allowed_tools) > 0:
+                    self.allowed_tools = [
+                        tool
+                        for tool in self.allowed_tools
+                        if tool in task.agent_config["allowed_tools"]
+                    ]
+                else:  # If allowed_tools is None, we overwrite it
+                    self.allowed_tools = task.agent_config["allowed_tools"]
+            if "disallowed_tools" in task.agent_config:
+                # If disallowed_tools has already been set, we take the union of the two
+                if isinstance(self.disallowed_tools, list):
+                    self.disallowed_tools.extend(task.agent_config["disallowed_tools"])
+                else:  # If disallowed_tools is None, we overwrite it
+                    self.disallowed_tools = task.agent_config["disallowed_tools"]
+            if "response_tool_name" in task.agent_config:
+                self.response_tool_name = task.agent_config["response_tool_name"]
 
-        # Re-apply filtering with updated lifecycle tools
-        await self._filter_tools()
+        all_tools = await self.mcp_client.list_tools()
+        self._available_tools = []
+
+        # Filter tools based on allowed and disallowed patterns
+        # No allowed tools and no disallowed tools -> we accept all tools
+        # No allowed tools and disallowed tools -> we accept all tools except the disallowed ones
+        for tool in all_tools:
+            if self.allowed_tools is not None and not any(
+                fnmatch.fnmatch(tool.name, pattern) for pattern in self.allowed_tools
+            ):
+                continue
+            if self.disallowed_tools is not None and any(
+                fnmatch.fnmatch(tool.name, pattern) for pattern in self.disallowed_tools
+            ):
+                continue
+            self._available_tools.append(tool)
+
+        self.console.info(
+            f"Agent initialized with {len(self.get_available_tools())} tools: {', '.join([t.name for t in self.get_available_tools()])}"  # noqa: E501
+        )
 
     async def run(self, prompt_or_task: str | Task | dict[str, Any], max_steps: int = 10) -> Trace:
         """
@@ -575,108 +591,6 @@ class MCPAgent(ABC):
 
         return await self.format_blocks(blocks)
 
-    async def _filter_tools(self) -> None:
-        """Apply tool filtering based on allowed/disallowed lists."""
-        # Get all tools from client
-        if self.mcp_client is None:
-            raise ValueError("MCP client is not initialized")
-
-        all_tools = await self.mcp_client.list_tools()
-
-        response_tools_by_server: dict[str, str] = {}  # server_name -> tool_name
-        for tool in all_tools:
-            if "response" in tool.name or tool.name == "response":
-                self.console.debug(f"Found response tool: '{tool.name}'")
-                # Extract server name from tool name (e.g., "grader_response" -> "grader")
-                if "_" in tool.name:
-                    server_name = tool.name.split("_", 1)[0]
-                    response_tools_by_server[server_name] = tool.name
-                else:
-                    response_tools_by_server["_default"] = tool.name
-
-        # Add response tool to lifecycle tools BEFORE filtering
-        if response_tools_by_server and hasattr(self.mcp_client, "mcp_config"):
-            # Get server names in order from mcp_config
-            server_names = list(self.mcp_client.mcp_config.keys())
-            self.console.debug(f"Server names: {server_names}")
-
-            # Try to find response tool from last server first
-            response_tool_name = None
-            for server_name in reversed(server_names):
-                if server_name in response_tools_by_server:
-                    response_tool_name = response_tools_by_server[server_name]
-                    self.console.debug(
-                        f"Found response tool '{response_tool_name}' from server '{server_name}'"
-                    )
-                    break
-
-            # Fallback to any response tool
-            if not response_tool_name and response_tools_by_server:
-                response_tool_name = next(iter(response_tools_by_server.values()))
-                self.console.debug(f"Using fallback response tool '{response_tool_name}'")
-
-            # Add to lifecycle tools if found
-            if response_tool_name and response_tool_name not in self.lifecycle_tools:
-                self.console.debug(f"Auto-detected '{response_tool_name}' tool as a lifecycle tool")
-                self.response_tool_name = response_tool_name
-                self.lifecycle_tools.append(response_tool_name)
-            elif response_tool_name:
-                self.console.debug(
-                    f"Response tool '{response_tool_name}' already in lifecycle_tools"
-                )
-                self.response_tool_name = response_tool_name
-        else:
-            self.console.debug("No response tools found or no mcp_config")
-
-        # Filter tools
-        self._available_tools = []
-        self._tool_map = {}
-
-        self.console.debug(f"All tools: {[t.name for t in all_tools]}")
-        self.console.debug(f"Allowed tools: {self.allowed_tools}")
-        self.console.debug(f"Agent tools: {self.agent_tools}")
-        self.console.debug(f"Disallowed tools: {self.disallowed_tools}")
-        self.console.debug(f"Lifecycle tools: {self.lifecycle_tools}")
-
-        for tool in all_tools:
-            # Lifecycle tools (setup, evaluate, response) should always be included
-            is_lifecycle = tool.name in self.lifecycle_tools
-
-            # Check if tool should be included
-            if not is_lifecycle:
-                if self.allowed_tools and tool.name not in self.allowed_tools:
-                    self.console.debug(f"Skipping tool '{tool.name}' - not in allowed_tools")
-                    continue
-                if self.agent_tools and tool.name not in self.agent_tools:
-                    self.console.debug(f"Skipping tool '{tool.name}' - not in agent_tools")
-                    continue
-                if tool.name in self.disallowed_tools:
-                    self.console.debug(f"Skipping tool '{tool.name}' - in disallowed_tools")
-                    continue
-
-            self.console.debug(
-                f"Adding tool '{tool.name}' to available tools (lifecycle={is_lifecycle})"
-            )
-            self._available_tools.append(tool)
-            self._tool_map[tool.name] = tool
-
-        # Check if all required tools are available
-        if self.required_tools:
-            available_tool_names = {tool.name for tool in self._available_tools}
-            missing_tools = [
-                tool for tool in self.required_tools if tool not in available_tool_names
-            ]
-            if missing_tools:
-                raise ValueError(
-                    f"Required tools not available: {missing_tools}. "
-                    f"Available tools: {list(available_tool_names)}"
-                )
-
-        available_tools = self.get_available_tools()
-        self.console.info(
-            f"Agent initialized with {len(available_tools)} tools: {', '.join([t.name for t in available_tools])}"  # noqa: E501
-        )
-
     async def _maybe_submit_response(self, response: AgentResponse, messages: list[Any]) -> None:
         """Submit response through lifecycle tool if available.
 
@@ -715,8 +629,11 @@ class MCPAgent(ABC):
 
     def get_available_tools(self) -> list[types.Tool]:
         """Get list of available MCP tools for LLM use (excludes lifecycle tools)."""
-        lifecycle_tool_names = self.lifecycle_tools
-        return [tool for tool in self._available_tools if tool.name not in lifecycle_tool_names]
+        if self._available_tools is None:
+            raise RuntimeError(
+                "Tools have not been initialized. Call initialize() before accessing available tools."  # noqa: E501
+            )
+        return self._available_tools
 
     def get_tool_schemas(self) -> list[dict]:
         """Get tool schemas in a format suitable for the model."""

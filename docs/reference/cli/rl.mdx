@@ -1,0 +1,87 @@
+---
+title: "hud rl"
+description: "Run GRPO reinforcement learning on tasks"
+icon: "brain"
+---
+
+The `hud rl` command trains an agent with GRPO on tasks, locally or via the HUD remote service.
+
+## Usage
+
+```bash
+hud rl [TASKS_FILE|DATASET] [MODEL] [OPTIONS]
+```
+
+## Arguments
+
+<ParamField path="tasks_file" type="string">
+  Path to tasks JSON/JSONL file or HuggingFace dataset name. If omitted, looks for a tasks file in the current directory.
+</ParamField>
+
+<ParamField path="model" type="string">
+  Model to train (default: interactive selection)
+</ParamField>
+
+## Options
+
+<ParamField path="--config" type="string">
+  Path to existing configuration file. Short: `-c`
+</ParamField>
+
+<ParamField path="--output-dir" type="string" default="/checkpoints">
+  Output directory for checkpoints. Short: `-o`
+</ParamField>
+
+<ParamField path="--restart" type="boolean" default="false">
+  Restart the vLLM server before training
+</ParamField>
+
+<ParamField path="--verbose" type="boolean" default="false">
+  Enable verbose output. Short: `-v`
+</ParamField>
+
+<ParamField path="--no-ddp" type="boolean" default="false">
+  Disable DistributedDataParallel (even with multiple GPUs)
+</ParamField>
+
+<ParamField path="--ddp-gpus" type="string">
+  Specific GPUs for DDP (e.g., `0,1,2,3`)
+</ParamField>
+
+<ParamField path="--vllm-gpu" type="integer">
+  Specific GPU for vLLM server
+</ParamField>
+
+<ParamField path="--local" type="boolean" default="false">
+  Run training locally instead of the remote HUD server
+</ParamField>
+
+## Behavior
+
+- If no tasks file is provided, an interactive picker helps locate one.
+- Remote mode (default) converts tasks to remote MCP automatically (build/push as needed) and launches remote training.
+- Local mode runs training on your machine (delegated to `local_runner`).
+
+## Examples
+
+```bash
+# Remote (default): auto-convert tasks to remote, then train
+hud rl tasks.json --model claude-rl
+
+# Local training with GPU selection
+hud rl tasks.json llama3.1 --local --ddp-gpus 0,1 --vllm-gpu 0
+
+# Use a dataset directly (remote)
+hud rl hud-evals/SheetBench-50 --model claude-rl
+```
+
+## See Also
+
+- [`hud eval`](/reference/cli/eval)
+- [`hud get`](/reference/cli/get)
+- [`hud build`](/reference/cli/build)
+- [`hud push`](/reference/cli/push)
+
+## Pricing & Billing
+
+See hosted vLLM and training GPU rates in the [Training Quickstart → Pricing](/train-agents/quickstart#pricing). Manage usage and billing at `https://hud.so/project/billing`.

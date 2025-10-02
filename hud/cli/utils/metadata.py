@@ -161,7 +161,9 @@ async def analyze_from_metadata(reference: str, output_format: str, verbose: boo
         console.print(f"  1. Pull it first: [cyan]hud pull {reference}[/cyan]")
         console.print(f"  2. Run live analysis: [cyan]hud analyze {reference} --live[/cyan]")
         if not settings.api_key:
-            console.print("  3. Set HUD_API_KEY for private environments")
+            console.print(
+                "  3. Set HUD_API_KEY in your environment or run: hud set HUD_API_KEY=your-key-here"
+            )
         return
 
     # Convert lock data to analysis format

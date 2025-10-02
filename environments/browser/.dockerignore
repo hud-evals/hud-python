@@ -3,18 +3,25 @@
 .gitignore
 
 # Node
-app/frontend/node_modules
-app/frontend/.next
-app/frontend/build
-app/frontend/dist
-apps/*/frontend/node_modules
-apps/*/frontend/.next
-apps/*/frontend/build
-apps/*/frontend/dist
+environment/*/frontend/node_modules
+environment/*/frontend/.next
+environment/*/frontend/build
+environment/*/frontend/dist
+environment/*/frontend/.turbo
+environment/*/frontend/.vercel
+environment/*/frontend/next-env.d.ts
+environment/*/frontend/package-lock.json
+# General Node/Next artifacts anywhere
+node_modules
+**/node_modules
+**/.next
+**/.turbo
+**/.vercel
 *.log
 
 # Python
 __pycache__
+**/__pycache__
 *.pyc
 *.pyo
 *.pyd
@@ -26,15 +33,21 @@ __pycache__
 .venv
 venv
 env
-apps/*/.venv
-apps/*/backend/.venv
-apps/*/backend/venv
+environment/*/backend/.venv
+environment/*/backend/venv
+environment/*/backend/__pycache__
 
-# Database
-app/backend/*.db
-app/backend/*.sqlite
-apps/*/backend/*.db
-apps/*/backend/*.sqlite
+# Database - exclude ALL database files
+*.db
+*.sqlite
+*.db-journal
+*.db-wal
+*.db-shm
+**/*.db
+**/*.sqlite
+**/*.db-journal
+**/*.db-wal
+**/*.db-shm
 
 # IDE
 .vscode
@@ -49,4 +62,40 @@ Thumbs.db
 # Documentation
 *.md
 !app/README.md
-!launch/README.md 
+!launch/README.md
+
+# Unix sockets, locks, pids (can break Docker context on Windows)
+**/*.sock
+**/*.socket
+**/*.pipe
+**/*.pid
+**/*.lock
+**/*.ipc
+
+# Symlinks and special files
+**/*.lnk
+**/symlink*
+**/.venv
+**/.env
+**/venv
+**/env
+
+# Temporary and cache files
+*.tmp
+*.temp
+*.cache
+**/*.tmp
+**/*.temp
+**/*.cache
+**/tmp/
+**/temp/
+**/cache/
+
+# Lock files that might have special permissions
+yarn.lock
+poetry.lock
+Pipfile.lock
+**/yarn.lock
+**/*.lock
+environment/uv.lock
+controller/uv.lock

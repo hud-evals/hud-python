@@ -31,7 +31,7 @@ def _get_pyautogui() -> Any | None:
             try:
                 from hud.tools.computer import computer_settings
 
-                os.environ["DISPLAY"] = str(computer_settings.DISPLAY_NUM)
+                os.environ["DISPLAY"] = f":{computer_settings.DISPLAY_NUM}"
             except (ImportError, AttributeError):
                 os.environ["DISPLAY"] = ":0"
 

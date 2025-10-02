@@ -33,14 +33,15 @@ def get_image_name(directory: str | Path, image_override: str | None = None) -> 
         except Exception:
             hud_console.error("Error loading pyproject.toml")
 
-    # Auto-generate with :dev tag
+    # Auto-generate with :dev tag (replace underscores with hyphens)
     dir_path = Path(directory).resolve()  # Get absolute path first
     dir_name = dir_path.name
     if not dir_name or dir_name == ".":
         # If we're in root or have empty name, use parent directory
         dir_name = dir_path.parent.name
-    clean_name = dir_name.replace("_", "-")
-    return f"hud-{clean_name}:dev", "auto"
+    # Replace underscores with hyphens for Docker image names
+    dir_name = dir_name.replace("_", "-")
+    return f"{dir_name}:dev", "auto"
 
 
 def update_pyproject_toml(directory: str | Path, image_name: str, silent: bool = False) -> None:
@@ -126,8 +127,4 @@ def is_environment_directory(path: str | Path) -> bool:
         return False
 
     # Must have pyproject.toml
-    if not (dir_path / "pyproject.toml").exists():
-        hud_console.error("pyproject.toml not found")
-        return False
-
-    return True
+    return (dir_path / "pyproject.toml").exists()

@@ -28,6 +28,7 @@ from .init import create_environment
 from .pull import pull_command
 from .push import push_command
 from .remove import remove_command
+from .utils.config import set_env_values
 from .utils.cursor import get_cursor_config_path, list_cursor_servers, parse_cursor_config
 from .utils.logging import CaptureLogger
 
@@ -37,6 +38,7 @@ app = typer.Typer(
     help="🚀 HUD CLI for MCP environment analysis and debugging",
     add_completion=False,
     rich_markup_mode="rich",
+    pretty_exceptions_enable=False,  # Disable Rich's verbose tracebacks
 )
 
 console = Console()
@@ -116,7 +118,9 @@ def analyze(
         image, *docker_args = params
         if live or docker_args:  # If docker args provided, assume live mode
             # Build Docker command from image and args
-            docker_cmd = ["docker", "run", "--rm", "-i", *docker_args, image]
+            from .utils.docker import build_run_command
+
+            docker_cmd = build_run_command(image, docker_args)
             asyncio.run(analyze_environment(docker_cmd, output_format, verbose))
         else:
             # Fast mode - analyze from metadata
@@ -140,7 +144,7 @@ def debug(
         None,
         help="Docker image, environment directory, or config file followed by optional Docker arguments",  # noqa: E501
     ),
-    config: Path = typer.Option(  # noqa: B008
+    config: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
         "-c",
@@ -239,11 +243,15 @@ def debug(
                     raise typer.Exit(1)
 
             # Build Docker command
-            command = ["docker", "run", "--rm", "-i", *docker_args, image_name]
+            from .utils.docker import build_run_command
+
+            command = build_run_command(image_name, docker_args)
         else:
             # Assume it's an image name
             image = first_param
-            command = ["docker", "run", "--rm", "-i", *docker_args, image]
+            from .utils.docker import build_run_command
+
+            command = build_run_command(image, docker_args)
     else:
         console.print(
             "[red]Error: Must specify a directory, Docker image, --config, or --cursor[/red]"
@@ -344,79 +352,71 @@ def version() -> None:
 def dev(
     params: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
         None,
-        help="Environment directory followed by optional Docker arguments (e.g., '. -e KEY=value')",
+        help="Module path or extra Docker args (when using --docker)",
     ),
-    image: str | None = typer.Option(
-        None, "--image", "-i", help="Docker image name (overrides auto-detection)"
+    docker: bool = typer.Option(
+        False,
+        "--docker",
+        help="Run in Docker with volume mounts for hot-reload (for complex environments)",
     ),
-    build: bool = typer.Option(False, "--build", "-b", help="Build image before starting"),
-    no_cache: bool = typer.Option(False, "--no-cache", help="Force rebuild without cache"),
-    transport: str = typer.Option(
-        "http", "--transport", "-t", help="Transport protocol: http (default) or stdio"
+    stdio: bool = typer.Option(
+        False,
+        "--stdio",
+        help="Use stdio transport (default: HTTP)",
     ),
     port: int = typer.Option(8765, "--port", "-p", help="HTTP server port (ignored for stdio)"),
-    no_reload: bool = typer.Option(False, "--no-reload", help="Disable hot-reload"),
-    full_reload: bool = typer.Option(
-        False,
-        "--full-reload",
-        help="Restart entire container on file changes (instead of just server process)",
-    ),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show server logs"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed logs"),
     inspector: bool = typer.Option(
         False, "--inspector", help="Launch MCP Inspector (HTTP mode only)"
     ),
-    no_logs: bool = typer.Option(False, "--no-logs", help="Disable streaming Docker logs"),
     interactive: bool = typer.Option(
         False, "--interactive", help="Launch interactive testing mode (HTTP mode only)"
     ),
+    watch: list[str] = typer.Option(  # noqa: B008
+        None,
+        "--watch",
+        help="Additional directories to watch for changes (default: current directory)",
+    ),
 ) -> None:
-    """🔥 Development mode with hot-reload.
+    """🔥 Development mode - run MCP server with hot-reload.
 
-    Runs your MCP environment in Docker with automatic restart on file changes.
+    TWO MODES:
 
-    The container's last command (typically the MCP server) will be wrapped
-    with watchfiles for hot-reload functionality.
+    1. Python Module:
+       hud dev                    # Auto-detects module
+       hud dev server.main        # Explicit module
+
+    2. Docker with Volume Mounts (Complex environments like 'browser'):
+       hud dev --docker           # Auto-detects image from hud.lock.yaml
+       hud dev --docker -p 8080:8080  # With extra Docker args
+
+    The server must define 'mcp' in its __init__.py or main.py.
 
     Examples:
         hud dev                      # Auto-detect in current directory
-        hud dev environments/browser # Specific directory
-        hud dev . --build            # Build image first
-        hud dev . --image custom:tag # Use specific image
-        hud dev . --no-cache         # Force clean rebuild
-        hud dev . --verbose          # Show detailed logs
-        hud dev . --transport stdio  # Use stdio proxy for multiple connections
-        hud dev . --inspector        # Launch MCP Inspector (HTTP mode only)
-        hud dev . --interactive      # Launch interactive testing mode (HTTP mode only)
-        hud dev . --no-logs          # Disable Docker log streaming
-        hud dev . --full-reload      # Restart entire container on file changes (instead of just server)
+        hud dev controller           # Run specific module
+        hud dev --inspector          # Launch MCP Inspector
+        hud dev --interactive        # Launch interactive testing mode
+        hud dev --stdio              # Use stdio transport
+        hud dev --watch ../shared    # Watch additional directories
 
-        # With Docker arguments (after all options):
-        hud dev . -e BROWSER_PROVIDER=anchorbrowser -e ANCHOR_API_KEY=xxx
-        hud dev . -e API_KEY=secret -v /tmp/data:/data --network host
-        hud dev . --build -e DEBUG=true --memory 2g
-    """  # noqa: E501
-    # Parse directory and Docker arguments
-    if params:
-        directory = params[0]
-        docker_args = params[1:] if len(params) > 1 else []
-    else:
-        directory = "."
-        docker_args = []
+    For environment backend servers, use uvicorn directly:
+        uvicorn server:app --reload
+    """
+    # Extract module from params if provided (first param when not --docker)
+    module = params[0] if params and not docker else None
+    docker_args = params if docker else []
 
     run_mcp_dev_server(
-        directory,
-        image,
-        build,
-        no_cache,
-        transport,
+        module,
+        stdio,
         port,
-        no_reload,
-        full_reload,
         verbose,
         inspector,
-        no_logs,
         interactive,
-        docker_args,
+        watch,
+        docker=docker,
+        docker_args=docker_args,
     )
 
 
@@ -424,17 +424,13 @@ def dev(
 def run(
     params: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
         None,
-        help="Docker image followed by optional arguments (e.g., 'hud-image:latest -e KEY=value')",
+        help="Docker image followed by optional Docker run arguments "
+        "(e.g., 'my-image:latest -e KEY=value')",
     ),
     local: bool = typer.Option(
         False,
         "--local",
         help="Run locally with Docker (default: remote via mcp.hud.so)",
-    ),
-    remote: bool = typer.Option(
-        False,
-        "--remote",
-        help="Run remotely via mcp.hud.so (default)",
     ),
     transport: str = typer.Option(
         "stdio",
@@ -469,60 +465,54 @@ def run(
         "-v",
         help="Show detailed output",
     ),
-    interactive: bool = typer.Option(
-        False,
-        "--interactive",
-        help="Launch interactive testing mode (HTTP transport only)",
-    ),
 ) -> None:
-    """🚀 Run MCP server locally or remotely.
+    """🚀 Run Docker image as MCP server.
 
-    By default, runs remotely via mcp.hud.so. Use --local for Docker.
+    A simple wrapper around 'docker run' that can launch images locally or remotely.
+    By default, runs remotely via mcp.hud.so. Use --local to run with local Docker.
 
-    Remote Examples:
-        hud run hud-text-2048:latest
-        hud run my-server:v1 -e API_KEY=xxx -h Run-Id:abc123
-        hud run my-server:v1 --transport http --port 9000
+    For local Python development with hot-reload, use 'hud dev' instead.
 
-    Local Examples:
-        hud run --local hud-text-2048:latest
-        hud run --local my-server:v1 -e API_KEY=xxx
-        hud run --local my-server:v1 --transport http
-
-    Interactive Testing (local only):
-        hud run --local --interactive --transport http hud-text-2048:latest
-        hud run --local --interactive --transport http --port 9000 my-server:v1
+    Examples:
+        hud run my-image:latest                    # Run remotely (default)
+        hud run my-image:latest --local            # Run with local Docker
+        hud run my-image:latest -e KEY=value       # Remote with env vars
+        hud run my-image:latest --local -e KEY=val # Local with env vars
+        hud run my-image:latest --transport http   # Use HTTP transport
     """
     if not params:
-        typer.echo("❌ Docker image is required")
+        console.print("[red]❌ Docker image is required[/red]")
+        console.print("\nExamples:")
+        console.print("  hud run my-image:latest              # Run remotely (default)")
+        console.print("  hud run my-image:latest --local      # Run with local Docker")
+        console.print("\n[yellow]For local Python development:[/yellow]")
+        console.print("  hud dev                              # Run with hot-reload")
         raise typer.Exit(1)
 
-    # Parse image and args
     image = params[0]
     docker_args = params[1:] if len(params) > 1 else []
 
-    # Handle conflicting flags
-    if local and remote:
-        typer.echo("❌ Cannot use both --local and --remote")
+    # Check if user accidentally passed a module path
+    from pathlib import Path
+
+    if not any(c in image for c in [":", "/"]) and (
+        Path(image).is_dir() or Path(image).is_file() or "." in image
+    ):
+        console.print(f"[yellow]⚠️  '{image}' looks like a module path, not a Docker image[/yellow]")
+        console.print("\n[green]For local Python development, use:[/green]")
+        console.print(f"  hud dev {image}")
+        console.print("\n[green]For Docker images:[/green]")
+        console.print("  hud run my-image:latest")
         raise typer.Exit(1)
 
     # Default to remote if not explicitly local
-    is_local = local and not remote
-
-    # Check for interactive mode restrictions
-    if interactive:
-        if transport != "http":
-            typer.echo("❌ Interactive mode requires HTTP transport (use --transport http)")
-            raise typer.Exit(1)
-        if not is_local:
-            typer.echo("❌ Interactive mode is only available for local execution (use --local)")
-            raise typer.Exit(1)
+    is_local = local
 
     if is_local:
         # Local Docker execution
         from .utils.runner import run_mcp_server
 
-        run_mcp_server(image, docker_args, transport, port, verbose, interactive)
+        run_mcp_server(image, docker_args, transport, port, verbose, interactive=False)
     else:
         # Remote execution via proxy
         from .utils.remote_runner import run_remote_server
@@ -585,6 +575,9 @@ def build(
     ),
     no_cache: bool = typer.Option(False, "--no-cache", help="Build without Docker cache"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
+    platform: str | None = typer.Option(
+        None, "--platform", help="Set Docker target platform (e.g., linux/amd64)"
+    ),
 ) -> None:
     """🏗️ Build a HUD environment and generate lock file.
 
@@ -635,7 +628,7 @@ def build(
         else:
             i += 1
 
-    build_command(directory, tag, no_cache, verbose, env_vars)
+    build_command(directory, tag, no_cache, verbose, env_vars, platform)
 
 
 @app.command()
@@ -738,6 +731,12 @@ def remove(
 @app.command()
 def init(
     name: str = typer.Argument(None, help="Environment name (default: current directory name)"),
+    preset: str | None = typer.Option(
+        None,
+        "--preset",
+        "-p",
+        help="Preset to use: blank, deep-research, browser. If omitted, you'll choose interactively.",  # noqa: E501
+    ),
     directory: str = typer.Option(".", "--dir", "-d", help="Target directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing files"),
 ) -> None:
@@ -754,7 +753,7 @@ def init(
         hud init my-env             # Create in ./my-env/
         hud init my-env --dir /tmp  # Create in /tmp/my-env/
     """
-    create_environment(name, directory, force)
+    create_environment(name, directory, force, preset)
 
 
 @app.command()
@@ -771,14 +770,14 @@ def eval(
     source: str | None = typer.Argument(
         None,
         help=(
-            "HuggingFace dataset identifier (e.g. 'hud-evals/SheetBench-50') or task JSON file. "
+            "HuggingFace dataset (e.g. 'hud-evals/SheetBench-50') or task JSON file. "
             "If not provided, looks for task.json in current directory."
         ),
     ),
     agent: str | None = typer.Argument(
         None,
         help=(
-            "Agent backend to use (claude, openai, or vllm). If not provided, will prompt interactively."  # noqa: E501
+            "Agent backend to use (claude, openai, vllm, or litellm). If not provided, will prompt interactively."  # noqa: E501
         ),
     ),
     full: bool = typer.Option(
@@ -801,8 +800,8 @@ def eval(
         "--max-concurrent",
         help="Max concurrent tasks (prevents rate limits in both asyncio and parallel modes)",
     ),
-    max_steps: int = typer.Option(
-        30,
+    max_steps: int | None = typer.Option(
+        None,
         "--max-steps",
         help="Maximum steps per task (default: 10 for single, 50 for full)",
     ),
@@ -826,6 +825,12 @@ def eval(
         "--verbose",
         help="Enable verbose output from the agent",
     ),
+    very_verbose: bool = typer.Option(
+        False,
+        "--very-verbose",
+        "-vv",
+        help="Enable debug-level logs for maximum visibility",
+    ),
     vllm_base_url: str | None = typer.Option(
         None,
         "--vllm-base-url",
@@ -836,6 +841,15 @@ def eval(
         "--group-size",
         help="Number of times to run each task (similar to RL training)",
     ),
+    integration_test: bool = typer.Option(
+        False,
+        "--integration-test",
+        help=(
+            "Run integration_test_tool, where problem is setup, "
+            "actions are applied, and evaluation is performed, without "
+            "spinning up an agent"
+        ),
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents."""
     from hud.settings import settings
@@ -843,54 +857,24 @@ def eval(
 
     hud_console = HUDConsole()
 
-    # If no source provided, look for task/eval JSON files in current directory
+    if integration_test:
+        agent = "integration_test"
+
+    # If no source provided, reuse RL helper to find a tasks file interactively
     if source is None:
-        # Search for JSON files with "task" or "eval" in the name (case-insensitive)
-        json_files = []
-        patterns = [
-            "*task*.json",
-            "*eval*.json",
-            "*Task*.json",
-            "*Eval*.json",
-            "*TASK*.json",
-            "*EVAL*.json",
-        ]
+        try:
+            from hud.cli.utils.tasks import find_tasks_file
 
-        # First check current directory
-        for pattern in patterns:
-            json_files.extend(Path(".").glob(pattern))
-
-        # If no files found, search recursively (but limit depth to avoid deep searches)
-        if not json_files:
-            for pattern in patterns:
-                # Search up to 2 levels deep
-                json_files.extend(Path(".").glob(f"*/{pattern}"))
-                json_files.extend(Path(".").glob(f"*/*/{pattern}"))
-
-        # Remove duplicates and sort
-        json_files = sorted(set(json_files))
-
-        if not json_files:
+            source = find_tasks_file(None, msg="Select a tasks file to run")
+            hud_console.success(f"Selected: {source}")
+        except Exception as e:
             hud_console.error(
                 "No source provided and no task/eval JSON files found in current directory"
             )
             hud_console.info(
-                "Usage: hud eval <source> or create a task JSON file "
-                "(e.g., task.json, eval_config.json)"
+                "Usage: hud eval <source> or create a task JSON file (e.g., task.json, tasks.jsonl)"
             )
-            raise typer.Exit(1)
-        elif len(json_files) == 1:
-            source = str(json_files[0])
-            hud_console.info(f"Found task file: {source}")
-        else:
-            # Multiple files found, let user choose
-            hud_console.info("Multiple task files found:")
-            file_choice = hud_console.select(
-                "Select a task file to run:",
-                choices=[str(f) for f in json_files],
-            )
-            source = file_choice
-            hud_console.success(f"Selected: {source}")
+            raise typer.Exit(1) from e
 
     # Import eval_command lazily to avoid importing agent dependencies
     try:
@@ -924,13 +908,14 @@ def eval(
                 {"name": "Claude 4 Sonnet", "value": "claude"},
                 {"name": "OpenAI Computer Use", "value": "openai"},
                 {"name": "vLLM (Local Server)", "value": "vllm"},
+                {"name": "LiteLLM (Multi-provider)", "value": "litellm"},
             ]
         )
 
         agent = hud_console.select("Select an agent to use:", choices=choices, default=0)
 
     # Handle HUD model selection
-    if agent and agent not in ["claude", "openai", "vllm"]:
+    if agent and agent not in ["claude", "openai", "vllm", "litellm", "integration_test"]:
         # Find remote model name
         model = agent
         if not vllm_base_url:
@@ -951,7 +936,7 @@ def eval(
         hud_console.info(f"Using HUD model: {model} (trained on {base_model})")
 
     # Validate agent choice
-    valid_agents = ["claude", "openai", "vllm"]
+    valid_agents = ["claude", "openai", "vllm", "litellm", "integration_test"]
     if agent not in valid_agents:
         hud_console.error(f"Invalid agent: {agent}. Must be one of: {', '.join(valid_agents)}")
         raise typer.Exit(1)
@@ -969,8 +954,10 @@ def eval(
         max_workers=max_workers,
         max_concurrent_per_worker=max_concurrent_per_worker,
         verbose=verbose,
+        very_verbose=very_verbose,
         vllm_base_url=vllm_base_url,
         group_size=group_size,
+        integration_test=integration_test,
     )
 
 
@@ -996,7 +983,7 @@ def get(
     ),
 ) -> None:
     """📥 Download a HuggingFace dataset and save it as JSONL."""
-    from .get import get_command
+    from hud.cli.get import get_command
 
     get_command(
         dataset_name=dataset_name,
@@ -1018,7 +1005,7 @@ def rl(
     ),
     model: str | None = typer.Argument(
         None,
-        help="Model to train (default: interactive selection)",
+        help="Model to train from https://hud.so/models (default: interactive selection)",
     ),
     config_file: Path | None = typer.Option(  # noqa: B008
         None,
@@ -1058,10 +1045,26 @@ def rl(
         "--ddp-gpus",
         help="Specific GPUs for DDP (e.g., '0,1,2,3')",
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Auto-accept all prompts and use defaults (lazy mode)",
+    ),
     vllm_gpu: int | None = typer.Option(
         None,
         "--vllm-gpu",
         help="Specific GPU for vLLM server",
+    ),
+    vllm_gpu_count: int = typer.Option(
+        1,
+        "--vllm-gpu-count",
+        help="Number of GPUs for vLLM server",
+    ),
+    skip_vllm_startup: bool = typer.Option(
+        False,
+        "--skip-vllm-startup",
+        help="Skip the vLLM server startup",
     ),
 ) -> None:
     """🎯 Run GRPO reinforcement learning training on tasks."""
@@ -1079,7 +1082,46 @@ def rl(
         no_ddp=no_ddp,
         ddp_gpus=ddp_gpus,
         vllm_gpu=vllm_gpu,
+        vllm_gpu_count=vllm_gpu_count,
+        yes=yes,
+        skip_vllm_startup=skip_vllm_startup,
     )
+
+
+@app.command()
+def set(
+    assignments: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
+        ..., help="One or more KEY=VALUE pairs to persist in ~/.hud/.env"
+    ),
+) -> None:
+    """Persist API keys or other variables for HUD to use by default.
+
+    Examples:
+        hud set ANTHROPIC_API_KEY=sk-... OPENAI_API_KEY=sk-...
+
+    Values are stored in ~/.hud/.env and are loaded by hud.settings with
+    the lowest precedence (overridden by process env and project .env).
+    """
+    from hud.utils.hud_console import HUDConsole
+
+    hud_console = HUDConsole()
+
+    updates: dict[str, str] = {}
+    for item in assignments:
+        if "=" not in item:
+            hud_console.error(f"Invalid assignment (expected KEY=VALUE): {item}")
+            raise typer.Exit(1)
+        key, value = item.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            hud_console.error(f"Invalid key in assignment: {item}")
+            raise typer.Exit(1)
+        updates[key] = value
+
+    path = set_env_values(updates)
+    hud_console.success("Saved credentials to user config")
+    hud_console.info(f"Location: {path}")
 
 
 def main() -> None:

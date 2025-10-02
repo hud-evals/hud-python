@@ -1,5 +1,6 @@
 ---
-title: Define Tasks for Training
+title: Dataset Design
+icon: table
 ---
 
 ## Tasks format
@@ -14,9 +15,12 @@ HUD tasksets can be provided in two primary formats (both supported):
     "id": "browser_2048_128",
     "prompt": "Reach 128 in 2048.",
     "mcp_config": {
-      "local": {
-        "command": "sh",
-        "args": ["-c", "docker run --rm --platform linux/amd64 -i hudevals/hud-browser:0.1.3 2>/dev/null"]
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-browser:0.1.3"
+        }
       }
     },
     "setup_tool": {"name": "launch_app", "arguments": {"app_name": "2048"}},
@@ -40,19 +44,6 @@ hud rl basic-2048.json
 - evaluate_tool: a tool call to compute reward
 - system_prompt (optional): extra guidance for the agent
 
-### Minimal JSONL example
-
-```json
-{"id": "browser_2048_128", "prompt": "Reach 128 in 2048.", "mcp_config": {"local": {"command": "sh", "args": ["-c", "docker run --rm --platform linux/amd64 -i hudevals/hud-browser:0.1.3 2>/dev/null"]}}, "setup_tool": {"name": "launch_app", "arguments": {"app_name": "2048"}}, "evaluate_tool": {"name": "evaluate", "arguments": {"name": "game_2048_max_number", "arguments": {"target": 128}}}}
-```
-
-Save as `basic-2048.jsonl` and run:
-
-```bash
-hud eval basic-2048.jsonl
-hud rl basic-2048.jsonl
-```
-
 ## Hosting on HuggingFace
 
 You can host tasksets on the Hub and fetch them with:
@@ -63,10 +54,27 @@ hud get hud-evals/basic-2048
 
 The command downloads the JSONL task file and places it in your project directory.
 
+This allows running the full dataset or training with simply:
+
+```bash
+hud eval hud-evals/basic-2048
+hud rl hud-evals/basic-2048
+```
+
 ## Tips
 
 - Keep tasks self-contained; use `setup_tool` to open apps or load data
 - Ensure `evaluate_tool` returns a numeric reward per episode
 - Use small task counts to iterate quickly; scale up once stable
+
+<CardGroup cols={2}>
+<Card title="Agent Evals" icon="robot" href="/evaluate-agents/benchmarks">
+  Learn how to run benchmarks
+</Card>
+
+<Card title="Environment Spec" icon="wrench" href="/build-environments/spec">
+  Deep-dive into MCP configs and tools
+</Card>
+</CardGroup>
 
 

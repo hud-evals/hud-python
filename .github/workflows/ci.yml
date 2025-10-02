@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12"]
 
     steps:
       - name: Check out code
@@ -37,7 +37,7 @@ jobs:
         env:
           DISPLAY: :99
           XAUTHORITY: /dev/null
-        run: uv run --python ${{ matrix.python-version }} --with=".[dev]" pytest --rootdir=hud --cov --cov-report=''
+        run: uv run --python ${{ matrix.python-version }} --with=".[rl,dev]" pytest --rootdir=hud --cov --cov-report=''
 
   lint-ruff:
     runs-on: ubuntu-latest
@@ -59,4 +59,4 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Run pyright
-        run: uv run --with=".[dev]" pyright
+        run: uv run --with=".[rl,dev]" pyright

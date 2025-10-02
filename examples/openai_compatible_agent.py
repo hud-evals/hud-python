@@ -87,7 +87,7 @@ def _task_for_mode(mode: Literal["text", "browser"], target: int) -> Task:
         mcp_config = {
             "local": {
                 "command": "docker",
-                "args": ["run", "--rm", "-i", "hudevals/hud-text-2048:latest"],
+                "args": ["run", "--rm", "-i", "hudevals/hud-text-2048:0.1.6"],
             }
         }
         prompt = f"Aim for the {target} tile (at least a score of 800!)"

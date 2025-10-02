@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, cast
 
@@ -8,13 +9,15 @@ from fastmcp import FastMCP
 from hud.tools.types import ContentBlock, EvaluationResult
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
     from fastmcp.tools import FunctionTool
     from fastmcp.tools.tool import Tool, ToolResult
 
 # Basic result types for tools
 BaseResult = list[ContentBlock] | EvaluationResult
+
+logger = logging.getLogger(__name__)
 
 
 class BaseTool(ABC):
@@ -58,6 +61,10 @@ class BaseTool(ABC):
         self.title = title or self.__class__.__name__.replace("Tool", "").replace("_", " ").title()
         self.description = description or (self.__doc__.strip() if self.__doc__ else None)
         self.meta = meta
+        self._callbacks: dict[
+            str,
+            list[Callable[..., Awaitable[Any]]],
+        ] = {}  # {"event_name": [callback_functions]}
 
         # Expose attributes FastMCP expects when registering an instance directly
         self.__name__ = self.name  # FastMCP uses fn.__name__ if name param omitted
@@ -100,13 +107,48 @@ class BaseTool(ABC):
             )
         return self._mcp_tool
 
+    def add_callback(self, event_type: str, callback: Callable[..., Awaitable[Any]]) -> None:
+        """Register a callback function for specific event
+
+        Args:
+            event_type: (Required) Specific event name to trigger callback
+                        e.g. "after_click", "before_navigate"
+            callback: (Required) Async function to call. Must be defined by `async def f(...)`
+        """
+        if event_type not in self._callbacks:
+            self._callbacks[event_type] = []
+        self._callbacks[event_type].append(callback)
+
+    def remove_callback(self, event_type: str, callback: Callable[..., Awaitable[Any]]) -> None:
+        """Remove a registered callback
+        Args:
+            event_type: (Required) Specific event name to trigger callback
+                        e.g. "after_click", "before_navigate"
+            callback: (Required) Function to remove from callback list.
+        """
+        if (event_type in self._callbacks) and (callback in self._callbacks[event_type]):
+            self._callbacks[event_type].remove(callback)
+
+    async def _trigger_callbacks(self, event_type: str, **kwargs: Any) -> None:
+        """Trigger all registered callback functions of an event type"""
+        callback_list = self._callbacks.get(event_type, [])
+        for callback in callback_list:
+            try:
+                await callback(**kwargs)
+            except Exception as e:
+                logger.warning("Callback failed for %s: %s", event_type, e)
+
 
 # Prefix for internal tool names
 _INTERNAL_PREFIX = "int_"
 
 
 class BaseHub(FastMCP):
-    """A composition-friendly FastMCP server that holds an internal tool dispatcher."""
+    """A composition-friendly FastMCP server that holds an internal tool dispatcher.
+
+    Note: BaseHub can be used standalone or to wrap existing routers. For the newer
+    FastAPI-like pattern, consider using HiddenRouter from hud.server instead.
+    """
 
     env: Any
 
@@ -129,6 +171,10 @@ class BaseHub(FastMCP):
             Optional long-lived environment object. Stored on the server
             instance (``layer.env``) and therefore available to every request
             via ``ctx.fastmcp.env``.
+        title:
+            Optional title for the dispatcher tool.
+        description:
+            Optional description for the dispatcher tool.
         meta:
             Metadata to include in MCP tool listing.
         """

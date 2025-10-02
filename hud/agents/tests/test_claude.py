@@ -86,6 +86,7 @@ class TestClaudeAgent:
             model_client=mock_model_client,
             model="claude-3-opus-20240229",
             max_tokens=1000,
+            validate_api_key=False,  # Skip validation in tests
         )
 
         assert agent.model_name == "claude-3-opus-20240229"
@@ -93,10 +94,14 @@ class TestClaudeAgent:
         assert agent.anthropic_client == mock_model_client
 
     @pytest.mark.asyncio
-    async def test_init_without_model_client(self, mock_mcp_client):
+    async def test_init_without_model_client(self, mock_mcp_client, mock_anthropic):
         """Test agent initialization without model client."""
         with patch("hud.settings.settings.anthropic_api_key", "test_key"):
-            agent = ClaudeAgent(mcp_client=mock_mcp_client, model="claude-3-opus-20240229")
+            agent = ClaudeAgent(
+                mcp_client=mock_mcp_client,
+                model="claude-3-opus-20240229",
+                validate_api_key=False,  # Skip validation in tests
+            )
 
             assert agent.model_name == "claude-3-opus-20240229"
             assert agent.anthropic_client is not None
@@ -105,7 +110,11 @@ class TestClaudeAgent:
     async def test_format_blocks(self, mock_mcp_client):
         """Test formatting content blocks into Claude messages."""
         mock_model_client = MagicMock()
-        agent = ClaudeAgent(mcp_client=mock_mcp_client, model_client=mock_model_client)
+        agent = ClaudeAgent(
+            mcp_client=mock_mcp_client,
+            model_client=mock_model_client,
+            validate_api_key=False,  # Skip validation in tests
+        )
 
         # Test with text only
         text_blocks: list[types.ContentBlock] = [
@@ -141,7 +150,11 @@ class TestClaudeAgent:
     async def test_format_tool_results_method(self, mock_mcp_client):
         """Test the agent's format_tool_results method."""
         mock_model_client = MagicMock()
-        agent = ClaudeAgent(mcp_client=mock_mcp_client, model_client=mock_model_client)
+        agent = ClaudeAgent(
+            mcp_client=mock_mcp_client,
+            model_client=mock_model_client,
+            validate_api_key=False,  # Skip validation in tests
+        )
 
         tool_calls = [
             MCPToolCall(name="test_tool", arguments={}, id="id1"),
@@ -171,7 +184,11 @@ class TestClaudeAgent:
         """Test getting model response from Claude API."""
         # Disable telemetry for this test to avoid backend configuration issues
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = ClaudeAgent(mcp_client=mock_mcp_client, model_client=mock_anthropic)
+            agent = ClaudeAgent(
+                mcp_client=mock_mcp_client,
+                model_client=mock_anthropic,
+                validate_api_key=False,  # Skip validation in tests
+            )
 
             # Mock the API response
             mock_response = MagicMock()
@@ -215,7 +232,11 @@ class TestClaudeAgent:
         """Test getting text-only response."""
         # Disable telemetry for this test to avoid backend configuration issues
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = ClaudeAgent(mcp_client=mock_mcp_client, model_client=mock_anthropic)
+            agent = ClaudeAgent(
+                mcp_client=mock_mcp_client,
+                model_client=mock_anthropic,
+                validate_api_key=False,  # Skip validation in tests
+            )
 
             mock_response = MagicMock()
             # Create text block
@@ -242,7 +263,11 @@ class TestClaudeAgent:
         """Test handling API errors."""
         # Disable telemetry for this test to avoid backend configuration issues
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = ClaudeAgent(mcp_client=mock_mcp_client, model_client=mock_anthropic)
+            agent = ClaudeAgent(
+                mcp_client=mock_mcp_client,
+                model_client=mock_anthropic,
+                validate_api_key=False,  # Skip validation in tests
+            )
 
             # Mock API error
             mock_anthropic.beta.messages.create = AsyncMock(

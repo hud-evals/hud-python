@@ -15,14 +15,12 @@ uv.lock
 *.jpeg
 *.bmp
 *.tiff
-*.ico
 
 # DS-Store
 .DS_Store
 
 # Test files
 /*.ipynb
-test.json
 TODO.md
 
 .coverage
@@ -40,6 +38,7 @@ CLAUDE.md
 
 *.csv
 .rl_config_*.json
+.rl-config-*.json
 
 # RL
 wandb/
@@ -51,3 +50,5 @@ test/
 /checkpoints_test/
 hud/rl/checkpoints/
 hud/rl/checkpoints_test/
+
+.ck/

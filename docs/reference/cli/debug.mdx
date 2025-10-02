@@ -9,8 +9,8 @@ The `hud debug` command validates MCP environments through 5 progressive phases.
 ## Synopsis
 
 ```bash
-hud debug [OPTIONS] IMAGE [DOCKER_ARGS...]
-hud debug --command COMMAND [ARGS...]
+hud debug [IMAGE|DIRECTORY] [OPTIONS] [DOCKER_ARGS...]
+hud debug --config PATH
 hud debug --cursor SERVER_NAME
 ```
 
@@ -18,11 +18,10 @@ hud debug --cursor SERVER_NAME
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--max-phase` | Stop at specified phase (1-5) | 5 |
-| `--command` | Debug a command instead of Docker | - |
+| `--config`, `-c` | JSON config file with MCP configuration | - |
 | `--cursor` | Debug a Cursor MCP server | - |
-| `--timeout` | Timeout per phase in seconds | 30 |
-| `-e, --env` | Set environment variables | - |
+| `--build`, `-b` | Build image before debugging (directory mode) | false |
+| `--max-phase`, `-p` | Maximum debug phase (1-5) | 5 |
 
 ## Debug Phases
 
@@ -67,43 +66,35 @@ Checks: Tools callable, return valid responses
 Checks: Overall health, state persistence
 
 <Note>
-Once your environment passes Phase 5, consider using `hud dev` for hot-reload development. This eliminates rebuild cycles and speeds up iteration.
+Use `hud dev` for hot-reload development after debug passes to speed up iteration.
 </Note>
 
 ## Examples
 
-### Docker Debug
+### Docker Image
 ```bash
 # Basic
 hud debug my-server:latest
 
-# With environment variables
+# With environment variables (Docker args after image)
 hud debug my-server:latest -e DEBUG=true -e LOG_LEVEL=debug
 
 # Stop at phase 3
 hud debug my-server:latest --max-phase 3
 ```
 
-### Local Development
+### Directory Mode
 ```bash
-# Python script
-hud debug --command "python my_server.py"
-
-# With arguments
-hud debug --command "python -m my_module.server --port 8000"
+# Build then debug from a directory containing a Dockerfile and pyproject.toml
+hud debug . --build
 ```
 
-### Cursor Integration
-```bash
-# Debug Cursor server
-hud debug --cursor my-dev-env
-```
 
 ## Common Issues
 
 ### Phase 1 Failures
 - **Container exits**: Check CMD/ENTRYPOINT
-- **No stderr**: Add `print(..., file=sys.stderr)`
+- **No stderr**: Route logs to stderr
 - **Permission denied**: Check file permissions
 
 ### Phase 2 Failures
@@ -118,22 +109,10 @@ hud debug --cursor my-dev-env
 
 ### Incremental Debugging
 ```bash
-# Debug phase by phase
 for phase in 1 2 3 4 5; do
-    echo "Testing phase $phase..."
-    hud debug my-env:latest --max-phase $phase || break
+  echo "Testing phase $phase..."
+  hud debug my-env:latest --max-phase $phase || break
 done
-```
-
-### Development Mode
-```bash
-# Once debug passes, use hot-reload for development
-cd environments/my-env
-hud dev . --build
-
-# Make changes to src/ files
-# Test changes without rebuilding
-hud analyze hud-my-env:dev
 ```
 
 ### Parallel Testing
@@ -141,7 +120,7 @@ hud analyze hud-my-env:dev
 # Test multiple environments
 images=("env1:latest" "env2:latest")
 for image in "${images[@]}"; do
-    hud debug "$image" > "debug_${image//:/}.log" 2>&1 &
+  hud debug "$image" > "debug_${image//:/}.log" 2>&1 &
 done
 wait
 ```

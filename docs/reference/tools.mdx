@@ -418,6 +418,52 @@ async def evaluate(name: str, **kwargs):
     return await evaluators.call_tool(name, kwargs)
 ```
 
+### Callback Functions
+
+Callback functions help you monitor certain types of actions and hook 
+behaviors to them. You can manage callbacks using three main methods,
+```python
+add_callback(self, event_type: str, callback: Callable)
+remove_callback(self, event_type: str, callback: Callable)
+_trigger_callbacks(self, event_type: str, **kwargs)  
+```
+*Special note*: Make sure the callback functions are defined by `async def`
+
+For example, when you want to take a screenshot every 
+time the webpage changes in `Playwright`
+ ```python
+from hud.tools.playwright import PlaywrightTool
+import base64
+
+class MyPlaywrightTool(PlaywrightTool):
+    def __init__(self, context: Any = None, cdp_url: str | None = None) -> None:
+        super().__init__(cdp_url=cdp_url)
+        self.screenshots: List = []
+        self.add_callback("webpage_change", self._on_webpage_change)
+
+    async def _on_webpage_change(self, **kwargs) -> None:
+        """Callback to capture screenshots on webpage changes"""
+        try:
+            await self._ensure_browser()
+            if self.page:
+                screenshot_bytes = await self.page.screenshot(full_page=True)
+                screenshot_b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
+                self.screenshots.append(screenshot_b64)
+        except Exception as e:
+            pass
+
+    async def navigate(self, url: str, wait_for_load_state="networkidle"):
+        result = await super().navigate(url, wait_for_load_state)
+        # Trigger callbacks with event data
+        await self._trigger_callbacks("webpage_change")
+        return result
+
+    async def click(self, selector: str, **kwargs):
+        result = await super().click(selector, **kwargs)
+        await self._trigger_callbacks("webpage_change")
+        return result
+```
+
 ## See Also
 
 - [Build Environments](/build-environments) - Using tools in environments

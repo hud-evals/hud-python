@@ -154,6 +154,9 @@ def pull_environment(
             # Check for API key (not required for pulling, but good to inform)
             if not settings.api_key:
                 hud_console.info("No HUD API key set (pulling from public registry)")
+                hud_console.info(
+                    "Set it in your environment or run: hud set HUD_API_KEY=your-key-here"
+                )
 
             lock_data = fetch_lock_from_registry(target)
 
@@ -165,6 +168,9 @@ def pull_environment(
                 if not settings.api_key:
                     hud_console.info(
                         "Not found in HUD registry (try setting HUD_API_KEY for private environments)"  # noqa: E501
+                    )
+                    hud_console.info(
+                        "Set it in your environment or run: hud set HUD_API_KEY=your-key-here"
                     )
                 else:
                     hud_console.info("Not found in HUD registry, treating as Docker image")

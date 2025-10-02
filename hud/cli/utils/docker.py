@@ -36,45 +36,6 @@ def get_docker_cmd(image: str) -> list[str] | None:
         return None
 
 
-def inject_supervisor(cmd: list[str]) -> list[str]:
-    """
-    Inject watchfiles CLI supervisor into a Docker CMD.
-
-    For shell commands, we inject before the last exec command.
-    For direct commands, we wrap the entire command.
-
-    Args:
-        cmd: Original Docker CMD
-
-    Returns:
-        Modified CMD with watchfiles supervisor injected
-    """
-    if not cmd:
-        return cmd
-
-    # Handle shell commands that might have background processes
-    if cmd[0] in ["sh", "bash"] and len(cmd) >= 3 and cmd[1] == "-c":
-        shell_cmd = cmd[2]
-
-        # Look for 'exec' in the shell command - this is the last command
-        if " exec " in shell_cmd:
-            # Replace only the exec'd command with watchfiles
-            parts = shell_cmd.rsplit(" exec ", 1)
-            if len(parts) == 2:
-                # Extract the actual command after exec
-                last_cmd = parts[1].strip()
-                # Use watchfiles with logs redirected to stderr (which won't interfere with MCP on stdout)  # noqa: E501
-                new_shell_cmd = f"{parts[0]} exec watchfiles --verbose '{last_cmd}' /app/src"
-                return [cmd[0], cmd[1], new_shell_cmd]
-        else:
-            # No exec, the whole thing is the command
-            return ["sh", "-c", f"watchfiles --verbose '{shell_cmd}' /app/src"]
-
-    # Direct command - wrap with watchfiles
-    watchfiles_cmd = " ".join(cmd)
-    return ["sh", "-c", f"watchfiles --verbose '{watchfiles_cmd}' /app/src"]
-
-
 def image_exists(image_name: str) -> bool:
     """Check if a Docker image exists locally."""
     result = subprocess.run(  # noqa: S603
@@ -119,6 +80,27 @@ def generate_container_name(identifier: str, prefix: str = "hud") -> str:
     # Replace special characters with hyphens
     safe_name = identifier.replace(":", "-").replace("/", "-").replace("\\", "-")
     return f"{prefix}-{safe_name}"
+
+
+def build_run_command(image: str, docker_args: list[str] | None = None) -> list[str]:
+    """Construct a standard docker run command used across CLI commands.
+
+    Args:
+        image: Docker image name to run
+        docker_args: Additional docker args to pass before the image
+
+    Returns:
+        The docker run command list
+    """
+    args = docker_args or []
+    return [
+        "docker",
+        "run",
+        "--rm",
+        "-i",
+        *args,
+        image,
+    ]
 
 
 def _emit_docker_hints(error_text: str) -> None:

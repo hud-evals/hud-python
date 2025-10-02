@@ -7,20 +7,21 @@ icon: "terminal"
 The HUD CLI provides a complete toolkit for creating, developing, and running MCP environments. Commands are organized into two main workflows:
 
 <CardGroup cols={2}>
-<Card title="Building Environments" icon="hammer" color="#6b21a8">
+<Card title="Build & Ship" icon="hammer" color="#6b21a8">
   **Directory-based commands** for creating and sharing environments:
-  - `hud init` - Create new environment
-  - `hud dev` - Develop with hot-reload
-  - `hud build` - Build and generate lock file
-  - `hud push` - Share to registry
+  - `hud init` — Create new environment
+  - `hud dev` — Develop with hot‑reload
+  - `hud build` — Build and generate lock file
+  - `hud push` — Share to registry
 </Card>
 
-<Card title="Running Environments" icon="play" color="#0891b2">
-  **Target-based commands** for consuming environments:
-  - `hud pull` - Get from registry
-  - `hud analyze` - Inspect capabilities
-  - `hud debug` - Test compliance
-  - `hud run` - Execute locally/remotely
+<Card title="Run & Evaluate" icon="play" color="#0891b2">
+  **Target-based commands** for using environments and agents:
+  - `hud analyze` — Inspect capabilities (fast/live)
+  - `hud debug` — 5‑phase compliance test
+  - `hud run` — Execute (Python module/command/Docker)
+  - `hud eval` — Run agents on tasks/datasets
+  - `hud rl` — Train with GRPO on tasks
 </Card>
 </CardGroup>
 
@@ -56,17 +57,21 @@ hud --version
 ### Running Workflow
 | Command | Input | Description | Example |
 |---------|-------|-------------|---------|
-| `hud pull` | Target | Get environment from registry | `hud pull org/env:latest` |
-| `hud analyze` | Target | Inspect tools & capabilities | `hud analyze org/env` |
-| `hud debug` | Target | Test MCP compliance | `hud debug my-env:latest` |
-| `hud run` | Target | Execute server | `hud run my-env --local` |
+| `hud analyze` | Image or config | Inspect tools & capabilities | `hud analyze org/env` |
+| `hud debug` | Image/dir/config | 5‑phase compliance test | `hud debug my-env:latest` |
+| `hud run` | Module/command/image | Execute server (local/remote) | `hud run controller --reload` |
+| `hud eval` | Tasks/dataset | Run agent on tasks | `hud eval tasks.json claude` |
+| `hud rl` | Tasks/dataset | Train with GRPO | `hud rl tasks.json --local` |
 
-### Utilities
+### Other Commands
 | Command | Description | Example |
 |---------|-------------|---------|
-| `hud quickstart` | Clone quickstart repository | `hud quickstart` |
+| `hud get` | Download HF dataset to tasks file | `hud get hud-evals/2048-basic -o tasks.jsonl` |
+| `hud quickstart` | Clone quickstart repo | `hud quickstart` |
 | `hud cursor-list` | List Cursor MCP servers | `hud cursor-list` |
-| `hud version` | Show version info | `hud version` |
+| `hud version` | Show CLI version | `hud version` |
+| `hud clone` | Clone any git repo (pretty output) | `hud clone https://github.com/...` |
+| `hud set` | Persist API keys to ~/.hud/.env | `hud set HUD_API_KEY=...` |
 
 ## Complete Workflows
 
@@ -78,7 +83,7 @@ Create a new HUD environment with minimal boilerplate:
 ```bash
 hud init my-env && cd my-env
 ```
-Creates `Dockerfile`, `pyproject.toml`, and minimal MCP server with context.
+Creates `Dockerfile`, `pyproject.toml`, `controller/` (MCP server), optional `environment/` backend, `tasks.json`.
 </Step>
 
 <Step title="Develop">
@@ -109,14 +114,6 @@ Requires `HUD_API_KEY`. Auto-detects registry from Docker login.
 ### Running an Environment
 
 <Steps>
-<Step title="Pull">
-Get environment with metadata preview:
-```bash
-hud pull hudpython/text_init:latest
-```
-Shows tools, env vars, and build info before downloading.
-</Step>
-
 <Step title="Analyze">
 Quick inspection without running:
 ```bash
@@ -156,13 +153,11 @@ hud debug my-image:latest -e DEBUG=true -p 8080:8080
 hud analyze ghcr.io/org/image:v1.0.0
 ```
 
-### Local Commands
+### Arbitrary Commands (Python/Node/etc.)
 ```bash
-# Python script
-hud debug --command "python server.py"
-
-# Node.js server
-hud debug --command "node mcp-server.js"
+# Run any command as MCP server (stdio/http)
+hud run --cmd "python -m controller" -t http -p 8765
+hud run --cmd "node mcp-server.js"
 ```
 
 ### Cursor Integration
@@ -293,10 +288,6 @@ export ANCHOR_API_KEY=...
 
 ### Running Commands
 <CardGroup cols={2}>
-<Card title="Pull Command" icon="download" href="/reference/cli/pull">
-  Get environments with metadata preview
-</Card>
-
 <Card title="Analyze Command" icon="magnifying-glass" href="/reference/cli/analyze">
   Inspect tools and capabilities
 </Card>

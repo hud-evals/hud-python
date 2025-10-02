@@ -239,8 +239,25 @@ async def _update_task_status_async(
 
     try:
         data: dict[str, Any] = {"status": status}
-        if job_id:
-            data["job_id"] = job_id
+
+        # Resolve effective job_id from explicit param, OTel baggage, or current job context
+        effective_job_id: str | None = job_id
+        if not effective_job_id:
+            bj = baggage.get_baggage("hud.job_id")
+            if isinstance(bj, str) and bj:
+                effective_job_id = bj
+        if not effective_job_id:
+            try:
+                from hud.telemetry.job import get_current_job  # Local import to avoid cycles
+
+                current_job = get_current_job()
+                if current_job:
+                    effective_job_id = current_job.id
+            except Exception:
+                effective_job_id = None
+
+        if effective_job_id:
+            data["job_id"] = effective_job_id
         if error_message:
             data["error_message"] = error_message
 
@@ -302,8 +319,25 @@ def _update_task_status_sync(
 
     try:
         data: dict[str, Any] = {"status": status}
-        if job_id:
-            data["job_id"] = job_id
+
+        # Resolve effective job_id from explicit param, OTel baggage, or current job context
+        effective_job_id: str | None = job_id
+        if not effective_job_id:
+            bj = baggage.get_baggage("hud.job_id")
+            if isinstance(bj, str) and bj:
+                effective_job_id = bj
+        if not effective_job_id:
+            try:
+                from hud.telemetry.job import get_current_job  # Local import to avoid cycles
+
+                current_job = get_current_job()
+                if current_job:
+                    effective_job_id = current_job.id
+            except Exception:
+                effective_job_id = None
+
+        if effective_job_id:
+            data["job_id"] = effective_job_id
         if error_message:
             data["error_message"] = error_message
 
@@ -342,7 +376,7 @@ def _print_trace_url(task_run_id: str) -> None:
     if not (settings.telemetry_enabled and settings.api_key):
         return
 
-    url = f"https://app.hud.so/trace/{task_run_id}"
+    url = f"https://hud.so/trace/{task_run_id}"
     header = "🚀 See your agent live at:"
 
     # ANSI color codes
@@ -381,7 +415,7 @@ def _print_trace_complete_url(task_run_id: str, error_occurred: bool = False) ->
     if not (settings.telemetry_enabled and settings.api_key):
         return
 
-    url = f"https://app.hud.so/trace/{task_run_id}"
+    url = f"https://hud.so/trace/{task_run_id}"
 
     # ANSI color codes
     GREEN = "\033[92m"

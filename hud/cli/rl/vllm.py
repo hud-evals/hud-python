@@ -165,6 +165,8 @@ async def wait_for_vllm_server(timeout: int = 360) -> bool:  # noqa: ASYNC109
                 if response.status_code == 200:
                     console.print("[green]✅ vLLM server is ready![/green]")
                     return True
+            except httpx.ConnectError:
+                pass
             except Exception as e:
                 hud_console.error(f"Failed to connect to vLLM server: {e}")
 

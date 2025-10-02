@@ -39,7 +39,8 @@ class InteractiveMCPTester:
         """Connect to the MCP server."""
         try:
             # Create MCP config for HTTP transport
-            config = {"server": {"url": self.server_url}}
+            # Note: We explicitly set auth to None to prevent OAuth discovery attempts
+            config = {"server": {"url": self.server_url, "auth": None}}
 
             self.client = MCPClient(
                 mcp_config=config,

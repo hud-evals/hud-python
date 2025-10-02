@@ -33,13 +33,13 @@ async def main():
         }
     }
 
-    # OPTION 2: Needs: docker build -t hudpython/hud-text-2048:latest environments/text_2048
+    # OPTION 2: Needs: docker build -thudevals/hud-text-2048:0.1.6 environments/text_2048
     # OR: docker pull hudpython/hud-text-2048:latest
     # This builds the image and allows you to run it directly
     # mcp_config = {
     #     "local": {
     #         "command": "docker",
-    #         "args": ["run", "--rm", "-i", "hudpython/hud-text-2048:latest"]
+    #         "args": ["run", "--rm", "-i", "hudevals/hud-text-2048:0.1.6"]
     #     }
     # }
 
@@ -47,7 +47,7 @@ async def main():
     # mcp_config = {
     #     "local": {
     #         "command": "hud",
-    #         "args": ["run", "hudpython/hud-text-2048:latest", "--local"]
+    #         "args": ["run", "hudevals/hud-text-2048:0.1.6", "--local"]
     #     }
     # }
 
@@ -59,7 +59,7 @@ async def main():
             "command": "hud",
             "args": [
                 "run",
-                "hudpython/hud-text-2048:latest",
+                "hudevals/hud-text-2048:0.1.6",
                 "--verbose",
             ],  # this can spin up 100s of remote containers!
         }

@@ -143,7 +143,7 @@ def _print_job_url(job_id: str, job_name: str) -> None:
     if not (settings.telemetry_enabled and settings.api_key):
         return
 
-    url = f"https://app.hud.so/jobs/{job_id}"
+    url = f"https://hud.so/jobs/{job_id}"
     header = f"🚀 Job '{job_name}' started:"
 
     # ANSI color codes
@@ -182,7 +182,7 @@ def _print_job_complete_url(job_id: str, job_name: str, error_occurred: bool = F
     if not (settings.telemetry_enabled and settings.api_key):
         return
 
-    url = f"https://app.hud.so/jobs/{job_id}"
+    url = f"https://hud.so/jobs/{job_id}"
 
     # ANSI color codes
     GREEN = "\033[92m"

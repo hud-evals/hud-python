@@ -1,0 +1,70 @@
+---
+title: "Other CLI Commands"
+description: "Miscellaneous HUD CLI utilities"
+icon: "toolbox"
+---
+
+Quick reference for auxiliary CLI utilities.
+
+## hud pull
+
+Fetch an environment from a registry with a metadata preview.
+
+```bash
+hud pull <org/env:tag> [--yes] [--verify-only]
+
+# From a shared lock file
+hud pull ./hud.lock.yaml
+```
+
+Notes:
+- Shows tool list, init time, variables (when available)
+- `--verify-only` skips `docker pull`
+
+## hud get
+
+```bash
+hud get hud-evals/2048-basic --split train -o tasks.jsonl --limit 100 --format jsonl
+```
+
+Downloads a HuggingFace dataset split and saves as JSON or JSONL.
+
+## hud quickstart
+
+```bash
+hud quickstart
+```
+
+Clones the HUD quickstart repository.
+
+## hud cursor-list
+
+```bash
+hud cursor-list
+```
+
+Lists MCP servers configured in Cursor and shows the config location.
+
+## hud version
+
+```bash
+hud version
+```
+
+Shows the HUD CLI version.
+
+## hud clone
+
+```bash
+hud clone https://github.com/user/repo.git
+```
+
+Clones a repository and prints any configured tutorial snippet.
+
+## hud set
+
+```bash
+hud set HUD_API_KEY=... ANTHROPIC_API_KEY=...
+```
+
+Saves KEY=VALUE pairs to `~/.hud/.env` for default use in HUD.

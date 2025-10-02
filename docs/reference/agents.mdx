@@ -14,7 +14,7 @@ The HUD SDK provides a base `MCPAgent` class and several pre-built agent impleme
 from hud.agents import MCPAgent
 ```
 
-Abstract base class for all MCP-enabled agents. Handles tool discovery, filtering, and execution flow.
+Abstract base class for all MCP-enabled agents. Handles the agent loop, MCP client lifecycle, tool discovery/filtering (including lifecycle tools like `setup`, `evaluate`, `response`), and standardized telemetry/logging.
 
 **Constructor Parameters:**
 | Parameter | Type | Description | Default |
@@ -22,14 +22,13 @@ Abstract base class for all MCP-enabled agents. Handles tool discovery, filterin
 | `mcp_client` | `AgentMCPClient` | MCP client for server connections | `None` |
 | `allowed_tools` | `list[str]` | List of tool names to allow | `None` (all) |
 | `disallowed_tools` | `list[str]` | List of tool names to disallow | `[]` |
-| `lifecycle_tools` | `list[str]` | Tools hidden from agent (setup/evaluate) | `[]` |
-| `initial_screenshot` | `bool` | Capture screenshot before first prompt | `False` |
-| `system_prompt` | `str` | System prompt to use | Default prompt |
-| `append_tool_system_prompt` | `bool` | Append available tools to system | `False` |
-| `append_setup_output` | `bool` | Append setup tool output to initial prompt | `False` |
-| `model_name` | `str` | Model name for telemetry | `"mcp-agent"` |
-| `response_agent` | `ResponseAgent` | Optional auto-response handler | `None` |
-| `auto_trace` | `bool` | Enable automatic telemetry | `True` |
+| `system_prompt` | `str` | System prompt to seed the conversation | Default prompt |
+| `append_setup_output` | `bool` | Append setup tool output to initial context | `True` |
+| `initial_screenshot` | `bool` | Include an initial screenshot when supported | `True` |
+| `model_name` | `str` | Model label for telemetry/logging | `"mcp-agent"` |
+| `response_agent` | `ResponseAgent` | Optional auto-continue/stop helper | `None` |
+| `auto_trace` | `bool` | Enable automatic tracing spans | `True` |
+| `verbose` | `bool` | Verbose console logs for development | `False` |
 
 **Key Methods:**
 
@@ -68,10 +67,15 @@ async def format_tool_results(tool_calls: list[MCPToolCall],
 ```
 
 **Class Variables:**
-- `metadata: dict[str, Any]` - Metadata injected into MCP initialize request
+- `metadata: dict[str, Any] | None` - Injected into MCP initialize requests
+- `required_tools: list[str]` - Tools that must be present or initialization fails
 
 **Auto-Client Creation:**
 If no `mcp_client` is provided but a `Task` with `mcp_config` is passed to `run()`, an MCPClient is automatically created and cleaned up.
+
+**Lifecycle & Filtering:**
+- Lifecycle tools (e.g., `setup`, `evaluate`, and auto-detected `response`) are hidden from the model but available to the framework
+- Use `allowed_tools` / `disallowed_tools` to control the tool surface visible to your model
 
 ## Pre-built Agents
 
@@ -87,28 +91,37 @@ Claude-specific implementation using Anthropic's API.
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
 | `model_client` | `AsyncAnthropic` | Anthropic client | Auto-created |
-| `model` | `str` | Claude model to use | `"claude-3-7-sonnet-20250219"` |
+| `model` | `str` | Claude model to use | `"claude-sonnet-4-20250514"` |
 | `max_tokens` | `int` | Maximum response tokens | `4096` |
-| `use_computer_beta` | `bool` | Use computer-use beta | `True` |
+| `use_computer_beta` | `bool` | Enable computer-use beta features | `True` |
+| `validate_api_key` | `bool` | Validate key on init | `True` |
 
 **Features:**
 - Native Claude tool calling
 - Automatic prompt caching
 - Computer-use beta support
-- Display metadata injection (1280x720)
+- Display metadata injection
 
 **Example:**
 ```python
 agent = ClaudeAgent(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=8192
+    model="claude-sonnet-4-20250514",
+    max_tokens=8192,
 )
 
 result = await agent.run(
     Task(
         prompt="Navigate to example.com",
-        mcp_config={"server": {...}},
-        evaluate_tool={"name": "evaluate", "arguments": {...}}
+        mcp_config={
+            "hud": {
+                "url": "https://mcp.hud.so/v3/mcp",
+                "headers": {
+                    "Authorization": "Bearer ${HUD_API_KEY}",
+                    "Mcp-Image": "hudpython/hud-remote-browser:latest"
+                }
+            }
+        },
+        evaluate_tool={"name": "evaluate", "arguments": {"name": "url_match", "arguments": {"pattern": "example.com"}}}
     )
 )
 ```
@@ -119,19 +132,20 @@ result = await agent.run(
 from hud.agents import OperatorAgent
 ```
 
-OpenAI's Operator agent implementation.
+OpenAI Operator-style agent built on the Responses API with computer-use.
 
 **Constructor Parameters:**
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
 | `model_client` | `AsyncOpenAI` | OpenAI client | Auto-created |
-| `model` | `str` | Model to use | `"gpt-4o-realtime-preview"` |
-| `max_tokens` | `int` | Maximum response tokens | `4096` |
+| `model` | `str` | Responses model to use | `"computer-use-preview"` |
+| `environment` | `Literal["windows","mac","linux","browser"]` | Computer environment | `"linux"` |
+| `validate_api_key` | `bool` | Validate key on init | `True` |
 
 **Features:**
-- OpenAI function calling
-- Operator system prompt
-- Display metadata injection (1920x1080)
+- OpenAI Responses computer-use
+- Operator-style system prompt guidance
+- Display metadata injection
 
 ### GenericOpenAIChatAgent
 
@@ -139,15 +153,14 @@ OpenAI's Operator agent implementation.
 from hud.agents import GenericOpenAIChatAgent
 ```
 
-OpenAI-compatible chat.completions agent that works with any API implementing the OpenAI schema (e.g., OpenAI, vLLM, Ollama, Together, etc.).
+OpenAI-compatible chat.completions agent that works with any endpoint implementing the OpenAI schema (OpenAI, vLLM, Ollama, Together, custom, etc.).
 
 **Constructor Parameters:**
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
 | `openai_client` | `AsyncOpenAI` | OpenAI-compatible client instance | Required |
 | `model_name` | `str` | Chat model name | `"gpt-4o-mini"` |
-| `parallel_tool_calls` | `bool` | Allow multiple tool calls per turn | `False` |
-| `completion_kwargs` | `dict[str, Any]` | Extra args for `chat.completions.create` (e.g., temperature) | `{}` |
+| `completion_kwargs` | `dict[str, Any]` | Extra args forwarded to `chat.completions.create` | `{}` |
 
 **Example (local or custom endpoint):**
 ```python
@@ -158,12 +171,11 @@ openai_client = AsyncOpenAI(
     api_key="not-needed",
 )
 
- agent = GenericOpenAIChatAgent(
-     openai_client=openai_client,
-     model_name="llama3.1",
-     parallel_tool_calls=False,
-     completion_kwargs={"temperature": 0.2},  # forwarded to OpenAI
- )
+agent = GenericOpenAIChatAgent(
+    openai_client=openai_client,
+    model_name="llama3.1",
+    completion_kwargs={"temperature": 0.2},
+)
 ```
 
 ### LangChainAgent
@@ -177,34 +189,34 @@ LangChain integration for using any LangChain-compatible model.
 **Constructor Parameters:**
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
-| `model` | `BaseChatModel` | LangChain chat model | Required |
+| `llm` | `BaseLanguageModel` | LangChain-compatible model | Required |
 
 **Example:**
 ```python
 from langchain_anthropic import ChatAnthropic
 
-model = ChatAnthropic(model="claude-3-opus-20240229")
-agent = LangChainAgent(model=model)
+llm = ChatAnthropic(model="claude-3-opus-20240229")
+agent = LangChainAgent(llm=llm)
 ```
 
-### ArtHUDAgent
+### GroundedOpenAIChatAgent
 
 ```python
-from hud.agents import ArtHUDAgent
+from hud.agents.grounded_openai import GroundedOpenAIChatAgent
 ```
 
-Integration with ART (Automatic Reasoning and Tool-use) models.
+OpenAI chat agent with a separate grounding model for element detection. The planning model issues natural-language "computer" tool calls that are grounded to coordinates by a dedicated vision model.
 
 **Constructor Parameters:**
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
-| `art_model` | `ArtModel` | ART model instance | Required |
-| `max_tokens` | `int` | Maximum response tokens | `4096` |
+| `grounder_config` | `GrounderConfig` | Configuration for the grounding model | Required |
+| `model_name` | `str` | OpenAI chat model name | `"gpt-4o-mini"` |
+| `allowed_tools` | `list[str]` | Exposed tool list (usually `["computer"]`) | `None` |
+| `append_setup_output` | `bool` | Append setup output to first turn | `False` |
+| `system_prompt` | `str` | System prompt to use | Opinionated default |
 
-**Features:**
-- Built-in Chain-of-Thought reasoning
-- Structured reasoning traces
-- Tool use optimization
+> Note: The grounded agent is for advanced use-cases where you want to decouple planning from grounding. For most users, `ClaudeAgent` or `OperatorAgent` is sufficient.
 
 ## Helper Classes
 
@@ -226,50 +238,39 @@ class MyResponseAgent(ResponseAgent):
 
 ### AgentResponse
 
-```python
-from hud.types import AgentResponse
-
-@dataclass
-class AgentResponse:
-    content: str | None = None
-    tool_calls: list[MCPToolCall] | None = None
-    done: bool = False
-```
+Key fields:
+- `tool_calls: list[MCPToolCall]`
+- `done: bool`
+- `content: str | None`
+- `reasoning: str | None`
+- `info: dict[str, Any]`
+- `isError: bool`
 
 ### MCPToolCall
 
-```python
-from hud.types import MCPToolCall
-
-class MCPToolCall(BaseModel):
-    name: str
-    arguments: dict[str, Any] = {}
-```
+Key fields:
+- `id: str` — unique identifier (auto-generated if not provided)
+- `name: str`
+- `arguments: dict[str, Any]`
 
 ### MCPToolResult
 
-```python
-from hud.types import MCPToolResult
-
-class MCPToolResult(BaseModel):
-    content: list[ContentBlock]
-    structuredContent: dict[str, Any] | None = None
-    isError: bool = False
-```
+Key fields:
+- `content: list[ContentBlock]`
+- `structuredContent: dict[str, Any] | None`
+- `isError: bool`
 
 ### Trace
 
-```python
-from hud.types import Trace
-
-class Trace(BaseModel):
-    reward: float = 0.0
-    done: bool = True
-    content: str | None = None
-    isError: bool = False
-    info: dict[str, Any] = {}
-    steps: list[TraceStep] = []
-```
+Key fields:
+- `reward: float`
+- `done: bool`
+- `content: str | None`
+- `isError: bool`
+- `info: dict[str, Any]`
+- `task: Task | None`
+- `trace: list[TraceStep]` — execution trace steps
+- `messages: list[Any]` — final conversation state
 
 ## Usage Examples
 
@@ -277,23 +278,25 @@ class Trace(BaseModel):
 
 ```python
 from hud.agents import ClaudeAgent
-from hud.clients import MCPClient
+from hud.datasets import Task
 
-# Manual client creation
-client = MCPClient({
-    "server": {
-        "command": "docker",
-        "args": ["run", "-i", "my-env:latest"]
-    }
-})
-
-agent = ClaudeAgent(mcp_client=client)
-await agent.initialize()
-
-# Run with string prompt
-result = await agent.run("Click the submit button", max_steps=5)
-print(f"Result: {result.content}")
-print(f"Success: {not result.isError}")
+agent = ClaudeAgent()
+result = await agent.run(
+    Task(
+        prompt="Click the submit button",
+        mcp_config={
+            "hud": {
+                "url": "https://mcp.hud.so/v3/mcp",
+                "headers": {
+                    "Authorization": "Bearer ${HUD_API_KEY}",
+                    "Mcp-Image": "hudpython/hud-remote-browser:latest"
+                }
+            }
+        }
+    ),
+    max_steps=5,
+)
+print("Done:", result.done, "Error:", result.isError)
 ```
 
 ### Task Execution with Auto-Client
@@ -308,11 +311,11 @@ agent = OperatorAgent()
 task = Task(
     prompt="Find the price of the product",
     mcp_config={
-        "browser": {
-            "url": "mcp://mcp.hud.so/v3/mcp",
+        "hud": {
+            "url": "https://mcp.hud.so/v3/mcp",
             "headers": {
                 "Authorization": "Bearer ${HUD_API_KEY}",
-                "Mcp-Image": "hudpython/hud-browser:latest"
+                "Mcp-Image": "hudpython/hud-remote-browser:latest"
             }
         }
     },
@@ -387,3 +390,5 @@ class MyCustomAgent(MCPAgent):
 - [Create Agents](/evaluate-agents/create-agents) - Tutorial on building agents
 - [Tasks](/reference/tasks) - Task configuration reference
 - [Architecture](/core-concepts/architecture) - How agents fit in HUD
+- [`hud eval`](/reference/cli/eval) - Run agents on tasks/datasets
+- [`hud rl`](/reference/cli/rl) - Train agents with GRPO

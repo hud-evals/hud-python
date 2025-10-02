@@ -1,0 +1,23 @@
+[project]
+name = "hud-browser-environment"
+version = "0.1.0"
+description = "HUD Browser Environment Backend"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "fastapi>=0.104.1",
+    "uvicorn[standard]>=0.24.0",
+    "python-multipart>=0.0.6",
+    "pydantic>=2.6,<3",
+    "pydantic-settings>=2.2,<3",
+    "httpx",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["environment"]

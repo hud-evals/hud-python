@@ -30,6 +30,7 @@ def run_local_training(
     model: str | None,
     config_file: Path | None,
     output_dir: str,
+    yes: bool,
     restart: bool,
     verbose: bool,
     no_ddp: bool,
@@ -63,8 +64,11 @@ def run_local_training(
         try:
             import typer
 
-            if not typer.confirm("\nDo you want to continue anyway?", default=False):
-                raise typer.Exit(1)
+            if not yes:
+                if not typer.confirm("\nDo you want to continue anyway?", default=False):
+                    raise typer.Exit(1)
+            else:
+                hud_console.warning("Auto-continuing despite Python 3.13+ (--yes mode)")
         except Exception as e:
             hud_console.warning(f"Failed to confirm: {e}")
             return
@@ -113,7 +117,13 @@ def run_local_training(
         try:
             import typer
 
-            continue_training = typer.confirm("\nContinue with healthy GPUs only?", default=True)
+            if yes:
+                continue_training = True
+                hud_console.info("Auto-continuing with healthy GPUs only (--yes mode)")
+            else:
+                continue_training = typer.confirm(
+                    "\nContinue with healthy GPUs only?", default=True
+                )
         except Exception:
             continue_training = True
 
@@ -180,9 +190,9 @@ def run_local_training(
 
     invalid_tasks: list[str] = []
     for i, task in enumerate(tasks):
-        if not hasattr(task, "prompt") or not task.prompt:
+        if not hasattr(task, "prompt") or not task.prompt:  # type: ignore
             invalid_tasks.append(f"Task {i}: missing 'prompt' field")
-        if not hasattr(task, "mcp_config") or not task.mcp_config:
+        if not hasattr(task, "mcp_config") or not task.mcp_config:  # type: ignore
             invalid_tasks.append(f"Task {i}: missing 'mcp_config' field")
 
     if invalid_tasks:
@@ -200,35 +210,53 @@ def run_local_training(
 
     # Step 3: Model selection (if not provided)
     if model is None and not config_file:
-        model = hud_console.select(
-            "Select a model for RL training:",
-            choices=[
-                {
-                    "name": "Qwen 2.5 VL 3B (Recommended - Vision-Language)",
-                    "value": "Qwen/Qwen2.5-VL-3B-Instruct",
-                },
-                {"name": "Custom model", "value": "custom"},
-            ],
-            default=0,
-        )
+        if yes:
+            model = "Qwen/Qwen2.5-VL-3B-Instruct"  # Default model in yes mode
+            hud_console.info(f"Auto-selecting model: {model} (--yes mode)")
+        else:
+            model = hud_console.select(
+                "Select a model for RL training:",
+                choices=[
+                    {
+                        "name": "Qwen 2.5 VL 3B (Recommended - Vision-Language)",
+                        "value": "Qwen/Qwen2.5-VL-3B-Instruct",
+                    },
+                    {"name": "Custom model", "value": "custom"},
+                ],
+                default=0,
+            )
 
-        if model == "custom":
-            console.print("Enter the model name (HuggingFace ID):")
-            model = input().strip()
+            if model == "custom":
+                console.print("Enter the model name (HuggingFace ID):")
+                model = input().strip()
+
+    # try to get model from config file
+    if config_file:
+        console.print(f"\n[cyan]Loading configuration from: {config_file}[/cyan]")
+        config = load_config(config_file)
+        if hasattr(config, "model") and hasattr(config.model, "base_model"):
+            if model is None:
+                model = config.model.base_model
+            else:
+                console.print(
+                    f"[yellow]Model already set to {model}, using that instead "
+                    f"of {config.model.base_model}[/yellow] (override)"
+                )
+
+    if model is None:
+        console.print("[red]❌ No model specified either through CLI or config file[/red]")
+        try:
+            import typer
+
+            raise typer.Exit(1)
+        except Exception:
+            return
 
     # Validate model is a VL model (whether provided via CLI or selected)
-    if model:
-        try:
-            validate_vl_model(model)
-        except ValueError as e:
-            console.print(f"\n[red]❌ {e}[/red]")
-            try:
-                import typer
-
-                raise typer.Exit(1)
-            except Exception:
-                return
-    else:
+    try:
+        validate_vl_model(model)
+    except ValueError as e:
+        console.print(f"\n[red]❌ {e}[/red]")
         try:
             import typer
 
@@ -277,6 +305,7 @@ def run_local_training(
         config, estimated_memory = generate_config_interactive(
             model_name=model,
             presets=presets,
+            yes=yes,
         )
 
     # Step 5: Save temporary config and display summary
@@ -288,8 +317,8 @@ def run_local_training(
     # Display configuration summary
     display_config_summary(config, len(tasks), gpu_info, estimated_memory)
 
-    # Step 6: Ask for confirmation (skip if config was provided)
-    if not config_file:
+    # Step 6: Ask for confirmation (skip if config was provided or in yes mode)
+    if not config_file and not yes:
         console.print("\n[bold yellow]Options:[/bold yellow]")
         console.print("  • Type [green]'start'[/green] to begin training")
         console.print("  • Type [cyan]'edit'[/cyan] to open config in your editor")
@@ -346,7 +375,12 @@ def run_local_training(
                 try:
                     import typer
 
-                    if typer.confirm("Save this configuration for later?", default=True):
+                    if yes:
+                        # Always save in yes mode
+                        config_path = Path("rl_config.json")
+                        save_config(config, config_path)
+                        hud_console.info("Auto-saved configuration (--yes mode)")
+                    elif typer.confirm("Save this configuration for later?", default=True):
                         config_path = Path("rl_config.json")
                         save_config(config, config_path)
                 except Exception as e:
@@ -367,6 +401,10 @@ def run_local_training(
                 console.print(
                     "[red]Invalid choice. Type 'start', 'edit', or 'cancel':[/red] ", end=""
                 )
+    elif yes:
+        # In yes mode, auto-start training
+        hud_console.info("Auto-starting training (--yes mode)")
+        config = load_config(temp_config_path)
     else:
         console.print("\n[dim]Using provided configuration file...[/dim]")
         config = load_config(temp_config_path)
@@ -464,7 +502,6 @@ def run_local_training(
         from .vllm import start_vllm_server, wait_for_vllm_server
 
         start_vllm_server(config.model.base_model, vllm_gpu_idx, restart=restart)
-
         server_ready = asyncio.run(wait_for_vllm_server())
         if not server_ready:
             console.print("[red]❌ Failed to start vLLM server[/red]")
@@ -483,7 +520,6 @@ def run_local_training(
             f"\n[bold green]🎯 Starting DDP training on {len(training_gpus)} GPUs...[/bold green]\n"
         )
         launch_ddp_training(training_gpus, tasks_file, temp_config_path, verbose)
-        console.print("\n[green]✅ Training completed successfully![/green]")
     else:
         console.print("\n[bold green]🎯 Starting single-GPU training...[/bold green]\n")
         try:
@@ -494,7 +530,7 @@ def run_local_training(
             # Import and run the async training function lazily
             from hud.rl.train import train  # heavy import
 
-            asyncio.run(train(config, tasks))
+            asyncio.run(train(config, tasks))  # type: ignore
             console.print("\n[green]✅ Training completed successfully![/green]")
 
             try:

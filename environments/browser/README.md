@@ -1,6 +1,85 @@
 # Browser Environment
 
-A browser automation environment for HUD that provides GUI access and web app interaction capabilities. This environment supports hot-reloading during development while maintaining persistent state.
+Browser automation environment with GUI access for testing web applications. Includes sample apps (2048, Todo) and supports hot-reload development.
+
+## Architecture
+
+**`environment/`** - Produces structured data
+- FastAPI backend with X11/VNC services (Linux-only)
+- Launches and manages web apps (Next.js frontends + Python backends)
+- Exposes HTTP endpoints for app control and state
+
+**`server/`** - Wraps data in MCP tools
+- Browser automation tools (Playwright, computer vision)
+- Setup tools (launch apps, seed data)
+- Evaluation tools (check game state, todo completion)
+
+**Why separate?** The environment backend requires X11/VNC/Chromium (Docker-only). The MCP server tools can be edited with hot-reload, while the heavy environment stays running.
+
+## Development
+
+This environment **requires Docker** due to X11/VNC dependencies.
+
+```bash
+# Build first (creates hud-browser:0.1.0)
+hud build
+
+# Start with hot-reload
+hud dev
+```
+
+When you run `hud dev` in an environment with a Dockerfile, it automatically:
+- Detects Docker mode is needed
+- Mounts `server/` and `environment/` as volumes
+- Enables hot-reload for both layers
+
+Edit files in `server/` or `environment/` and they reload inside the container!
+
+## Publishing Your Environment
+
+Once your environment is ready, you can share it with the community:
+
+### 1. Push to Registry
+```bash
+# Build and push your environment (requires docker hub login and hud api key)
+hud build
+hud push
+```
+
+### 2. Create a Dataset
+
+Create a dataset on HuggingFace with your tasks:
+
+**Option A: Upload manually**
+1. Upload your `tasks.json` to HuggingFace
+2. Make sure it's **public** to appear on leaderboards
+
+**Option B: Use the SDK**
+```python
+from hud.datasets import save_tasks
+import json
+
+# Load your tasks
+with open("tasks.json") as f:
+    tasks = json.load(f)
+
+# Push to HuggingFace
+save_tasks(tasks, repo_id="your-org/your-dataset")
+```
+
+### 3. Run and Track Performance
+
+```bash
+# Run Claude on your benchmark
+hud eval "your-org/your-dataset" --agent claude
+
+# View results at:
+# hud.so/leaderboards/your-org/your-dataset
+```
+
+**Note**: Only public HuggingFace datasets appear as leaderboards!
+
+📚 Learn more: [Creating Benchmarks](https://docs.hud.so/evaluate-agents/create-benchmarks) | [Leaderboards](https://docs.hud.so/evaluate-agents/leaderboards)
 
 ## Architecture Overview
 
@@ -15,87 +94,6 @@ The browser environment uses a two-process architecture:
 - **ServiceManager**: Manages X11, VNC, and app processes
 - **BaseHub Tools**: Setup and evaluate tools organized by app (2048, todo)
 - **Multiprocessing Proxy**: Enables state sharing between processes
-
-## Context Management and Common Pitfalls
-
-### Understanding the Proxy System
-
-The browser environment uses Python's `multiprocessing.Manager` to share state between the context server and MCP server. This introduces important constraints:
-
-#### ❌ Common Pitfall: Unpicklable Objects
-
-```python
-# BAD: This will fail with "cannot pickle 'coroutine' object"
-@setup.tool("my_tool")
-async def my_tool():
-    env = setup.env
-    result = await env.call_app_api("app", "/api/endpoint")  # Returns coroutine
-    # The coroutine can't be serialized through the proxy!
-```
-
-#### ✅ Solution: Direct HTTP Calls
-
-```python
-# GOOD: Make HTTP calls directly
-@setup.tool("my_tool")
-async def my_tool():
-    import httpx
-    
-    # Get the backend port from persistent context
-    persistent_ctx = setup.env
-    backend_port = persistent_ctx.get_app_backend_port("app")
-    
-    # Make API call directly
-    url = f"http://localhost:{backend_port}/api/endpoint"
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        result = response.json()
-```
-
-### State Synchronization Issues
-
-#### ❌ Common Pitfall: Direct List/Dict Manipulation
-
-```python
-# BAD: Regular Python lists don't sync through proxy
-class ServiceManager:
-    def __init__(self):
-        self._launched_apps = []  # Won't sync!
-```
-
-#### ✅ Solution: Store State in Persistent Context
-
-```python
-# GOOD: Use the persistent context for shared state
-class BrowserContext:
-    def __init__(self):
-        self._running_apps: List[str] = []
-        self._app_ports: Dict[str, Dict[str, int]] = {}
-    
-    def add_running_app(self, app_name: str) -> None:
-        """Add app to running list."""
-        if app_name not in self._running_apps:
-            self._running_apps.append(app_name)
-```
-
-### Accessing Shared Resources
-
-#### ❌ Common Pitfall: Direct Attribute Access
-
-```python
-# BAD: Direct attribute access on proxy objects
-playwright_tool = env.playwright  # May not work with proxy
-```
-
-#### ✅ Solution: Use Getter Methods
-
-```python
-# GOOD: Use proxy-friendly getter methods
-playwright_tool = persistent_ctx.get_playwright_tool()
-```
-
-## Best Practices
 
 ### 1. Tool Implementation Pattern
 

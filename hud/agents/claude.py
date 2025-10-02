@@ -6,7 +6,7 @@ import copy
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-from anthropic import AsyncAnthropic, BadRequestError
+from anthropic import Anthropic, AsyncAnthropic, BadRequestError
 from anthropic.types.beta import BetaContentBlockParam, BetaImageBlockParam, BetaTextBlockParam
 
 import hud
@@ -54,6 +54,7 @@ class ClaudeAgent(MCPAgent):
         model: str = "claude-sonnet-4-20250514",
         max_tokens: int = 4096,
         use_computer_beta: bool = True,
+        validate_api_key: bool = True,
         **kwargs: Any,
     ) -> None:
         """
@@ -74,6 +75,13 @@ class ClaudeAgent(MCPAgent):
             if not api_key:
                 raise ValueError("Anthropic API key not found. Set ANTHROPIC_API_KEY.")
             model_client = AsyncAnthropic(api_key=api_key)
+
+        # validate api key if requested
+        if validate_api_key:
+            try:
+                Anthropic(api_key=model_client.api_key).models.list()
+            except Exception as e:
+                raise ValueError(f"Anthropic API key is invalid: {e}") from e
 
         self.anthropic_client = model_client
         self.model = model
@@ -318,7 +326,7 @@ class ClaudeAgent(MCPAgent):
         selected_computer_tool = None
 
         for priority_name in computer_tool_priority:
-            for tool in self._available_tools:
+            for tool in self.get_available_tools():
                 # Check both exact match and suffix match (for prefixed tools)
                 if tool.name == priority_name or tool.name.endswith(f"_{priority_name}"):
                     selected_computer_tool = tool
@@ -342,13 +350,12 @@ class ClaudeAgent(MCPAgent):
             )
 
         # Add other non-computer tools
-        for tool in self._available_tools:
-            # Skip computer tools (already handled) and lifecycle tools
-            is_computer_tool = any(
+        for tool in self.get_available_tools():
+            # Skip computer tools (already handled)
+            if any(
                 tool.name == priority_name or tool.name.endswith(f"_{priority_name}")
                 for priority_name in computer_tool_priority
-            )
-            if is_computer_tool or tool.name in self.lifecycle_tools:
+            ):
                 continue
 
             claude_tool = {

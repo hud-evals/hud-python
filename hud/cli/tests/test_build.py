@@ -235,14 +235,10 @@ class TestAnalyzeMcpEnvironment:
         # Setup mock client to fail
         mock_client = mock.AsyncMock()
         mock_client_class.return_value = mock_client
-        mock_client.initialize.side_effect = Exception("Connection failed")
+        mock_client.initialize.side_effect = ConnectionError("Connection failed")
 
-        result = await analyze_mcp_environment("test:latest")
-
-        assert result["success"] is False
-        assert result["toolCount"] == 0
-        assert "error" in result
-        assert "Connection failed" in result["error"]
+        with pytest.raises(ConnectionError):
+            await analyze_mcp_environment("test:latest")
 
     @mock.patch("hud.cli.build.MCPClient")
     async def test_analyze_verbose_mode(self, mock_client_class):
@@ -401,26 +397,6 @@ ENV API_KEY
         (env_dir / "Dockerfile").write_text("FROM python:3.11")
 
         mock_build.return_value = False
-
-        with pytest.raises(typer.Exit):
-            build_environment(str(env_dir))
-
-    @mock.patch("hud.cli.build.build_docker_image")
-    @mock.patch("hud.cli.build.analyze_mcp_environment")
-    def test_build_environment_analysis_failure(self, mock_analyze, mock_build, tmp_path):
-        """Test when MCP analysis fails."""
-        env_dir = tmp_path / "test-env"
-        env_dir.mkdir()
-        (env_dir / "pyproject.toml").write_text("[tool.hud]")
-        (env_dir / "Dockerfile").write_text("FROM python:3.11")
-
-        mock_build.return_value = True
-        mock_analyze.return_value = {
-            "success": False,
-            "error": "Connection failed",
-            "toolCount": 0,
-            "tools": [],
-        }
 
         with pytest.raises(typer.Exit):
             build_environment(str(env_dir))

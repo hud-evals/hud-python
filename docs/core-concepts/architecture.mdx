@@ -11,7 +11,7 @@ HUD is built as a thin orchestration layer on top of MCP, providing structure fo
 ```mermaid
 graph TB
     subgraph "Remote"
-        Dashboard["📊 Dashboard<br/>(app.hud.so)"]
+        Dashboard["📊 Dashboard<br/>(hud.so)"]
         API["🔌 MCP Orchestrator<br/>(mcp.hud.so)"]
     end
     
@@ -158,7 +158,7 @@ import hud
 
 with hud.trace("my-evaluation"):
     result = await agent.run(task)
-    # View at app.hud.so/traces/{trace_id}
+    # View at hud.so/traces/{trace_id}
 ```
 
 ## Execution Flow
@@ -204,7 +204,7 @@ The `MCPServer` class wraps FastMCP with lifecycle management, making it easy to
 ## Next Steps
 
 <CardGroup cols={2}>
-<Card title="Evaluate Agents" icon="robot" href="/evaluate-agents">
+<Card title="Evaluate Agents" icon="robot" href="/evaluate-agents/create-agents">
   Test and benchmark agents on standardized tasks
 </Card>
 

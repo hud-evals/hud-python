@@ -4,7 +4,7 @@ description: "Share HUD environments to Docker and HUD registries"
 icon: "upload"
 ---
 
-The `hud push` command publishes your HUD environment to both Docker registry and HUD registry, making it available for others to use with `hud pull`.
+The `hud push` command publishes your environment image to a Docker registry and uploads metadata to the HUD registry.
 
 ## Usage
 
@@ -43,14 +43,14 @@ hud push [DIRECTORY] [OPTIONS]
 ## Prerequisites
 
 <Warning>
-`hud push` requires an API key. Set it via environment variable:
+Requires `HUD_API_KEY`:
 ```bash
 export HUD_API_KEY="your-api-key"
 ```
 </Warning>
 
 <Note>
-You must be logged in to a Docker registry:
+Login to your Docker registry first (e.g., Docker Hub or GHCR):
 ```bash
 docker login
 # or
@@ -61,277 +61,70 @@ docker login ghcr.io
 ## What It Does
 
 <Steps>
-<Step title="Validate Lock File">
-Reads `hud.lock.yaml` to get image reference and metadata
+<Step title="Verify Build">
+Ensures a recent `hud build` exists (lock file present), prompting to build if missing.
 </Step>
 
-<Step title="Tag for Registry">
-Creates registry tag from local image:
-- Uses `--image` if provided
-- Auto-detects from Docker config
-- Defaults to Docker Hub format
+<Step title="Choose Target">
+Determines target image:
+- `--image` if provided
+- Else auto-detects Docker Hub username and uses `username/{name}:{tag}`
+- Tag uses `--tag`, or the lock’s internal `build.version`, else current tag
 </Step>
 
-<Step title="Push to Docker">
-Pushes image to Docker registry and gets digest
+<Step title="Push Image">
+Tags and pushes via Docker; captures pushed digest.
 </Step>
 
-<Step title="Update Lock File">
+<Step title="Update Lock">
 Updates `hud.lock.yaml` with:
-- Registry image reference with digest
-- Push timestamp
-- Registry information
+- `image`: full registry reference with digest
+- `push`: `source`, `pushedAt`, `registry`, and `image_with_tag`
 </Step>
 
 <Step title="Upload Metadata">
-Sends lock file to HUD registry at:
-`{HUD_API_URL}/registry/envs/{org}/{name}:{tag}`
+Uploads lock metadata to the HUD registry path `.../registry/envs/{org}/{name}:{tag}`.
 </Step>
 </Steps>
 
 ## Registry Detection
 
-The command intelligently detects your registry:
-
-1. **Explicit**: Use `--image` flag
-   ```bash
-   hud push . --image ghcr.io/myorg/myenv
-   ```
-
-2. **Docker Config**: Reads from `~/.docker/config.json`
-   ```bash
-   docker login ghcr.io
-   hud push  # Auto-uses ghcr.io
-   ```
-
-3. **Default**: Docker Hub format
-   ```bash
-   hud push  # Creates: yourusername/envname
-   ```
+1) Explicit `--image` → used as‑is.
+2) Docker config → reads logged‑in username (Docker Hub).
+3) Default → prompts if no login and `--image` missing.
 
 ## Examples
 
-### Basic Push
-
-Push to default registry:
-
 ```bash
-# After hud build
+# Basic (auto username)
 hud push
-```
 
-Output:
-```
-🚀 HUD Environment Push
+# Custom registry and tag
+hud push . --image ghcr.io/myorg/myenv --tag v1.0.0
 
-📋 Local Details
-Image: hud-my-env:latest
-Lock: hud.lock.yaml (2.3 KB)
-Tools: 5 tools available
-
-🎯 Registry Target
-Local: hud-my-env:latest
-Registry: myusername/my-env:latest
-
-Push to registry? [y/N]: y
-
-✅ Tagged image
-✅ Pushed to registry: myusername/my-env@sha256:abc123...
-✅ Updated lock file
-✅ Metadata uploaded to HUD registry
-```
-
-### Custom Registry
-
-Push to GitHub Container Registry:
-
-```bash
-hud push . --image ghcr.io/myorg/my-tool --tag v1.0.0
-```
-
-### CI/CD Automation
-
-Skip prompts for automation:
-
-```bash
+# Non‑interactive (CI)
 hud push . --yes --tag "prod-$(date +%Y%m%d)"
 ```
 
-### Override Tag
-
-Push with different tag:
-
-```bash
-hud push . --tag experimental
-```
-
-## Lock File Updates
-
-After pushing, `hud.lock.yaml` gains registry information:
+## Lock File After Push
 
 ```yaml
-version: "1.0"
-image: "myorg/myenv:latest@sha256:abc123..."
-build:
-  generatedAt: "2024-01-15T10:30:00Z"
-  hudVersion: "0.1.0"
-  directory: "my-env"
+image: "myorg/myenv:latest@sha256:..."
 push:
-  source: "hud-my-env:latest"
-  pushedAt: "2024-01-15T11:00:00Z"
+  source: "my-env:dev@sha256:..."
+  pushedAt: "2025-01-01T11:00:00Z"
   registry: "ghcr.io"
-environment:
-  # ... environment details
-tools:
-  # ... tool information
+  image_with_tag: "myorg/myenv:latest"
 ```
 
-## Sharing Workflows
+## Notes
 
-### Public Sharing
-
-After pushing, others can use:
-
-```bash
-# Pull with metadata preview
-hud pull myorg/myenv:latest
-
-# Use in MCP configs
-{"hud": {"registry": "myorg/myenv:latest"}}
-
-# Direct Docker usage
-docker run myorg/myenv:latest
-```
-
-### Private Registries
-
-For private registries, users need:
-
-1. Docker registry access:
-   ```bash
-   docker login private-registry.com
-   ```
-
-2. HUD API key (if using private HUD registry):
-   ```bash
-   export HUD_API_KEY="shared-key"
-   ```
-
-## Usage Messages
-
-After successful push, helpful usage examples are shown:
-
-```
-📦 Usage:
-
-Test locally:
-  hud run myorg/myenv:latest
-
-Use in MCP configs:
-  
-  Claude Desktop:
-    {"docker": {"image": "myorg/myenv@sha256:...", "command": "auto"}}
-  
-  Via HUD (recommended):
-    {"hud": {"registry": "myorg/myenv:latest"}}
-
-Share environment:
-  Others can now pull with: hud pull myorg/myenv:latest
-```
-
-## Troubleshooting
-
-### Authentication Issues
-
-<AccordionGroup>
-<Accordion title="Docker login required">
-```bash
-# Docker Hub
-docker login
-
-# GitHub Registry
-docker login ghcr.io -u USERNAME
-
-# Custom registry
-docker login my-registry.com
-```
-</Accordion>
-
-<Accordion title="HUD API key missing">
-```bash
-# Set API key
-export HUD_API_KEY="your-key-here"
-
-# Or create .env file
-echo "HUD_API_KEY=your-key-here" > .env
-```
-</Accordion>
-
-<Accordion title="Permission denied">
-Ensure you have push access to the registry namespace:
-- Docker Hub: Must own the namespace
-- GitHub: Must have package write permissions
-- Private: Check with your admin
-</Accordion>
-</AccordionGroup>
-
-### Push Failures
-
-<Tip>
-For large images, push may timeout. Use `--verbose` to see progress:
-```bash
-hud push . --verbose
-```
-</Tip>
-
-<Warning>
-If metadata upload fails, the Docker image is still pushed. You can retry metadata upload or share `hud.lock.yaml` manually.
-</Warning>
-
-## Best Practices
-
-1. **Version Tags**: Use semantic versioning
-   ```bash
-   hud push . --tag v1.0.0
-   hud push . --tag v1.1.0-beta
-   ```
-
-2. **Namespace Organization**: Group related environments
-   ```bash
-   hud push . --image myorg/tools/browser
-   hud push . --image myorg/tools/scraper
-   ```
-
-3. **Documentation**: Update README with pull instructions
-   ```markdown
-   ## Installation
-   ```bash
-   hud pull myorg/myenv:latest
-   ```
-   ```
-
-4. **CI Integration**: Automate pushes
-   ```yaml
-   - name: Push HUD environment
-     env:
-       HUD_API_KEY: ${{ secrets.HUD_API_KEY }}
-     run: hud push . --yes --tag ${{ github.ref_name }}
-   ```
-
-## Security
-
-<Note>
-The HUD registry only stores metadata (lock files), not code or images. Actual images are stored in Docker registries with their existing security models.
-</Note>
-
-- **API Keys**: Keep `HUD_API_KEY` secret
-- **Registry Auth**: Use Docker's credential helpers
-- **Image Signing**: Coming soon with `--sign` flag
-- **Private Envs**: Use private Docker registries
+- If HUD registry upload fails, the Docker push still succeeds; you can share `hud.lock.yaml` manually.
+- Image names must include `org/name` for HUD registry uploads.
 
 ## See Also
 
-- [`hud build`](/reference/cli/build) - Build before pushing
-- [`hud pull`](/reference/cli/pull) - Get shared environments
-- [`hud analyze`](/reference/cli/analyze) - Inspect pushed environments
-- [Build Environments](/build-environments/registry) - Registry guide
+- [`hud build`](/reference/cli/build)
+- [`hud pull`](/reference/cli/pull)
+- [`hud analyze`](/reference/cli/analyze)
+- [Build Environments](/build-environments) - Getting started with HUD environments

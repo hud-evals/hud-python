@@ -68,7 +68,8 @@ class Actor:
         """Run a single task."""
         agent = self.create_agent()
 
-        with hud.trace(f"Training | {task.id}", job_id=job_id):
+        # Run the task
+        with hud.trace(f"Training | {task.prompt}", job_id=job_id):
             result = await agent.run(task, max_steps=self.config.max_steps_per_episode)
 
         result.info["tool_spec"] = agent.get_tool_schemas()
@@ -115,7 +116,8 @@ if __name__ == "__main__":
                 "name": "evaluate",
                 "arguments": {"name": "game_2048_max_number", "arguments": {"target": 128}},
             },
-            "system_prompt": """You are an expert 2048 game player using a browser interface. Your goal is to reach the tile specified by the user.
+            "agent_config": {
+                "system_prompt": """You are an expert 2048 game player using a browser interface. Your goal is to reach the tile specified by the user.
 HOW 2048 WORKS:
 - 4x4 grid with numbered tiles (2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048...)
 - When you move, all tiles slide in that direction
@@ -146,7 +148,8 @@ IMPORTANT GAME PLAYING GUIDELINES:
 
 Strategy: keep highest tiles in a corner; maintain order; avoid random moves.
 """,
-            "agent_tools": ["computer"],
+                "allowed_tools": ["computer"],
+            },
         }
 
         task = Task(**task_data)

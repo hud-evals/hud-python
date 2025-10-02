@@ -89,7 +89,7 @@ if __name__ == "__main__":
     # Check for required API keys
     if not os.getenv("HUD_API_KEY"):
         print("⚠️  HUD_API_KEY not set")
-        print("   Get your key at: https://app.hud.so")
+        print("   Get your key at: https://hud.so")
         exit(1)
 
     if not os.getenv("OPENAI_API_KEY"):

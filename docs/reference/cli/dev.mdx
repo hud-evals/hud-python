@@ -4,7 +4,7 @@ description: "Hot-reload development server for MCP environments"
 icon: "fire"
 ---
 
-The `hud dev` command provides hot-reload development for MCP environments, automatically restarting your server when source files change.
+The `hud dev` command provides development-time proxying for MCP environments, starting your image and exposing it over HTTP (default) or stdio.
 
 ## Synopsis
 
@@ -14,15 +14,15 @@ hud dev [DIRECTORY] [OPTIONS]
 
 ## Description
 
-`hud dev` creates a development proxy server that runs your MCP environment in Docker with hot-reload capabilities. It automatically detects or builds your Docker image and exposes it via HTTP or stdio for development.
+`hud dev` launches a lightweight MCP proxy that runs your Docker image and forwards MCP traffic. It auto-detects or builds your image, mounts your project directory, and optionally opens an inspector or interactive tool runner.
 
 **Key Features:**
-- **Auto-detection**: Automatically finds or generates Docker image names
-- **Hot-reload**: Mounts local `src/` directory for live code changes
-- **Interactive testing**: Test tools directly from the command line with arrow keys
-- **HTTP/Stdio protocols**: Choose transport method
-- **Inspector support**: Launch MCP Inspector for debugging
-- **Container management**: Handles Docker lifecycle automatically
+- **Auto-detection**: Determines image from `[tool.hud.image]` or `dir-name:dev`
+- **Project mount**: Mounts your project at `/app` (sets `PYTHONPATH=/app`)
+- **Interactive testing**: TUI for calling tools (HTTP transport only)
+- **HTTP/Stdio protocols**: Choose transport method (`http` default)
+- **Inspector support**: Launch MCP Inspector (HTTP mode)
+- **Per-connection containers**: Each client gets its own container
 
 ## Arguments
 
@@ -40,16 +40,15 @@ hud dev [DIRECTORY] [OPTIONS]
 | `--transport`, `-t` | Transport protocol: `http` or `stdio` | `http` |
 | `--port`, `-p` | HTTP server port (ignored for stdio) | `8765` |
 | `--interactive` | Launch interactive tool testing interface | `false` |
-| `--no-reload` | Disable hot-reload functionality | `false` |
+| `--no-reload` | Disable hot-reload supervision | `false` |
 | `--verbose`, `-v` | Show detailed server logs | `false` |
 | `--inspector` | Launch MCP Inspector (HTTP mode only) | `false` |
 | `--no-logs` | Disable streaming Docker logs | `false` |
+| `--full-reload` | Restart entire container on file changes (not implemented) | `false` |
 
 ## Examples
 
 ### Auto-Detection Mode (Recommended)
-
-Start development server without specifying directory (auto-detects from current location):
 
 ```bash
 hud dev
@@ -57,23 +56,17 @@ hud dev
 
 ### Build and Start
 
-Build Docker image first, then start development server:
-
 ```bash
 hud dev --build
 ```
 
 ### Specific Directory
 
-Watch a specific environment directory:
-
 ```bash
-hud dev environments/my-browser-env --build
+hud dev environments/my-env --build
 ```
 
 ### Custom Image
-
-Use a specific Docker image name:
 
 ```bash
 hud dev . --image my-custom-env:dev --build
@@ -81,15 +74,11 @@ hud dev . --image my-custom-env:dev --build
 
 ### HTTP Mode with Inspector
 
-Start in HTTP mode and launch MCP Inspector:
-
 ```bash
 hud dev . --build --transport http --inspector
 ```
 
 ### Stdio Mode
-
-Use stdio transport (for multiple simultaneous connections):
 
 ```bash
 hud dev . --build --transport stdio
@@ -97,54 +86,45 @@ hud dev . --build --transport stdio
 
 ### Clean Rebuild
 
-Force a complete rebuild without Docker cache:
-
 ```bash
 hud dev . --build --no-cache
 ```
 
 ### Verbose Logging
 
-Show detailed logs from the container:
-
 ```bash
 hud dev . --build --verbose
 ```
 
-### Interactive Testing
-
-Launch with interactive tool testing interface:
+### Interactive Testing (HTTP only)
 
 ```bash
 hud dev . --build --interactive
 ```
 
 <Note>
-Interactive mode disables Docker logs and hot-reload to provide a clean interface for testing tools with arrow key navigation.
+Interactive mode disables log streaming and hot-reload supervision to provide a clean UI.
 </Note>
 
 ## How It Works
 
 1. **Image Resolution**: 
-   - Checks `pyproject.toml` for `[tool.hud.image]` setting
-   - Auto-generates name like `hud-{directory-name}:dev` if not found
+   - Reads `pyproject.toml` `[tool.hud.image]`
+   - Auto-generates `dir-name:dev` if absent; writes it back on build
    - Uses `--image` override if provided
 
-2. **Docker Setup**: 
-   - Builds image with `--build` if requested
-   - Mounts local `src/` directory to `/app/src` in container
-   - Injects hot-reload supervisor (unless `--no-reload`)
+2. **Container Startup**: 
+   - Runs your image with its original `CMD` (the container controls reload behavior)
+   - Mounts your project at `/app` and sets `PYTHONPATH=/app`
+   - For HTTP transport, the proxy hosts `http://localhost:<port>/mcp`
 
 3. **Proxy Server**:
-   - Creates FastMCP proxy that forwards to Docker containers
-   - Each client connection gets its own container instance
-   - Automatically handles container lifecycle
+   - Each client connection gets its own container
+   - Inspector and interactive UI are available in HTTP mode
 
-4. **Development Flow**:
-   - Edit files in `src/` directory
-   - Changes are immediately reflected in running containers
-   - No rebuild required for code changes
-   - **Only the MCP server restarts**, not your environment state
+4. **Hot-Reload**:
+   - Depends on your container `CMD` (templates include `--reload` flags)
+   - For best results, separate the restartable MCP controller from any long-lived backend
 
 ### Process Separation Architecture
 
@@ -175,71 +155,32 @@ graph LR
 - gRPC services
 - Shared memory/IPC
 
-See the browser environment for a complete implementation example.
+Separating the MCP server (restartable) from the backend (stateful) enables code reloads without losing state. See the browser template for a full example.
 
 ## File Mounting
 
-The development server mounts your local `src/` directory directly into containers:
+Project directory is mounted as `/app` inside the container:
 
 ```
-Local: ./src/                → Container: /app/src/
-Local: ./src/my_package/     → Container: /app/src/my_package/
-Local: ./src/server.py       → Container: /app/src/server.py
+Local: ./                   → Container: /app/
+Local: ./controller/        → Container: /app/controller/
+Local: ./environment/       → Container: /app/environment/
 ```
-
-**Live Changes**: Any edits to files in `src/` are immediately reflected in running containers.
-
-**Hot-Reload Behavior**: 
-- With process separation: Only the MCP server restarts, environment state persists
-- Without separation: Entire environment restarts (state is lost)
-- Disable with `--no-reload` if manual control is preferred
-
-<Note>
-For environments with important state (browsers, databases, running applications), implement process separation to preserve state during hot-reload. This dramatically improves development speed.
-</Note>
-
-## Interactive Mode
-
-When launched with `--interactive`, `hud dev` provides a command-line interface for testing tools:
-
-```bash
-hud dev . --interactive
-```
-
-**Features:**
-- **Arrow Key Navigation**: Select tools using up/down arrows
-- **Parameter Input**: Enter tool parameters with validation
-- **Result Display**: See tool responses in real-time
-- **Clean Interface**: Disables logs for focused testing
-- **Exit Gracefully**: Select "Quit" or press Ctrl+C
-
-**Workflow:**
-1. Environment starts and connects
-2. Tools list appears with arrow navigation
-3. Select a tool and press Enter
-4. Input parameters if required
-5. See results immediately
-6. Continue testing or quit
-
-<Tip>
-Interactive mode is perfect for rapid tool development - make changes to your code and test immediately without leaving the terminal.
-</Tip>
 
 ## Transport Modes
 
 ### HTTP Transport (Default)
 
 ```bash
-hud dev . --transport http --port 8080
+hud dev . --transport http --port 8765
 ```
 
 **Benefits:**
-- Web browser access
-- MCP Inspector integration
+- Web browser access and MCP Inspector
 - Multiple simultaneous connections
-- RESTful debugging
+- Easier debugging
 
-**URL:** `http://localhost:8080/mcp`
+**URL:** `http://localhost:8765/mcp`
 
 ### Stdio Transport
 
@@ -248,12 +189,8 @@ hud dev . --transport stdio
 ```
 
 **Benefits:**
-- Direct MCP protocol
-- Lower latency
-- Cursor/Claude integration ready
+- Direct MCP protocol, lower latency
 - Single connection focused
-
-**Usage:** Connect via stdio to the running container
 
 ## Integration Examples
 
@@ -263,7 +200,6 @@ hud dev . --transport stdio
    ```bash
    hud dev . --build --transport http --port 8765
    ```
-
 2. Add to Cursor's MCP config:
    ```json
    {
@@ -274,122 +210,40 @@ hud dev . --transport stdio
      }
    }
    ```
-
-3. Edit files - changes apply immediately!
+3. Edit files — changes apply immediately based on your container's reload behavior.
 
 ### Testing During Development
 
-Run analysis in another terminal:
-
 ```bash
-# Test tools are working
-hud analyze hud-my-env:dev
+# Quick inspection (optional)
+hud analyze my-env:dev
 
-# Full debug check
-hud debug hud-my-env:dev
+# Deep check (only when broken)
+hud debug my-env:dev
 ```
 
 ### MCP Inspector
-
-Launch inspector for visual debugging:
 
 ```bash
 hud dev . --build --inspector
 ```
 
-Opens browser with MCP Inspector interface showing:
+Opens an inspector that shows:
 - Available tools and schemas
-- Real-time tool calls
-- Protocol messages
-- Error debugging
+- Real-time tool calls and protocol messages
 
 ## Troubleshooting
 
-### Port Already in Use
-
-```bash
-# Use different port
-hud dev . --port 9000
-
-# Or find and kill existing process
-lsof -ti :8765 | xargs kill
-```
-
-### Build Failures
-
-```bash
-# Clean rebuild
-hud dev . --build --no-cache
-
-# Check Dockerfile
-docker build -t my-env .
-```
-
-### File Changes Not Detected
-
-```bash
-# Check file permissions
-ls -la src/
-
-# Force restart (Ctrl+C then restart)
-hud dev . --build --verbose
-```
-
-### Container Startup Issues
-
-```bash
-# Debug with full logs
-hud dev . --build --verbose
-
-# Test image manually
-docker run -it my-env:dev
-```
-
-## Performance Tips
-
-1. **Exclude Large Files**: Use `.dockerignore` to exclude large files from build context
-2. **Layer Caching**: Structure Dockerfile for optimal layer caching
-3. **Minimal Rebuilds**: Only use `--build` when dependencies change
-4. **Port Selection**: Use uncommon ports to avoid conflicts
-
-## Development Workflow
-
-Recommended workflow for environment development:
-
-```bash
-# 1. Navigate to your environment directory
-cd environments/my-env
-
-# 2. Start development server with interactive testing
-hud dev --build --interactive
-
-# 3. Test tools interactively with arrow keys
-# Make code changes and test again immediately
-
-# 4. Alternative: Run dev server and test separately
-# Terminal 1: Keep hud dev running
-hud dev --build
-
-# Terminal 2: Test your changes
-hud analyze hud-my-env:dev
-
-# 5. Production build
-hud build  # Creates hud.lock.yaml
-
-# 6. Share your environment
-hud push
-```
-
-<Note>
-Using `hud dev --build` also generates or updates `hud.lock.yaml` with environment metadata, similar to `hud build`.
-</Note>
+- Use `--verbose` to see container logs
+- If container never starts: run `hud debug <image>`
+- Port conflicts: choose a new `--port`
 
 ## See Also
 
-- [`hud init`](/reference/cli/init) - Create new environments
-- [`hud build`](/reference/cli/build) - Build production images
-- [`hud push`](/reference/cli/push) - Share to registry
-- [`hud analyze`](/reference/cli/analyze) - Test tools after changes
-- [`hud debug`](/reference/cli/debug) - Full environment validation  
-- [`hud run`](/reference/cli/run) - Run production environments
-- [Build Environments](/build-environments) - Environment development guide
+- [`hud init`](/reference/cli/init) — Create new environments
+- [`hud build`](/reference/cli/build) — Build production images
+- [`hud push`](/reference/cli/push) — Share to registry
+- [`hud analyze`](/reference/cli/analyze) — Inspect tools
+- [`hud debug`](/reference/cli/debug) — Validate environment
+- [`hud run`](/reference/cli/run) — Run locally/remotely
+- [Build Environments](/build-environments)

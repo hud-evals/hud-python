@@ -6,7 +6,7 @@ import logging
 from typing import Any, ClassVar, Literal
 
 import mcp.types as types
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAI
 from openai.types.responses import (
     ResponseComputerToolCall,
     ResponseInputMessageContentListParam,
@@ -45,6 +45,7 @@ class OperatorAgent(MCPAgent):
         model_client: AsyncOpenAI | None = None,
         model: str = "computer-use-preview",
         environment: Literal["windows", "mac", "linux", "browser"] = "linux",
+        validate_api_key: bool = True,
         **kwargs: Any,
     ) -> None:
         """
@@ -75,6 +76,13 @@ class OperatorAgent(MCPAgent):
         self.last_response_id: str | None = None
         self.pending_call_id: str | None = None
         self.pending_safety_checks: list[Any] = []
+
+        # validate api key if requested
+        if validate_api_key:
+            try:
+                OpenAI(api_key=self.openai_client.api_key).models.list()
+            except Exception as e:
+                raise ValueError(f"OpenAI API key is invalid: {e}") from e
 
         self.model_name = "openai-" + self.model
 

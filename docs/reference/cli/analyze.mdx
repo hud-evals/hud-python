@@ -4,18 +4,20 @@ description: "Inspect MCP environments quickly from metadata or live containers"
 icon: "magnifying-glass"
 ---
 
-The `hud analyze` command inspects MCP environments to discover their tools and capabilities. By default, it uses cached metadata for instant results. Use `--live` for real-time analysis.
+The `hud analyze` command inspects MCP environments to discover tools and capabilities. By default it uses cached metadata; pass `--live` (or Docker args) to run a container.
 
 ## Usage
 
 ```bash
-hud analyze <TARGET> [OPTIONS]
+hud analyze <IMAGE> [DOCKER_ARGS...] [OPTIONS]
+hud analyze --config mcp.json
+hud analyze --cursor <SERVER_NAME>
 ```
 
 ## Arguments
 
-<ParamField path="target" type="string" required>
-  Docker image, lock file path, or command to analyze
+<ParamField path="image" type="string">
+  Docker image to analyze (omit when using --config or --cursor)
 </ParamField>
 
 ## Options
@@ -25,362 +27,80 @@ hud analyze <TARGET> [OPTIONS]
 </ParamField>
 
 <ParamField path="--verbose" type="boolean" default="false">
-  Show full tool schemas and parameters. Short: `-v`
+  Show input schemas in fast mode and more details in live mode. Short: `-v`
 </ParamField>
 
 <ParamField path="--live" type="boolean" default="false">
-  Run container for live analysis (slower but more accurate)
+  Run container for live analysis (slower but exact)
 </ParamField>
 
 <ParamField path="--config" type="string">
-  JSON config file with MCP configuration. Short: `-c`
+  JSON file with MCP configuration (always live). Short: `-c`
 </ParamField>
 
 <ParamField path="--cursor" type="string">
-  Analyze a server from Cursor config
-</ParamField>
-
-<ParamField path="--command" type="string">
-  Analyze a local command instead of Docker image
-</ParamField>
-
-<ParamField path="--timeout" type="integer" default="30">
-  Timeout in seconds for live analysis
+  Analyze a Cursor MCP server (always live)
 </ParamField>
 
 ## Analysis Modes
 
 ### Fast Mode (Default)
 
-Uses cached metadata from:
-1. Local lock file cache (`~/.hud/locks/`)
-2. HUD registry (if available)
+Sources (in order):
+1. Local HUD cache: `~/.hud/envs/<digest>/hud.lock.yaml`
+2. HUD registry metadata (if available)
 3. Basic Docker manifest info
 
 ```bash
 # Instant results from metadata
-hud analyze hudpython/text-analyzer:latest
-
-# From lock file
-hud analyze ./my-env.lock.yaml
+hud analyze myorg/my-env:latest
 ```
-
-<Note>
-Fast mode is perfect for quick inspection and doesn't require running containers.
-</Note>
 
 ### Live Mode
 
-Runs the actual container for comprehensive analysis:
+Runs the container and queries the server:
 
 ```bash
 # Full analysis with running container
-hud analyze hudpython/text-analyzer:latest --live
+hud analyze myorg/my-env:latest --live
 
-# With environment variables
-hud analyze my-env:latest --live -e API_KEY=test
+# Passing env vars implies live mode
+a=API_KEY=secret hud analyze myorg/my-env:latest --live -e API_KEY=secret
 ```
 
-<Tip>
-Use `--live` when you need:
-- Real-time tool validation
-- Resource discovery
-- Telemetry information
-- Testing with specific env vars
-</Tip>
+> Providing Docker args (after the image) automatically switches to live mode.
 
 ## Output Formats
 
-### Interactive (Default)
-
-Fast mode output:
-```
-📊 Environment Overview
-┌─────────────┬─────────────────────────┐
-│ Image       │ hudpython/text-2048     │
-│ Source      │ HUD Registry            │
-│ Built       │ 2024-01-15T10:30:00Z    │
-│ HUD Version │ 0.1.0                   │
-│ Init Time   │ 450 ms                  │
-│ Tools       │ 6                       │
-└─────────────┴─────────────────────────┘
-
-🔧 Available Tools
-└── Tools
-    ├── setup - Initialize environment
-    ├── evaluate - Return environment state
-    ├── move - Move tiles in direction
-    ├── reset_board - Reset game to start
-    └── get_score - Get current score
-```
-
-Live mode output (`--live`):
-```
-🔍 Analyzing MCP environment: hudpython/text-2048:latest
-
-📊 Environment Overview
-┌─────────────┬─────────────────────────┐
-│ Server      │ hud-text-2048           │
-│ Initialized │ ✓                       │
-└─────────────┴─────────────────────────┘
-
-🔧 Available Tools
-├── Regular Tools
-│   ├── move
-│   │   └── Move tiles in the specified direction
-│   ├── reset_board
-│   │   └── Reset the game board to initial state
-│   └── get_score
-│       └── Get the current game score
-└── Hub Tools
-    └── game_hub
-        ├── save_state
-        └── load_state
-
-📚 Available Resources
-┌──────────────────┬────────────────┬─────────────┐
-│ URI              │ Name           │ Type        │
-├──────────────────┼────────────────┼─────────────┤
-│ game://state     │ Game State     │ application │
-│ game://history   │ Move History   │ text/plain  │
-└──────────────────┴────────────────┴─────────────┘
-
-📡 Telemetry Data
-┌─────────┬─────────────────────────────┐
-│ Live URL│ https://app.hud.so/xyz123   │
-│ Status  │ running                     │
-│ Services│ 2/2 running                 │
-└─────────┴─────────────────────────────┘
-```
-
-### JSON Format
-
-```bash
-# Fast mode
-hud analyze my-env --format json
-
-{
-  "image": "my-env:latest",
-  "status": "from_cache",
-  "tool_count": 6,
-  "init_time": 450,
-  "tools": [{
-    "name": "setup",
-    "description": "Initialize environment"
-  }]
-}
-
-# Live mode
-hud analyze my-env --format json --live
-
-{
-  "metadata": {
-    "servers": ["my-env"],
-    "initialized": true
-  },
-  "tools": [{
-    "name": "setup",
-    "description": "Initialize environment",
-    "input_schema": {...}
-  }],
-  "hub_tools": {...},
-  "resources": [...],
-  "telemetry": {...}
-}
-```
-
-### Markdown Format
-
-```bash
-hud analyze my-env --format markdown > docs/tools.md
-```
-
-Generates formatted documentation with tool descriptions and schemas.
+- `interactive` (default): rich table/tree views
+- `json`: structured output for tooling
+- `markdown`: docs-friendly summaries
 
 ## Examples
 
-### Fast Analysis (Default)
-
 ```bash
-# Quick inspection from metadata
-hud analyze hudpython/text-analyzer:latest
-
-# Analyze multiple environments rapidly
-for env in browser scraper analyzer; do
-  hud analyze "hudpython/$env:latest"
-done
+# Fast metadata analysis
+hud analyze hudpython/text-2048:latest
 
 # From lock file
-hud analyze ./environments/prod.lock.yaml
+hud analyze ./locks/text-2048.yaml --format json
 
-# With verbose schemas
-hud analyze my-env:latest --verbose
-```
+# Live analysis with env vars
+hud analyze my-env:latest --live -e API_KEY=test
 
-### Live Analysis
-
-```bash
-# Full container analysis
-hud analyze my-env:latest --live
-
-# With environment variables
-hud analyze my-env:latest --live -e API_KEY=test -e DEBUG=true
-
-# Custom timeout for slow environments
-hud analyze heavy-env:latest --live --timeout 60
-```
-
-### Local Development
-
-```bash
-# Analyze local command
-hud analyze --command "python my_server.py" --live
-
-# Cursor integration
+# Cursor and config
 hud analyze --cursor my-dev-server --live
-
-# With config file
-hud analyze my-env:latest --config mcp-config.json
+hud analyze --config mcp-config.json
 ```
 
-### Documentation Generation
+## Tips
 
-```bash
-# Generate tool documentation
-hud analyze my-env:latest --format markdown > docs/tools.md
-
-# Compare versions
-hud analyze my-env:v1.0 --format json > v1.json
-hud analyze my-env:v2.0 --format json > v2.json
-diff v1.json v2.json
-
-# Extract tool names
-hud analyze my-env --format json | jq -r '.tools[].name'
-```
-
-## Performance Comparison
-
-| Mode | Speed | Use Case |
-|------|-------|----------|
-| Fast (default) | < 1 second | Quick inspection, CI checks |
-| Live (`--live`) | 5-30 seconds | Full validation, debugging |
-
-<Tip>
-Use fast mode for rapid iteration during development. Switch to `--live` for final validation.
-</Tip>
-
-## CI/CD Integration
-
-### Fast CI Checks
-
-```yaml
-# GitHub Actions - Quick tool validation
-- name: Verify tools exist
-  run: |
-    TOOLS=$(hud analyze $IMAGE --format json | jq '.tool_count')
-    if [ "$TOOLS" -lt 3 ]; then
-      echo "Not enough tools!"
-      exit 1
-    fi
-```
-
-### Python Validation Script
-
-```python
-#!/usr/bin/env python3
-import subprocess
-import json
-
-def verify_environment(image, required_tools):
-    """Fast validation using metadata"""
-    # Quick check with metadata
-    result = subprocess.run(
-        ["hud", "analyze", image, "--format", "json"],
-        capture_output=True, text=True, check=True
-    )
-    
-    data = json.loads(result.stdout)
-    available = {tool["name"] for tool in data["tools"]}
-    missing = set(required_tools) - available
-    
-    if missing:
-        print(f"⚠️  Missing tools: {missing}")
-        print("Running live analysis for details...")
-        
-        # Full check if needed
-        subprocess.run(
-            ["hud", "analyze", image, "--live"],
-            check=True
-        )
-    return len(missing) == 0
-
-# Usage
-verify_environment("my-env:latest", ["setup", "evaluate", "process"])
-```
-
-## Troubleshooting
-
-<AccordionGroup>
-<Accordion title="No metadata found">
-The environment may not have been pushed to HUD registry:
-```bash
-# Falls back to basic Docker info
-hud analyze my-env:latest --verbose
-
-# Force live analysis
-hud analyze my-env:latest --live
-```
-</Accordion>
-
-<Accordion title="Stale metadata">
-If metadata seems outdated:
-```bash
-# Use live mode for current state
-hud analyze my-env:latest --live
-
-# Rebuild and push to update metadata
-hud build && hud push
-```
-</Accordion>
-
-<Accordion title="Timeout in live mode">
-Some environments take longer to initialize:
-```bash
-# Increase timeout
-hud analyze heavy-env:latest --live --timeout 120
-
-# Check with debug first
-hud debug heavy-env:latest --max-phase 1
-```
-</Accordion>
-
-<Accordion title="JSON parsing errors">
-Ensure clean output:
-```bash
-# Redirect stderr for clean JSON
-hud analyze my-env --format json 2>/dev/null
-
-# Or use jq for validation
-hud analyze my-env --format json | jq .
-```
-</Accordion>
-</AccordionGroup>
-
-## Best Practices
-
-1. **Default to Fast Mode**: Start with metadata for quick checks
-2. **Live for Validation**: Use `--live` before production deployments
-3. **Cache Lock Files**: Share lock files for consistent metadata
-4. **Version Your Tools**: Track tool changes across versions
-5. **Automate Checks**: Add fast analysis to CI pipelines
-
-<Note>
-Fast mode shows what tools *should* be available based on build-time analysis. Live mode shows what *actually* works right now.
-</Note>
+- Prefer fast mode during iteration; switch to `--live` for final validation.
+- If metadata isn’t found, the command suggests pulling or running live.
 
 ## See Also
 
-- [`hud debug`](/reference/cli/debug) - Test tool functionality
-- [`hud pull`](/reference/cli/pull) - Get environments with metadata
-- [`hud build`](/reference/cli/build) - Generate fresh metadata
-- [`hud run`](/reference/cli/run) - Execute environments
+- [`hud pull`](/reference/cli/pull)
+- [`hud debug`](/reference/cli/debug)
+- [`hud build`](/reference/cli/build)
+- [`hud run`](/reference/cli/run)
