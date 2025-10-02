@@ -51,11 +51,11 @@ def get_export_executor() -> ThreadPoolExecutor:
     The executor is automatically cleaned up on process exit via atexit.
 
     Returns:
-        ThreadPoolExecutor with 50 workers for high-throughput parallel uploads
+        ThreadPoolExecutor with 8 workers for high-throughput parallel uploads
     """
     global _export_executor
     if _export_executor is None:
-        # Use 50 workers to handle high-volume parallel uploads efficiently
+        # Use 8 workers to handle high-volume parallel uploads efficiently
         _export_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="span-export")
 
         def cleanup() -> None:

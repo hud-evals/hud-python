@@ -553,7 +553,7 @@ def eval_command(
         help="Comma-separated list of allowed tools",
     ),
     max_concurrent: int = typer.Option(
-        50,
+        30,
         "--max-concurrent",
         help=(
             "Maximum concurrent tasks (1-200 recommended, prevents rate limits "
