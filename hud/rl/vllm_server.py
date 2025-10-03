@@ -122,17 +122,13 @@ async def custom_run_server(args: Namespace, **uvicorn_kwargs) -> None:
 # Adapted from vllm/entrypoints/cli/serve.py
 # Only difference is that we call `custom_run_server` instead of `run_server` and we do config translation (i.e. pass populated namespace to `parse_args`)
 def server(vllm_args: list[str]):
+    logger.info(f"vLLM server args: {vllm_args}")
+
     parser = FlexibleArgumentParser(description="vLLM OpenAI-Compatible RESTful API server.")
     parser = make_arg_parser(parser)
     args = parser.parse_args(args=vllm_args)
     assert args is not None
     validate_parsed_serve_args(args)
-
-    # Raise error if logprobs_mode is not set to processed_logprobs
-    if args.logprobs_mode != "processed_logprobs":
-        raise ValueError(
-            "logprobs_mode must be 'processed_logprobs' to be compatible with the orchestrator."
-        )
 
     if args.headless or args.api_server_count < 1:
         run_headless(args)
@@ -189,18 +185,5 @@ def start_server_with_multiprocessing(
     
     return process
 
-
-def server_with_multiprocessing(vllm_args: list[str], daemon: bool = False) -> multiprocessing.Process:
-    """
-    Alternative entry point that uses multiprocessing by default.
-    
-    Args:
-        vllm_args: List of command-line arguments for the vLLM server
-        daemon: Whether to run the process as a daemon
-    
-    Returns:
-        The multiprocessing.Process object running the server
-    """
-    return start_server_with_multiprocessing(vllm_args, daemon=daemon)
 
 

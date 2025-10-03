@@ -189,7 +189,7 @@ _server_manager = VLLMServerManager()
 def get_vllm_args(model_name: str, chat_template_path: Path | None = None) -> list[str]:
     """Get common vLLM server arguments for both local and remote deployments."""
     args = [
-        "serve",
+        # "serve",
         model_name,
         "--api-key",
         "token-abc123",
