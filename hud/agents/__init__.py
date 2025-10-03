@@ -4,11 +4,15 @@ from .base import MCPAgent
 from .claude import ClaudeAgent
 from .openai import OperatorAgent
 from .openai_chat_generic import GenericOpenAIChatAgent
-from .litellm_claude import LiteLLMClaudeAgent
+from .litellm_agent import LiteLLMAgent
+
+# Backwards compatibility
+LiteLLMClaudeAgent = LiteLLMAgent
 
 __all__ = [
     "ClaudeAgent",
     "GenericOpenAIChatAgent",
+    "LiteLLMAgent",
     "LiteLLMClaudeAgent",
     "MCPAgent",
     "OperatorAgent",

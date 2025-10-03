@@ -79,9 +79,9 @@ def _select_litellm_agent(model: str | None) -> tuple[type[Any], dict[str, Any]]
     from hud.agents.lite_llm import LiteAgent
 
     if _is_litellm_claude_model(model):
-        from hud.agents.litellm_claude import LiteLLMClaudeAgent
+        from hud.agents.litellm_agent import LiteLLMAgent
 
-        return LiteLLMClaudeAgent, {
+        return LiteLLMAgent, {
             "model": model or "anthropic/claude-sonnet-4-20250514",
         }
 

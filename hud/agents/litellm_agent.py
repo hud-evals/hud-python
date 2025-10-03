@@ -1,8 +1,9 @@
-"""LiteLLM-powered Claude MCP Agent.
+"""LiteLLM-powered MCP Agent.
 
-Mirrors the MCP behavior of hud/agents/claude.py (Anthropic SDK) while using
-LiteLLM for transport. Keeps Anthropic tool-use semantics, including prompt
-caching and computer-use tooling when the provider supports it.
+Provides the same MCP behaviour as hud/agents/claude.py / openai_chat_generic.py
+while routing through LiteLLM. Supports Anthropic computer-use (when available),
+prompt caching, and OpenAI-style tool result formatting so LiteLLM can talk to
+providers such as OpenRouter or Anthropic directly.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Sequence, cast
 
 import litellm
 from litellm.exceptions import APIError, BadRequestError
@@ -41,6 +42,13 @@ else:  # pragma: no cover - fallback when anthropic types are absent at runtime
     BetaTextBlockParam = dict  # type: ignore
     BetaToolResultBlockParam = dict  # type: ignore
 
+try:  # pragma: no cover - optional import
+    from pydantic.fields import FieldInfo as _PydanticFieldInfo
+    from pydantic_core import PydanticUndefined
+except Exception:  # pragma: no cover - fallback when pydantic not present
+    _PydanticFieldInfo = None  # type: ignore
+    PydanticUndefined = object()  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_MODEL_ALIASES: dict[str, str] = {
@@ -49,8 +57,8 @@ ANTHROPIC_MODEL_ALIASES: dict[str, str] = {
 }
 
 
-class LiteLLMClaudeAgent(MCPAgent):
-    """Claude-style MCP agent implemented on top of LiteLLM."""
+class LiteLLMAgent(MCPAgent):
+    """Generic MCP agent implemented on top of LiteLLM."""
 
     metadata: ClassVar[dict[str, Any]] = {
         "display_width": computer_settings.ANTHROPIC_COMPUTER_WIDTH,
@@ -64,6 +72,7 @@ class LiteLLMClaudeAgent(MCPAgent):
         max_tokens: int = 4096,
         use_computer_beta: bool = True,
         completion_kwargs: dict[str, Any] | None = None,
+        cache_control_injection: Sequence[str] | None = None,
         validate_api_key: bool = True,
         **kwargs: Any,
     ) -> None:
@@ -79,6 +88,7 @@ class LiteLLMClaudeAgent(MCPAgent):
         self._transport_provider: str | None = None
         self._litellm_model = self.model
         self._validate_api_key = validate_api_key
+        self._cache_control_injection = list(cache_control_injection or ["system", "last_user"])
         self._anthropic_key_validated = False
         self._computer_tool_type: str | None = None
 
@@ -226,6 +236,7 @@ class LiteLLMClaudeAgent(MCPAgent):
                     arguments = {}
                 if not isinstance(arguments, dict):
                     arguments = {}
+                arguments = _to_json_safe(arguments)
                 name = _get_field(func_spec, "name")
                 if isinstance(name, str) and name in self._claude_to_mcp_tool_map:
                     name = self._claude_to_mcp_tool_map[name]
@@ -240,7 +251,7 @@ class LiteLLMClaudeAgent(MCPAgent):
                         "type": "function",
                         "function": {
                             "name": _get_field(func_spec, "name"),
-                            "arguments": _get_field(func_spec, "arguments", "{}"),
+                            "arguments": json.dumps(arguments),
                         },
                     }
                 )
@@ -259,7 +270,7 @@ class LiteLLMClaudeAgent(MCPAgent):
                     tool_id = block.get("id")
                     if tool_id in tool_calls_seen:
                         continue
-                    tool_input = block.get("input", {})
+                    tool_input = _to_json_safe(block.get("input", {}))
                     if not isinstance(tool_input, dict):
                         tool_input = {}
                     result.tool_calls.append(
@@ -444,6 +455,8 @@ class LiteLLMClaudeAgent(MCPAgent):
         return claude_tools
 
     def _choose_computer_tool_type(self) -> str:
+        if self._transport_provider == "openrouter":
+            return "computer_20250124"
         return "computer_20241022"
 
     def _is_openrouter_model(self) -> bool:
@@ -476,22 +489,18 @@ class LiteLLMClaudeAgent(MCPAgent):
             kwargs["tool_choice"] = "auto"
 
         if not self._is_openrouter_model():
-            beta_headers: list[str] = []
+            beta_headers: set[str] = {"prompt-caching-2024-07-31"}
             if self.use_computer_beta:
                 if self._computer_tool_type == "computer_20250124":
-                    beta_headers.append("computer-use-2025-01-24")
+                    beta_headers.add("computer-use-2025-01-24")
                 else:
-                    beta_headers.append("computer-use-2024-10-22")
-            # prompt caching beta keeps parity with claude.py (Anthropic requires header)
-            if beta_headers:
-                beta_headers.append("prompt-caching-2024-07-31")
+                    beta_headers.add("computer-use-2024-10-22")
 
-            if beta_headers:
-                extra_headers: dict[str, str] = kwargs.setdefault("extra_headers", {})  # type: ignore[assignment]
-                existing = extra_headers.get("anthropic-beta")
-                merged = set(filter(None, (existing.split(",") if existing else [])))
-                merged.update(beta_headers)
-                extra_headers["anthropic-beta"] = ",".join(sorted(merged))
+            extra_headers: dict[str, str] = kwargs.setdefault("extra_headers", {})  # type: ignore[assignment]
+            existing = extra_headers.get("anthropic-beta")
+            if existing:
+                beta_headers.update(filter(None, existing.split(",")))
+            extra_headers["anthropic-beta"] = ",".join(sorted(beta_headers))
 
         return kwargs
 
@@ -546,29 +555,9 @@ class LiteLLMClaudeAgent(MCPAgent):
         self._resolved_completion_kwargs = dict(self.completion_kwargs)
         self._transport_provider = None
 
-        if self.model.startswith("openrouter/anthropic/") and self.use_computer_beta:
-            anthro_model = self.model.split("openrouter/", 1)[1]
-            anthro_model = ANTHROPIC_MODEL_ALIASES.get(anthro_model, anthro_model)
-            if not anthro_model.startswith("anthropic/"):
-                anthro_model = f"anthropic/{anthro_model}"
-
-            anthro_key = self._resolved_completion_kwargs.get("api_key") or settings.anthropic_api_key
-            if not anthro_key:
-                raise ValueError(
-                    "Anthropic API key not found. Set ANTHROPIC_API_KEY or include 'api_key' in completion_kwargs to enable computer use via LiteLLM."
-                )
-
-            for key in ("api_base", "base_url", "headers", "extra_headers", "custom_headers"):
-                self._resolved_completion_kwargs.pop(key, None)
-
-            self._resolved_completion_kwargs["api_key"] = anthro_key
-            self._litellm_model = anthro_model
-            self._transport_provider = "anthropic"
-            self.hud_console.info(
-                "Routing Anthropic computer-use model through Anthropic API because OpenRouter does not yet support computer-use payloads."
-            )
-        elif self.model.startswith("openrouter/"):
+        if self.model.startswith("openrouter/"):
             self._transport_provider = "openrouter"
+            self._litellm_model = self.model
         elif self.model.startswith("anthropic/"):
             mapped = ANTHROPIC_MODEL_ALIASES.get(self.model, self.model)
             self._litellm_model = mapped
@@ -582,27 +571,6 @@ class LiteLLMClaudeAgent(MCPAgent):
                 mapped = f"anthropic/{mapped}"
             self._litellm_model = mapped
             self._resolved_completion_kwargs.pop("custom_llm_provider", None)
-
-        if self._transport_provider == "openrouter" and self.use_computer_beta:
-            # For OpenRouter, fall back to Anthropic routing to maintain computer-use parity.
-            remainder = self.model.split("openrouter/", 1)[1]
-            if remainder.startswith("anthropic/"):
-                anthro_model = ANTHROPIC_MODEL_ALIASES.get(remainder, remainder)
-            else:
-                anthro_model = None
-
-            if anthro_model:
-                for key in ("api_base", "base_url", "headers", "extra_headers", "custom_headers"):
-                    self._resolved_completion_kwargs.pop(key, None)
-
-                self._litellm_model = anthro_model
-                self._transport_provider = "anthropic"
-                if self._resolved_completion_kwargs.get("api_key") is None:
-                    self._resolved_completion_kwargs["api_key"] = settings.anthropic_api_key
-                self._resolved_completion_kwargs.pop("custom_llm_provider", None)
-                self.hud_console.info(
-                    "Automatically switching OpenRouter Anthropic model to Anthropic API for computer use support."
-                )
 
         if self._transport_provider == "anthropic":
             anthro_key = self._resolved_completion_kwargs.get("api_key") or settings.anthropic_api_key
@@ -665,27 +633,45 @@ class LiteLLMClaudeAgent(MCPAgent):
 
     def _add_prompt_caching(self, messages: list[BetaMessageParam]) -> list[BetaMessageParam]:
         messages_cached = copy.deepcopy(messages)
+        targets = set(self._cache_control_injection)
 
-        if (
-            messages_cached
-            and isinstance(messages_cached[-1], dict)
-            and messages_cached[-1].get("role") == "user"
-        ):
-            last_content = messages_cached[-1].get("content")
-            if isinstance(last_content, list):
-                for block in last_content:
-                    if isinstance(block, dict):
-                        block_type = block.get("type")
-                        if block_type in {"text", "image", "tool_use", "tool_result"}:
-                            cache_control: BetaCacheControlEphemeralParam = {"type": "ephemeral"}
-                            block["cache_control"] = cache_control  # type: ignore[index]
+        if "system" in targets:
+            for msg in messages_cached:
+                if isinstance(msg, dict) and msg.get("role") == "system":
+                    self._apply_cache_control(msg)
+
+        if "all_user" in targets:
+            for msg in messages_cached:
+                if isinstance(msg, dict) and msg.get("role") == "user":
+                    self._apply_cache_control(msg)
+        elif "first_user" in targets:
+            for msg in messages_cached:
+                if isinstance(msg, dict) and msg.get("role") == "user":
+                    self._apply_cache_control(msg)
+                    break
+
+        if "last_user" in targets:
+            if (
+                messages_cached
+                and isinstance(messages_cached[-1], dict)
+                and messages_cached[-1].get("role") == "user"
+            ):
+                self._apply_cache_control(messages_cached[-1])
 
         return messages_cached
 
+    def _apply_cache_control(self, message: dict[str, Any]) -> None:
+        cache_value: BetaCacheControlEphemeralParam = {"type": "ephemeral"}
+        content = message.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") in {"text", "image"}:
+                    block["cache_control"] = cache_value
+        elif isinstance(content, str) and content:
+            message["cache_control"] = cache_value
+
 
 def _safe_json_loads(raw: str | None) -> Any:
-    import json
-
     if not raw:
         return {}
     return json.loads(raw)
@@ -711,6 +697,40 @@ def _get_field(obj: Any, key: str, default: Any | None = None) -> Any:
     if hasattr(obj, key):
         return getattr(obj, key)
     return default
+
+
+def _to_json_safe(value: Any) -> Any:
+    """Ensure tool inputs are JSON-serialisable for MCP calls."""
+
+    if isinstance(value, dict):
+        return {k: _to_json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_json_safe(v) for v in value]
+    if _PydanticFieldInfo is not None and isinstance(value, _PydanticFieldInfo):
+        default = getattr(value, "default", None)
+        if isinstance(default, PydanticUndefined):
+            default = None
+        if default is not None:
+            return _to_json_safe(default)
+        default_factory = getattr(value, "default_factory", None)
+        if callable(default_factory):  # pragma: no cover - rare path
+            try:
+                produced = default_factory()
+            except Exception:
+                produced = None
+            return _to_json_safe(produced)
+        example = getattr(value, "examples", None)
+        if example:
+            return _to_json_safe(example[0])
+        extra = getattr(value, "json_schema_extra", None)
+        if isinstance(extra, dict):
+            hint = extra.get("example") or extra.get("examples")
+            if hint:
+                if isinstance(hint, list):
+                    return _to_json_safe(hint[0])
+                return _to_json_safe(hint)
+        return None
+    return value
 
 
 def base64_to_content_block(base64: str) -> BetaImageBlockParam:
