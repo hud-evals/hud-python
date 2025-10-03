@@ -5,6 +5,7 @@ import logging
 import sys
 from hud.server import MCPServer
 from hud.tools import HudComputerTool, AnthropicComputerTool, OpenAIComputerTool
+from server.computer_tools import AnthropicComputerToolWithRecord, OpenAIComputerToolWithRecord
 
 # Configure logging
 logging.basicConfig(
@@ -21,9 +22,10 @@ from server.shared import ENV_SERVER_URL, http_client, playwright
 
 # Register tools
 mcp.tool(playwright)
+# Create and register computer tools
 mcp.tool(HudComputerTool(display_num=1))
-mcp.tool(AnthropicComputerTool(display_num=1))
-mcp.tool(OpenAIComputerTool(display_num=1))
+mcp.tool(AnthropicComputerToolWithRecord(display_num=1))
+mcp.tool(OpenAIComputerToolWithRecord(display_num=1))
 
 # Import and register routers
 from server.tools import router as tools_router
