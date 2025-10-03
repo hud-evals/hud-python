@@ -1,10 +1,9 @@
 """ online-mind2web evaluators webjudge"""
 """ reference: https://github.com/OSU-NLP-Group/Online-Mind2Web/blob/main/src/methods/webjudge_online_mind2web.py """ 
 
-import os, json, logging
+import os, json, logging, base64, re
+import openai
 from hud.tools.types import EvaluationResult
-from server.main import mcp, http_client
-from hud.tools import playwright
 from hud.server import MCPRouter
 
 logger = logging.getLogger(__name__)
@@ -194,7 +193,7 @@ The snapshots of the web page progression are shown in the images below."""
         # Create message content with text and images
         message_content = [{"type": "text", "text": prompt}]
 
-        for i, base64_img in enumerate(base64_images):
+        for base64_img in base64_images:
             message_content.append({
                 "type": "image_url",
                 "image_url": {
@@ -211,7 +210,6 @@ The snapshots of the web page progression are shown in the images below."""
             }
         ]
 
-        import openai
         client = openai.OpenAI(api_key=openai_api_key)
 
         response = client.chat.completions.create(
@@ -314,10 +312,12 @@ async def webjudge(
 
         if not screenshot_history:
             logging.warning("No screenshot history available")
-            return {
-                "success": False,
-                "error": "No screenshot history available"
-            }
+            return EvaluationResult(
+                reward=0.,
+                done=True,
+                content="No screenshot avaliable",
+                info={"task_description": task_text, "status": "No screenshot avaliable"}
+            )
 
         # Get action history from file
         action_history = []
@@ -447,7 +447,6 @@ Note: Screenshot analysis scored {main_score}/5, below threshold of {score_thres
             content = [{"type": "text", "text": prompt_text_only}]
 
         # Final evaluation
-        import openai
         client = openai.OpenAI(api_key=openai_api_key)
 
         messages = [
@@ -477,7 +476,7 @@ Note: Screenshot analysis scored {main_score}/5, below threshold of {score_thres
         logging.info(f"WebJudge evaluation result: {status}")
 
         return EvaluationResult(
-                reward=1. if success == "success" else 0.,
+                reward=1. if success else 0.,
                 done=True,
                 content=final_result,
                 info={"task_description": task_text, "status": status, "thoughts": thoughts}
