@@ -236,7 +236,6 @@ class OpenAIComputerToolWithRecord(OpenAIComputerTool):
             "drag",
             "wait",
         }
-        logger.info(f"debug action type: {type}")
         if type in screenshot_action_type:
             if hasattr(self, "_trigger_callbacks"):
                 await self._trigger_callbacks("on_screenshot_action")

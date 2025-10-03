@@ -475,6 +475,7 @@ Note: Screenshot analysis scored {main_score}/5, below threshold of {score_thres
             status = final_result.split("Status:")[1].strip().strip('"').lower()
             success = status == "success"
         except:
+            logging.info(f"Warning: Final result parsing failed: {final_result}")
             thoughts = final_result
             success = "success" in final_result.lower()
             status = "success" if success else "failure"

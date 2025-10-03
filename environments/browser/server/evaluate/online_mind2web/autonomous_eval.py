@@ -27,13 +27,6 @@ async def autonomous_eval(
                 reward=0.0, done=False, content="OPENAI_API_KEY environment variable not set"
             )
 
-        # check the browser - get playwright tool from tools module
-        try:
-            from ..tools import playwright as playwright_tool
-        except ImportError:
-            logging.error("Cannot import playwright tool")
-            return EvaluationResult(reward=0.0, done=False, content="Cannot import playwright tool")
-
         if not playwright_tool or not hasattr(playwright_tool, "page") or not playwright_tool.page:
             logging.error("Browser/page not available")
             return EvaluationResult(reward=0.0, done=False, content="Browser/page not available")
