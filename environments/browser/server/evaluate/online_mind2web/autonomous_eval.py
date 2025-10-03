@@ -1,4 +1,4 @@
-""" online=mind2web evaluators."""
+"""online=mind2web evaluators."""
 
 import os, json, logging
 from hud.tools.types import EvaluationResult
@@ -10,43 +10,34 @@ logger = logging.getLogger(__name__)
 
 router = MCPRouter()
 
+
 @router.tool
 async def autonomous_eval(
     task_description: dict | str,
 ) -> dict:
     logging.info((task_description))
-    if type(task_description) == str: task_description = json.loads(task_description)
+    if type(task_description) == str:
+        task_description = json.loads(task_description)
     try:
         # check openai api key
-        openai_api_key = os.getenv('OPENAI_API_KEY')
+        openai_api_key = os.getenv("OPENAI_API_KEY")
         if openai_api_key is None:
             logging.error("OPENAI_API_KEY environment variable not set")
             return EvaluationResult(
-                reward=0.,
-                done=False,
-                content="OPENAI_API_KEY environment variable not set"
+                reward=0.0, done=False, content="OPENAI_API_KEY environment variable not set"
             )
-
 
         # check the browser - get playwright tool from tools module
         try:
             from ..tools import playwright as playwright_tool
         except ImportError:
             logging.error("Cannot import playwright tool")
-            return EvaluationResult(
-                reward=0.,
-                done=False,
-                content="Cannot import playwright tool"
-            )
+            return EvaluationResult(reward=0.0, done=False, content="Cannot import playwright tool")
 
-        if not playwright_tool or not hasattr(playwright_tool, 'page') or not playwright_tool.page:
+        if not playwright_tool or not hasattr(playwright_tool, "page") or not playwright_tool.page:
             logging.error("Browser/page not available")
-            return EvaluationResult(
-                reward=0.,
-                done=False,
-                content="Browser/page not available"
-            )
-        
+            return EvaluationResult(reward=0.0, done=False, content="Browser/page not available")
+
         # Load action history from file
         action_history = []
         try:
@@ -69,7 +60,8 @@ async def autonomous_eval(
         # take screen shot
         screenshot_bytes = await playwright_tool.page.screenshot()
         import base64
-        screenshot_b64 = base64.b64encode(screenshot_bytes).decode('utf-8')
+
+        screenshot_b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
 
         # Create evaluation prompt using Autonomous_eval structure
         system_msg = """You are an expert in evaluating the performance of a web navigation agent. The agent is designed to help a human user navigate a website to complete a task. Given the user's intent, the agent's action history, the final state of the webpage, and the agent's response to the user, your goal is to decide whether the agent's execution is successful or not.
@@ -89,7 +81,7 @@ Status: "success" or "failure"
         prompt = f"""User Intent: {task_description["confirmed_task"]}
 
 Action History:
-{chr(10).join(f"{i+1}. {action}" for i, action in enumerate(last_actions))}
+{chr(10).join(f"{i + 1}. {action}" for i, action in enumerate(last_actions))}
 
 The last snapshot of the web page is shown in the image."""
         logging.info("Calling GPT-4.1 for evaluation...")
@@ -98,7 +90,9 @@ The last snapshot of the web page is shown in the image."""
         logging.info(f"Creating OpenAI client with api_key: {openai_api_key[:10]}...")
 
         # Check for any environment variables that might affect OpenAI client
-        proxy_related_vars = {k: v for k, v in os.environ.items() if 'proxy' in k.lower() or 'http' in k.lower()}
+        proxy_related_vars = {
+            k: v for k, v in os.environ.items() if "proxy" in k.lower() or "http" in k.lower()
+        }
         if proxy_related_vars:
             logging.info(f"Found proxy-related env vars: {proxy_related_vars}")
 
@@ -110,6 +104,7 @@ The last snapshot of the web page is shown in the image."""
             logging.error(f"Failed to create OpenAI client: {e}")
             logging.error(f"OpenAI version: {openai.__version__}")
             import traceback
+
             logging.error(traceback.format_exc())
             raise
         messages = [
@@ -120,17 +115,20 @@ The last snapshot of the web page is shown in the image."""
                     {"type": "text", "text": prompt},
                     {
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{screenshot_b64}", "detail": "high"}
-                    }
-                ]
-            }
+                        "image_url": {
+                            "url": f"data:image/png;base64,{screenshot_b64}",
+                            "detail": "high",
+                        },
+                    },
+                ],
+            },
         ]
 
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=messages,
             temperature=0.0,
-            max_tokens=500  # Increased for detailed thoughts and status
+            max_tokens=500,  # Increased for detailed thoughts and status
         )
 
         # Parse result according to new format
@@ -156,14 +154,14 @@ The last snapshot of the web page is shown in the image."""
                 "status": status,
                 "thoughts": thoughts,
                 "task_description": task_description,
-                "actions_count": len(action_history)
-            }
+                "actions_count": len(action_history),
+            },
         )
-        
+
     except Exception as e:
         logging.error(f"VLM evaluation failed: {e}")
         return {
             "passes": False,
             "error": str(e),
-            "task_description": task_description["confirmed_task"]
+            "task_description": task_description["confirmed_task"],
         }

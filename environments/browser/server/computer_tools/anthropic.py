@@ -12,6 +12,7 @@ from hud.tools.executors import BaseExecutor
 
 logger = logging.getLogger(__name__)
 
+
 class AnthropicComputerToolWithRecord(AnthropicComputerTool):
     def __init__(
         self,
@@ -43,17 +44,17 @@ class AnthropicComputerToolWithRecord(AnthropicComputerTool):
         )
         self.add_callback("on_screenshot_action", self._on_screenshot_action)
         self.add_callback("on_recorded_action", self._on_recorded_action)
-        
+
     async def _on_screenshot_action(self, **_) -> None:
         """Callback function to take and save screenshots to /screenshot directory"""
         try:
             # Check if executor is available and properly initialized
-            if not hasattr(self, 'executor') or self.executor is None:
+            if not hasattr(self, "executor") or self.executor is None:
                 logger.debug("Executor not yet initialized, skipping screenshot")
                 return
 
             # Additional check for executor readiness
-            if not hasattr(self.executor, 'screenshot'):
+            if not hasattr(self.executor, "screenshot"):
                 logger.debug("Executor screenshot method not available, skipping screenshot")
                 return
 
@@ -70,7 +71,7 @@ class AnthropicComputerToolWithRecord(AnthropicComputerTool):
 
                 # Decode base64 and save to file
                 image_data = base64.b64decode(screenshot_base64)
-                with open(filepath, 'wb') as f:
+                with open(filepath, "wb") as f:
                     f.write(image_data)
 
                 logger.info(f"Saved screenshot to {filepath}")
@@ -78,9 +79,16 @@ class AnthropicComputerToolWithRecord(AnthropicComputerTool):
         except Exception as e:
             logger.debug(f"Screenshot callback failed (this is normal during initialization): {e}")
 
-    async def _on_recorded_action(self, action=None, coordinate=None, text=None,
-                                  start_coordinate=None, scroll_direction=None,
-                                  scroll_amount=None, **_):
+    async def _on_recorded_action(
+        self,
+        action=None,
+        coordinate=None,
+        text=None,
+        start_coordinate=None,
+        scroll_direction=None,
+        scroll_amount=None,
+        **_,
+    ):
         """Record action in unified representation format
 
         Creates unified action representations like:
@@ -131,12 +139,16 @@ class AnthropicComputerToolWithRecord(AnthropicComputerTool):
             True, description="Whether to take a screenshot after clicking"
         ),
     ) -> list[ContentBlock]:
-        
-        result = await super().__call__(action=action, coordinate=coordinate, text=text, 
-                                  start_coordinate=start_coordinate, scroll_direction=scroll_direction,
-                                  scroll_amount=scroll_amount, duration=duration, 
-                                  take_screenshot_on_click=take_screenshot_on_click
-                                )
+        result = await super().__call__(
+            action=action,
+            coordinate=coordinate,
+            text=text,
+            start_coordinate=start_coordinate,
+            scroll_direction=scroll_direction,
+            scroll_amount=scroll_amount,
+            duration=duration,
+            take_screenshot_on_click=take_screenshot_on_click,
+        )
         screenshot_actions = {
             "screenshot",
             "left_click",
@@ -157,11 +169,7 @@ class AnthropicComputerToolWithRecord(AnthropicComputerTool):
             "left_mouse_down",
             "left_mouse_up",
         }
-        if (
-            action in screenshot_actions
-            and action != "screenshot"
-            and take_screenshot_on_click
-        ):
+        if action in screenshot_actions and action != "screenshot" and take_screenshot_on_click:
             await self._trigger_callbacks("on_screenshot_action")
         recorded_actions = {
             "left_click",
@@ -176,20 +184,27 @@ class AnthropicComputerToolWithRecord(AnthropicComputerTool):
             "left_click_drag",
             "drag",
         }
-        if (action in recorded_actions):
-            await self._trigger_callbacks("on_recorded_action",
-                                         action=action,
-                                         coordinate=coordinate,
-                                         text=text,
-                                         start_coordinate=start_coordinate,
-                                         scroll_direction=scroll_direction,
-                                         scroll_amount=scroll_amount)
+        if action in recorded_actions:
+            await self._trigger_callbacks(
+                "on_recorded_action",
+                action=action,
+                coordinate=coordinate,
+                text=text,
+                start_coordinate=start_coordinate,
+                scroll_direction=scroll_direction,
+                scroll_amount=scroll_amount,
+            )
         return result
 
-
-    def _to_action_repr(self, action, coordinate=None, text=None,
-                        start_coordinate=None, scroll_direction=None,
-                        scroll_amount=None):
+    def _to_action_repr(
+        self,
+        action,
+        coordinate=None,
+        text=None,
+        start_coordinate=None,
+        scroll_direction=None,
+        scroll_amount=None,
+    ):
         """Create unified action representation following AgentRewardBench format
 
         Format examples:

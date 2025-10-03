@@ -1,5 +1,6 @@
-""" online-mind2web evaluators webjudge"""
-""" reference: https://github.com/OSU-NLP-Group/Online-Mind2Web/blob/main/src/methods/webjudge_online_mind2web.py """ 
+"""online-mind2web evaluators webjudge"""
+
+""" reference: https://github.com/OSU-NLP-Group/Online-Mind2Web/blob/main/src/methods/webjudge_online_mind2web.py """
 
 import os, json, logging, base64, re
 import openai
@@ -9,6 +10,7 @@ from hud.server import MCPRouter
 logger = logging.getLogger(__name__)
 
 router = MCPRouter()
+
 
 async def identify_key_point(task_description: dict | str) -> dict:
     """Identify key points in a task description using GPT-4.
@@ -20,27 +22,31 @@ async def identify_key_point(task_description: dict | str) -> dict:
         Dict containing the identified key points
     """
 
-    if type(task_description) == str: task_description = json.loads(task_description)
+    if type(task_description) == str:
+        task_description = json.loads(task_description)
 
     # Check OpenAI API key
-    openai_api_key = os.getenv('OPENAI_API_KEY')
+    openai_api_key = os.getenv("OPENAI_API_KEY")
 
     # Debug what we get from environment
     logging.info(f"DEBUG: Raw environment variable type: {type(openai_api_key)}")
     if openai_api_key:
-        logging.info(f"DEBUG: Raw key repr: {repr(openai_api_key[:50])}")  # Show first 50 chars with repr to see any weird characters
+        logging.info(
+            f"DEBUG: Raw key repr: {repr(openai_api_key[:50])}"
+        )  # Show first 50 chars with repr to see any weird characters
     if openai_api_key is None:
         logging.error("OPENAI_API_KEY environment variable not set")
-        return {
-            "success": False,
-            "error": "OPENAI_API_KEY environment variable not set"
-        }
+        return {"success": False, "error": "OPENAI_API_KEY environment variable not set"}
 
     try:
         logging.info("Webjudge evaluation: identify_key_point")
 
         # Extract task text
-        task_text = task_description.get("confirmed_task", str(task_description)) if isinstance(task_description, dict) else str(task_description)
+        task_text = (
+            task_description.get("confirmed_task", str(task_description))
+            if isinstance(task_description, dict)
+            else str(task_description)
+        )
 
         system_msg = """You are an expert tasked with analyzing a given task to identify the key points explicitly stated in the task description.
 
@@ -60,15 +66,17 @@ async def identify_key_point(task_description: dict | str) -> dict:
 
         messages = [
             {"role": "system", "content": system_msg},
-            {"role": "user", "content": user_prompt}
+            {"role": "user", "content": user_prompt},
         ]
 
         # Debug the actual API key being used
-        logging.info(f"DEBUG: Creating OpenAI client with key: {openai_api_key[:20]}...{openai_api_key[-10:]}")
+        logging.info(
+            f"DEBUG: Creating OpenAI client with key: {openai_api_key[:20]}...{openai_api_key[-10:]}"
+        )
         logging.info(f"DEBUG: Full API key length: {len(openai_api_key)}")
 
         # Check if the key looks valid (should start with sk-)
-        if not openai_api_key.startswith('sk-'):
+        if not openai_api_key.startswith("sk-"):
             logging.error(f"DEBUG: API key doesn't start with 'sk-': {openai_api_key[:10]}")
 
         client = openai.OpenAI(api_key=openai_api_key)
@@ -83,19 +91,23 @@ async def identify_key_point(task_description: dict | str) -> dict:
                 model="gpt-4o",
                 messages=messages,
                 temperature=0.0,
-                max_tokens=500  # Increased for key points list
+                max_tokens=500,  # Increased for key points list
             )
             logging.info("DEBUG: API call completed successfully")
         except Exception as api_error:
             logging.error(f"DEBUG: API call failed with error: {api_error}")
             logging.error(f"DEBUG: Error type: {type(api_error)}")
-            if hasattr(api_error, 'response'):
+            if hasattr(api_error, "response"):
                 logging.error(f"DEBUG: Error response: {api_error.response}")
             # Re-check the environment variable at the moment of failure
-            current_key = os.getenv('OPENAI_API_KEY')
-            logging.error(f"DEBUG: Env var at failure - length: {len(current_key) if current_key else 'None'}")
+            current_key = os.getenv("OPENAI_API_KEY")
+            logging.error(
+                f"DEBUG: Env var at failure - length: {len(current_key) if current_key else 'None'}"
+            )
             if current_key:
-                logging.error(f"DEBUG: Env var at failure: {current_key[:20]}...{current_key[-10:]}")
+                logging.error(
+                    f"DEBUG: Env var at failure: {current_key[:20]}...{current_key[-10:]}"
+                )
             raise
 
         # Parse the response
@@ -107,7 +119,7 @@ async def identify_key_point(task_description: dict | str) -> dict:
             "success": True,
             "key_points": key_points_text,
             "task_description": task_text,
-            "model": "gpt-4o"
+            "model": "gpt-4o",
         }
 
     except Exception as e:
@@ -115,15 +127,13 @@ async def identify_key_point(task_description: dict | str) -> dict:
         return {
             "success": False,
             "error": str(e),
-            "task_description": task_text if 'task_text' in locals() else str(task_description)
+            "task_description": task_text if "task_text" in locals() else str(task_description),
         }
 
 
 # @evaluate.tool("judge_image")
 async def judge_image(
-    base64_images: list | str,
-    task_description: dict | str,
-    key_points: str
+    base64_images: list | str, task_description: dict | str, key_points: str
 ) -> dict:
     """Judge image(s) for task completion using GPT-4V
 
@@ -143,19 +153,20 @@ async def judge_image(
         base64_images = [base64_images]
 
     # Check OpenAI API key
-    openai_api_key = os.getenv('OPENAI_API_KEY')
+    openai_api_key = os.getenv("OPENAI_API_KEY")
     if openai_api_key is None:
         logging.error("OPENAI_API_KEY environment variable not set")
-        return {
-            "success": False,
-            "error": "OPENAI_API_KEY environment variable not set"
-        }
+        return {"success": False, "error": "OPENAI_API_KEY environment variable not set"}
 
     try:
         logging.info(f"Judging {len(base64_images)} images for task completion")
 
         # Extract task text
-        task_text = task_description.get("confirmed_task", str(task_description)) if isinstance(task_description, dict) else str(task_description)
+        task_text = (
+            task_description.get("confirmed_task", str(task_description))
+            if isinstance(task_description, dict)
+            else str(task_description)
+        )
 
         system_msg = """You are an expert evaluator tasked with determining whether the provided images contain information about the necessary steps to complete a task.
 
@@ -194,20 +205,16 @@ The snapshots of the web page progression are shown in the images below."""
         message_content = [{"type": "text", "text": prompt}]
 
         for base64_img in base64_images:
-            message_content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/png;base64,{base64_img}",
-                    "detail": "high"
+            message_content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{base64_img}", "detail": "high"},
                 }
-            })
+            )
 
         messages = [
             {"role": "system", "content": system_msg},
-            {
-                "role": "user",
-                "content": message_content
-            }
+            {"role": "user", "content": message_content},
         ]
 
         client = openai.OpenAI(api_key=openai_api_key)
@@ -216,7 +223,7 @@ The snapshots of the web page progression are shown in the images below."""
             model="gpt-4o",  # GPT-4V
             messages=messages,
             temperature=0.0,
-            max_tokens=1000
+            max_tokens=1000,
         )
 
         # Parse the response
@@ -230,7 +237,7 @@ The snapshots of the web page progression are shown in the images below."""
             "task_description": task_text,
             "key_points": key_points,
             "images_processed": len(base64_images),
-            "model": "gpt-4o"
+            "model": "gpt-4o",
         }
 
     except Exception as e:
@@ -238,15 +245,13 @@ The snapshots of the web page progression are shown in the images below."""
         return {
             "success": False,
             "error": str(e),
-            "task_description": task_text if 'task_text' in locals() else str(task_description),
-            "images_processed": len(base64_images) if 'base64_images' in locals() else 0
+            "task_description": task_text if "task_text" in locals() else str(task_description),
+            "images_processed": len(base64_images) if "base64_images" in locals() else 0,
         }
-        
+
 
 @router.tool
-async def webjudge(
-    task_description: dict | str
-) -> dict:
+async def webjudge(task_description: dict | str) -> dict:
     """WebJudge Online Mind2Web evaluation using screenshot history and action history
 
     Args:
@@ -256,18 +261,15 @@ async def webjudge(
     Returns:
         Dict containing evaluation results with success/failure status
     """
-    score_threshold=3
+    score_threshold = 3
     if type(task_description) == str:
         task_description = json.loads(task_description)
 
     # Check OpenAI API key
-    openai_api_key = os.getenv('OPENAI_API_KEY')
+    openai_api_key = os.getenv("OPENAI_API_KEY")
     if openai_api_key is None:
         logging.error("OPENAI_API_KEY environment variable not set")
-        return {
-            "success": False,
-            "error": "OPENAI_API_KEY environment variable not set"
-        }
+        return {"success": False, "error": "OPENAI_API_KEY environment variable not set"}
 
     try:
         logging.info("Starting WebJudge Online Mind2Web evaluation")
@@ -280,12 +282,11 @@ async def webjudge(
         screenshot_history = []
 
         try:
-
             if os.path.exists(screenshot_dir):
                 # Get all PNG files sorted by modification time (newest last)
                 screenshot_files = []
                 for file in os.listdir(screenshot_dir):
-                    if file.endswith('.png') and file.startswith('screenshot_'):
+                    if file.endswith(".png") and file.startswith("screenshot_"):
                         filepath = os.path.join(screenshot_dir, file)
                         mtime = os.path.getmtime(filepath)
                         screenshot_files.append((mtime, filepath))
@@ -296,9 +297,9 @@ async def webjudge(
                 # Convert to base64 for the last 10 screenshots
                 for _, filepath in screenshot_files[-10:]:  # Last 10 screenshots
                     try:
-                        with open(filepath, 'rb') as f:
+                        with open(filepath, "rb") as f:
                             image_data = f.read()
-                            screenshot_b64 = base64.b64encode(image_data).decode('utf-8')
+                            screenshot_b64 = base64.b64encode(image_data).decode("utf-8")
                             screenshot_history.append(screenshot_b64)
                     except Exception as e:
                         logging.warning(f"Failed to read screenshot {filepath}: {e}")
@@ -313,10 +314,10 @@ async def webjudge(
         if not screenshot_history:
             logging.warning("No screenshot history available")
             return EvaluationResult(
-                reward=0.,
+                reward=0.0,
                 done=True,
                 content="No screenshot avaliable",
-                info={"task_description": task_text, "status": "No screenshot avaliable"}
+                info={"task_description": task_text, "status": "No screenshot avaliable"},
             )
 
         # Get action history from file
@@ -336,7 +337,9 @@ async def webjudge(
         # Get last 10 actions for evaluation
         last_actions = action_history[-10:] if action_history else []
 
-        logging.info(f"Found {len(screenshot_history)} screenshots and {len(action_history)} actions")
+        logging.info(
+            f"Found {len(screenshot_history)} screenshots and {len(action_history)} actions"
+        )
 
         # Step 1: Identify key points
         logging.info(f"Webjudge step 1: Identify key points")
@@ -344,7 +347,7 @@ async def webjudge(
         if not key_points_result.get("success"):
             return {
                 "success": False,
-                "error": f"Key point identification failed: {key_points_result.get('error')}"
+                "error": f"Key point identification failed: {key_points_result.get('error')}",
             }
 
         key_points = key_points_result["key_points"]
@@ -365,13 +368,13 @@ async def webjudge(
         judge_result = await judge_image(
             base64_images=screenshot_history[-10:],  # Last 10 screenshots
             task_description=task_description,
-            key_points=key_points
+            key_points=key_points,
         )
 
         if not judge_result.get("success"):
             return {
                 "success": False,
-                "error": f"Image judgment failed: {judge_result.get('error')}"
+                "error": f"Image judgment failed: {judge_result.get('error')}",
             }
 
         # Parse judgment result for score
@@ -385,13 +388,15 @@ async def webjudge(
 
         # Extract reasoning
         try:
-            reasoning = judgment_text.split("**Reasoning**:")[-1].strip().split("**Score**:")[0].strip()
+            reasoning = (
+                judgment_text.split("**Reasoning**:")[-1].strip().split("**Score**:")[0].strip()
+            )
         except:
             reasoning = "Unable to extract reasoning"
 
         # Step 3: Final evaluation using GPT-4
         logging.info(f"Webjudge step 3: Final evaluation using GPT-4")
-        
+
         system_msg = """You are an expert in evaluating the performance of a web navigation agent. The agent is designed to help a human user navigate a website to complete a task. Given the user's task, the agent's action history, key points for task completion, and analysis of important web pages, your goal is to determine whether the agent has completed the task and achieved all requirements.
 
 Your response must strictly follow the following evaluation criteria!
@@ -415,18 +420,25 @@ Status: "success" or "failure"
         if main_score >= score_threshold:
             # Include high-scoring screenshots in final evaluation
             final_images = []
-            for screenshot_b64 in screenshot_history[-min(5, len(screenshot_history)):]:  # Last 5 screenshots
-                final_images.append({
-                    'type': 'image_url',
-                    'image_url': {"url": f"data:image/png;base64,{screenshot_b64}", "detail": "high"}
-                })
+            for screenshot_b64 in screenshot_history[
+                -min(5, len(screenshot_history)) :
+            ]:  # Last 5 screenshots
+                final_images.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{screenshot_b64}",
+                            "detail": "high",
+                        },
+                    }
+                )
 
             prompt_with_images = f"""User Task: {task_text}
 
 Key Points: {key_points}
 
 Action History:
-{chr(10).join(f"{i+1}. {action}" for i, action in enumerate(last_actions))}
+{chr(10).join(f"{i + 1}. {action}" for i, action in enumerate(last_actions))}
 
 Image Analysis Results:
 Score: {main_score}/5
@@ -440,7 +452,7 @@ Reasoning: {reasoning}"""
 Key Points: {key_points}
 
 Action History:
-{chr(10).join(f"{i+1}. {action}" for i, action in enumerate(last_actions))}
+{chr(10).join(f"{i + 1}. {action}" for i, action in enumerate(last_actions))}
 
 Note: Screenshot analysis scored {main_score}/5, below threshold of {score_threshold}."""
 
@@ -449,16 +461,10 @@ Note: Screenshot analysis scored {main_score}/5, below threshold of {score_thres
         # Final evaluation
         client = openai.OpenAI(api_key=openai_api_key)
 
-        messages = [
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": content}
-        ]
+        messages = [{"role": "system", "content": system_msg}, {"role": "user", "content": content}]
 
         response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=messages,
-            temperature=0.0,
-            max_tokens=500
+            model="gpt-4o", messages=messages, temperature=0.0, max_tokens=500
         )
 
         final_result = response.choices[0].message.content.strip()
@@ -476,16 +482,16 @@ Note: Screenshot analysis scored {main_score}/5, below threshold of {score_thres
         logging.info(f"WebJudge evaluation result: {status}")
 
         return EvaluationResult(
-                reward=1. if success else 0.,
-                done=True,
-                content=final_result,
-                info={"task_description": task_text, "status": status, "thoughts": thoughts}
-            )
+            reward=1.0 if success else 0.0,
+            done=True,
+            content=final_result,
+            info={"task_description": task_text, "status": status, "thoughts": thoughts},
+        )
 
     except Exception as e:
         logging.error(f"WebJudge evaluation failed: {e}")
         return {
             "success": False,
             "error": str(e),
-            "task_description": task_text if 'task_text' in locals() else str(task_description)
+            "task_description": task_text if "task_text" in locals() else str(task_description),
         }

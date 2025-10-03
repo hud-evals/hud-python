@@ -1,4 +1,5 @@
 """OpenAI with memory/history tracking for remote browser environment."""
+
 import os, base64
 from datetime import datetime
 import logging
@@ -12,6 +13,7 @@ from _collections_abc import Callable, Awaitable
 from hud.tools.executors import BaseExecutor
 
 logger = logging.getLogger(__name__)
+
 
 class OpenAIComputerToolWithRecord(OpenAIComputerTool):
     """OpenAI Computer Use tool
@@ -60,24 +62,22 @@ class OpenAIComputerToolWithRecord(OpenAIComputerTool):
         )
         self.add_callback("on_screenshot_action", self._on_screenshot_action)
         self.add_callback("on_recorded_action", self._on_recorded_action)
-        
+
     async def _on_screenshot_action(self, **kwargs) -> None:
         """Callback function to take and save screenshots to /screenshot directory"""
         try:
             # Check if executor is available and properly initialized
-            if not hasattr(self, 'executor') or self.executor is None:
+            if not hasattr(self, "executor") or self.executor is None:
                 logger.debug("Executor not yet initialized, skipping screenshot")
                 return
 
             # Additional check for executor readiness
-            if not hasattr(self.executor, 'screenshot'):
+            if not hasattr(self.executor, "screenshot"):
                 logger.debug("Executor screenshot method not available, skipping screenshot")
                 return
 
             screenshot_base64 = await self.executor.screenshot()
             if screenshot_base64:
-
-
                 # Create screenshot directory if it doesn't exist
                 screenshot_dir = "/screenshot"
                 os.makedirs(screenshot_dir, exist_ok=True)
@@ -89,7 +89,7 @@ class OpenAIComputerToolWithRecord(OpenAIComputerTool):
 
                 # Decode base64 and save to file
                 image_data = base64.b64decode(screenshot_base64)
-                with open(filepath, 'wb') as f:
+                with open(filepath, "wb") as f:
                     f.write(image_data)
 
                 logger.info(f"Saved screenshot to {filepath}")
@@ -98,8 +98,9 @@ class OpenAIComputerToolWithRecord(OpenAIComputerTool):
             logger.debug(f"Screenshot callback failed (this is normal during initialization): {e}")
             # Don't log as error since this is expected during initialization
 
-    async def _on_recorded_action(self, type=None, x=None, y=None, text=None,
-                                  path=None, scroll_x=None, scroll_y=None, **_):
+    async def _on_recorded_action(
+        self, type=None, x=None, y=None, text=None, path=None, scroll_x=None, scroll_y=None, **_
+    ):
         """Record action in unified representation format
 
         Creates unified action representations like:
@@ -112,9 +113,7 @@ class OpenAIComputerToolWithRecord(OpenAIComputerTool):
 
         try:
             # Create unified action representation
-            action_repr = self._to_action_repr(
-                type, x, y, text, path, scroll_x, scroll_y
-            )
+            action_repr = self._to_action_repr(type, x, y, text, path, scroll_x, scroll_y)
 
             # Dump to file
             action_history_dir = "/action_history"
@@ -129,8 +128,9 @@ class OpenAIComputerToolWithRecord(OpenAIComputerTool):
         except Exception as e:
             logger.warning(f"Failed to record action: {e}")
 
-    def _to_action_repr(self, type, x=None, y=None, text=None,
-                        path=None, scroll_x=None, scroll_y=None):
+    def _to_action_repr(
+        self, type, x=None, y=None, text=None, path=None, scroll_x=None, scroll_y=None
+    ):
         """Create unified action representation following AgentRewardBench format
 
         Format examples:
@@ -213,9 +213,17 @@ class OpenAIComputerToolWithRecord(OpenAIComputerTool):
     ) -> list[ContentBlock]:
         """Overriding OpenAIComputerTool.__call__()"""
         result = await super().__call__(
-            type=type, x=x, y=y, button=button, 
-            text=text, scroll_x=scroll_x, scroll_y=scroll_y,
-            ms=ms, keys=keys, path=path, action=action
+            type=type,
+            x=x,
+            y=y,
+            button=button,
+            text=text,
+            scroll_x=scroll_x,
+            scroll_y=scroll_y,
+            ms=ms,
+            keys=keys,
+            path=path,
+            action=action,
         )
         screenshot_action_type = {
             "screenshot",
@@ -230,7 +238,7 @@ class OpenAIComputerToolWithRecord(OpenAIComputerTool):
         }
         logger.info(f"debug action type: {type}")
         if type in screenshot_action_type:
-            if hasattr(self, '_trigger_callbacks'):
+            if hasattr(self, "_trigger_callbacks"):
                 await self._trigger_callbacks("on_screenshot_action")
             else:
                 logger.warning("_trigger_callbacks method not available")
@@ -253,7 +261,7 @@ class OpenAIComputerToolWithRecord(OpenAIComputerTool):
                 text=text,
                 path=path,
                 scroll_x=scroll_x,
-                scroll_y=scroll_y
+                scroll_y=scroll_y,
             )
 
         return result
