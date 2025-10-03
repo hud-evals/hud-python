@@ -20,6 +20,7 @@ import logging
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import mcp.types as types
+from openai import AsyncOpenAI
 
 from hud import instrument
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
@@ -28,7 +29,6 @@ from hud.utils.hud_console import HUDConsole
 from .base import MCPAgent
 
 if TYPE_CHECKING:
-    from openai import AsyncOpenAI
     from openai.types.chat import ChatCompletionToolParam
 
 logger = logging.getLogger(__name__)
@@ -42,14 +42,26 @@ class GenericOpenAIChatAgent(MCPAgent):
     def __init__(
         self,
         *,
-        openai_client: AsyncOpenAI | None,
+        openai_client: AsyncOpenAI | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
         model_name: str = "gpt-4o-mini",
         completion_kwargs: dict[str, Any] | None = None,
         **agent_kwargs: Any,
     ) -> None:
         # Accept base-agent settings via **agent_kwargs (e.g., mcp_client, system_prompt, etc.)
         super().__init__(**agent_kwargs)
-        self.oai = openai_client
+        
+        # Handle client creation - support both patterns
+        if openai_client is not None:
+            # Use provided client (backward compatibility)
+            self.oai = openai_client
+        elif api_key is not None or base_url is not None:
+            # Create client from config (new pattern, consistent with other agents)
+            self.oai = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        else:
+            raise ValueError("Either openai_client or (api_key and base_url) must be provided")
+            
         self.model_name = model_name
         self.completion_kwargs: dict[str, Any] = completion_kwargs or {}
         self.mcp_schemas = []

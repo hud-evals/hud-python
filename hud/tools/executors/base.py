@@ -280,7 +280,7 @@ class BaseExecutor:
 
     # ===== Utility Actions =====
 
-    async def wait(self, time: int) -> ContentResult:
+    async def wait(self, time: int, take_screenshot: bool = True) -> ContentResult:
         """
         Wait for specified time.
 
@@ -289,7 +289,9 @@ class BaseExecutor:
         """
         duration_seconds = time / 1000.0
         await asyncio.sleep(duration_seconds)
-        return ContentResult(output=f"Waited {time}ms")
+        # take screenshot
+        screenshot = await self.screenshot() if take_screenshot else None
+        return ContentResult(output=f"Waited {time}ms", base64_image=screenshot)
 
     async def screenshot(self) -> str | None:
         """

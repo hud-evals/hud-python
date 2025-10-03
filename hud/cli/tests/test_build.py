@@ -373,7 +373,8 @@ ENV API_KEY
         with open(lock_file) as f:
             lock_data = yaml.safe_load(f)
 
-        assert lock_data["image"] == "test/env:latest@sha256:abc123"
+        assert lock_data["images"]["full"] == "test-env:0.1.0@sha256:abc123"
+        assert lock_data["images"]["local"] == "test-env:0.1.0"
         assert lock_data["build"]["version"] == "0.1.0"
         assert lock_data["environment"]["toolCount"] == 2
         assert len(lock_data["tools"]) == 2

@@ -94,7 +94,7 @@ def trace(
     job_id: str | None = None,
     task_id: str | None = None,
 ) -> Generator[Trace, None, None]:
-    """Start a HUD trace context.
+    """Start a HUD trace context for telemetry tracking.
 
     A unique task_run_id is automatically generated for each trace.
 
@@ -108,22 +108,21 @@ def trace(
     Yields:
         Trace: The trace object with logging capabilities
 
-    Usage:
-        import hud
+    Example:
+        >>> import hud
+        >>> # Synchronous code
+        >>> with hud.trace("My Task") as trace:
+        ...     do_work()
+        ...     trace.log_sync({"step": 1, "progress": 0.5})
+        >>> # For async code with HIGH CONCURRENCY (200+ tasks), use async_trace
+        >>> async with hud.async_trace("My Async Task") as trace:
+        ...     await do_async_work()
+        ...     await trace.log({"loss": 0.23, "accuracy": 0.95})
 
-        # Basic usage
-        with hud.trace("My Task") as trace:
-            # Your code here
-            trace.log_sync({"step": 1, "progress": 0.5})
-
-        # Async logging
-        async with hud.trace("Async Task") as trace:
-            await trace.log({"loss": 0.23, "accuracy": 0.95})
-
-        # With job association
-        with hud.job("Training Run") as job:
-            with hud.trace("Epoch 1", job_id=job.id) as trace:
-                trace.log_sync({"epoch": 1, "loss": 0.5})
+    Note:
+        For simple async code (< 30 parallel tasks), this context manager works fine
+        with `async with`. Use `hud.async_trace()` only for high-concurrency scenarios
+        (200+ parallel tasks) where event loop blocking becomes an issue.
     """
     # Ensure telemetry is configured
     configure_telemetry()

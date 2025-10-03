@@ -63,12 +63,12 @@ class ComputerSettings(BaseSettings):
     )
 
     QWEN_COMPUTER_WIDTH: int = Field(
-        default=1920,
+        default=700,
         description="Width of the display to use for the Qwen computer tools",
         validation_alias="QWEN_COMPUTER_WIDTH",
     )
     QWEN_COMPUTER_HEIGHT: int = Field(
-        default=1080,
+        default=448,
         description="Height of the display to use for the Qwen computer tools",
         validation_alias="QWEN_COMPUTER_HEIGHT",
     )

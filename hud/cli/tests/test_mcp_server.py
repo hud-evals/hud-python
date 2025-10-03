@@ -19,7 +19,7 @@ class TestRunMCPDevServer:
         import click
 
         with (
-            patch("hud.cli.dev.image_exists", return_value=False),
+            patch("hud.cli.utils.environment.image_exists", return_value=False),
             patch("click.confirm", return_value=False),
             pytest.raises(click.Abort),
         ):

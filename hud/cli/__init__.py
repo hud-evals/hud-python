@@ -796,33 +796,19 @@ def eval(
         help="Comma-separated list of allowed tools",
     ),
     max_concurrent: int = typer.Option(
-        50,
+        30,
         "--max-concurrent",
-        help="Max concurrent tasks (prevents rate limits in both asyncio and parallel modes)",
+        help="Maximum concurrent tasks (1-200 recommended, prevents rate limits)",
     ),
     max_steps: int | None = typer.Option(
         None,
         "--max-steps",
         help="Maximum steps per task (default: 10 for single, 50 for full)",
     ),
-    parallel: bool = typer.Option(
-        False,
-        "--parallel",
-        help="Use process-based parallel execution for large datasets (100+ tasks)",
-    ),
-    max_workers: int | None = typer.Option(
-        None,
-        "--max-workers",
-        help="Number of worker processes for parallel mode (auto-optimized if not set)",
-    ),
-    max_concurrent_per_worker: int = typer.Option(
-        20,
-        "--max-concurrent-per-worker",
-        help="Maximum concurrent tasks per worker in parallel mode",
-    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
+        "-v",
         help="Enable verbose output from the agent",
     ),
     very_verbose: bool = typer.Option(
@@ -867,14 +853,14 @@ def eval(
 
             source = find_tasks_file(None, msg="Select a tasks file to run")
             hud_console.success(f"Selected: {source}")
-        except Exception as e:
+        except (FileNotFoundError, Exception):
             hud_console.error(
                 "No source provided and no task/eval JSON files found in current directory"
             )
             hud_console.info(
                 "Usage: hud eval <source> or create a task JSON file (e.g., task.json, tasks.jsonl)"
             )
-            raise typer.Exit(1) from e
+            raise typer.Exit(1) from None
 
     # Import eval_command lazily to avoid importing agent dependencies
     try:
@@ -950,9 +936,6 @@ def eval(
         allowed_tools=allowed_tools,
         max_concurrent=max_concurrent,
         max_steps=max_steps,
-        parallel=parallel,
-        max_workers=max_workers,
-        max_concurrent_per_worker=max_concurrent_per_worker,
         verbose=verbose,
         very_verbose=very_verbose,
         vllm_base_url=vllm_base_url,
@@ -1126,6 +1109,13 @@ def set(
 
 def main() -> None:
     """Main entry point for the CLI."""
+    # Check for updates (including on --version command)
+    # Skip only on help-only commands
+    if not (len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"])):
+        from .utils.version_check import display_update_prompt
+
+        display_update_prompt()
+
     # Handle --version flag before Typer parses args
     if "--version" in sys.argv:
         try:

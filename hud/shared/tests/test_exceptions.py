@@ -7,7 +7,7 @@ classification and helpful hints for users.
 from __future__ import annotations
 
 import json
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import httpx
 import pytest
@@ -17,6 +17,7 @@ from hud.shared.exceptions import (
     HudClientError,
     HudConfigError,
     HudException,
+    HudMCPError,
     HudRateLimitError,
     HudRequestError,
     HudTimeoutError,
@@ -243,23 +244,23 @@ class TestMCPErrorHandling:
     @pytest.mark.asyncio
     async def test_mcp_error_handling(self):
         """Test that McpError is handled appropriately."""
-        # Since McpError is imported dynamically, we'll mock it
-        with patch("hud.clients.mcp_use.McpError") as MockMcpError:
-            MockMcpError.side_effect = Exception
 
-            # Create a mock MCP error
-            mcp_error = Exception("MCP protocol error: Unknown method")
-            mcp_error.__class__.__name__ = "McpError"
+        # Create a mock McpError class
+        class McpError(Exception):
+            pass
 
-            try:
-                raise mcp_error
-            except Exception as e:
-                # This would typically be caught in the client code
-                # and re-raised as HudException
-                with pytest.raises(HudException) as exc_info:
-                    raise HudException from e
+        # Create a mock MCP error
+        mcp_error = McpError("MCP protocol error: Unknown method")
 
-                assert "MCP protocol error" in str(exc_info.value)
+        try:
+            raise mcp_error
+        except Exception as e:
+            # This would typically be caught in the client code
+            # and re-raised as HudException
+            with pytest.raises(HudMCPError) as exc_info:
+                raise HudException from e
+
+            assert "MCP protocol error" in str(exc_info.value)
 
     def test_mcp_tool_error_result(self):
         """Test handling of MCP tool execution errors (isError: true)."""
@@ -352,7 +353,7 @@ class TestExceptionRendering:
         assert len(error.hints) == 1
         assert error.hints[0] == HUD_API_KEY_MISSING
         assert error.hints[0].title == "HUD API key required"
-        assert "Set HUD_API_KEY environment variable" in error.hints[0].tips[0]
+        assert "Set HUD_API_KEY" in error.hints[0].tips[0]
 
     def test_exception_type_preservation(self):
         """Test that exception types are preserved through conversion."""

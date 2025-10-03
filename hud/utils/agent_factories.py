@@ -36,9 +36,7 @@ def create_openai_agent(**kwargs: Any) -> GenericOpenAIChatAgent:
     api_key = kwargs.pop("api_key", None)
     base_url = kwargs.pop("base_url", None)
 
-    openai_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-
-    return GenericOpenAIChatAgent(openai_client=openai_client, **kwargs)
+    return GenericOpenAIChatAgent(api_key=api_key, base_url=base_url, **kwargs)
 
 
 def create_grounded_agent(**kwargs: Any) -> GroundedOpenAIChatAgent:

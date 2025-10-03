@@ -94,7 +94,7 @@ class TestBaseMCPAgent:
 
         assert agent.mcp_client is not None
         assert agent.allowed_tools is None
-        assert agent.disallowed_tools == []
+        assert agent.disallowed_tools is None
         assert agent.initial_screenshot is True
         assert agent.system_prompt is not None  # Default system prompt is set
 
@@ -241,6 +241,13 @@ class TestBaseMCPAgent:
         assert "tool2" not in tool_names  # Not in allowed list
         assert "tool3" not in tool_names  # In disallowed list
 
+        # Make sure tool schemas are correct
+        schemas = agent.get_tool_schemas()
+        assert len(schemas) == 1
+        assert schemas[0]["name"] == "tool1"
+        assert schemas[0]["description"] == "Tool 1"
+        assert schemas[0]["parameters"] == {"type": "object"}
+
     @pytest.mark.asyncio
     async def test_call_tool_success(self):
         """Test successful tool call."""
@@ -321,21 +328,6 @@ class TestBaseMCPAgent:
 
         # call_tools doesn't validate empty names, it will return error
         await agent.call_tools(tool_call)
-
-    def test_get_tool_schemas(self):
-        """Test getting tool schemas."""
-        agent = MockMCPAgent()
-
-        agent._available_tools = [
-            types.Tool(name="tool1", description="Tool 1", inputSchema={"type": "object"}),
-            types.Tool(name="setup", description="Setup", inputSchema={"type": "object"}),
-        ]
-
-        schemas = agent.get_tool_schemas()
-
-        # Should include non-lifecycle tools
-        assert len(schemas) == 1
-        assert schemas[0]["name"] == "tool1"
 
     def test_get_tools_by_server(self):
         """Test getting tools grouped by server."""

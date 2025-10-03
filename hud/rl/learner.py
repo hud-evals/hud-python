@@ -187,7 +187,7 @@ class GRPOLearner:
         # Use 8-bit optimizer if configured
         if self.config.training.use_8bit_optimizer and BNB_AVAILABLE:
             hud_console.info("Using 8-bit AdamW optimizer from bitsandbytes")
-            optimizer = bnb.optim.AdamW8bit(
+            optimizer = bnb.optim.AdamW8bit(  # type: ignore
                 trainable_params,
                 lr=self.config.training.lr,
                 betas=self.config.training.adam_betas,

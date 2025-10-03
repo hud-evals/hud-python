@@ -36,28 +36,20 @@ hud eval [SOURCE] [AGENT] [OPTIONS]
   Comma-separated list of allowed tools
 </ParamField>
 
-<ParamField path="--max-concurrent" type="integer" default="50">
-  Max concurrent tasks
+<ParamField path="--max-concurrent" type="integer" default="30">
+  Maximum concurrent tasks (1-200 recommended). Adjust based on your API rate limits and system resources.
 </ParamField>
 
-<ParamField path="--max-steps" type="integer" default="30">
-  Maximum steps per task (default varies by mode)
-</ParamField>
-
-<ParamField path="--parallel" type="boolean" default="false">
-  Use process-based parallel execution for large datasets (100+ tasks)
-</ParamField>
-
-<ParamField path="--max-workers" type="integer">
-  Number of worker processes for parallel mode (auto-optimized if not set)
-</ParamField>
-
-<ParamField path="--max-concurrent-per-worker" type="integer" default="20">
-  Maximum concurrent tasks per worker in parallel mode
+<ParamField path="--max-steps" type="integer" default="50">
+  Maximum steps per task (default: 10 for single task, 50 for full dataset)
 </ParamField>
 
 <ParamField path="--verbose" type="boolean" default="false">
   Enable verbose agent output
+</ParamField>
+
+<ParamField path="--very-verbose" type="boolean" default="false">
+  Enable debug-level logs for maximum visibility
 </ParamField>
 
 <ParamField path="--vllm-base-url" type="string">
@@ -71,11 +63,23 @@ hud eval [SOURCE] [AGENT] [OPTIONS]
 ## Examples
 
 ```bash
-# Minimal (interactive agent selection)
-hud eval tasks.json
+# Single task (debug mode)
+hud eval hud-evals/SheetBench-50
 
-# Entire dataset with Claude
+# Entire huggingface dataset with Claude
 hud eval hud-evals/SheetBench-50 claude --full
+
+# High concurrency for faster evaluation
+hud eval hud-evals/SheetBench-50 claude --full --max-concurrent 100
+
+# Limit concurrency to prevent rate limits
+hud eval hud-evals/SheetBench-50 openai --full --max-concurrent 20
+
+# Local task config
+hud eval tasks.json claude
+
+# Local task config with verbose output for debugging
+hud eval tasks.json claude --verbose
 
 # vLLM with explicit base URL
 hud eval tasks.json vllm --model llama3.1 --vllm-base-url http://localhost:8000

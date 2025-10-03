@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Generic HuggingFace dataset evaluation runner with parallel execution support.
+"""Generic HuggingFace dataset evaluation runner using asyncio-based concurrency.
 
 This script lets you evaluate any HUD-compatible Task dataset with either
-Claude or OpenAI (Operator) agents. Supports both asyncio-based concurrency
-(for small datasets) and process-based parallelization (for large datasets).
+Claude or OpenAI (Operator) agents using efficient asyncio-based concurrency.
 
 Prerequisites:
 • `uv add hud-python`
@@ -21,14 +20,14 @@ python examples/run_evaluation.py hud-evals/OSWorld-Verified-Gold --agent openai
 # Enable debug-level logs for maximum visibility
 python examples/run_evaluation.py hud-evals/OSWorld-Verified-Gold --agent openai --very-verbose
 
-# Evaluate the FULL SheetBench dataset with Claude (Single Process concurrency)
-python examples/run_evaluation.py hud-evals/SheetBench-50 --full --agent claude --max-concurrent 25
+# Evaluate the FULL SheetBench dataset with Claude
+python examples/run_evaluation.py hud-evals/SheetBench-50 --full --agent claude --max-concurrent 50
 
-# Run OSWorld-Verified dataset full with PARALLEL execution (300+ tasks)
-python examples/run_evaluation.py hud-evals/OSWorld-Verified-Gold --agent openai --full --parallel
+# Run OSWorld-Verified dataset with higher concurrency for speed
+python examples/run_evaluation.py hud-evals/OSWorld-Verified-Gold --agent openai --full --max-concurrent 100
 
-# Parallel mode with manual configuration (8 workers, 10 concurrent per worker)
-python examples/run_evaluation.py hud-evals/OSWorld-Verified-Gold --agent openai --full --parallel --max-workers 8 --max-concurrent-per-worker 10
+# Limit concurrency to prevent rate limits
+python examples/run_evaluation.py hud-evals/SheetBench-50 --agent openai --full --max-concurrent 20
 
 # Custom max steps per task (useful for complex tasks)
 python examples/run_evaluation.py hud-evals/SheetBench-50 --full --max-steps 100
@@ -46,14 +45,14 @@ from datasets import load_dataset
 from hud.agents import ClaudeAgent, OperatorAgent
 from hud.agents.misc.response_agent import ResponseAgent
 from hud.clients import MCPClient
-from hud.datasets import Task, run_dataset, run_dataset_parallel, run_dataset_parallel_manual
+from hud.datasets import Task, run_dataset
 
 logger = logging.getLogger(__name__)
 
 # Uncomment to enable logging
-# logging.basicConfig(
-#     level=logging.INFO, format="%(asctime)s - %(name)s - %(message)s", datefmt="%H:%M:%S"
-# )
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(message)s", datefmt="%H:%M:%S"
+)
 
 # ---------------------------------------------------------------------------
 # Agent factory helpers
@@ -137,17 +136,10 @@ async def run_full_dataset(
     agent_type: Literal["claude", "openai"] = "claude",
     model: str | None = None,
     allowed_tools: list[str] | None = None,
-    max_concurrent: int = 30,
+    max_concurrent: int = 50,
     max_steps: int = 10,
-    parallel: bool = False,
-    max_workers: int | None = None,
-    max_concurrent_per_worker: int = 25,
 ) -> list[Any]:
-    """Run evaluation across the entire dataset.
-
-    Uses either asyncio-based run_dataset or process-based run_dataset_parallel
-    depending on the parallel flag.
-    """
+    """Run evaluation across the entire dataset using asyncio-based concurrency."""
 
     # Build agent class + config for run_dataset – we pass the *class* and a minimal
     # config dict, run_dataset will create a fresh agent per task.
@@ -155,54 +147,29 @@ async def run_full_dataset(
         agent_class = OperatorAgent
         agent_config: dict[str, Any] = {
             "allowed_tools": allowed_tools or ["openai_computer"],
+            "validate_api_key": False,
         }
     else:
         agent_class = ClaudeAgent
         agent_config = {
             "model": model or "claude-sonnet-4-20250514",
             "allowed_tools": allowed_tools or ["anthropic_computer"],
+            "validate_api_key": False,
         }
 
     eval_name = f"Evaluation {dataset_name.split('/')[-1]}"
 
-    if parallel:
-        print(f"🚀 Running PARALLEL evaluation (workers: {max_workers or 'auto'})…")
-        if max_workers is None:
-            # Use auto-optimization (now the default run_dataset_parallel)
-            return await run_dataset_parallel(
-                name=eval_name,
-                dataset=dataset_name,
-                agent_class=agent_class,
-                agent_config=agent_config,
-                metadata={"dataset": dataset_name, "parallel": True},
-                max_steps=max_steps,
-                auto_respond=True,
-            )
-        else:
-            # Use manual configuration
-            return await run_dataset_parallel_manual(
-                name=eval_name,
-                dataset=dataset_name,
-                agent_class=agent_class,
-                agent_config=agent_config,
-                max_workers=max_workers,
-                max_concurrent_per_worker=max_concurrent_per_worker,
-                metadata={"dataset": dataset_name, "parallel": True},
-                max_steps=max_steps,
-                auto_respond=True,
-            )
-    else:
-        print(f"🚀 Running evaluation (max_concurrent: {max_concurrent})…")
-        return await run_dataset(
-            name=eval_name,
-            dataset=dataset_name,
-            agent_class=agent_class,
-            agent_config=agent_config,
-            max_concurrent=max_concurrent,
-            metadata={"dataset": dataset_name},
-            max_steps=max_steps,
-            auto_respond=True,
-        )
+    print(f"🚀 Running evaluation (max_concurrent: {max_concurrent})…")
+    return await run_dataset(
+        name=eval_name,
+        dataset=dataset_name,
+        agent_class=agent_class,
+        agent_config=agent_config,
+        max_concurrent=max_concurrent,
+        metadata={"dataset": dataset_name},
+        max_steps=max_steps,
+        auto_respond=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -239,7 +206,7 @@ Examples:
         dest="max_concurrent",
         type=int,
         default=50,
-        help="Max concurrent tasks (default: 50)",
+        help="Max concurrent tasks (1-200 recommended, default: 50)",
     )
 
     # Task settings
@@ -249,19 +216,6 @@ Examples:
         type=int,
         default=10,
         help="Max steps per task (default: 10)",
-    )
-
-    # Parallel mode (100+ tasks)
-    parser.add_argument(
-        "--parallel", action="store_true", help="Use parallel execution for large datasets"
-    )
-    parser.add_argument("--max-workers", dest="max_workers", type=int, help="Worker processes")
-    parser.add_argument(
-        "--max-concurrent-per-worker",
-        dest="max_concurrent_per_worker",
-        type=int,
-        default=25,
-        help="Max concurrent tasks per worker",
     )
 
     # Logging
@@ -316,9 +270,6 @@ async def main() -> None:
             allowed_tools=allowed_tools,
             max_concurrent=args.max_concurrent,
             max_steps=args.max_steps,
-            parallel=args.parallel,
-            max_workers=args.max_workers,
-            max_concurrent_per_worker=args.max_concurrent_per_worker,
         )
 
         elapsed = time.time() - start_time
@@ -330,14 +281,10 @@ async def main() -> None:
         print(f"Total tasks: {len(results)}")
         print(f"Time elapsed: {elapsed:.2f} seconds")
         print(f"Throughput: {len(results) / elapsed:.2f} tasks/second")
-
-        if args.parallel:
-            print(f"Execution mode: PARALLEL (workers: {args.max_workers or 'auto'})")
-        else:
-            print(f"Execution mode: ASYNCIO (max_concurrent: {args.max_concurrent})")
+        print(f"Execution mode: ASYNCIO (max_concurrent: {args.max_concurrent})")
 
         # Count successes
-        successful = sum(1 for r in results if getattr(r, "reward", 0) > 0)
+        successful = sum(1 for r in results if getattr(r, "reward", 0) > 0.7)
         print(
             f"Successful tasks: {successful}/{len(results)} ({100 * successful / len(results):.1f}%)"
         )

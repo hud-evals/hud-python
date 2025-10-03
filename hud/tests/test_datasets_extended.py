@@ -126,7 +126,7 @@ class TestDatasetOperations:
 
     def test_save_taskconfigs_empty_list(self):
         """Test saving empty task list."""
-        with patch("datasets.Dataset") as MockDataset:
+        with patch("hud.datasets.utils.Dataset") as MockDataset:
             mock_instance = MagicMock()
             MockDataset.from_list.return_value = mock_instance
 
@@ -203,12 +203,12 @@ class TestRunDatasetExtended:
 
         with (
             patch("hud.clients.MCPClient") as MockClient,
-            patch("hud.job") as mock_job_func,
+            patch("hud.async_job") as mock_job_func,
             patch("hud.trace") as mock_trace,
         ):
-            mock_job = MagicMock()
+            mock_job = AsyncMock()
             mock_job.id = "job-meta"
-            mock_job_func.return_value.__enter__.return_value = mock_job
+            mock_job_func.return_value.__aenter__.return_value = mock_job
             mock_trace.return_value.__enter__.return_value = "trace-id"
 
             mock_client = AsyncMock()

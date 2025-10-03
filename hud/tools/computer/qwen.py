@@ -424,7 +424,10 @@ coordinate on the screen.
                 # Rescale screenshot if requested
                 screenshot_base64 = await self._rescale_screenshot(screenshot_base64)
                 result = ContentResult(
-                    output=result.output, error=result.error, base64_image=screenshot_base64
+                    # note: we suppress the output since it's not useful
+                    output="",
+                    error=result.error,
+                    base64_image=screenshot_base64,
                 )
 
         # Convert to content blocks
