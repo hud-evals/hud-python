@@ -69,7 +69,7 @@ def get_available_models() -> list[dict[str, str | None]]:
 
 
 def build_agent(
-    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"],
+    agent_type: Literal["claude", "openai", "openrouter", "vllm", "litellm", "integration_test"],
     *,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
@@ -145,6 +145,34 @@ def build_agent(
         else:
             return OperatorAgent(verbose=verbose)
 
+    elif agent_type == "openrouter":
+        try:
+            from hud.agents import OpenRouterAgent
+        except ImportError as e:
+            hud_console.error(
+                "OpenRouter agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
+
+        api_key = settings.openrouter_api_key
+        if not api_key:
+            hud_console.error("OPENROUTER_API_KEY is required for OpenRouter agent")
+            hud_console.info(
+                "Set it in your environment or run: hud set OPENROUTER_API_KEY=your-key-here"
+            )
+            raise typer.Exit(1)
+
+        agent_kwargs: dict[str, Any] = {
+            "api_key": api_key,
+            "model_name": model or "anthropic/claude-sonnet-4",
+            "verbose": verbose,
+        }
+        if allowed_tools:
+            agent_kwargs["allowed_tools"] = allowed_tools
+
+        return OpenRouterAgent(**agent_kwargs)
+
     elif agent_type == "litellm":
         try:
             from hud.agents.lite_llm import LiteAgent
@@ -189,7 +217,14 @@ def build_agent(
 async def run_single_task(
     source: str,
     *,
-    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = "claude",
+    agent_type: Literal[
+        "claude",
+        "openai",
+        "openrouter",
+        "vllm",
+        "litellm",
+        "integration_test",
+    ] = "claude",
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_steps: int = 10,
@@ -302,6 +337,25 @@ async def run_single_task(
         agent_config = {"verbose": verbose}
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
+    elif agent_type == "openrouter":
+        from hud.agents import OpenRouterAgent
+
+        api_key = settings.openrouter_api_key
+        if not api_key:
+            hud_console.error("OPENROUTER_API_KEY is required for OpenRouter agent")
+            hud_console.info(
+                "Set it in your environment or run: hud set OPENROUTER_API_KEY=your-key-here"
+            )
+            raise typer.Exit(1)
+
+        agent_class = OpenRouterAgent
+        agent_config = {
+            "api_key": api_key,
+            "model_name": model or "anthropic/claude-sonnet-4",
+            "verbose": verbose,
+        }
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
     elif agent_type == "litellm":
         from hud.agents.lite_llm import LiteAgent
 
@@ -359,7 +413,14 @@ async def run_single_task(
 async def run_full_dataset(
     source: str,
     *,
-    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = "claude",
+    agent_type: Literal[
+        "claude",
+        "openai",
+        "openrouter",
+        "vllm",
+        "litellm",
+        "integration_test",
+    ] = "claude",
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_concurrent: int = 30,
@@ -454,6 +515,34 @@ async def run_full_dataset(
             raise typer.Exit(1) from e
 
         agent_config = {"verbose": verbose}
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+
+    elif agent_type == "openrouter":
+        try:
+            from hud.agents import OpenRouterAgent
+
+            agent_class = OpenRouterAgent
+        except ImportError as e:
+            hud_console.error(
+                "OpenRouter agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
+
+        api_key = settings.openrouter_api_key
+        if not api_key:
+            hud_console.error("OPENROUTER_API_KEY is required for OpenRouter agent")
+            hud_console.info(
+                "Set it in your environment or run: hud set OPENROUTER_API_KEY=your-key-here"
+            )
+            raise typer.Exit(1)
+
+        agent_config = {
+            "api_key": api_key,
+            "model_name": model or "anthropic/claude-sonnet-4",
+            "verbose": verbose,
+        }
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
 
@@ -592,10 +681,17 @@ def eval_command(
         "--full",
         help="Run the entire dataset (omit for single-task debug mode)",
     ),
-    agent: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = typer.Option(
+    agent: Literal[
+        "claude",
+        "openai",
+        "openrouter",
+        "vllm",
+        "litellm",
+        "integration_test",
+    ] = typer.Option(
         "claude",
         "--agent",
-        help="Agent backend to use (claude, openai, vllm for local server, or litellm)",
+        help="Agent backend to use (claude, openai, openrouter, vllm for local server, or litellm)",
     ),
     model: str | None = typer.Option(
         None,
@@ -700,6 +796,9 @@ def eval_command(
         # Run with OpenAI Operator agent
         hud eval hud-evals/OSWorld-Gold-Beta --agent openai
 
+        # Run with OpenRouter agent
+        hud eval hud-evals/SheetBench-50 openrouter --model anthropic/claude-sonnet-4
+
         # Use local vLLM server (default: localhost:8000)
         hud eval task.json --agent vllm --model Qwen/Qwen2.5-VL-3B-Instruct
 
@@ -741,6 +840,13 @@ def eval_command(
         hud_console.error("OPENAI_API_KEY is required for OpenAI agent")
         hud_console.info("Set it in your environment or run: hud set OPENAI_API_KEY=your-key-here")
         raise typer.Exit(1)
+    elif agent == "openrouter":
+        if not settings.openrouter_api_key:
+            hud_console.error("OPENROUTER_API_KEY is required for OpenRouter agent")
+            hud_console.info(
+                "Set it in your environment or run: hud set OPENROUTER_API_KEY=your-key-here"
+            )
+            raise typer.Exit(1)
     elif agent == "vllm":
         if model:
             hud_console.info(f"Using vLLM with model: {model}")
