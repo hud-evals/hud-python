@@ -95,6 +95,38 @@ class TestPlaywrightTool:
             mock_page.fill.assert_called_once_with("input#name", "John Doe")
 
     @pytest.mark.asyncio
+    async def test_playwright_tool_press_with_keys(self):
+        """Test press action when keys list is provided."""
+        tool = PlaywrightTool()
+
+        mock_page = AsyncMock()
+        mock_page.keyboard.press = AsyncMock()
+
+        with patch.object(tool, "_ensure_browser", new_callable=AsyncMock):
+            tool.page = mock_page
+
+            blocks = await tool(action="press", keys=["ctrl", "a"])
+
+            mock_page.keyboard.press.assert_called_once_with("Control+A")
+            assert any(isinstance(b, TextContent) for b in blocks)
+
+    @pytest.mark.asyncio
+    async def test_playwright_tool_press_with_text_chord(self):
+        """Test press action when chord is supplied via text."""
+        tool = PlaywrightTool()
+
+        mock_page = AsyncMock()
+        mock_page.keyboard.press = AsyncMock()
+
+        with patch.object(tool, "_ensure_browser", new_callable=AsyncMock):
+            tool.page = mock_page
+
+            blocks = await tool(action="press", text="cmd+enter")
+
+            mock_page.keyboard.press.assert_called_once_with("Meta+Enter")
+            assert any(isinstance(b, TextContent) for b in blocks)
+
+    @pytest.mark.asyncio
     async def test_playwright_tool_screenshot_with_mocked_browser(self):
         """Test screenshot action with mocked browser."""
         tool = PlaywrightTool()

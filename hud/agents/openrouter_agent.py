@@ -102,12 +102,110 @@ class OpenRouterAgent(GenericOpenAIChatAgent):
         )
         return "unknown"
 
+    # -----------------------------
+    # Tool filtering helpers
+    # -----------------------------
+    def _is_function_tool(self, schema: dict) -> bool:
+        return schema.get("type") == "function"
+
+    def _function_name(self, schema: dict) -> str:
+        return (schema.get("function") or {}).get("name", "")
+
+    def _is_playwright_fn(self, schema: dict) -> bool:
+        return self._is_function_tool(schema) and self._function_name(schema) == "playwright"
+
+    def _is_anthropic_computer(self, schema: dict) -> bool:
+        # Anthropic Computer Use tool is a non-function tool with explicit type
+        return schema.get("type") == "computer_20250124"
+
+    def _is_qwen_computer(self, schema: dict) -> bool:
+        # Qwen computer tool type (should not be passed to OpenAI/Anthropic)
+        return schema.get("type") == "computer_use"
+
+    def _is_openai_or_generic_computer_fn(self, schema: dict) -> bool:
+        if not self._is_function_tool(schema):
+            return False
+        name = self._function_name(schema)
+        return name in {"openai_computer", "computer"}
+
+    def _filter_tools_for_model(self, base_schemas: list[dict]) -> list[dict]:
+        """
+        Filter the available tools to match the provider behind the chosen model.
+        This prevents exposing incompatible computer tools to a given provider.
+        """
+        if self.model_type == "anthropic":
+            filtered: list[dict] = []
+            added_anthropic_computer = False
+
+            # Prefer the Anthropic computer tool; allow other *function* tools,
+            # but block OpenAI/generic computer function tools and Qwen computer
+            # tool. Keep playwright/setup/evaluate/etc (they are function tools).
+            for schema in base_schemas:
+                if self._is_anthropic_computer(schema):
+                    if not added_anthropic_computer:
+                        filtered.append(schema)
+                        added_anthropic_computer = True
+                    continue
+
+                if self._is_qwen_computer(schema):
+                    continue
+
+                if self._is_openai_or_generic_computer_fn(schema):
+                    continue
+
+                filtered.append(schema)
+
+            logger.info(
+                "Filtered tools for Anthropic: kept %d of %d",
+                len(filtered),
+                len(base_schemas),
+            )
+            return filtered
+
+        if self.model_type == "openai":
+            function_tools = [s for s in base_schemas if self._is_function_tool(s)]
+            have_openai_computer = any(
+                self._function_name(s) == "openai_computer" for s in function_tools
+            )
+
+            # OpenAI Chat Completions only accepts function tools. Drop
+            # Anthropic/Qwen computer tools and any other non-function tool types.
+            filtered: list[dict] = []
+            for s in function_tools:
+                # Avoid the Playwright function tool for OpenAI models because the
+                # subclass overrides (e.g., PlaywrightToolWithMemory.click) define
+                # defaults using pydantic.Field(...). When invoked without explicit
+                # args, those FieldInfo defaults leak into Playwright and cause:
+                # "Object of type FieldInfo is not JSON serializable".
+                # We route OpenAI models to the Computer Use tool instead.
+                if self._is_playwright_fn(s):
+                    continue
+                fname = self._function_name(s)
+                # If we have a provider-specific openai_computer tool, drop the generic "computer"
+                if have_openai_computer and fname == "computer":
+                    continue
+                filtered.append(s)
+
+            logger.info(
+                "Filtered tools for OpenAI: kept %d of %d (function-only)",
+                len(filtered),
+                len(base_schemas),
+            )
+            return filtered
+
+        # Unknown model type — do not filter (preserves current behavior).
+        logger.warning("Unknown model type; not filtering tool schemas")
+        return base_schemas
+
     def get_tool_schemas(self) -> list[dict]:
         """Get tool schemas adapted for the model type."""
         base_schemas = super().get_tool_schemas()
+        # Filter the tool list based on the target provider so we only expose
+        # compatible tools.
+        filtered_schemas = self._filter_tools_for_model(base_schemas)
 
         if self.model_type == "anthropic":
-            for schema in base_schemas:
+            for schema in filtered_schemas:
                 if "function" in schema:
                     func = schema["function"]
                     if "parameters" not in func:
@@ -117,7 +215,7 @@ class OpenRouterAgent(GenericOpenAIChatAgent):
                     if "required" not in params and "properties" in params:
                         params["required"] = list(params["properties"].keys())
 
-        return base_schemas
+        return filtered_schemas
 
     @instrument(
         span_type="agent",
