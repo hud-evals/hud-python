@@ -118,6 +118,12 @@ class CheckpointConfig(BaseConfig):
     checkpoint_prefix: str = Field(default="cua-grpo-step", description="Prefix for checkpoint directories")
 
 
+class LossConfig(BaseConfig):
+    norm_type: Literal["token", "sequence"] = Field(default="token", description="Normalization type")
+    importance_sampling_level: Literal["token", "sequence"] = Field(default="token", description="Importance sampling level")
+    kl_beta: float = Field(default=0.0, ge=0.0, description="KL divergence coefficient")
+    clip_ratio: float = Field(default=10.0, description="Clip ratio for importance sampling")
+
 class TrainingConfig(BaseConfig):
     # Model and checkpoint configuration
     model: ModelConfig = Field(default_factory=ModelConfig, description="Model configuration")
@@ -132,27 +138,13 @@ class TrainingConfig(BaseConfig):
     epochs: int = Field(default=2, ge=1, description="Number of training epochs")
     update_after_group: bool = Field(default=True, description="Whether to update the policy after each task group")
     accumulate_over_minibatches: bool = Field(default=False, description="Whether to accumulate over minibatches")
-
-    # Aggregation and loss parameters
-    ppo_mode: Literal["per_token", "per_trace"] = Field(default="per_token", description="PPO mode")
-    token_agg: Literal["mean", "sum"] = Field(default="mean", description="Token aggregation method")
-    kl_beta: float = Field(default=0.0, ge=0.0, description="KL divergence coefficient")
-    entropy_beta: float = Field(default=0.0, ge=0.0, description="Entropy coefficient")
-    top_eps: float = Field(default=0.2, ge=0.0, le=1.0, description="Top epsilon for PPO clipping")
-    bottom_eps: float = Field(default=0.1, ge=0.0, le=1.0, description="Bottom epsilon for PPO clipping")
     grad_clip: float = Field(default=1.0, gt=0.0, description="Gradient clipping value")
+
+    # Loss configuration
+    loss: LossConfig = Field(default_factory=LossConfig, description="Loss configuration")
 
     # Optimizer configuration
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig, description="Optimizer configuration")
-
-    @model_validator(mode='after')
-    def validate_model(self) -> 'TrainingConfig':
-        if self.top_eps < self.bottom_eps:
-            raise ValueError(
-                f"top_eps ({self.top_eps}) must be >= bottom_eps ({self.bottom_eps})"
-            )
-
-        return self
 
 class RewardConfig(BaseConfig):
     scale_rewards: Literal["group", "batch", "none"] = Field(default="group", description="Reward scaling strategy")

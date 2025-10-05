@@ -15,16 +15,12 @@ import torch
 from hud.rl.checkpoint import CheckpointManager
 from hud.rl.config import TrainingConfig
 from hud.rl.logger import console
-from hud.rl.loss import compute_grpo_loss, sanity_check
+from hud.rl.loss import compute_loss, get_per_token_logps, entropy_from_logits
 from hud.rl.model import get_model
 from hud.rl.optimizer import get_optimizer
 from hud.rl.parallel_dims import ParallelDims
 from hud.rl.parallelize_qwen_2_5 import parallelize_qwen
 from hud.rl.distributed import setup_distributed, synchronize, cleanup_distributed, get_world_size
-from hud.rl.utils import (
-    get_gpu_utilization,
-    get_memory_usage,
-)
 from hud.rl.types import TrainingSample
 
 
@@ -47,7 +43,12 @@ class Trainer:
 
         self.model = get_model(config.model)
         self.model = parallelize_qwen(self.model, self.parallel_dims)
-        self.ref_model = copy.deepcopy(self.model)
+        if self.config.loss.kl_beta > 0:
+            self.ref_model = get_model(config.model)
+            self.ref_model = parallelize_qwen(self.ref_model, self.parallel_dims)
+            self.ref_model.eval()
+        else:
+            self.ref_model = None
 
         self.optimizer = get_optimizer(self.config.optimizer, self.model)
 
@@ -70,53 +71,60 @@ class Trainer:
         batch: list[TrainingSample],
     ) -> None:
 
-        if self.config.dp_replicate > 1 and not self.parallel_dims.fsdp_enabled:
-            self.ref_model.to("cuda")
+        # Compute ref logprobs if we're using KL regularization
+        if self.ref_model:
+            with console.progress("Computing ref logprobs for batch...") as progress, torch.no_grad():
+                for minibatch in batch:
+                    sample = minibatch.to_device(torch.device("cuda"))
+                    logits = self.ref_model(**sample.inputs).logits
+                    logprobs = get_per_token_logps(logits, sample.inputs["input_ids"], sample.temperature)
+                    sample.ref_logprobs = logprobs
+                    del logits, logprobs
 
-        with console.progress("Computing ref logprobs for batch...") as progress, torch.no_grad():
-            for microbatch in batch:
-                sample = microbatch.to_device(torch.device("cuda"))
-                logits = self.ref_model.forward(**sample.inputs).logits
-                logits = logits[:,-1,:]
-                logits = logits / sample.temperature
-
-                per_token_logprobs = []
-                for row_logits, row_input_ids in zip(logits, sample.inputs["input_ids"]):
-                    row_logprobs = torch.nn.functional.log_softmax(row_logits, dim=-1)
-                    row_logprobs = row_logprobs[row_input_ids]
-                    per_token_logprobs.append(row_logprobs)
-                per_token_logprobs = torch.stack(per_token_logprobs)
-                sample.ref_logprobs = per_token_logprobs
-
-        self.ref_model.to("cpu")
-
-        if self.config.dp_replicate > 1 and not self.parallel_dims.fsdp_enabled:
-            self.model.to("cuda")
 
         with console.progress("Computing old logprobs for batch...") as progress, torch.no_grad():
-            for microbatch in batch:
-                sample = microbatch.to_device(torch.device("cuda"))
-                logits = self.model.forward(**sample.inputs).logits
+            for minibatch_idx, minibatch in enumerate(batch):
+                sample = minibatch.to_device(torch.device("cuda"))
+                logits = self.model(**sample.inputs).logits
+                logprobs = get_per_token_logps(logits, sample.inputs["input_ids"], sample.temperature)
 
-                per_token_logprobs = []
-                for row_logits, row_input_ids in zip(logits, sample.inputs["input_ids"]):
-                    row_logprobs = torch.nn.functional.log_softmax(row_logits, dim=-1)
-                    row_logprobs = row_logprobs[row_input_ids]
-                    per_token_logprobs.append(row_logprobs)
-                per_token_logprobs = torch.stack(per_token_logprobs)
-                sample.old_logprobs = per_token_logprobs
+                sample.old_logprobs = logprobs
 
         self.model.train()
 
         training_start_time = time.time()
 
+        if self.config.loss.norm_type == "token":
+            # Normalize with the number of assistant tokens in the local batch
+            loss_norm = sum(minibatch.inputs["assistant_mask"].sum().item() for minibatch in batch)
+        elif self.config.loss.norm_type == "sequence":
+            loss_norm = len(batch)
+
+        with console.progress("Training batch...") as progress:
+            for step, minibatch in enumerate(batch):
+                if hasattr(self.model, 'set_requires_all_reduce'):
+                    self.model.set_requires_all_reduce(step == len(batch) - 1)  # type: ignore
+
+                sample = minibatch.to_device(torch.device("cuda"))
+                logits = self.model(**sample.inputs).logits
+                logprobs = get_per_token_logps(logits, sample.inputs["input_ids"], sample.temperature)
+
+                with torch.no_grad():
+                    entropy = entropy_from_logits(logits)
+
+                loss, loss_dict = compute_loss(logprobs, sample.old_logprobs, sample.ref_logprobs, sample.advantage, sample.inputs["assistant_mask"], self.config.loss, loss_norm)
+
+                del logits
+                
+                loss.backward()
+            
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+
         training_time = time.time() - training_start_time
-        gpu_util = get_gpu_utilization()
-        gpu_memory = get_memory_usage()
         console.info_log(
             f"Update duration: {training_time:.2f}s"
         )
-        console.info_log(f"GPU Util: {gpu_util:.1f}% | Memory: {gpu_memory:.2f} GB")
 
     def cleanup(self) -> None:
         try:

@@ -52,9 +52,6 @@ def _prepare_minibatches(
     mini_batch_size: int,
     pad_token_id: int,
 ) -> list[TrainingSample]:
-    if mini_batch_size <= 1:
-        return samples
-
     batched_samples: list[TrainingSample] = []
     for i in range(0, len(samples), mini_batch_size):
         chunk = samples[i : i + mini_batch_size]
