@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import argparse
 import os
-import copy
 import time
-from typing import Sequence
+from pathlib import Path
 
 # Disable tokenizer parallelism warnings
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -12,138 +10,139 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 import torch
 
-from hud.rl.checkpoint import CheckpointManager
-from hud.rl.config import TrainingConfig
+from hud.rl.config import Config, TrainingConfig
 from hud.rl.logger import console
 from hud.rl.loss import compute_loss, get_per_token_logps, entropy_from_logits
 from hud.rl.model import get_model
 from hud.rl.optimizer import get_optimizer
 from hud.rl.parallel_dims import ParallelDims
 from hud.rl.parallelize_qwen_2_5 import parallelize_qwen
-from hud.rl.distributed import setup_distributed, synchronize, cleanup_distributed, get_world_size
+from hud.rl.distributed import get_world_size, setup_distributed
+from hud.rl.checkpoint import CheckpointManager
 from hud.rl.types import TrainingSample
 
 
-class Trainer:
-    def __init__(self, config: TrainingConfig) -> None:
-        self.config = config
+def get_batch(step: int, root: str) -> list[TrainingSample]:
+    """Load the batch for the given step from ``<output_dir>/step_{step}/rollouts``."""
 
-        setup_distributed()
-        world_size = get_world_size()
-        self.parallel_dims = ParallelDims(
-            dp_replicate=self.config.dp_replicate,
-            dp_shard=self.config.dp_shard,
-            cp=1,
-            tp=1,
-            pp=1,
-            ep=1,
-            etp=1,
-            world_size=world_size,
-        )
+    rank = int(os.environ.get("RANK") or os.environ.get("LOCAL_RANK") or 0)
+    output_root = Path(root)
+    step_rollout_dir = output_root / f"step_{step:05d}" / "rollouts"
+    batch_path = step_rollout_dir / f"rank_{rank}.pt"
 
-        self.model = get_model(config.model)
-        self.model = parallelize_qwen(self.model, self.parallel_dims)
-        if self.config.loss.kl_beta > 0:
-            self.ref_model = get_model(config.model)
-            self.ref_model = parallelize_qwen(self.ref_model, self.parallel_dims)
-            self.ref_model.eval()
-        else:
-            self.ref_model = None
+    console.info(f"Waiting for batch: {batch_path}")
+    while not batch_path.exists():
+        time.sleep(0.5)
 
-        self.optimizer = get_optimizer(self.config.optimizer, self.model)
+    console.info_log(f"Loading batch from {batch_path}")
+    return torch.load(batch_path, weights_only=False)
 
-        self.checkpoint_manager = CheckpointManager(
-            out_dir=config.checkpoint.out_dir,
-            checkpoint_prefix=config.checkpoint.checkpoint_prefix,
-        )
+def train(
+    training_config: TrainingConfig,
+    max_steps: int,
+) -> None:
 
-        self.step_count = 0
+    setup_distributed()
+    world_size = get_world_size()
 
-    def get_batch(
-        self
-    ) -> list[TrainingSample]:
-        raise NotImplementedError(
-            "Trainer.get_batch is not implemented; pass microbatches explicitly"
-        )
+    console.section_title("Initializing trainer")
 
-    def train_step(
-        self,
-        batch: list[TrainingSample],
-    ) -> None:
+    parallel_dims = ParallelDims(
+        dp_replicate=training_config.dp_replicate,
+        dp_shard=training_config.dp_shard,
+        cp=1,
+        tp=1,
+        pp=1,
+        ep=1,
+        etp=1,
+        world_size=world_size,
+    )
 
-        # Compute ref logprobs if we're using KL regularization
-        if self.ref_model:
-            with console.progress("Computing ref logprobs for batch...") as progress, torch.no_grad():
-                for minibatch in batch:
+    model = parallelize_qwen(get_model(training_config.model), parallel_dims)
+
+    ref_model: torch.nn.Module | None = None
+    if training_config.loss.kl_beta > 0:
+        console.info("Initializing reference model for KL regularization")
+        ref_model = parallelize_qwen(get_model(training_config.model), parallel_dims)
+        ref_model.eval()
+
+    optimizer = get_optimizer(training_config.optimizer, model)
+
+    checkpoint_manager = CheckpointManager(
+        output_dir=training_config.output_dir,
+        save_last_n=training_config.save_last_n,
+    )
+
+    for step in range(max_steps):
+        batch = get_batch(step, training_config.output_dir)
+                
+        if ref_model is not None:
+            with console.progress("Computing reference log probabilities...") as progress, torch.no_grad():
+                for i, minibatch in enumerate(batch):
                     sample = minibatch.to_device(torch.device("cuda"))
-                    logits = self.ref_model(**sample.inputs).logits
-                    logprobs = get_per_token_logps(logits, sample.inputs["input_ids"], sample.temperature)
-                    sample.ref_logprobs = logprobs
-                    del logits, logprobs
+                    logits = ref_model(**sample.inputs).logits
+                    sample.ref_logprobs = get_per_token_logps(
+                        logits,
+                        sample.inputs["input_ids"],
+                        sample.temperature,
+                    )
+                    progress.update(f"Computing reference log probabilities... {i + 1}/{len(batch)}")
+                    del logits
 
+        
 
-        with console.progress("Computing old logprobs for batch...") as progress, torch.no_grad():
-            for minibatch_idx, minibatch in enumerate(batch):
+        with console.progress("Computing old log probabilities...") as progress, torch.no_grad():
+            for i, minibatch in enumerate(batch):
                 sample = minibatch.to_device(torch.device("cuda"))
-                logits = self.model(**sample.inputs).logits
-                logprobs = get_per_token_logps(logits, sample.inputs["input_ids"], sample.temperature)
+                logits = model(**sample.inputs).logits
+                sample.old_logprobs = get_per_token_logps(
+                    logits,
+                    sample.inputs["input_ids"],
+                    sample.temperature,
+                )
+                progress.update(f"Computing old log probabilities... {i + 1}/{len(batch)}")
+                del logits
 
-                sample.old_logprobs = logprobs
-
-        self.model.train()
-
+        model.train()
         training_start_time = time.time()
 
-        if self.config.loss.norm_type == "token":
-            # Normalize with the number of assistant tokens in the local batch
-            loss_norm = sum(minibatch.inputs["assistant_mask"].sum().item() for minibatch in batch)
-        elif self.config.loss.norm_type == "sequence":
+        if training_config.loss.norm_type == "token":
+            loss_norm = sum(
+                minibatch.inputs["assistant_mask"].sum().item() for minibatch in batch
+            )
+        elif training_config.loss.norm_type == "sequence":
             loss_norm = len(batch)
 
-        with console.progress("Training batch...") as progress:
-            for step, minibatch in enumerate(batch):
-                if hasattr(self.model, 'set_requires_all_reduce'):
-                    self.model.set_requires_all_reduce(step == len(batch) - 1)  # type: ignore
+        with console.progress("Training...") as progress:
+            for idx, minibatch in enumerate(batch):
+                model.set_requires_all_reduce(idx == len(batch) - 1) # type: ignore attr-defined
 
                 sample = minibatch.to_device(torch.device("cuda"))
-                logits = self.model(**sample.inputs).logits
-                logprobs = get_per_token_logps(logits, sample.inputs["input_ids"], sample.temperature)
+                logits = model(**sample.inputs).logits
+                logprobs = get_per_token_logps(
+                    logits,
+                    sample.inputs["input_ids"],
+                    sample.temperature,
+                )
 
-                with torch.no_grad():
-                    entropy = entropy_from_logits(logits)
-
-                loss, loss_dict = compute_loss(logprobs, sample.old_logprobs, sample.ref_logprobs, sample.advantage, sample.inputs["assistant_mask"], self.config.loss, loss_norm)
-
-                del logits
+                loss, loss_dict = compute_loss(
+                    logprobs,
+                    sample.old_logprobs,
+                    sample.ref_logprobs,
+                    sample.advantage,
+                    sample.inputs["assistant_mask"],
+                    training_config.loss,
+                    loss_norm,
+                )
                 
+                del logits
                 loss.backward()
-            
-            self.optimizer.step()
-            self.optimizer.zero_grad()
+                progress.update(f"Trained... {idx + 1}/{len(batch)}")
 
-        training_time = time.time() - training_start_time
-        console.info_log(
-            f"Update duration: {training_time:.2f}s"
-        )
+        optimizer.step()
+        optimizer.zero_grad()
 
-    def cleanup(self) -> None:
-        try:
-            synchronize()
-        except Exception:
-            console.warning("Failed to synchronize during cleanup")
+        checkpoint_manager.save(model, step)
 
-        cleanup_distributed()
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="GRPO trainer")
-    parser.add_argument("--config", type=str, help="Path to config JSON file")
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
-
-    _ = parser.parse_args()
-    console.error("Standalone trainer execution is not supported; use the runner workflow.")
-    raise SystemExit(1)
-
-
-if __name__ == "__main__":
-    main()
+        step_duration = time.time() - training_start_time
+        console.info(f"Step {step} took {step_duration:.2f} seconds")

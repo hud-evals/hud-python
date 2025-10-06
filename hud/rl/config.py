@@ -113,11 +113,6 @@ class OptimizerConfig(BaseConfig):
         return v
 
 
-class CheckpointConfig(BaseConfig):
-    out_dir: str = Field(default="./checkpoints", description="Output directory for checkpoints")
-    checkpoint_prefix: str = Field(default="cua-grpo-step", description="Prefix for checkpoint directories")
-
-
 class LossConfig(BaseConfig):
     norm_type: Literal["token", "sequence"] = Field(default="token", description="Normalization type")
     importance_sampling_level: Literal["token", "sequence"] = Field(default="token", description="Importance sampling level")
@@ -125,26 +120,21 @@ class LossConfig(BaseConfig):
     clip_ratio: float = Field(default=10.0, description="Clip ratio for importance sampling")
 
 class TrainingConfig(BaseConfig):
-    # Model and checkpoint configuration
+    # Mode and Parallelization
     model: ModelConfig = Field(default_factory=ModelConfig, description="Model configuration")
-    checkpoint: CheckpointConfig = Field(default_factory=CheckpointConfig, description="Checkpoint configuration")
+    dp_replicate: int = Field(default=1, ge=1, description="Data parallel replicate.")
+    dp_shard: int = Field(default=1, ge=1, description="Data parallel shard.")
 
-    # Parallelization
-    dp_replicate: int = Field(default=1, ge=1, description="Data parallel replicate. To run DDP, set to num_devices")
-    dp_shard: int = Field(default=1, ge=1, description="Data parallel shard. To run FSDP, set to num_devices")
-
-    # Optimization
-    save_every_batches: int = Field(default=1, ge=1, description="Save checkpoint every N batches")
-    epochs: int = Field(default=2, ge=1, description="Number of training epochs")
-    update_after_group: bool = Field(default=True, description="Whether to update the policy after each task group")
-    accumulate_over_minibatches: bool = Field(default=False, description="Whether to accumulate over minibatches")
-    grad_clip: float = Field(default=1.0, gt=0.0, description="Gradient clipping value")
+    # Checkpointing
+    output_dir: str = ""
+    save_last_n: int = Field(default=1, ge=1, description="Save last N checkpoints")
 
     # Loss configuration
     loss: LossConfig = Field(default_factory=LossConfig, description="Loss configuration")
 
     # Optimizer configuration
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig, description="Optimizer configuration")
+    max_grad_norm: float = Field(default=1.0, gt=0.0, description="Maximum gradient norm")
 
 class RewardConfig(BaseConfig):
     scale_rewards: Literal["group", "batch", "none"] = Field(default="group", description="Reward scaling strategy")
@@ -209,6 +199,8 @@ class Config(BaseConfig):
     verbose: bool = Field(default=False, description="Enable verbose logging")
     seed: int = Field(default=1234, description="Random seed for reproducibility")
 
+    output_dir: str = Field(default="./outputs", description="Output directory for batches/checkpoints")
+
     @field_validator("base_model")
     @classmethod
     def validate_base_model(cls, v: str) -> str:
@@ -223,6 +215,12 @@ class Config(BaseConfig):
         return self
 
     @model_validator(mode='after')
+    def propagate_output_dir(self) -> 'Config':
+        """Propagate output_dir to sub-configs."""
+        self.training.output_dir = self.output_dir
+        return self
+
+    @model_validator(mode='after')
     def validate_batching(self) -> 'Config':
         """Ensure batch sizing aligns with group collection and distributed layout."""
         if self.batch_size % self.group_size != 0:
@@ -233,12 +231,6 @@ class Config(BaseConfig):
         world_size = self.expected_world_size
         if world_size <= 0:
             raise ValueError("Expected world size must be at least 1")
-
-        per_rank_total = self.batch_size // world_size
-        if per_rank_total == 0:
-            raise ValueError(
-                "batch_size must be at least the configured world size so each rank receives samples"
-            )
 
         return self
 

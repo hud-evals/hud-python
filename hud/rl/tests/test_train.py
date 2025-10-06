@@ -1,0 +1,29 @@
+"""Utility to exercise hud.rl.train with a pre-recorded batch."""
+
+import os
+from pathlib import Path
+
+import torch
+
+from hud.rl.config import TrainingConfig, ModelConfig
+from hud.rl.logger import console
+from hud.rl.train import train
+
+
+def main() -> None:
+    rank = int(os.environ.get("LOCAL_RANK", 0))
+
+    training_config = TrainingConfig()
+    training_config.model = ModelConfig(base_model="Qwen/Qwen2.5-VL-7B-Instruct")
+    training_config.dp_shard = 4
+    training_config.optimizer.use_8bit_optimizer = False
+    training_config.loss.kl_beta = 0.0
+    training_config.output_dir = "/home/ubuntu/hud-python/hud/rl/tests/outputs"
+
+    console.info("=" * 80)
+    console.info("Running trainer...")
+
+    train(training_config, max_steps=1)
+
+if __name__ == "__main__":
+    main()

@@ -1,6 +1,8 @@
 """Script to prepare and save training batches for testing (one per GPU)."""
 
 import json
+from pathlib import Path
+
 import torch
 
 from hud.rl.advantages import calculate_advantages
@@ -95,8 +97,13 @@ def main():
     print("\n" + "=" * 80)
     print("Saving batches...")
 
+    tests_root = Path(__file__).resolve().parents[1]
+    outputs_root = tests_root / "outputs"
+    step_dir = outputs_root / "step_00000" / "rollouts"
+    step_dir.mkdir(parents=True, exist_ok=True)
+
     for gpu_idx, gpu_batch in enumerate(training_batch):
-        output_file = f"/home/ubuntu/hud-python/hud/rl/tests/data/batch_gpu{gpu_idx}.pt"
+        output_file = step_dir / f"rank_{gpu_idx}.pt"
         torch.save(gpu_batch, output_file)
         print(f"  GPU {gpu_idx}: {output_file}")
 
