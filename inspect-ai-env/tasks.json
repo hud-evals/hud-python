@@ -1,0 +1,23 @@
+{
+    "prompt": "",
+    "mcp_config": {
+      "inspect_ai_env": {
+        "url": "http://localhost:8765/mcp"
+      }
+    },
+    "setup_tool": {
+      "name": "setup"
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "eval_config": {
+          "message-limit": "20", 
+          "sandbox": "local"
+        }
+      }
+    }
+
+}
+
+
