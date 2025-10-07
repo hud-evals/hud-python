@@ -1,10 +1,14 @@
 import re
 import uuid
 import math
-from typing import Literal
+import sys
+from typing import Literal, Type, TypeVar
 from pathlib import Path
+from argparse import Namespace
 
 from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator
+
+T = TypeVar("T", bound="BaseConfig")
 
 PATTERN = re.compile(r"^Qwen/Qwen2\.5.*", re.IGNORECASE)
 
@@ -19,16 +23,48 @@ class BaseConfig(BaseModel):
     )
     
     @classmethod
-    def from_file(cls, config_path: str | Path) -> "BaseConfig":
+    def from_file(cls: Type["T"], config_path: str | Path) -> "T":
         config_path = Path(config_path)
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found: {config_path}")
-        
+
         with open(config_path, 'r') as f:
             import json
             config_data = json.load(f)
-        
+
         return cls.model_validate(config_data)
+
+    @classmethod
+    def from_argv(cls: Type["T"], allow_extras: bool = False) -> tuple["T", list[str]]:
+        """Parse CLI args into config. Returns (config, extra_args).
+
+        Supports: --config path.json --key value
+        """
+        import json
+        args = sys.argv[1:]
+        config_dict = {}
+        extras = []
+        i = 0
+
+        while i < len(args):
+            if args[i] == "--config" and i + 1 < len(args):
+                with open(args[i + 1]) as f:
+                    config_dict = json.load(f)
+                i += 2
+            elif args[i].startswith("--") and i + 1 < len(args) and not args[i + 1].startswith("--"):
+                key = args[i][2:].replace("-", "_")
+                try:
+                    value = json.loads(args[i + 1])
+                except (json.JSONDecodeError, ValueError):
+                    value = args[i + 1]
+                config_dict[key] = value
+                i += 2
+            else:
+                if allow_extras:
+                    extras.append(args[i])
+                i += 1
+
+        return cls.model_validate(config_dict), extras
     
     def save_to_file(self, config_path: str | Path) -> None:
         config_path = Path(config_path)
@@ -140,9 +176,13 @@ class RewardConfig(BaseConfig):
     scale_rewards: Literal["group", "batch", "none"] = Field(default="group", description="Reward scaling strategy")
     leave_one_out: bool = Field(default=False, description="RLOO scaling factor G/(G-1), only applies when scale_rewards='none'")
 
+class ClientConfig(BaseConfig):
+    base_url: str = Field(default="http://localhost:8000/v1", description="OpenAI-compatible base URL")
+    api_key: str = Field(default="EMPTY", description="API key")
+    request_timeout: float = Field(default=45.0, ge=1.0, description="Client request timeout (seconds)")
+
 class ActorConfig(BaseConfig):
     base_model: str = ""
-
     verbose: bool = Field(default=False, description="Enable verbose logging")
 
     # Execution parameters
@@ -151,31 +191,67 @@ class ActorConfig(BaseConfig):
 
     # Agent parameters
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature")
-    vllm_base_url: str = Field(default="http://localhost:8000/v1", description="vLLM server base URL")
-    vllm_api_key: str = Field(default="token-abc123", description="vLLM API key")
     max_new_tokens: int = Field(default=1024, ge=1, le=4096, description="Maximum new tokens to generate")
     force_tool_choice: bool = Field(default=True, description="Force tool choice when available")
 
     # Timeouts
-    request_timeout: int = Field(default=45, ge=1, le=300, description="Request timeout in seconds")
     episode_timeout_sec: int = Field(default=600, ge=1, le=3600, description="Episode timeout in seconds")
 
     def validate_config(self) -> None:
         super().validate_config()
-        
-        if self.episode_timeout_sec <= self.request_timeout:
-            raise ValueError(
-                f"episode_timeout_sec ({self.episode_timeout_sec}) must be greater than "
-                f"request_timeout ({self.request_timeout})"
-            )
 
+class VLLMConfig(BaseConfig):
+    base_model: str = ""
+    host: str | None = Field(default=None, description="Host to bind for vLLM server")
+    port: int | None = Field(default=None, description="Port to bind for vLLM server")
+
+    tensor_parallel_size: int = Field(default=1, ge=1, description="Tensor parallel size for vLLM")
+    trust_remote_code: bool = Field(default=True, description="Trust remote code for model loading")
+    enable_auto_tool_choice: bool = Field(default=True, description="Enable auto tool choice in vLLM")
+    tool_call_parser: str = Field(default="hermes", description="Tool call parser for vLLM")
+    chat_template: str | None = Field(default=None, description="Path to Jinja chat template for vLLM")
+    uvicorn_log_level: str | None = Field(default=None, description="Uvicorn log level (e.g., info, debug)")
+    enable_log_requests: bool = Field(default=False, description="Enable request logging in vLLM server")
+    gpu_memory_utilization: float = Field(default=0.9, ge=0.0, le=1.0, description="GPU memory utilization for vLLM")
+
+    extra_vllm_args: list[str] = Field(default_factory=list, description="Extra vLLM CLI args to append")
+
+    def to_vllm(self) -> Namespace:
+        """
+        This mirrors the attributes produced by vLLM's CLI parser, so we can
+        pass it through their parser to fill missing defaults.
+        """
+        ns = Namespace()
+
+        setattr(ns, "host", self.host or "0.0.0.0")
+        setattr(ns, "port", int(self.port or 8000))
+
+        # Model and features
+        setattr(ns, "model", self.base_model)
+        setattr(ns, "trust_remote_code", bool(self.trust_remote_code))
+        setattr(ns, "tensor_parallel_size", int(self.tensor_parallel_size))
+        setattr(ns, "enable_auto_tool_choice", bool(self.enable_auto_tool_choice))
+        setattr(ns, "tool_call_parser", self.tool_call_parser)
+        if self.chat_template is not None:
+            setattr(ns, "chat_template", self.chat_template)
+
+        # Server logging
+        if self.uvicorn_log_level is not None:
+            setattr(ns, "uvicorn_log_level", self.uvicorn_log_level)
+        setattr(ns, "disable_uvicorn_access_log", False)
+        setattr(ns, "enable_log_requests", bool(self.enable_log_requests))
+
+        # Memory
+        setattr(ns, "gpu_memory_utilization", float(self.gpu_memory_utilization))
+
+        return ns
 
 class Config(BaseConfig):
     """Top-level RL configuration with rollout and trainer settings."""
 
     base_model: str = Field(
         default="Qwen/Qwen2.5-VL-3B-Instruct",
-        description="Base model name shared across model and actor configurations"
+        description="Base model name shared across training and inference configurations"
     )
 
     processor: ProcessorConfig = Field(default_factory=ProcessorConfig, description="Processor configuration")
@@ -191,7 +267,9 @@ class Config(BaseConfig):
     select_strategy: Literal["recent", "variance", "random"] = Field(default="variance", description="Buffer selection strategy")
 
     training: TrainingConfig = Field(default_factory=TrainingConfig, description="Trainer configuration")
+    client: ClientConfig = Field(default_factory=ClientConfig, description="Client configuration")
     actor: ActorConfig = Field(default_factory=ActorConfig, description="Actor configuration")
+    vllm: VLLMConfig = Field(default_factory=VLLMConfig, description="VLLM server configuration")
 
     job_name: str = Field(default="RL Training", description="Job name for telemetry")
     job_id: str = Field(default=str(uuid.uuid4()), description="Job ID for telemetry")
@@ -212,12 +290,22 @@ class Config(BaseConfig):
         """Propagate base_model to sub-configs."""
         self.training.model.base_model = self.base_model
         self.actor.base_model = self.base_model
+        self.vllm.base_model = self.base_model
         return self
 
     @model_validator(mode='after')
     def propagate_output_dir(self) -> 'Config':
         """Propagate output_dir to sub-configs."""
         self.training.output_dir = self.output_dir
+        return self
+
+    @model_validator(mode='after')
+    def propagate_client_fields(self) -> 'Config':
+        """Couple client fields to the vLLM server fields.
+        """
+        host = self.vllm.host or "127.0.0.1"
+        port = int(self.vllm.port or 8000)
+        self.client.base_url = f"http://{host}:{port}/v1"
         return self
 
     @model_validator(mode='after')

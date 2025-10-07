@@ -5,30 +5,16 @@ import hud
 from hud.rl.config import ActorConfig
 from hud.rl.logger import console
 from hud.types import Task, Trace
-from hud.utils.agent_factories import create_openai_agent
+from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
+from openai import AsyncOpenAI
 
 
 class Actor:
-    """Collects episodes using vLLM-served models via HUD agents."""
+    """Collects episodes using GenericOpenAIChatAgent."""
 
-    def __init__(self, config: ActorConfig) -> None:
+    def __init__(self, config: ActorConfig, client: AsyncOpenAI) -> None:
         self.config = config
-
-    def create_agent(self):
-        """Create an agent with the current adapter."""
-        return create_openai_agent(
-            base_url=self.config.vllm_base_url.replace("localhost", "127.0.0.1"),
-            api_key=self.config.vllm_api_key,
-            request_timeout=self.config.request_timeout,
-            model_name=self.config.base_model,
-            append_setup_output=False,
-            verbose=self.config.verbose,
-            completion_kwargs={
-                "temperature": self.config.temperature,
-                "max_tokens": self.config.max_new_tokens,
-                "tool_choice": "required" if self.config.force_tool_choice else "auto",
-            },
-        )
+        self.client = client
 
     async def run_tasks(self, tasks: list[Task], job_id: str) -> list[Trace]:
         """Run tasks and collect traces using semaphore for concurrency control with timeout protection."""
@@ -65,12 +51,20 @@ class Actor:
 
     async def _run_task(self, task: Task, job_id: str) -> Trace:
         """Run a single task."""
-        agent = self.create_agent()
+        agent = GenericOpenAIChatAgent(
+            openai_client=self.client,
+            model_name=self.config.base_model,
+            verbose=self.config.verbose,
+            append_setup_output=False,
+            completion_kwargs={
+                "temperature": self.config.temperature,
+                "max_tokens": self.config.max_new_tokens,
+                "tool_choice": "required" if self.config.force_tool_choice else "auto",
+            },
+        )
 
-        # Run the task
         with hud.trace(f"Training | {task.prompt}", job_id=job_id):
             result = await agent.run(task, max_steps=self.config.max_steps_per_episode)
-
         result.info["tool_spec"] = agent.get_tool_schemas()
         result.info["temperature"] = self.config.temperature
 
@@ -90,7 +84,7 @@ if __name__ == "__main__":
     from hud.datasets import Task
 
     async def test_actor() -> None:
-        """Test the actor with a single 2048 task using local hud-browser image."""
+        """Test the actor with a single 2048 task using a local hud-browser image."""
         config = ActorConfig()
         config.max_parallel_episodes = 16
         config.max_steps_per_episode = 10
@@ -152,11 +146,13 @@ Strategy: keep highest tiles in a corner; maintain order; avoid random moves.
         }
 
         task = Task(**task_data)
-        actor = Actor(config)
+        client = AsyncOpenAI(base_url="http://127.0.0.1:8000/v1", api_key="EMPTY", timeout=30.0)
+
+        actor = Actor(config, client=client)
 
         console.info_log(f"Testing actor with task: {task.id}") 
         console.info_log(f"Model: {config.base_model}")
-        console.info_log(f"VLLM: {config.vllm_base_url}")
+        console.info_log(f"Client base URL: {client.base_url}")
 
         job_id = str(uuid.uuid4())
         with hud.job("Test Actor", job_id=job_id):

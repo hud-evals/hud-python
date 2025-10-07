@@ -1,5 +1,4 @@
-import os
-import random
+from pathlib import Path
 
 import torch
 
@@ -27,3 +26,8 @@ def get_gpu_utilization() -> float:
         # Fallback: estimate based on memory usage
         # This is less accurate but works without nvidia-ml-py
         return min(100.0, (torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()) * 100)
+
+
+def get_weights_path(output_dir: str | Path, step: int) -> Path:
+    output_dir = Path(output_dir)
+    return output_dir / f"step_{step:05d}" / "checkpoints" / "model.safetensors"
