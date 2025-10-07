@@ -47,10 +47,12 @@ def compute_loss(
     """Compute loss for a batch of samples, use per-token loss."""
     log_ratio = log_probs - old_log_probs
 
-    # GSPO
     if config.importance_sampling_level == "sequence":
-        seq_log_ratio = (log_ratio[assistant_mask]).sum() / torch.clamp(assistant_mask.sum(), min=1)
-        log_ratio = log_probs - log_probs.detach() + seq_log_ratio.detach()
+        seq_log_ratio = (log_ratio[assistant_mask]).sum()
+        # GSPO normalizes the importance ratio by the sequence length
+        if config.apply_length_norm:
+            seq_log_ratio = seq_log_ratio / torch.clamp_min(assistant_mask.sum(), 1)
+        log_ratio = torch.clamp(seq_log_ratio.unsqueeze(0), max=10.0)
 
     ratio = torch.exp(log_ratio)
     clipped_ratio = torch.clamp(ratio, max=config.clip_ratio)
@@ -61,7 +63,7 @@ def compute_loss(
 
     loss = (loss[assistant_mask]).sum()
 
-    if config.norm_type == "sequence":
+    if config.importance_sampling_level == "sequence":
         loss = loss / torch.clamp(assistant_mask.sum(), 1)
 
     loss = loss / max(loss_norm, 1)

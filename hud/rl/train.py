@@ -106,11 +106,11 @@ def train(
         model.train()
         training_start_time = time.time()
 
-        if training_config.loss.norm_type == "token":
+        if training_config.loss.importance_sampling_level == "token":
             loss_norm = sum(
                 minibatch.inputs["assistant_mask"].sum().item() for minibatch in batch
             )
-        elif training_config.loss.norm_type == "sequence":
+        elif training_config.loss.importance_sampling_level == "sequence":
             loss_norm = len(batch)
 
         with console.progress("Training...") as progress:

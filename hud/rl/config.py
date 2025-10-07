@@ -114,7 +114,7 @@ class OptimizerConfig(BaseConfig):
 
 
 class LossConfig(BaseConfig):
-    norm_type: Literal["token", "sequence"] = Field(default="token", description="Normalization type")
+    apply_length_norm: bool = Field(default=False, description="Apply length norm to the importance ratio; only applies when importance_sampling_level is 'sequence'")
     importance_sampling_level: Literal["token", "sequence"] = Field(default="token", description="Importance sampling level")
     kl_beta: float = Field(default=0.0, ge=0.0, description="KL divergence coefficient")
     clip_ratio: float = Field(default=10.0, description="Clip ratio for importance sampling")
