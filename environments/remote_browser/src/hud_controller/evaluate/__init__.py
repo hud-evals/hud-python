@@ -19,6 +19,9 @@ from . import (
     verify_type_action,
     sheet_contains,
     sheets_cell_values,
+    autonomous_eval,
+    webjudge,
+    overall_judge
 )
 
 __all__ = ["evaluate"]

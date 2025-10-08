@@ -20,12 +20,13 @@ from hud.server import MCPServer
 from hud.server.context import attach_context
 
 # Import tools
-from .tools import PlaywrightToolWithMemory, BrowserExecutor
+from .tools import PlaywrightToolWithMemory, BrowserExecutor, AnthropicComputerToolWithRecord, OpenAIComputerToolWithRecord
 from hud.tools.computer import (
     AnthropicComputerTool,
     OpenAIComputerTool,
     HudComputerTool,
 )
+from hud.tools import PlaywrightTool
 
 # Import setup and evaluate hubs
 from .setup import setup as setup_hub
@@ -265,6 +266,7 @@ async def initialize_environment(ctx):
 
         # Initialize PlaywrightToolWithMemory with CDP URL from context
         # This reconnects to the existing browser session on reloads
+        # playwright_tool = PlaywrightTool(cdp_url=cdp_url)
         playwright_tool = PlaywrightToolWithMemory(context=None, cdp_url=cdp_url)
 
         # Ensure browser is connected before registering tools
@@ -281,8 +283,10 @@ async def initialize_environment(ctx):
 
         # Create and register computer tools with default dimensions
         mcp.add_tool(HudComputerTool(executor=browser_executor))
-        mcp.add_tool(AnthropicComputerTool(executor=browser_executor))
-        mcp.add_tool(OpenAIComputerTool(executor=browser_executor))
+        # mcp.add_tool(AnthropicComputerTool(executor=browser_executor))
+        # mcp.add_tool(OpenAIComputerTool(executor=browser_executor))
+        mcp.add_tool(AnthropicComputerToolWithRecord(executor=browser_executor))
+        mcp.add_tool(OpenAIComputerToolWithRecord(executor=browser_executor))
 
         await send_progress(80, "Registered hud computer tools")
 
