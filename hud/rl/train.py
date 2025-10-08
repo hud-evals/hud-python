@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import time
 from pathlib import Path
@@ -74,6 +75,11 @@ def train(
     )
 
     for step in range(max_steps):
+        # Save checkpoint from previous step (skip first step since no training yet)
+        if step > 0:
+            console.info(f"Saving checkpoint for step {step - 1}...")
+            checkpoint_manager.save(model, step - 1)
+        
         batch = get_batch(step, training_config.output_dir)
                 
         if ref_model is not None:
@@ -85,9 +91,8 @@ def train(
                         logits,
                         sample.inputs["input_ids"],
                         sample.temperature,
-                    )
+                    ).cpu()
                     progress.update(f"Computing reference log probabilities... {i + 1}/{len(batch)}")
-                    del logits
 
         
 
@@ -99,23 +104,24 @@ def train(
                     logits,
                     sample.inputs["input_ids"],
                     sample.temperature,
-                )
+                ).cpu()
                 progress.update(f"Computing old log probabilities... {i + 1}/{len(batch)}")
-                del logits
 
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
         model.train()
         training_start_time = time.time()
 
         if training_config.loss.importance_sampling_level == "token":
-            loss_norm = sum(
+            loss_norm = int(sum(
                 minibatch.inputs["assistant_mask"].sum().item() for minibatch in batch
-            )
+            ))
         elif training_config.loss.importance_sampling_level == "sequence":
             loss_norm = len(batch)
 
         with console.progress("Training...") as progress:
             for idx, minibatch in enumerate(batch):
-                model.set_requires_all_reduce(idx == len(batch) - 1) # type: ignore attr-defined
+                model.set_requires_all_reduce(idx == len(batch) - 1)
 
                 sample = minibatch.to_device(torch.device("cuda"))
                 logits = model(**sample.inputs).logits
@@ -124,6 +130,9 @@ def train(
                     sample.inputs["input_ids"],
                     sample.temperature,
                 )
+
+                # old_logprobs is set in the previous loop, so it should not be None
+                assert sample.old_logprobs is not None, "old_logprobs must be computed before training"
 
                 loss, loss_dict = compute_loss(
                     logprobs,
@@ -137,12 +146,40 @@ def train(
                 
                 del logits
                 loss.backward()
-                progress.update(f"Trained... {idx + 1}/{len(batch)}")
+                console.info(f"hi {idx}")
+            progress.update(f"Trained... {idx + 1}/{len(batch)}")
 
+        console.info(f"About to call optimizer.step() after {len(batch)} minibatches")
         optimizer.step()
+        console.info("hi2")
         optimizer.zero_grad()
-
-        checkpoint_manager.save(model, step)
-
+        console.info("hi3")
+        
+        dummy_tensor = torch.zeros(1, device="cuda")
+        torch.distributed.all_reduce(dummy_tensor, op=torch.distributed.ReduceOp.SUM)
+        console.info("hi4")
+        
         step_duration = time.time() - training_start_time
-        console.info(f"Step {step} took {step_duration:.2f} seconds")
+        console.info(f"Step {step} training took {step_duration:.2f} seconds")
+
+        torch.cuda.empty_cache()
+    
+    # Save final checkpoint after last training step
+    if max_steps > 0:
+        console.info(f"Saving final checkpoint for step {max_steps - 1}...")
+        checkpoint_manager.save(model, max_steps - 1)
+
+
+def main() -> None:
+    """Main entry point for training script."""
+    config, _ = Config.from_argv()
+    
+    if config.verbose:
+        import logging
+        logging.basicConfig(level=logging.INFO)
+    
+    train(config.training, config.training_steps)
+
+
+if __name__ == "__main__":
+    main()

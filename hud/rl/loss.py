@@ -57,7 +57,7 @@ def compute_loss(
     ratio = torch.exp(log_ratio)
     clipped_ratio = torch.clamp(ratio, max=config.clip_ratio)
 
-    loss = - clipped_ratio * advantages
+    loss = - clipped_ratio * advantages.unsqueeze(-1)
 
     clipped = (ratio > config.clip_ratio).float()
 

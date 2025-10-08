@@ -63,15 +63,21 @@ class CheckpointManager:
         
         if self._is_master:
             console.info(f"Saving checkpoint to {checkpoint_path}")
-            checkpoint_path.mkdir(parents=True, exist_ok=True)
             
-            model_path = checkpoint_path / "model.safetensors"
+            temp_checkpoint_path = checkpoint_path.parent / f"{checkpoint_path.name}.tmp"
+            temp_checkpoint_path.mkdir(parents=True, exist_ok=True)
+            
+            model_path = temp_checkpoint_path / "model.safetensors"
             torch.save(cpu_state, model_path)
             
             if hasattr(model, 'config'):
-                model.config.save_pretrained(checkpoint_path)  # type: ignore
+                model.config.save_pretrained(temp_checkpoint_path) # type: ignore
             if hasattr(model, 'generation_config') and model.generation_config:
-                model.generation_config.save_pretrained(checkpoint_path)  # type: ignore
+                model.generation_config.save_pretrained(temp_checkpoint_path)  # type: ignore
+            
+            if checkpoint_path.exists():
+                shutil.rmtree(checkpoint_path)
+            temp_checkpoint_path.rename(checkpoint_path)
             
             console.info(f"Checkpoint saved to {checkpoint_path}")
             

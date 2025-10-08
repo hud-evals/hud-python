@@ -43,7 +43,7 @@ class CheckpointWorker:
     """Extension of a vLLM worker that can hot-load checkpoints over RPC."""
 
     def update_weights(self, model_path: Path) -> None:
-        """Update weights from a specified path pointing to a ``.pt`` file."""
+        """Update weights from a specified path pointing to a `.safetensors` file."""
         state_dict = torch.load(model_path, map_location="cpu", mmap=True)
 
         def weights_iterator():
@@ -237,10 +237,17 @@ async def reload_weights(client: AsyncOpenAI) -> None:
 
 
 def main() -> None:
-    from hud.rl.config import VLLMConfig
-
-    cfg, extra = VLLMConfig.from_argv(allow_extras=True)
-    ns = cfg.to_vllm()
+    import sys
+    from hud.rl.config import Config, VLLMConfig
+    
+    if "--config" in sys.argv:
+        cfg, extra = Config.from_argv(allow_extras=True)
+        vllm_cfg = cfg.vllm
+    else:
+        # Load vllm-specific config directly
+        vllm_cfg, extra = VLLMConfig.from_argv(allow_extras=True)
+    
+    ns = vllm_cfg.to_vllm()
     server(ns, extra_args=extra)
 
 

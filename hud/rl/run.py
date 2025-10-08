@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import argparse
 import asyncio
 import json
 import logging
+import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
@@ -16,6 +17,9 @@ from hud.rl.buffer import create_buffer
 from hud.rl.config import Config
 from hud.rl.logger import console
 from hud.rl.model import get_processor
+from hud.rl.utils import get_weights_path
+from hud.rl.vllm import update_weights
+from openai import AsyncOpenAI
 from hud.rl.preprocessor import preprocess_traces
 from hud.rl.types import TrainingSample
 from hud.utils.tasks import load_tasks
@@ -31,11 +35,50 @@ def resolve_pad_token_id(processor: "ProcessorMixin") -> int:
         return 0
     return int(pad_token_id)
 
+def save_batches(training_batch: list[list[TrainingSample]], step: int, output_dir: str | Path) -> None:
+    output_dir = Path(output_dir)
+    rollout_dir = output_dir / f"step_{step:05d}" / "rollouts"
+    rollout_dir.mkdir(parents=True, exist_ok=True)
+    
+    for rank, rank_samples in enumerate(training_batch):
+        batch_path = rollout_dir / f"rank_{rank}.pt"
+        temp_path = rollout_dir / f"rank_{rank}.pt.tmp"
+        
+        # Write to temp file first
+        torch.save(rank_samples, temp_path)
+        
+        # Atomically rename to final path
+        temp_path.rename(batch_path)
+        console.debug_log(f"Saved {len(rank_samples)} minibatches to {batch_path}")
+    
+    console.info(f"Saved batches for step {step} to {rollout_dir}")
+
+async def wait_for_checkpoint(step: int, output_dir: str | Path, timeout: int = 3600) -> Path:
+    checkpoint_path = get_weights_path(output_dir, step)
+    console.info(f"Waiting for checkpoint: {checkpoint_path}")
+    
+    start_time = time.time()
+    while not checkpoint_path.exists():
+        elapsed = time.time() - start_time
+        if elapsed > timeout:
+            raise TimeoutError(f"Checkpoint not found after {timeout} seconds: {checkpoint_path}")
+        
+        await asyncio.sleep(0.5)
+    
+    console.info(f"Checkpoint ready: {checkpoint_path}")
+    return checkpoint_path
+
 async def run(config: Config, tasks: list[Task]) -> None:
     "Run Rollouts, Collect and Prepare Training Samples"
 
-    # Initialize components
-    actor = Actor(config.actor)
+    client = AsyncOpenAI(
+        base_url=config.client.base_url.replace("localhost", "127.0.0.1"),
+        api_key=config.client.api_key,
+        timeout=float(config.client.request_timeout),
+    )
+
+    # Actor constructs its own agent using the provided client
+    actor = Actor(config.actor, client=client)
     buffer = create_buffer(
         tasks=tasks,
         group_size=config.group_size,
@@ -45,6 +88,18 @@ async def run(config: Config, tasks: list[Task]) -> None:
     )
 
     console.key_value_table(buffer.info)
+
+    # Ensure enough unique tasks
+    min_num_tasks= config.batch_size // config.group_size
+    num_unique_tasks = len(set(task.id for task in tasks))
+    
+    if num_unique_tasks < min_num_tasks:
+        raise ValueError(
+            f"Insufficient unique tasks: need at least {min_num_tasks} "
+            f"(batch_size={config.batch_size} / group_size={config.group_size}), "
+            f"but only {num_unique_tasks} unique task(s) loaded. "
+            f"The buffer will not be able to collect enough completed groups."
+        )
 
     job_metadata = {
         "base_model": config.base_model,
@@ -129,15 +184,25 @@ async def run(config: Config, tasks: list[Task]) -> None:
 
             training_batch = batch_samples(samples, config.mini_batch_size, config.num_gpus, pad_token_id)
 
-            # For now we just log the advantages for the training batch
-            for gpu_idx, gpu_batches in enumerate(training_batch):
-                for batch_idx, sample in enumerate(gpu_batches):
-                    console.info(
-                        f"GPU {gpu_idx} | Batch {batch_idx} | "
-                        f"Advantages: {sample.advantage.tolist()}"
-                    )
-
-            # Reset buffer for next batch
+            total_samples = sum(len(gpu_batch) for gpu_batch in training_batch)
+            console.info(f"Created training batch with {total_samples} samples across {len(training_batch)} GPU batches")
+            
+            save_batches(training_batch, step, config.output_dir)
+            
+            console.section_title(f"Waiting for training to complete for step {step}")
+            checkpoint_path = await wait_for_checkpoint(step, config.output_dir)
+            
+            if step < config.training_steps - 1:
+                console.section_title(f"Updating vLLM weights from checkpoint: {checkpoint_path}")
+                try:
+                    await update_weights(client, Path(config.output_dir), step)
+                    console.info("vLLM weights updated successfully")
+                except Exception as e:
+                    console.warning_log(f"Failed to update vLLM weights: {e}")
+                    console.warning_log("Continuing with current weights...")
+            else:
+                console.info("Last step - skipping vLLM weight update")
+            
             buffer.reset()
             console.info(f"Buffer reset. Status: {buffer.info}")
 
@@ -145,32 +210,33 @@ async def run(config: Config, tasks: list[Task]) -> None:
 
 
 async def _main_async() -> None:
-    parser = argparse.ArgumentParser(description="Run HUD RL")
-    parser.add_argument("--config", type=str, help="Path to config JSON file")
-    parser.add_argument("--tasks", type=str, help="Path to tasks JSONL file or HuggingFace dataset name")
-    parser.add_argument("--tasks-json", type=json.loads, help="Tasks as JSON list string")
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+    import sys
 
-    args = parser.parse_args()
+    # Extract --tasks args before from_argv
+    tasks_arg = None
+    filtered_argv = []
+    i = 1
+    while i < len(sys.argv):
+        if sys.argv[i] == "--tasks" and i + 1 < len(sys.argv):
+            tasks_arg = sys.argv[i + 1]
+            i += 2
+        elif sys.argv[i] == "--tasks-json" and i + 1 < len(sys.argv):
+            tasks_arg = json.loads(sys.argv[i + 1])
+            i += 2
+        else:
+            filtered_argv.append(sys.argv[i])
+            i += 1
 
-    if args.config:
-        with open(args.config) as fp:
-            config_dict = json.load(fp)
-        config = Config.model_validate(config_dict)
-    else:
-        config = Config()
+    sys.argv = [sys.argv[0]] + filtered_argv
+    config, _ = Config.from_argv()
 
-    if args.verbose:
-        config.verbose = True
+    if config.verbose:
         logging.basicConfig(level=logging.INFO)
 
-    if args.tasks_json:
-        tasks = load_tasks(args.tasks_json)
-    elif args.tasks:
-        tasks = load_tasks(args.tasks)
-    else:
+    if not tasks_arg:
         raise ValueError("Requires tasks via --tasks or --tasks-json")
 
+    tasks = load_tasks(tasks_arg)
     await run(config, tasks) # type: ignore
 
 
