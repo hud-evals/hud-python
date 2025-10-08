@@ -92,6 +92,7 @@ def train(
                         sample.inputs["input_ids"],
                         sample.temperature,
                     ).cpu()
+                    del logits
                     progress.update(f"Computing reference log probabilities... {i + 1}/{len(batch)}")
 
         
@@ -105,6 +106,7 @@ def train(
                     sample.inputs["input_ids"],
                     sample.temperature,
                 ).cpu()
+                del logits
                 progress.update(f"Computing old log probabilities... {i + 1}/{len(batch)}")
 
         torch.cuda.synchronize()
@@ -146,21 +148,17 @@ def train(
                 
                 del logits
                 loss.backward()
-                console.info(f"hi {idx}")
-            progress.update(f"Trained... {idx + 1}/{len(batch)}")
+                progress.update(f"Trained... {idx + 1}/{len(batch)}")
 
-        console.info(f"About to call optimizer.step() after {len(batch)} minibatches")
         optimizer.step()
-        console.info("hi2")
         optimizer.zero_grad()
-        console.info("hi3")
-        
-        dummy_tensor = torch.zeros(1, device="cuda")
-        torch.distributed.all_reduce(dummy_tensor, op=torch.distributed.ReduceOp.SUM)
-        console.info("hi4")
         
         step_duration = time.time() - training_start_time
         console.info(f"Step {step} training took {step_duration:.2f} seconds")
+
+        # Simulate metrics synchronization TODO: update this to log metrics
+        dummy_tensor = torch.zeros(1, device="cuda")
+        torch.distributed.all_reduce(dummy_tensor, op=torch.distributed.ReduceOp.SUM)
 
         torch.cuda.empty_cache()
     
