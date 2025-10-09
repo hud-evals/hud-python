@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import copy
 import logging
+from nt import truncate
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from anthropic import Anthropic, AsyncAnthropic, BadRequestError
-from anthropic.types.beta import BetaContentBlockParam, BetaImageBlockParam, BetaTextBlockParam
+from anthropic.types.beta import (
+    BetaContentBlockParam,
+    BetaDocumentBlock,
+    BetaImageBlockParam,
+    BetaTextBlockParam,
+)
 
 import hud
 
@@ -15,6 +21,7 @@ if TYPE_CHECKING:
     from anthropic.types.beta import (
         BetaCacheControlEphemeralParam,
         BetaContentBlockParam,
+        BetaDocumentBlock,
         BetaImageBlockParam,
         BetaMessageParam,
         BetaTextBlockParam,
@@ -268,7 +275,12 @@ class ClaudeAgent(MCPAgent):
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
     ) -> list[BetaMessageParam]:
-        """Format tool results into Claude messages."""
+        """Format tool results into Claude messages.
+        
+        Handles file attachments (PDFs from JSON), images, and text content.
+        """
+        import json
+        
         # Process each tool result
         user_content = []
 
@@ -281,7 +293,41 @@ class ClaudeAgent(MCPAgent):
 
             # Convert MCP tool results to Claude format
             claude_blocks = []
+            
+            # NEW: Try to parse JSON from TextContent to check for file data
+            if result.content and len(result.content) > 0:
+                first_content = result.content[0]
+                
+                if isinstance(first_content, types.TextContent):
+                    try:
+                        data = json.loads(first_content.text)
+                        
+                        # Check if JSON contains PDF/file data
+                        if isinstance(data, dict) and data.get("pdf_base64"):
+                            # Add document attachment
+                            claude_blocks.append(
+                                document_to_content_block(
+                                    filename=data.get("filename", "document.pdf"),
+                                    mime_type=data.get("mime_type", "application/pdf"),
+                                    base64_data=data["pdf_base64"]
+                                )
+                            )
+                            
+                            # Add text description
+                            if data.get("title"):
+                                claude_blocks.append(
+                                    text_to_content_block(f"Retrieved document: {data['title']}")
+                                )
+                            
+                            # Add tool result and continue to next
+                            user_content.append(tool_use_content_block(tool_use_id, claude_blocks))
+                            continue
+                            
+                    except (json.JSONDecodeError, KeyError, TypeError):
+                        # Not JSON or no file data, handle normally below
+                        pass
 
+            # EXISTING: Handle errors and regular content
             if result.isError:
                 # Extract error message from content
                 error_msg = "Tool execution failed"
@@ -411,8 +457,23 @@ def text_to_content_block(text: str) -> BetaTextBlockParam:
     return {"type": "text", "text": text}
 
 
+def document_to_content_block(
+    filename: str, mime_type: str, base64_data: str
+) -> BetaDocumentBlock:
+    """Convert base64 PDF to Claude document content block."""
+    return {
+        "type": "document",
+        "source": {
+            "type": "base64",
+            "media_type": mime_type,
+            "data": base64_data
+        }
+    }
+
+
 def tool_use_content_block(
-    tool_use_id: str, content: list[BetaTextBlockParam | BetaImageBlockParam]
+    tool_use_id: str, 
+    content: list[BetaTextBlockParam | BetaImageBlockParam | BetaDocumentBlock]
 ) -> BetaToolResultBlockParam:
     """Create tool result content block."""
     return {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
