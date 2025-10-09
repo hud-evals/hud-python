@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import time
 from pathlib import Path
+from typing import cast
+
+from torch.distributed import get_rank
 
 # Disable tokenizer parallelism warnings
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -20,8 +24,12 @@ from hud.rl.parallel_dims import ParallelDims
 from hud.rl.parallelize_qwen_2_5 import parallelize_qwen
 from hud.rl.distributed import get_world_size, setup_distributed
 from hud.rl.checkpoint import CheckpointManager
-from hud.rl.types import TrainingSample
+from hud.rl.types import TrainingMetrics, TrainingSample
 
+def merge_metrics(metrics_list: list[TrainingMetrics]) -> TrainingMetrics:
+    merged = TrainingMetrics()
+    # TODO: implement
+    return merged
 
 def get_batch(step: int, root: str) -> list[TrainingSample]:
     """Load the batch for the given step from ``<output_dir>/step_{step}/rollouts``."""
@@ -45,6 +53,7 @@ def train(
 
     setup_distributed()
     world_size = get_world_size()
+    rank = get_rank()
 
     console.section_title("Initializing trainer")
 
@@ -81,7 +90,9 @@ def train(
             checkpoint_manager.save(model, step - 1)
         
         batch = get_batch(step, training_config.output_dir)
-                
+
+        training_metrics = TrainingMetrics()
+
         if ref_model is not None:
             with console.progress("Computing reference log probabilities...") as progress, torch.no_grad():
                 for i, minibatch in enumerate(batch):
@@ -144,6 +155,7 @@ def train(
                     sample.inputs["assistant_mask"],
                     training_config.loss,
                     loss_norm,
+                    training_metrics,
                 )
                 
                 del logits
@@ -156,10 +168,23 @@ def train(
         step_duration = time.time() - training_start_time
         console.info(f"Step {step} training took {step_duration:.2f} seconds")
 
-        # Simulate metrics synchronization TODO: update this to log metrics
-        dummy_tensor = torch.zeros(1, device="cuda")
-        torch.distributed.all_reduce(dummy_tensor, op=torch.distributed.ReduceOp.SUM)
+        # Gather metrics across ranks        
+        if rank == 0:
+            output_list = [None] * world_size
+        else:
+            output_list = None
+        
+        torch.distributed.gather_object(training_metrics, object_gather_list=output_list, dst=0)
 
+        if rank == 0:
+            assert isinstance(output_list, list) and all(isinstance(m, TrainingMetrics) for m in output_list)
+            output_list = cast(list[TrainingMetrics], output_list)
+            merged_training_metrics = merge_metrics(output_list)
+
+            with open(Path(training_config.output_dir) / f"metrics_{step}.json", "w") as f:
+                json.dump(merged_training_metrics.to_dict(), f)
+        
+        
         torch.cuda.empty_cache()
     
     # Save final checkpoint after last training step

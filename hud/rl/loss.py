@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from hud.rl.config import LossConfig
+from hud.rl.types import TrainingMetrics
 
 
 def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor:
@@ -43,6 +44,7 @@ def compute_loss(
     assistant_mask: torch.Tensor, # (B, seq)
     config: LossConfig,
     loss_norm: int,
+    training_metrics: TrainingMetrics,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """Compute loss for a batch of samples, use per-token loss."""
     log_ratio = log_probs - old_log_probs
@@ -67,6 +69,30 @@ def compute_loss(
         loss = loss / torch.clamp(assistant_mask.sum(), 1)
 
     loss = loss / max(loss_norm, 1)
+
+    # Store metrics
+    mask_count = assistant_mask.sum().clamp_min(1.0)
+    training_metrics.update(
+        {
+            "policy_ratio": (ratio * assistant_mask).sum().item() / mask_count.item()
+            if mask_count.item() > 0
+            else 1.0,
+            "loss": loss.item(),
+        }
+    )
+
+    # Compute KL divergence if reference log probs are provided
+    if ref_log_probs is not None:
+        log_rho = log_probs - ref_log_probs
+        rho = torch.exp(log_rho.clamp(-20.0, 20.0))
+        kl_approx = rho - torch.log(rho) - 1
+        training_metrics.update(
+            {
+                "kl": (kl_approx * assistant_mask).sum().item() / mask_count.item()
+                if mask_count.item() > 0
+                else 0.0,
+            }
+        )
 
     return loss, {
         "loss": loss,
