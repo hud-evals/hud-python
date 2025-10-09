@@ -6,8 +6,13 @@
     "trust_remote_code": true
   },
   "num_gpus": 2,
-  "training_steps": 2,
-  "shuffle_dataset": false,
+  "training_steps": 10,
+  "buffer": {
+    "shuffle_dataset": false,
+    "buffer_steps": 4,
+    "select_strategy": "recent",
+    "require_images": false
+  },
   "batch_size": 64,
   "mini_batch_size": 2,
   "group_size": 8,
@@ -15,8 +20,6 @@
     "scale_rewards": "group",
     "leave_one_out": false
   },
-  "buffer_steps": 4,
-  "select_strategy": "recent",
   "training": {
     "model": {
       "attn_implementation": "flash_attention_2",

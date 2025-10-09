@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed._composable.replicate import replicate
+from torch.distributed.fsdp import FSDPModule
 from transformers import (
     AutoConfig,
     ProcessorMixin,
@@ -18,7 +17,9 @@ except ImportError:
     LIGER_AVAILABLE = False
 
 from hud.rl.logger import console
-from hud.rl.config import ModelConfig, ProcessorConfig
+from hud.rl.config import ModelConfig, ProcessorConfig, TrainingConfig
+from hud.rl.parallel_dims import ParallelDims
+from hud.rl.parallelize import apply_fsdp
 
 def freeze_vision_tower(model: nn.Module) -> None:
     for name, module in model.named_modules():
@@ -64,6 +65,13 @@ def get_model(config: ModelConfig) -> nn.Module:
 
     return model
 
+
+def build_model(training_cfg: "TrainingConfig", parallel_dims: "ParallelDims") -> nn.Module:
+    model = get_model(training_cfg.model)
+    model = apply_fsdp(model, parallel_dims, reshard_after_forward=False, cpu_offload=False)
+    assert isinstance(model, FSDPModule)
+    return model
+
 def get_processor(base_model: str, config: ProcessorConfig) -> ProcessorMixin:
     try:
         processor = AutoProcessor.from_pretrained(
@@ -77,9 +85,6 @@ def get_processor(base_model: str, config: ProcessorConfig) -> ProcessorMixin:
     except Exception as e:
         console.warning(f"Failed to load processor: {e}")
         raise e
-
-def apply_ddp(model: nn.Module, dp_mesh: DeviceMesh) -> None:
-    replicate(model, device_mesh=dp_mesh, bucket_cap_mb=100)
 
 if __name__ == "__main__":
     model = get_model(ModelConfig(base_model="Qwen/Qwen2.5-VL-3B-Instruct"))

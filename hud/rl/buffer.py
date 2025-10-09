@@ -23,8 +23,9 @@ def _variance(values: list[float]) -> float:
 class Buffer(ABC):
     """Base class that keeps track of tasks, traces, and group sampling."""
 
-    def __init__(self, tasks: list[Task], group_size: int, shuffle_dataset: bool = False) -> None:
+    def __init__(self, tasks: list[Task], group_size: int, shuffle_dataset: bool = False, require_images: bool = False) -> None:
         self.group_size = group_size
+        self.require_images = require_images
         self._initialize_tasks(tasks, shuffle_dataset)
         self.task_traces: defaultdict[str, list[Trace]] = defaultdict(list)
 
@@ -53,9 +54,24 @@ class Buffer(ABC):
     def _tasks_ready(self) -> list[str]:
         return [task_id for task_id, traces in self.task_traces.items() if len(traces) >= self.group_size]
 
+    def _has_image(self, trace: Trace) -> bool:
+        """Return True if the trace contains at least one user image.
+        """
+        try:
+            for m in getattr(trace, "messages", []) or []:
+                if isinstance(m, dict) and m.get("role") == "user":
+                    for c in m.get("content", []) or []:
+                        if isinstance(c, dict) and c.get("type") in {"image", "image_url"}:
+                            return True
+        except Exception:
+            pass
+        return False
+
     def add_traces(self, traces: list[Trace]) -> None:
         for trace in traces:
             if getattr(trace, "isError", False):
+                continue
+            if self.require_images and not self._has_image(trace):
                 continue
             task_key = self._trace_task_key(trace)
             self.task_traces[task_key].append(trace)
@@ -143,8 +159,9 @@ class ReplayBuffer(Buffer):
         select_strategy: str,
         buffer_steps: int,
         shuffle_dataset: bool = False,
+        require_images: bool = False,
     ) -> None:
-        super().__init__(tasks, group_size, shuffle_dataset)
+        super().__init__(tasks, group_size, shuffle_dataset, require_images=require_images)
         self.select_strategy = select_strategy
         self.buffer_steps = buffer_steps
         self._total_groups: defaultdict[str, int] = defaultdict(int)
@@ -285,9 +302,10 @@ def create_buffer(
     select_strategy: str,
     buffer_steps: int = 0,
     shuffle_dataset: bool = False,
+    require_images: bool = False,
 ) -> Buffer:
     if select_strategy == "recent":
-        return SimpleBuffer(tasks, group_size, shuffle_dataset)
+        return SimpleBuffer(tasks, group_size, shuffle_dataset, require_images=require_images)
     if select_strategy in {"random", "variance"}:
-        return ReplayBuffer(tasks, group_size, select_strategy, buffer_steps, shuffle_dataset)
+        return ReplayBuffer(tasks, group_size, select_strategy, buffer_steps, shuffle_dataset, require_images=require_images)
     raise ValueError(f"Invalid select_strategy: {select_strategy}. Expected 'recent', 'random', or 'variance'.")

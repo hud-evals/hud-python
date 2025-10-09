@@ -82,9 +82,10 @@ async def run(config: Config, tasks: list[Task]) -> None:
     buffer = create_buffer(
         tasks=tasks,
         group_size=config.group_size,
-        select_strategy=config.select_strategy,
-        buffer_steps=config.buffer_steps,
-        shuffle_dataset=config.shuffle_dataset,
+        select_strategy=config.buffer.select_strategy,
+        buffer_steps=config.buffer.buffer_steps,
+        shuffle_dataset=config.buffer.shuffle_dataset,
+        require_images=config.buffer.require_images,
     )
 
     console.key_value_table(buffer.info)
@@ -106,8 +107,8 @@ async def run(config: Config, tasks: list[Task]) -> None:
         "batch_size": config.batch_size,
         "group_size": config.group_size,
         "mini_batch_size": config.mini_batch_size,
-        "buffer_steps": config.buffer_steps,
-        "select_strategy": config.select_strategy,
+        "buffer_steps": config.buffer.buffer_steps,
+        "select_strategy": config.buffer.select_strategy,
         "training_steps": config.training_steps,
         "expected_world_size": config.expected_world_size,
         "grad_accumulation_steps": config.grad_accumulation_steps,

@@ -5,11 +5,12 @@ import pytest
 from PIL import Image
 
 from hud.rl.parallel_dims import ParallelDims
-from hud.rl.parallelize_qwen_2_5 import parallelize_qwen
-from hud.rl.model import get_model, get_processor
-from hud.rl.config import ModelConfig
+from hud.rl.model import build_model
+from hud.rl.config import ModelConfig, TrainingConfig
 from hud.rl.logger import console
+from hud.rl.distributed import setup_distributed, cleanup_distributed
 from torch.distributed.fsdp import FSDPModule
+from transformers import AutoProcessor
 
 console.set_verbose(True)
 
@@ -23,25 +24,12 @@ def _vl_model_default():
 
 def setup_environment():
     world_size = int(os.environ.get('WORLD_SIZE', '1'))
-    local_rank = int(os.environ.get('LOCAL_RANK', '0'))
-
+    
     if not torch.cuda.is_available():
         raise RuntimeError('CUDA is required for these parallel tests')
 
-    torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl", device_id=torch.device("cuda", torch.cuda.current_device()))
-
+    setup_distributed()
     return world_size
-
-
-def cleanup():
-    if dist.is_initialized():
-        current_device = torch.cuda.current_device() if torch.cuda.is_available() else None
-        if current_device is not None:
-            dist.barrier(device_ids=[current_device])
-        else:
-            dist.barrier()
-        dist.destroy_process_group()
 
 def generate_lm_dummy_input(batch_size=2, seq_len=128, vocab_size=151936):
     generator = torch.Generator()
@@ -90,32 +78,29 @@ def generate_vl_dummy_input(
 
 
 def run_parallelism_test(model_name, parallel_dims, test_type, is_vl=False):
-
     console.info_log(
         f"Starting {test_type} test for {'VL' if is_vl else 'LM'} model: {model_name}"
     )
 
-    config = ModelConfig(base_model=model_name)
-
+    # Create training config
+    model_config = ModelConfig(base_model=model_name)
     if is_vl:
-        config.freeze_vision_tower = True
-
-    model = get_model(config)
-    model = parallelize_qwen(model, parallel_dims)
-
-    print(model)
-
-    if test_type in ("FSDP", "HSDP"):
-        assert isinstance(model, FSDPModule)
+        model_config.freeze_vision_tower = True
+    
+    training_config = TrainingConfig(model=model_config)
+    
+    # Build model with FSDP applied
+    model = build_model(training_config, parallel_dims)
+    
+    console.info_log(f"Model parallelized: {type(model)}")
+    assert isinstance(model, FSDPModule), f"Expected FSDPModule, got {type(model)}"
 
     model.train()
 
-    if parallel_dims.dp_replicate_enabled and not parallel_dims.fsdp_enabled:
-      model = model.to("cuda")
-
+    # Prepare inputs
     if is_vl:
         try:
-            processor = get_processor(config)
+            processor = AutoProcessor.from_pretrained(model_name)
         except OSError as exc:
             pytest.skip(f"Processor unavailable: {exc}")
         inputs = generate_vl_dummy_input(processor)
@@ -159,60 +144,9 @@ def run_parallelism_test(model_name, parallel_dims, test_type, is_vl=False):
             grads_with_values += 1
     grad_norm = grad_norm ** 0.5
 
-    console.info_log(f"[{model_type} {test_type} backward grad norm: {grad_norm:.6e}")
-    console.info_log(f"[{model_type} {test_type} test passed - Loss: {loss_value:.4f}")
+    console.info_log(f"[{model_type} {test_type}] backward grad norm: {grad_norm:.6e}")
+    console.info_log(f"[{model_type} {test_type}] test passed - Loss: {loss_value:.4f}")
     model.zero_grad(set_to_none=True)
-
-
-# DDP Tests
-@pytest.mark.skipif(torch.cuda.device_count() < 4, reason="Requires at least 4 GPUs")
-def test_lm_ddp_4_gpus():
-    """Test LM DDP with 4 GPUs"""
-    world_size = setup_environment()
-    if world_size < 4:
-        pytest.skip(f"Requires world_size >= 4, got {world_size}")
-
-    try:
-        parallel_dims = ParallelDims(
-            dp_replicate=world_size,
-            dp_shard=1,
-            cp=1,
-            tp=1,
-            pp=1,
-            ep=1,
-            etp=1,
-            world_size=world_size
-        )
-
-        run_parallelism_test(_lm_model_default(), parallel_dims, "DDP", is_vl=False)
-
-    finally:
-        cleanup()
-
-
-@pytest.mark.skipif(torch.cuda.device_count() < 4, reason="Requires at least 4 GPUs")
-def test_vl_ddp_4_gpus():
-    """Test VL DDP with 4 GPUs"""
-    world_size = setup_environment()
-    if world_size < 4:
-        pytest.skip(f"Requires world_size >= 4, got {world_size}")
-
-    try:
-        parallel_dims = ParallelDims(
-            dp_replicate=world_size,
-            dp_shard=1,
-            cp=1,
-            tp=1,
-            pp=1,
-            ep=1,
-            etp=1,
-            world_size=world_size
-        )
-
-        run_parallelism_test(_vl_model_default(), parallel_dims, "DDP", is_vl=True)
-
-    finally:
-        cleanup()
 
 
 # FSDP Tests
@@ -238,7 +172,7 @@ def test_lm_fsdp_4_gpus():
         run_parallelism_test(_lm_model_default(), parallel_dims, "FSDP", is_vl=False)
 
     finally:
-        cleanup()
+        cleanup_distributed()
 
 
 @pytest.mark.skipif(torch.cuda.device_count() < 4, reason="Requires at least 4 GPUs")
@@ -263,7 +197,7 @@ def test_vl_fsdp_4_gpus():
         run_parallelism_test(_vl_model_default(), parallel_dims, "FSDP", is_vl=True)
 
     finally:
-        cleanup()
+        cleanup_distributed()
 
 
 # HSDP Tests
@@ -289,7 +223,7 @@ def test_lm_hsdp_2x2_mesh():
         run_parallelism_test(_lm_model_default(), parallel_dims, "HSDP", is_vl=False)
 
     finally:
-        cleanup()
+        cleanup_distributed()
 
 
 @pytest.mark.skipif(torch.cuda.device_count() < 4, reason="Requires at least 4 GPUs")
@@ -314,7 +248,7 @@ def test_vl_hsdp_2x2_mesh():
         run_parallelism_test(_vl_model_default(), parallel_dims, "HSDP", is_vl=True)
 
     finally:
-        cleanup()
+        cleanup_distributed()
 
 
 
@@ -325,58 +259,28 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print("Usage: torchrun --nproc_per_node=4 test_qwen_parallelism.py <test_name>")
+        print("Usage: torchrun --nproc-per-node 4 test_parallelism.py <test_name>")
         print("Available tests:")
-        print("  LM: lm_ddp, lm_fsdp, lm_hsdp")
-        print("  VL: vl_ddp, vl_fsdp, vl_hsdp")
-        print("  All LM: all_lm")
-        print("  All VL: all_vl")
-        print("  All: all")
+        print("  LM: lm_fsdp, lm_hsdp")
+        print("  VL: vl_fsdp, vl_hsdp")
         sys.exit(1)
 
     test_name = sys.argv[1]
 
     # LM tests
-    if test_name == "lm_ddp":
-        test_lm_ddp_4_gpus()
-    elif test_name == "lm_fsdp":
+    if test_name == "lm_fsdp":
         test_lm_fsdp_4_gpus()
     elif test_name == "lm_hsdp":
         test_lm_hsdp_2x2_mesh()
 
     # VL tests
-    elif test_name == "vl_ddp":
-        test_vl_ddp_4_gpus()
     elif test_name == "vl_fsdp":
         test_vl_fsdp_4_gpus()
     elif test_name == "vl_hsdp":
         test_vl_hsdp_2x2_mesh()
-
-    # Combined tests
-    elif test_name == "all_lm":
-        print("Running all LM tests...")
-        test_lm_ddp_4_gpus()
-        test_lm_fsdp_4_gpus()
-        test_lm_hsdp_2x2_mesh()
-    elif test_name == "all_vl":
-        print("Running all VL tests...")
-        test_vl_ddp_4_gpus()
-        test_vl_fsdp_4_gpus()
-        test_vl_hsdp_2x2_mesh()
-    elif test_name == "all":
-        print("Running all tests...")
-        test_lm_ddp_4_gpus()
-        test_lm_fsdp_4_gpus()
-        test_lm_hsdp_2x2_mesh()
-        test_vl_ddp_4_gpus()
-        test_vl_fsdp_4_gpus()
-        test_vl_hsdp_2x2_mesh()
     else:
         print(f"Unknown test: {test_name}")
         print("Available tests:")
-        print("  LM: lm_ddp, lm_fsdp, lm_hsdp")
-        print("  VL: vl_ddp, vl_fsdp, vl_hsdp")
-        print("  All LM: all_lm")
-        print("  All VL: all_vl")
-        print("  All: all")
+        print("  LM: lm_fsdp, lm_hsdp")
+        print("  VL: vl_fsdp, vl_hsdp")
         sys.exit(1)

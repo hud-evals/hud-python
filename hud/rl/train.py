@@ -14,10 +14,9 @@ import torch
 from hud.rl.config import Config, TrainingConfig
 from hud.rl.logger import console
 from hud.rl.loss import compute_loss, get_per_token_logps, entropy_from_logits
-from hud.rl.model import get_model
+from hud.rl.model import build_model
 from hud.rl.optimizer import get_optimizer
 from hud.rl.parallel_dims import ParallelDims
-from hud.rl.parallelize_qwen_2_5 import parallelize_qwen
 from hud.rl.distributed import get_world_size, setup_distributed
 from hud.rl.checkpoint import CheckpointManager
 from hud.rl.types import TrainingSample
@@ -59,12 +58,12 @@ def train(
         world_size=world_size,
     )
 
-    model = parallelize_qwen(get_model(training_config.model), parallel_dims)
+    model = build_model(training_config, parallel_dims)
 
     ref_model: torch.nn.Module | None = None
     if training_config.loss.kl_beta > 0:
         console.info("Initializing reference model for KL regularization")
-        ref_model = parallelize_qwen(get_model(training_config.model), parallel_dims)
+        ref_model = build_model(training_config, parallel_dims)
         ref_model.eval()
 
     optimizer = get_optimizer(training_config.optimizer, model)

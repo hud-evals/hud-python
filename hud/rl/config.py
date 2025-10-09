@@ -133,6 +133,15 @@ class ModelConfig(BaseConfig):
         super().validate_config()
 
 
+class BufferConfig(BaseConfig):
+    select_strategy: Literal["recent", "variance", "random"] = Field(
+        default="variance", description="Buffer selection strategy"
+    )
+    buffer_steps: int = Field(default=4, ge=0, description="Number of buffer steps")
+    shuffle_dataset: bool = Field(default=False, description="Whether to shuffle the dataset")
+    require_images: bool = Field(default=False, description="Drop text-only traces in buffer")
+
+
 class OptimizerConfig(BaseConfig):
     lr: float = Field(default=3e-5, gt=0.0, description="Learning rate")
     use_8bit_optimizer: bool = Field(default=True, description="Use 8-bit Adam optimizer")
@@ -258,18 +267,16 @@ class Config(BaseConfig):
 
     num_gpus: int = Field(default=1, ge=1, description="Number of GPUs to use for training")
     training_steps: int = Field(default=100, ge=1, description="Number of training steps")
-    shuffle_dataset: bool = Field(default=False, description="Whether to shuffle the dataset")
     batch_size: int = Field(default=24, ge=1, description="Global batch size for training")
     mini_batch_size: int = Field(default=1, ge=1, description="Mini-batch size")
     group_size: int = Field(default=4, ge=1, description="Group size i.e. number of rollouts per prompt")
     rewards: RewardConfig = Field(default_factory=RewardConfig, description="Reward scaling configuration")
-    buffer_steps: int = Field(default=4, ge=0, description="Number of buffer steps")
-    select_strategy: Literal["recent", "variance", "random"] = Field(default="variance", description="Buffer selection strategy")
 
     training: TrainingConfig = Field(default_factory=TrainingConfig, description="Trainer configuration")
+    vllm: VLLMConfig = Field(default_factory=VLLMConfig, description="VLLM server configuration")
     client: ClientConfig = Field(default_factory=ClientConfig, description="Client configuration")
     actor: ActorConfig = Field(default_factory=ActorConfig, description="Actor configuration")
-    vllm: VLLMConfig = Field(default_factory=VLLMConfig, description="VLLM server configuration")
+    buffer: BufferConfig = Field(default_factory=BufferConfig, description="Buffer configuration")
 
     job_name: str = Field(default="RL Training", description="Job name for telemetry")
     job_id: str = Field(default=str(uuid.uuid4()), description="Job ID for telemetry")
