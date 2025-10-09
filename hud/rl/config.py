@@ -215,7 +215,6 @@ class VLLMConfig(BaseConfig):
     port: int | None = Field(default=None, description="Port to bind for vLLM server")
 
     tensor_parallel_size: int = Field(default=1, ge=1, description="Tensor parallel size for vLLM")
-    trust_remote_code: bool = Field(default=True, description="Trust remote code for model loading")
     enable_auto_tool_choice: bool = Field(default=True, description="Enable auto tool choice in vLLM")
     tool_call_parser: str = Field(default="hermes", description="Tool call parser for vLLM")
     chat_template: str | None = Field(default=None, description="Path to Jinja chat template for vLLM")
@@ -237,7 +236,6 @@ class VLLMConfig(BaseConfig):
 
         # Model and features
         setattr(ns, "model", self.base_model)
-        setattr(ns, "trust_remote_code", bool(self.trust_remote_code))
         setattr(ns, "tensor_parallel_size", int(self.tensor_parallel_size))
         setattr(ns, "enable_auto_tool_choice", bool(self.enable_auto_tool_choice))
         setattr(ns, "tool_call_parser", self.tool_call_parser)
