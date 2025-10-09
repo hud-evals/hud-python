@@ -1,33 +1,52 @@
 from pathlib import Path
-
+import json
+from typing import Dict
+import os
 import torch
-
-def get_memory_usage() -> float:
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-        return torch.cuda.memory_allocated() / 1024**3
-    return 0.0
-
-
-def get_gpu_utilization() -> float:
-    """Get current GPU utilization percentage (0-100)."""
-    if not torch.cuda.is_available():
-        return 0.0
-
-    try:
-        import nvidia_ml_py as nvml  # type: ignore
-
-        nvml.nvmlInit()
-        device_id = torch.cuda.current_device()
-        handle = nvml.nvmlDeviceGetHandleByIndex(device_id)
-        util = nvml.nvmlDeviceGetUtilizationRates(handle)
-        return float(util.gpu)
-    except Exception:
-        # Fallback: estimate based on memory usage
-        # This is less accurate but works without nvidia-ml-py
-        return min(100.0, (torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()) * 100)
+import torch.distributed as dist
 
 
 def get_weights_path(output_dir: str | Path, step: int) -> Path:
     output_dir = Path(output_dir)
     return output_dir / f"step_{step:05d}" / "checkpoints" / "model.safetensors"
+
+
+def save_step_metrics(output_dir: str | Path, step: int, metrics: Dict[str, float]) -> Path:
+    """Writes metrics to a JSON file: `<output_dir>/step_{step}/metrics.json`.
+    """
+    step_dir = Path(output_dir) / f"step_{step:05d}"
+    step_dir.mkdir(parents=True, exist_ok=True)
+    path = step_dir / "metrics.json"
+    with open(path, "w") as f:
+        json.dump(dict(metrics), f)
+    return path
+
+
+# Distributed helpers (migrated from distributed.py)
+
+def setup_distributed() -> None:
+    """Initialize torch.distributed (NCCL) and set CUDA device from LOCAL_RANK."""
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
+    if not dist.is_initialized():
+        dist.init_process_group(
+            backend="nccl",
+            device_id=(torch.device("cuda", torch.cuda.current_device()) if torch.cuda.is_available() else None),
+        )
+
+
+def get_world_size() -> int:
+    """Return expected world size from env, defaulting to 1."""
+    return int(os.environ.get("WORLD_SIZE", "1"))
+
+
+def cleanup_distributed() -> None:
+    if dist.is_initialized():
+        dist.destroy_process_group()
+
+
+def is_main_process() -> bool:
+    if not dist.is_initialized():
+        return True
+    return dist.get_rank() == 0

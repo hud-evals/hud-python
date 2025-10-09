@@ -8,7 +8,7 @@ from hud.rl.parallel_dims import ParallelDims
 from hud.rl.model import build_model
 from hud.rl.config import ModelConfig, TrainingConfig
 from hud.rl.logger import console
-from hud.rl.distributed import setup_distributed, cleanup_distributed
+from hud.rl.utils import setup_distributed, cleanup_distributed
 from torch.distributed.fsdp import FSDPModule
 from transformers import AutoProcessor
 

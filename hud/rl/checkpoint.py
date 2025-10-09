@@ -7,7 +7,7 @@ from torch import nn, Tensor
 from torch.distributed.checkpoint.state_dict import _get_fqns as get_fqns
 from torch.distributed.tensor import DTensor
 
-from hud.rl.distributed import is_main_process
+from hud.rl.utils import is_main_process
 from hud.rl.logger import console
 
 

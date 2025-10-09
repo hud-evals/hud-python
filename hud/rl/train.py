@@ -17,7 +17,7 @@ from hud.rl.loss import compute_loss, get_per_token_logps, entropy_from_logits
 from hud.rl.model import build_model
 from hud.rl.optimizer import get_optimizer
 from hud.rl.parallel_dims import ParallelDims
-from hud.rl.distributed import get_world_size, setup_distributed
+from hud.rl.utils import get_world_size, setup_distributed, is_main_process
 from hud.rl.checkpoint import CheckpointManager
 from hud.rl.types import TrainingSample
 
