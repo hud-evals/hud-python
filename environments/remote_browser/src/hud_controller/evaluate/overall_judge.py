@@ -8,7 +8,7 @@ from .webjudge import webjudge
 logger = logging.getLogger(__name__)
 
 @evaluate.tool("overall_judge")
-async def overall_judge(ctx: Context, task_description: dict | str) -> dict:
+async def overall_judge(ctx: Context, task_description: dict | str) -> dict | EvaluationResult:
     """Judge and return the results from all evalution methods
 
     Args:
@@ -35,7 +35,7 @@ async def overall_judge(ctx: Context, task_description: dict | str) -> dict:
             reward += r.reward
             errors += r.isError
             done += int(r.done)
-            info[f.__name__] = {"reward":r.reward, "done": r.done, "isError": r.isError}
+            info[f.__name__] = {"reward":r.reward, "done": r.done, "isError": r.isError, "info": r.info}
 
         return EvaluationResult(
             reward=reward/n,

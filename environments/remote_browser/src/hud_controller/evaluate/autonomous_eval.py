@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 async def autonomous_eval(
     ctx: Context,
     task_description: dict | str,
-) -> dict:
+) -> dict | EvaluationResult:
     logging.info((task_description))
     if type(task_description) == str:
         task_description = json.loads(task_description)
@@ -22,7 +22,7 @@ async def autonomous_eval(
         if openai_api_key is None:
             logging.error("OPENAI_API_KEY environment variable not set")
             return EvaluationResult(
-                reward=0.0, done=False, content="OPENAI_API_KEY environment variable not set", isError=True
+                reward=0.0, done=False, info={"error": "OPENAI_API_KEY environment variable not set"}, isError=True
             )
 
         persistent_ctx = evaluate.env
@@ -85,8 +85,6 @@ Action History:
 The last snapshot of the web page is shown in the image."""
         logging.info("Calling GPT-4.1 for evaluation...")
         import openai
-
-        logging.info(f"Creating OpenAI client with api_key: {openai_api_key[:10]}...")
 
         # Check for any environment variables that might affect OpenAI client
         proxy_related_vars = {

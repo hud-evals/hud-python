@@ -32,7 +32,7 @@ async def identify_key_point(task_description: dict | str) -> dict:
     logging.info(f"DEBUG: Raw environment variable type: {type(openai_api_key)}")
     if openai_api_key:
         logging.info(
-            f"DEBUG: Raw key repr: {repr(openai_api_key[:50])}"
+            f"DEBUG: Raw key repr: {repr(openai_api_key[:10])}"
         )  # Show first 50 chars with repr to see any weird characters
     if openai_api_key is None:
         logging.error("OPENAI_API_KEY environment variable not set")
@@ -71,7 +71,7 @@ async def identify_key_point(task_description: dict | str) -> dict:
 
         # Debug the actual API key being used
         logging.info(
-            f"DEBUG: Creating OpenAI client with key: {openai_api_key[:20]}...{openai_api_key[-10:]}"
+            f"DEBUG: Creating OpenAI client with key: {openai_api_key[:10]}...{openai_api_key[-10:]}"
         )
         logging.info(f"DEBUG: Full API key length: {len(openai_api_key)}")
 
@@ -251,7 +251,7 @@ The snapshots of the web page progression are shown in the images below."""
 
 
 # @evaluate.tool("webjudge")
-async def webjudge(ctx: Context, task_description: dict | str) -> dict:
+async def webjudge(ctx: Context, task_description: dict | str):
     """WebJudge Online Mind2Web evaluation using screenshot history and action history
 
     Args:
@@ -346,6 +346,7 @@ async def webjudge(ctx: Context, task_description: dict | str) -> dict:
         logging.info(f"Webjudge step 1: Identify key points")
         key_points_result = await identify_key_point(task_description)
         if not key_points_result.get("success"):
+            logger.error(f"Key point identification failed: {key_points_result.get('error')}")
             return EvaluationResult(isError=True, info={"Exception": f"Key point identification failed: {key_points_result.get('error')}"})
 
         key_points = key_points_result["key_points"]
@@ -480,6 +481,7 @@ Note: Screenshot analysis scored {main_score}/5, below threshold of {score_thres
             done=True,
             content=final_result,
             info={"task_description": task_text, "status": status, "thoughts": thoughts},
+            isError=False,
         )
 
     except Exception as e:
