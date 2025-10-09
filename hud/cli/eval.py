@@ -113,7 +113,7 @@ def _build_vllm_config(
 
 
 def build_agent(
-    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"],
+    agent_type: Literal["claude", "openai", "openrouter", "vllm", "litellm", "integration_test"],
     *,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
@@ -180,6 +180,21 @@ def build_agent(
             allowed_tools=allowed_tools,
             verbose=verbose,
         )
+    elif agent_type == "openrouter":
+        try:
+            from hud.agents.openrouter import OpenRouterAgent
+        except ImportError as e:
+            hud_console.error(
+                "OpenRouter agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
+
+        return OpenRouterAgent(
+            model_name=model or "z-ai/glm-4.6",
+            allowed_tools=allowed_tools,
+            verbose=verbose,
+        )
 
     # Fallback Claude agent (Anthropic)
     try:
@@ -209,7 +224,7 @@ def build_agent(
 async def run_single_task(
     source: str,
     *,
-    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = "claude",
+    agent_type: Literal["claude", "openai", "openrouter", "vllm", "litellm", "integration_test"] = "claude",
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_steps: int = 10,
@@ -305,6 +320,16 @@ async def run_single_task(
         }
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
+    elif agent_type == "openrouter":
+        from hud.agents.openrouter import OpenRouterAgent
+
+        agent_class = OpenRouterAgent
+        agent_config = {
+            "model_name": model or "z-ai/glm-4.5v",
+            "verbose": verbose,
+        }
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
     elif agent_type == "claude":
         from hud.agents import ClaudeAgent
 
@@ -353,7 +378,7 @@ async def run_single_task(
 async def run_full_dataset(
     source: str,
     *,
-    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = "claude",
+    agent_type: Literal["claude", "openai", "openrouter", "vllm", "litellm", "integration_test"] = "claude",
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_concurrent: int = 30,
@@ -539,10 +564,13 @@ def eval_command(
         "--full",
         help="Run the entire dataset (omit for single-task debug mode)",
     ),
-    agent: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = typer.Option(
+    agent: Literal["claude", "openai", "openrouter", "vllm", "litellm", "integration_test"] = typer.Option(
         "claude",
         "--agent",
-        help="Agent backend to use (claude, openai, vllm for local server, or litellm)",
+        help=(
+            "Agent backend to use (claude, openai computer use, openrouter responses, "
+            "vllm for local server, or litellm)"
+        ),
     ),
     model: str | None = typer.Option(
         None,
