@@ -185,8 +185,8 @@ async def run(config: Config, tasks: list[Task]) -> None:
 
             training_batch = batch_samples(samples, config.mini_batch_size, config.num_gpus, pad_token_id)
 
-            total_samples = sum(len(gpu_batch) for gpu_batch in training_batch)
-            console.info(f"Created training batch with {total_samples} samples across {len(training_batch)} GPU batches")
+            total_minibatches = sum(len(gpu_batch) for gpu_batch in training_batch)
+            console.info(f"Created training batch with {total_minibatches} minibatches across {len(training_batch)} GPU batches")
             
             save_batches(training_batch, step, config.output_dir)
             

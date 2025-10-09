@@ -15,26 +15,43 @@ def batch_samples(
     if not sample_list:
         return []
 
-    minibatches = _prepare_minibatches(sample_list, mini_batch_size, pad_token_id)
+    def _is_image_sample(s: TrainingSample) -> bool:
+        return s.inputs.get("pixel_values") is not None  # type: ignore[arg-type]
+
+    image_samples = [s for s in sample_list if _is_image_sample(s)]
+    text_samples = [s for s in sample_list if not _is_image_sample(s)]
+
+    text_minibatches = _prepare_minibatches(text_samples, mini_batch_size, pad_token_id) if text_samples else []
+    image_minibatches = _prepare_minibatches(image_samples, mini_batch_size, pad_token_id) if image_samples else []
 
     if num_gpus == 1:
-        return [minibatches]
+        return [text_minibatches + image_minibatches]
 
-    num_padding = num_gpus - (len(minibatches) % num_gpus)
+    # Pad each modality group to a multiple of num_gpus using modality-matching dummies
+    def _pad_group(group: list[TrainingSample]) -> list[TrainingSample]:
+        if not group:
+            return group
+        rem = len(group) % num_gpus
+        if rem == 0:
+            return group
+        pad = num_gpus - rem
+        ref = group[0]
+        return group + [_create_dummy_batch(ref) for _ in range(pad)]
 
-    if num_padding < num_gpus and len(minibatches) > 0:
-        dummy_batch = _create_dummy_batch(minibatches[0])
-        minibatches.extend([dummy_batch] * num_padding)
+    text_minibatches = _pad_group(text_minibatches)
+    image_minibatches = _pad_group(image_minibatches)
 
-    per_gpu_count = len(minibatches) // num_gpus
-    batches_per_gpu: list[list[TrainingSample]] = []
+    ordered: list[TrainingSample] = []
+    for i in range(0, len(text_minibatches), num_gpus):
+        ordered.extend(text_minibatches[i : i + num_gpus])
+    for i in range(0, len(image_minibatches), num_gpus):
+        ordered.extend(image_minibatches[i : i + num_gpus])
 
-    for _ in range(num_gpus):
-        gpu_batches: list[TrainingSample] = []
-        for _ in range(per_gpu_count):
-            gpu_batches.append(minibatches.pop(0))
-        batches_per_gpu.append(gpu_batches)
+    batches_per_gpu: list[list[TrainingSample]] = [[] for _ in range(num_gpus)]
+    for idx, mb in enumerate(ordered):
+        batches_per_gpu[idx % num_gpus].append(mb)
 
+    assert all(len(batches_per_gpu[0]) == len(bp) for bp in batches_per_gpu), "Uneven per-GPU batch counts after distribution"
     return batches_per_gpu
 
 

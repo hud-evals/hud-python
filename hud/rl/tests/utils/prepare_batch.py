@@ -86,6 +86,8 @@ def main():
 
     print("\n" + "=" * 80)
     print(f"Training batch structure: {len(training_batch)} GPU(s)")
+    total_minibatches = sum(len(gpu_batch) for gpu_batch in training_batch)
+    print(f"Total minibatches: {total_minibatches}")
 
     for gpu_idx, gpu_batches in enumerate(training_batch):
         print(f"\nGPU {gpu_idx}: {len(gpu_batches)} minibatch(es)")
