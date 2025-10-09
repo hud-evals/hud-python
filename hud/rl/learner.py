@@ -437,7 +437,16 @@ class GRPOLearner:
             ref_logp = (ref_logp * m.float()).sum(dim=1) / counts
 
         # Clip log probability differences
-        log_ratio = torch.where(m, pol_logp - old_logp, torch.zeros_like(pol_logp))
+        # log_ratio = torch.where(m, pol_logp - old_logp, torch.zeros_like(pol_logp))
+        # ratio_tok = torch.exp(log_ratio.clamp(-20.0, 20.0))
+
+
+        seq_log_ratio = (pol_logp - old_logp).sum()
+        # GSPO normalizes the importance ratio by the sequence length
+        seq_log_ratio = seq_log_ratio / torch.clamp_min(m.sum(), 1)
+        log_ratio = torch.clamp(seq_log_ratio.unsqueeze(0), max=10.0)
+
+        # Compute ratio token
         ratio_tok = torch.exp(log_ratio.clamp(-20.0, 20.0))
 
         # Ensure advantage shape matches ratio_tok for broadcasting
