@@ -5,7 +5,7 @@
     "max_pixels": 200704,
     "trust_remote_code": true
   },
-  "num_gpus": 2,
+  "num_gpus": 3,
   "training_steps": 10,
   "buffer": {
     "shuffle_dataset": false,
@@ -13,9 +13,9 @@
     "select_strategy": "recent",
     "require_images": false
   },
-  "batch_size": 64,
-  "mini_batch_size": 2,
-  "group_size": 8,
+  "batch_size": 96,
+  "mini_batch_size": 4,
+  "group_size": 12,
   "rewards": {
     "scale_rewards": "group",
     "leave_one_out": false
@@ -28,11 +28,11 @@
       "freeze_vision_tower": true
     },
     "dp_replicate": 1,
-    "dp_shard": 2,
-    "save_last_n": 1,
+    "dp_shard": 3,
+    "save_last_n": 3,
     "loss": {
-      "apply_length_norm": false,
-      "importance_sampling_level": "token",
+      "apply_length_norm": true,
+      "importance_sampling_level": "sequence",
       "kl_beta": 0.0,
       "clip_ratio": 10.0
     },
@@ -54,10 +54,10 @@
   },
   "actor": {
     "verbose": false,
-    "max_steps_per_episode": 5,
+    "max_steps_per_episode": 10,
     "max_parallel_episodes": 48,
     "temperature": 0.7,
-    "max_new_tokens": 1024,
+    "max_new_tokens": 512,
     "force_tool_choice": false,
     "episode_timeout_sec": 600
   },

@@ -123,6 +123,8 @@ async def run(config: Config, tasks: list[Task]) -> None:
         total_steps = config.training_steps
 
         console.section_title("Starting Run")
+
+        cumulative_trained_tokens = 0
         for step in range(total_steps):
             console.section_title(f"Step {step + 1}/{total_steps}")
 
@@ -168,6 +170,9 @@ async def run(config: Config, tasks: list[Task]) -> None:
 
             processed_inputs = preprocess_traces(traces, processor)
 
+            tokens_this_step = int(sum(int(pi["assistant_mask"].sum().item()) for pi in processed_inputs))
+            cumulative_trained_tokens += tokens_this_step
+
             samples: list[TrainingSample] = []
             for inputs, advantage, temperature in zip(
                 processed_inputs,
@@ -192,6 +197,25 @@ async def run(config: Config, tasks: list[Task]) -> None:
             
             console.section_title(f"Waiting for training to complete for step {step}")
             checkpoint_path = await wait_for_checkpoint(step, config.output_dir)
+
+            metrics_path = Path(config.output_dir) / f"step_{step:05d}" / "metrics.json"
+            if metrics_path.exists():
+                with open(metrics_path) as mf:
+                    step_metrics = json.load(mf)
+
+                step_metrics.update({
+                    "step": step,
+                    "reward_mean": float(rewards.mean().item()) if rewards.numel() > 0 else 0.0,
+                    "reward_std": float(rewards.std(unbiased=False).item()) if rewards.numel() > 0 else 0.0,
+                    "advantage_mean": float(advantages.mean().item()) if advantages.numel() > 0 else 0.0,
+                    "advantage_std": float(advantages.std(unbiased=False).item()) if advantages.numel() > 0 else 0.0,
+                    "tokens_trained_step": int(tokens_this_step),
+                    "tokens_trained_cumulative": int(cumulative_trained_tokens),
+                })
+
+                await job.log(step_metrics)
+            else:
+                console.warning_log(f"Metrics not found for step {step}: {metrics_path}")
             
             if step < config.training_steps - 1:
                 console.section_title(f"Updating vLLM weights from checkpoint: {checkpoint_path}")
