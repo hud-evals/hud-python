@@ -44,6 +44,7 @@ import hud
 from datasets import load_dataset
 from hud.agents import ClaudeAgent, OperatorAgent
 from hud.datasets import Task, run_dataset
+from hud.types import AgentType
 
 logger = logging.getLogger(__name__)
 
@@ -58,14 +59,14 @@ logging.basicConfig(
 
 
 def _build_agent(
-    agent_type: Literal["claude", "openai"],
+    agent_type: Literal[AgentType.CLAUDE, AgentType.OPENAI],
     *,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
 ) -> ClaudeAgent | OperatorAgent:
     """Create and return the requested agent type."""
 
-    if agent_type == "openai":
+    if agent_type == AgentType.OPENAI:
         # Only pass allowed_tools if explicitly provided
         # This allows tasks to specify their own via agent_config
         if allowed_tools:
@@ -105,7 +106,7 @@ def _build_agent(
 async def run_single_task(
     dataset_name: str,
     *,
-    agent_type: Literal["claude", "openai"] = "claude",
+    agent_type: Literal[AgentType.CLAUDE, AgentType.OPENAI] = AgentType.CLAUDE,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_steps: int = 10,
@@ -144,7 +145,7 @@ async def run_single_task(
 async def run_full_dataset(
     dataset_name: str,
     *,
-    agent_type: Literal["claude", "openai"] = "claude",
+    agent_type: Literal[AgentType.CLAUDE, AgentType.OPENAI] = AgentType.CLAUDE,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_concurrent: int = 50,
@@ -154,7 +155,7 @@ async def run_full_dataset(
 
     # Build agent class + config for run_dataset – we pass the *class* and a minimal
     # config dict, run_dataset will create a fresh agent per task.
-    if agent_type == "openai":
+    if agent_type == AgentType.OPENAI:
         agent_class = OperatorAgent
         agent_config: dict[str, Any] = {
             "validate_api_key": False,
