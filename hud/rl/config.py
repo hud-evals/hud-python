@@ -167,6 +167,8 @@ class LossConfig(BaseConfig):
 class TrainingConfig(BaseConfig):
     # Mode and Parallelization
     model: ModelConfig = Field(default_factory=ModelConfig, description="Model configuration")
+    reshard_after_forward: bool = Field(default=True, description="Whether to reshard after forward pass")
+    cpu_offload: bool = Field(default=False, description="Whether to offload to CPU")
     dp_replicate: int = Field(default=1, ge=1, description="Data parallel replicate.")
     dp_shard: int = Field(default=1, ge=1, description="Data parallel shard.")
 

@@ -1,10 +1,3 @@
-"""Utility to exercise hud.rl.train with a pre-recorded batch."""
-
-import os
-from pathlib import Path
-
-import torch
-
 from hud.rl.config import TrainingConfig, ModelConfig
 from hud.rl.logger import console
 from hud.rl.train import train

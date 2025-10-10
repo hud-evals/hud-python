@@ -68,7 +68,7 @@ def get_model(config: ModelConfig) -> nn.Module:
 
 def build_model(training_cfg: "TrainingConfig", parallel_dims: "ParallelDims") -> nn.Module:
     model = get_model(training_cfg.model)
-    model = apply_fsdp(model, parallel_dims, reshard_after_forward=False, cpu_offload=False)
+    model = apply_fsdp(model, parallel_dims, reshard_after_forward=training_cfg.reshard_after_forward, cpu_offload=training_cfg.cpu_offload)
     assert isinstance(model, FSDPModule)
     return model
 
