@@ -46,6 +46,8 @@ class BaseConfig(BaseModel):
         extras = []
         i = 0
 
+        known_keys = set(getattr(cls, "model_fields", {}).keys())
+
         while i < len(args):
             if args[i] == "--config" and i + 1 < len(args):
                 with open(args[i + 1]) as f:
@@ -53,12 +55,17 @@ class BaseConfig(BaseModel):
                 i += 2
             elif args[i].startswith("--") and i + 1 < len(args) and not args[i + 1].startswith("--"):
                 key = args[i][2:].replace("-", "_")
-                try:
-                    value = json.loads(args[i + 1])
-                except (json.JSONDecodeError, ValueError):
-                    value = args[i + 1]
-                config_dict[key] = value
-                i += 2
+                
+                if allow_extras and key not in known_keys:
+                    extras.extend([args[i], args[i + 1]])
+                    i += 2
+                else:
+                    try:
+                        value = json.loads(args[i + 1])
+                    except (json.JSONDecodeError, ValueError):
+                        value = args[i + 1]
+                    config_dict[key] = value
+                    i += 2
             else:
                 if allow_extras:
                     extras.append(args[i])

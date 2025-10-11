@@ -13,7 +13,7 @@
     "select_strategy": "recent",
     "require_images": false
   },
-  "batch_size": 96,
+  "batch_size": 72,
   "mini_batch_size": 4,
   "group_size": 12,
   "rewards": {
@@ -54,7 +54,7 @@
   },
   "actor": {
     "verbose": false,
-    "max_steps_per_episode": 10,
+    "max_steps_per_episode": 5,
     "max_parallel_episodes": 48,
     "temperature": 0.7,
     "max_new_tokens": 512,

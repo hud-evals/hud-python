@@ -244,11 +244,12 @@ def main() -> None:
         cfg, extra = Config.from_argv(allow_extras=True)
         vllm_cfg = cfg.vllm
     else:
-        # Load vllm-specific config directly
         vllm_cfg, extra = VLLMConfig.from_argv(allow_extras=True)
     
     ns = vllm_cfg.to_vllm()
-    server(ns, extra_args=extra)
+
+    extra_args = list(extra or []) + list(getattr(vllm_cfg, "extra_vllm_args", []) or [])
+    server(ns, extra_args=extra_args)
 
 
 if __name__ == "__main__":
