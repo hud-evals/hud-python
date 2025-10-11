@@ -1,5 +1,5 @@
 {
-  "base_model": "Qwen/Qwen2.5-VL-3B-Instruct",
+  "base_model": "Qwen/Qwen2.5-VL-7B-Instruct",
   "processor": {
     "min_pixels": 50176,
     "max_pixels": 200704,
@@ -13,11 +13,11 @@
     "select_strategy": "recent",
     "require_images": false
   },
-  "batch_size": 72,
-  "mini_batch_size": 4,
-  "group_size": 12,
+  "batch_size": 48,
+  "mini_batch_size": 2,
+  "group_size": 6,
   "rewards": {
-    "scale_rewards": "group",
+    "scale_rewards": "none",
     "leave_one_out": false
   },
   "training": {
@@ -31,7 +31,7 @@
     "dp_shard": 3,
     "save_last_n": 3,
     "loss": {
-      "apply_length_norm": true,
+      "apply_length_norm": false,
       "importance_sampling_level": "sequence",
       "kl_beta": 0.0,
       "clip_ratio": 10.0
