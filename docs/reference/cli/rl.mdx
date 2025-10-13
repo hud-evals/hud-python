@@ -4,7 +4,9 @@ description: "Run GRPO reinforcement learning on tasks"
 icon: "brain"
 ---
 
-The `hud rl` command trains an agent with GRPO on tasks, locally or via the HUD remote service.
+The `hud rl` command launches GRPO training for a tasks file using the HUD remote service. It converts
+local tasks to remote MCP format (building/pushing as needed), walks through model and GPU selection,
+then triggers a hosted training job.
 
 ## Usage
 
@@ -15,64 +17,43 @@ hud rl [TASKS_FILE|DATASET] [MODEL] [OPTIONS]
 ## Arguments
 
 <ParamField path="tasks_file" type="string">
-  Path to tasks JSON/JSONL file or HuggingFace dataset name. If omitted, looks for a tasks file in the current directory.
+  Path to tasks JSON/JSONL file or HuggingFace dataset name. If omitted, the CLI attempts to
+  auto-detect a tasks file in the current directory.
 </ParamField>
 
 <ParamField path="model" type="string">
-  Model to train (default: interactive selection)
+  HUD model name to train (defaults to interactive selection).
 </ParamField>
 
 ## Options
 
 <ParamField path="--config" type="string">
-  Path to existing configuration file. Short: `-c`
+  Path to an existing configuration file. Short: `-c`
 </ParamField>
 
-<ParamField path="--output-dir" type="string" default="/checkpoints">
-  Output directory for checkpoints. Short: `-o`
-</ParamField>
-
-<ParamField path="--restart" type="boolean" default="false">
-  Restart the vLLM server before training
-</ParamField>
-
-<ParamField path="--verbose" type="boolean" default="false">
-  Enable verbose output. Short: `-v`
-</ParamField>
-
-<ParamField path="--no-ddp" type="boolean" default="false">
-  Disable DistributedDataParallel (even with multiple GPUs)
-</ParamField>
-
-<ParamField path="--ddp-gpus" type="string">
-  Specific GPUs for DDP (e.g., `0,1,2,3`)
-</ParamField>
-
-<ParamField path="--vllm-gpu" type="integer">
-  Specific GPU for vLLM server
-</ParamField>
-
-<ParamField path="--local" type="boolean" default="false">
-  Run training locally instead of the remote HUD server
+<ParamField path="--yes" type="boolean" default="false">
+  Auto-accept prompts (non-interactive mode). Short: `-y`
 </ParamField>
 
 ## Behavior
 
-- If no tasks file is provided, an interactive picker helps locate one.
-- Remote mode (default) converts tasks to remote MCP automatically (build/push as needed) and launches remote training.
-- Local mode runs training on your machine (delegated to `local_runner`).
+- Tasks are converted to remote MCP format automatically before training begins.
+- The CLI prompts for model selection, GPU type/count, and configuration review. Use `--yes` to accept
+  defaults without prompts.
+- The resulting job appears in the HUD dashboard, and vLLM is deployed automatically if not already
+  running for the model.
 
 ## Examples
 
 ```bash
-# Remote (default): auto-convert tasks to remote, then train
+# Launch remote training (defaults to interactive model selection)
 hud rl tasks.json --model claude-rl
 
-# Local training with GPU selection
-hud rl tasks.json llama3.1 --local --ddp-gpus 0,1 --vllm-gpu 0
-
-# Use a dataset directly (remote)
+# Launch using a dataset
 hud rl hud-evals/SheetBench-50 --model claude-rl
+
+# Run non-interactively with defaults
+hud rl tasks.json --model claude-rl --yes
 ```
 
 ## See Also
@@ -84,4 +65,5 @@ hud rl hud-evals/SheetBench-50 --model claude-rl
 
 ## Pricing & Billing
 
-See hosted vLLM and training GPU rates in the [Training Quickstart → Pricing](/train-agents/quickstart#pricing). Manage usage and billing at `https://hud.so/project/billing`.
+See hosted vLLM and training GPU rates in the [Training Quickstart → Pricing](/train-agents/quickstart#pricing).
+Manage usage and billing at `https://hud.so/project/billing`.

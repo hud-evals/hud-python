@@ -12,7 +12,7 @@ uv tool install hud-python
 hud get hud-evals/basic-2048
 ```
 
-### 1) Simple: Train (remote by default)
+### 1) Simple: Train
 
 ```bash
 hud rl basic-2048.json
@@ -26,24 +26,7 @@ Optional baseline first (Claude or Operator):
 hud eval basic-2048.json
 ```
 
-### 2) Run on your own machine/remote
-
-Use any provider with at least 2 GPUs (one for inference, one for training). Run locally with the flag `--local`:
-
-```bash
-uv tool install hud-python
-hud get hud-evals/basic-2048
-hud rl basic-2048.json --local
-```
-
-### Recommended setups
-
-- 2× A100: quick iteration, shorter runs
-- 8× A100: higher throughput for larger tasksets
-
-Training throughput depends on task complexity and parallelism (`max_parallel_episodes`).
-
-### 3) Build your own environment (hud init)
+### 2) Build your own environment (hud init)
 
 Create a new MCP environment, develop with hot-reload, and train on a production image:
 
@@ -69,7 +52,7 @@ For easy launching, specify the tasks and config upfront, and add `--yes` to aut
 hud rl taskset.json --config rl-config.json --yes
 ```
 
-Additionally, sometimes it may be helpful to run an initial analysis on the dataset to determine which tasks would be the most informative to trian on. In that case either start with a deployed model or run `hud rl` without training, and then:
+Additionally, sometimes it may be helpful to run an initial analysis on the dataset to determine which tasks would be the most informative to train on. If you already have a deployed model you can evaluate it directly, otherwise launch training briefly, then:
 
 ```bash
 hud eval taskset.json --full --group-size 6 --max-steps 5
