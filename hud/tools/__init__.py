@@ -12,7 +12,7 @@ from .response import ResponseTool
 from .submit import SubmitTool
 
 if TYPE_CHECKING:
-    from .computer import AnthropicComputerTool, HudComputerTool, OpenAIComputerTool
+    from .computer import AnthropicComputerTool, HudComputerTool, OpenAIComputerTool, GeminiComputerTool
 
 __all__ = [
     "AnthropicComputerTool",
@@ -22,6 +22,7 @@ __all__ = [
     "EditTool",
     "HudComputerTool",
     "OpenAIComputerTool",
+    "GeminiComputerTool",
     "PlaywrightTool",
     "ResponseTool",
     "SubmitTool",
@@ -30,7 +31,7 @@ __all__ = [
 
 def __getattr__(name: str) -> Any:
     """Lazy import computer tools to avoid importing pyautogui unless needed."""
-    if name in ("AnthropicComputerTool", "HudComputerTool", "OpenAIComputerTool"):
+    if name in ("AnthropicComputerTool", "HudComputerTool", "OpenAIComputerTool", "GeminiComputerTool"):
         from . import computer
 
         return getattr(computer, name)
