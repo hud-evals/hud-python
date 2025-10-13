@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from hud.types import Task
 from pydantic import BaseModel
 
 from hud.settings import settings
@@ -15,7 +16,6 @@ from hud.shared.requests import make_request_sync
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
 
 class RLModelInfo(BaseModel):
     """Model information from the API."""
@@ -92,7 +92,7 @@ def stop_training(model_name: str) -> dict[str, Any]:
 def launch_training(
     model_name: str,
     config: dict[str, Any],
-    tasks: list[dict[str, Any]],
+    tasks: list[Task],
     gpu_type: str = "A100",
     gpu_count: int = 1,
 ) -> dict[str, Any]:

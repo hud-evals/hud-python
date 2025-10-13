@@ -996,97 +996,49 @@ def get(
 
 @app.command()
 def rl(
-    tasks_file: str | None = typer.Argument(
+    tasks: str | None = typer.Argument(
         None,
         help=(
             "Path to tasks file (JSON/JSONL) or HuggingFace dataset name. "
-            "If not provided, looks for tasks.json or tasks.jsonl in current directory."
+            "If not provided, attempts to auto-detect in current directory."
         ),
     ),
-    model: str | None = typer.Argument(
+    model: str | None = typer.Option(
         None,
-        help="Model to train from https://hud.so/models (default: interactive selection)",
+        "--model",
+        help="HUD model name to train (see https://hud.so/models)",
     ),
-    config_file: Path | None = typer.Option(  # noqa: B008
+    config: Path | None = typer.Option(
         None,
         "--config",
         "-c",
-        help="Path to existing configuration file",
+        help="Optional configuration file for remote training",
     ),
-    output_dir: str = typer.Option(
-        "checkpoints",
-        "--output-dir",
-        "-o",
-        help="Output directory for checkpoints",
-    ),
-    restart: bool = typer.Option(
-        False,
-        "--restart",
-        help="Restart the vLLM server before training",
-    ),
-    verbose: bool = typer.Option(
-        False,
-        "--verbose",
-        "-v",
-        help="Enable verbose output",
-    ),
-    local: bool = typer.Option(
-        False,
-        "--local",
-        help="Run training locally instead of using remote API server",
-    ),
-    no_ddp: bool = typer.Option(
-        False,
-        "--no-ddp",
-        help="Disable DDP even with multiple GPUs",
-    ),
-    ddp_gpus: str | None = typer.Option(
-        None,
-        "--ddp-gpus",
-        help="Specific GPUs for DDP (e.g., '0,1,2,3')",
-    ),
-    yes: bool = typer.Option(
-        False,
-        "--yes",
-        "-y",
-        help="Auto-accept all prompts and use defaults (lazy mode)",
-    ),
-    vllm_gpu: int | None = typer.Option(
-        None,
-        "--vllm-gpu",
-        help="Specific GPU for vLLM server",
-    ),
-    vllm_gpu_count: int = typer.Option(
-        1,
-        "--vllm-gpu-count",
-        help="Number of GPUs for vLLM server",
-    ),
-    skip_vllm_startup: bool = typer.Option(
-        False,
-        "--skip-vllm-startup",
-        help="Skip the vLLM server startup",
-    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Auto-accept prompts"),
 ) -> None:
-    """🎯 Run GRPO reinforcement learning training on tasks."""
-    # Import from the rl module
-    from .rl import rl_command
+    """Run GRPO training remotely via the HUD service."""
 
-    rl_command(
-        tasks_file=tasks_file,
+    from hud.utils.hud_console import hud_console
+    from hud.cli.utils.tasks import find_tasks_file
+    from hud.cli.flows.tasks import convert_tasks_to_remote
+    from hud.cli.rl.launcher import launch_training
+
+    if tasks is None:
+        tasks = find_tasks_file(None, msg="Select a tasks file for training")
+
+    try:
+        hud_console.info("Preparing tasks for training...")
+        remote_tasks = convert_tasks_to_remote(tasks)
+    except Exception as exc:  # noqa: BLE001
+        hud_console.error(f"Tasks not valid for training: {exc}")
+        raise typer.Exit(1) from exc
+
+    launch_training(
+        tasks_file=remote_tasks,
         model=model,
-        config_file=config_file,
-        output_dir=output_dir,
-        restart=restart,
-        verbose=verbose,
-        local=local,
-        no_ddp=no_ddp,
-        ddp_gpus=ddp_gpus,
-        vllm_gpu=vllm_gpu,
-        vllm_gpu_count=vllm_gpu_count,
+        config_file=config,
         yes=yes,
-        skip_vllm_startup=skip_vllm_startup,
     )
-
 
 @app.command()
 def set(
@@ -1156,18 +1108,7 @@ def main() -> None:
             console.print("  6. Run and test: [cyan]hud run <image>[/cyan]")
             console.print("\n[yellow]Datasets & RL Training:[/yellow]")
             console.print("  1. Get dataset: [cyan]hud get hud-evals/browser-2048-tasks[/cyan]")
-            console.print(
-                "  2. Create dataset: [cyan]hud hf tasks.json --name my-org/my-tasks[/cyan]"
-            )
-            console.print(
-                "  3. Start training: [cyan]hud rl browser-2048-tasks.jsonl --local[/cyan]"
-            )
-            console.print(
-                "  4. Custom model: [cyan]hud rl tasks.jsonl --model meta-llama/Llama-3.2-3B --local[/cyan]"  # noqa: E501
-            )
-            console.print(
-                "  5. Restart server: [cyan]hud rl tasks.jsonl --restart --local[/cyan]\n"
-            )
+            console.print("  2. Remote training: [cyan]hud rl tasks.jsonl --model <hud-model>[/cyan]\\n")
 
         app()
     except typer.Exit as e:
