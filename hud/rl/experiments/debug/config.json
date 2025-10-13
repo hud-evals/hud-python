@@ -14,8 +14,8 @@
     "require_images": false
   },
   "batch_size": 48,
-  "mini_batch_size": 2,
-  "group_size": 6,
+  "mini_batch_size": 4,
+  "group_size": 12,
   "rewards": {
     "scale_rewards": "none",
     "leave_one_out": false
@@ -31,10 +31,10 @@
     "dp_shard": 3,
     "save_last_n": 3,
     "loss": {
-      "apply_length_norm": false,
-      "importance_sampling_level": "sequence",
+      "apply_length_norm": true,
+      "importance_sampling_level": "token",
       "kl_beta": 0.0,
-      "clip_ratio": 10.0
+      "clip_ratio": 8.0
     },
     "optimizer": {
       "lr": 3e-05,

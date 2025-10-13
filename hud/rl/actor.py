@@ -96,12 +96,14 @@ if __name__ == "__main__":
             "id": "test_2048_128",
             "prompt": "Play the browser-based 2048 game and try to reach the 128 tile. Start by taking a screenshot, then make strategic moves using arrow keys.",  # noqa: E501
             "mcp_config": {
-                "local": {
-                    "command": "sh",
-                    "args": [
-                        "-c",
-                        "docker run --rm -i -e AGENT_DISPLAY_WIDTH=588 -e AGENT_DISPLAY_HEIGHT=336 hudevals/hud-browser:0.1.7",
-                    ],
+                "hud": {
+                    "url": "https://mcp.hud.so/v3/mcp",
+                    "headers": {
+                        "Authorization": "Bearer ${HUD_API_KEY}",
+                        "Mcp-Image": "hudevals/hud-browser:0.1.7",
+                        "Env-Agent-Display-Width": "588",
+                        "Env-Agent-Display-Height": "336",
+                    },
                 }
             },
             "setup_tool": {"name": "launch_app", "arguments": {"app_name": "2048"}},
