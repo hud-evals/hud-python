@@ -37,7 +37,7 @@ from .providers import get_provider, BrowserProvider
 
 # Global persistent context (initialized during startup)
 persistent_ctx = None
-playwright_tool= None
+playwright_tool = None
 browser_executor: Optional[BrowserExecutor] = None
 
 # Create Hud FastMCP instance

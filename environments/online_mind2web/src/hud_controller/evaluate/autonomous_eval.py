@@ -22,7 +22,10 @@ async def autonomous_eval(
         if openai_api_key is None:
             logging.error("OPENAI_API_KEY environment variable not set")
             return EvaluationResult(
-                reward=0.0, done=False, info={"error": "OPENAI_API_KEY environment variable not set"}, isError=True
+                reward=0.0,
+                done=False,
+                info={"error": "OPENAI_API_KEY environment variable not set"},
+                isError=True,
             )
 
         persistent_ctx = evaluate.env
@@ -34,7 +37,7 @@ async def autonomous_eval(
                 done=False,
                 content="No browser page available",
                 info={"error": "No browser page available"},
-                isError=True
+                isError=True,
             )
 
         # Load action history from file

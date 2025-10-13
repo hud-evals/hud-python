@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 MAX_IMAGE = 50  # Maximum screenshot of history to judge
 
+
 async def identify_key_point(task_description: dict | str) -> dict:
     """Identify key points in a task description using GPT-4.
 
@@ -210,7 +211,7 @@ The snapshots of the web page progression are shown in the images below."""
                 {
                     "type": "image_url",
                     "image_url": {"url": f"data:image/png;base64,{base64_img}", "detail": "high"},
-                } # type: ignore
+                }  # type: ignore
             )
 
         messages = [
@@ -269,8 +270,9 @@ async def webjudge(ctx: Context, task_description: dict | str, score_threshold: 
     openai_api_key = os.getenv("OPENAI_API_KEY")
     if openai_api_key is None:
         logging.error("OPENAI_API_KEY environment variable not set")
-        return EvaluationResult(isError=True, info={"Exception": f"OPENAI_API_KEY environment variable not set"})
-
+        return EvaluationResult(
+            isError=True, info={"Exception": f"OPENAI_API_KEY environment variable not set"}
+        )
 
     try:
         logging.info("Starting WebJudge Online Mind2Web evaluation")
@@ -346,7 +348,12 @@ async def webjudge(ctx: Context, task_description: dict | str, score_threshold: 
         key_points_result = await identify_key_point(task_description)
         if not key_points_result.get("success"):
             logger.error(f"Key point identification failed: {key_points_result.get('error')}")
-            return EvaluationResult(isError=True, info={"Exception": f"Key point identification failed: {key_points_result.get('error')}"})
+            return EvaluationResult(
+                isError=True,
+                info={
+                    "Exception": f"Key point identification failed: {key_points_result.get('error')}"
+                },
+            )
 
         key_points = key_points_result["key_points"]
 
@@ -370,7 +377,10 @@ async def webjudge(ctx: Context, task_description: dict | str, score_threshold: 
         )
 
         if not judge_result.get("success"):
-            return EvaluationResult(isError=True, info={"Exception": f"Image judgment failed: {judge_result.get('error')}"})
+            return EvaluationResult(
+                isError=True,
+                info={"Exception": f"Image judgment failed: {judge_result.get('error')}"},
+            )
 
         # Parse judgment result for score
         judgment_text = judge_result["judgment"]
@@ -381,7 +391,7 @@ async def webjudge(ctx: Context, task_description: dict | str, score_threshold: 
         except:
             main_score = 3  # Default score if parsing fails
         logger.info("Score: ", main_score)
-        
+
         # Extract reasoning
         try:
             reasoning = (

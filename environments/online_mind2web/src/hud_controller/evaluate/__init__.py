@@ -6,10 +6,6 @@ from hud.tools.base import BaseHub
 
 evaluate = BaseHub("evaluate")
 
-from . import (
-    autonomous_eval,
-    webjudge,
-    overall_judge
-)
+from . import autonomous_eval, webjudge, overall_judge
 
 __all__ = ["evaluate"]
