@@ -7,6 +7,7 @@ import tarfile
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 import httpx
 import questionary
@@ -173,8 +174,91 @@ def _download_tarball_subdir(
             os.remove(tmp_path)
 
 
+def _generate_tool_stubs(tools_file: Path, tools: list[Any]) -> None:
+    """Generate tool stub functions from MCP tool schemas.
+    
+    Args:
+        tools_file: Path to controller/tools.py file
+        tools: List of tool objects from MCP server
+    """
+    # Read existing file
+    content = tools_file.read_text()
+    
+    # Generate tool functions
+    tool_functions = []
+    for tool in tools:
+        # Extract schema info
+        schema = tool.inputSchema if hasattr(tool, "inputSchema") else {}
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
+        
+        # Build function parameters
+        params = []
+        for prop_name, prop_info in properties.items():
+            prop_type = prop_info.get("type", "str")
+            # Map JSON schema types to Python types
+            python_type = {
+                "string": "str",
+                "number": "float",
+                "integer": "int",
+                "boolean": "bool",
+                "array": "list",
+                "object": "dict",
+            }.get(prop_type, "Any")
+            
+            # Add optional marker if not required
+            if prop_name not in required:
+                python_type = f"{python_type} | None = None"
+            
+            params.append(f"{prop_name}: {python_type}")
+        
+        params_str = ", ".join(params) if params else ""
+        
+        # Build function
+        func = f'''
+@mcp.tool
+async def {tool.name}({params_str}) -> str:
+    """{tool.description}"""
+    raise NotImplementedError("TODO: Implement {tool.name}")
+'''
+        tool_functions.append(func)
+    
+    # Append to file
+    new_content = content.rstrip() + "\n\n" + "\n".join(tool_functions) + "\n"
+    tools_file.write_text(new_content)
+
+
+async def analyze_external_mcp_server(url: str) -> list[Any]:
+    """Fetch raw tool schemas from an external MCP server.
+    
+    Args:
+        url: MCP server URL (e.g., https://mcp.deepwiki.com/sse)
+        
+    Returns:
+        List of raw tool objects
+    """
+    from hud.clients import MCPClient
+    
+    config = {"external": {"url": url}}
+    client = MCPClient(mcp_config=config, auto_trace=False)
+    
+    try:
+        await client.initialize()
+        tools = await client.list_tools()
+        return tools
+    finally:
+        try:
+            await client.shutdown()
+        except Exception:
+            pass
+
+
 def create_environment(
-    name: str | None, directory: str, force: bool, preset: str | None = None
+    name: str | None,
+    directory: str,
+    force: bool,
+    preset: str | None = None,
+    from_mcp: str | None = None,
 ) -> None:
     """Create a new HUD environment by downloading a preset from the repo."""
 
@@ -189,14 +273,22 @@ def create_environment(
     else:
         target_dir = Path(directory) / name
 
-    # Choose preset
-    preset_normalized = (preset or "").strip().lower() if preset else _prompt_for_preset()
-    if preset_normalized not in PRESET_MAP:
-        hud_console.warning(
-            f"Unknown preset '{preset_normalized}', defaulting to 'blank' "
-            "(available: blank, deep-research, browser)"
-        )
-        preset_normalized = "blank"
+    # Handle --from-mcp flag
+    if from_mcp is not None:
+        preset_normalized = "from-mcp"
+        env_folder = "from_mcp_template"
+        branch = "from-mcp-init"
+    else:
+        # Choose preset
+        preset_normalized = (preset or "").strip().lower() if preset else _prompt_for_preset()
+        if preset_normalized not in PRESET_MAP:
+            hud_console.warning(
+                f"Unknown preset '{preset_normalized}', defaulting to 'blank' "
+                "(available: blank, deep-research, browser)"
+            )
+            preset_normalized = "blank"
+        env_folder = PRESET_MAP[preset_normalized]
+        branch = GITHUB_BRANCH
 
     # Check if directory exists
     if target_dir.exists() and any(target_dir.iterdir()):
@@ -207,9 +299,8 @@ def create_environment(
         else:
             hud_console.warning(f"Overwriting existing files in {target_dir}")
 
-    # Download preset from GitHub
-    env_folder = PRESET_MAP[preset_normalized]
-    if env_folder is None:
+    # Validate env_folder (already set above based on from_mcp flag)
+    if not from_mcp and env_folder is None:
         hud_console.error("Internal error: preset mapping missing folder name")
         raise typer.Exit(1)
 
@@ -217,7 +308,7 @@ def create_environment(
     hud_console.section_title("Downloading template from public SDK")
     source_url = (
         f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/tree/"
-        f"{GITHUB_BRANCH}/environments/{env_folder}"
+        f"{branch}/environments/{env_folder}"
     )
     hud_console.info("Source: " + source_url)
 
@@ -226,10 +317,11 @@ def create_environment(
     started = time.time()
     files_created_dl: list[str] = []
     try:
+        assert env_folder is not None  # Already validated above
         _download_tarball_subdir(
             owner=GITHUB_OWNER,
             repo=GITHUB_REPO,
-            ref=GITHUB_BRANCH,
+            ref=branch,
             subdir=env_folder,
             dest_dir=target_dir,
             files_created=files_created_dl,
@@ -272,3 +364,22 @@ def create_environment(
 
     hud_console.info("\n3. Review the README in this preset for specific instructions.")
     hud_console.info("\n4. Customize as needed.")
+
+    # Analyze external MCP server if URL provided
+    if from_mcp is not None:
+        import asyncio
+        hud_console.section_title("Fetching tools from MCP server")
+        try:
+            tools = asyncio.run(analyze_external_mcp_server(from_mcp))
+            hud_console.success(f"Found {len(tools)} tools from {from_mcp}")
+            
+            # Generate tool stubs and write to tools.py
+            tools_file = target_dir / "controller" / "tools.py"
+            if tools_file.exists():
+                hud_console.info(f"Generating tool stubs in {tools_file.relative_to(target_dir)}")
+                _generate_tool_stubs(tools_file, tools)
+                hud_console.success(f"Generated {len(tools)} tool stubs")
+            else:
+                hud_console.warning(f"tools.py not found at {tools_file}")
+        except Exception as e:
+            hud_console.warning(f"Could not fetch tools: {e}")

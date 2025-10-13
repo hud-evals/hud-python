@@ -742,6 +742,11 @@ def init(
     ),
     directory: str = typer.Option(".", "--dir", "-d", help="Target directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing files"),
+    from_mcp: str | None = typer.Option(
+        None,
+        "--from-mcp",
+        help="Use from_mcp_template (controller/environment pattern with HTTP backend)",
+    ),
 ) -> None:
     """🚀 Initialize a new HUD environment with minimal boilerplate.
 
@@ -752,11 +757,12 @@ def init(
     - Required setup/evaluate tools
 
     Examples:
-        hud init                    # Use current directory name
-        hud init my-env             # Create in ./my-env/
-        hud init my-env --dir /tmp  # Create in /tmp/my-env/
+        hud init                              # Use current directory name
+        hud init my-env                       # Create in ./my-env/
+        hud init my-env --dir /tmp            # Create in /tmp/my-env/
+        hud init --from-mcp [MCP SERVER URL]  # Use from_mcp_template pattern
     """
-    create_environment(name, directory, force, preset)
+    create_environment(name, directory, force, preset, from_mcp)
 
 
 @app.command()

@@ -1,0 +1,13 @@
+[
+  {
+    "prompt": "Do something in this strange new environment",
+    "mcp_config": {
+      "local": {
+        "url": "http://localhost:8765/mcp"
+      }
+    },
+    "setup_tool": {},
+    "integration_test_tool": {},
+    "evaluate_tool": {}
+  }
+]
