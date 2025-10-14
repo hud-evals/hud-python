@@ -780,7 +780,8 @@ def eval(
     agent: str | None = typer.Argument(
         None,
         help=(
-            "Agent backend to use (claude, openai, vllm, or litellm). If not provided, will prompt interactively."  # noqa: E501
+            "Agent backend to use (claude, openai computer use, openrouter responses, "
+            "vllm, or litellm). If not provided, will prompt interactively."
         ),
     ),
     full: bool = typer.Option(
@@ -896,6 +897,7 @@ def eval(
             [
                 {"name": "Claude 4 Sonnet", "value": "claude"},
                 {"name": "OpenAI Computer Use", "value": "openai"},
+                {"name": "OpenRouter", "value": "openrouter"},
                 {"name": "vLLM (Local Server)", "value": "vllm"},
                 {"name": "LiteLLM (Multi-provider)", "value": "litellm"},
             ]
@@ -904,7 +906,7 @@ def eval(
         agent = hud_console.select("Select an agent to use:", choices=choices, default=0)
 
     # Handle HUD model selection
-    if agent and agent not in ["claude", "openai", "vllm", "litellm", "integration_test"]:
+    if agent and agent not in ["claude", "openai", "openrouter", "vllm", "litellm", "integration_test"]:
         # Find remote model name
         model = agent
         if not vllm_base_url:
@@ -925,7 +927,7 @@ def eval(
         hud_console.info(f"Using HUD model: {model} (trained on {base_model})")
 
     # Validate agent choice
-    valid_agents = ["claude", "openai", "vllm", "litellm", "integration_test"]
+    valid_agents = ["claude", "openai", "openrouter", "vllm", "litellm", "integration_test"]
     if agent not in valid_agents:
         hud_console.error(f"Invalid agent: {agent}. Must be one of: {', '.join(valid_agents)}")
         raise typer.Exit(1)

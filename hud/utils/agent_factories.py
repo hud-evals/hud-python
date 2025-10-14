@@ -8,6 +8,7 @@ from openai import AsyncOpenAI
 
 from hud.agents.grounded_openai import GroundedOpenAIChatAgent
 from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
+from hud.agents.openrouter import OpenRouterAgent
 from hud.tools.grounding import GrounderConfig
 
 
@@ -82,3 +83,9 @@ def create_grounded_agent(**kwargs: Any) -> GroundedOpenAIChatAgent:
     return GroundedOpenAIChatAgent(
         openai_client=openai_client, grounder_config=grounder_config, **kwargs
     )
+
+
+def create_openrouter_agent(**kwargs: Any) -> OpenRouterAgent:
+    """Factory for OpenRouterAgent with run_dataset compatibility."""
+
+    return OpenRouterAgent(**kwargs)

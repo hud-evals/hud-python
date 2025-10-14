@@ -1,0 +1,188 @@
+### left_click
+
+Call rule: `left_click(start_box='[x,y]')`
+{
+    'name': 'left_click',
+    'description': 'Perform a left mouse click at the specified coordinates on the screen.',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'start_box': {
+                'type': 'array',
+                'items': {
+                    'type': 'integer'
+                },
+                'description': 'Coordinates [x,y] where to perform the click, normalized to 0-999 range.'
+            }
+        },
+        'required': ['start_box']
+    }
+}
+
+### left_double_click
+
+Call rule: `left_double_click(start_box='[x,y]', element_info='')`
+{
+    'name': 'left_double_click',
+    'description': 'Perform a left mouse double-click at the specified coordinates on the screen.',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'start_box': {
+                'type': 'array',
+                'items': {
+                    'type': 'integer'
+                },
+                'description': 'Coordinates [x,y] where to perform the double-click, normalized to 0-999 range.'
+            },
+            'element_info': {
+                'type': 'string',
+                'description': 'Optional text description of the UI element being double-clicked.'
+            }
+        },
+        'required': ['start_box']
+    }
+}
+
+### left_drag
+
+Call rule: `left_drag(start_box='[x1,y1]', end_box='[x2,y2]', element_info='')`
+{
+    'name': 'left_drag',
+    'description': 'Drag the mouse from starting coordinates to ending coordinates while holding the left mouse button.',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'start_box': {
+                'type': 'array',
+                'items': {
+                    'type': 'integer'
+                },
+                'description': 'Starting coordinates [x1,y1] for the drag operation, normalized to 0-999 range.'
+            },
+            'end_box': {
+                'type': 'array',
+                'items': {
+                    'type': 'integer'
+                },
+                'description': 'Ending coordinates [x2,y2] for the drag operation, normalized to 0-999 range.'
+            },
+            'element_info': {
+                'type': 'string',
+                'description': 'Optional text description of the UI element being dragged.'
+            }
+        },
+        'required': ['start_box', 'end_box']
+    }
+}
+
+### key
+
+Call rule: `key(keys='')`
+{
+    'name': 'key',
+    'description': 'Simulate pressing a single key or combination of keys on the keyboard.',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'keys': {
+                'type': 'string',
+                'description': "The key or key combination to press. Use '+' to separate keys in combinations (e.g., 'ctrl+c', 'alt+tab')."
+            }
+        },
+        'required': ['keys']
+    }
+}
+
+### type
+
+Call rule: `type(content='')`
+{
+    'name': 'type',
+    'description': 'Type text content into the currently focused text input field. This action only performs typing and does not handle field activation or clearing.',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'content': {
+                'type': 'string',
+                'description': 'The text content to be typed into the active text field.'
+            }
+        },
+        'required': ['content']
+    }
+}
+
+### scroll
+
+Call rule: `scroll(start_box='[x,y]', direction='', step=5, element_info='')`
+{
+    'name': 'scroll',
+    'description': 'Scroll an element at the specified coordinates in the specified direction by a given number of wheel steps.',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'start_box': {
+                'type': 'array',
+                'items': {
+                    'type': 'integer'
+                },
+                'description': 'Coordinates [x,y] of the element or area to scroll, normalized to 0-999 range.'
+            },
+            'direction': {
+                'type': 'string',
+                'enum': ['down', 'up'],
+                'description': "The direction to scroll: 'down' or 'up'."
+            },
+            'step': {
+                'type': 'integer',
+                'default': 5,
+                'description': 'Number of wheel steps to scroll, default is 5.'
+            },
+            'element_info': {
+                'type': 'string',
+                'description': 'Optional text description of the UI element being scrolled.'
+            }
+        },
+        'required': ['start_box', 'direction']
+    }
+}
+
+### WAIT
+
+Call rule: `WAIT()`
+{
+    'name': 'WAIT',
+    'description': 'Wait for 5 seconds before proceeding to the next action.',
+    'parameters': {
+        'type': 'object',
+        'properties': {},
+        'required': []
+    }
+}
+
+### DONE
+
+Call rule: `DONE()`
+{
+    'name': 'DONE',
+    'description': 'Indicate that the current task has been completed successfully and no further actions are needed.',
+    'parameters': {
+        'type': 'object',
+        'properties': {},
+        'required': []
+    }
+}
+
+### FAIL
+
+Call rule: `FAIL()`
+{
+    'name': 'FAIL',
+    'description': 'Indicate that the current task cannot be completed or is impossible to accomplish.',
+    'parameters': {
+        'type': 'object',
+        'properties': {},
+        'required': []
+    }
+}
+
