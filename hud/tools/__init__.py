@@ -12,7 +12,12 @@ from .response import ResponseTool
 from .submit import SubmitTool
 
 if TYPE_CHECKING:
-    from .computer import AnthropicComputerTool, HudComputerTool, OpenAIComputerTool, GeminiComputerTool
+    from .computer import (
+        AnthropicComputerTool,
+        GeminiComputerTool,
+        HudComputerTool,
+        OpenAIComputerTool,
+    )
 
 __all__ = [
     "AnthropicComputerTool",
@@ -20,9 +25,9 @@ __all__ = [
     "BaseTool",
     "BashTool",
     "EditTool",
+    "GeminiComputerTool",
     "HudComputerTool",
     "OpenAIComputerTool",
-    "GeminiComputerTool",
     "PlaywrightTool",
     "ResponseTool",
     "SubmitTool",

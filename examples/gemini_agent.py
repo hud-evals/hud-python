@@ -28,7 +28,7 @@ async def main():
         provider = os.getenv("BROWSER_PROVIDER", "anchorbrowser")
         headers = {
             "Authorization": f"Bearer {settings.api_key}",
-            "Mcp-Image": "alberthu233/hud-remote-browser:gemini-dev-1",
+            "Mcp-Image": "alberthu233/hud-remote-browser:gemini-dev-2",
             "Env-Browser-Provider": provider,
         }
 
@@ -71,10 +71,10 @@ async def main():
             2. Fill in the customer name as "Gemini Test"
             3. Enter the telephone as "555-0456"
             4. Enter the email as "gemini@test.com"
-            5. Type "Testing form submission with Gemini" in the comments
+            5. Type "Submission with Gemini" in the comments
             6. Select a medium pizza size
             7. Choose "mushroom" as a topping
-            8. Set delivery time to "10:00 AM"
+            8. Set delivery time to "16:00"
             9. Submit the form
             10. Verify the submission was successful
             """

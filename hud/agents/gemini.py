@@ -187,21 +187,24 @@ class GeminiAgent(MCPAgent):
             top_p=self.top_p,
             top_k=self.top_k,
             max_output_tokens=self.max_output_tokens,
-            tools=cast(Any, self.gemini_tools),
+            tools=cast("Any", self.gemini_tools),
             system_instruction=self.system_prompt,
         )
+
+        # Trim screenshots from older turns to manage context growth
+        self._remove_old_screenshots(messages)
 
         # Make API call - using a simpler call pattern
         response = self.gemini_client.models.generate_content(
             model=self.model,
-            contents=cast(Any, messages),
+            contents=cast("Any", messages),
             config=generate_config,
         )
 
         # Append assistant response (including any function_call) so that
         # subsequent FunctionResponse messages correspond to a prior FunctionCall
         if response.candidates and len(response.candidates) > 0 and response.candidates[0].content:
-            cast(list[genai_types.Content], messages).append(response.candidates[0].content)
+            cast("list[genai_types.Content]", messages).append(response.candidates[0].content)
 
         # Process response
         result = AgentResponse(content="", tool_calls=[], done=True)
@@ -261,6 +264,8 @@ class GeminiAgent(MCPAgent):
                             "text",
                             "press_enter",
                             "clear_before_typing",
+                            "safety_decision",
+                            "safetyDecision",
                             "direction",
                             "magnitude",
                             "url",
@@ -282,7 +287,6 @@ class GeminiAgent(MCPAgent):
                     tool_call = MCPToolCall(
                         name=mcp_tool_name,
                         arguments=final_args,
-                        id=func_name or mcp_tool_name,  # type: ignore[arg-type]
                         gemini_name=func_name,  # type: ignore[arg-type]
                     )
                     collected_tool_calls.append(tool_call)
@@ -360,9 +364,13 @@ class GeminiAgent(MCPAgent):
             response_dict["url"] = url if url else "about:blank"
 
             # For Gemini Computer Use actions, always acknowledge safety decisions
-            # Some actions (e.g., click_at) may require explicit acknowledgement
-            # in the corresponding FunctionResponse to proceed.
-            if gemini_name in PREDEFINED_COMPUTER_USE_FUNCTIONS:
+            requires_ack = False
+            if tool_call.arguments:
+                requires_ack = bool(
+                    tool_call.arguments.get("safety_decision")
+                    or tool_call.arguments.get("safetyDecision")
+                )
+            if gemini_name in PREDEFINED_COMPUTER_USE_FUNCTIONS and requires_ack:
                 # Provide common acknowledgement flags expected by the API
                 # (include multiple canonical spellings to maximize compatibility)
                 response_dict["acknowledged"] = True
@@ -447,9 +455,8 @@ class GeminiAgent(MCPAgent):
                 gemini_tools.append(custom_tool)
                 # Direct mapping for non-computer tools
                 self._gemini_to_mcp_tool_map[tool.name] = tool.name
-            except Exception:  # noqa: S110
+            except Exception:
                 self.hud_console.warning(f"Failed to convert tool {tool.name} to Gemini format")
-                pass
 
         self.gemini_tools = gemini_tools
         return gemini_tools
@@ -486,4 +493,3 @@ class GeminiAgent(MCPAgent):
                             ):
                                 # Clear the parts (screenshots)
                                 part.function_response.parts = None
-

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import cast
+import base64
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -101,7 +101,11 @@ class TestGeminiAgent:
         # Test with screenshot
         image_blocks: list[types.ContentBlock] = [
             types.TextContent(type="text", text="Look at this"),
-            types.ImageContent(type="image", data="base64data", mimeType="image/png"),
+            types.ImageContent(
+                type="image",
+                data=base64.b64encode(b"fakeimage").decode("utf-8"),
+                mimeType="image/png",
+            ),
         ]
         messages = await agent.format_blocks(image_blocks)
         assert len(messages) == 1
@@ -134,7 +138,11 @@ class TestGeminiAgent:
             MCPToolResult(
                 content=[
                     types.TextContent(type="text", text="Clicked successfully"),
-                    types.ImageContent(type="image", data="screenshot_data", mimeType="image/png"),
+                    types.ImageContent(
+                        type="image",
+                        data=base64.b64encode(b"screenshot").decode("utf-8"),
+                        mimeType="image/png",
+                    ),
                 ],
                 isError=False,
             ),
@@ -231,7 +239,7 @@ class TestGeminiAgent:
 
             assert response.content == "I will click at coordinates"
             assert len(response.tool_calls) == 1
-            assert response.tool_calls[0].arguments == {"x": 100, "y": 200}
+            assert response.tool_calls[0].arguments == {"action": "click_at", "x": 100, "y": 200}
             assert response.done is False
 
     @pytest.mark.asyncio
@@ -348,4 +356,3 @@ class TestGeminiAgent:
             assert response.content == ""
             assert response.tool_calls == []
             assert response.done is True
-
