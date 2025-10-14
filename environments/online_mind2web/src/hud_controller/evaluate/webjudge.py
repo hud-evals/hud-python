@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 MAX_IMAGE = 50  # Maximum screenshot of history to judge
 
 
+@evaluate.tool("webjudge")
+async def webjudge(ctx: Context, task_description: dict | str):
+    return await webjudge_eval(ctx, task_description)
+
+
 async def identify_key_point(task_description: dict | str) -> dict:
     """Identify key points in a task description using GPT-4.
 
@@ -133,7 +138,6 @@ async def identify_key_point(task_description: dict | str) -> dict:
         }
 
 
-# @evaluate.tool("judge_image")
 async def judge_image(
     base64_images: list | str, task_description: dict | str, key_points: str
 ) -> dict:
@@ -252,8 +256,7 @@ The snapshots of the web page progression are shown in the images below."""
         }
 
 
-# @evaluate.tool("webjudge")
-async def webjudge(ctx: Context, task_description: dict | str, score_threshold: int = 3):
+async def webjudge_eval(ctx: Context, task_description: dict | str, score_threshold: int = 3):
     """WebJudge Online Mind2Web evaluation using screenshot history and action history
 
     Args:

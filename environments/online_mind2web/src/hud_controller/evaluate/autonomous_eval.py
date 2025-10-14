@@ -8,7 +8,14 @@ from fastmcp import Context
 logger = logging.getLogger(__name__)
 
 
-# @evaluate.tool("autonomous_eval")
+@evaluate.tool("autonomous")
+async def autonomous(
+    ctx: Context,
+    task_description: dict | str,
+) -> dict | EvaluationResult:
+    return await autonomous(ctx, task_description)
+
+
 async def autonomous_eval(
     ctx: Context,
     task_description: dict | str,

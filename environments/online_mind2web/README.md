@@ -22,3 +22,15 @@ hud eval ./test_task.json
 ```bash
 hud eval Genteki/Online-Mind2Web --full --max-concurrent=5
 ```
+
+### Different Evaluation Method
+
+To chosse different evaluation method, you can change different `task["evaluate_tool"]["evaluate"]["name"]` value in task json file. Here are the different evaluation method we support for you:
+
+| Evaluation Method | Final Screenshot | Screenshot History | Action Histroy | 
+|:---|:---:|:---:| :---: |
+| `autonomous` | ✔ | ✗ | ✔ |
+| `webjudge` | ✔ | ✔ | ✔ |
+| `overall_judge`[^1] | - | - | - |
+
+[^1]: `overall_judge` will execute all evaluation methods above and return the average of the rewards of them.

@@ -3,7 +3,7 @@ from fastmcp import Context
 from hud.tools.types import EvaluationResult
 from . import evaluate
 from .autonomous_eval import autonomous_eval
-from .webjudge import webjudge
+from .webjudge import webjudge_eval
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ async def overall_judge(ctx: Context, task_description: dict | str) -> dict | Ev
     Returns:
         Dict containing rewards and info
     """
-    evaluation_methods = [autonomous_eval, webjudge]
+    evaluation_methods = [autonomous_eval, webjudge_eval]
 
     info = {}
     reward = 0.0
