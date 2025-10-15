@@ -94,6 +94,14 @@ class BrowserExecutor(BaseExecutor):
         self.playwright_tool = playwright_tool
         logger.info("BrowserExecutor initialized with Playwright backend")
 
+    async def _current_url(self) -> str | None:
+        """Return current page URL if available."""
+        try:
+            page = await self._ensure_page()
+            return page.url
+        except Exception:
+            return None
+
     def _map_key(self, key: str) -> str:
         """Map a key name to Playwright format."""
         key = key.strip()
@@ -172,6 +180,9 @@ class BrowserExecutor(BaseExecutor):
             logger.debug(f"Clicked at ({x}, {y}) with button {button}")
 
             result = ContentResult(output=f"Clicked at ({x}, {y})")
+            current = await self._current_url()
+            if current:
+                result.url = current
             if take_screenshot:
                 result = result + ContentResult(base64_image=await self.screenshot())
 
@@ -213,6 +224,9 @@ class BrowserExecutor(BaseExecutor):
             logger.debug(f"Typed text: {text[:50]}...")
 
             result = ContentResult(output=f"Typed: {text}")
+            current = await self._current_url()
+            if current:
+                result.url = current
             if take_screenshot:
                 result = result + ContentResult(base64_image=await self.screenshot())
 
@@ -253,6 +267,9 @@ class BrowserExecutor(BaseExecutor):
             logger.debug(f"Pressed keys: {keys} (mapped to: {mapped_keys})")
 
             result = ContentResult(output=f"Pressed: {key_combination}")
+            current = await self._current_url()
+            if current:
+                result.url = current
             if take_screenshot:
                 result = result + ContentResult(base64_image=await self.screenshot())
 
@@ -292,6 +309,9 @@ class BrowserExecutor(BaseExecutor):
             logger.debug(f"Scrolled at ({x}, {y}) by ({delta_x}, {delta_y})")
 
             result = ContentResult(output=f"Scrolled by ({delta_x}, {delta_y})")
+            current = await self._current_url()
+            if current:
+                result.url = current
             if take_screenshot:
                 result = result + ContentResult(base64_image=await self.screenshot())
 
@@ -319,6 +339,9 @@ class BrowserExecutor(BaseExecutor):
             logger.debug(f"Moved mouse to ({x}, {y})")
 
             result = ContentResult(output=f"Moved to ({x}, {y})")
+            current = await self._current_url()
+            if current:
+                result.url = current
             if take_screenshot:
                 result = result + ContentResult(base64_image=await self.screenshot())
 
@@ -369,6 +392,9 @@ class BrowserExecutor(BaseExecutor):
             logger.debug(f"Dragged from {path[0]} through {len(path)} points")
 
             result = ContentResult(output=f"Dragged through {len(path)} points")
+            current = await self._current_url()
+            if current:
+                result.url = current
             if take_screenshot:
                 result = result + ContentResult(base64_image=await self.screenshot())
 

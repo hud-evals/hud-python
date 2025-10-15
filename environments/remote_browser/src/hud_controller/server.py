@@ -25,6 +25,7 @@ from hud.tools.computer import (
     AnthropicComputerTool,
     OpenAIComputerTool,
     HudComputerTool,
+    GeminiComputerTool,
 )
 
 # Import setup and evaluate hubs
@@ -283,6 +284,7 @@ async def initialize_environment(ctx):
         mcp.add_tool(HudComputerTool(executor=browser_executor))
         mcp.add_tool(AnthropicComputerTool(executor=browser_executor))
         mcp.add_tool(OpenAIComputerTool(executor=browser_executor))
+        mcp.add_tool(GeminiComputerTool(executor=browser_executor))
 
         await send_progress(80, "Registered hud computer tools")
 
