@@ -61,12 +61,17 @@ def list_models() -> list[RLModelInfo]:
     ]
 
 
-def deploy_vllm(model_name: str, gpu_type: str = "A100", gpu_count: int = 1) -> dict[str, Any]:
+def deploy_vllm(
+    model_name: str,
+    config: dict[str, Any],
+    gpu_type: str = "A100",
+    gpu_count: int = 1
+) -> dict[str, Any]:
     """Deploy a vLLM server for a model."""
     return make_request_sync(
         method="POST",
         url=f"{settings.hud_rl_url}/models/{model_name}/deploy",
-        json={"gpu_type": gpu_type, "gpu_count": gpu_count},
+        json={"gpu_type": gpu_type, "gpu_count": gpu_count, "vllm_config": config},
         api_key=settings.api_key,
     )
 

@@ -25,7 +25,7 @@ console = Console()
 
 
 def ensure_vllm_deployed(
-    model_name: str, gpu_type: str = "A100", gpu_count: int = 1, timeout: int = 600
+    model_name: str, config: dict[str, Any], gpu_type: str = "A100", gpu_count: int = 1, timeout: int = 600
 ) -> None:
     """Deploy vLLM for a model if needed and wait until it's ready."""
 
@@ -35,7 +35,7 @@ def ensure_vllm_deployed(
         return
 
     hud_console.info(f"Deploying vLLM server for {model_name}...")
-    rl_api.deploy_vllm(model_name, gpu_type=gpu_type, gpu_count=gpu_count)
+    rl_api.deploy_vllm(model_name, config=config, gpu_type=gpu_type, gpu_count=gpu_count)
     hud_console.success("vLLM deployment started")
 
     hud_console.info("Waiting for vLLM server to be ready...")
@@ -89,13 +89,6 @@ def launch_training(
         hud_console.error(f"Error during model selection: {exc}")
         raise
 
-    vllm_count = vllm_gpu_count if vllm_gpu_count and vllm_gpu_count > 0 else 1
-    try:
-        ensure_vllm_deployed(model_name, gpu_type="A100", gpu_count=vllm_count)
-    except Exception as exc:
-        hud_console.error(f"Failed to prepare vLLM server: {exc}")
-        raise
-
     gpu_choice, num_gpus, temp_path, config_obj = _prepare_training_config(
         model_info=model_info,
         tasks_file=tasks_file,
@@ -103,6 +96,18 @@ def launch_training(
         tasks_count=len(tasks),
         yes=yes,
     )
+
+    vllm_count = vllm_gpu_count if vllm_gpu_count and vllm_gpu_count > 0 else 1
+    try:
+        ensure_vllm_deployed(
+            model_name,
+            config=config_obj.vllm.model_dump(),
+            gpu_type="A100",
+            gpu_count=vllm_count
+        )
+    except Exception as exc:
+        hud_console.error(f"Failed to prepare vLLM server: {exc}")
+        raise
 
     try:
         try:
