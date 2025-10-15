@@ -190,6 +190,9 @@ class TrainingConfig(BaseConfig):
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig, description="Optimizer configuration")
     max_grad_norm: float = Field(default=1.0, gt=0.0, description="Maximum gradient norm")
 
+    # Benchmarking
+    benchmark: bool = Field(default=False, description="Whether to run in benchmark mode to collect FLOPS and memory usage metrics")
+
 class RewardConfig(BaseConfig):
     scale_rewards: Literal["group", "batch", "none"] = Field(default="group", description="Reward scaling strategy")
     leave_one_out: bool = Field(default=False, description="RLOO scaling factor G/(G-1), only applies when scale_rewards='none'")
