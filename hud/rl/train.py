@@ -26,6 +26,7 @@ from hud.rl.utils import get_world_size, setup_distributed, is_main_process
 from hud.rl.checkpoint import CheckpointManager
 from hud.rl.utils import save_step_metrics
 from hud.rl.types import TrainingSample
+from hud.rl.perf import get_perf_counter
 
 
 def get_batch(step: int, root: str) -> list[TrainingSample]:
@@ -54,6 +55,11 @@ def train(
 
     console.section_title("Initializing trainer")
 
+    if training_config.benchmark:
+        console.warning_log("Running in benchmark mode, overriding max_steps to 5")
+        max_steps = 5
+
+
     parallel_dims = ParallelDims(
         dp_replicate=training_config.dp_replicate,
         dp_shard=training_config.dp_shard,
@@ -67,8 +73,7 @@ def train(
 
     model = build_model(training_config, parallel_dims)
 
-
-
+    benchmark_data = []
 
     ref_model: torch.nn.Module | None = None
     if training_config.loss.kl_beta > 0:
@@ -110,7 +115,8 @@ def train(
                     del logits
                     progress.update(f"Computing reference log probabilities... {i + 1}/{len(batch)}")
 
-        
+        perf_counter = get_perf_counter(model, batch[0].inputs["input_ids"].shape[1])
+
 
         with console.progress("Computing old log probabilities...") as progress, torch.no_grad():
             for i, minibatch in enumerate(batch):
@@ -196,17 +202,40 @@ def train(
         step_duration = time.time() - training_start_time
         console.info(f"Step {step} training took {step_duration:.2f} seconds")
 
+
+        # Collect performance data
+        num_tokens = sum(minibatch.inputs["input_ids"].shape[1] for minibatch in batch)
+        perf_counter.count_tokens(num_tokens)  # Add to rolling window
+        throughput = perf_counter.get_tokens_per_second() or 0
+        mfu = perf_counter.get_mfu() or 0
+        peak_memory = torch.cuda.max_memory_allocated() / 1024**3
+
+        benchmark_data.append({
+            "step": step,
+            "step_duration": step_duration,
+            "loss": loss.detach().cpu().item(),
+            "grad_norm": grad_norm.detach().cpu().item(),
+            "throughput": throughput,
+            "mfu": mfu,
+            "peak_memory": peak_memory,
+        })
+
         stats = collector.get_stats()
         if is_main_process():
             save_step_metrics(training_config.output_dir, step, stats)
         
-        
+        if is_main_process():
+            console.error_log(f"Benchmark data: {benchmark_data}")
+
         torch.cuda.empty_cache()
     
     # Save final checkpoint after last training step
     if max_steps > 0:
         console.info(f"Saving final checkpoint for step {max_steps - 1}...")
         checkpoint_manager.save(model, max_steps - 1)
+
+    if training_config.benchmark:
+        
 
 
 def main() -> None:

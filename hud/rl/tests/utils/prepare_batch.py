@@ -24,7 +24,7 @@ def resolve_pad_token_id(processor):
 
 def main():
     config = Config()
-    trace_file = "/home/ubuntu/hud-python/hud/rl/tests/data/traces_de8ea147-3c52-4117-ad24-d1dbaa39a088.json"
+    trace_file = "/home/ubuntu/myworkspace/hud-python/hud/rl/tests/data/traces_de8ea147-3c52-4117-ad24-d1dbaa39a088.json"
 
     print("=" * 80)
     print("Loading traces from dump...")
@@ -41,7 +41,7 @@ def main():
     pad_token_id = resolve_pad_token_id(processor)
 
     group_size = 8
-    num_traces = min(len(traces), 32)
+    num_traces = min(len(traces), 16)
     traces = traces[:num_traces]
 
     rewards = torch.tensor([float(trace.reward) for trace in traces], dtype=torch.float32)

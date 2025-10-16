@@ -111,3 +111,4 @@ def get_peak_flops(device_name: str) -> float:
     else:  # for other GPU types, assume A100
         console.warning(f"Peak flops undefined for: {device_name}, fallback to A100")
         return 312e12
+
