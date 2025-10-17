@@ -76,12 +76,12 @@ def compute_loss(
 
     clipped = (ratio > config.clip_ratio).float()
 
-    loss = (loss[assistant_mask]).sum()
+    loss = (loss * assistant_mask).sum(dim=-1)  # (B,)
 
     if config.importance_sampling_level == "sequence":
-        loss = loss / torch.clamp(assistant_mask.sum(), 1)
+        loss = loss / torch.clamp_min(assistant_mask.sum(dim=-1), 1)
 
-    loss = loss / max(loss_norm, 1)
+    loss = loss.sum() / max(loss_norm, 1)
 
     out_tensors: dict[str, torch.Tensor] = {
         "importance_ratio": ratio.detach(),
