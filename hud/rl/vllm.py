@@ -4,7 +4,7 @@ from argparse import Namespace
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 import uvloop
@@ -23,6 +23,7 @@ from vllm.entrypoints.openai.api_server import (
 )
 from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
 from vllm.entrypoints.openai.tool_parsers import ToolParserManager
+from vllm.model_executor.model_loader.utils import process_weights_after_loading
 from vllm.utils import FlexibleArgumentParser
 
 from openai import AsyncOpenAI, NotFoundError
@@ -31,15 +32,13 @@ from httpx import Response
 from hud.rl.logger import console
 from hud.rl.utils import get_weights_path
 
-__all__ = [
-    "CheckpointWorker",
-    "custom_build_async_engine_client",
-    "custom_run_server_worker",
-    "custom_run_server",
-    "server",
-]
 
-class CheckpointWorker:
+if TYPE_CHECKING:
+    from vllm.v1.worker.gpu_worker import Worker
+else:
+    Worker = object
+
+class CheckpointWorker(Worker):
     """Extension of a vLLM worker that can hot-load checkpoints over RPC."""
 
     def update_weights(self, model_path: Path) -> None:
@@ -53,9 +52,6 @@ class CheckpointWorker:
                 yield key, value
 
         self.model_runner.model.load_weights(weights_iterator())
-
-        # Post-processing is required for some architectures.
-        from vllm.model_executor.model_loader.utils import process_weights_after_loading
 
         device = next(self.model_runner.model.parameters()).device
         process_weights_after_loading(
