@@ -101,7 +101,7 @@ class CheckpointManager:
             
             step_dir = self.output_dir / f"step_{step:05d}"
             if step_dir.exists():
-                console.info(f"Removing old step directory: {step_dir}")
+                console.info_log(f"Removing old step directory: {step_dir}")
                 shutil.rmtree(step_dir, ignore_errors=True)
         
         self._saved_steps = [s for s in self._saved_steps if s not in steps_to_delete or s == self._best_step]

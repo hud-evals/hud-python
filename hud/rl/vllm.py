@@ -29,7 +29,7 @@ from vllm.utils import FlexibleArgumentParser
 from openai import AsyncOpenAI, NotFoundError
 from httpx import Response
 
-from hud.rl.logger import console
+from hud.rl.logger import console, configure_logging
 from hud.rl.utils import get_weights_path
 
 
@@ -238,9 +238,11 @@ def main() -> None:
     
     if "--config" in sys.argv:
         cfg, extra = Config.from_argv(allow_extras=True)
+        configure_logging(cfg.verbose)
         vllm_cfg = cfg.vllm
     else:
         vllm_cfg, extra = VLLMConfig.from_argv(allow_extras=True)
+        configure_logging(True)
     
     ns = vllm_cfg.to_vllm()
 

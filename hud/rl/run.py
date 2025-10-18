@@ -15,7 +15,7 @@ from hud.rl.advantages import calculate_advantages
 from hud.rl.batch import batch_samples
 from hud.rl.buffer import create_buffer
 from hud.rl.config import Config
-from hud.rl.logger import console
+from hud.rl.logger import console, configure_logging
 from hud.rl.model import get_processor
 from hud.rl.utils import get_weights_path
 from hud.rl.vllm import update_weights
@@ -51,7 +51,7 @@ def save_batches(training_batch: list[list[TrainingSample]], step: int, output_d
         temp_path.rename(batch_path)
         console.debug_log(f"Saved {len(rank_samples)} minibatches to {batch_path}")
     
-    console.info(f"Saved batches for step {step} to {rollout_dir}")
+    console.info_log(f"Saved batches for step {step} to {rollout_dir}")
 
 async def wait_for_checkpoint(step: int, output_dir: str | Path, timeout: int = 3600) -> Path:
     checkpoint_path = get_weights_path(output_dir, step)
@@ -65,7 +65,7 @@ async def wait_for_checkpoint(step: int, output_dir: str | Path, timeout: int = 
         
         await asyncio.sleep(0.5)
     
-    console.info(f"Checkpoint ready: {checkpoint_path}")
+    console.info_log(f"Checkpoint ready: {checkpoint_path}")
     return checkpoint_path
 
 async def run(config: Config, tasks: list[Task]) -> None:
@@ -119,7 +119,7 @@ async def run(config: Config, tasks: list[Task]) -> None:
         pad_token_id = resolve_pad_token_id(processor)
 
         num_tasks = config.batch_size // config.group_size
-        console.info(f"Number of prompts per step: {num_tasks}")
+        console.info_log(f"Number of prompts per step: {num_tasks}")
         total_steps = config.training_steps
 
         console.section_title("Starting Run")
@@ -132,24 +132,24 @@ async def run(config: Config, tasks: list[Task]) -> None:
             while buffer.completed_groups() < num_tasks:
                 tasks_to_run = buffer.sample_tasks(num_tasks)
 
-                console.info(f"Running {len(tasks_to_run)} tasks")
+                console.info_log(f"Running {len(tasks_to_run)} tasks")
                 collected_traces = await actor.run_tasks(tasks_to_run, job_id=job.id)
 
                 # Count successful vs error traces
                 successful = sum(1 for t in collected_traces if not getattr(t, "isError", False))
-                console.info(
+                console.info_log(
                     f"Collected {len(collected_traces)} traces ({successful} successful, {len(collected_traces)-successful} errors)"
                 )
 
                 buffer.add_traces(collected_traces)
-                console.info(
+                console.info_log(
                     f"Buffer status: {buffer.completed_groups()}/{num_tasks} groups complete"
                 )
 
             # Sample traces for training
             traces = buffer.sample_traces(num_tasks)
             if not traces:
-                console.warning("No traces sampled from buffer")
+                console.warning_log("No traces sampled from buffer")
                 buffer.reset()
                 continue
 
@@ -191,7 +191,7 @@ async def run(config: Config, tasks: list[Task]) -> None:
             training_batch = batch_samples(samples, config.mini_batch_size, config.num_gpus, pad_token_id)
 
             total_minibatches = sum(len(gpu_batch) for gpu_batch in training_batch)
-            console.info(f"Created training batch with {total_minibatches} minibatches across {len(training_batch)} GPU batches")
+            console.info_log(f"Created training batch with {total_minibatches} minibatches across {len(training_batch)} GPU batches")
             
             save_batches(training_batch, step, config.output_dir)
             
@@ -229,7 +229,7 @@ async def run(config: Config, tasks: list[Task]) -> None:
                 console.info("Last step - skipping vLLM weight update")
             
             buffer.reset()
-            console.info(f"Buffer reset. Status: {buffer.info}")
+            console.info_log(f"Buffer reset. Status: {buffer.info}")
 
         console.section_title("All steps completed")
 
@@ -254,9 +254,7 @@ async def _main_async() -> None:
 
     sys.argv = [sys.argv[0]] + filtered_argv
     config, _ = Config.from_argv()
-
-    if config.verbose:
-        logging.basicConfig(level=logging.INFO)
+    configure_logging(config.verbose)
 
     if not tasks_arg:
         raise ValueError("Requires tasks via --tasks or --tasks-json")
