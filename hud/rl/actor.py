@@ -152,9 +152,9 @@ Strategy: keep highest tiles in a corner; maintain order; avoid random moves.
 
         actor = Actor(config, client=client)
 
-        console.info_log(f"Testing actor with task: {task.id}") 
-        console.info_log(f"Model: {config.base_model}")
-        console.info_log(f"Client base URL: {client.base_url}")
+        console.info(f"Testing actor with task: {task.id}") 
+        console.info(f"Model: {config.base_model}")
+        console.info(f"Client base URL: {client.base_url}")
 
         job_id = str(uuid.uuid4())
         with hud.job("Test Actor", job_id=job_id):
