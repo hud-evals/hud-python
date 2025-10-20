@@ -243,11 +243,20 @@ class InteractiveMCPTester:
             args = {}
             for prop_name, prop_schema in properties.items():
                 prop_type = prop_schema.get("type")
-                if not prop_type and ("anyOf" in prop_schema or "oneOf" in prop_schema):
+                if not prop_type and "anyOf" in prop_schema:
                     prop_type = next(
                         (
                             s.get("type")
-                            for s in (prop_schema["anyOf"] or prop_schema["oneOf"] or [])
+                            for s in prop_schema.get("anyOf", [])
+                            if s.get("type") != "null"
+                        ),
+                        None,
+                    )
+                if not prop_type and "oneOf" in prop_schema:
+                    prop_type = next(
+                        (
+                            s.get("type")
+                            for s in prop_schema.get("oneOf", [])
                             if s.get("type") != "null"
                         ),
                         None,
@@ -369,8 +378,7 @@ class InteractiveMCPTester:
                     data_length = len(content.data) if hasattr(content, "data") else 0
                     console.print(
                         Panel(
-                            f"📷 Image ({mime_type})\n"
-                            f"Size: {data_length:,} bytes (base64 encoded)",
+                            f"📷 Image ({mime_type})\nSize: {data_length:,} bytes (base64 encoded)",
                             title="Result",
                             border_style="green" if not result.isError else "red",
                         )
