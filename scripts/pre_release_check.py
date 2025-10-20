@@ -86,7 +86,7 @@ class PreReleaseChecker:
             return False
 
         total_tasks = len(self.results)
-        successful_tasks = sum(1 for r in self.results if getattr(r, "reward", 0) > 0)
+        successful_tasks = sum(1 for r in self.results if getattr(r, "reward", 0) > 0.7)
         error_tasks = sum(1 for r in self.results if getattr(r, "isError", False))
 
         success_rate = (successful_tasks / total_tasks * 100) if total_tasks > 0 else 0

@@ -22,6 +22,8 @@ class TestInitModule:
 
         expected = [
             "Trace",
+            "async_job",
+            "async_trace",
             "clear_trace",
             "create_job",
             "get_trace",

@@ -46,7 +46,7 @@ def setup_hud_telemetry(
         The auto-created trace context manager if one was created, None otherwise.
         Caller is responsible for exiting the context manager.
     """
-    if not mcp_config:
+    if mcp_config is None:
         raise ValueError("Please run initialize() before setting up client-side telemetry")
 
     # Check if there are any HUD servers to setup telemetry for

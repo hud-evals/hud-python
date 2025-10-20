@@ -47,8 +47,8 @@ await setup({"name": "todo_basic_usage"})
 await evaluate({"name": "todo_basic_usage"})
 
 # Direct function calls
-await setup({"function": "todo_reset", "args": {}})
-await evaluate({"function": "todo_completion_rate", "args": {"min_rate": 0.5}})
+await setup({"name": "todo_reset", "arguments": {}})
+await evaluate({"name": "todo_completion_rate", "arguments": {"min_rate": 0.5}})
 
 # MCP resource discovery
 todo_evaluators = await client.read_resource("evaluators://todo")

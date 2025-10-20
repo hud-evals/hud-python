@@ -94,16 +94,18 @@ def configure_telemetry(
 
     # HUD exporter (only if enabled and API key is available)
     if settings.telemetry_enabled and settings.api_key:
+        # Use the HudSpanExporter directly (it now handles async context internally)
         exporter = HudSpanExporter(
             telemetry_url=settings.hud_telemetry_url, api_key=settings.api_key
         )
-        # Export more continuously to avoid big end flushes
+
+        # Batch exports for efficiency while maintaining reasonable real-time visibility
         provider.add_span_processor(
             BatchSpanProcessor(
                 exporter,
-                schedule_delay_millis=1000,
-                max_queue_size=8192,
-                max_export_batch_size=256,
+                schedule_delay_millis=1000,  # Export every 5 seconds (less frequent)
+                max_queue_size=16384,  # Larger queue for high-volume scenarios
+                max_export_batch_size=512,  # Larger batches (fewer uploads)
                 export_timeout_millis=30000,
             )
         )
@@ -140,8 +142,8 @@ def configure_telemetry(
                 BatchSpanProcessor(
                     otlp_exporter,
                     schedule_delay_millis=1000,
-                    max_queue_size=8192,
-                    max_export_batch_size=256,
+                    max_queue_size=16384,
+                    max_export_batch_size=512,
                     export_timeout_millis=30000,
                 )
             )

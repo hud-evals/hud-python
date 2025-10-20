@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "HUD Browser MCP Server"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "hud-python@git+https://github.com/hud-evals/hud-python@cli-dev",
+    "hud-python>=0.4.54",
     "httpx",
     "playwright",
     "pyautogui",

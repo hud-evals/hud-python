@@ -137,7 +137,11 @@ class MCPAgent(ABC):
                 "No MCPClient. Please provide one when initializing the agent or pass a Task with mcp_config."  # noqa: E501
             )
 
-        await self._setup_config(self.mcp_client.mcp_config)
+        try:
+            client_cfg = getattr(self.mcp_client, "mcp_config", None)
+        except Exception:
+            client_cfg = None
+        await self._setup_config(client_cfg)
 
         # Initialize client if needed
         try:
@@ -618,8 +622,11 @@ class MCPAgent(ABC):
             except Exception as e:
                 self.console.error_log(f"Response lifecycle tool failed: {e}")
 
-    async def _setup_config(self, mcp_config: dict[str, dict[str, Any]]) -> None:
+    async def _setup_config(self, mcp_config: dict[str, dict[str, Any]] | None) -> None:
         """Inject metadata into the metadata of the initialize request."""
+        if not isinstance(mcp_config, dict):
+            return
+
         if self.metadata:
             patch_mcp_config(
                 mcp_config,

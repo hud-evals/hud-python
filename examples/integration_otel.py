@@ -52,11 +52,11 @@ async def main():
         },
         "setup_tool": {
             "name": "setup",
-            "arguments": {"function": "board", "args": {"board_size": 4}},
+            "arguments": {"name": "board", "arguments": {"board_size": 4}},
         },
         "evaluate_tool": {
             "name": "evaluate",
-            "arguments": {"function": "max_number"},
+            "arguments": {"name": "max_number"},
         },
     }
     task = Task(**task_dict)

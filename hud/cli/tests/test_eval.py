@@ -11,7 +11,7 @@ from hud.cli.eval import (
     build_agent,
     run_single_task,
 )
-from hud.types import Task, Trace
+from hud.types import AgentType, Task, Trace
 
 
 class TestBuildAgent:
@@ -26,7 +26,7 @@ class TestBuildAgent:
             mock_runner.return_value = mock_instance
 
             # Test with verbose=False
-            result = build_agent("integration_test", verbose=False)
+            result = build_agent(AgentType.INTEGRATION_TEST, verbose=False)
 
             mock_runner.assert_called_once_with(verbose=False)
             assert result == mock_instance
@@ -40,7 +40,7 @@ class TestBuildAgent:
             mock_runner.return_value = mock_instance
 
             # Test with verbose=False
-            result = build_agent("claude", verbose=False)
+            result = build_agent(AgentType.CLAUDE, verbose=False)
 
             mock_runner.assert_called_once_with(model="claude-sonnet-4-20250514", verbose=False)
             assert result == mock_instance
@@ -55,7 +55,7 @@ class TestBuildAgent:
 
             # Test with verbose=False
             result = build_agent(
-                "claude",
+                AgentType.CLAUDE,
                 model="claude-sonnet-4-20250514",
                 allowed_tools=["act"],
                 verbose=True,
@@ -97,7 +97,7 @@ class TestRunSingleTask:
             patch("hud.cli.eval.find_environment_dir", return_value=None),
             patch("hud.cli.eval.hud.trace"),
         ):
-            await run_single_task("test.json", agent_type="integration_test", max_steps=10)
+            await run_single_task("test.json", agent_type=AgentType.INTEGRATION_TEST, max_steps=10)
 
             # Verify agent.run was called with the task containing agent_config
             mock_agent.run.assert_called_once()
@@ -119,7 +119,7 @@ class TestRunSingleTask:
             mock_grouped.return_value = [{"task": mock_task, "rewards": [1.0, 0.5]}]
 
             await run_single_task(
-                "test.json", agent_type="integration_test", group_size=3, max_steps=10
+                "test.json", agent_type=AgentType.INTEGRATION_TEST, group_size=3, max_steps=10
             )
 
             # Verify run_tasks_grouped was called with correct group_size
@@ -332,6 +332,7 @@ class TestRunDatasetToolFiltering:
             patch.object(ClaudeAgent, "_run_context", mock_run_context),
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_client_instance),
+            patch("hud.settings.settings.anthropic_api_key", "sk-test-key"),
         ):
             # Run the dataset
             await run_dataset(
@@ -400,6 +401,7 @@ class TestRunDatasetToolFiltering:
             patch.object(ClaudeAgent, "_run_context", mock_run_context),
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_client_instance),
+            patch("hud.settings.settings.anthropic_api_key", "sk-test-key"),
         ):
             # Run the dataset
             await run_dataset(
@@ -500,6 +502,7 @@ class TestSystemPromptHandling:
             patch.object(ClaudeAgent, "_run_context", mock_run_context),
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_mcp_client),
+            patch("hud.settings.settings.anthropic_api_key", "sk-test-key"),
         ):
             # Run the dataset
             await run_dataset(
@@ -551,6 +554,7 @@ class TestSystemPromptHandling:
             patch.object(ClaudeAgent, "_run_context", mock_run_context),
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_mcp_client),
+            patch("hud.settings.settings.anthropic_api_key", "sk-test-key"),
         ):
             # Run the dataset
             await run_dataset(

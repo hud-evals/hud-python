@@ -219,6 +219,17 @@ class TestAnalyzeMcpEnvironment:
         mock_tool.description = "Test tool"
         mock_tool.inputSchema = {"type": "object"}
 
+        # Prefer analyze_environment path (aligns with analyze CLI tests)
+        mock_client.analyze_environment = mock.AsyncMock(
+            return_value={
+                "metadata": {"servers": ["local"], "initialized": True},
+                "tools": [{"name": "test_tool", "description": "Test tool"}],
+                "hub_tools": {},
+                "resources": [],
+                "telemetry": {},
+            }
+        )
+        # Fallback still defined for completeness
         mock_client.list_tools.return_value = [mock_tool]
 
         result = await analyze_mcp_environment("test:latest")
@@ -237,7 +248,9 @@ class TestAnalyzeMcpEnvironment:
         mock_client_class.return_value = mock_client
         mock_client.initialize.side_effect = ConnectionError("Connection failed")
 
-        with pytest.raises(ConnectionError):
+        from hud.shared.exceptions import HudException
+
+        with pytest.raises(HudException, match="Connection failed"):
             await analyze_mcp_environment("test:latest")
 
     @mock.patch("hud.cli.build.MCPClient")
@@ -245,6 +258,15 @@ class TestAnalyzeMcpEnvironment:
         """Test analysis in verbose mode."""
         mock_client = mock.AsyncMock()
         mock_client_class.return_value = mock_client
+        mock_client.analyze_environment = mock.AsyncMock(
+            return_value={
+                "metadata": {"servers": ["local"], "initialized": True},
+                "tools": [],
+                "hub_tools": {},
+                "resources": [],
+                "telemetry": {},
+            }
+        )
         mock_client.list_tools.return_value = []
 
         # Just test that it runs without error in verbose mode
@@ -363,7 +385,7 @@ ENV API_KEY
         mock_run.return_value = mock_result
 
         # Run build
-        build_environment(str(env_dir), "test/env:latest")
+        build_environment(str(env_dir), "test-env:latest")
 
         # Check lock file was created
         lock_file = env_dir / "hud.lock.yaml"
@@ -373,7 +395,8 @@ ENV API_KEY
         with open(lock_file) as f:
             lock_data = yaml.safe_load(f)
 
-        assert lock_data["image"] == "test/env:latest@sha256:abc123"
+        assert lock_data["images"]["full"] == "test-env:0.1.0@sha256:abc123"
+        assert lock_data["images"]["local"] == "test-env:0.1.0"
         assert lock_data["build"]["version"] == "0.1.0"
         assert lock_data["environment"]["toolCount"] == 2
         assert len(lock_data["tools"]) == 2

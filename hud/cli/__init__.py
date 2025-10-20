@@ -12,6 +12,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from hud.types import AgentType
+
 from . import list_func as list_module
 from .analyze import (
     analyze_environment,
@@ -242,15 +244,18 @@ def debug(
                 if build and not build_environment(directory, image_name):
                     raise typer.Exit(1)
 
-            # Build Docker command
-            from .utils.docker import build_run_command
+            # Build Docker command with folder-mode envs
+            from .utils.docker import create_docker_run_command
 
-            command = build_run_command(image_name, docker_args)
+            command = create_docker_run_command(
+                image_name, docker_args=docker_args, env_dir=directory
+            )
         else:
             # Assume it's an image name
             image = first_param
             from .utils.docker import build_run_command
 
+            # Image-only mode: do not auto-inject local .env
             command = build_run_command(image, docker_args)
     else:
         console.print(
@@ -796,33 +801,19 @@ def eval(
         help="Comma-separated list of allowed tools",
     ),
     max_concurrent: int = typer.Option(
-        50,
+        30,
         "--max-concurrent",
-        help="Max concurrent tasks (prevents rate limits in both asyncio and parallel modes)",
+        help="Maximum concurrent tasks (1-200 recommended, prevents rate limits)",
     ),
     max_steps: int | None = typer.Option(
         None,
         "--max-steps",
         help="Maximum steps per task (default: 10 for single, 50 for full)",
     ),
-    parallel: bool = typer.Option(
-        False,
-        "--parallel",
-        help="Use process-based parallel execution for large datasets (100+ tasks)",
-    ),
-    max_workers: int | None = typer.Option(
-        None,
-        "--max-workers",
-        help="Number of worker processes for parallel mode (auto-optimized if not set)",
-    ),
-    max_concurrent_per_worker: int = typer.Option(
-        20,
-        "--max-concurrent-per-worker",
-        help="Maximum concurrent tasks per worker in parallel mode",
-    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
+        "-v",
         help="Enable verbose output from the agent",
     ),
     very_verbose: bool = typer.Option(
@@ -858,7 +849,7 @@ def eval(
     hud_console = HUDConsole()
 
     if integration_test:
-        agent = "integration_test"
+        agent = AgentType.INTEGRATION_TEST
 
     # If no source provided, reuse RL helper to find a tasks file interactively
     if source is None:
@@ -867,14 +858,14 @@ def eval(
 
             source = find_tasks_file(None, msg="Select a tasks file to run")
             hud_console.success(f"Selected: {source}")
-        except Exception as e:
+        except (FileNotFoundError, Exception):
             hud_console.error(
                 "No source provided and no task/eval JSON files found in current directory"
             )
             hud_console.info(
                 "Usage: hud eval <source> or create a task JSON file (e.g., task.json, tasks.jsonl)"
             )
-            raise typer.Exit(1) from e
+            raise typer.Exit(1) from None
 
     # Import eval_command lazily to avoid importing agent dependencies
     try:
@@ -905,17 +896,17 @@ def eval(
         # Add standard agent choices
         choices.extend(
             [
-                {"name": "Claude 4 Sonnet", "value": "claude"},
-                {"name": "OpenAI Computer Use", "value": "openai"},
-                {"name": "vLLM (Local Server)", "value": "vllm"},
-                {"name": "LiteLLM (Multi-provider)", "value": "litellm"},
+                {"name": "Claude 4 Sonnet", "value": AgentType.CLAUDE},
+                {"name": "OpenAI Computer Use", "value": AgentType.OPENAI},
+                {"name": "vLLM (Local Server)", "value": AgentType.VLLM},
+                {"name": "LiteLLM (Multi-provider)", "value": AgentType.LITELLM},
             ]
         )
 
         agent = hud_console.select("Select an agent to use:", choices=choices, default=0)
 
     # Handle HUD model selection
-    if agent and agent not in ["claude", "openai", "vllm", "litellm", "integration_test"]:
+    if agent and agent not in [e.value for e in AgentType]:
         # Find remote model name
         model = agent
         if not vllm_base_url:
@@ -932,27 +923,27 @@ def eval(
             hud_console.error(f"Model {model} not found")
             raise typer.Exit(1)
         model = base_model
-        agent = "vllm"  # Use vLLM backend for HUD models
+        agent = AgentType.VLLM  # Use vLLM backend for HUD models
         hud_console.info(f"Using HUD model: {model} (trained on {base_model})")
 
     # Validate agent choice
-    valid_agents = ["claude", "openai", "vllm", "litellm", "integration_test"]
+    valid_agents = [e.value for e in AgentType]
     if agent not in valid_agents:
         hud_console.error(f"Invalid agent: {agent}. Must be one of: {', '.join(valid_agents)}")
         raise typer.Exit(1)
+
+    # Type narrowing: agent is now guaranteed to be an AgentType value after validation
+    agent = AgentType(agent)
 
     # Run the command
     eval_command(
         source=source,
         full=full,
-        agent=agent,  # type: ignore
+        agent=agent,
         model=model,
         allowed_tools=allowed_tools,
         max_concurrent=max_concurrent,
         max_steps=max_steps,
-        parallel=parallel,
-        max_workers=max_workers,
-        max_concurrent_per_worker=max_concurrent_per_worker,
         verbose=verbose,
         very_verbose=very_verbose,
         vllm_base_url=vllm_base_url,
@@ -1078,6 +1069,13 @@ def set(
 
 def main() -> None:
     """Main entry point for the CLI."""
+    # Check for updates (including on --version command)
+    # Skip only on help-only commands
+    if not (len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ["--help", "-h"])):
+        from .utils.version_check import display_update_prompt
+
+        display_update_prompt()
+
     # Handle --version flag before Typer parses args
     if "--version" in sys.argv:
         try:

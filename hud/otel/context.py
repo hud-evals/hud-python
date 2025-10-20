@@ -520,8 +520,8 @@ class trace:
         # Update task status if root (only for HUD backend)
         if self.is_root and settings.telemetry_enabled and settings.api_key:
             if exc_type is not None:
-                # Use synchronous update to ensure it completes before process exit
-                _update_task_status_sync(
+                # Use fire-and-forget to avoid blocking the event loop
+                _fire_and_forget_status_update(
                     self.task_run_id,
                     "error",
                     job_id=self.job_id,
@@ -533,8 +533,8 @@ class trace:
                 if not self.job_id:
                     _print_trace_complete_url(self.task_run_id, error_occurred=True)
             else:
-                # Use synchronous update to ensure it completes before process exit
-                _update_task_status_sync(
+                # Use fire-and-forget to avoid blocking the event loop
+                _fire_and_forget_status_update(
                     self.task_run_id,
                     "completed",
                     job_id=self.job_id,

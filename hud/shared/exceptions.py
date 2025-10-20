@@ -69,11 +69,6 @@ class HudException(Exception):
             elif isinstance(exc_value, Exception):
                 # Try to convert to a specific HudException
                 result = cls._analyze_exception(exc_value, message or str(exc_value))
-                # If we couldn't categorize it (still base HudException),
-                # just re-raise the original exception
-                if type(result) is HudException:
-                    # Re-raise the original exception unchanged
-                    raise exc_value from None
                 return result
 
         # Normal creation
@@ -190,11 +185,42 @@ class HudRequestError(HudException):
         self.response_text = response_text
         self.response_headers = response_headers
         # Compute default hints from status code if none provided
-        if hints is None and status_code in (401, 403, 429):
+        if hints is None and status_code in (401, 402, 403, 429):
             try:
-                from hud.shared.hints import HUD_API_KEY_MISSING, RATE_LIMIT_HIT  # type: ignore
+                from hud.shared.hints import (  # type: ignore
+                    CREDITS_EXHAUSTED,
+                    HUD_API_KEY_MISSING,
+                    PRO_PLAN_REQUIRED,
+                    RATE_LIMIT_HIT,
+                )
 
-                if status_code in (401, 403):
+                if status_code == 402:
+                    hints = [CREDITS_EXHAUSTED]
+                elif status_code == 403:
+                    # Default 403 to auth unless the message clearly indicates Pro plan
+                    combined_text = (message or "").lower()
+                    try:
+                        if response_text:
+                            combined_text += "\n" + str(response_text).lower()
+                    except Exception:  # noqa: S110
+                        pass
+                    try:
+                        if response_json and isinstance(response_json, dict):
+                            detail = response_json.get("detail")
+                            if isinstance(detail, str):
+                                combined_text += "\n" + detail.lower()
+                    except Exception:  # noqa: S110
+                        pass
+
+                    mentions_pro = (
+                        "pro plan" in combined_text
+                        or "requires pro" in combined_text
+                        or "pro mode" in combined_text
+                        or combined_text.strip().startswith("pro ")
+                    )
+
+                    hints = [PRO_PLAN_REQUIRED] if mentions_pro else [HUD_API_KEY_MISSING]
+                elif status_code == 401:
                     hints = [HUD_API_KEY_MISSING]
                 elif status_code == 429:
                     hints = [RATE_LIMIT_HIT]

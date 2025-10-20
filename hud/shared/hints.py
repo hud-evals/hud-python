@@ -61,6 +61,31 @@ RATE_LIMIT_HIT = Hint(
     context=["network"],
 )
 
+# Billing / plan upgrade
+PRO_PLAN_REQUIRED = Hint(
+    title="Pro plan required",
+    message="This feature requires Pro.",
+    tips=[
+        "Upgrade your plan to continue",
+    ],
+    docs_url="https://hud.so/project/billing",
+    command_examples=None,
+    code="PRO_PLAN_REQUIRED",
+    context=["billing", "plan"],
+)
+
+CREDITS_EXHAUSTED = Hint(
+    title="Credits exhausted",
+    message="Your credits are exhausted.",
+    tips=[
+        "Top up credits or upgrade your plan",
+    ],
+    docs_url="https://hud.so/project/billing",
+    command_examples=None,
+    code="CREDITS_EXHAUSTED",
+    context=["billing", "credits"],
+)
+
 TOOL_NOT_FOUND = Hint(
     title="Tool not found",
     message="Requested tool doesn't exist.",

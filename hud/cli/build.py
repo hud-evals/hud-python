@@ -161,49 +161,42 @@ async def analyze_mcp_environment(
     hud_console = HUDConsole()
     env_vars = env_vars or {}
 
-    # Build Docker command to run the image
-    docker_cmd = ["docker", "run", "--rm", "-i"]
+    # Build Docker command to run the image, injecting any provided env vars
+    from hud.cli.utils.docker import build_env_flags
 
-    # Add environment variables
-    for key, value in env_vars.items():
-        docker_cmd.extend(["-e", f"{key}={value}"])
+    docker_cmd = ["docker", "run", "--rm", "-i", *build_env_flags(env_vars), image]
 
-    docker_cmd.append(image)
+    # Show full docker command being used for analysis
+    hud_console.dim_info("Command:", " ".join(docker_cmd))
 
-    # Create MCP config
-    config = {
-        "server": {"command": docker_cmd[0], "args": docker_cmd[1:] if len(docker_cmd) > 1 else []}
-    }
+    # Create MCP config consistently with analyze helpers
+    from hud.cli.analyze import parse_docker_command
+
+    mcp_config = parse_docker_command(docker_cmd)
 
     # Initialize client and measure timing
     start_time = time.time()
-    client = MCPClient(mcp_config=config, verbose=verbose, auto_trace=False)
+    client = MCPClient(mcp_config=mcp_config, verbose=verbose, auto_trace=False)
     initialized = False
 
     try:
         if verbose:
-            hud_console.info(f"Initializing MCP client with command: {' '.join(docker_cmd)}")
+            hud_console.info("Initializing MCP client...")
 
-        # Add timeout to fail fast instead of hanging (30 seconds)
+        # Add timeout to fail fast instead of hanging (60 seconds)
         await asyncio.wait_for(client.initialize(), timeout=60.0)
         initialized = True
         initialize_ms = int((time.time() - start_time) * 1000)
 
-        # Get tools
-        tools = await client.list_tools()
+        # Delegate to standard analysis helper for consistency
+        full_analysis = await client.analyze_environment()
 
-        # Extract tool information
-        tool_info = []
-        for tool in tools:
-            tool_dict = {"name": tool.name, "description": tool.description}
-            if hasattr(tool, "inputSchema") and tool.inputSchema:
-                tool_dict["inputSchema"] = tool.inputSchema
-            tool_info.append(tool_dict)
-
+        # Normalize to build's expected fields
+        tools_list = full_analysis.get("tools", [])
         return {
             "initializeMs": initialize_ms,
-            "toolCount": len(tools),
-            "tools": tool_info,
+            "toolCount": len(tools_list),
+            "tools": tools_list,
             "success": True,
         }
     except TimeoutError:
@@ -295,6 +288,10 @@ def build_environment(
         hud_console.error(f"Directory not found: {directory}")
         raise typer.Exit(1)
 
+    from hud.cli.utils.docker import require_docker_running
+
+    require_docker_running()
+
     # Step 1: Check for hud.lock.yaml (previous build)
     lock_path = env_dir / "hud.lock.yaml"
     base_name = None
@@ -355,13 +352,24 @@ def build_environment(
 
     hud_console.success(f"Built temporary image: {temp_tag}")
 
-    # Analyze the environment
+    # Analyze the environment (merge folder .env if present)
     hud_console.progress_message("Analyzing MCP environment...")
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        analysis = loop.run_until_complete(analyze_mcp_environment(temp_tag, verbose, env_vars))
+        # Merge .env from env_dir for analysis only
+        try:
+            from hud.cli.utils.docker import load_env_vars_for_dir
+
+            env_from_file = load_env_vars_for_dir(env_dir)
+        except Exception:
+            env_from_file = {}
+        merged_env_for_analysis = {**env_from_file, **(env_vars or {})}
+
+        analysis = loop.run_until_complete(
+            analyze_mcp_environment(temp_tag, verbose, merged_env_for_analysis)
+        )
     except Exception as e:
         hud_console.error(f"Failed to analyze MCP environment: {e}")
         hud_console.info("")

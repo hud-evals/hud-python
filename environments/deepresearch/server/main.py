@@ -18,7 +18,7 @@ logging.basicConfig(
     force=True,  # Force all loggers to use stderr
 )
 
-# MCP server (frontend/controller)
+# MCP server
 mcp = MCPServer(name="deepresearch")
 
 # Environment server URL (backend)

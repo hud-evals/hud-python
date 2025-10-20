@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import typer
 
 import hud
 from hud.cli.utils.env_check import ensure_built, find_environment_dir
 from hud.settings import settings
+from hud.types import AgentType
 from hud.utils.group_eval import display_group_statistics, run_tasks_grouped
 from hud.utils.hud_console import HUDConsole
 
@@ -68,8 +69,52 @@ def get_available_models() -> list[dict[str, str | None]]:
         return []
 
 
+def _build_vllm_config(
+    vllm_base_url: str | None,
+    model: str | None,
+    allowed_tools: list[str] | None,
+    verbose: bool,
+) -> dict[str, Any]:
+    """Build configuration for vLLM agent.
+
+    Args:
+        vllm_base_url: Optional base URL for vLLM server
+        model: Model name to use
+        allowed_tools: Optional list of allowed tools
+        verbose: Enable verbose output
+
+    Returns:
+        Dictionary with agent configuration
+    """
+    # Determine base URL and API key
+    if vllm_base_url is not None:
+        base_url = vllm_base_url
+        api_key = settings.api_key if base_url.startswith(settings.hud_rl_url) else "token-abc123"
+        hud_console.info(f"Using vLLM server at {base_url}")
+    else:
+        base_url = "http://localhost:8000/v1"
+        api_key = "token-abc123"
+
+    config: dict[str, Any] = {
+        "api_key": api_key,
+        "base_url": base_url,
+        "model_name": model or "served-model",
+        "verbose": verbose,
+        "completion_kwargs": {
+            "temperature": 0.7,
+            "max_tokens": 2048,
+            "tool_choice": "auto",
+        },
+    }
+
+    if allowed_tools:
+        config["allowed_tools"] = allowed_tools
+
+    return config
+
+
 def build_agent(
-    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"],
+    agent_type: AgentType,
     *,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
@@ -79,15 +124,13 @@ def build_agent(
     """Create and return the requested agent type."""
 
     # Import agents lazily to avoid dependency issues
-    if agent_type == "integration_test":
+    if agent_type == AgentType.INTEGRATION_TEST:
         from hud.agents.misc.integration_test_agent import IntegrationTestRunner
 
         return IntegrationTestRunner(verbose=verbose)
-    elif agent_type == "vllm":
+    elif agent_type == AgentType.VLLM:
         # Create a generic OpenAI agent for vLLM server
         try:
-            from openai import AsyncOpenAI
-
             from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
         except ImportError as e:
             hud_console.error(
@@ -96,38 +139,16 @@ def build_agent(
             )
             raise typer.Exit(1) from e
 
-        # Determine the base URL to use
-        if vllm_base_url is not None:
-            # Use the provided vLLM URL (for custom/local servers)
-            base_url = vllm_base_url
-            hud_console.info(f"Using vLLM server at {base_url}")
-            api_key = (
-                settings.api_key if base_url.startswith(settings.hud_rl_url) else "token-abc123"
-            )
-        else:
-            # Default to localhost
-            base_url = "http://localhost:8000/v1"
-            api_key = "token-abc123"
-
-        # Create OpenAI client for vLLM
-        openai_client = AsyncOpenAI(
-            base_url=base_url,
-            api_key=api_key,
-            timeout=30.0,
-        )
-
-        return GenericOpenAIChatAgent(
-            openai_client=openai_client,
-            model_name=model or "served-model",  # Default model name
+        # Use the shared config builder
+        config = _build_vllm_config(
+            vllm_base_url=vllm_base_url,
+            model=model,
+            allowed_tools=allowed_tools,
             verbose=verbose,
-            completion_kwargs={
-                "temperature": 0.7,
-                "max_tokens": 2048,
-                "tool_choice": "required",  # if self.actor_config.force_tool_choice else "auto",
-            },
         )
+        return GenericOpenAIChatAgent(**config)
 
-    elif agent_type == "openai":
+    elif agent_type == AgentType.OPENAI:
         try:
             from hud.agents import OperatorAgent
         except ImportError as e:
@@ -145,7 +166,7 @@ def build_agent(
         else:
             return OperatorAgent(verbose=verbose)
 
-    elif agent_type == "litellm":
+    elif agent_type == AgentType.LITELLM:
         try:
             from hud.agents.lite_llm import LiteAgent
         except ImportError as e:
@@ -189,7 +210,7 @@ def build_agent(
 async def run_single_task(
     source: str,
     *,
-    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = "claude",
+    agent_type: AgentType = AgentType.CLAUDE,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_steps: int = 10,
@@ -248,42 +269,34 @@ async def run_single_task(
 
     # Use grouped evaluation if group_size > 1
     agent_config: dict[str, Any] = {}
-    if agent_type == "integration_test":
+    if agent_type == AgentType.INTEGRATION_TEST:
         from hud.agents.misc.integration_test_agent import IntegrationTestRunner
 
         agent_class = IntegrationTestRunner
         agent_config = {"verbose": verbose}
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
-    elif agent_type == "vllm":
+    elif agent_type == AgentType.VLLM:
         # Special handling for vLLM
-        sample_agent = build_agent(
-            agent_type,
-            model=model,
-            allowed_tools=allowed_tools,
-            verbose=verbose,
-            vllm_base_url=vllm_base_url,
-        )
-        agent_config = {
-            "openai_client": sample_agent.oai,
-            "model_name": sample_agent.model_name,
-            "verbose": verbose,
-            "completion_kwargs": sample_agent.completion_kwargs,
-        }
-        if allowed_tools:
-            agent_config["allowed_tools"] = allowed_tools
-
         from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
 
         agent_class = GenericOpenAIChatAgent
-    elif agent_type == "openai":
+
+        # Use the shared config builder
+        agent_config = _build_vllm_config(
+            vllm_base_url=vllm_base_url,
+            model=model,
+            allowed_tools=allowed_tools,
+            verbose=verbose,
+        )
+    elif agent_type == AgentType.OPENAI:
         from hud.agents import OperatorAgent
 
         agent_class = OperatorAgent
         agent_config = {"verbose": verbose}
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
-    elif agent_type == "litellm":
+    elif agent_type == AgentType.LITELLM:
         from hud.agents.lite_llm import LiteAgent
 
         agent_class = LiteAgent
@@ -293,13 +306,14 @@ async def run_single_task(
         }
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
-    elif agent_type == "claude":
+    elif agent_type == AgentType.CLAUDE:
         from hud.agents import ClaudeAgent
 
         agent_class = ClaudeAgent
         agent_config = {
             "model": model or "claude-sonnet-4-20250514",
             "verbose": verbose,
+            "validate_api_key": False,
         }
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
@@ -340,29 +354,23 @@ async def run_single_task(
 async def run_full_dataset(
     source: str,
     *,
-    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = "claude",
+    agent_type: AgentType = AgentType.CLAUDE,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_concurrent: int = 30,
     max_steps: int = 10,
-    parallel: bool = False,
-    max_workers: int | None = None,
-    max_concurrent_per_worker: int = 25,
     verbose: bool = False,
     vllm_base_url: str | None = None,
     group_size: int = 1,
 ) -> list[Any]:
-    """Run evaluation across the entire dataset.
-
-    Uses either asyncio-based run_dataset or process-based parallel execution
-    depending on the parallel flag."""
+    """Run evaluation across the entire dataset using asyncio-based concurrency."""
 
     # Provide early feedback to user
     hud_console.info("🔧 Initializing evaluation...")
 
     # Import run_dataset lazily
     try:
-        from hud.datasets import run_dataset, run_dataset_parallel, run_dataset_parallel_manual
+        from hud.datasets import run_dataset
         from hud.utils.tasks import load_tasks
     except ImportError as e:
         hud_console.error(
@@ -387,12 +395,13 @@ async def run_full_dataset(
     dataset_name = f"Dataset: {path.name}" if path.exists() else source.split("/")[-1]
 
     # Build agent class + config for run_dataset
-    if agent_type == "integration_test":  # --integration-test mode
+    agent_config: dict[str, Any]
+    if agent_type == AgentType.INTEGRATION_TEST:  # --integration-test mode
         from hud.agents.misc.integration_test_agent import IntegrationTestRunner
 
         agent_class = IntegrationTestRunner
         agent_config = {"verbose": verbose}
-    elif agent_type == "vllm":
+    elif agent_type == AgentType.VLLM:
         try:
             from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
 
@@ -404,25 +413,14 @@ async def run_full_dataset(
             )
             raise typer.Exit(1) from e
 
-        # Use build_agent to create a sample agent to get the config
-        sample_agent = build_agent(
-            agent_type,
+        # Use the shared config builder
+        agent_config = _build_vllm_config(
+            vllm_base_url=vllm_base_url,
             model=model,
             allowed_tools=allowed_tools,
             verbose=verbose,
-            vllm_base_url=vllm_base_url,
         )
-
-        # Extract the config from the sample agent
-        agent_config: dict[str, Any] = {
-            "openai_client": sample_agent.oai,
-            "model_name": sample_agent.model_name,
-            "verbose": verbose,
-            "completion_kwargs": sample_agent.completion_kwargs,
-        }
-        if allowed_tools:
-            agent_config["allowed_tools"] = allowed_tools
-    elif agent_type == "openai":
+    elif agent_type == AgentType.OPENAI:
         try:
             from hud.agents import OperatorAgent
 
@@ -434,11 +432,11 @@ async def run_full_dataset(
             )
             raise typer.Exit(1) from e
 
-        agent_config = {"verbose": verbose}
+        agent_config = {"verbose": verbose, "validate_api_key": False}
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
 
-    elif agent_type == "litellm":
+    elif agent_type == AgentType.LITELLM:
         try:
             from hud.agents.lite_llm import LiteAgent
 
@@ -472,6 +470,7 @@ async def run_full_dataset(
         agent_config = {
             "model": model or "claude-sonnet-4-20250514",
             "verbose": verbose,
+            "validate_api_key": False,
         }
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
@@ -505,9 +504,7 @@ async def run_full_dataset(
                 agent_class=agent_class,
                 agent_config=agent_config,
                 group_size=group_size,
-                max_parallel_episodes=max_concurrent
-                if not parallel
-                else max_concurrent_per_worker * (max_workers or 4),
+                max_parallel_episodes=max_concurrent,
                 max_steps=max_steps,
                 verbose=verbose,
                 job_id=job.id,
@@ -519,48 +516,18 @@ async def run_full_dataset(
         # Return stats for consistency with other modes
         return stats
 
-    # Original logic for non-grouped evaluation
-    elif parallel:
-        hud_console.info(
-            f"🚀 Running PARALLEL evaluation (workers: {max_workers or 'auto'}, max_concurrent: {max_concurrent})…"  # noqa: E501
-        )
-        if max_workers is None:
-            # Use auto-optimization (now the default run_dataset_parallel)
-            return await run_dataset_parallel(
-                name=f"Evaluation {dataset_name}",
-                dataset=dataset_or_tasks,
-                agent_class=agent_class,
-                agent_config=agent_config,
-                max_concurrent=max_concurrent,
-                metadata={"dataset": source, "parallel": True},
-                max_steps=max_steps,
-                auto_respond=True,
-            )
-        else:
-            # Use manual configuration
-            return await run_dataset_parallel_manual(
-                name=f"Evaluation {dataset_name}",
-                dataset=dataset_or_tasks,
-                agent_class=agent_class,
-                agent_config=agent_config,
-                max_workers=max_workers,
-                max_concurrent_per_worker=max_concurrent_per_worker,
-                max_concurrent=max_concurrent,
-                metadata={"dataset": source, "parallel": True},
-                max_steps=max_steps,
-                auto_respond=True,
-            )
-    else:
-        hud_console.info(f"🚀 Running evaluation (max_concurrent: {max_concurrent})…")
-        return await run_dataset(
-            name=f"Evaluation {dataset_name}",
-            dataset=dataset_or_tasks,
-            agent_class=agent_class,
-            agent_config=agent_config,
-            max_concurrent=max_concurrent,
-            metadata={"dataset": source},
-            max_steps=max_steps,
-        )
+    # Run evaluation with asyncio-based concurrency
+    hud_console.info(f"🚀 Running evaluation (max_concurrent: {max_concurrent})…")
+    return await run_dataset(
+        name=f"Evaluation {dataset_name}",
+        dataset=dataset_or_tasks,
+        agent_class=agent_class,
+        agent_config=agent_config,
+        max_concurrent=max_concurrent,
+        metadata={"dataset": source},
+        max_steps=max_steps,
+        auto_respond=True,
+    )
 
 
 def eval_command(
@@ -573,8 +540,8 @@ def eval_command(
         "--full",
         help="Run the entire dataset (omit for single-task debug mode)",
     ),
-    agent: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = typer.Option(
-        "claude",
+    agent: AgentType = typer.Option(  # noqa: B008
+        AgentType.CLAUDE,
         "--agent",
         help="Agent backend to use (claude, openai, vllm for local server, or litellm)",
     ),
@@ -591,31 +558,20 @@ def eval_command(
     max_concurrent: int = typer.Option(
         30,
         "--max-concurrent",
-        help="Concurrency level for asyncio mode (ignored in parallel mode)",
+        help=(
+            "Maximum concurrent tasks (1-200 recommended, prevents rate limits "
+            "and resource exhaustion)"
+        ),
     ),
     max_steps: int | None = typer.Option(
         None,
         "--max-steps",
         help="Maximum steps per task (default: 10 for single, 50 for full)",
     ),
-    parallel: bool = typer.Option(
-        False,
-        "--parallel",
-        help="Use process-based parallel execution for large datasets (100+ tasks)",
-    ),
-    max_workers: int | None = typer.Option(
-        None,
-        "--max-workers",
-        help="Number of worker processes for parallel mode (auto-optimized if not set)",
-    ),
-    max_concurrent_per_worker: int = typer.Option(
-        20,
-        "--max-concurrent-per-worker",
-        help="Maximum concurrent tasks per worker in parallel mode",
-    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
+        "-v",
         help="Enable verbose output from the agent",
     ),
     very_verbose: bool = typer.Option(
@@ -650,23 +606,20 @@ def eval_command(
         # Evaluate a single task from SheetBench
         hud eval hud-evals/SheetBench-50
 
-        # Evaluate the FULL SheetBench dataset with Claude (asyncio mode)
+        # Evaluate the FULL SheetBench dataset with Claude
         hud eval hud-evals/SheetBench-50 --full --agent claude
 
-        # Run large dataset with PARALLEL execution (auto-optimized)
-        hud eval hud-evals/OSWorld-Verified-Gold --full --parallel
+        # Run with higher concurrency for faster evaluation
+        hud eval hud-evals/OSWorld-Verified-Gold --full --max-concurrent 100
 
-        # Parallel mode with manual configuration (16 workers, 25 tasks each)
-        hud eval hud-evals/OSWorld-Verified-Gold --full --parallel --max-workers 16
-
-        # Limit total concurrent tasks to prevent rate limits
-        hud eval hud-evals/SheetBench-50 --full --parallel --max-concurrent 20
+        # Limit concurrent tasks to prevent rate limits
+        hud eval hud-evals/SheetBench-50 --full --max-concurrent 20
 
         # Run a single task from a JSON file
         hud eval task.json
 
-        # Run multiple tasks from a JSON file with parallel execution
-        hud eval tasks.json --full --parallel
+        # Run multiple tasks from a JSON file
+        hud eval tasks.json --full
 
         # Run with OpenAI Operator agent
         hud eval hud-evals/OSWorld-Gold-Beta --agent openai
@@ -680,8 +633,6 @@ def eval_command(
         # Run with verbose output for debugging
         hud eval task.json --verbose
     """
-    from hud.settings import settings
-
     # Always configure basic logging so agent steps can be logged
     # Set to INFO by default for consistency with run_evaluation.py
     if very_verbose:
@@ -698,21 +649,21 @@ def eval_command(
 
     # We pass integration_test as the agent_type
     if integration_test:
-        agent = "integration_test"
+        agent = AgentType.INTEGRATION_TEST
 
     # Check for required API keys
-    if agent == "claude":
+    if agent == AgentType.CLAUDE:
         if not settings.anthropic_api_key:
             hud_console.error("ANTHROPIC_API_KEY is required for Claude agent")
             hud_console.info(
                 "Set it in your environment or run: hud set ANTHROPIC_API_KEY=your-key-here"
             )
             raise typer.Exit(1)
-    elif agent == "openai" and not settings.openai_api_key:
+    elif agent == AgentType.OPENAI and not settings.openai_api_key:
         hud_console.error("OPENAI_API_KEY is required for OpenAI agent")
         hud_console.info("Set it in your environment or run: hud set OPENAI_API_KEY=your-key-here")
         raise typer.Exit(1)
-    elif agent == "vllm":
+    elif agent == AgentType.VLLM:
         if model:
             hud_console.info(f"Using vLLM with model: {model}")
         else:
@@ -736,7 +687,11 @@ def eval_command(
 
     # Run evaluation
     if full:
-        asyncio.run(
+        import time
+
+        start_time = time.time()
+
+        results = asyncio.run(
             run_full_dataset(
                 source,
                 agent_type=agent,
@@ -744,14 +699,29 @@ def eval_command(
                 allowed_tools=allowed_tools_list,
                 max_concurrent=max_concurrent,
                 max_steps=max_steps,
-                parallel=parallel,
-                max_workers=max_workers,
-                max_concurrent_per_worker=max_concurrent_per_worker,
                 verbose=very_verbose or verbose,
                 vllm_base_url=vllm_base_url,
                 group_size=group_size,
             )
         )
+
+        elapsed = time.time() - start_time
+
+        # Print statistics (only for non-grouped mode)
+        if group_size == 1 and results:
+            hud_console.info("\n" + "=" * 50)
+            hud_console.success("📊 Evaluation Complete!")
+            hud_console.info("=" * 50)
+            hud_console.info(f"Total tasks: {len(results)}")
+            hud_console.info(f"Time elapsed: {elapsed:.2f} seconds")
+            hud_console.info(f"Throughput: {len(results) / elapsed:.2f} tasks/second")
+            hud_console.info(f"Execution mode: ASYNCIO (max_concurrent: {max_concurrent})")
+
+            # Count successes
+            successful = sum(1 for r in results if getattr(r, "reward", 0) > 0.7)
+            success_rate = 100 * successful / len(results)
+            hud_console.info(f"Successful tasks: {successful}/{len(results)} ({success_rate:.1f}%)")
+            hud_console.info("=" * 50)
     else:
         asyncio.run(
             run_single_task(

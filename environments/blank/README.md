@@ -6,10 +6,12 @@ See [docs](https://docs.hud.so/build-environments) for the complete environment 
 ## Architecture
 
 **`environment/`** - Produces structured data
+
 - Owns all state (game logic, browser sessions, databases, etc.)
 - Exposes HTTP endpoints `/health`, `/act`, `/reset`, `/state` that return structured information about the environment state
 
 **`server/`** - Wraps data in MCP tools
+
 - Calls environment endpoints to get structured data for the agent, and environment setup/evaluation
 - Agents and tasks interact only with these tools!
 
@@ -33,12 +35,14 @@ Visit http://localhost:8765/docs to see the new tool appear instantly.
 In general, we recommend starting work on the environment backend first, then developing the MCP server to expose the right things to the agent.
 
 For complex environments that require many dependencies, we recommend running `hud dev` in the environment root:
+
 ```bash
 cd ..
 hud dev
 ```
 
 ## Tasks & Evaluation
+
 ```bash
 # Build first in the global folder with the Dockerfile (creates blank:0.1.0)
 hud build
@@ -59,6 +63,7 @@ Your `tasks.json` uses `docker run` to launch the environment:
 ```
 
 **Commands:**
+
 ```bash
 # Build first
 hud build
@@ -78,6 +83,7 @@ hud rl tasks.json  # Auto-converts docker→remote, builds & pushes if needed
 Once your environment is ready, you can share it with the community:
 
 ### 1. Push to Registry
+
 ```bash
 # Build and push your environment (requires docker hub login and hud api key)
 hud build
@@ -89,10 +95,12 @@ hud push
 Create a dataset on HuggingFace with your tasks:
 
 **Option A: Upload manually**
+
 1. Upload your `tasks.json` to HuggingFace
 2. Make sure it's **public** to appear on leaderboards
 
 **Option B: Use the SDK**
+
 ```python
 from hud.datasets import save_tasks
 import json
@@ -109,7 +117,7 @@ save_tasks(tasks, repo_id="your-org/your-dataset")
 
 ```bash
 # Run Claude on your benchmark
-hud eval "your-org/your-dataset" --agent claude
+hud eval "your-org/your-dataset" claude
 
 # View results at:
 # hud.so/leaderboards/your-org/your-dataset
@@ -118,4 +126,3 @@ hud eval "your-org/your-dataset" --agent claude
 **Note**: Only public HuggingFace datasets appear as leaderboards!
 
 📚 Learn more: [Creating Benchmarks](https://docs.hud.so/evaluate-agents/create-benchmarks) | [Leaderboards](https://docs.hud.so/evaluate-agents/leaderboards)
-

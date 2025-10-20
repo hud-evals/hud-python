@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -61,19 +60,28 @@ class TestTaskExtended:
         assert setup_tools[1].arguments is not None
         assert setup_tools[1].arguments["mode"] == "test"
 
-    def test_env_var_complex_resolution(self):
+    def test_env_var_complex_resolution(self, monkeypatch):
         """Test complex environment variable scenarios."""
-        os.environ["API_KEY"] = "sk-12345"
-        os.environ["HUD_TELEMETRY_URL"] = "https://api.example.com"
-        os.environ["EMPTY_VAR"] = ""
-        os.environ["RUN_ID"] = "run-789"
+        # Set environment variables
+        monkeypatch.setenv("HUD_API_KEY", "sk-12345")
+        monkeypatch.setenv("HUD_TELEMETRY_URL", "https://api.example.com")
+        monkeypatch.setenv("EMPTY_VAR", "")
+        monkeypatch.setenv("RUN_ID", "run-789")
 
-        try:
+        # Mock settings to return our test values
+        with patch("hud.types.settings") as mock_settings:
+            mock_settings.api_key = "sk-12345"
+            mock_settings.hud_telemetry_url = "https://api.example.com"
+            mock_settings.model_dump.return_value = {
+                "api_key": "sk-12345",
+                "hud_telemetry_url": "https://api.example.com",
+            }
+
             task = Task(
                 prompt="Complex env test",
                 mcp_config={
                     "auth": {
-                        "bearer": "Bearer ${API_KEY}",
+                        "bearer": "Bearer ${HUD_API_KEY}",
                         "empty": "${EMPTY_VAR}",
                         "missing": "${MISSING_VAR}",
                     },
@@ -82,23 +90,17 @@ class TestTaskExtended:
                         "${HUD_TELEMETRY_URL}/v2",
                         "${MISSING_URL}",
                     ],
-                    "metadata": {"run_id": "${RUN_ID}", "combined": "${API_KEY}-${RUN_ID}"},
+                    "metadata": {"run_id": "${RUN_ID}", "combined": "${HUD_API_KEY}-${RUN_ID}"},
                 },
             )
 
-            assert task.mcp_config["auth"]["bearer"] == "Bearer sk-12345"
-            assert task.mcp_config["auth"]["empty"] == ""
-            assert task.mcp_config["auth"]["missing"] == ""
-            assert task.mcp_config["endpoints"][0] == "https://api.example.com/v1"
-            assert task.mcp_config["endpoints"][1] == "https://api.example.com/v2"
-            assert task.mcp_config["endpoints"][2] == ""
-            assert task.mcp_config["metadata"]["combined"] == "sk-12345-run-789"
-
-        finally:
-            del os.environ["API_KEY"]
-            del os.environ["HUD_TELEMETRY_URL"]
-            del os.environ["EMPTY_VAR"]
-            del os.environ["RUN_ID"]
+        assert task.mcp_config["auth"]["bearer"] == "Bearer sk-12345"
+        assert task.mcp_config["auth"]["empty"] == ""
+        assert task.mcp_config["auth"]["missing"] == ""
+        assert task.mcp_config["endpoints"][0] == "https://api.example.com/v1"
+        assert task.mcp_config["endpoints"][1] == "https://api.example.com/v2"
+        assert task.mcp_config["endpoints"][2] == ""
+        assert task.mcp_config["metadata"]["combined"] == "sk-12345-run-789"
 
     def test_non_string_values_preserved(self):
         """Test that non-string values are preserved during env resolution."""
@@ -126,14 +128,15 @@ class TestDatasetOperations:
 
     def test_save_taskconfigs_empty_list(self):
         """Test saving empty task list."""
-        with patch("datasets.Dataset") as MockDataset:
+        with patch("hud.datasets.utils.Dataset") as MockDataset:
             mock_instance = MagicMock()
             MockDataset.from_list.return_value = mock_instance
+            mock_instance.push_to_hub.return_value = None
 
             save_tasks([], "test-org/empty-dataset")
 
             MockDataset.from_list.assert_called_once_with([])
-            mock_instance.push_to_hub.assert_called_once()
+            mock_instance.push_to_hub.assert_called_once_with("test-org/empty-dataset")
 
     def test_save_taskconfigs_mixed_rejection(self):
         """Test that mixing dicts and Task objects is rejected."""
@@ -203,12 +206,12 @@ class TestRunDatasetExtended:
 
         with (
             patch("hud.clients.MCPClient") as MockClient,
-            patch("hud.job") as mock_job_func,
+            patch("hud.async_job") as mock_job_func,
             patch("hud.trace") as mock_trace,
         ):
-            mock_job = MagicMock()
+            mock_job = AsyncMock()
             mock_job.id = "job-meta"
-            mock_job_func.return_value.__enter__.return_value = mock_job
+            mock_job_func.return_value.__aenter__.return_value = mock_job
             mock_trace.return_value.__enter__.return_value = "trace-id"
 
             mock_client = AsyncMock()

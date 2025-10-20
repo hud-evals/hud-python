@@ -1,21 +1,27 @@
-"""Custom OpenTelemetry exporter that sends spans to the existing HUD telemetry
-HTTP endpoint (/trace/<id>/telemetry-upload).
+"""Custom OpenTelemetry exporter for HUD telemetry backend.
 
-The exporter groups spans by ``hud.task_run_id`` baggage / attribute so we keep
-exactly the same semantics the old async worker in ``hud.telemetry.exporter``
-implemented.
+This exporter sends spans to the HUD telemetry HTTP endpoint, grouping them
+by task_run_id for efficient batch uploads.
 
-This exporter is *synchronous* (derives from :class:`SpanExporter`).  We rely on
-``hud.shared.make_request_sync`` which already contains retry & auth logic.
+Performance optimizations:
+- Detects async contexts and runs exports in a thread pool to avoid blocking
+- Uses persistent HTTP client with connection pooling for reduced overhead
+- Tracks pending export futures to ensure completion during shutdown
+
+The exporter derives from SpanExporter (synchronous interface) but handles
+async contexts intelligently to prevent event loop blocking during high-concurrency
+workloads.
 """
 
 from __future__ import annotations
 
+import atexit
+import concurrent.futures as cf
 import contextlib
 import json
 import logging
-import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +36,34 @@ if TYPE_CHECKING:
     from opentelemetry.sdk.trace import ReadableSpan
 
 logger = logging.getLogger(__name__)
+
+# Global singleton thread pool for span exports
+_export_executor: ThreadPoolExecutor | None = None
+
+
+def get_export_executor() -> ThreadPoolExecutor:
+    """Get or create the global thread pool for span exports.
+
+    Returns a singleton ThreadPoolExecutor used for running span exports
+    in a thread pool when called from async contexts, preventing event
+    loop blocking during high-concurrency workloads.
+
+    The executor is automatically cleaned up on process exit via atexit.
+
+    Returns:
+        ThreadPoolExecutor with 8 workers for high-throughput parallel uploads
+    """
+    global _export_executor
+    if _export_executor is None:
+        # Use 8 workers to handle high-volume parallel uploads efficiently
+        _export_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="span-export")
+
+        def cleanup() -> None:
+            if _export_executor is not None:
+                _export_executor.shutdown(wait=True)
+
+        atexit.register(cleanup)
+    return _export_executor
 
 
 # ---------------------------------------------------------------------------
@@ -297,73 +331,213 @@ def _span_to_dict(span: ReadableSpan) -> dict[str, Any]:
 
 
 class HudSpanExporter(SpanExporter):
-    """Exporter that forwards spans to HUD backend using existing endpoint."""
+    """OpenTelemetry span exporter for the HUD backend.
+
+    This exporter groups spans by task_run_id and sends them to the HUD
+    telemetry endpoint. Performance optimizations include:
+
+    - Auto-detects async contexts and runs exports in thread pool (non-blocking)
+    - Tracks pending export futures for proper shutdown coordination
+
+    Handles high-concurrency scenarios (200+ parallel tasks) by offloading
+    synchronous HTTP operations to a thread pool when called from async
+    contexts, preventing event loop blocking.
+    """
 
     def __init__(self, *, telemetry_url: str, api_key: str) -> None:
+        """Initialize the HUD span exporter.
+
+        Args:
+            telemetry_url: Base URL for the HUD telemetry backend
+            api_key: API key for authentication
+        """
         super().__init__()
         self._telemetry_url = telemetry_url.rstrip("/")
         self._api_key = api_key
 
-    # ------------------------------------------------------------------
-    # Core API
-    # ------------------------------------------------------------------
+        # Track pending export futures for shutdown coordination
+        self._pending_futures: list[cf.Future[SpanExportResult]] = []
+
     def export(self, spans: list[ReadableSpan]) -> SpanExportResult:  # type: ignore[override]
+        """Export spans to HUD backend.
+
+        Auto-detects async contexts: if called from an async event loop, runs
+        the export in a thread pool to avoid blocking. Otherwise runs synchronously.
+
+        Args:
+            spans: List of ReadableSpan objects to export
+
+        Returns:
+            SpanExportResult.SUCCESS (returns immediately in async contexts)
+        """
         if not spans:
             return SpanExportResult.SUCCESS
 
-        # Group spans by hud.task_run_id attribute
+        # Group spans by task_run_id for batched uploads
         grouped: dict[str, list[ReadableSpan]] = defaultdict(list)
         for span in spans:
             run_id = span.attributes.get("hud.task_run_id") if span.attributes else None
             if not run_id:
-                # Skip spans that are outside HUD traces
+                # Skip spans outside HUD traces
                 continue
             grouped[str(run_id)].append(span)
 
-        # Send each group synchronously (retry inside make_request_sync)
-        for run_id, span_batch in grouped.items():
-            try:
-                url = f"{self._telemetry_url}/trace/{run_id}/telemetry-upload"
-                telemetry_spans = [_span_to_dict(s) for s in span_batch]
-                # Include current step count in metadata
-                metadata = {}
-                # Get the HIGHEST step count from the batch (most recent)
-                step_count = 0
-                for span in span_batch:
-                    if span.attributes and "hud.step_count" in span.attributes:
-                        current_step = span.attributes["hud.step_count"]
-                        if isinstance(current_step, int) and current_step > step_count:
-                            step_count = current_step
+        # Detect async context to avoid event loop blocking
+        import asyncio
 
-                payload = {
-                    "metadata": metadata,
-                    "telemetry": telemetry_spans,
-                }
+        try:
+            loop = asyncio.get_running_loop()
+            # In async context - offload to thread pool
+            executor = get_export_executor()
 
-                # Only include step_count if we found any steps
-                if step_count > 0:
-                    payload["step_count"] = step_count
+            def _sync_export() -> SpanExportResult:
+                # Send each group synchronously (retry inside make_request_sync)
+                for run_id, span_batch in grouped.items():
+                    try:
+                        url = f"{self._telemetry_url}/trace/{run_id}/telemetry-upload"
+                        telemetry_spans = [_span_to_dict(s) for s in span_batch]
+                        # Include current step count in metadata
+                        metadata = {}
+                        # Get the HIGHEST step count from the batch (most recent)
+                        step_count = 0
+                        for span in span_batch:
+                            if span.attributes and "hud.step_count" in span.attributes:
+                                current_step = span.attributes["hud.step_count"]
+                                if isinstance(current_step, int) and current_step > step_count:
+                                    step_count = current_step
 
-                logger.debug("HUD exporter sending %d spans to %s", len(span_batch), url)
-                make_request_sync(
-                    method="POST",
-                    url=url,
-                    json=payload,
-                    api_key=self._api_key,
-                )
-            except Exception as exc:
-                logger.exception("HUD exporter failed to send spans for task %s: %s", run_id, exc)
-                # If *any* group fails we return FAILURE so the OTEL SDK can retry
-                return SpanExportResult.FAILURE
+                        payload = {
+                            "metadata": metadata,
+                            "telemetry": telemetry_spans,
+                        }
 
-        return SpanExportResult.SUCCESS
+                        # Only include step_count if we found any steps
+                        if step_count > 0:
+                            payload["step_count"] = step_count
+
+                        logger.debug("HUD exporter sending %d spans to %s", len(span_batch), url)
+                        make_request_sync(
+                            method="POST",
+                            url=url,
+                            json=payload,
+                            api_key=self._api_key,
+                        )
+                    except Exception as exc:
+                        logger.exception(
+                            "HUD exporter failed to send spans for task %s: %s", run_id, exc
+                        )
+                        return SpanExportResult.FAILURE
+                return SpanExportResult.SUCCESS
+
+            # Run in thread to avoid blocking event loop
+            future = loop.run_in_executor(executor, _sync_export)
+            # Track and cleanup when done
+            self._pending_futures.append(future)  # type: ignore[list-item]
+
+            def _cleanup_done(f: cf.Future[SpanExportResult]) -> None:
+                with contextlib.suppress(Exception):
+                    # Consume exception to avoid "exception was never retrieved"
+                    _ = f.exception()
+                # Remove from pending list
+                with contextlib.suppress(ValueError):
+                    self._pending_futures.remove(f)
+
+            future.add_done_callback(_cleanup_done)  # type: ignore[arg-type]
+            # Don't wait for it - return immediately
+            return SpanExportResult.SUCCESS
+
+        except RuntimeError:
+            # No event loop - run synchronously
+            # Send each group synchronously (retry inside make_request_sync)
+            for run_id, span_batch in grouped.items():
+                try:
+                    url = f"{self._telemetry_url}/trace/{run_id}/telemetry-upload"
+                    telemetry_spans = [_span_to_dict(s) for s in span_batch]
+                    # Include current step count in metadata
+                    metadata = {}
+                    # Get the HIGHEST step count from the batch (most recent)
+                    step_count = 0
+                    for span in span_batch:
+                        if span.attributes and "hud.step_count" in span.attributes:
+                            current_step = span.attributes["hud.step_count"]
+                            if isinstance(current_step, int) and current_step > step_count:
+                                step_count = current_step
+
+                    payload = {
+                        "metadata": metadata,
+                        "telemetry": telemetry_spans,
+                    }
+
+                    # Only include step_count if we found any steps
+                    if step_count > 0:
+                        payload["step_count"] = step_count
+
+                    logger.debug("HUD exporter sending %d spans to %s", len(span_batch), url)
+                    make_request_sync(
+                        method="POST",
+                        url=url,
+                        json=payload,
+                        api_key=self._api_key,
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "HUD exporter failed to send spans for task %s: %s", run_id, exc
+                    )
+                    # If *any* group fails we return FAILURE so the OTEL SDK can retry
+                    return SpanExportResult.FAILURE
+
+            return SpanExportResult.SUCCESS
 
     def shutdown(self) -> None:  # type: ignore[override]
-        # Nothing to cleanup, httpx handled inside make_request_sync
-        pass
+        """Shutdown the exporter and wait for pending exports.
+
+        Waits up to 10 seconds for any in-flight exports to complete.
+        """
+        try:
+            if self._pending_futures:
+                with contextlib.suppress(Exception):
+                    cf.wait(self._pending_futures, timeout=10.0)
+        finally:
+            self._pending_futures.clear()
 
     def force_flush(self, timeout_millis: int | None = None) -> bool:  # type: ignore[override]
-        if timeout_millis:
-            time.sleep(timeout_millis / 1000)
-        # Synchronous export, nothing buffered here
-        return True
+        """Force flush all pending span exports.
+
+        Waits for all pending export futures to complete before returning.
+        This is called by the OpenTelemetry SDK during shutdown to ensure
+        all telemetry is uploaded.
+
+        Args:
+            timeout_millis: Maximum time to wait in milliseconds
+
+        Returns:
+            True if all exports completed, False otherwise
+        """
+        try:
+            if not self._pending_futures:
+                return True
+
+            total_pending = len(self._pending_futures)
+            if total_pending > 10:
+                # Show progress for large batches
+                logger.info("Flushing %d pending telemetry uploads...", total_pending)
+
+            timeout = (timeout_millis or 30000) / 1000.0
+            done, not_done = cf.wait(self._pending_futures, timeout=timeout)
+
+            # Consume exceptions to avoid "exception was never retrieved" warnings
+            for f in list(done):
+                with contextlib.suppress(Exception):
+                    _ = f.exception()
+
+            # Remove completed futures
+            for f in list(done):
+                with contextlib.suppress(ValueError):
+                    self._pending_futures.remove(f)
+
+            if total_pending > 10:
+                logger.info("Completed %d/%d telemetry uploads", len(done), total_pending)
+
+            return len(not_done) == 0
+        except Exception:
+            return False

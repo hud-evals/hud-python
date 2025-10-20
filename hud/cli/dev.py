@@ -238,9 +238,10 @@ async def run_mcp_module(
         if env_dir.exists() and (env_dir / "server.py").exists():
             hud_console.info("")
             hud_console.info(
-                f"{hud_console.sym.FLOW} Don't forget to start the environment backend:"
+                f"{hud_console.sym.FLOW} Don't forget to start the environment backend in another "
+                "terminal:"
             )
-            hud_console.info("   cd ../environment && uvicorn server:app --reload")
+            hud_console.info("   cd environment && uv run python uvicorn server:app --reload")
 
         # Launch inspector if requested (first run only)
         if inspector and transport == "http":
@@ -504,15 +505,12 @@ def run_docker_dev_server(
     base_name = image_name.replace(":", "-").replace("/", "-")
     container_name = f"{base_name}-dev-{pid}"
 
-    # Build docker run command with volume mounts
-    docker_cmd = [
-        "docker",
-        "run",
-        "--rm",
-        "-i",
+    # Build docker run command with volume mounts and folder-mode envs
+    from .utils.docker import create_docker_run_command
+
+    base_args = [
         "--name",
         container_name,
-        # Mount both server and environment for hot-reload
         "-v",
         f"{env_dir.absolute()}/server:/app/server:rw",
         "-v",
@@ -524,29 +522,14 @@ def run_docker_dev_server(
         "-e",
         "HUD_DEV=1",
     ]
+    combined_args = [*base_args, *docker_args] if docker_args else base_args
+    docker_cmd = create_docker_run_command(
+        image_name,
+        docker_args=combined_args,
+        env_dir=env_dir,
+    )
 
-    # Load .env file if present
-    env_file = env_dir / ".env"
-    loaded_env_vars: dict[str, str] = {}
-    if env_file.exists():
-        try:
-            from hud.cli.utils.config import parse_env_file
-
-            env_contents = env_file.read_text(encoding="utf-8")
-            loaded_env_vars = parse_env_file(env_contents)
-            for key, value in loaded_env_vars.items():
-                docker_cmd.extend(["-e", f"{key}={value}"])
-            if verbose and loaded_env_vars:
-                hud_console.info(f"Loaded {len(loaded_env_vars)} env var(s) from .env")
-        except Exception as e:
-            hud_console.warning(f"Failed to load .env file: {e}")
-
-    # Add user-provided Docker arguments
-    if docker_args:
-        docker_cmd.extend(docker_args)
-
-    # Append the image name
-    docker_cmd.append(image_name)
+    # Env flags already injected by create_docker_run_command
 
     # Print startup info
     hud_console.header("HUD Development Mode (Docker)")

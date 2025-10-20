@@ -90,12 +90,10 @@ class TestPatchMCPConfig:
 class TestSetupHUDTelemetry:
     """Tests for setup_hud_telemetry function."""
 
-    def test_empty_config_raises_error(self):
-        """Test that empty config raises ValueError."""
-        with pytest.raises(
-            ValueError, match="Please run initialize\\(\\) before setting up client-side telemetry"
-        ):
-            setup_hud_telemetry({})
+    def test_empty_config_returns_none(self):
+        """Test that empty config returns None (no servers to set up telemetry for)."""
+        result = setup_hud_telemetry({})
+        assert result is None
 
     def test_none_config_raises_error(self):
         """Test that None config raises ValueError."""
