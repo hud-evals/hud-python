@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 import questionary
-from mcp.types import TextContent
+from mcp.types import ImageContent, TextContent
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
@@ -242,7 +242,18 @@ class InteractiveMCPTester:
             # Prompt for each property
             args = {}
             for prop_name, prop_schema in properties.items():
-                prop_type = prop_schema.get("type", "string")
+                prop_type = prop_schema.get("type")
+                if not prop_type and ("anyOf" in prop_schema or "oneOf" in prop_schema):
+                    prop_type = next(
+                        (
+                            s.get("type")
+                            for s in (prop_schema["anyOf"] or prop_schema["oneOf"] or [])
+                            if s.get("type") != "null"
+                        ),
+                        None,
+                    )
+                prop_type = prop_type or "string"
+
                 description = prop_schema.get("description", "")
                 is_required = prop_name in required
 
@@ -349,6 +360,17 @@ class InteractiveMCPTester:
                     console.print(
                         Panel(
                             content.text,
+                            title="Result",
+                            border_style="green" if not result.isError else "red",
+                        )
+                    )
+                elif isinstance(content, ImageContent):
+                    mime_type = getattr(content, "mimeType", "image/png")
+                    data_length = len(content.data) if hasattr(content, "data") else 0
+                    console.print(
+                        Panel(
+                            f"📷 Image ({mime_type})\n"
+                            f"Size: {data_length:,} bytes (base64 encoded)",
                             title="Result",
                             border_style="green" if not result.isError else "red",
                         )
