@@ -60,6 +60,13 @@ class Actor:
                 "temperature": self.config.temperature,
                 "max_tokens": self.config.max_new_tokens,
                 "tool_choice": "required" if self.config.force_tool_choice else "auto",
+                "logprobs": True,
+                "top_p": 1.0,
+                "extra_body": {
+                    "prompt_logprobs": 0,
+                    "top_k": -1,
+                    "min_p": 0.0,
+                }
             },
         )
 
@@ -158,12 +165,12 @@ Strategy: keep highest tiles in a corner; maintain order; avoid random moves.
 
         job_id = str(uuid.uuid4())
         with hud.job("Test Actor", job_id=job_id):
-            traces = await actor.run_tasks([task] * 32, job_id=job_id)
+            traces = await actor.run_tasks([task], job_id=job_id)
 
         for trace in traces:
             print(f"Trace completed - Reward: {trace.reward}")
 
-        # output_file = f"traces_{job_id}.json"
-        # save_traces(traces, output_file)
+        output_file = f"traces_{job_id}.json"
+        save_traces(traces, output_file)
 
     asyncio.run(test_actor())
