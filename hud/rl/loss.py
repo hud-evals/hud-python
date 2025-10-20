@@ -66,8 +66,8 @@ def compute_loss(
         # GSPO normalizes the importance ratio by the sequence length
         if config.apply_length_norm:
             seq_log_ratio = seq_log_ratio / torch.clamp_min(assistant_mask.sum(dim=-1), 1)
-        seq_log_ratio = torch.clamp(seq_log_ratio, max=10.0)
-        log_ratio = seq_log_ratio.unsqueeze(-1).expand_as(log_ratio)  # (B, seq_len)
+        log_ratio = log_probs - log_probs.detach() + seq_log_ratio.detach()
+        log_ratio = torch.clamp(log_ratio, max=10.0)
 
     ratio = torch.exp(log_ratio)
     clipped_ratio = torch.clamp(ratio, max=config.clip_ratio)
