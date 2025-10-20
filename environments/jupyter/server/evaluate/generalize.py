@@ -4,6 +4,7 @@ from ..config import SOLUTIONS_PATH
 
 logger = logging.getLogger("__name__")
 
+
 def kmp(text: str, pattern: str) -> list[int]:
     """Find all occurrences of pattern in text using KMP algorithm.
     Returns:
@@ -35,6 +36,7 @@ def kmp(text: str, pattern: str) -> list[int]:
 
     return positions
 
+
 def generalize_code(id: str):
     """Generalize solution code from instance 1 to instances 2 and 3."""
     # src_path = "/app/shared_data/1_solution.py"
@@ -44,7 +46,7 @@ def generalize_code(id: str):
     if not os.path.exists(src_path):
         logger.warning(f"Solution file not found: {src_path}")
         return {"error": f"Solution file not found: {src_path}"}
-    
+
     with open(src_path, "r") as f:
         code = f.read()
 
@@ -58,7 +60,7 @@ def generalize_code(id: str):
         tgt_pattern = f"{i}_{id}_"
         # tgt_path = f"/app/shared_data/{i}_solution.py"
         tgt_path = os.path.join(SOLUTIONS_PATH, f"{i}_solution.py")
-        
+
         positions = kmp(code, src_pattern)
 
         # Convert to list for efficient in-place replacement (O(n) instead of O(k*n))
@@ -75,7 +77,7 @@ def generalize_code(id: str):
         results[f"instance_{i}"] = {
             "path": tgt_path,
             "replacements": len(positions),
-            "pattern": f"{src_pattern} -> {tgt_pattern}"
+            "pattern": f"{src_pattern} -> {tgt_pattern}",
         }
 
     return results

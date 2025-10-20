@@ -39,7 +39,7 @@ class JupyterKernel:
         self.base_url = f"http://{url_suffix}"
         self.base_ws_url = f"ws://{url_suffix}"
         self.lang = lang
-        self.kernel_id : str | None = None
+        self.kernel_id: str | None = None
         self.ws = None
         self.convid = convid
         logger.info(f"SpreadsheetBench kernel created for conversation {convid} at {url_suffix}")

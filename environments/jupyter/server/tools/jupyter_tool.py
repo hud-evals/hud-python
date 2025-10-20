@@ -105,4 +105,3 @@ class JupyterTool(BaseTool):
         except Exception as e:
             logger.error(f"Jupyter execution error: {e}")
             raise ToolError(f"Execution failed: {str(e)}") from e
-

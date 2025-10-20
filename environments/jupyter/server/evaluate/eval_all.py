@@ -76,13 +76,15 @@ async def eval_all(ctx: Context, id: str, answer_position: str, dataset_path: st
                 exec_result = await kernel.execute(solution_code, timeout=30)
 
                 # Check for execution errors
-                is_error = "-----" in exec_result or "Error" in exec_result or "Traceback" in exec_result
+                is_error = (
+                    "-----" in exec_result or "Error" in exec_result or "Traceback" in exec_result
+                )
 
                 if is_error:
                     results[instance_key] = {
                         "passed": False,
                         "execution_error": exec_result[:500],  # Truncate long errors
-                        "reward": 0.0
+                        "reward": 0.0,
                     }
                     continue
 
@@ -91,7 +93,7 @@ async def eval_all(ctx: Context, id: str, answer_position: str, dataset_path: st
                     results[instance_key] = {
                         "passed": False,
                         "error": "Output file not created by solution",
-                        "reward": 0.0
+                        "reward": 0.0,
                     }
                     continue
 
@@ -105,18 +107,14 @@ async def eval_all(ctx: Context, id: str, answer_position: str, dataset_path: st
                     "reward": 1.0 if passed else 0.0,
                     "input_file": str(input_file.name),
                     "output_file": str(output_file.name),
-                    "answer_file": str(answer_file.name)
+                    "answer_file": str(answer_file.name),
                 }
 
                 if passed:
                     total_passed += 1
 
             except Exception as e:
-                results[instance_key] = {
-                    "passed": False,
-                    "error": str(e),
-                    "reward": 0.0
-                }
+                results[instance_key] = {"passed": False, "error": str(e), "reward": 0.0}
 
         # Calculate final score
         total_instances = 3
@@ -133,7 +131,11 @@ async def eval_all(ctx: Context, id: str, answer_position: str, dataset_path: st
                 status = "✅ PASS" if result.get("passed", False) else "❌ FAIL"
                 summary += f"Instance {i}: {status}\n"
                 if not result.get("passed", False):
-                    error_msg = result.get("error") or result.get("execution_error") or result.get("message", "Unknown error")
+                    error_msg = (
+                        result.get("error")
+                        or result.get("execution_error")
+                        or result.get("message", "Unknown error")
+                    )
                     summary += f"  Error: {error_msg[:200]}\n"
 
         logger.info(f"Evaluation complete: {total_passed}/{total_instances} passed")
@@ -150,8 +152,8 @@ async def eval_all(ctx: Context, id: str, answer_position: str, dataset_path: st
                 "total_instances": total_instances,
                 "success_rate": success_rate,
                 "generalization": gen_results,
-                "instance_results": results
-            }
+                "instance_results": results,
+            },
         }
 
     except Exception as e:
@@ -162,5 +164,5 @@ async def eval_all(ctx: Context, id: str, answer_position: str, dataset_path: st
             "done": True,
             "isError": True,
             "content": f"❌ ERROR: {str(e)}",
-            "info": {"task_id": id, "error": str(e)}
+            "info": {"task_id": id, "error": str(e)},
         }

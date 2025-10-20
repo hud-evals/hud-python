@@ -5,6 +5,7 @@ import asyncio
 import threading
 from pathlib import Path
 from hud.server import MCPServer
+
 # from .api import create_spreadsheetbench_app
 from .jupyter import JupyterKernel, JupyterKernelWrapper
 from .tools import JupyterTool
@@ -28,6 +29,7 @@ mcp = MCPServer(name="Jupyter")
 
 # Global kernel instance (single kernel per container, like original SpreadsheetBench)
 jupyter_kernel = None
+
 
 @mcp.initialize
 async def initialize_environment(ctx=None):

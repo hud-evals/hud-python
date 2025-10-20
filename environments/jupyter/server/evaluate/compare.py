@@ -6,6 +6,7 @@ import datetime
 
 logger = logging.getLogger("__name__")
 
+
 # def compare(proc_file, gt_file, answer_position, instruction_type):
 def compare(proc_file, gt_file, answer_position):
     if not os.path.exists(proc_file):
@@ -21,17 +22,17 @@ def compare(proc_file, gt_file, answer_position):
     result = False
     msg = ""
 
-    sheet_cell_ranges = answer_position.split(',')
+    sheet_cell_ranges = answer_position.split(",")
     result_list = []
     msg_list = []
     for sheet_cell_range in sheet_cell_ranges:
-        if '!' in sheet_cell_range:
-            sheet_name, cell_range = sheet_cell_range.split('!')
+        if "!" in sheet_cell_range:
+            sheet_name, cell_range = sheet_cell_range.split("!")
             sheet_name = sheet_name.lstrip("'").rstrip("'")
         else:
             sheet_name = wb_gt.sheetnames[0]
             cell_range = sheet_cell_range
-    
+
         # process sheet_name and cell_range
         sheet_name = sheet_name.lstrip("'").rstrip("'")
         cell_range = cell_range.lstrip("'").rstrip("'")
@@ -41,6 +42,7 @@ def compare(proc_file, gt_file, answer_position):
         msg_list.append(msg)
 
     return all(result_list), "; ".join(msg_list)
+
 
 def cell_level_compare(wb_gt, wb_proc, sheet_name, cell_range):
     if sheet_name not in wb_proc:
@@ -58,7 +60,7 @@ def cell_level_compare(wb_gt, wb_proc, sheet_name, cell_range):
             msg = f"Value difference at cell {cell_gt.coordinate}: ws_gt has {cell_gt.value},\
                     ws_proc has {cell_proc.value}"
             return False, msg
-        
+
         # if not compare_fill_color(cell_gt.fill, cell_proc.fill):
         #     msg = f"Fill color difference at cell {cell_gt.coordinate}: ws_gt has {cell_gt.fill.fgColor.rgb},\
         #             ws_proc has {cell_proc.fill.fgColor.rgb}"
@@ -96,7 +98,6 @@ def transform_value(v):
 
 
 def compare_cell_value(v1, v2):
-
     v1 = transform_value(v1)
     v2 = transform_value(v2)
     if (v1 == "" and v2 is None) or (v1 is None and v2 == ""):
@@ -139,8 +140,8 @@ def compare_font_color(font_gt, font_proc) -> bool:
 
 
 def col_num2name(n):
-    """ Convert a column number to an Excel column name """
-    name = ''
+    """Convert a column number to an Excel column name"""
+    name = ""
     while n > 0:
         n, remainder = divmod(n - 1, 26)
         name = chr(65 + remainder) + name
@@ -148,24 +149,24 @@ def col_num2name(n):
 
 
 def col_name2num(name):
-    """ Convert an Excel column name to a column number """
+    """Convert an Excel column name to a column number"""
     num = 0
     for c in name:
-        num = num * 26 + (ord(c) - ord('A') + 1)
+        num = num * 26 + (ord(c) - ord("A") + 1)
     return num
 
 
 def parse_cell_range(range_str):
-    """ Parse a range string like 'A1:AB12' """
-    start_cell, end_cell = range_str.split(':')
-    start_col, start_row = '', ''
+    """Parse a range string like 'A1:AB12'"""
+    start_cell, end_cell = range_str.split(":")
+    start_col, start_row = "", ""
     for char in start_cell:
         if char.isdigit():
             start_row += char
         else:
             start_col += char
-    
-    end_col, end_row = '', ''
+
+    end_col, end_row = "", ""
     for char in end_cell:
         if char.isdigit():
             end_row += char
@@ -176,8 +177,8 @@ def parse_cell_range(range_str):
 
 
 def generate_cell_names(range_str):
-    """ Generate a list of all cell names in the specified range """
-    if ':' not in range_str:
+    """Generate a list of all cell names in the specified range"""
+    if ":" not in range_str:
         return [range_str]
     (start_col, start_row), (end_col, end_row) = parse_cell_range(range_str)
     columns = [col_num2name(i) for i in range(start_col, end_col + 1)]

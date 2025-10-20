@@ -28,7 +28,9 @@ async def eval_single(ctx: Context, proc_file: str, gt_file: str, answer_positio
         else:
             content = f"❌ FAIL: {msg}"
 
-        logger.info(f"Evaluation: {proc_file} vs {gt_file} ({answer_position}): {'PASS' if result else 'FAIL'}")
+        logger.info(
+            f"Evaluation: {proc_file} vs {gt_file} ({answer_position}): {'PASS' if result else 'FAIL'}"
+        )
 
         return EvaluationResult(
             reward=1.0 if result else 0.0,
@@ -40,8 +42,8 @@ async def eval_single(ctx: Context, proc_file: str, gt_file: str, answer_positio
                 "gt_file": gt_file,
                 "answer_position": answer_position,
                 "passed": result,
-                "message": msg if not result else "All cells match"
-            }
+                "message": msg if not result else "All cells match",
+            },
         )
 
     except Exception as e:
@@ -55,6 +57,6 @@ async def eval_single(ctx: Context, proc_file: str, gt_file: str, answer_positio
                 "proc_file": proc_file,
                 "gt_file": gt_file,
                 "answer_position": answer_position,
-                "error": str(e)
-            }
+                "error": str(e),
+            },
         )
