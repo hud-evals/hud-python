@@ -16,7 +16,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 
 from hud.rl.config import Config, TrainingConfig
-from hud.rl.logger import console
+from hud.rl.logger import console, configure_logging
 from hud.rl.loss import compute_loss, get_per_token_logps, entropy_from_logits
 from hud.rl.metrics import MetricsCollector
 from hud.rl.model import build_model
@@ -79,7 +79,7 @@ def train(
 
     ref_model: torch.nn.Module | None = None
     if training_config.loss.kl_beta > 0:
-        console.info("Initializing reference model for KL regularization")
+        console.info_log("Initializing reference model for KL regularization")
         ref_model = build_model(training_config, parallel_dims)
         ref_model.eval()
 
@@ -205,7 +205,7 @@ def train(
         optimizer.zero_grad()
         
         step_duration = time.time() - training_start_time
-        console.info(f"Step {step} training took {step_duration:.2f} seconds")
+        console.info_log(f"Step {step} training took {step_duration:.2f} seconds")
 
 
         # Collect performance data
@@ -275,11 +275,7 @@ def train(
 def main() -> None:
     """Main entry point for training script."""
     config, _ = Config.from_argv()
-    
-    if config.verbose:
-        import logging
-        logging.basicConfig(level=logging.INFO)
-    
+    configure_logging(config.verbose)
     train(config.training, config.training_steps)
 
 

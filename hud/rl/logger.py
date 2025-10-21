@@ -18,21 +18,39 @@ class RankAwareHUDConsole(HUDConsole):
         super().info(self._format_msg(msg), stderr=stderr)
 
     def info_log(self, msg: str, stderr: bool = True) -> None:
-        super().info_log(msg, stderr=stderr)
+        super().info_log(self._format_msg(msg), stderr=stderr)
 
     def warning(self, msg: str, stderr: bool = True) -> None:
         super().warning(self._format_msg(msg), stderr=stderr)
 
     def warning_log(self, msg: str, stderr: bool = True) -> None:
-        super().warning_log(msg, stderr=stderr)
+        super().warning_log(self._format_msg(msg), stderr=stderr)
 
     def error(self, msg: str, stderr: bool = True) -> None:
         super().error(self._format_msg(msg), stderr=stderr)
 
+    def error_log(self, msg: str, stderr: bool = True) -> None:
+        super().error_log(self._format_msg(msg), stderr=stderr)
+
+    def debug_log(self, msg: str, stderr: bool = True) -> None:
+        super().debug_log(self._format_msg(msg), stderr=stderr)
+
 
 def setup_logger() -> RankAwareHUDConsole:
-# Single shared instance that automatically adds rank info
+    """Single shared instance that automatically adds rank info."""
     logger = logging.getLogger("hud.rl")
     return RankAwareHUDConsole(logger=logger)
+
+
+def configure_logging(verbose: bool = False) -> None:
+    """Configure logging level based on verbose flag.
+    
+    Args:
+        verbose: If True, set to INFO level. If False, set to WARNING level.
+    """
+    level = logging.INFO if verbose else logging.WARNING
+    logging.basicConfig(level=level)
+    logging.getLogger("hud.rl").setLevel(level)
+
 
 console = setup_logger()

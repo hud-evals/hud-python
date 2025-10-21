@@ -254,6 +254,10 @@ class VLLMConfig(BaseConfig):
         if self.chat_template is not None:
             setattr(ns, "chat_template", self.chat_template)
 
+        # Tokens and logprobs
+        setattr(ns, "return_tokens_as_token_ids", True)
+        setattr(ns, "logprobs_mode", "processed_logprobs")
+
         # Server logging
         if self.uvicorn_log_level is not None:
             setattr(ns, "uvicorn_log_level", self.uvicorn_log_level)
