@@ -141,6 +141,8 @@ def calculate_group_statistics(
         errors = [t for t in task_traces if t.isError]
 
         # Calculate statistics
+        has_success = np.any(rewards > 0)
+
         task_stats = {
             "task_id": task.id
             if isinstance(task, Task) and hasattr(task, "id")
@@ -153,8 +155,9 @@ def calculate_group_statistics(
             "min_reward": float(np.min(rewards)),
             "max_reward": float(np.max(rewards)),
             "success_rate": float(np.sum(rewards > 0) / len(rewards)) if len(rewards) > 0 else 0.0,
+            "pass_at_k": 1.0 if has_success else 0.0,
             "error_rate": len(errors) / len(task_traces) if len(task_traces) > 0 else 0.0,
-            "traces": task_traces,  # Keep full traces for detailed analysis
+            "traces": task_traces,
         }
 
         # Add variance info like RL does
@@ -179,14 +182,17 @@ def display_group_statistics(stats: list[dict[str, Any]], show_details: bool = T
 
     # Overall statistics
     all_means = [s["mean_reward"] for s in stats]
+    all_pass_at_k = [s["pass_at_k"] for s in stats]
     overall_mean = mean(all_means) if all_means else 0.0
     overall_std = stdev(all_means) if len(all_means) > 1 else 0.0
+    overall_pass_at_k = mean(all_pass_at_k) if all_pass_at_k else 0.0
 
     hud_console.success("\n📊 Evaluation Summary")
     hud_console.info(f"Tasks evaluated: {len(stats)}")
     hud_console.info(f"Episodes per task: {stats[0]['group_size'] if stats else 0}")
     hud_console.info(f"Total episodes: {sum(len(s['rewards']) for s in stats)}")
     hud_console.info(f"Overall mean reward: {overall_mean:.3f} ± {overall_std:.3f}")
+    hud_console.info(f"Pass@{stats[0]['group_size'] if stats else 0}: {overall_pass_at_k:.1%}")
 
     # Detailed table
     if show_details and len(stats) <= 50:  # Only show for reasonable dataset sizes
@@ -195,6 +201,7 @@ def display_group_statistics(stats: list[dict[str, Any]], show_details: bool = T
         table.add_column("Mean±Std", justify="right", style="green")
         table.add_column("Min/Max", justify="right")
         table.add_column("Success%", justify="right", style="yellow")
+        table.add_column("Pass@k", justify="right", style="magenta")
         table.add_column("Rewards", style="dim")
 
         for stat in stats:
@@ -208,6 +215,7 @@ def display_group_statistics(stats: list[dict[str, Any]], show_details: bool = T
                 f"{stat['mean_reward']:.3f}±{stat['std_reward']:.3f}",
                 f"{stat['min_reward']:.2f}/{stat['max_reward']:.2f}",
                 f"{stat['success_rate'] * 100:.0f}%",
+                "✓" if stat['pass_at_k'] > 0 else "✗",
                 rewards_str,
             )
 
