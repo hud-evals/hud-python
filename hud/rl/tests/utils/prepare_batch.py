@@ -101,15 +101,17 @@ def main():
 
     tests_root = Path(__file__).resolve().parents[1]
     outputs_root = tests_root / "outputs"
-    step_dir = outputs_root / "step_00000" / "rollouts"
-    step_dir.mkdir(parents=True, exist_ok=True)
 
-    for gpu_idx, gpu_batch in enumerate(training_batch):
-        output_file = step_dir / f"rank_{gpu_idx}.pt"
-        torch.save(gpu_batch, output_file)
-        print(f"  GPU {gpu_idx}: {output_file}")
+    for step in range(5):
+        step_dir = outputs_root / f"step_{step:05d}" / "rollouts"
+        step_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Done!")
+        for gpu_idx, gpu_batch in enumerate(training_batch):
+            output_file = step_dir / f"rank_{gpu_idx}.pt"
+            torch.save(gpu_batch, output_file)
+            print(f"  GPU {gpu_idx}: {output_file}")
+
+        print("Done!")
 
 
 if __name__ == "__main__":
