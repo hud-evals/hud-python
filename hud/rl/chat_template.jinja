@@ -63,7 +63,7 @@
                 {%- endif -%}
                 {{ '<|vision_start|><|video_pad|><|vision_end|>' }}
             {%- elif 'text' in content and message['role'] == 'assistant' -%}
-                {% generation %} {{ content['text'] }} {% endgeneration %}
+                {% generation -%}{{ content['text'] }}{%- endgeneration %}
             {%- elif 'text' in content -%}
                 {{ content['text'] }}
             {%- endif -%}
@@ -78,12 +78,12 @@
             {%- endif -%}
             {# Handle the case where arguments is already a JSON string (OpenAI format) #}
             {%- if tool_call.arguments is string -%}
-                {% generation %} {{ '<tool_call>\n{"name": "' }}{{ tool_call.name }}{{ '", "arguments": ' }}{{ tool_call.arguments }}{{ '}\n</tool_call>' }} {% endgeneration %}
+                {% generation -%}{{ '<tool_call>\n{"name": "' }}{{ tool_call.name }}{{ '", "arguments": ' }}{{ tool_call.arguments }}{{ '}\n</tool_call>' }}{%- endgeneration %}
             {%- else -%}
-                {% generation %} {{ '<tool_call>\n' }}{{ tool_call | tojson }}{{ '\n</tool_call>' }} {% endgeneration %}
+                {% generation -%}{{ '<tool_call>\n' }}{{ tool_call | tojson }}{{ '\n</tool_call>' }}{%- endgeneration %}
             {%- endif -%}
             {%- if not loop.last -%}
-                {% generation %} {{ '\n' }} {% endgeneration %}
+                {% generation -%}{{ '\n' }}{%- endgeneration %}
             {%- endif -%}
         {%- endfor -%}
     {%- endif -%}
