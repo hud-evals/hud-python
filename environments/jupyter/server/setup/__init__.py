@@ -1,10 +1,9 @@
 """Setup tools for the sheet environment."""
 
-from __future__ import annotations
-from hud.tools import BaseHub
+from hud.server import MCPRouter
+from .load_spreadsheet import router as load_spreadsheet_router
 
-setup = BaseHub("setup")
+router = MCPRouter(name="setup")
+router.include_router(load_spreadsheet_router)
 
-from .load_spreadsheet import load_spreadsheet
-
-__all__ = ["setup"]
+__all__ = ["router"]

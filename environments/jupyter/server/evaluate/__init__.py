@@ -1,11 +1,11 @@
-from __future__ import annotations
-from hud.tools import BaseHub
+from hud.server import MCPRouter
+from .dumb import router as dumb_router
+from .eval_single import router as eval_single_router
+from .eval_all import router as eval_all_router
 
-evaluate = BaseHub("evaluate")
+router = MCPRouter(name="evaluate")
+router.include_router(dumb_router)
+router.include_router(eval_single_router)
+router.include_router(eval_all_router)
 
-from . import dumb
-from . import compare
-from . import eval_single
-from . import eval_all
-
-__all__ = ["evaluate"]
+__all__ = ["router"]

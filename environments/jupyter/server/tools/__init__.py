@@ -1,1 +1,2 @@
-from .jupyter_tool import JupyterTool
+from .jupyter import JupyterTool
+from .jupyter_with_record import JupyterToolWithRecord

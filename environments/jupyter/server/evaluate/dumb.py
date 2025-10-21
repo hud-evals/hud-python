@@ -1,12 +1,13 @@
 import os, json, logging
 from hud.tools.types import EvaluationResult
-from . import evaluate
 from fastmcp import Context
+from hud.server import MCPRouter
 
 logger = logging.getLogger(__name__)
+router = MCPRouter()
 
 
-@evaluate.tool("dumb")
+@router.tool("dumb")
 async def dumb(ctx: Context):
     logging.info("Dumb evaluate function")
     return EvaluationResult()

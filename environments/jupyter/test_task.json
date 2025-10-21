@@ -14,22 +14,16 @@
             }
         },
         "setup_tool": {
-            "name": "setup",
+            "name": "load_spreadsheet",
             "arguments": {
-                "name": "load_spreadsheet",
-                "arguments": {
-                    "id": "59196"
-                }
+                "id": "59196"
             }
         },
         "evaluate_tool": {
-            "name": "evaluate",
+            "name": "eval_all",
             "arguments": {
-                "name": "eval_all",
-                "arguments": {
-                    "id": "59196",
-                    "answer_position": "H3:H5"
-                }
+                "id": "59196",
+                "answer_position": "H3:H5"
             }
         }
     }

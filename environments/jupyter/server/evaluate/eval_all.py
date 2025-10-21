@@ -1,17 +1,18 @@
 import sys, os, logging
 from pathlib import Path
 from hud.tools.types import EvaluationResult
-from . import evaluate
-from fastmcp import Context
+from hud.server.router import MCPRouter
 from .compare import compare
 from .generalize import generalize_code
 from ..config import VOLUMES_PATH, SOLUTIONS_PATH
+from ..tools import JupyterToolWithRecord
 
 logger = logging.getLogger(__name__)
+router = MCPRouter()
 
 
-@evaluate.tool("eval_all")
-async def eval_all(ctx: Context, id: str, answer_position: str, dataset_path: str = "all_data_912"):
+@router.tool("eval_all")
+async def eval_all(id: str, answer_position: str, dataset_path: str = "all_data_912"):
     """
     Evaluate solution on all three instances (generalization test).
 
@@ -28,12 +29,19 @@ async def eval_all(ctx: Context, id: str, answer_position: str, dataset_path: st
         EvaluationResult with aggregated results for all instances
     """
     try:
-        # Get jupyter kernel
+        # Get the global jupyter tool and reuse its kernel
         main_module = sys.modules.get("server.main") or sys.modules.get("__main__")
-        if not main_module or not hasattr(main_module, "jupyter_kernel"):
-            raise RuntimeError("Could not access Jupyter kernel")
+        if not main_module or not hasattr(main_module, "jupyter_tool"):
+            raise RuntimeError("Could not access Jupyter tool")
 
-        kernel = main_module.jupyter_kernel
+        global_tool = main_module.jupyter_tool
+        if not global_tool or not global_tool._kernel_id:
+            # Kernel not initialized yet, trigger initialization
+            await global_tool._ensure_kernel()
+
+        # Create new tool instance connected to the same kernel
+        jupyter_tool = JupyterToolWithRecord(kernel_id=global_tool._kernel_id)
+
         dataset_dir = Path(VOLUMES_PATH) / dataset_path
         spreadsheet_dir = dataset_dir / "spreadsheet" / id
 
@@ -73,7 +81,7 @@ async def eval_all(ctx: Context, id: str, answer_position: str, dataset_path: st
                 with open(solution_path, "r") as f:
                     solution_code = f.read()
 
-                exec_result = await kernel.execute(solution_code, timeout=30)
+                exec_result = await jupyter_tool._execute(solution_code, timeout=30)
 
                 # Check for execution errors
                 is_error = (

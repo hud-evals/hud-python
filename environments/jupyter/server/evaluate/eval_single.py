@@ -1,13 +1,14 @@
 import logging
 from hud.tools.types import EvaluationResult
-from . import evaluate
+from hud.server import MCPRouter
 from fastmcp import Context
 from .compare import compare
 
 logger = logging.getLogger(__name__)
+router = MCPRouter()
 
 
-@evaluate.tool("eval_single")
+@router.tool("eval_single")
 async def eval_single(ctx: Context, proc_file: str, gt_file: str, answer_position: str):
     """
     Evaluate a single SpreadsheetBench instance by comparing output against ground truth.

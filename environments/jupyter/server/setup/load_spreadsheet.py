@@ -1,14 +1,18 @@
 """Load specific spreadsheet tasks from SpreadsheetBench dataset."""
 
-import json, os, sys
+import json
+import os
+import sys
 from pathlib import Path
-from fastmcp import Context
-from . import setup
 from ..config import VOLUMES_PATH
+from ..tools import JupyterToolWithRecord
+from hud.server import MCPRouter
+
+router = MCPRouter()
 
 
-@setup.tool("load_spreadsheet")
-async def load_spreadsheet(ctx: Context, id: str, dataset_path: str = "all_data_912"):
+@router.tool("load_spreadsheet")
+async def load_spreadsheet(id: str, dataset_path: str = "all_data_912"):
     """
     Load spreadsheet for a SpreadsheetBench task (single-turn approach).
 
@@ -41,12 +45,18 @@ async def load_spreadsheet(ctx: Context, id: str, dataset_path: str = "all_data_
     if not Path(spreadsheet_dir).exists():
         return f"❌ Spreadsheet directory not found: {spreadsheet_dir}"
 
-    # Get jupyter kernel
+    # Get the global jupyter tool and reuse its kernel
     main_module = sys.modules.get("server.main") or sys.modules.get("__main__")
-    if not main_module or not hasattr(main_module, "jupyter_kernel"):
-        return "❌ Could not access Jupyter kernel"
+    if not main_module or not hasattr(main_module, "jupyter_tool"):
+        return "❌ Could not access Jupyter tool"
 
-    kernel = main_module.jupyter_kernel
+    global_tool = main_module.jupyter_tool
+    if not global_tool or not global_tool._kernel_id:
+        # Kernel not initialized yet, trigger initialization
+        await global_tool._ensure_kernel()
+
+    # Create new tool instance connected to the same kernel
+    jupyter_tool = JupyterToolWithRecord(kernel_id=global_tool._kernel_id)
 
     # Load data - simple and literal for KMP generalization
     code = f"""
@@ -62,12 +72,8 @@ for i, row in enumerate(ws.iter_rows(min_row=1, max_row=5, values_only=True), 1)
     print(f"Row {{i}}: {{row}}")
 """
 
-    result = await kernel.execute(code, timeout=15)
-
-    # Append code to solution file
-    with open("/app/shared_data/1_solution.py", "a") as f:
-        f.write(code)
-        f.write("\n\n")
+    # Execute code (automatically recorded if successful)
+    result = await jupyter_tool._execute(code, timeout=15)
 
     # Return formatted response
     return f"""✅ Loaded SpreadsheetBench Task: {id}
