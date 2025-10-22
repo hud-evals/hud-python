@@ -4,7 +4,7 @@ import openpyxl
 import datetime
 
 
-logger = logging.getLogger("__name__")
+logger = logging.getLogger(__name__)
 
 
 # def compare(proc_file, gt_file, answer_position, instruction_type):

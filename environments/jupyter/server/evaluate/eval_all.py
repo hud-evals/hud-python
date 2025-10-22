@@ -1,6 +1,6 @@
-import sys, os, logging
+import os
+import logging
 from pathlib import Path
-from hud.tools.types import EvaluationResult
 from hud.server.router import MCPRouter
 from .compare import compare
 from .generalize import generalize_code
@@ -29,65 +29,40 @@ async def eval_all(id: str, answer_position: str, dataset_path: str = "all_data_
         EvaluationResult with aggregated results for all instances
     """
     try:
-        # Get the global jupyter tool and reuse its kernel
-        main_module = sys.modules.get("server.main") or sys.modules.get("__main__")
-        if not main_module or not hasattr(main_module, "jupyter_tool"):
-            raise RuntimeError("Could not access Jupyter tool")
-
-        global_tool = main_module.jupyter_tool
-        if not global_tool or not global_tool._kernel_id:
-            # Kernel not initialized yet, trigger initialization
-            await global_tool._ensure_kernel()
-
-        # Create new tool instance connected to the same kernel
-        jupyter_tool = JupyterToolWithRecord(kernel_id=global_tool._kernel_id)
+        # Connect to the shared kernel
+        jupyter_tool = JupyterToolWithRecord.from_shared_kernel("SpreadSheetBench")
 
         dataset_dir = Path(VOLUMES_PATH) / dataset_path
         spreadsheet_dir = dataset_dir / "spreadsheet" / id
-
         if not spreadsheet_dir.exists():
             raise FileNotFoundError(f"Spreadsheet directory not found: {spreadsheet_dir}")
 
         # Step 1: Generalize code
         logger.info(f"Generalizing solution for task {id}")
         gen_results = generalize_code(id)
-
         if "error" in gen_results:
             raise RuntimeError(f"Generalization failed: {gen_results['error']}")
 
         # Step 2: Execute and evaluate all three instances
         results = {}
         total_passed = 0
-
         for i in range(1, 4):
             instance_key = f"instance_{i}"
             solution_path = os.path.join(SOLUTIONS_PATH, f"{i}_solution.py")
-            input_file = spreadsheet_dir / f"{i}_{id}_input.xlsx"
             output_file = spreadsheet_dir / f"{i}_{id}_output.xlsx"
             answer_file = spreadsheet_dir / f"{i}_{id}_answer.xlsx"
-
-            # Check if files exist
-            if not input_file.exists():
-                results[instance_key] = {"error": f"Input file not found: {input_file}"}
-                continue
-
-            if not answer_file.exists():
-                results[instance_key] = {"error": f"Answer file not found: {answer_file}"}
-                continue
 
             # Execute solution
             logger.info(f"Executing solution for instance {i}")
             try:
                 with open(solution_path, "r") as f:
                     solution_code = f.read()
-
                 exec_result = await jupyter_tool._execute(solution_code, timeout=30)
 
                 # Check for execution errors
                 is_error = (
                     "-----" in exec_result or "Error" in exec_result or "Traceback" in exec_result
                 )
-
                 if is_error:
                     results[instance_key] = {
                         "passed": False,
@@ -106,16 +81,12 @@ async def eval_all(id: str, answer_position: str, dataset_path: str = "all_data_
                     continue
 
                 # Compare with ground truth (get answer_position from first instance)
-                # For simplicity, we'll compare entire first sheet
                 passed, msg = compare(str(output_file), str(answer_file), answer_position)
 
                 results[instance_key] = {
                     "passed": passed,
                     "message": msg,
                     "reward": 1.0 if passed else 0.0,
-                    "input_file": str(input_file.name),
-                    "output_file": str(output_file.name),
-                    "answer_file": str(answer_file.name),
                 }
 
                 if passed:

@@ -1,15 +1,17 @@
+import os
 import logging
 from hud.tools.types import EvaluationResult
 from hud.server import MCPRouter
-from fastmcp import Context
 from .compare import compare
+from ..config import VOLUMES_PATH
 
 logger = logging.getLogger(__name__)
 router = MCPRouter()
 
 
 @router.tool("eval_single")
-async def eval_single(ctx: Context, proc_file: str, gt_file: str, answer_position: str):
+# async def eval_single(proc_file: str, gt_file: str, answer_position: str):
+async def eval_single(id: str, answer_position: str, dataset_path: str = "all_data_912"):
     """
     Evaluate a single SpreadsheetBench instance by comparing output against ground truth.
 
@@ -22,6 +24,10 @@ async def eval_single(ctx: Context, proc_file: str, gt_file: str, answer_positio
         EvaluationResult with comparison result
     """
     try:
+        proc_file = os.path.join(
+            VOLUMES_PATH, dataset_path, "spreadsheet", id, f"1_{id}_output.xlsx"
+        )
+        gt_file = os.path.join(VOLUMES_PATH, dataset_path, "spreadsheet", id, f"1_{id}_answer.xlsx")
         result, msg = compare(proc_file, gt_file, answer_position)
 
         if result:

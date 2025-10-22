@@ -35,18 +35,53 @@ class JupyterTool(BaseTool):
     Execute Python code in a Jupyter kernel.
     """
 
+    # Class-level kernel registry for sharing kernels
+    _kernel_registry: dict[str, str] = {}
+
+    @classmethod
+    def register_shared_kernel(cls, registry_name: str, kernel_id: str) -> None:
+        """Register a kernel_id with a name for reuse.
+
+        Args:
+            registry_name: Name to register the kernel under
+            kernel_id: The kernel ID to register
+        """
+        cls._kernel_registry[registry_name] = kernel_id
+        logger.info(f"Registered kernel '{registry_name}': {kernel_id}")
+
+    @classmethod
+    def from_shared_kernel(cls, registry_name: str, **kwargs) -> JupyterTool:
+        """Connect to a kernel using its registry name.
+
+        Args:
+            registry_name: Name of the registered kernel
+            **kwargs: Additional parameters for JupyterTool (url_suffix, etc.)
+
+        Returns:
+            JupyterTool instance connected to the registered kernel
+
+        Raises:
+            ValueError: If registry_name not found
+        """
+        kernel_id = cls._kernel_registry.get(registry_name)
+        if not kernel_id:
+            raise ValueError(f"No kernel registered with name '{registry_name}'")
+
+        logger.info(f"Connecting to registered kernel '{registry_name}': {kernel_id}")
+        return cls(kernel_id=kernel_id, **kwargs)
+
     def __init__(
         self,
         url_suffix: str = "localhost:8888",
         kernel_name: str = "python3",
-        kernel_id: str | None = None,
+        kernel_id: str = "",
     ) -> None:
         """Initialize JupyterTool with connection parameters.
 
         Args:
             url_suffix: (Optional) Kernel gateway host:port (default: localhost:8888)
             kernel_name: (Optional) Kernel name to use (default: python3)
-            kernel_id: (Optional) If set, connect to the existed kernel with kernel_id. If not set, create new kernel
+            kernel_id: (Optional) If set, connect to the existed kernel with kernel_id. If empty, create new kernel
         """
         super().__init__(
             env=None,
@@ -176,7 +211,7 @@ class JupyterTool(BaseTool):
             await self._connect()
 
         msg_id = uuid4().hex
-        self._ws.write_message(
+        self._ws.write_message(  # type: ignore
             json_encode(
                 {
                     "header": {
@@ -206,8 +241,8 @@ class JupyterTool(BaseTool):
         async def wait_for_messages():
             execution_done = False
             while not execution_done:
-                msg = await self._ws.read_message()
-                msg = json_decode(msg)
+                msg = await self._ws.read_message()  # type: ignore
+                msg = json_decode(msg)  # type: ignore
                 msg_type = msg["msg_type"]
                 parent_msg_id = msg["parent_header"].get("msg_id", None)
 
@@ -267,7 +302,7 @@ class JupyterTool(BaseTool):
             except Exception as e:
                 logger.warning(f"Error shutting down kernel: {e}")
 
-            self._kernel_id = None
+            self._kernel_id = ""
 
             if self._heartbeat_callback:
                 self._heartbeat_callback.stop()

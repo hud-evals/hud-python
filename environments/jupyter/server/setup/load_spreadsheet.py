@@ -2,7 +2,6 @@
 
 import json
 import os
-import sys
 from pathlib import Path
 from ..config import VOLUMES_PATH
 from ..tools import JupyterToolWithRecord
@@ -45,18 +44,8 @@ async def load_spreadsheet(id: str, dataset_path: str = "all_data_912"):
     if not Path(spreadsheet_dir).exists():
         return f"❌ Spreadsheet directory not found: {spreadsheet_dir}"
 
-    # Get the global jupyter tool and reuse its kernel
-    main_module = sys.modules.get("server.main") or sys.modules.get("__main__")
-    if not main_module or not hasattr(main_module, "jupyter_tool"):
-        return "❌ Could not access Jupyter tool"
-
-    global_tool = main_module.jupyter_tool
-    if not global_tool or not global_tool._kernel_id:
-        # Kernel not initialized yet, trigger initialization
-        await global_tool._ensure_kernel()
-
-    # Create new tool instance connected to the same kernel
-    jupyter_tool = JupyterToolWithRecord(kernel_id=global_tool._kernel_id)
+    # Connect to the shared kernel
+    jupyter_tool = JupyterToolWithRecord.from_shared_kernel("SpreadSheetBench")
 
     # Load data - simple and literal for KMP generalization
     code = f"""

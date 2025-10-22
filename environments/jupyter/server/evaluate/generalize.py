@@ -2,7 +2,7 @@ import os, json, logging
 import copy
 from ..config import SOLUTIONS_PATH
 
-logger = logging.getLogger("__name__")
+logger = logging.getLogger(__name__)
 
 
 def kmp(text: str, pattern: str) -> list[int]:

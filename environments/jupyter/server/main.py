@@ -31,7 +31,11 @@ async def initialize_environment():
 
     # Create tool (kernel will be created on first use)
     jupyter_tool = JupyterTool(url_suffix="localhost:8888", kernel_name="python3")
-    mcp.add_tool(jupyter_tool.mcp)
+    mcp.add_tool(jupyter_tool)
+
+    # Ensure kernel is started and register it for reuse
+    await jupyter_tool._ensure_kernel()
+    JupyterTool.register_shared_kernel("SpreadSheetBench", jupyter_tool._kernel_id)
 
     logger.info("Jupyter environment initialized successfully")
 
