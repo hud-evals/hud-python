@@ -201,7 +201,7 @@ class ClientConfig(BaseConfig):
 
 class ActorConfig(BaseConfig):
     base_model: str = ""
-    verbose: bool = Field(default=False, description="Enable verbose logging")
+    verbosity: int = Field(default=0, ge=0, le=2, description="Verbosity level")
 
     # Execution parameters
     max_steps_per_episode: int = Field(default=5, ge=1, description="Maximum steps per episode")
@@ -292,7 +292,7 @@ class Config(BaseConfig):
     job_name: str = Field(default="RL Training", description="Job name for telemetry")
     job_id: str = Field(default=str(uuid.uuid4()), description="Job ID for telemetry")
     stats_interval: int = Field(default=1, ge=1, description="Statistics collection interval")
-    verbose: bool = Field(default=False, description="Enable verbose logging")
+    verbosity: int = Field(default=0, ge=0, le=2, description="Verbosity level")
     seed: int = Field(default=1234, description="Random seed for reproducibility")
 
     output_dir: str = Field(default="./outputs", description="Output directory for batches/checkpoints")

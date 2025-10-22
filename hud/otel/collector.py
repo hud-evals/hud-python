@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 from opentelemetry import trace
@@ -26,8 +25,7 @@ logger = logging.getLogger(__name__)
 _TRACE_STORAGE: dict[str, TraceCollector] = {}
 _LOCK = threading.Lock()
 
-# Context variable to track if collection is enabled
-_collecting_enabled: ContextVar[bool] = ContextVar("collecting_enabled", default=False)
+_collecting_enabled: bool = False
 
 
 class TraceCollector:
@@ -75,7 +73,7 @@ class CollectingSpanExporter(SpanExporter):
 
     def export(self, spans: list[ReadableSpan]) -> SpanExportResult:
         """Collect spans if collection is enabled."""
-        if not _collecting_enabled.get():
+        if not _collecting_enabled:
             return SpanExportResult.SUCCESS
 
         for span in spans:
@@ -103,7 +101,8 @@ class CollectingSpanExporter(SpanExporter):
 
 def enable_trace_collection(enabled: bool = True) -> None:
     """Enable or disable in-memory trace collection."""
-    _collecting_enabled.set(enabled)
+    global _collecting_enabled
+    _collecting_enabled = enabled
 
 
 def get_trace(task_run_id: str) -> Trace | None:

@@ -42,15 +42,18 @@ def setup_logger() -> RankAwareHUDConsole:
     return RankAwareHUDConsole(logger=logger)
 
 
-def configure_logging(verbose: bool = False) -> None:
+def configure_logging(verbosity: int = 0) -> None:
     """Configure logging level based on verbose flag.
     
     Args:
-        verbose: If True, set to INFO level. If False, set to WARNING level.
+        verbosity: If 0, set to WARNING level. If 1, set to INFO level. If 2, set to DEBUG level.
     """
-    level = logging.INFO if verbose else logging.WARNING
+    level = logging.WARNING
+    if verbosity == 1:
+        level = logging.INFO
+    elif verbosity == 2:
+        level = logging.DEBUG
     logging.basicConfig(level=level)
-    logging.getLogger("hud.rl").setLevel(level)
 
 
 console = setup_logger()

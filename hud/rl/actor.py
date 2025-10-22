@@ -54,7 +54,7 @@ class Actor:
         agent = GenericOpenAIChatAgent(
             openai_client=self.client,
             model_name=self.config.base_model,
-            verbose=self.config.verbose,
+            verbose=True if self.config.verbosity >= 1 else False,
             append_setup_output=False,
             completion_kwargs={
                 "temperature": self.config.temperature,
@@ -70,7 +70,7 @@ class Actor:
             },
         )
 
-        with hud.trace(f"Training | {task.prompt}", job_id=job_id):
+        async with hud.async_trace(f"Actor | {task.prompt}", job_id=job_id):
             result = await agent.run(task, max_steps=self.config.max_steps_per_episode)
         result.info["tool_spec"] = agent.get_tool_schemas()
         result.info["temperature"] = self.config.temperature
@@ -89,6 +89,7 @@ if __name__ == "__main__":
     import uuid
 
     from hud.datasets import Task
+    from hud.rl.logger import configure_logging
 
     async def test_actor() -> None:
         """Test the actor with a single 2048 task using a local hud-browser image."""
@@ -97,7 +98,8 @@ if __name__ == "__main__":
         config.max_steps_per_episode = 10
         config.temperature = 0.6
         config.force_tool_choice = False
-        config.verbose = True
+        config.verbosity = 1
+        configure_logging(verbosity=config.verbosity)
 
         task_data = {
             "id": "test_2048_128",
@@ -155,7 +157,7 @@ Strategy: keep highest tiles in a corner; maintain order; avoid random moves.
         }
 
         task = Task(**task_data)
-        client = AsyncOpenAI(base_url="http://127.0.0.1:8000/v1", api_key="EMPTY", timeout=30.0)
+        client = AsyncOpenAI(base_url="http://127.0.0.1:8001/v1", api_key="EMPTY", timeout=30.0)
 
         actor = Actor(config, client=client)
 
@@ -164,13 +166,16 @@ Strategy: keep highest tiles in a corner; maintain order; avoid random moves.
         console.info(f"Client base URL: {client.base_url}")
 
         job_id = str(uuid.uuid4())
-        with hud.job("Test Actor", job_id=job_id):
-            traces = await actor.run_tasks([task], job_id=job_id)
+        async with hud.async_job("Test Actor", job_id=job_id):
+            traces = await actor.run_tasks([task] * 32, job_id=job_id)
 
         for trace in traces:
-            print(f"Trace completed - Reward: {trace.reward}")
+            console.info(f"Trace completed - Reward: {trace.reward}")
 
         output_file = f"traces_{job_id}.json"
         save_traces(traces, output_file)
+
+        from hud.utils.task_tracking import wait_all_tasks
+        await wait_all_tasks()
 
     asyncio.run(test_actor())

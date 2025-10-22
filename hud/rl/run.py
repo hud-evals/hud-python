@@ -23,6 +23,7 @@ from openai import AsyncOpenAI
 from hud.rl.preprocessor import preprocess_traces
 from hud.rl.types import TrainingSample
 from hud.utils.tasks import load_tasks
+from hud.utils.task_tracking import wait_all_tasks
 
 if TYPE_CHECKING:
     from hud.types import Task
@@ -114,7 +115,7 @@ async def run(config: Config, tasks: list[Task]) -> None:
         "grad_accumulation_steps": config.grad_accumulation_steps,
     }
 
-    with hud.job(config.job_name, metadata=job_metadata, job_id=config.job_id) as job:
+    async with hud.async_job(config.job_name, metadata=job_metadata, job_id=config.job_id) as job:
         processor = get_processor(config.base_model, config.processor)
         pad_token_id = resolve_pad_token_id(processor)
 
@@ -231,6 +232,9 @@ async def run(config: Config, tasks: list[Task]) -> None:
             buffer.reset()
             console.info_log(f"Buffer reset. Status: {buffer.info}")
 
+            # Final telemetry flush
+            await wait_all_tasks()
+
         console.section_title("All steps completed")
 
 
@@ -254,7 +258,7 @@ async def _main_async() -> None:
 
     sys.argv = [sys.argv[0]] + filtered_argv
     config, _ = Config.from_argv()
-    configure_logging(config.verbose)
+    configure_logging(config.verbosity)
 
     if not tasks_arg:
         raise ValueError("Requires tasks via --tasks or --tasks-json")
