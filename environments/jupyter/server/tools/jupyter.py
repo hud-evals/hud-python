@@ -6,7 +6,7 @@ import re
 import json
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import tornado
@@ -50,7 +50,7 @@ class JupyterTool(BaseTool):
         logger.info(f"Registered kernel '{registry_name}': {kernel_id}")
 
     @classmethod
-    def from_shared_kernel(cls, registry_name: str, **kwargs) -> JupyterTool:
+    def from_shared_kernel(cls, registry_name: str, **kwargs: Any) -> JupyterTool:
         """Connect to a kernel using its registry name.
 
         Args:
@@ -81,7 +81,8 @@ class JupyterTool(BaseTool):
         Args:
             url_suffix: (Optional) Kernel gateway host:port (default: localhost:8888)
             kernel_name: (Optional) Kernel name to use (default: python3)
-            kernel_id: (Optional) If set, connect to the existed kernel with kernel_id. If empty, create new kernel
+            kernel_id: (Optional) If set, connect to the existed kernel with kernel_id.
+                If empty, create new kernel
         """
         super().__init__(
             env=None,
@@ -104,12 +105,12 @@ class JupyterTool(BaseTool):
         self._heartbeat_interval = 10000  # 10 seconds
         self._heartbeat_callback = None
 
-    async def __call__(self, code: str, timeout: int = 15):
+    async def __call__(self, code: str, timeout: int = 15) -> list[ContentBlock]:
         """Execute Python code in the Jupyter kernel.
 
         Args:
             code: Python code to execute
-            timeout: Execution timeout in seconds (default: 60)
+            timeout: Execution timeout in seconds (default: 15)
 
         Returns:
             List of ContentBlock with execution results
@@ -130,7 +131,7 @@ class JupyterTool(BaseTool):
             return ContentResult(output=output).to_content_blocks()
 
         except Exception as e:
-            logger.error(f"Jupyter execution error: {e}")
+            logger.error("Jupyter execution error: %s", e)
             raise ToolError(f"Execution failed: {str(e)}") from e
 
     async def _ensure_kernel(self) -> None:
