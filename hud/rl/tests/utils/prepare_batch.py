@@ -24,7 +24,7 @@ def resolve_pad_token_id(processor):
 
 def main():
     config = Config()
-    trace_file = "/home/ubuntu/hud-python/hud/rl/tests/data/traces_de8ea147-3c52-4117-ad24-d1dbaa39a088.json"
+    trace_file = "/home/ubuntu/myworkspace/hud-python/hud/rl/tests/data/traces_de8ea147-3c52-4117-ad24-d1dbaa39a088.json"
 
     print("=" * 80)
     print("Loading traces from dump...")
@@ -41,7 +41,7 @@ def main():
     pad_token_id = resolve_pad_token_id(processor)
 
     group_size = 8
-    num_traces = min(len(traces), 32)
+    num_traces = min(len(traces), 16)
     traces = traces[:num_traces]
 
     rewards = torch.tensor([float(trace.reward) for trace in traces], dtype=torch.float32)
@@ -101,15 +101,17 @@ def main():
 
     tests_root = Path(__file__).resolve().parents[1]
     outputs_root = tests_root / "outputs"
-    step_dir = outputs_root / "step_00000" / "rollouts"
-    step_dir.mkdir(parents=True, exist_ok=True)
 
-    for gpu_idx, gpu_batch in enumerate(training_batch):
-        output_file = step_dir / f"rank_{gpu_idx}.pt"
-        torch.save(gpu_batch, output_file)
-        print(f"  GPU {gpu_idx}: {output_file}")
+    for step in range(5):
+        step_dir = outputs_root / f"step_{step:05d}" / "rollouts"
+        step_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Done!")
+        for gpu_idx, gpu_batch in enumerate(training_batch):
+            output_file = step_dir / f"rank_{gpu_idx}.pt"
+            torch.save(gpu_batch, output_file)
+            print(f"  GPU {gpu_idx}: {output_file}")
+
+        print("Done!")
 
 
 if __name__ == "__main__":

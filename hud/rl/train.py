@@ -26,6 +26,8 @@ from hud.rl.utils import get_world_size, setup_distributed, is_main_process
 from hud.rl.checkpoint import CheckpointManager
 from hud.rl.utils import save_step_metrics
 from hud.rl.types import TrainingSample
+from hud.rl.perf import PerfCounter
+from rich.table import Table
 
 
 def get_batch(step: int, root: str) -> list[TrainingSample]:
@@ -54,6 +56,12 @@ def train(
 
     console.section_title("Initializing trainer")
 
+    if training_config.benchmark:
+        if is_main_process():
+            console.warning_log("Running in benchmark mode, overriding max_steps to 5")
+        max_steps = min(max_steps, 5)
+
+
     parallel_dims = ParallelDims(
         dp_replicate=training_config.dp_replicate,
         dp_shard=training_config.dp_shard,
@@ -66,6 +74,8 @@ def train(
     )
 
     model = build_model(training_config, parallel_dims)
+
+    benchmark_data = []
 
     ref_model: torch.nn.Module | None = None
     if training_config.loss.kl_beta > 0:
@@ -81,6 +91,8 @@ def train(
     )
 
     collector = MetricsCollector(distributed=(world_size > 1))
+
+    perf_counter: PerfCounter | None = None
 
     for step in range(max_steps):
         collector.reset()
@@ -107,7 +119,9 @@ def train(
                     del logits
                     progress.update(f"Computing reference log probabilities... {i + 1}/{len(batch)}")
 
-        
+        if perf_counter is None:
+            perf_counter = PerfCounter(model, batch[0].inputs["input_ids"].shape[1], 10)
+            perf_counter.count_tokens(0)
 
         with console.progress("Computing old log probabilities...") as progress, torch.no_grad():
             for i, minibatch in enumerate(batch):
@@ -193,17 +207,69 @@ def train(
         step_duration = time.time() - training_start_time
         console.info_log(f"Step {step} training took {step_duration:.2f} seconds")
 
+
+        # Collect performance data
+        num_tokens = sum(minibatch.inputs["input_ids"].shape[1] for minibatch in batch)
+        console.warning_log(f"num_tokens: {num_tokens}")
+        perf_counter.count_tokens(num_tokens)  # Add to rolling window
+        throughput = perf_counter.get_tokens_per_second() or 0
+        mfu = perf_counter.get_mfu() or 0
+        peak_memory = torch.cuda.max_memory_allocated() / 1024**3
+
+        dist_perf_output_list = [{}] * world_size
+        torch.distributed.all_gather_object(dist_perf_output_list, {
+            "step_duration": step_duration,
+            "throughput": throughput,
+            "mfu": mfu,
+            "peak_memory": peak_memory,
+        })
+
+        benchmark_data.append({
+            "step": step,
+            # max step duration across ranks
+            "step_duration": max([x["step_duration"] for x in dist_perf_output_list]),
+            # sum throughput across ranks
+            "throughput": sum([x["throughput"] for x in dist_perf_output_list]),
+            # average mfu across ranks
+            "mfu": sum([x["mfu"] for x in dist_perf_output_list])/world_size,
+            # sum peak memory across ranks
+            "peak_memory": max([x["peak_memory"] for x in dist_perf_output_list]),
+        })
+
         stats = collector.get_stats()
         if is_main_process():
             save_step_metrics(training_config.output_dir, step, stats)
-        
-        
+
         torch.cuda.empty_cache()
     
     # Save final checkpoint after last training step
     if max_steps > 0:
         console.info(f"Saving final checkpoint for step {max_steps - 1}...")
         checkpoint_manager.save(model, max_steps - 1)
+
+    if training_config.benchmark:
+        # Create benchmark table
+        table = Table(title="Training Performance Metrics")
+        table.add_column("Step", justify="right", style="cyan")
+        table.add_column("Duration (s)", justify="right", style="yellow")
+        table.add_column("Throughput (tok/s)", justify="right", style="green")
+        table.add_column("MFU (%)", justify="right", style="green")
+        table.add_column("Peak Memory (GB)", justify="right", style="red")
+        
+        # Add rows
+        for data in benchmark_data:
+            table.add_row(
+                str(data["step"]),
+                f"{data['step_duration']:.2f}",
+                f"{data['throughput']:.0f}",
+                f"{data['mfu']:.2f}",
+                f"{data['peak_memory']:.2f}",
+            )
+        
+        if is_main_process():
+            console.section_title("Benchmark Results")
+            console.print(table)
+        
 
 
 def main() -> None:
