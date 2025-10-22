@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-import re
-import json
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+import re
+from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import uuid4
 
 import tornado
-from tornado.escape import json_encode, json_decode, url_escape
-from tornado.websocket import websocket_connect
-from tornado.ioloop import PeriodicCallback
+from tornado.escape import json_decode, json_encode, url_escape
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
+from tornado.ioloop import PeriodicCallback
+from tornado.websocket import websocket_connect
 
 from hud.tools.base import BaseTool
 from hud.tools.types import ContentResult, ToolError
@@ -36,7 +35,7 @@ class JupyterTool(BaseTool):
     """
 
     # Class-level kernel registry for sharing kernels
-    _kernel_registry: dict[str, str] = {}
+    _kernel_registry: ClassVar[dict[str, str]] = {}
 
     @classmethod
     def register_shared_kernel(cls, registry_name: str, kernel_id: str) -> None:
@@ -47,7 +46,7 @@ class JupyterTool(BaseTool):
             kernel_id: The kernel ID to register
         """
         cls._kernel_registry[registry_name] = kernel_id
-        logger.info(f"Registered kernel '{registry_name}': {kernel_id}")
+        logger.info("Registered kernel '%s': %s", registry_name, kernel_id)
 
     @classmethod
     def from_shared_kernel(cls, registry_name: str, **kwargs: Any) -> JupyterTool:
@@ -55,19 +54,16 @@ class JupyterTool(BaseTool):
 
         Args:
             registry_name: Name of the registered kernel
-            **kwargs: Additional parameters for JupyterTool (url_suffix, etc.)
+            **kwargs: Additional parameters for JupyterTool (url_suffix, kernel_name)
 
         Returns:
             JupyterTool instance connected to the registered kernel
-
-        Raises:
-            ValueError: If registry_name not found
         """
         kernel_id = cls._kernel_registry.get(registry_name)
         if not kernel_id:
             raise ValueError(f"No kernel registered with name '{registry_name}'")
 
-        logger.info(f"Connecting to registered kernel '{registry_name}': {kernel_id}")
+        logger.info("Connecting to registered kernel '%s': %s", registry_name, kernel_id)
         return cls(kernel_id=kernel_id, **kwargs)
 
     def __init__(
@@ -105,12 +101,12 @@ class JupyterTool(BaseTool):
         self._heartbeat_interval = 10000  # 10 seconds
         self._heartbeat_callback = None
 
-    async def __call__(self, code: str, timeout: int = 15) -> list[ContentBlock]:
+    async def __call__(self, code: str, execution_timeout: int = 15) -> list[ContentBlock]:
         """Execute Python code in the Jupyter kernel.
 
         Args:
             code: Python code to execute
-            timeout: Execution timeout in seconds (default: 15)
+            execution_timeout: Execution timeout in seconds (default: 15)
 
         Returns:
             List of ContentBlock with execution results
@@ -120,7 +116,7 @@ class JupyterTool(BaseTool):
             await self._ensure_kernel()
 
             # Execute code
-            result = await self._execute(code, timeout)
+            result = await self._execute(code, execution_timeout)
 
             # Check for timeout
             if result.startswith("[Execution timed out"):
@@ -132,7 +128,7 @@ class JupyterTool(BaseTool):
 
         except Exception as e:
             logger.error("Jupyter execution error: %s", e)
-            raise ToolError(f"Execution failed: {str(e)}") from e
+            raise ToolError(f"Execution failed: {e!s}") from e
 
     async def _ensure_kernel(self) -> None:
         """Ensure kernel is initialized and connected."""
@@ -161,10 +157,10 @@ class JupyterTool(BaseTool):
                     )
                     kernel = json_decode(response.body)
                     self._kernel_id = kernel["id"]
-                    logger.info(f"Kernel started with ID: {self._kernel_id}")
+                    logger.info("Kernel started with ID: %s", self._kernel_id)
                     break
                 except Exception as e:
-                    logger.warning(f"Kernel connection attempt failed: {e}")
+                    logger.warning("Kernel connection attempt failed: %s", e)
                     n_tries -= 1
                     await asyncio.sleep(1)
 
@@ -198,12 +194,12 @@ class JupyterTool(BaseTool):
                     "Failed to reconnect to kernel websocket - Is the kernel still running?"
                 )
 
-    async def _execute(self, code: str, timeout: int = 60) -> str:
+    async def _execute(self, code: str, execution_timeout: int = 15) -> str:
         """Execute code in Jupyter kernel and return output.
 
         Args:
             code: Python code to execute
-            timeout: Execution timeout in seconds
+            execution_timeout: Execution timeout in seconds
 
         Returns:
             String output from the kernel
@@ -239,7 +235,7 @@ class JupyterTool(BaseTool):
 
         outputs = []
 
-        async def wait_for_messages():
+        async def wait_for_messages() -> bool:
             execution_done = False
             while not execution_done:
                 msg = await self._ws.read_message()  # type: ignore
@@ -267,20 +263,20 @@ class JupyterTool(BaseTool):
                     execution_done = True
             return execution_done
 
-        async def interrupt_kernel():
+        async def interrupt_kernel() -> None:
             client = AsyncHTTPClient()
             interrupt_response = await client.fetch(
                 f"{self._base_url}/api/kernels/{self._kernel_id}/interrupt",
                 method="POST",
                 body=json_encode({"kernel_id": self._kernel_id}),
             )
-            logger.info(f"Kernel interrupted: {interrupt_response}")
+            logger.info("Kernel interrupted: %s", interrupt_response)
 
         try:
-            execution_done = await asyncio.wait_for(wait_for_messages(), timeout)
-        except asyncio.TimeoutError:
+            execution_done = await asyncio.wait_for(wait_for_messages(), execution_timeout)
+        except TimeoutError:
             await interrupt_kernel()
-            return f"[Execution timed out ({timeout} seconds).]"
+            return f"[Execution timed out ({execution_timeout} seconds).]"
 
         if not outputs and execution_done:
             ret = "[Code executed successfully with no output]"
@@ -299,9 +295,9 @@ class JupyterTool(BaseTool):
                     f"{self._base_url}/api/kernels/{self._kernel_id}",
                     method="DELETE",
                 )
-                logger.info(f"Kernel {self._kernel_id} shut down")
+                logger.info("Kernel %s shut down", self._kernel_id)
             except Exception as e:
-                logger.warning(f"Error shutting down kernel: {e}")
+                logger.warning("Error shutting down kernel: %s", e)
 
             self._kernel_id = ""
 
@@ -314,3 +310,7 @@ class JupyterTool(BaseTool):
                 self._ws = None
 
         self._initialized = False
+
+    def get_kernel_id(self) -> str:
+        """Get the jupyter kernel id."""
+        return self._kernel_id

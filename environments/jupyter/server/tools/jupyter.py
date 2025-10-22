@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import re
-import json
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import uuid4
 
 import tornado
@@ -36,7 +35,7 @@ class JupyterTool(BaseTool):
     """
 
     # Class-level kernel registry for sharing kernels
-    _kernel_registry: dict[str, str] = {}
+    _kernel_registry: ClassVar[dict[str, str]] = {}
 
     @classmethod
     def register_shared_kernel(cls, registry_name: str, kernel_id: str) -> None:
@@ -47,7 +46,7 @@ class JupyterTool(BaseTool):
             kernel_id: The kernel ID to register
         """
         cls._kernel_registry[registry_name] = kernel_id
-        logger.info(f"Registered kernel '{registry_name}': {kernel_id}")
+        logger.info("Registered kernel '%s': %s", registry_name, kernel_id)
 
     @classmethod
     def from_shared_kernel(cls, registry_name: str, **kwargs: Any) -> JupyterTool:
@@ -55,19 +54,16 @@ class JupyterTool(BaseTool):
 
         Args:
             registry_name: Name of the registered kernel
-            **kwargs: Additional parameters for JupyterTool (url_suffix, etc.)
+            **kwargs: Additional parameters for JupyterTool (url_suffix, kernel_name)
 
         Returns:
             JupyterTool instance connected to the registered kernel
-
-        Raises:
-            ValueError: If registry_name not found
         """
         kernel_id = cls._kernel_registry.get(registry_name)
         if not kernel_id:
             raise ValueError(f"No kernel registered with name '{registry_name}'")
 
-        logger.info(f"Connecting to registered kernel '{registry_name}': {kernel_id}")
+        logger.info("Connecting to registered kernel '%s': %s", registry_name, kernel_id)
         return cls(kernel_id=kernel_id, **kwargs)
 
     def __init__(
@@ -161,10 +157,10 @@ class JupyterTool(BaseTool):
                     )
                     kernel = json_decode(response.body)
                     self._kernel_id = kernel["id"]
-                    logger.info(f"Kernel started with ID: {self._kernel_id}")
+                    logger.info("Kernel started with ID: %s", self._kernel_id)
                     break
                 except Exception as e:
-                    logger.warning(f"Kernel connection attempt failed: {e}")
+                    logger.warning("Kernel connection attempt failed: %s", e)
                     n_tries -= 1
                     await asyncio.sleep(1)
 
@@ -198,7 +194,7 @@ class JupyterTool(BaseTool):
                     "Failed to reconnect to kernel websocket - Is the kernel still running?"
                 )
 
-    async def _execute(self, code: str, timeout: int = 60) -> str:
+    async def _execute(self, code: str, timeout: int = 15) -> str:
         """Execute code in Jupyter kernel and return output.
 
         Args:
@@ -239,7 +235,7 @@ class JupyterTool(BaseTool):
 
         outputs = []
 
-        async def wait_for_messages():
+        async def wait_for_messages() -> bool:
             execution_done = False
             while not execution_done:
                 msg = await self._ws.read_message()  # type: ignore
@@ -274,7 +270,7 @@ class JupyterTool(BaseTool):
                 method="POST",
                 body=json_encode({"kernel_id": self._kernel_id}),
             )
-            logger.info(f"Kernel interrupted: {interrupt_response}")
+            logger.info("Kernel interrupted: %s", interrupt_response)
 
         try:
             execution_done = await asyncio.wait_for(wait_for_messages(), timeout)
@@ -299,9 +295,9 @@ class JupyterTool(BaseTool):
                     f"{self._base_url}/api/kernels/{self._kernel_id}",
                     method="DELETE",
                 )
-                logger.info(f"Kernel {self._kernel_id} shut down")
+                logger.info("Kernel %s shut down", self._kernel_id)
             except Exception as e:
-                logger.warning(f"Error shutting down kernel: {e}")
+                logger.warning("Error shutting down kernel: %s", e)
 
             self._kernel_id = ""
 
@@ -314,3 +310,7 @@ class JupyterTool(BaseTool):
                 self._ws = None
 
         self._initialized = False
+
+    def get_kernel_id(self) -> str:
+        """Get the jupyter kernel id."""
+        return self._kernel_id
