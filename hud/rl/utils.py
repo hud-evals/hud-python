@@ -5,6 +5,8 @@ import os
 import torch
 import torch.distributed as dist
 
+from hud.types import Trace
+
 
 def get_weights_path(output_dir: str | Path, step: int) -> Path:
     output_dir = Path(output_dir)
@@ -50,3 +52,10 @@ def is_main_process() -> bool:
     if not dist.is_initialized():
         return True
     return dist.get_rank() == 0
+
+
+def save_traces(traces: list[Trace], output_path: str) -> None:
+    """Save traces to JSON file."""
+    with open(output_path, "w") as f:
+        json.dump([trace.model_dump(mode="json") for trace in traces], f, indent=2)
+    print(f"Saved {len(traces)} traces to {output_path}")
