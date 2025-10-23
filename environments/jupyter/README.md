@@ -36,7 +36,6 @@ hud eval
 │   │   ├── generalize.py
 │   │   └── __init__.py
 │   ├── __init__.py
-│   ├── jupyter.py
 │   ├── main.py
 │   ├── pyproject.toml
 │   ├── setup
@@ -44,13 +43,12 @@ hud eval
 │   │   └── load_spreadsheet.py
 │   └── tools
 │       ├── __init__.py
-│       └── jupyter_tool.py
+│       └── jupyter_with_record.py
 └── test_task.json
 ```
 Here we introduce the main parts of the environments
-* `server/jupyter.py`: `JupyterKernel` class to run jupyter kernel on MCP server
 * `main.py` start point of MCP server
-* `tools/jupyter_tool.py`: offer `execute_code` method to allow agent interacting with `JupyterKernel`
+* `tools/jupyter_with_record.py`: offer `execute_code` method to allow agent interacting with jupyter kernel and record the solution
 * `setup/`: setup methods for eval task
 * `evaluate/` evaluations method for eval task
 

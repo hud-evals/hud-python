@@ -62,7 +62,7 @@ for i, row in enumerate(ws.iter_rows(min_row=1, max_row=5, values_only=True), 1)
 """
 
     # Execute code (automatically recorded if successful)
-    result = await jupyter_tool._execute(code, timeout=15)
+    result = await jupyter_tool._execute(code)
 
     # Return formatted response
     return f"""✅ Loaded SpreadsheetBench Task: {id}

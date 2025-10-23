@@ -6,8 +6,8 @@ from ..config import SOLUTIONS_PATH
 class JupyterToolWithRecord(JupyterTool):
     """Jupyter Tool with code recording"""
 
-    async def _execute(self, code: str, timeout: int = 15) -> str:
-        result = await super()._execute(code, timeout)
+    async def _execute(self, code: str, execution_timeout: int = 15) -> str:
+        result = await super()._execute(code, execution_timeout)
 
         # Record code if no error
         is_error = (
