@@ -1,0 +1,5 @@
+# Ignore all custom evals except the example
+*
+!__init__.py
+!.gitignore
+!example_eval/
