@@ -5,6 +5,7 @@ import json
 import logging
 import uuid
 from collections import defaultdict
+from enum import Enum
 from string import Template
 from typing import Any, Literal
 
@@ -19,6 +20,14 @@ logger = logging.getLogger(__name__)
 
 # Guard to ensure we only log missing HUD_API_KEY once
 _missing_api_key_error_logged: bool = False
+
+
+class AgentType(str, Enum):
+    CLAUDE = "claude"
+    OPENAI = "openai"
+    VLLM = "vllm"
+    LITELLM = "litellm"
+    INTEGRATION_TEST = "integration_test"
 
 
 class Task(BaseModel):
@@ -325,6 +334,7 @@ class Trace(BaseModel):
 
 __all__ = [
     "AgentResponse",
+    "AgentType",
     "MCPToolCall",
     "MCPToolResult",
     "Trace",

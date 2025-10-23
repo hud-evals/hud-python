@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "MCP server for DeepResearch environment"
 requires-python = ">=3.11"
 dependencies = [
-    "hud-python>=0.4.53",
+    "hud-python>=0.4.54",
     "httpx>=0.24.0",
 ]
 

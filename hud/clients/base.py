@@ -146,7 +146,7 @@ class BaseHUDClient(AgentMCPClient):
         except HudException:
             raise
         except Exception as e:
-            # Auto-converts to appropriate HUD exception type with hints
+            hud_console.error(f"Failed to initialize MCP client: {e}")
             raise HudException from e
 
         # Common hud behavior - fetch telemetry

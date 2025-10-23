@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import typer
 
 import hud
 from hud.cli.utils.env_check import ensure_built, find_environment_dir
 from hud.settings import settings
+from hud.types import AgentType
 from hud.utils.group_eval import display_group_statistics, run_tasks_grouped
 from hud.utils.hud_console import HUDConsole
 
@@ -113,7 +114,7 @@ def _build_vllm_config(
 
 
 def build_agent(
-    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"],
+    agent_type: AgentType,
     *,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
@@ -123,11 +124,11 @@ def build_agent(
     """Create and return the requested agent type."""
 
     # Import agents lazily to avoid dependency issues
-    if agent_type == "integration_test":
+    if agent_type == AgentType.INTEGRATION_TEST:
         from hud.agents.misc.integration_test_agent import IntegrationTestRunner
 
         return IntegrationTestRunner(verbose=verbose)
-    elif agent_type == "vllm":
+    elif agent_type == AgentType.VLLM:
         # Create a generic OpenAI agent for vLLM server
         try:
             from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
@@ -147,7 +148,7 @@ def build_agent(
         )
         return GenericOpenAIChatAgent(**config)
 
-    elif agent_type == "openai":
+    elif agent_type == AgentType.OPENAI:
         try:
             from hud.agents import OperatorAgent
         except ImportError as e:
@@ -165,7 +166,7 @@ def build_agent(
         else:
             return OperatorAgent(verbose=verbose)
 
-    elif agent_type == "litellm":
+    elif agent_type == AgentType.LITELLM:
         try:
             from hud.agents.lite_llm import LiteAgent
         except ImportError as e:
@@ -209,7 +210,7 @@ def build_agent(
 async def run_single_task(
     source: str,
     *,
-    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = "claude",
+    agent_type: AgentType = AgentType.CLAUDE,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_steps: int = 10,
@@ -268,14 +269,14 @@ async def run_single_task(
 
     # Use grouped evaluation if group_size > 1
     agent_config: dict[str, Any] = {}
-    if agent_type == "integration_test":
+    if agent_type == AgentType.INTEGRATION_TEST:
         from hud.agents.misc.integration_test_agent import IntegrationTestRunner
 
         agent_class = IntegrationTestRunner
         agent_config = {"verbose": verbose}
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
-    elif agent_type == "vllm":
+    elif agent_type == AgentType.VLLM:
         # Special handling for vLLM
         from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
 
@@ -288,14 +289,14 @@ async def run_single_task(
             allowed_tools=allowed_tools,
             verbose=verbose,
         )
-    elif agent_type == "openai":
+    elif agent_type == AgentType.OPENAI:
         from hud.agents import OperatorAgent
 
         agent_class = OperatorAgent
         agent_config = {"verbose": verbose}
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
-    elif agent_type == "litellm":
+    elif agent_type == AgentType.LITELLM:
         from hud.agents.lite_llm import LiteAgent
 
         agent_class = LiteAgent
@@ -305,7 +306,7 @@ async def run_single_task(
         }
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
-    elif agent_type == "claude":
+    elif agent_type == AgentType.CLAUDE:
         from hud.agents import ClaudeAgent
 
         agent_class = ClaudeAgent
@@ -353,7 +354,7 @@ async def run_single_task(
 async def run_full_dataset(
     source: str,
     *,
-    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = "claude",
+    agent_type: AgentType = AgentType.CLAUDE,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_concurrent: int = 30,
@@ -395,12 +396,12 @@ async def run_full_dataset(
 
     # Build agent class + config for run_dataset
     agent_config: dict[str, Any]
-    if agent_type == "integration_test":  # --integration-test mode
+    if agent_type == AgentType.INTEGRATION_TEST:  # --integration-test mode
         from hud.agents.misc.integration_test_agent import IntegrationTestRunner
 
         agent_class = IntegrationTestRunner
         agent_config = {"verbose": verbose}
-    elif agent_type == "vllm":
+    elif agent_type == AgentType.VLLM:
         try:
             from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
 
@@ -419,7 +420,7 @@ async def run_full_dataset(
             allowed_tools=allowed_tools,
             verbose=verbose,
         )
-    elif agent_type == "openai":
+    elif agent_type == AgentType.OPENAI:
         try:
             from hud.agents import OperatorAgent
 
@@ -435,7 +436,7 @@ async def run_full_dataset(
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
 
-    elif agent_type == "litellm":
+    elif agent_type == AgentType.LITELLM:
         try:
             from hud.agents.lite_llm import LiteAgent
 
@@ -539,8 +540,8 @@ def eval_command(
         "--full",
         help="Run the entire dataset (omit for single-task debug mode)",
     ),
-    agent: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = typer.Option(
-        "claude",
+    agent: AgentType = typer.Option(  # noqa: B008
+        AgentType.CLAUDE,
         "--agent",
         help="Agent backend to use (claude, openai, vllm for local server, or litellm)",
     ),
@@ -648,21 +649,21 @@ def eval_command(
 
     # We pass integration_test as the agent_type
     if integration_test:
-        agent = "integration_test"
+        agent = AgentType.INTEGRATION_TEST
 
     # Check for required API keys
-    if agent == "claude":
+    if agent == AgentType.CLAUDE:
         if not settings.anthropic_api_key:
             hud_console.error("ANTHROPIC_API_KEY is required for Claude agent")
             hud_console.info(
                 "Set it in your environment or run: hud set ANTHROPIC_API_KEY=your-key-here"
             )
             raise typer.Exit(1)
-    elif agent == "openai" and not settings.openai_api_key:
+    elif agent == AgentType.OPENAI and not settings.openai_api_key:
         hud_console.error("OPENAI_API_KEY is required for OpenAI agent")
         hud_console.info("Set it in your environment or run: hud set OPENAI_API_KEY=your-key-here")
         raise typer.Exit(1)
-    elif agent == "vllm":
+    elif agent == AgentType.VLLM:
         if model:
             hud_console.info(f"Using vLLM with model: {model}")
         else:

@@ -3,21 +3,15 @@
     "id": "2048_target_128",
     "prompt": "You are playing 2048 and your goal is to reach the 128 tile. Combine tiles strategically to achieve this goal.",
     "mcp_config": {
-      "local": {
-        "command": "docker",
-        "args": [
-          "run",
-          "--rm",
-          "-i",
-          "hudevals/hud-text-2048:0.1.3"
-        ]
+      "hud": {
+        "url": "http://localhost:8765/mcp"
       }
     },
     "setup_tool": {
       "name": "setup",
       "arguments": {
-        "function": "board",
-        "args": {
+        "name": "board",
+        "arguments": {
           "board_size": 4
         }
       }
@@ -25,8 +19,8 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "function": "max_number",
-        "args": {
+        "name": "max_number",
+        "arguments": {
           "target": 128
         }
       }
@@ -44,7 +38,7 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": [
+        "arguments": [
           "run",
           "--rm",
           "-i",
@@ -55,8 +49,8 @@
     "setup_tool": {
       "name": "setup",
       "arguments": {
-        "function": "board",
-        "args": {
+        "name": "board",
+        "arguments": {
           "board_size": 4
         }
       }
@@ -64,8 +58,8 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "function": "max_number",
-        "args": {
+        "name": "max_number",
+        "arguments": {
           "target": 256
         }
       }
@@ -83,7 +77,7 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": [
+        "arguments": [
           "run",
           "--rm",
           "-i",
@@ -94,8 +88,8 @@
     "setup_tool": {
       "name": "setup",
       "arguments": {
-        "function": "board",
-        "args": {
+        "name": "board",
+        "arguments": {
           "board_size": 4
         }
       }
@@ -103,8 +97,8 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "function": "max_number",
-        "args": {
+        "name": "max_number",
+        "arguments": {
           "target": 512
         }
       }
@@ -122,7 +116,7 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": [
+        "arguments": [
           "run",
           "--rm",
           "-i",
@@ -133,8 +127,8 @@
     "setup_tool": {
       "name": "setup",
       "arguments": {
-        "function": "board",
-        "args": {
+        "name": "board",
+        "arguments": {
           "board_size": 4
         }
       }
@@ -142,8 +136,8 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "function": "max_number",
-        "args": {
+        "name": "max_number",
+        "arguments": {
           "target": 1024
         }
       }
@@ -161,7 +155,7 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": [
+        "arguments": [
           "run",
           "--rm",
           "-i",
@@ -172,8 +166,8 @@
     "setup_tool": {
       "name": "setup",
       "arguments": {
-        "function": "board",
-        "args": {
+        "name": "board",
+        "arguments": {
           "board_size": 4
         }
       }
@@ -181,8 +175,8 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "function": "max_number",
-        "args": {
+        "name": "max_number",
+        "arguments": {
           "target": 2048
         }
       }
@@ -200,7 +194,7 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": [
+        "arguments": [
           "run",
           "--rm",
           "-i",
@@ -211,8 +205,8 @@
     "setup_tool": {
       "name": "setup",
       "arguments": {
-        "function": "board",
-        "args": {
+        "name": "board",
+        "arguments": {
           "board_size": 4
         }
       }
@@ -220,8 +214,8 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "function": "max_number",
-        "args": {
+        "name": "max_number",
+        "arguments": {
           "target": 4096
         }
       }
@@ -239,7 +233,7 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": [
+        "arguments": [
           "run",
           "--rm",
           "-i",
@@ -250,8 +244,8 @@
     "setup_tool": {
       "name": "setup",
       "arguments": {
-        "function": "board",
-        "args": {
+        "name": "board",
+        "arguments": {
           "board_size": 4
         }
       }
@@ -259,8 +253,8 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "function": "efficiency",
-        "args": {
+        "name": "efficiency",
+        "arguments": {
           "min_ratio": 10.0
         }
       }
@@ -278,7 +272,7 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": [
+        "arguments": [
           "run",
           "--rm",
           "-i",
@@ -289,8 +283,8 @@
     "setup_tool": {
       "name": "setup",
       "arguments": {
-        "function": "board",
-        "args": {
+        "name": "board",
+        "arguments": {
           "board_size": 4
         }
       }
@@ -298,8 +292,8 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "function": "efficiency",
-        "args": {
+        "name": "efficiency",
+        "arguments": {
           "min_ratio": 15.0
         }
       }
@@ -317,7 +311,7 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": [
+        "arguments": [
           "run",
           "--rm",
           "-i",
@@ -328,8 +322,8 @@
     "setup_tool": {
       "name": "setup",
       "arguments": {
-        "function": "board",
-        "args": {
+        "name": "board",
+        "arguments": {
           "board_size": 4
         }
       }
@@ -337,8 +331,8 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "function": "efficiency",
-        "args": {
+        "name": "efficiency",
+        "arguments": {
           "min_ratio": 18.0
         }
       }
@@ -356,7 +350,7 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": [
+        "arguments": [
           "run",
           "--rm",
           "-i",
@@ -367,8 +361,8 @@
     "setup_tool": {
       "name": "setup",
       "arguments": {
-        "function": "board",
-        "args": {
+        "name": "board",
+        "arguments": {
           "board_size": 3
         }
       }
@@ -376,8 +370,8 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "function": "max_number",
-        "args": {
+        "name": "max_number",
+        "arguments": {
           "target": 256
         }
       }
@@ -395,7 +389,7 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": [
+        "arguments": [
           "run",
           "--rm",
           "-i",
@@ -406,8 +400,8 @@
     "setup_tool": {
       "name": "setup",
       "arguments": {
-        "function": "board",
-        "args": {
+        "name": "board",
+        "arguments": {
           "board_size": 5
         }
       }
@@ -415,8 +409,8 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "function": "max_number",
-        "args": {
+        "name": "max_number",
+        "arguments": {
           "target": 4096
         }
       }
@@ -434,7 +428,7 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": [
+        "arguments": [
           "run",
           "--rm",
           "-i",
@@ -445,8 +439,8 @@
     "setup_tool": {
       "name": "setup",
       "arguments": {
-        "function": "board",
-        "args": {
+        "name": "board",
+        "arguments": {
           "board_size": 6
         }
       }
@@ -454,8 +448,8 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "function": "max_number",
-        "args": {
+        "name": "max_number",
+        "arguments": {
           "target": 8192
         }
       }
@@ -473,7 +467,7 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": [
+        "arguments": [
           "run",
           "--rm",
           "-i",
@@ -484,8 +478,8 @@
     "setup_tool": {
       "name": "setup",
       "arguments": {
-        "function": "board",
-        "args": {
+        "name": "board",
+        "arguments": {
           "board_size": 4
         }
       }
@@ -493,8 +487,8 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "function": "max_number",
-        "args": {
+        "name": "max_number",
+        "arguments": {
           "target": 32768
         }
       }
@@ -512,7 +506,7 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": [
+        "arguments": [
           "run",
           "--rm",
           "-i",
@@ -523,8 +517,8 @@
     "setup_tool": {
       "name": "setup",
       "arguments": {
-        "function": "board",
-        "args": {
+        "name": "board",
+        "arguments": {
           "board_size": 5
         }
       }
@@ -532,8 +526,8 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "function": "max_number",
-        "args": {
+        "name": "max_number",
+        "arguments": {
           "target": 65536
         }
       }

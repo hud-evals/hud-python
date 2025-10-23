@@ -232,6 +232,7 @@ async def _update_task_status_async(
     error_message: str | None = None,
     trace_name: str | None = None,
     task_id: str | None = None,
+    group_id: str | None = None,
 ) -> None:
     """Async task status update."""
     if not settings.telemetry_enabled:
@@ -277,6 +278,9 @@ async def _update_task_status_async(
         if task_id:
             data["task_id"] = task_id
 
+        if group_id:
+            data["group_id"] = group_id
+
         await make_request(
             method="POST",
             url=f"{settings.hud_telemetry_url}/trace/{task_run_id}/status",
@@ -297,10 +301,13 @@ def _fire_and_forget_status_update(
     error_message: str | None = None,
     trace_name: str | None = None,
     task_id: str | None = None,
+    group_id: str | None = None,
 ) -> None:
     """Fire and forget status update - works in any context including Jupyter."""
     fire_and_forget(
-        _update_task_status_async(task_run_id, status, job_id, error_message, trace_name, task_id),
+        _update_task_status_async(
+            task_run_id, status, job_id, error_message, trace_name, task_id, group_id
+        ),
         f"update task {task_run_id} status to {status}",
     )
 
@@ -312,6 +319,7 @@ def _update_task_status_sync(
     error_message: str | None = None,
     trace_name: str | None = None,
     task_id: str | None = None,
+    group_id: str | None = None,
 ) -> None:
     """Synchronous task status update."""
     if not settings.telemetry_enabled:
@@ -356,6 +364,9 @@ def _update_task_status_sync(
 
         if task_id:
             data["task_id"] = task_id
+
+        if group_id:
+            data["group_id"] = group_id
 
         make_request_sync(
             method="POST",
@@ -447,10 +458,12 @@ class trace:
         attributes: dict[str, Any] | None = None,
         job_id: str | None = None,
         task_id: str | None = None,
+        group_id: str | None = None,
     ) -> None:
         self.task_run_id = task_run_id
         self.job_id = job_id
         self.task_id = task_id
+        self.group_id = group_id
         self.is_root = is_root
         self.span_name = span_name
         self.attributes = attributes or {}
@@ -473,6 +486,8 @@ class trace:
             ctx = baggage.set_baggage("hud.job_id", self.job_id, context=ctx)
         if self.task_id:
             ctx = baggage.set_baggage("hud.task_id", self.task_id, context=ctx)
+        if self.group_id:
+            ctx = baggage.set_baggage("hud.group_id", self.group_id, context=ctx)
         self._otel_token = context.attach(ctx)
 
         # Start a span as current
@@ -486,6 +501,8 @@ class trace:
             span_attrs["hud.job_id"] = self.job_id
         if self.task_id:
             span_attrs["hud.task_id"] = self.task_id
+        if self.group_id:
+            span_attrs["hud.group_id"] = self.group_id
 
         # Use start_as_current_span context manager
         self._span_manager = tracer.start_as_current_span(
@@ -502,6 +519,7 @@ class trace:
                 job_id=self.job_id,
                 trace_name=self.span_name,
                 task_id=self.task_id,
+                group_id=self.group_id,
             )
             # Print the nice trace URL box (only if not part of a job)
             if not self.job_id:
@@ -528,6 +546,7 @@ class trace:
                     error_message=str(exc_val),
                     trace_name=self.span_name,
                     task_id=self.task_id,
+                    group_id=self.group_id,
                 )
                 # Print error completion message (only if not part of a job)
                 if not self.job_id:
@@ -540,6 +559,7 @@ class trace:
                     job_id=self.job_id,
                     trace_name=self.span_name,
                     task_id=self.task_id,
+                    group_id=self.group_id,
                 )
                 # Print success completion message (only if not part of a job)
                 if not self.job_id:

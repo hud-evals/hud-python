@@ -804,9 +804,9 @@ class TodoCompleted:
 @problem("todo_basic", description="Complete two todo items", difficulty="easy")
 class TodoBasic:
     def get_setup(self):
-        return {"function": "todo_seed", "args": {"num_items": 5}}
+        return {"name": "todo_seed", "arguments": {"num_items": 5}}
     def get_evaluation(self):
-        return {"function": "todo_completed", "args": {"expected_count": 2}}
+        return {"name": "todo_completed", "arguments": {"expected_count": 2}}
 ```
 
 Decorators keep registration *next to the implementation* and avoid manual bookkeeping.  The server simply exposes the combined metadata through an MCP **resource**.  Follow `environments/browser/src/hud_controller/problems/registry.py` as a template and expose the JSON with `@mcp.resource("problems://registry")`.

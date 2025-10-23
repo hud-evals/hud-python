@@ -29,11 +29,11 @@ HUD tasksets can be provided in two primary formats (both supported):
 ]
 ```
 
-Save as `basic-2048.json` and run:
+Save as `2048-basic.json` and run:
 
 ```bash
-hud eval basic-2048.json
-hud rl basic-2048.json
+hud eval 2048-basic.json
+hud rl 2048-basic.json
 ```
 
 2) JSONL file with one task object per line
@@ -49,7 +49,7 @@ hud rl basic-2048.json
 You can host tasksets on the Hub and fetch them with:
 
 ```bash
-hud get hud-evals/basic-2048
+hud get hud-evals/2048-basic
 ```
 
 The command downloads the JSONL task file and places it in your project directory.
@@ -57,8 +57,8 @@ The command downloads the JSONL task file and places it in your project director
 This allows running the full dataset or training with simply:
 
 ```bash
-hud eval hud-evals/basic-2048
-hud rl hud-evals/basic-2048
+hud eval hud-evals/2048-basic
+hud rl hud-evals/2048-basic
 ```
 
 ## Tips

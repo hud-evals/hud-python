@@ -12,6 +12,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from hud.types import AgentType
+
 from . import list_func as list_module
 from .analyze import (
     analyze_environment,
@@ -847,7 +849,7 @@ def eval(
     hud_console = HUDConsole()
 
     if integration_test:
-        agent = "integration_test"
+        agent = AgentType.INTEGRATION_TEST
 
     # If no source provided, reuse RL helper to find a tasks file interactively
     if source is None:
@@ -894,17 +896,17 @@ def eval(
         # Add standard agent choices
         choices.extend(
             [
-                {"name": "Claude 4 Sonnet", "value": "claude"},
-                {"name": "OpenAI Computer Use", "value": "openai"},
-                {"name": "vLLM (Local Server)", "value": "vllm"},
-                {"name": "LiteLLM (Multi-provider)", "value": "litellm"},
+                {"name": "Claude 4 Sonnet", "value": AgentType.CLAUDE},
+                {"name": "OpenAI Computer Use", "value": AgentType.OPENAI},
+                {"name": "vLLM (Local Server)", "value": AgentType.VLLM},
+                {"name": "LiteLLM (Multi-provider)", "value": AgentType.LITELLM},
             ]
         )
 
         agent = hud_console.select("Select an agent to use:", choices=choices, default=0)
 
     # Handle HUD model selection
-    if agent and agent not in ["claude", "openai", "vllm", "litellm", "integration_test"]:
+    if agent and agent not in [e.value for e in AgentType]:
         # Find remote model name
         model = agent
         if not vllm_base_url:
@@ -921,20 +923,23 @@ def eval(
             hud_console.error(f"Model {model} not found")
             raise typer.Exit(1)
         model = base_model
-        agent = "vllm"  # Use vLLM backend for HUD models
+        agent = AgentType.VLLM  # Use vLLM backend for HUD models
         hud_console.info(f"Using HUD model: {model} (trained on {base_model})")
 
     # Validate agent choice
-    valid_agents = ["claude", "openai", "vllm", "litellm", "integration_test"]
+    valid_agents = [e.value for e in AgentType]
     if agent not in valid_agents:
         hud_console.error(f"Invalid agent: {agent}. Must be one of: {', '.join(valid_agents)}")
         raise typer.Exit(1)
+
+    # Type narrowing: agent is now guaranteed to be an AgentType value after validation
+    agent = AgentType(agent)
 
     # Run the command
     eval_command(
         source=source,
         full=full,
-        agent=agent,  # type: ignore
+        agent=agent,
         model=model,
         allowed_tools=allowed_tools,
         max_concurrent=max_concurrent,
