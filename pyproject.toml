@@ -42,6 +42,7 @@ dependencies = [
     # AI providers
     "anthropic",
     "openai",
+    "google-genai",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
