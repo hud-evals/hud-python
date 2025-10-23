@@ -169,25 +169,27 @@ async def run(config: Config, tasks: list[Task]) -> None:
                 dtype=torch.float32,
             )
 
-            processed_inputs = preprocess_traces(traces, processor)
+            processed_items = preprocess_traces(traces, processor)
 
-            tokens_this_step = int(sum(int(pi["assistant_mask"].sum().item()) for pi in processed_inputs))
+            tokens_this_step = int(
+                sum(int(item[0]["assistant_mask"].sum().item()) for item in processed_items)
+            )
             cumulative_trained_tokens += tokens_this_step
 
             samples: list[TrainingSample] = []
-            for inputs, advantage, temperature in zip(
-                processed_inputs,
+            for (inputs, old_logprobs), advantage, temperature in zip(
+                processed_items,
                 advantages,
                 temperatures,
                 strict=True,
             ):
-                samples.append(
-                    TrainingSample(
-                        inputs=inputs,
-                        advantage=advantage.view(1),
-                        temperature=temperature.view(1),
-                    )
+                sample = TrainingSample(
+                    inputs=inputs,
+                    advantage=advantage.view(1),
+                    temperature=temperature.view(1),
                 )
+                sample.old_logprobs = old_logprobs.view(1, -1)
+                samples.append(sample)
 
             training_batch = batch_samples(samples, config.mini_batch_size, config.num_gpus, pad_token_id)
 

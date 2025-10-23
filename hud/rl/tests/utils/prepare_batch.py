@@ -62,23 +62,23 @@ def main():
     print(f"Temperatures: shape={tuple(temperatures.shape)}")
 
     print("\nPreprocessing traces...")
-    processed_inputs = preprocess_traces(traces, processor)
-    print(f"Processed {len(processed_inputs)} inputs")
+    processed_items = preprocess_traces(traces, processor)
+    print(f"Processed {len(processed_items)} inputs")
 
     samples: list[TrainingSample] = []
-    for inputs, advantage, temperature in zip(
-        processed_inputs,
+    for (inputs, old_logprobs), advantage, temperature in zip(
+        processed_items,
         advantages,
         temperatures,
         strict=True,
     ):
-        samples.append(
-            TrainingSample(
-                inputs=inputs,
-                advantage=advantage.view(1),
-                temperature=temperature.view(1),
-            )
+        sample = TrainingSample(
+            inputs=inputs,
+            advantage=advantage.view(1),
+            temperature=temperature.view(1),
         )
+        sample.old_logprobs = old_logprobs.view(1, -1)
+        samples.append(sample)
 
     mini_batch_size = 1
     num_gpus = 4

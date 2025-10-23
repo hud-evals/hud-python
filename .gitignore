@@ -50,5 +50,5 @@ test/
 /checkpoints_test/
 hud/rl/checkpoints/
 hud/rl/checkpoints_test/
-
+hud/rl/tests/data/*
 .ck/

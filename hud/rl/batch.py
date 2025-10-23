@@ -96,6 +96,12 @@ def _merge_chunk(chunk: list[TrainingSample], pad_token_id: int) -> TrainingSamp
             (0, max_seq_len - sample.inputs["assistant_mask"].size(-1)),
             value=False,
         )
+        if sample.old_logprobs is not None:
+            sample.old_logprobs = torch.nn.functional.pad(
+                sample.old_logprobs,
+                (0, max_seq_len - sample.old_logprobs.size(-1)),
+                value=0.0,
+            )
 
     input_ids = torch.stack([sample.inputs["input_ids"] for sample in chunk], dim=0)
     attention_mask = torch.stack([sample.inputs["attention_mask"] for sample in chunk], dim=0)
@@ -111,7 +117,12 @@ def _merge_chunk(chunk: list[TrainingSample], pad_token_id: int) -> TrainingSamp
 
     advantages = torch.cat([sample.advantage.view(-1) for sample in chunk], dim=0)
     temperatures = torch.cat([sample.temperature.view(-1) for sample in chunk], dim=0)
-    return TrainingSample(inputs=merged_inputs, advantage=advantages, temperature=temperatures)
+    merged_sample = TrainingSample(inputs=merged_inputs, advantage=advantages, temperature=temperatures)
+
+    if all(sample.old_logprobs is not None for sample in chunk):
+        merged_sample.old_logprobs = torch.cat([sample.old_logprobs for sample in chunk], dim=0)
+
+    return merged_sample
 
 
 def _merge_pixel_values(chunk: list[TrainingSample]) -> torch.Tensor | None:

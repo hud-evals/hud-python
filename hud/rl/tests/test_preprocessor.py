@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 
+import torch
 from transformers import Qwen2VLProcessor
 
 from rich.console import Console
@@ -20,46 +21,6 @@ def visualize_tokenization(input_ids, assistant_mask, tokenizer):
         input_ids = input_ids[0]
     if assistant_mask.dim() > 1:
         assistant_mask = assistant_mask[0]
-
-    console.print("\n[bold]Tokenization Visualization[/bold]")
-    console.print(Text("TRAINED", style="bold green") + " / " + Text("IGNORED", style="dim") + " / " + Text("LAST TOKEN (no target)", style="dim red"))
-    console.rule(style="dim")
-
-    chunk_size = 15
-    for start_idx in range(0, len(input_ids), chunk_size):
-        end_idx = min(start_idx + chunk_size, len(input_ids))
-
-        id_text = Text()
-        dec_text = Text()
-
-        id_text.append("IDs:  ")
-        dec_text.append("Text: ")
-
-        for i in range(start_idx, end_idx):
-            token_id = input_ids[i].item()
-            decoded_token = tokenizer.decode([token_id])
-
-            # Clean up token for display
-            display_token = decoded_token.replace('\n', '⏎').replace('\t', '→').replace(' ', '·')
-            if len(display_token) > 8:
-                display_token = display_token[:7] + "…"
-
-            if i == 0:
-                # First token is never predicted (no previous token)
-                style = "dim white"
-            elif i < len(assistant_mask):
-                style = "bold green" if assistant_mask[i] else "dim white"
-            else:
-                style = "dim red"
-
-            id_text.append(f"{token_id:6d} ", style=style)
-            dec_text.append(f"{display_token:8s} ", style=style)
-
-        # Print position header and rows
-        console.print(f"\n[dim]Position {start_idx:4d}-{end_idx-1:4d}:[/dim]")
-        console.print(id_text)
-        console.print(dec_text)
-
 
     console.print("\n[bold]Full Decoded Text:[/bold]")
     console.rule(style="dim")
@@ -93,8 +54,11 @@ def visualize_tokenization(input_ids, assistant_mask, tokenizer):
 
 
 def main():
-    # Load traces from JSON
-    traces_file = Path("hud/rl/tests/data/traces_de8ea147-3c52-4117-ad24-d1dbaa39a088.json")
+    traces_files = list(Path("hud/rl/tests/data").glob("traces_*.json"))
+    if not traces_files:
+        console.print("[yellow]No traces files found. Please run the test_actor.py script first.[/yellow]")
+        return
+    traces_file = max(traces_files, key=lambda x: x.stat().st_mtime)    
     with open(traces_file) as f:
         traces_data = json.load(f)
 
@@ -108,25 +72,26 @@ def main():
     console.print(f"\n[dim]Loading processor for {model_name}...[/dim]")
     processor = Qwen2VLProcessor.from_pretrained(model_name)
 
-    # Process and visualize all traces
-    num_to_show = 5 # len(traces)
+    num_to_show = min(len(traces), 10)
 
     for i in range(num_to_show):
         console.print(f"\n[bold cyan]{'=' * 100}[/bold cyan]")
         console.print(f"[bold]Processing Trace {i+1}/{len(traces)}[/bold]")
 
         # Process the trace
-        processed = preprocess_traces([traces[i]], processor)[0]
+        processed_inputs, old_logprobs = preprocess_traces([traces[i]], processor)[0]
 
         # Show shape information
         console.print("\n[bold]Shape Information:[/bold]")
-        for key, value in processed.items():
+        for key, value in processed_inputs.items():
             console.print(f"  {key}: shape={value.shape}, dtype={value.dtype}") # type: ignore
+
+        console.print(f"  old_logprobs: shape={old_logprobs.shape}, dtype={old_logprobs.dtype}")
 
         # Visualize tokenization and masking
         visualize_tokenization(
-            processed['input_ids'],
-            processed['assistant_mask'],
+            processed_inputs["input_ids"],
+            processed_inputs["assistant_mask"],
             processor.tokenizer # type: ignore
         )
 

@@ -111,6 +111,10 @@ def train(
 
         with console.progress("Computing old log probabilities...") as progress, torch.no_grad():
             for i, minibatch in enumerate(batch):
+                if minibatch.old_logprobs is not None:
+                    progress.update(f"Computing old log probabilities... {i + 1}/{len(batch)}")
+                    continue
+
                 sample = minibatch.to_device(torch.device("cuda"))
                 logits = model(**sample.inputs).logits
                 logits = torch.cat(
@@ -209,7 +213,7 @@ def train(
 def main() -> None:
     """Main entry point for training script."""
     config, _ = Config.from_argv()
-    configure_logging(config.verbose)
+    configure_logging(config.verbosity)
     train(config.training, config.training_steps)
 
 
