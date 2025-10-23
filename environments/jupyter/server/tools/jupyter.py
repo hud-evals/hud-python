@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import re
 import asyncio
 import logging
+import re
 from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import uuid4
 
 import tornado
-from tornado.escape import json_encode, json_decode, url_escape
-from tornado.websocket import websocket_connect
-from tornado.ioloop import PeriodicCallback
+from tornado.escape import json_decode, json_encode, url_escape
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
+from tornado.ioloop import PeriodicCallback
+from tornado.websocket import websocket_connect
 
 from hud.tools.base import BaseTool
 from hud.tools.types import ContentResult, ToolError
@@ -101,12 +101,12 @@ class JupyterTool(BaseTool):
         self._heartbeat_interval = 10000  # 10 seconds
         self._heartbeat_callback = None
 
-    async def __call__(self, code: str, timeout: int = 15) -> list[ContentBlock]:
+    async def __call__(self, code: str, execution_timeout: int = 15) -> list[ContentBlock]:
         """Execute Python code in the Jupyter kernel.
 
         Args:
             code: Python code to execute
-            timeout: Execution timeout in seconds (default: 15)
+            execution_timeout: Execution timeout in seconds (default: 15)
 
         Returns:
             List of ContentBlock with execution results
@@ -116,7 +116,7 @@ class JupyterTool(BaseTool):
             await self._ensure_kernel()
 
             # Execute code
-            result = await self._execute(code, timeout)
+            result = await self._execute(code, execution_timeout)
 
             # Check for timeout
             if result.startswith("[Execution timed out"):
@@ -128,7 +128,7 @@ class JupyterTool(BaseTool):
 
         except Exception as e:
             logger.error("Jupyter execution error: %s", e)
-            raise ToolError(f"Execution failed: {str(e)}") from e
+            raise ToolError(f"Execution failed: {e!s}") from e
 
     async def _ensure_kernel(self) -> None:
         """Ensure kernel is initialized and connected."""
@@ -194,12 +194,12 @@ class JupyterTool(BaseTool):
                     "Failed to reconnect to kernel websocket - Is the kernel still running?"
                 )
 
-    async def _execute(self, code: str, timeout: int = 15) -> str:
+    async def _execute(self, code: str, execution_timeout: int = 15) -> str:
         """Execute code in Jupyter kernel and return output.
 
         Args:
             code: Python code to execute
-            timeout: Execution timeout in seconds
+            execution_timeout: Execution timeout in seconds
 
         Returns:
             String output from the kernel
@@ -263,7 +263,7 @@ class JupyterTool(BaseTool):
                     execution_done = True
             return execution_done
 
-        async def interrupt_kernel():
+        async def interrupt_kernel() -> None:
             client = AsyncHTTPClient()
             interrupt_response = await client.fetch(
                 f"{self._base_url}/api/kernels/{self._kernel_id}/interrupt",
@@ -273,15 +273,12 @@ class JupyterTool(BaseTool):
             logger.info("Kernel interrupted: %s", interrupt_response)
 
         try:
-            execution_done = await asyncio.wait_for(wait_for_messages(), timeout)
-        except asyncio.TimeoutError:
+            await asyncio.wait_for(wait_for_messages(), execution_timeout)
+        except TimeoutError:
             await interrupt_kernel()
-            return f"[Execution timed out ({timeout} seconds).]"
+            return f"[Execution timed out ({execution_timeout} seconds).]"
 
-        if not outputs and execution_done:
-            ret = "[Code executed successfully with no output]"
-        else:
-            ret = "".join(outputs)
+        ret = "".join(outputs)
 
         # Remove ANSI escape sequences
         return strip_ansi(ret)

@@ -57,7 +57,7 @@ async def eval_all(id: str, answer_position: str, dataset_path: str = "all_data_
             try:
                 with open(solution_path, "r") as f:
                     solution_code = f.read()
-                exec_result = await jupyter_tool._execute(solution_code, timeout=30)
+                exec_result = await jupyter_tool._execute(solution_code, execution_timeout=30)
 
                 # Check for execution errors
                 is_error = (

@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from mcp.types import TextContent
 
 from hud.tools.jupyter import JupyterTool, strip_ansi
 
@@ -62,6 +63,7 @@ class TestJupyterTool:
         ):
             mock_execute.return_value = "Hello, World!"
             result = await tool(code="print('Hello, World!')")
+            assert isinstance(result[0], TextContent)
             assert result[0].text == "Hello, World!"
 
     @pytest.mark.asyncio
