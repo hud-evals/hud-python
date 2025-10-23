@@ -211,7 +211,6 @@ def train(
         # Collect performance data
         # sum batch size * sequence length for each minibatch
         num_tokens = sum(minibatch.inputs["input_ids"].shape[1] * minibatch.inputs["input_ids"].shape[0] for minibatch in batch)
-        console.warning_log(f"num_tokens: {num_tokens}")
         perf_counter.count_tokens(num_tokens)  # Add to rolling window
         throughput = perf_counter.get_tokens_per_second() or 0
         mfu = perf_counter.get_mfu() or 0
