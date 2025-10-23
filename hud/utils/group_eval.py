@@ -60,6 +60,13 @@ async def run_tasks_grouped(
     # Run all episodes, respecting max_parallel_episodes
     all_traces = []
 
+    # Generate group_ids for each unique task
+    import uuid
+
+    task_group_ids = {}
+    for i in range(len(tasks)):
+        task_group_ids[i] = str(uuid.uuid4())
+
     for batch_start in range(0, len(grouped_tasks), max_parallel_episodes):
         batch_end = min(batch_start + max_parallel_episodes, len(grouped_tasks))
         batch = grouped_tasks[batch_start:batch_end]
@@ -80,7 +87,9 @@ async def run_tasks_grouped(
 
                 # Run the task
                 trace_name = f"Eval | {task.id if hasattr(task, 'id') else 'Task'} | Group {task_mapping[idx]}"  # noqa: E501
-                with hud.trace(trace_name, job_id=job_id):
+                # Use the group_id for this specific task
+                task_group_id = task_group_ids[task_mapping[idx]]
+                with hud.trace(trace_name, job_id=job_id, group_id=task_group_id):
                     result = await agent.run(task, max_steps=max_steps)
                     return result
 
@@ -106,7 +115,7 @@ async def run_tasks_grouped(
             hud_console.info(f"Completed batch: {len(all_traces)}/{len(grouped_tasks)} episodes")
 
     # Group results back by original task and calculate statistics
-    return calculate_group_statistics(tasks, all_traces, task_mapping, group_size)
+    return calculate_group_statistics(tasks, all_traces, task_mapping, group_size, task_group_ids)
 
 
 def calculate_group_statistics(
@@ -114,6 +123,7 @@ def calculate_group_statistics(
     traces: list[Trace],
     task_mapping: list[int],
     group_size: int,
+    task_group_ids: dict[int, str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Calculate statistics for each group, similar to preprocess_advantages.
@@ -123,6 +133,7 @@ def calculate_group_statistics(
         traces: All traces from grouped runs
         task_mapping: Mapping of trace index to task index
         group_size: Number of runs per task
+        task_group_ids: Dict mapping task index to group ID
 
     Returns:
         List of statistics for each task
@@ -147,6 +158,7 @@ def calculate_group_statistics(
             else f"task_{task_idx}",
             "prompt": task.prompt if isinstance(task, Task) else task.get("prompt", ""),
             "group_size": group_size,
+            "group_id": task_group_ids.get(task_idx) if task_group_ids else None,
             "rewards": rewards.tolist(),
             "mean_reward": float(np.mean(rewards)),
             "std_reward": float(np.std(rewards)) if len(rewards) > 1 else 0.0,
