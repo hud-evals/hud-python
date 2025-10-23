@@ -209,7 +209,8 @@ def train(
 
 
         # Collect performance data
-        num_tokens = sum(minibatch.inputs["input_ids"].shape[1] for minibatch in batch)
+        # sum batch size * sequence length for each minibatch
+        num_tokens = sum(minibatch.inputs["input_ids"].shape[1] * minibatch.inputs["input_ids"].shape[0] for minibatch in batch)
         console.warning_log(f"num_tokens: {num_tokens}")
         perf_counter.count_tokens(num_tokens)  # Add to rolling window
         throughput = perf_counter.get_tokens_per_second() or 0
@@ -230,8 +231,8 @@ def train(
             "step_duration": max([x["step_duration"] for x in dist_perf_output_list]),
             # sum throughput across ranks
             "throughput": sum([x["throughput"] for x in dist_perf_output_list]),
-            # average mfu across ranks
-            "mfu": sum([x["mfu"] for x in dist_perf_output_list])/world_size,
+            # sum mfu across ranks (already normalized by world size)
+            "mfu": sum([x["mfu"] for x in dist_perf_output_list]),
             # sum peak memory across ranks
             "peak_memory": max([x["peak_memory"] for x in dist_perf_output_list]),
         })
