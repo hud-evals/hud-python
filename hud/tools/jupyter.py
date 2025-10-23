@@ -273,15 +273,12 @@ class JupyterTool(BaseTool):
             logger.info("Kernel interrupted: %s", interrupt_response)
 
         try:
-            execution_done = await asyncio.wait_for(wait_for_messages(), execution_timeout)
+            await asyncio.wait_for(wait_for_messages(), execution_timeout)
         except TimeoutError:
             await interrupt_kernel()
             return f"[Execution timed out ({execution_timeout} seconds).]"
 
-        if not outputs and execution_done:
-            ret = "[Code executed successfully with no output]"
-        else:
-            ret = "".join(outputs)
+        ret = "".join(outputs)
 
         # Remove ANSI escape sequences
         return strip_ansi(ret)
