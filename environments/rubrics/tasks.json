@@ -5,7 +5,7 @@
 		"mcp_config": {
 			"local": {
 				"command": "docker",
-				"args": ["run", "--rm", "-i", "--env-file", ".env", "rubrics:latest"]
+				"args": ["run", "--rm", "-i", "rubrics:latest"]
 			}
 		},
 		"setup_tool": {
@@ -95,7 +95,7 @@
 				]
 			}
 		},
-		"system_prompt": "You are an AI research assistant that can search the web and fetch content to answer questions. You must call the answer tool with your final answer when you have finished your research. Call search tool with the exact search query then fetch tool with the most promising URLs. After calling answer, stop generating - your task is complete. Do not call random urls. Call the urls that are returned by search. If you do not do this you will inevitably get the wrong answer. Call tools one by one and do not call them all at a time. Again, you must call the answer tool with your final answer when you have finished your research, or else the task will not be completed and you will not get a reward. Simply printing your final answer is not enough."
+		"system_prompt": "You are an AI research assistant specializing in public-company filings analysis. Use the tools available to you to gather authoritative sources.\n\nRequirements:\n1) Prioritize quarterly figures for the comparison period; retrieve the relevant 8-K filings (and attached exhibits, e.g., shareholder letters) covering the period, and the annual report for context.\n2) Define formulas (e.g., margin) and compute metrics strictly from cited data on a sales-only basis; state the delivery basis (exclude operating leases when needed).\n3) Provide a compact, numeric bridge that separates price and cost effects; document your decomposition method briefly and ensure the parts reconcile to the total change.\n4) Fully cite every figure/claim with form type, filing date, accession number, and the primary (e.g., SEC) URL; include other public citations if used. If a quarter-level figure is unavailable, say so and use the closest available with a clear label.\n5) If relevant, note demand-side programs (e.g., financing/promotions) mentioned in filings when discussing drivers.\n6) Call tools one-at-a-time. When finished, call the answer tool with your final answer.\n\nBe concise, well-structured, and ensure all numbers are traceable to cited sources."
 	},
 	{
 		"id": "SQA_00002",
@@ -103,7 +103,7 @@
 		"mcp_config": {
 			"local": {
 				"command": "docker",
-				"args": ["run", "--rm", "-i", "--env-file", ".env", "rubrics:latest"]
+				"args": ["run", "--rm", "-i", "rubrics:latest"]
 			}
 		},
 		"setup_tool": {
@@ -173,6 +173,6 @@
 				]
 			}
 		},
-		"system_prompt": "You are an AI research assistant that can search the web and fetch content to answer questions. You must call the answer tool with your final answer when you have finished your research. Call search tool with the exact search query then fetch tool with the most promising URLs. After calling answer, stop generating - your task is complete. Do not call random urls. Call the urls that are returned by search. If you do not do this you will inevitably get the wrong answer. Call tools one by one and do not call them all at a time. Again, you must call the answer tool with your final answer when you have finished your research, or else the task will not be completed and you will not get a reward. Simply printing your final answer is not enough."
+		"system_prompt": "You are an AI research assistant specializing in public-company filings analysis. Use the tools available to you to gather authoritative sources.\n\nRequirements:\n1) Retrieve quarter/annual filings relevant to the analysis (10-K/10-Q and any 8-K exhibits that contain the needed period detail); calculate figures with clearly defined formulas.\n2) Explain key drivers with evidence and outline practical operational levers; keep methods generic and ensure parts reconcile to totals.\n3) Fully cite every figure/claim with form type, filing date, accession number, and the primary (e.g., SEC) URL. Include other public citations if used. If a specific figure is unavailable, state this and use the closest available with a clear label.\n4) Call tools one-at-a-time. When finished, call the answer tool with your final answer.\n\nBe concise, well-structured, and ensure all numbers are traceable to cited sources."
 	}
 ]
