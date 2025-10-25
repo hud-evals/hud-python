@@ -237,7 +237,7 @@ async def run_mcp_module(
 
                 from hud.cli.flows.dev import create_dynamic_trace
 
-                live_trace_url = await create_dynamic_trace(
+                _, live_trace_url = await create_dynamic_trace(
                     mcp_config=local_mcp_config,
                     build_status=False,
                     environment_name=mcp_server.name or "mcp-server",
@@ -608,7 +608,7 @@ def run_docker_dev_server(
                     "headers": {},
                 }
             }
-            live_trace_url = _asy.run(
+            _, live_trace_url = _asy.run(
                 create_dynamic_trace(
                     mcp_config=local_mcp_config,
                     build_status=True,
@@ -661,12 +661,32 @@ def run_docker_dev_server(
     # Create and run proxy with HUD helpers
     async def run_proxy() -> None:
         from fastmcp import FastMCP
+        from fastmcp.server.proxy import ProxyClient
 
-        # Create FastMCP proxy to Docker stdio
-        fastmcp_proxy = FastMCP.as_proxy(mcp_config, name="HUD Docker Dev Proxy")
+        # Create ProxyClient without custom log handler since we capture Docker logs directly
+        proxy_client = ProxyClient(mcp_config, name="HUD Docker Dev Proxy")
+
+        # Extract container name from docker args and store for logs endpoint
+        docker_cmd = mcp_config["docker"]["args"]
+        container_name = None
+        for i, arg in enumerate(docker_cmd):
+            if arg == "--name" and i + 1 < len(docker_cmd):
+                container_name = docker_cmd[i + 1]
+                break
+
+        if container_name:
+            # Store container name for logs endpoint to use
+            os.environ["_HUD_DEV_DOCKER_CONTAINER"] = container_name
+            hud_console.debug(f"Docker container: {container_name}")
+
+        # Create FastMCP proxy using the ProxyClient
+        fastmcp_proxy = FastMCP.as_proxy(proxy_client)
 
         # Wrap in MCPServer to get /docs and REST wrappers
         proxy = MCPServer(name="HUD Docker Dev Proxy")
+
+        # Enable logs endpoint on HTTP server
+        os.environ["_HUD_DEV_LOGS_PROVIDER"] = "enabled"
 
         # Import all tools from the FastMCP proxy
         await proxy.import_server(fastmcp_proxy)

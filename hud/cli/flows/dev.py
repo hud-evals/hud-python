@@ -18,7 +18,7 @@ async def create_dynamic_trace(
     mcp_config: dict[str, dict[str, Any]],
     build_status: bool,
     environment_name: str,
-) -> str | None:
+) -> tuple[str | None, str | None]:
     """
     Create a dynamic trace for HUD dev sessions when running in HTTP mode.
 
@@ -43,27 +43,16 @@ async def create_dynamic_trace(
     api_key = settings.api_key
     if not api_key:
         logger.warning("Skipping dynamic trace creation; missing HUD_API_KEY")
-        return None
+        return None, None
 
     try:
         resp = await make_request("POST", url=url, json=payload, api_key=api_key)
         # New API returns an id; construct the URL as https://hud.so/trace/{id}
-        trace_id = None
-        if isinstance(resp, dict):
-            trace_id = resp.get("id")
-            if trace_id is None:
-                data = resp.get("data", {}) or {}
-                if isinstance(data, dict):
-                    trace_id = data.get("id")
-            # Backcompat: if url is provided directly
-            if not trace_id:
-                direct_url = resp.get("url") or (resp.get("data", {}) or {}).get("url")
-                if isinstance(direct_url, str) and direct_url:
-                    return direct_url
+        trace_id = resp.get("id")
 
         if isinstance(trace_id, str) and trace_id:
-            return f"https://hud.so/trace/{trace_id}"
-        return None
+            return trace_id, f"https://hud.so/trace/{trace_id}"
+        return None, None
     except Exception as e:
         # Do not interrupt dev flow
         try:
@@ -71,7 +60,7 @@ async def create_dynamic_trace(
             logger.warning("Failed to create dynamic dev trace: %s | payload=%s", e, preview)
         except Exception:
             logger.warning("Failed to create dynamic dev trace: %s", e)
-        return None
+        return None, None
 
 
 def show_dev_ui(

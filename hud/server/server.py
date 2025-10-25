@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 from fastmcp.server.server import FastMCP, Transport
+from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from hud.server.low_level import LowLevelServerWithInit
@@ -492,6 +493,7 @@ class MCPServer(FastMCP):
         - GET /docs - Interactive documentation and tool testing
         - POST /api/tools/{name} - REST wrappers for MCP tools
         - GET /openapi.json - OpenAPI spec for REST endpoints
+        - GET /logs - Development log endpoint (when provided by dev runtime)
         """
 
         # Register REST wrapper for each tool
@@ -541,6 +543,63 @@ class MCPServer(FastMCP):
         for tool_key in self._tool_manager._tools.keys():  # noqa: SIM118
             endpoint = create_tool_endpoint(tool_key)
             self.custom_route(f"/api/tools/{tool_key}", methods=["POST"])(endpoint)
+
+        # Development log endpoint - only if dev runtime set a provider
+        provider = os.environ.get("_HUD_DEV_LOGS_PROVIDER")
+        if provider == "enabled":
+
+            @self.custom_route("/logs", methods=["GET"])
+            async def get_logs(request: Request) -> Response:
+                """Return Docker container logs on demand.
+
+                Query params:
+                  - limit: max number of lines to return (default 100)
+                  - tail: number of lines from end to return (default 100)
+                """
+                import subprocess
+
+                # Get container name from environment
+                container_name = os.environ.get("_HUD_DEV_DOCKER_CONTAINER")
+                if not container_name:
+                    return JSONResponse({"items": [], "next": None})
+
+                # Get query params
+                params = request.query_params
+                tail = params.get("tail", "100")
+
+                try:
+                    # Run docker logs to get recent output
+                    result = subprocess.run(  # noqa: S603, ASYNC221
+                        ["docker", "logs", "--tail", tail, container_name],  # noqa: S607
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        timeout=5,
+                    )
+
+                    # Parse logs into items
+                    items = []
+                    lines = result.stdout.strip().split("\n") if result.stdout else []
+
+                    for i, line in enumerate(lines):
+                        if line.strip():
+                            items.append(
+                                {
+                                    "id": i,
+                                    "stream": "mixed",
+                                    "log": line,
+                                    "container_name": container_name,
+                                }
+                            )
+
+                    return JSONResponse({"items": items, "next": len(items) - 1 if items else None})
+
+                except subprocess.TimeoutExpired:
+                    return JSONResponse({"error": "Docker logs timeout"}, status_code=500)
+                except Exception as e:
+                    return JSONResponse({"error": f"Failed to get logs: {e!s}"}, status_code=500)
 
         @self.custom_route("/openapi.json", methods=["GET"])
         async def openapi_spec(request: Request) -> Response:

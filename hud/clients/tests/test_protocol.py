@@ -37,7 +37,13 @@ class MockClient(BaseHUDClient):
 
     async def _list_resources_impl(self) -> list[types.Resource]:
         """Minimal resource listing implementation for tests."""
-        return []
+        from pydantic import AnyUrl
+
+        return [
+            types.Resource(
+                uri=AnyUrl("telemetry://live"), name="telemetry", description="Live telemetry data"
+            )
+        ]
 
     async def _call_tool(self, tool_call: MCPToolCall) -> MCPToolResult:
         if tool_call.name == "test_tool":

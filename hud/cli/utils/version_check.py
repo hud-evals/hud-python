@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -26,6 +27,9 @@ import httpx
 from packaging import version
 
 from hud.utils.hud_console import HUDConsole
+
+# Logger for version checking
+logger = logging.getLogger(__name__)
 
 # Cache location for version check data
 CACHE_DIR = Path.home() / ".hud" / ".cache"
@@ -218,7 +222,7 @@ def display_update_prompt(console: HUDConsole | None = None) -> None:
         console: HUDConsole instance for output. If None, creates a new one.
     """
     if console is None:
-        console = HUDConsole()
+        console = HUDConsole(logger=logger)
 
     try:
         info = check_for_updates()
@@ -231,11 +235,8 @@ def display_update_prompt(console: HUDConsole | None = None) -> None:
                 f"   Run: [bold yellow]uv tool upgrade hud-python[/bold yellow] to update"
             )
 
-            # Display as a subtle but noticeable panel
-            console._stdout_console.print(
-                f"\n[yellow]{update_msg}[/yellow]\n",
-                highlight=False,
-            )
+            # Display using console info
+            console.info(f"[yellow]{update_msg}[/yellow]")
     except Exception:  # noqa: S110
         # Never let version checking disrupt the user's workflow
         pass
