@@ -230,7 +230,7 @@ class AgentResponse(BaseModel):
     tool_calls: list[MCPToolCall] = Field(default_factory=list)
     done: bool = Field(default=False)
 
-    # --- TELEMETRY [hud.so] ---
+    # --- TELEMETRY [hud.ai] ---
     # Responses
     content: str | None = Field(default=None)
     reasoning: str | None = Field(default=None)

@@ -1,19 +1,30 @@
 # syntax=docker/dockerfile:1
+# Local development Dockerfile that uses local hud-python
 FROM hudevals/hud-browser-base:latest AS setup
 
 WORKDIR /app
 
+# Layer 0: Install local hud-python
+# Copy local hud-python source (build context is repo root)
+COPY hud /app/hud-python/hud/
+COPY pyproject.toml /app/hud-python/
+COPY README.md /app/hud-python/
+COPY LICENSE /app/hud-python/
+
+# Install local hud-python
+RUN cd /app/hud-python && uv pip install --system --break-system-packages -e .
+
 # Layer 1: Install server dependencies
-COPY server/pyproject.toml /app/server/
+COPY environments/browser/server/pyproject.toml /app/server/
 RUN cd /app/server && uv pip install --system --break-system-packages .
 
 # Layer 2: Install environment dependencies
-COPY environment/pyproject.toml /app/environment/
+COPY environments/browser/environment/pyproject.toml /app/environment/
 RUN cd /app/environment && uv pip install --system --break-system-packages .
 
 # Layer 3: Copy source code (changes here don't invalidate dependency layers)
-COPY server/ /app/server/
-COPY environment/ /app/environment/
+COPY environments/browser/server/ /app/server/
+COPY environments/browser/environment/ /app/environment/
 
 # Auto-discover and install/build all frontend apps
 RUN set -e; \
@@ -58,3 +69,4 @@ CMD ["sh", "-c", "\
       sleep 5 && cd /app/server && exec python3 -m server.main; \
     fi\
 "]
+

@@ -55,7 +55,7 @@ def ensure_vllm_deployed(
     hud_console.info("Waiting for vLLM server to be ready...")
     start_time = time.time()
     with hud_console.progress() as progress:
-        progress.update("Checking deployment status (see live status on https://hud.so/models)")
+        progress.update("Checking deployment status (see live status on https://hud.ai/models)")
         while True:
             if time.time() - start_time > timeout:
                 hud_console.error("Timeout waiting for vLLM deployment")
@@ -139,7 +139,7 @@ def run_remote_training(
     hud_console.section_title("Model Selection")
 
     # Fetch existing models
-    hud_console.info("Fetching your models from https://hud.so/models")
+    hud_console.info("Fetching your models from https://hud.ai/models")
 
     try:
         models = rl_api.list_models()
@@ -312,7 +312,7 @@ def run_remote_training(
         # gpu_table.add_column("Price/hr", style="yellow")
 
         # for gpu, info in GPU_PRICING.items():
-        #     gpu_table.add_row(gpu, info["memory"], "see pricing on hud.so")
+        #     gpu_table.add_row(gpu, info["memory"], "see pricing on hud.ai")
 
         # console.print(gpu_table)
 

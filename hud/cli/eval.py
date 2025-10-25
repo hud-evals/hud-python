@@ -53,7 +53,7 @@ def get_available_models() -> list[dict[str, str | None]]:
     try:
         from hud.cli.rl import rl_api
 
-        hud_console.info("Fetching your models from https://hud.so/models")
+        hud_console.info("Fetching your models from https://hud.ai/models")
         models = rl_api.list_models()
 
         # Filter for ready models only and sort by recency
@@ -771,7 +771,7 @@ def eval_command(
     # Check for HUD_API_KEY if using HUD services
     if not settings.api_key:
         hud_console.warning("HUD_API_KEY not set. Some features may be limited.")
-        hud_console.info("Get your API key at: https://hud.so")
+        hud_console.info("Get your API key at: https://hud.ai")
         hud_console.info("Set it in your environment or run: hud set HUD_API_KEY=your-key-here")
 
     # Parse allowed tools

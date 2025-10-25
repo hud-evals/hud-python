@@ -5,7 +5,12 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": ["run", "--rm", "-i", "deepresearch:latest"]
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "deepresearch:0.1.7"
+        ]
       }
     },
     "setup_tool": {
@@ -26,7 +31,12 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": ["run", "--rm", "-i", "deepresearch:latest"]
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "deepresearch:0.1.7"
+        ]
       }
     },
     "setup_tool": {
@@ -47,7 +57,12 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": ["run", "--rm", "-i", "deepresearch:latest"]
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "deepresearch:0.1.7"
+        ]
       }
     },
     "setup_tool": {
@@ -68,7 +83,12 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": ["run", "--rm", "-i", "deepresearch:latest"]
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "deepresearch:0.1.7"
+        ]
       }
     },
     "setup_tool": {
@@ -89,7 +109,12 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": ["run", "--rm", "-i", "deepresearch:latest"]
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "deepresearch:0.1.7"
+        ]
       }
     },
     "setup_tool": {
@@ -110,7 +135,12 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": ["run", "--rm", "-i", "deepresearch:latest"]
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "deepresearch:0.1.7"
+        ]
       }
     },
     "setup_tool": {
@@ -131,7 +161,12 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": ["run", "--rm", "-i", "deepresearch:latest"]
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "deepresearch:0.1.7"
+        ]
       }
     },
     "setup_tool": {
@@ -152,7 +187,12 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": ["run", "--rm", "-i", "deepresearch:latest"]
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "deepresearch:0.1.7"
+        ]
       }
     },
     "setup_tool": {
@@ -173,7 +213,12 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": ["run", "--rm", "-i", "deepresearch:latest"]
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "deepresearch:0.1.7"
+        ]
       }
     },
     "setup_tool": {
@@ -194,7 +239,12 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": ["run", "--rm", "-i", "deepresearch:latest"]
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "deepresearch:0.1.7"
+        ]
       }
     },
     "setup_tool": {
@@ -215,7 +265,12 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": ["run", "--rm", "-i", "deepresearch:latest"]
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "deepresearch:0.1.7"
+        ]
       }
     },
     "setup_tool": {
@@ -236,7 +291,12 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": ["run", "--rm", "-i", "deepresearch:latest"]
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "deepresearch:0.1.7"
+        ]
       }
     },
     "setup_tool": {
@@ -257,7 +317,12 @@
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": ["run", "--rm", "-i", "deepresearch:latest"]
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "deepresearch:0.1.7"
+        ]
       }
     },
     "setup_tool": {
@@ -274,11 +339,16 @@
   },
   {
     "id": "SQA_00020",
-    "prompt": "In the series \"El guardián invisible,\" who portrays the character Alfonso Álvarez de Toledo?\n\nReturn just the answer, no other text.",
+    "prompt": "In the series \"El guardi\u00e1n invisible,\" who portrays the character Alfonso \u00c1lvarez de Toledo?\n\nReturn just the answer, no other text.",
     "mcp_config": {
       "local": {
         "command": "docker",
-        "args": ["run", "--rm", "-i", "deepresearch:latest"]
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "deepresearch:0.1.7"
+        ]
       }
     },
     "setup_tool": {
@@ -288,7 +358,7 @@
     "evaluate_tool": {
       "name": "evaluate",
       "arguments": {
-        "expected_answer": "Ramón Barea"
+        "expected_answer": "Ram\u00f3n Barea"
       }
     },
     "system_prompt": "You are an AI research assistant that can search the web and fetch content to answer questions. You must call the answer tool with your final answer when you have finished your research. Call search tool with the exact search query then fetch tool with the most promising URLs. After calling answer, stop generating - your task is complete. Do not call random urls. Call the urls that are returned by search. If you do not do this you will inevitably get the wrong answer. Call tools one by one and do not call them all at a time. Again, you must call the answer tool with your final answer when you have finished your research, or else the task will not be completed and you will not get a reward. Simply printing your final answer is not enough."

@@ -16,4 +16,4 @@ image = "rubrics:dev"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = [ "controller", "environment",]
+packages = [ "server", "environment",]

@@ -408,7 +408,7 @@ def _print_trace_url(task_run_id: str) -> None:
     if not (settings.telemetry_enabled and settings.api_key):
         return
 
-    url = f"https://hud.so/trace/{task_run_id}"
+    url = f"https://hud.ai/trace/{task_run_id}"
     header = "🚀 See your agent live at:"
 
     # ANSI color codes
@@ -447,7 +447,7 @@ def _print_trace_complete_url(task_run_id: str, error_occurred: bool = False) ->
     if not (settings.telemetry_enabled and settings.api_key):
         return
 
-    url = f"https://hud.so/trace/{task_run_id}"
+    url = f"https://hud.ai/trace/{task_run_id}"
 
     # ANSI color codes
     GREEN = "\033[92m"

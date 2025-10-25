@@ -95,7 +95,7 @@ class FastMCPHUDClient(BaseHUDClient):
                             raise RuntimeError(
                                 "Authentication failed for HUD API. "
                                 "Please ensure your HUD_API_KEY environment variable is set correctly."  # noqa: E501
-                                "You can get an API key at https://hud.so"
+                                "You can get an API key at https://hud.ai"
                             ) from e
                     # Generic 401 error
                     raise RuntimeError(

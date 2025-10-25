@@ -253,10 +253,23 @@ def debug(
         else:
             # Assume it's an image name
             image = first_param
-            from .utils.docker import build_run_command
+            from .utils.docker import create_docker_run_command
 
-            # Image-only mode: do not auto-inject local .env
-            command = build_run_command(image, docker_args)
+            # For image mode, check if there's a .env file in current directory
+            # and use it if available (similar to hud dev behavior)
+            cwd = Path.cwd()
+            if (cwd / ".env").exists():
+                # Use create_docker_run_command to load .env from current directory
+                command = create_docker_run_command(
+                    image,
+                    docker_args=docker_args,
+                    env_dir=cwd,  # Load .env from current directory
+                )
+            else:
+                # No .env file, use basic command without env loading
+                from .utils.docker import build_run_command
+
+                command = build_run_command(image, docker_args)
     else:
         console.print(
             "[red]Error: Must specify a directory, Docker image, --config, or --cursor[/red]"
@@ -741,14 +754,14 @@ def remove(
 
 @app.command()
 def init(
-    name: str = typer.Argument(None, help="Environment name (default: current directory name)"),
+    name: str = typer.Argument(None, help="Environment name (default: chosen preset name)"),
     preset: str | None = typer.Option(
         None,
         "--preset",
         "-p",
         help="Preset to use: blank, deep-research, browser, rubrics. If omitted, you'll choose interactively.",  # noqa: E501
     ),
-    directory: str = typer.Option(".", "--dir", "-d", help="Target directory"),
+    directory: str = typer.Option(".", "--dir", "-d", help="Parent directory for the environment"),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing files"),
 ) -> None:
     """🚀 Initialize a new HUD environment with minimal boilerplate.
@@ -760,8 +773,8 @@ def init(
     - Required setup/evaluate tools
 
     Examples:
-        hud init                    # Use current directory name
-        hud init my-env             # Create in ./my-env/
+        hud init                    # Choose preset interactively, create ./preset-name/
+        hud init my-env             # Create new directory ./my-env/
         hud init my-env --dir /tmp  # Create in /tmp/my-env/
     """
     create_environment(name, directory, force, preset)

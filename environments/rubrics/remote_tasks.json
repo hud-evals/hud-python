@@ -1,18 +1,17 @@
 [
   {
-    "id": "finance_rubric_00000",
     "prompt": "I need help analyzing Valero's refining margins in early 2024. Based on its FY2023 10-K and Q1 2024 10-Q, can you calculate the refining margin per barrel? And compare year over year? \n\nIf margins were getting squeezed while throughput volumes were consistent, figure out what drove that - is it because crude differentials were tightening up, or could it be related to how they timed their maintenance schedules? And based on the findings at that time, what would have been implied about their optimization approach heading into Q2 2024?",
     "mcp_config": {
-      "local": {
-        "command": "docker",
-        "args": [
-          "run",
-          "--rm",
-          "-i",
-          "--env-file",
-          ".env",
-          "rubrics:0.1.0"
-        ]
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudpython/rubrics:0.1.0",
+          "Env-Edgar-Identity": "${EDGAR_IDENTITY}",
+          "Env-Exa-Api-Key": "${EXA_API_KEY}",
+          "Env-Anthropic-Api-Key": "${ANTHROPIC_API_KEY}",
+          "Env-Openai-Api-Key": "${OPENAI_API_KEY}"
+        }
       }
     },
     "setup_tool": {
@@ -82,22 +81,21 @@
         ]
       }
     },
-    "system_prompt": "You are an AI finance research assistant specializing in public company filings analysis. You must call the answer tool with your final answer when you have finished your research. Search for companies by ticker or name, then retrieve the relevant SEC filings needed to answer the question. Extract financial data and segment information from filings as needed for your analysis. You have access to tools that you must call one-at-a-time. As an ABSOLUTE last resort you can use web search and fetch if you're unable to use the SEC tools.\n\nPull the relevant documents, analyze them thoroughly, and provide your answer in a well-structured format. Call tools one-at-a-time. When finished, call the answer tool with your final answer or else the task will not be completed. Once you have gathered the information needed to answer the question, call the answer tool."
+    "id": "finance_rubric_00000"
   },
   {
-    "id": "finance_rubric_00001",
     "prompt": "Using T-Mobile's Q1 2024 and Q3 2024 10-Qs, calculate wireless service margins and ARPU if disclosed in segment data. Should margins compress despite ARPU growth and subscriber additions, would this reflect promotional intensity to defend share or network infrastructure costs outpacing revenue? What does that imply for fixed cost leverage as the network scales?",
     "mcp_config": {
-      "local": {
-        "command": "docker",
-        "args": [
-          "run",
-          "--rm",
-          "-i",
-          "--env-file",
-          ".env",
-          "rubrics:0.1.0"
-        ]
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudpython/rubrics:0.1.0",
+          "Env-Edgar-Identity": "${EDGAR_IDENTITY}",
+          "Env-Exa-Api-Key": "${EXA_API_KEY}",
+          "Env-Anthropic-Api-Key": "${ANTHROPIC_API_KEY}",
+          "Env-Openai-Api-Key": "${OPENAI_API_KEY}"
+        }
       }
     },
     "setup_tool": {
@@ -203,22 +201,21 @@
         ]
       }
     },
-    "system_prompt": "You are an AI finance research assistant specializing in public company filings analysis. You must call the answer tool with your final answer when you have finished your research. Search for companies by ticker or name, then retrieve the relevant SEC filings needed to answer the question. Extract financial data and segment information from filings as needed for your analysis. You have access to tools that you must call one-at-a-time. As an ABSOLUTE last resort you can use web search and fetch if you're unable to use the SEC tools.\n\nPull the relevant documents, analyze them thoroughly, and provide your answer in a well-structured format. Call tools one-at-a-time. When finished, call the answer tool with your final answer or else the task will not be completed. Once you have gathered the information needed to answer the question, call the answer tool."
+    "id": "finance_rubric_00001"
   },
   {
-    "id": "finance_rubric_00002",
     "prompt": "Using PNC Financial's Q2 2024 and Q2 2023 10-Qs, calculate loan growth and operating cash flow if disclosed in the statements. Should loan balances expand while cash generation contracts, would this reflect provision expense buildup or deposit funding cost pressure? What does that imply for capital deployment efficiency and near-term profitability?",
     "mcp_config": {
-      "local": {
-        "command": "docker",
-        "args": [
-          "run",
-          "--rm",
-          "-i",
-          "--env-file",
-          ".env",
-          "rubrics:0.1.0"
-        ]
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudpython/rubrics:0.1.0",
+          "Env-Edgar-Identity": "${EDGAR_IDENTITY}",
+          "Env-Exa-Api-Key": "${EXA_API_KEY}",
+          "Env-Anthropic-Api-Key": "${ANTHROPIC_API_KEY}",
+          "Env-Openai-Api-Key": "${OPENAI_API_KEY}"
+        }
       }
     },
     "setup_tool": {
@@ -292,22 +289,21 @@
         ]
       }
     },
-    "system_prompt": "You are an AI finance research assistant specializing in public company filings analysis. You must call the answer tool with your final answer when you have finished your research. Search for companies by ticker or name, then retrieve the relevant SEC filings needed to answer the question. Extract financial data and segment information from filings as needed for your analysis. You have access to tools that you must call one-at-a-time. As an ABSOLUTE last resort you can use web search and fetch if you're unable to use the SEC tools.\n\nPull the relevant documents, analyze them thoroughly, and provide your answer in a well-structured format. Call tools one-at-a-time. When finished, call the answer tool with your final answer or else the task will not be completed. Once you have gathered the information needed to answer the question, call the answer tool."
+    "id": "finance_rubric_00002"
   },
   {
-    "id": "finance_rubric_00003",
     "prompt": "Using Boeing's Q3 2024 10-Q, calculate operating margins by segment if disclosed and compare to FY2023 10-K levels. Should defense margins compress while backlog grows, would this reflect fixed-price contract overruns or engineering labor inflation? What does that imply for program profitability and bid discipline on new awards?",
     "mcp_config": {
-      "local": {
-        "command": "docker",
-        "args": [
-          "run",
-          "--rm",
-          "-i",
-          "--env-file",
-          ".env",
-          "rubrics:0.1.0"
-        ]
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudpython/rubrics:0.1.0",
+          "Env-Edgar-Identity": "${EDGAR_IDENTITY}",
+          "Env-Exa-Api-Key": "${EXA_API_KEY}",
+          "Env-Anthropic-Api-Key": "${ANTHROPIC_API_KEY}",
+          "Env-Openai-Api-Key": "${OPENAI_API_KEY}"
+        }
       }
     },
     "setup_tool": {
@@ -385,22 +381,21 @@
         ]
       }
     },
-    "system_prompt": "You are an AI finance research assistant specializing in public company filings analysis. You must call the answer tool with your final answer when you have finished your research. Search for companies by ticker or name, then retrieve the relevant SEC filings needed to answer the question. Extract financial data and segment information from filings as needed for your analysis. You have access to tools that you must call one-at-a-time. As an ABSOLUTE last resort you can use web search and fetch if you're unable to use the SEC tools.\n\nPull the relevant documents, analyze them thoroughly, and provide your answer in a well-structured format. Call tools one-at-a-time. When finished, call the answer tool with your final answer or else the task will not be completed. Once you have gathered the information needed to answer the question, call the answer tool."
+    "id": "finance_rubric_00003"
   },
   {
-    "id": "finance_rubric_00004",
     "prompt": "Using Amazon's FY2024 10-K, calculate inventory turnover and fulfillment costs as a percentage of revenue if disclosed in the statements. Should turnover deteriorate while online mix reaches 65% yet fulfillment intensity remains stable, would this reflect assortment expansion or promotional cadence changes? What does that imply for working capital efficiency?",
     "mcp_config": {
-      "local": {
-        "command": "docker",
-        "args": [
-          "run",
-          "--rm",
-          "-i",
-          "--env-file",
-          ".env",
-          "rubrics:0.1.0"
-        ]
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudpython/rubrics:0.1.0",
+          "Env-Edgar-Identity": "${EDGAR_IDENTITY}",
+          "Env-Exa-Api-Key": "${EXA_API_KEY}",
+          "Env-Anthropic-Api-Key": "${ANTHROPIC_API_KEY}",
+          "Env-Openai-Api-Key": "${OPENAI_API_KEY}"
+        }
       }
     },
     "setup_tool": {
@@ -482,22 +477,21 @@
         ]
       }
     },
-    "system_prompt": "You are an AI finance research assistant specializing in public company filings analysis. You must call the answer tool with your final answer when you have finished your research. Search for companies by ticker or name, then retrieve the relevant SEC filings needed to answer the question. Extract financial data and segment information from filings as needed for your analysis. You have access to tools that you must call one-at-a-time. As an ABSOLUTE last resort you can use web search and fetch if you're unable to use the SEC tools.\n\nPull the relevant documents, analyze them thoroughly, and provide your answer in a well-structured format. Call tools one-at-a-time. When finished, call the answer tool with your final answer or else the task will not be completed. Once you have gathered the information needed to answer the question, call the answer tool."
+    "id": "finance_rubric_00004"
   },
   {
-    "id": "finance_rubric_00005",
     "prompt": "Using Moderna's Q1, Q2, and Q3 2024 10-Qs, calculate R&D spend as a percentage of revenue and operating cash burn if disclosed in the cash flow statements. Should burn rate accelerate while Phase III programs advance, would this reflect CRO cost inflation or inefficient trial design? What does that imply for runway and financing needs?",
     "mcp_config": {
-      "local": {
-        "command": "docker",
-        "args": [
-          "run",
-          "--rm",
-          "-i",
-          "--env-file",
-          ".env",
-          "rubrics:0.1.0"
-        ]
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudpython/rubrics:0.1.0",
+          "Env-Edgar-Identity": "${EDGAR_IDENTITY}",
+          "Env-Exa-Api-Key": "${EXA_API_KEY}",
+          "Env-Anthropic-Api-Key": "${ANTHROPIC_API_KEY}",
+          "Env-Openai-Api-Key": "${OPENAI_API_KEY}"
+        }
       }
     },
     "setup_tool": {
@@ -587,22 +581,21 @@
         ]
       }
     },
-    "system_prompt": "You are an AI finance research assistant specializing in public company filings analysis. You must call the answer tool with your final answer when you have finished your research. Search for companies by ticker or name, then retrieve the relevant SEC filings needed to answer the question. Extract financial data and segment information from filings as needed for your analysis. You have access to tools that you must call one-at-a-time. As an ABSOLUTE last resort you can use web search and fetch if you're unable to use the SEC tools.\n\nPull the relevant documents, analyze them thoroughly, and provide your answer in a well-structured format. Call tools one-at-a-time. When finished, call the answer tool with your final answer or else the task will not be completed. Once you have gathered the information needed to answer the question, call the answer tool."
+    "id": "finance_rubric_00005"
   },
   {
-    "id": "finance_rubric_00006",
     "prompt": "Per Netflix's 2024 Proxy Statement (DEF 14A), compile a table of CEO and CFO total compensation (salary, bonus, equity grant-date value) alongside three-year total shareholder return (2022 -2024). Apply the ISS quantitative pay-for-performance test and tabulate percentile ranks plus the overall score. In three sentences, state whether performance-vesting targets exceeded peer median and recommend a Say-on-Pay vote.",
     "mcp_config": {
-      "local": {
-        "command": "docker",
-        "args": [
-          "run",
-          "--rm",
-          "-i",
-          "--env-file",
-          ".env",
-          "rubrics:0.1.0"
-        ]
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudpython/rubrics:0.1.0",
+          "Env-Edgar-Identity": "${EDGAR_IDENTITY}",
+          "Env-Exa-Api-Key": "${EXA_API_KEY}",
+          "Env-Anthropic-Api-Key": "${ANTHROPIC_API_KEY}",
+          "Env-Openai-Api-Key": "${OPENAI_API_KEY}"
+        }
       }
     },
     "setup_tool": {
@@ -764,22 +757,21 @@
         ]
       }
     },
-    "system_prompt": "You are an AI finance research assistant specializing in public company filings analysis. You must call the answer tool with your final answer when you have finished your research. Search for companies by ticker or name, then retrieve the relevant SEC filings needed to answer the question. Extract financial data and segment information from filings as needed for your analysis. You have access to tools that you must call one-at-a-time. As an ABSOLUTE last resort you can use web search and fetch if you're unable to use the SEC tools.\n\nPull the relevant documents, analyze them thoroughly, and provide your answer in a well-structured format. Call tools one-at-a-time. When finished, call the answer tool with your final answer or else the task will not be completed. Once you have gathered the information needed to answer the question, call the answer tool."
+    "id": "finance_rubric_00006"
   },
   {
-    "id": "finance_rubric_00007",
     "prompt": "Based on Oracle's FY2024 10-K, what were the operating expenses in 2024, broken out by segment? Which segment had the highest operating expenses and which segment had the lowest?",
     "mcp_config": {
-      "local": {
-        "command": "docker",
-        "args": [
-          "run",
-          "--rm",
-          "-i",
-          "--env-file",
-          ".env",
-          "rubrics:0.1.0"
-        ]
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudpython/rubrics:0.1.0",
+          "Env-Edgar-Identity": "${EDGAR_IDENTITY}",
+          "Env-Exa-Api-Key": "${EXA_API_KEY}",
+          "Env-Anthropic-Api-Key": "${ANTHROPIC_API_KEY}",
+          "Env-Openai-Api-Key": "${OPENAI_API_KEY}"
+        }
       }
     },
     "setup_tool": {
@@ -817,22 +809,20 @@
         ]
       }
     },
-    "system_prompt": "You are an AI finance research assistant specializing in public company filings analysis. You must call the answer tool with your final answer when you have finished your research. Search for companies by ticker or name, then retrieve the relevant SEC filings needed to answer the question. Extract financial data and segment information from filings as needed for your analysis. You have access to tools that you must call one-at-a-time. As an ABSOLUTE last resort you can use web search and fetch if you're unable to use the SEC tools.\n\nPull the relevant documents, analyze them thoroughly, and provide your answer in a well-structured format. Call tools one-at-a-time. When finished, call the answer tool with your final answer or else the task will not be completed. Once you have gathered the information needed to answer the question, call the answer tool."
+    "id": "finance_rubric_00007"
   },
   {
-    "id": "finance_rubric_00008",
     "prompt": "Per Sun Country Airlines' FY2024 Form 10-K, what were Sun's ASMs and RPMs for 2024, and what was the load factor?",
     "mcp_config": {
-      "local": {
-        "command": "docker",
-        "args": [
-          "run",
-          "--rm",
-          "-i",
-          "--env-file",
-          ".env",
-          "rubrics:0.1.0"
-        ]
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudpython/rubrics:0.1.0",
+          "Env-Exa-Api-Key": "${EXA_API_KEY}",
+          "Env-Anthropic-Api-Key": "${ANTHROPIC_API_KEY}",
+          "Env-Openai-Api-Key": "${OPENAI_API_KEY}"
+        }
       }
     },
     "setup_tool": {
@@ -862,22 +852,21 @@
         ]
       }
     },
-    "system_prompt": "You are an AI finance research assistant specializing in public company filings analysis. You must call the answer tool with your final answer when you have finished your research. Search for companies by ticker or name, then retrieve the relevant SEC filings needed to answer the question. Extract financial data and segment information from filings as needed for your analysis. You have access to tools that you must call one-at-a-time. As an ABSOLUTE last resort you can use web search and fetch if you're unable to use the SEC tools.\n\nPull the relevant documents, analyze them thoroughly, and provide your answer in a well-structured format. Call tools one-at-a-time. When finished, call the answer tool with your final answer or else the task will not be completed. Once you have gathered the information needed to answer the question, call the answer tool."
+    "id": "finance_rubric_00008"
   },
   {
-    "id": "finance_rubric_00009",
     "prompt": "Based on ExxonMobil's Q2 2025 10-Q, what were the crude oil and product purchases for the three months ended June 30, 2025, broken out by U.S. vs Non-U.S.? Which was higher and which was lower?",
     "mcp_config": {
-      "local": {
-        "command": "docker",
-        "args": [
-          "run",
-          "--rm",
-          "-i",
-          "--env-file",
-          ".env",
-          "rubrics:0.1.0"
-        ]
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudpython/rubrics:0.1.0",
+          "Env-Edgar-Identity": "${EDGAR_IDENTITY}",
+          "Env-Exa-Api-Key": "${EXA_API_KEY}",
+          "Env-Anthropic-Api-Key": "${ANTHROPIC_API_KEY}",
+          "Env-Openai-Api-Key": "${OPENAI_API_KEY}"
+        }
       }
     },
     "setup_tool": {
@@ -907,6 +896,6 @@
         ]
       }
     },
-    "system_prompt": "You are an AI finance research assistant specializing in public company filings analysis. You must call the answer tool with your final answer when you have finished your research. Search for companies by ticker or name, then retrieve the relevant SEC filings needed to answer the question. Extract financial data and segment information from filings as needed for your analysis. You have access to tools that you must call one-at-a-time. As an ABSOLUTE last resort you can use web search and fetch if you're unable to use the SEC tools.\n\nPull the relevant documents, analyze them thoroughly, and provide your answer in a well-structured format. Call tools one-at-a-time. When finished, call the answer tool with your final answer or else the task will not be completed. Once you have gathered the information needed to answer the question, call the answer tool."
+    "id": "finance_rubric_00009"
   }
 ]
