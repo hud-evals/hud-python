@@ -51,7 +51,7 @@ async def launch_app(app_name: str) -> str:
 
     # Automatically navigate to the app after launching
     try:
-        await playwright(action="navigate", url=app_url)
+        await playwright(action="navigate", url=app_url, wait_for_load_state="networkidle")
         # Give the page a moment to fully load
         await asyncio.sleep(1)
         return f"Launched {app_name} at {app_url} and navigated to it"
