@@ -223,7 +223,7 @@ async def get_filings(req: GetFilingsRequest) -> List[Dict[str, Any]]:
                 company.get_filings(form=req.form_type) if req.form_type else company.get_filings()
             )
         else:
-            filings = edgar_get_filings(form=req.form_type, count=req.limit)
+            filings = edgar_get_filings(form=req.form_type)
 
         for i, filing in enumerate(filings):
             if i >= req.limit:
