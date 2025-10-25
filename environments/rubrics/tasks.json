@@ -5,7 +5,7 @@
 		"mcp_config": {
 			"local": {
 				"command": "docker",
-				"args": ["run", "--rm", "-i", "rubrics:latest"]
+				"args": ["run", "--rm", "-i", "--env-file", ".env", "rubrics:latest"]
 			}
 		},
 		"setup_tool": {
@@ -103,7 +103,7 @@
 		"mcp_config": {
 			"local": {
 				"command": "docker",
-				"args": ["run", "--rm", "-i", "rubrics:latest"]
+				"args": ["run", "--rm", "-i", "--env-file", ".env", "rubrics:latest"]
 			}
 		},
 		"setup_tool": {

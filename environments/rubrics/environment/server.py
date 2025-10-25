@@ -144,7 +144,11 @@ app = FastAPI(title="SEC EDGAR Environment API", version="0.1.0")
 
 
 # Require SEC EDGAR identity via EDGAR_IDENTITY (format: "Your Name your.email@domain.com")
-set_identity(os.environ["EDGAR_IDENTITY"])
+_identity = os.getenv("EDGAR_IDENTITY")
+if not _identity:
+    raise ValueError("EDGAR_IDENTITY environment variable is required")
+set_identity(_identity)
+logger.info(f"SEC EDGAR identity set to: {_identity}")
 
 
 @app.get("/health")
@@ -212,9 +216,7 @@ async def get_filings(req: GetFilingsRequest) -> List[Dict[str, Any]]:
             filings = company.get_filings()
 
         results = []
-        for i, filing in enumerate(filings):
-            if i >= req.limit:
-                break
+        for filing in list(filings)[: req.limit]:
             results.append(
                 {
                     "filing_date": filing.filing_date.strftime("%Y-%m-%d")
