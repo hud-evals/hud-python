@@ -12,6 +12,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import typer
 import yaml
@@ -202,6 +203,61 @@ def get_existing_version(lock_path: Path) -> str | None:
         return None
 
 
+def extract_debugging_ports(telemetry: dict[str, Any]) -> list[int]:
+    """Extract debugging ports from telemetry URLs.
+
+    Args:
+        telemetry: Telemetry data from analyze_environment
+
+    Returns:
+        List of unique port numbers to expose
+    """
+    ports = set()
+
+    # Fields that might contain URLs with ports
+    url_fields = ["live_url", "vnc_url", "cdp_url", "debug_url", "websocket_url"]
+
+    for field in url_fields:
+        if field in telemetry:
+            try:
+                parsed = urlparse(telemetry[field])
+                if parsed.port:
+                    ports.add(parsed.port)
+                elif parsed.netloc and ":" in parsed.netloc:
+                    port_str = parsed.netloc.split(":")[-1]
+                    try:
+                        port = int(port_str)
+                        ports.add(port)
+                    except ValueError:
+                        pass
+            except Exception:  # noqa: S110
+                # Ignore parsing errors
+                pass
+
+    # Check services for common debugging ports
+    if "services" in telemetry:
+        services = telemetry.get("services", {})
+        # Common service to port mappings
+        service_ports = {
+            "novnc": 6080,
+            "vnc": 5900,
+            "chrome": 9222,
+            "firefox": 9223,
+            "webapp": 8080,
+            "api": 8000,
+            "debug": 5005,
+        }
+
+        for service, status in services.items():
+            if status == "running":
+                service_lower = service.lower()
+                for name, port in service_ports.items():
+                    if name in service_lower:
+                        ports.add(port)
+
+    return sorted(list(ports))
+
+
 def get_docker_image_digest(image: str) -> str | None:
     """Get the digest of a Docker image."""
     try:
@@ -329,10 +385,14 @@ async def analyze_mcp_environment(
 
         # Normalize to build's expected fields
         tools_list = full_analysis.get("tools", [])
+        hub_tools = full_analysis.get("hub_tools", {})
+
         return {
             "initializeMs": initialize_ms,
             "toolCount": len(tools_list),
             "tools": tools_list,
+            "hubTools": hub_tools,
+            "telemetry": full_analysis.get("telemetry", {}),
             "success": True,
         }
     except TimeoutError:
@@ -516,7 +576,9 @@ def build_environment(
     finally:
         loop.close()
 
-    hud_console.success(f"Analyzed environment: {analysis['toolCount']} tools found")
+    # Show analysis results including hub tools
+    tool_msg = f"Analyzed environment: {analysis['toolCount']} tools found"
+    hud_console.success(tool_msg)
 
     # Extract environment variables from Dockerfile
     dockerfile_path = env_dir / "Dockerfile"
@@ -580,6 +642,17 @@ def build_environment(
         },
     }
 
+    # Add telemetry data if available
+    telemetry = analysis.get("telemetry", {})
+    if telemetry:
+        lock_content["environment"]["telemetry"] = telemetry
+
+        # Extract debugging ports from telemetry
+        debugging_ports = extract_debugging_ports(telemetry)
+        if debugging_ports:
+            lock_content["environment"]["debuggingPorts"] = debugging_ports
+            hud_console.info(f"Detected debugging ports: {', '.join(map(str, debugging_ports))}")
+
     # Add environment variables section if any exist
     # Include env vars from .env file as well
     env_vars_from_file = set(env_from_file.keys()) if env_from_file else set()
@@ -624,6 +697,10 @@ def build_environment(
             }
             for tool in analysis["tools"]
         ]
+
+    # Add hub tools if present
+    if analysis.get("hubTools"):
+        lock_content["hubTools"] = analysis["hubTools"]
 
     # Write lock file
     lock_path = env_dir / "hud.lock.yaml"
