@@ -917,6 +917,7 @@ def eval(
             [
                 {"name": "Claude 4 Sonnet", "value": AgentType.CLAUDE},
                 {"name": "OpenAI Computer Use", "value": AgentType.OPENAI},
+                {"name": "Gemini Computer Use", "value": AgentType.GEMINI},
                 {"name": "vLLM (Local Server)", "value": AgentType.VLLM},
                 {"name": "LiteLLM (Multi-provider)", "value": AgentType.LITELLM},
             ]

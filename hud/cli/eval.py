@@ -188,6 +188,24 @@ def build_agent(
         else:
             return OperatorAgent(verbose=verbose)
 
+    elif agent_type == AgentType.GEMINI:
+        try:
+            from hud.agents import GeminiAgent
+        except ImportError as e:
+            hud_console.error(
+                "Gemini agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
+
+        gemini_kwargs: dict[str, Any] = {
+            "model": model or "gemini-2.5-computer-use-preview-10-2025",
+            "verbose": verbose,
+        }
+        if allowed_tools:
+            gemini_kwargs["allowed_tools"] = allowed_tools
+        return GeminiAgent(**gemini_kwargs)
+
     elif agent_type == AgentType.LITELLM:
         try:
             from hud.agents.lite_llm import LiteAgent
@@ -342,6 +360,17 @@ async def run_single_task(
 
         agent_class = OperatorAgent
         agent_config = {"verbose": verbose}
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+    elif agent_type == AgentType.GEMINI:
+        from hud.agents import GeminiAgent
+
+        agent_class = GeminiAgent
+        agent_config = {
+            "model": model or "gemini-2.5-computer-use-preview-10-2025",
+            "verbose": verbose,
+            "validate_api_key": False,
+        }
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
     elif agent_type == AgentType.LITELLM:
@@ -534,6 +563,26 @@ async def run_full_dataset(
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
 
+    elif agent_type == AgentType.GEMINI:
+        try:
+            from hud.agents import GeminiAgent
+
+            agent_class = GeminiAgent
+        except ImportError as e:
+            hud_console.error(
+                "Gemini agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
+
+        agent_config = {
+            "model": model or "gemini-2.5-computer-use-preview-10-2025",
+            "verbose": verbose,
+            "validate_api_key": False,
+        }
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+
     elif agent_type == AgentType.LITELLM:
         try:
             from hud.agents.lite_llm import LiteAgent
@@ -641,7 +690,7 @@ def eval_command(
     agent: AgentType = typer.Option(  # noqa: B008
         AgentType.CLAUDE,
         "--agent",
-        help="Agent backend to use (claude, openai, vllm for local server, or litellm)",
+        help="Agent backend to use (claude, gemini, openai, vllm for local servers, or litellm)",
     ),
     model: str | None = typer.Option(
         None,
@@ -755,6 +804,13 @@ def eval_command(
             hud_console.error("ANTHROPIC_API_KEY is required for Claude agent")
             hud_console.info(
                 "Set it in your environment or run: hud set ANTHROPIC_API_KEY=your-key-here"
+            )
+            raise typer.Exit(1)
+    elif agent == AgentType.GEMINI:
+        if not settings.gemini_api_key:
+            hud_console.error("GEMINI_API_KEY is required for Gemini agent")
+            hud_console.info(
+                "Set it in your environment or run: hud set GEMINI_API_KEY=your-key-here"
             )
             raise typer.Exit(1)
     elif agent == AgentType.OPENAI and not settings.openai_api_key:
