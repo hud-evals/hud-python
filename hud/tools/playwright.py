@@ -236,6 +236,14 @@ class PlaywrightTool(BaseTool):
             # Only create a new page if we didn't already reuse one above
             if self.page is None:
                 self.page = await self._browser_context.new_page()
+            # Reuse existing page if available (for CDP connections), otherwise create new one
+            pages = self._browser_context.pages
+            if pages:
+                self.page = pages[0]
+                logger.info("Reusing existing browser page")
+            else:
+                self.page = await self._browser_context.new_page()
+                logger.info("Created new browser page")
             logger.info("Playwright browser launched successfully")
 
     async def navigate(

@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import json
+import re
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -48,6 +50,140 @@ def increment_version(version_str: str, increment_type: str = "patch") -> str:
         return f"{major}.{minor + 1}.0"
     else:  # patch
         return f"{major}.{minor}.{patch + 1}"
+
+
+def find_task_files_in_env(env_dir: Path) -> list[Path]:
+    """Find all task files in an environment directory.
+
+    This looks for .json and .jsonl files that contain task definitions,
+    excluding config files and lock files.
+
+    Args:
+        env_dir: Environment directory to search
+
+    Returns:
+        List of task file paths
+    """
+    task_files: list[Path] = []
+
+    # Find all .json and .jsonl files
+    json_files = list(env_dir.glob("*.json")) + list(env_dir.glob("*.jsonl"))
+
+    # Filter out config files and lock files
+    for file in json_files:
+        # Skip hidden files, config files, and lock files
+        if (
+            file.name.startswith(".")
+            or file.name == "package.json"
+            or file.name == "tsconfig.json"
+            or file.name == "gcp.json"
+            or file.name.endswith(".lock.json")
+        ):
+            continue
+
+        # Check if it's a task file by looking for mcp_config
+        try:
+            with open(file, encoding="utf-8") as f:
+                content = json.load(f)
+
+            # It's a task file if it's a list with mcp_config entries
+            if (
+                isinstance(content, list)
+                and len(content) > 0
+                and any(isinstance(item, dict) and "mcp_config" in item for item in content)
+            ):
+                task_files.append(file)
+        except (json.JSONDecodeError, Exception):  # noqa: S112
+            continue
+
+    return task_files
+
+
+def update_tasks_json_versions(
+    env_dir: Path, base_name: str, old_version: str | None, new_version: str
+) -> list[Path]:
+    """Update image references in tasks.json files to use the new version.
+
+    Args:
+        env_dir: Environment directory
+        base_name: Base image name (without version)
+        old_version: Previous version (if any)
+        new_version: New version to use
+
+    Returns:
+        List of updated task files
+    """
+    hud_console = HUDConsole()
+    updated_files: list[Path] = []
+
+    for task_file in find_task_files_in_env(env_dir):
+        try:
+            with open(task_file, encoding="utf-8") as f:
+                tasks = json.load(f)
+            if not isinstance(tasks, list):
+                continue
+
+            modified = False
+
+            # Process each task
+            for task in tasks:
+                if not isinstance(task, dict) or "mcp_config" not in task:
+                    continue
+
+                mcp_config = task["mcp_config"]
+
+                # Handle local Docker format
+                if "local" in mcp_config and isinstance(mcp_config["local"], dict):
+                    local_config = mcp_config["local"]
+
+                    # Check for docker run args
+                    if "args" in local_config and isinstance(local_config["args"], list):
+                        for i, arg in enumerate(local_config["args"]):
+                            # Match image references
+                            if isinstance(arg, str) and (
+                                arg == f"{base_name}:latest"
+                                or (old_version and arg == f"{base_name}:{old_version}")
+                                or re.match(rf"^{re.escape(base_name)}:\d+\.\d+\.\d+$", arg)
+                            ):
+                                # Update to new version
+                                local_config["args"][i] = f"{base_name}:{new_version}"
+                                modified = True
+
+                # Handle HUD API format (remote MCP)
+                elif "hud" in mcp_config and isinstance(mcp_config["hud"], dict):
+                    hud_config = mcp_config["hud"]
+
+                    # Check headers for Mcp-Image
+                    if "headers" in hud_config and isinstance(hud_config["headers"], dict):
+                        headers = hud_config["headers"]
+
+                        if "Mcp-Image" in headers:
+                            image_ref = headers["Mcp-Image"]
+
+                            # Match various image formats
+                            if isinstance(image_ref, str) and ":" in image_ref:
+                                # Split into image name and tag
+                                image_name, _ = image_ref.rsplit(":", 1)
+
+                                if (
+                                    image_name == base_name  # Exact match
+                                    or image_name.endswith(f"/{base_name}")  # With prefix
+                                ):
+                                    # Update to new version, preserving the full image path
+                                    headers["Mcp-Image"] = f"{image_name}:{new_version}"
+                                    modified = True
+
+            # Save the file if modified
+            if modified:
+                with open(task_file, "w") as f:
+                    json.dump(tasks, f, indent=2)
+                updated_files.append(task_file)
+                hud_console.success(f"Updated {task_file.name} with version {new_version}")
+
+        except Exception as e:
+            hud_console.warning(f"Could not update {task_file.name}: {e}")
+
+    return updated_files
 
 
 def get_existing_version(lock_path: Path) -> str | None:
@@ -161,49 +297,42 @@ async def analyze_mcp_environment(
     hud_console = HUDConsole()
     env_vars = env_vars or {}
 
-    # Build Docker command to run the image
-    docker_cmd = ["docker", "run", "--rm", "-i"]
+    # Build Docker command to run the image, injecting any provided env vars
+    from hud.cli.utils.docker import build_env_flags
 
-    # Add environment variables
-    for key, value in env_vars.items():
-        docker_cmd.extend(["-e", f"{key}={value}"])
+    docker_cmd = ["docker", "run", "--rm", "-i", *build_env_flags(env_vars), image]
 
-    docker_cmd.append(image)
+    # Show full docker command being used for analysis
+    hud_console.dim_info("Command:", " ".join(docker_cmd))
 
-    # Create MCP config
-    config = {
-        "server": {"command": docker_cmd[0], "args": docker_cmd[1:] if len(docker_cmd) > 1 else []}
-    }
+    # Create MCP config consistently with analyze helpers
+    from hud.cli.analyze import parse_docker_command
+
+    mcp_config = parse_docker_command(docker_cmd)
 
     # Initialize client and measure timing
     start_time = time.time()
-    client = MCPClient(mcp_config=config, verbose=verbose, auto_trace=False)
+    client = MCPClient(mcp_config=mcp_config, verbose=verbose, auto_trace=False)
     initialized = False
 
     try:
         if verbose:
-            hud_console.info(f"Initializing MCP client with command: {' '.join(docker_cmd)}")
+            hud_console.info("Initializing MCP client...")
 
-        # Add timeout to fail fast instead of hanging (30 seconds)
+        # Add timeout to fail fast instead of hanging (60 seconds)
         await asyncio.wait_for(client.initialize(), timeout=60.0)
         initialized = True
         initialize_ms = int((time.time() - start_time) * 1000)
 
-        # Get tools
-        tools = await client.list_tools()
+        # Delegate to standard analysis helper for consistency
+        full_analysis = await client.analyze_environment()
 
-        # Extract tool information
-        tool_info = []
-        for tool in tools:
-            tool_dict = {"name": tool.name, "description": tool.description}
-            if hasattr(tool, "inputSchema") and tool.inputSchema:
-                tool_dict["inputSchema"] = tool.inputSchema
-            tool_info.append(tool_dict)
-
+        # Normalize to build's expected fields
+        tools_list = full_analysis.get("tools", [])
         return {
             "initializeMs": initialize_ms,
-            "toolCount": len(tools),
-            "tools": tool_info,
+            "toolCount": len(tools_list),
+            "tools": tools_list,
             "success": True,
         }
     except TimeoutError:
@@ -295,6 +424,10 @@ def build_environment(
         hud_console.error(f"Directory not found: {directory}")
         raise typer.Exit(1)
 
+    from hud.cli.utils.docker import require_docker_running
+
+    require_docker_running()
+
     # Step 1: Check for hud.lock.yaml (previous build)
     lock_path = env_dir / "hud.lock.yaml"
     base_name = None
@@ -355,13 +488,24 @@ def build_environment(
 
     hud_console.success(f"Built temporary image: {temp_tag}")
 
-    # Analyze the environment
+    # Analyze the environment (merge folder .env if present)
     hud_console.progress_message("Analyzing MCP environment...")
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        analysis = loop.run_until_complete(analyze_mcp_environment(temp_tag, verbose, env_vars))
+        # Merge .env from env_dir for analysis only
+        try:
+            from hud.cli.utils.docker import load_env_vars_for_dir
+
+            env_from_file = load_env_vars_for_dir(env_dir)
+        except Exception:
+            env_from_file = {}
+        merged_env_for_analysis = {**env_from_file, **(env_vars or {})}
+
+        analysis = loop.run_until_complete(
+            analyze_mcp_environment(temp_tag, verbose, merged_env_for_analysis)
+        )
     except Exception as e:
         hud_console.error(f"Failed to analyze MCP environment: {e}")
         hud_console.info("")
@@ -378,28 +522,24 @@ def build_environment(
     dockerfile_path = env_dir / "Dockerfile"
     required_env, optional_env = extract_env_vars_from_dockerfile(dockerfile_path)
 
-    # Merge user-provided env vars with detected ones
-    provided_env_vars: dict[str, str] = {}
-    missing_required = []
-    if env_vars:
-        # Use placeholders in lock file for any provided values to avoid storing secrets
-        provided_env_vars = {k: f"${{{k}}}" for k in env_vars}
-        # Track which required vars are still missing
-        missing_required = [e for e in required_env if e not in env_vars]
-
-        # Show what env vars were provided
-        hud_console.success(f"Using provided environment variables: {', '.join(env_vars.keys())}")
-    else:
-        missing_required = required_env[:]
-
-    # Warn about missing required variables
-    if missing_required:
-        hud_console.warning(
-            f"Missing required environment variables: {', '.join(missing_required)}"
-        )
+    # Show env vars detected from .env file
+    if env_from_file:
         hud_console.info(
-            "These can be added to the lock file after build or provided with -e flags"
+            f"Detected environment variables from .env file: {', '.join(sorted(env_from_file.keys()))}"  # noqa: E501
         )
+
+    # Create a complete set of all required variables for warning
+    all_required_for_warning = set(required_env)
+    all_required_for_warning.update(env_from_file.keys())
+
+    # Find which ones are missing (not provided via -e flags)
+    all_missing = all_required_for_warning - set(env_vars.keys() if env_vars else [])
+
+    if all_missing:
+        hud_console.warning(
+            f"Environment variables not provided via -e flags: {', '.join(sorted(all_missing))}"
+        )
+        hud_console.info("These will be added to the required list in the lock file")
 
     # Check for existing version and increment
     lock_path = env_dir / "hud.lock.yaml"
@@ -441,7 +581,13 @@ def build_environment(
     }
 
     # Add environment variables section if any exist
-    if missing_required or optional_env or provided_env_vars:
+    # Include env vars from .env file as well
+    env_vars_from_file = set(env_from_file.keys()) if env_from_file else set()
+
+    # Check if we have any env vars to document
+    has_env_vars = bool(required_env or optional_env or env_vars or env_vars_from_file)
+
+    if has_env_vars:
         lock_content["environment"]["variables"] = {}
 
         # Add note about editing environment variables
@@ -450,10 +596,21 @@ def build_environment(
             "Provided variables will be used when running the environment."
         )
 
-        if provided_env_vars:
-            lock_content["environment"]["variables"]["provided"] = provided_env_vars
-        if missing_required:
-            lock_content["environment"]["variables"]["required"] = missing_required
+        # Combine all required variables: from Dockerfile, .env file, and provided vars
+        all_required = set(required_env)
+
+        # Add all env vars from .env file to required
+        all_required.update(env_vars_from_file)
+
+        # Add all provided env vars to required
+        if env_vars:
+            all_required.update(env_vars.keys())
+
+        # Remove any that are optional - they stay in optional
+        all_required = all_required - set(optional_env)
+
+        if all_required:
+            lock_content["environment"]["variables"]["required"] = sorted(list(all_required))
         if optional_env:
             lock_content["environment"]["variables"]["optional"] = optional_env
 
@@ -571,6 +728,17 @@ def build_environment(
         local_ref = lock_content.get("images", {}).get("local", version_tag)
         save_to_registry(lock_content, local_ref, verbose)
 
+    # Update tasks.json files with new version
+    hud_console.progress_message("Updating task files with new version...")
+    updated_task_files = update_tasks_json_versions(
+        env_dir, base_name, existing_version, new_version
+    )
+
+    if updated_task_files:
+        hud_console.success(f"Updated {len(updated_task_files)} task file(s)")
+    else:
+        hud_console.dim_info("No task files found or updated", value="")
+
     # Print summary
     hud_console.section_title("Build Complete")
 
@@ -594,7 +762,7 @@ def build_environment(
     hud_console.section_title("Next Steps")
     hud_console.info("Test locally:")
     hud_console.command_example("hud dev", "Hot-reload development")
-    hud_console.command_example(f"hud run {latest_tag}", "Run the built image")
+    hud_console.command_example(f"hud run {version_tag}", "Run the built image")
     hud_console.info("")
     hud_console.info("Publish to registry:")
     hud_console.command_example("hud push", f"Push as {version_tag}")

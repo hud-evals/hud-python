@@ -109,8 +109,8 @@ The above example let's the agent play 2048 ([See replay](https://hud.so/trace/6
 RL using GRPO a Qwen2.5-VL model on any hud dataset:
 
 ```bash
-hud get hud-evals/basic-2048 # from HF
-hud rl basic-2048.json
+hud get hud-evals/2048-basic # from HF
+hud rl 2048-basic.json
 ```
 
 > See [agent training docs](https://docs.hud.so/train-agents/quickstart)
@@ -301,14 +301,14 @@ Train with the new interactive `hud rl` flow:
 uv tool install hud-python
 
 # Option A: Run directly from a HuggingFace dataset
-hud rl hud-evals/basic-2048
+hud rl hud-evals/2048-basic
 
 # Option B: Download first, modify, then train
-hud get hud-evals/basic-2048
-hud rl basic-2048.json
+hud get hud-evals/2048-basic
+hud rl 2048-basic.json
 
 # Optional: baseline evaluation
-hud eval basic-2048.json
+hud eval 2048-basic.json
 ```
 
 Supports multi‑turn RL for both:

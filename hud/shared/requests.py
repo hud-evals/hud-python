@@ -18,7 +18,11 @@ from hud.shared.exceptions import (
     HudRequestError,
     HudTimeoutError,
 )
-from hud.shared.hints import HUD_API_KEY_MISSING, RATE_LIMIT_HIT
+from hud.shared.hints import (
+    CREDITS_EXHAUSTED,
+    HUD_API_KEY_MISSING,
+    RATE_LIMIT_HIT,
+)
 
 # Set up logger
 logger = logging.getLogger("hud.http")
@@ -137,9 +141,13 @@ async def make_request(
                 raise HudTimeoutError(f"Request timed out: {e!s}") from None
             except httpx.HTTPStatusError as e:
                 err = HudRequestError.from_httpx_error(e)
-                if getattr(err, "status_code", None) == 429 and RATE_LIMIT_HIT not in err.hints:
+                code = getattr(err, "status_code", None)
+                if code == 429 and RATE_LIMIT_HIT not in err.hints:
                     logger.debug("Attaching RATE_LIMIT hint to 429 error")
                     err.hints.append(RATE_LIMIT_HIT)
+                elif code == 402 and CREDITS_EXHAUSTED not in err.hints:
+                    logger.debug("Attaching CREDITS_EXHAUSTED hint to 402 error")
+                    err.hints.append(CREDITS_EXHAUSTED)
                 raise err from None
             except httpx.RequestError as e:
                 if attempt <= max_retries:
@@ -234,9 +242,13 @@ def make_request_sync(
                 raise HudTimeoutError(f"Request timed out: {e!s}") from None
             except httpx.HTTPStatusError as e:
                 err = HudRequestError.from_httpx_error(e)
-                if getattr(err, "status_code", None) == 429 and RATE_LIMIT_HIT not in err.hints:
+                code = getattr(err, "status_code", None)
+                if code == 429 and RATE_LIMIT_HIT not in err.hints:
                     logger.debug("Attaching RATE_LIMIT hint to 429 error")
                     err.hints.append(RATE_LIMIT_HIT)
+                elif code == 402 and CREDITS_EXHAUSTED not in err.hints:
+                    logger.debug("Attaching CREDITS_EXHAUSTED hint to 402 error")
+                    err.hints.append(CREDITS_EXHAUSTED)
                 raise err from None
             except httpx.RequestError as e:
                 if attempt <= max_retries:

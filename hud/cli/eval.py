@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import typer
 
 import hud
 from hud.cli.utils.env_check import ensure_built, find_environment_dir
 from hud.settings import settings
+from hud.types import AgentType
 from hud.utils.group_eval import display_group_statistics, run_tasks_grouped
 from hud.utils.hud_console import HUDConsole
 
@@ -19,6 +20,28 @@ if TYPE_CHECKING:
     from hud.types import Task
 logger = logging.getLogger(__name__)
 hud_console = HUDConsole()
+
+
+def _tasks_use_local_mcp(tasks: list[Task]) -> bool:
+    """Return True if any task's MCP config uses a local command instead of a URL.
+
+    A config is considered local when a server entry contains a 'command' key and
+    does not provide a 'url'.
+    """
+    try:
+        for t in tasks:
+            cfg = getattr(t, "mcp_config", {}) or {}
+            if not isinstance(cfg, dict):
+                continue
+            for server_cfg in cfg.values():
+                if isinstance(server_cfg, dict) and (
+                    "command" in server_cfg and not server_cfg.get("url")
+                ):
+                    return True
+        return False
+    except Exception:
+        # Be conservative: if detection fails, do not block
+        return False
 
 
 def get_available_models() -> list[dict[str, str | None]]:
@@ -30,7 +53,7 @@ def get_available_models() -> list[dict[str, str | None]]:
     try:
         from hud.cli.rl import rl_api
 
-        hud_console.info("Fetching your models from https://hud.so/models")
+        hud_console.info("Fetching your models from https://hud.ai/models")
         models = rl_api.list_models()
 
         # Filter for ready models only and sort by recency
@@ -113,7 +136,7 @@ def _build_vllm_config(
 
 
 def build_agent(
-    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"],
+    agent_type: AgentType,
     *,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
@@ -123,11 +146,11 @@ def build_agent(
     """Create and return the requested agent type."""
 
     # Import agents lazily to avoid dependency issues
-    if agent_type == "integration_test":
+    if agent_type == AgentType.INTEGRATION_TEST:
         from hud.agents.misc.integration_test_agent import IntegrationTestRunner
 
         return IntegrationTestRunner(verbose=verbose)
-    elif agent_type == "vllm":
+    elif agent_type == AgentType.VLLM:
         # Create a generic OpenAI agent for vLLM server
         try:
             from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
@@ -147,7 +170,7 @@ def build_agent(
         )
         return GenericOpenAIChatAgent(**config)
 
-    elif agent_type == "openai":
+    elif agent_type == AgentType.OPENAI:
         try:
             from hud.agents import OperatorAgent
         except ImportError as e:
@@ -165,7 +188,7 @@ def build_agent(
         else:
             return OperatorAgent(verbose=verbose)
 
-    elif agent_type == "litellm":
+    elif agent_type == AgentType.LITELLM:
         try:
             from hud.agents.lite_llm import LiteAgent
         except ImportError as e:
@@ -209,7 +232,7 @@ def build_agent(
 async def run_single_task(
     source: str,
     *,
-    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = "claude",
+    agent_type: AgentType = AgentType.CLAUDE,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_steps: int = 10,
@@ -264,18 +287,44 @@ async def run_single_task(
             "Using first task from dataset (run with --full to run the entire dataset)..."
         )
 
-    task_prompt = task.prompt[:50] + "..." if len(task.prompt) > 50 else task.prompt
+    # Warn/confirm if the task uses local MCP config
+    try:
+        if group_size > 1 and _tasks_use_local_mcp([task]):
+            hud_console.warning(
+                "Detected a local MCP configuration (uses 'command' instead of a 'url')."
+            )
+            hud_console.info(
+                "Ensure there are no exposed port conflicts during Docker runs/builds in eval."
+            )
+            proceed = hud_console.confirm(
+                "Proceed with running local MCP servers for this evaluation?",
+                default=True,
+            )
+            if not proceed:
+                # Provide a helpful next step
+                hud_console.hint("You can convert tasks to remote with: hud convert <tasks_file>")
+                raise typer.Exit(1)
+            # Always show the convert hint for awareness
+            hud_console.hint(
+                "Avoid local port conflicts by converting to remote: hud convert <tasks_file>"
+            )
+    except typer.Exit:
+        raise
+    except Exception as e:
+        hud_console.debug(f"Local MCP confirmation skipped due to error: {e}")
+
+    task_prompt = task.prompt
 
     # Use grouped evaluation if group_size > 1
     agent_config: dict[str, Any] = {}
-    if agent_type == "integration_test":
+    if agent_type == AgentType.INTEGRATION_TEST:
         from hud.agents.misc.integration_test_agent import IntegrationTestRunner
 
         agent_class = IntegrationTestRunner
         agent_config = {"verbose": verbose}
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
-    elif agent_type == "vllm":
+    elif agent_type == AgentType.VLLM:
         # Special handling for vLLM
         from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
 
@@ -288,14 +337,14 @@ async def run_single_task(
             allowed_tools=allowed_tools,
             verbose=verbose,
         )
-    elif agent_type == "openai":
+    elif agent_type == AgentType.OPENAI:
         from hud.agents import OperatorAgent
 
         agent_class = OperatorAgent
         agent_config = {"verbose": verbose}
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
-    elif agent_type == "litellm":
+    elif agent_type == AgentType.LITELLM:
         from hud.agents.lite_llm import LiteAgent
 
         agent_class = LiteAgent
@@ -305,7 +354,7 @@ async def run_single_task(
         }
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
-    elif agent_type == "claude":
+    elif agent_type == AgentType.CLAUDE:
         from hud.agents import ClaudeAgent
 
         agent_class = ClaudeAgent
@@ -353,7 +402,7 @@ async def run_single_task(
 async def run_full_dataset(
     source: str,
     *,
-    agent_type: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = "claude",
+    agent_type: AgentType = AgentType.CLAUDE,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_concurrent: int = 30,
@@ -386,6 +435,56 @@ async def run_full_dataset(
         hud_console.error(f"No tasks found in: {source}")
         raise typer.Exit(1)
 
+    # Warn/confirm once if any task uses local MCP config
+    try:
+        if _tasks_use_local_mcp(tasks):
+            hud_console.warning(
+                "Detected local MCP configurations (use 'command' instead of a 'url')."
+            )
+            hud_console.info(
+                "When running many tasks concurrently, exposed host ports from Docker may conflict."
+            )
+            proceed = hud_console.confirm(
+                "Proceed with running local MCP servers for this evaluation?",
+                default=True,
+            )
+            if not proceed:
+                # Helpful hint when source is a file path
+                try:
+                    path = Path(source)
+                    if path.exists():
+                        hud_console.hint(
+                            f"You can convert tasks to remote with: hud convert {path.name}"
+                        )
+                    else:
+                        hud_console.hint(
+                            "You can convert tasks to remote with: hud convert <tasks_file>"
+                        )
+                except Exception:
+                    hud_console.hint(
+                        "You can convert tasks to remote with: hud convert <tasks_file>"
+                    )
+                raise typer.Exit(1)
+            # Always show the convert hint for awareness
+            try:
+                path = Path(source)
+                if path.exists():
+                    hud_console.hint(
+                        f"Convert to remote to avoid port conflicts: hud convert {path.name}"
+                    )
+                else:
+                    hud_console.hint(
+                        "Convert to remote to avoid port conflicts: hud convert <tasks_file>"
+                    )
+            except Exception:
+                hud_console.hint(
+                    "Convert to remote to avoid port conflicts: hud convert <tasks_file>"
+                )
+    except typer.Exit:
+        raise
+    except Exception as e:
+        hud_console.debug(f"Local MCP confirmation skipped due to error: {e}")
+
     # Convert Task objects to dicts for dataset runners
     dataset_or_tasks = [task.model_dump() for task in tasks]
 
@@ -395,12 +494,12 @@ async def run_full_dataset(
 
     # Build agent class + config for run_dataset
     agent_config: dict[str, Any]
-    if agent_type == "integration_test":  # --integration-test mode
+    if agent_type == AgentType.INTEGRATION_TEST:  # --integration-test mode
         from hud.agents.misc.integration_test_agent import IntegrationTestRunner
 
         agent_class = IntegrationTestRunner
         agent_config = {"verbose": verbose}
-    elif agent_type == "vllm":
+    elif agent_type == AgentType.VLLM:
         try:
             from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
 
@@ -419,7 +518,7 @@ async def run_full_dataset(
             allowed_tools=allowed_tools,
             verbose=verbose,
         )
-    elif agent_type == "openai":
+    elif agent_type == AgentType.OPENAI:
         try:
             from hud.agents import OperatorAgent
 
@@ -435,7 +534,7 @@ async def run_full_dataset(
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
 
-    elif agent_type == "litellm":
+    elif agent_type == AgentType.LITELLM:
         try:
             from hud.agents.lite_llm import LiteAgent
 
@@ -539,8 +638,8 @@ def eval_command(
         "--full",
         help="Run the entire dataset (omit for single-task debug mode)",
     ),
-    agent: Literal["claude", "openai", "vllm", "litellm", "integration_test"] = typer.Option(
-        "claude",
+    agent: AgentType = typer.Option(  # noqa: B008
+        AgentType.CLAUDE,
         "--agent",
         help="Agent backend to use (claude, openai, vllm for local server, or litellm)",
     ),
@@ -648,21 +747,21 @@ def eval_command(
 
     # We pass integration_test as the agent_type
     if integration_test:
-        agent = "integration_test"
+        agent = AgentType.INTEGRATION_TEST
 
     # Check for required API keys
-    if agent == "claude":
+    if agent == AgentType.CLAUDE:
         if not settings.anthropic_api_key:
             hud_console.error("ANTHROPIC_API_KEY is required for Claude agent")
             hud_console.info(
                 "Set it in your environment or run: hud set ANTHROPIC_API_KEY=your-key-here"
             )
             raise typer.Exit(1)
-    elif agent == "openai" and not settings.openai_api_key:
+    elif agent == AgentType.OPENAI and not settings.openai_api_key:
         hud_console.error("OPENAI_API_KEY is required for OpenAI agent")
         hud_console.info("Set it in your environment or run: hud set OPENAI_API_KEY=your-key-here")
         raise typer.Exit(1)
-    elif agent == "vllm":
+    elif agent == AgentType.VLLM:
         if model:
             hud_console.info(f"Using vLLM with model: {model}")
         else:
@@ -672,7 +771,7 @@ def eval_command(
     # Check for HUD_API_KEY if using HUD services
     if not settings.api_key:
         hud_console.warning("HUD_API_KEY not set. Some features may be limited.")
-        hud_console.info("Get your API key at: https://hud.so")
+        hud_console.info("Get your API key at: https://hud.ai")
         hud_console.info("Set it in your environment or run: hud set HUD_API_KEY=your-key-here")
 
     # Parse allowed tools

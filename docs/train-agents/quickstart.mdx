@@ -3,19 +3,31 @@ title: "RL Quickstart"
 icon: "graduation-cap"
 ---
 
+## Prerequisites
+
+- HUD API key: Remote training requires authentication. Set `HUD_API_KEY` before running:
+
+```bash
+export HUD_API_KEY="sk-hud-..."  # get one at https://hud.ai
+# Or persist it locally:
+hud set HUD_API_KEY=sk-hud-...
+```
+
+- Docker daemon: For local runs (using `--local`) or when training against a local Docker image, ensure Docker Desktop is installed and the Docker daemon is running.
+
 ## Quickstart
 
 Install and download a taskset:
 
 ```bash
 uv tool install hud-python
-hud get hud-evals/basic-2048
+hud get hud-evals/2048-basic
 ```
 
 ### 1) Simple: Train (remote by default)
 
 ```bash
-hud rl basic-2048.json
+hud rl 2048-basic.json
 ```
 
 This launches training remotely and automatically provisions a vLLM server and a trainer for you. You can monitor progress on https://hud.so. The server persists between runs, so you can rerun training or evaluate against the same endpoint.
@@ -23,7 +35,7 @@ This launches training remotely and automatically provisions a vLLM server and a
 Optional baseline first (Claude or Operator):
 
 ```bash
-hud eval basic-2048.json
+hud eval 2048-basic.json
 ```
 
 ### 2) Run on your own machine/remote
@@ -32,8 +44,8 @@ Use any provider with at least 2 GPUs (one for inference, one for training). Run
 
 ```bash
 uv tool install hud-python
-hud get hud-evals/basic-2048
-hud rl basic-2048.json --local
+hud get hud-evals/2048-basic
+hud rl 2048-basic.json --local
 ```
 
 ### Recommended setups

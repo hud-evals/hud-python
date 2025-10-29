@@ -26,6 +26,7 @@ from hud.shared.hints import (
     CLIENT_NOT_INITIALIZED,
     HUD_API_KEY_MISSING,
     INVALID_CONFIG,
+    PRO_PLAN_REQUIRED,
     RATE_LIMIT_HIT,
     TOOL_NOT_FOUND,
 )
@@ -201,6 +202,22 @@ class TestHudRequestError:
         """Test that 403 status adds authentication hint."""
         error = HudRequestError("Forbidden", status_code=403)
         assert HUD_API_KEY_MISSING in error.hints
+
+    def test_403_pro_plan_message_sets_pro_hint(self):
+        """403 with Pro wording should map to PRO_PLAN_REQUIRED, not auth."""
+        error = HudRequestError("Feature requires Pro plan", status_code=403)
+        assert PRO_PLAN_REQUIRED in error.hints
+        assert HUD_API_KEY_MISSING not in error.hints
+
+    def test_403_pro_plan_detail_sets_pro_hint(self):
+        """403 with detail indicating Pro should map to PRO_PLAN_REQUIRED."""
+        error = HudRequestError(
+            "Forbidden",
+            status_code=403,
+            response_json={"detail": "Requires Pro plan"},
+        )
+        assert PRO_PLAN_REQUIRED in error.hints
+        assert HUD_API_KEY_MISSING not in error.hints
 
     def test_429_adds_rate_limit_hint(self):
         """Test that 429 status adds rate limit hint."""

@@ -70,6 +70,7 @@ class OperatorAgent(MCPAgent):
 
         self.openai_client = model_client
         self.model = model
+        self.checkpoint_name = self.model
         self.environment = environment
 
         # State tracking for OpenAI's stateful API
@@ -84,7 +85,7 @@ class OperatorAgent(MCPAgent):
             except Exception as e:
                 raise ValueError(f"OpenAI API key is invalid: {e}") from e
 
-        self.model_name = "openai-" + self.model
+        self.model_name = "Operator"
 
         # Append OpenAI-specific instructions to the base system prompt
         openai_instructions = """

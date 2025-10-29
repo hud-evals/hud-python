@@ -219,6 +219,17 @@ class TestAnalyzeMcpEnvironment:
         mock_tool.description = "Test tool"
         mock_tool.inputSchema = {"type": "object"}
 
+        # Prefer analyze_environment path (aligns with analyze CLI tests)
+        mock_client.analyze_environment = mock.AsyncMock(
+            return_value={
+                "metadata": {"servers": ["local"], "initialized": True},
+                "tools": [{"name": "test_tool", "description": "Test tool"}],
+                "hub_tools": {},
+                "resources": [],
+                "telemetry": {},
+            }
+        )
+        # Fallback still defined for completeness
         mock_client.list_tools.return_value = [mock_tool]
 
         result = await analyze_mcp_environment("test:latest")
@@ -247,6 +258,15 @@ class TestAnalyzeMcpEnvironment:
         """Test analysis in verbose mode."""
         mock_client = mock.AsyncMock()
         mock_client_class.return_value = mock_client
+        mock_client.analyze_environment = mock.AsyncMock(
+            return_value={
+                "metadata": {"servers": ["local"], "initialized": True},
+                "tools": [],
+                "hub_tools": {},
+                "resources": [],
+                "telemetry": {},
+            }
+        )
         mock_client.list_tools.return_value = []
 
         # Just test that it runs without error in verbose mode

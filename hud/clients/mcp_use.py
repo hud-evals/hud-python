@@ -243,8 +243,8 @@ class MCPUseHUDClient(BaseHUDClient):
             structuredContent=result.structuredContent,
         )
 
-    async def list_resources(self) -> list[types.Resource]:
-        """List all available resources."""
+    async def _list_resources_impl(self) -> list[types.Resource]:
+        """Implementation of resource listing for MCP-use client."""
         if self._client is None or not self._sessions:
             raise ValueError("Client is not connected, call initialize() first")
 

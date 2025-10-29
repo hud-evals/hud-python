@@ -13,9 +13,12 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 from fastmcp.server.server import FastMCP, Transport
+from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from hud.cli.eval import run_full_dataset
 from hud.server.low_level import LowLevelServerWithInit
+from hud.types import Task
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
@@ -311,10 +314,34 @@ class MCPServer(FastMCP):
         if transport is None:
             transport = "stdio"
 
-        # Register HTTP helpers for HTTP transport
+        # Register HTTP helpers and CORS for HTTP transport
         if transport in ("http", "sse"):
             self._register_hud_helpers()
             logger.info("Registered HUD helper endpoints at /hud/*")
+
+            # Add CORS middleware if not already provided
+            from starlette.middleware import Middleware
+            from starlette.middleware.cors import CORSMiddleware
+
+            # Get or create middleware list
+            middleware = transport_kwargs.get("middleware", [])
+            if isinstance(middleware, list):
+                # Check if CORS is already configured
+                has_cors = any(
+                    isinstance(m, Middleware) and m.cls == CORSMiddleware for m in middleware
+                )
+                if not has_cors:
+                    # Add CORS with permissive defaults for dev
+                    cors_middleware = Middleware(
+                        CORSMiddleware,
+                        allow_origins=["*"],
+                        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+                        allow_headers=["*"],
+                        expose_headers=["Mcp-Session-Id"],
+                    )
+                    middleware = [cors_middleware, *middleware]
+                    transport_kwargs["middleware"] = middleware
+                    logger.info("Added CORS middleware for browser compatibility")
 
         try:
             await super().run_async(
@@ -461,6 +488,84 @@ class MCPServer(FastMCP):
             self._prompt_manager._prompts[new_key] = prompt
         # await self.import_server(hidden_router, prefix=None, **kwargs)
 
+    def _get_docker_logs(
+        self,
+        tail: int = 100,
+        since: str | None = None,
+        until: str | None = None,
+        timestamps: bool = False,
+    ) -> dict[str, Any]:
+        """Helper function to get Docker container logs.
+
+        Args:
+            tail: Number of lines to show from the end of the logs
+            since: Show logs since timestamp or relative time
+            until: Show logs before a timestamp or relative time
+            timestamps: Show timestamps in log output
+
+        Returns:
+            Dictionary with logs data or error information
+        """
+        import subprocess
+
+        container_name = os.environ.get("_HUD_DEV_DOCKER_CONTAINER")
+        if not container_name:
+            return {"items": [], "container_name": None, "error": "No container name found"}
+
+        # Build docker logs command
+        cmd = ["docker", "logs", "--tail", str(tail)]
+
+        if since:
+            cmd.extend(["--since", since])
+        if until:
+            cmd.extend(["--until", until])
+        if timestamps:
+            cmd.append("--timestamps")
+
+        cmd.append(container_name)
+
+        try:
+            # Run docker logs to get output
+            result = subprocess.run(  # noqa: S603
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+            )
+
+            # Parse logs into items
+            items = []
+            lines = result.stdout.strip().split("\n") if result.stdout else []
+
+            for i, line in enumerate(lines):
+                if line.strip():
+                    items.append(
+                        {
+                            "id": i,
+                            "stream": "mixed",
+                            "log": line,
+                            "container_name": container_name,
+                        }
+                    )
+
+            return {
+                "items": items,
+                "container_name": container_name,
+                "total_lines": len(items),
+            }
+
+        except subprocess.TimeoutExpired:
+            return {"error": "Docker logs timeout", "container_name": container_name, "items": []}
+        except Exception as e:
+            return {
+                "error": f"Failed to get logs: {e!s}",
+                "container_name": container_name,
+                "items": [],
+            }
+
     def _register_hud_helpers(self) -> None:
         """Register development helper endpoints.
 
@@ -468,6 +573,8 @@ class MCPServer(FastMCP):
         - GET /docs - Interactive documentation and tool testing
         - POST /api/tools/{name} - REST wrappers for MCP tools
         - GET /openapi.json - OpenAPI spec for REST endpoints
+        - GET /logs - Development log endpoint (when provided by dev runtime)
+        - hud-logs tool - MCP tool for fetching logs (when in Docker mode)
         """
 
         # Register REST wrapper for each tool
@@ -506,15 +613,206 @@ class MCPServer(FastMCP):
                         return str(obj)
 
                     serialized = serialize_obj(result)
-                    return JSONResponse({"success": True, "result": serialized})
+                    # Return the serialized CallToolResult directly (no wrapper)
+                    return JSONResponse(serialized)
                 except Exception as e:
-                    return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+                    # Return a simple error object
+                    return JSONResponse({"error": str(e)}, status_code=400)
 
             return tool_endpoint
 
         for tool_key in self._tool_manager._tools.keys():  # noqa: SIM118
             endpoint = create_tool_endpoint(tool_key)
             self.custom_route(f"/api/tools/{tool_key}", methods=["POST"])(endpoint)
+
+        # Development endpoints - only if dev runtime set a provider
+        provider = os.environ.get("_HUD_DEV_LOGS_PROVIDER")
+        if provider == "enabled":
+
+            @self.custom_route("/logs", methods=["GET"])
+            async def get_logs(request: Request) -> Response:
+                """Return Docker container logs on demand.
+
+                Query params:
+                  - limit: max number of lines to return (default 100)
+                  - tail: number of lines from end to return (default 100)
+                """
+                # Get query params
+                params = request.query_params
+                tail = int(params.get("tail", "100"))
+
+                # Use helper function to get logs
+                result = self._get_docker_logs(tail=tail)
+
+                # Add 'next' field for compatibility with existing API
+                if "error" in result:
+                    return JSONResponse(result, status_code=500)
+                else:
+                    items = result.get("items", [])
+                    return JSONResponse(
+                        {
+                            "items": items,
+                            "next": len(items) - 1 if items else None,
+                        }
+                    )
+
+            # Import existing types from the codebase
+            from pydantic import BaseModel
+
+            from hud.types import AgentType
+
+            class EvalRequest(BaseModel):
+                """Request model for /eval endpoint."""
+
+                tasks: list[dict[str, Any]] = []
+                agent: str = "claude"
+                model: str | None = None
+                max_steps: int = 10
+                verbose: bool = False
+                group_size: int = 1
+                name: str | None = None
+
+            @self.custom_route("/eval", methods=["POST"])
+            async def run_eval(request: Request) -> Response:
+                """Run evaluation on tasks using the current Docker environment."""
+                import asyncio
+                import json
+
+                try:
+                    body = await request.body()
+                    data = json.loads(body)
+
+                    # Validate request using Pydantic model
+                    try:
+                        eval_request = EvalRequest(**data)
+                    except Exception as e:
+                        return JSONResponse({"error": f"Invalid request: {e!s}"}, status_code=400)
+
+                    # Get the Docker MCP config from environment
+                    docker_mcp_config = os.environ.get("_HUD_DEV_DOCKER_MCP_CONFIG")
+                    if not docker_mcp_config:
+                        return JSONResponse(
+                            {"error": "Docker MCP config not available"}, status_code=500
+                        )
+
+                    docker_config = json.loads(docker_mcp_config)
+
+                    # Simplify Docker config for evaluation
+                    if "docker" in docker_config and "args" in docker_config["docker"]:
+                        original_args = docker_config["docker"]["args"]
+                        filtered_args = []
+                        i = 0
+
+                        while i < len(original_args):
+                            arg = original_args[i]
+
+                            # Skip volume mounts and their values
+                            if arg in ["-v", "--volume"]:
+                                i += 2  # Skip the flag and its value
+                                continue
+
+                            # Skip combined volume mount args
+                            if arg.startswith(("-v", "--volume=")):
+                                i += 1
+                                continue
+
+                            # Skip explicit container name to avoid collisions
+                            if arg == "--name" and i + 1 < len(original_args):
+                                i += 2  # Skip the --name and its value
+                                continue
+
+                            # Skip dev-specific environment variables
+                            if arg == "-e" and i + 1 < len(original_args):
+                                next_arg = original_args[i + 1]
+                                if next_arg in [
+                                    "PYTHONPATH=/app",
+                                    "HUD_DEV=1",
+                                    "PYTHONUNBUFFERED=1",
+                                ]:
+                                    i += 2  # Skip the -e and its value
+                                    continue
+
+                            filtered_args.append(arg)
+                            i += 1
+
+                        # Update the docker args with filtered version
+                        docker_config["docker"]["args"] = filtered_args
+
+                    try:
+                        agent_type = AgentType(eval_request.agent.lower())
+                    except ValueError:
+                        valid_agents = [
+                            a.value for a in AgentType if a != AgentType.INTEGRATION_TEST
+                        ]
+                        return JSONResponse(
+                            {
+                                "error": f"Invalid agent type: {eval_request.agent}",
+                                "valid_agents": valid_agents,
+                            },
+                            status_code=400,
+                        )
+
+                    # Add MCP config to each task and validate basic structure
+                    tasks = []
+                    for task_data in eval_request.tasks:
+                        task_data["mcp_config"] = docker_config
+                        tasks.append(Task.model_validate(task_data).model_dump())
+
+                    # Save tasks to temporary file
+                    import tempfile
+
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", prefix="hud-eval-", suffix=".json", delete=False
+                    ) as f:
+                        json.dump(tasks, f)
+                        task_file = f.name
+
+                    # Fire and forget - launch evaluation in background
+                    async def run_eval_background() -> None:
+                        try:
+                            await run_full_dataset(
+                                task_file,
+                                agent_type=agent_type,
+                                model=eval_request.model,
+                                max_steps=eval_request.max_steps,
+                                verbose=eval_request.verbose,
+                                group_size=eval_request.group_size,
+                            )
+                        except Exception as e:
+                            raise e
+                        finally:
+                            # Clean up temp file
+                            import os
+
+                            if os.path.exists(task_file):
+                                os.unlink(task_file)
+
+                    # Start the evaluation in the background (fire and forget)
+                    asyncio.create_task(run_eval_background())  # noqa: RUF006
+
+                    # Return immediately
+                    response_data = {
+                        "status": "started",
+                        "message": f"Evaluation launched with {len(tasks)} task(s)",
+                        "agent": eval_request.agent,
+                        "model": eval_request.model,
+                        "max_steps": eval_request.max_steps,
+                        "verbose": eval_request.verbose,
+                    }
+
+                    # Include group_size if > 1
+                    if eval_request.group_size > 1:
+                        response_data["group_size"] = eval_request.group_size
+                        response_data["total_episodes"] = len(tasks) * eval_request.group_size
+
+                    return JSONResponse(response_data)
+
+                except json.JSONDecodeError:
+                    return JSONResponse({"error": "Invalid JSON in request body"}, status_code=400)
+                except Exception as e:
+                    return JSONResponse(
+                        {"error": f"Failed to run evaluation: {e!s}"}, status_code=500
+                    )
 
         @self.custom_route("/openapi.json", methods=["GET"])
         async def openapi_spec(request: Request) -> Response:
@@ -570,6 +868,40 @@ class MCPServer(FastMCP):
                     logger.warning("Failed to generate spec for %s: %s", tool_key, e)
 
             return JSONResponse(spec)
+
+        # Register hud-logs tool when in Docker dev mode
+        container_name = os.environ.get("_HUD_DEV_DOCKER_CONTAINER")
+        if container_name:
+
+            @self.tool("hud-logs")
+            async def get_docker_logs(
+                tail: int = 100,
+                since: str | None = None,
+                until: str | None = None,
+                timestamps: bool = False,
+            ) -> dict[str, Any]:
+                """Get logs from the Docker container running the HUD environment.
+
+                Args:
+                    tail: Number of lines to show from the end of the logs (default: 100)
+                    since: Show logs since timestamp (e.g. 2013-01-02T13:23:37Z) or relative (42m)
+                    until: Show logs before timestamp (e.g. 2013-01-02T13:23:37Z) or relative (42m)
+                    timestamps: Show timestamps in log output
+
+                Returns:
+                    Dictionary with:
+                    - items: List of log entries
+                    - container_name: Name of the container
+                    - total_lines: Total number of log lines returned
+                    - error: Error message if logs could not be retrieved
+                """
+                # Use helper function to get logs
+                return self._get_docker_logs(
+                    tail=tail,
+                    since=since,
+                    until=until,
+                    timestamps=timestamps,
+                )
 
         @self.custom_route("/docs", methods=["GET"])
         async def docs_page(request: Request) -> Response:

@@ -62,7 +62,8 @@ class GenericOpenAIChatAgent(MCPAgent):
         else:
             raise ValueError("Either openai_client or (api_key and base_url) must be provided")
 
-        self.model_name = model_name
+        self.model_name = "GenericOpenAI"
+        self.checkpoint_name = model_name
         self.completion_kwargs: dict[str, Any] = completion_kwargs or {}
         self.mcp_schemas = []
         self.hud_console = HUDConsole(logger=logger)
@@ -194,7 +195,7 @@ class GenericOpenAIChatAgent(MCPAgent):
             raise ValueError("openai_client is required for GenericOpenAIChatAgent")
         # default transport = OpenAI SDK
         return await self.oai.chat.completions.create(
-            model=self.model_name,
+            model=self.checkpoint_name,
             messages=messages,
             tools=tools,  # type: ignore ready ChatCompletionToolParam-shaped
             **extra,

@@ -46,7 +46,7 @@ uv tool install hud-python
 Set your API keys as environment variables:
 
 ```bash
-export HUD_API_KEY="sk-hud-..."      # Get from hud.so
+export HUD_API_KEY="sk-hud-..."      # Get from hud.ai
 export ANTHROPIC_API_KEY="sk-ant-..." # For Claude agents
 export OPENAI_API_KEY="sk-..."        # For OpenAI agents
 ```
@@ -67,7 +67,7 @@ from hud.agents import ClaudeAgent
 
 async def main():
     # The trace context captures ALL agent interactions within a "task run"
-    # Everything inside this context shows up as one trace on hud.so
+    # Everything inside this context shows up as one trace on hud.ai
     with hud.trace("quickstart-2048"):
         # Define task with remote MCP environment
         task = Task(

@@ -89,7 +89,7 @@ class TestClaudeAgent:
             validate_api_key=False,  # Skip validation in tests
         )
 
-        assert agent.model_name == "claude-3-opus-20240229"
+        assert agent.model_name == "Claude"
         assert agent.max_tokens == 1000
         assert agent.anthropic_client == mock_model_client
 
@@ -103,7 +103,7 @@ class TestClaudeAgent:
                 validate_api_key=False,  # Skip validation in tests
             )
 
-            assert agent.model_name == "claude-3-opus-20240229"
+            assert agent.model_name == "Claude"
             assert agent.anthropic_client is not None
 
     @pytest.mark.asyncio

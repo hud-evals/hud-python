@@ -81,14 +81,16 @@ class AsyncTrace:
         attrs: dict[str, Any] | None = None,
         job_id: str | None = None,
         task_id: str | None = None,
+        group_id: str | None = None,
     ) -> None:
         self.name = name
         self.root = root
         self.attrs = attrs or {}
         self.job_id = job_id
         self.task_id = task_id
+        self.group_id = group_id
         self.task_run_id = str(uuid.uuid4())
-        self.trace_obj = Trace(self.task_run_id, name, job_id, task_id)
+        self.trace_obj = Trace(self.task_run_id, name, job_id, task_id, group_id)
         self._otel_trace = None
 
     async def __aenter__(self) -> Trace:
@@ -104,6 +106,7 @@ class AsyncTrace:
             attributes=self.attrs,
             job_id=self.job_id,
             task_id=self.task_id,
+            group_id=self.group_id,
         )
         self._otel_trace.__enter__()
 
@@ -116,6 +119,7 @@ class AsyncTrace:
                     job_id=self.job_id,
                     trace_name=self.name,
                     task_id=self.task_id,
+                    group_id=self.group_id,
                 ),
                 name=f"trace-status-{self.task_run_id[:8]}",
             )
@@ -146,6 +150,7 @@ class AsyncTrace:
                     error_message=str(exc_val) if exc_val else None,
                     trace_name=self.name,
                     task_id=self.task_id,
+                    group_id=self.group_id,
                 ),
                 name=f"trace-status-{self.task_run_id[:8]}-{status}",
             )
@@ -264,6 +269,7 @@ def async_trace(
     attrs: dict[str, Any] | None = None,
     job_id: str | None = None,
     task_id: str | None = None,
+    group_id: str | None = None,
 ) -> AsyncTrace:
     """Create an async trace context for telemetry tracking.
 
@@ -277,6 +283,7 @@ def async_trace(
         attrs: Additional attributes to attach to the trace
         job_id: Optional job ID to associate with this trace
         task_id: Optional task ID for custom task identifiers
+        group_id: Optional group ID to associate with this trace
 
     Returns:
         AsyncTrace context manager
@@ -292,7 +299,14 @@ def async_trace(
         Use this async version only in high-concurrency scenarios (200+ parallel
         tasks) or when writing custom async evaluation frameworks.
     """
-    return AsyncTrace(name, root=root, attrs=attrs, job_id=job_id, task_id=task_id)
+    return AsyncTrace(
+        name,
+        root=root,
+        attrs=attrs,
+        job_id=job_id,
+        task_id=task_id,
+        group_id=group_id if group_id else str(uuid.uuid4()),
+    )
 
 
 def async_job(

@@ -16,7 +16,7 @@ def run_stdio_server(image: str, docker_args: list[str], verbose: bool) -> None:
     """Run Docker image as stdio MCP server (direct passthrough)."""
     hud_console = HUDConsole()  # Use stderr for stdio mode
 
-    # Build docker command
+    # Build docker command (image-only mode: do not auto-inject local .env)
     docker_cmd = ["docker", "run", "--rm", "-i", *docker_args, image]
 
     if verbose:

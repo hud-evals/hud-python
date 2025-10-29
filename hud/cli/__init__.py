@@ -12,6 +12,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from hud.types import AgentType
+
 from . import list_func as list_module
 from .analyze import (
     analyze_environment,
@@ -242,16 +244,32 @@ def debug(
                 if build and not build_environment(directory, image_name):
                     raise typer.Exit(1)
 
-            # Build Docker command
-            from .utils.docker import build_run_command
+            # Build Docker command with folder-mode envs
+            from .utils.docker import create_docker_run_command
 
-            command = build_run_command(image_name, docker_args)
+            command = create_docker_run_command(
+                image_name, docker_args=docker_args, env_dir=directory
+            )
         else:
             # Assume it's an image name
             image = first_param
-            from .utils.docker import build_run_command
+            from .utils.docker import create_docker_run_command
 
-            command = build_run_command(image, docker_args)
+            # For image mode, check if there's a .env file in current directory
+            # and use it if available (similar to hud dev behavior)
+            cwd = Path.cwd()
+            if (cwd / ".env").exists():
+                # Use create_docker_run_command to load .env from current directory
+                command = create_docker_run_command(
+                    image,
+                    docker_args=docker_args,
+                    env_dir=cwd,  # Load .env from current directory
+                )
+            else:
+                # No .env file, use basic command without env loading
+                from .utils.docker import build_run_command
+
+                command = build_run_command(image, docker_args)
     else:
         console.print(
             "[red]Error: Must specify a directory, Docker image, --config, or --cursor[/red]"
@@ -377,6 +395,11 @@ def dev(
         "--watch",
         help="Additional directories to watch for changes (default: current directory)",
     ),
+    new: bool = typer.Option(
+        False,
+        "--new",
+        help="Show Cursor installation link for new server setup",
+    ),
 ) -> None:
     """🔥 Development mode - run MCP server with hot-reload.
 
@@ -417,6 +440,7 @@ def dev(
         watch,
         docker=docker,
         docker_args=docker_args,
+        new=new,
     )
 
 
@@ -730,14 +754,14 @@ def remove(
 
 @app.command()
 def init(
-    name: str = typer.Argument(None, help="Environment name (default: current directory name)"),
+    name: str = typer.Argument(None, help="Environment name (default: chosen preset name)"),
     preset: str | None = typer.Option(
         None,
         "--preset",
         "-p",
-        help="Preset to use: blank, deep-research, browser. If omitted, you'll choose interactively.",  # noqa: E501
+        help="Preset to use: blank, deep-research, browser, rubrics. If omitted, you'll choose interactively.",  # noqa: E501
     ),
-    directory: str = typer.Option(".", "--dir", "-d", help="Target directory"),
+    directory: str = typer.Option(".", "--dir", "-d", help="Parent directory for the environment"),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing files"),
 ) -> None:
     """🚀 Initialize a new HUD environment with minimal boilerplate.
@@ -749,8 +773,8 @@ def init(
     - Required setup/evaluate tools
 
     Examples:
-        hud init                    # Use current directory name
-        hud init my-env             # Create in ./my-env/
+        hud init                    # Choose preset interactively, create ./preset-name/
+        hud init my-env             # Create new directory ./my-env/
         hud init my-env --dir /tmp  # Create in /tmp/my-env/
     """
     create_environment(name, directory, force, preset)
@@ -844,7 +868,7 @@ def eval(
     hud_console = HUDConsole()
 
     if integration_test:
-        agent = "integration_test"
+        agent = AgentType.INTEGRATION_TEST
 
     # If no source provided, reuse RL helper to find a tasks file interactively
     if source is None:
@@ -891,17 +915,17 @@ def eval(
         # Add standard agent choices
         choices.extend(
             [
-                {"name": "Claude 4 Sonnet", "value": "claude"},
-                {"name": "OpenAI Computer Use", "value": "openai"},
-                {"name": "vLLM (Local Server)", "value": "vllm"},
-                {"name": "LiteLLM (Multi-provider)", "value": "litellm"},
+                {"name": "Claude 4 Sonnet", "value": AgentType.CLAUDE},
+                {"name": "OpenAI Computer Use", "value": AgentType.OPENAI},
+                {"name": "vLLM (Local Server)", "value": AgentType.VLLM},
+                {"name": "LiteLLM (Multi-provider)", "value": AgentType.LITELLM},
             ]
         )
 
         agent = hud_console.select("Select an agent to use:", choices=choices, default=0)
 
     # Handle HUD model selection
-    if agent and agent not in ["claude", "openai", "vllm", "litellm", "integration_test"]:
+    if agent and agent not in [e.value for e in AgentType]:
         # Find remote model name
         model = agent
         if not vllm_base_url:
@@ -918,20 +942,23 @@ def eval(
             hud_console.error(f"Model {model} not found")
             raise typer.Exit(1)
         model = base_model
-        agent = "vllm"  # Use vLLM backend for HUD models
+        agent = AgentType.VLLM  # Use vLLM backend for HUD models
         hud_console.info(f"Using HUD model: {model} (trained on {base_model})")
 
     # Validate agent choice
-    valid_agents = ["claude", "openai", "vllm", "litellm", "integration_test"]
+    valid_agents = [e.value for e in AgentType]
     if agent not in valid_agents:
         hud_console.error(f"Invalid agent: {agent}. Must be one of: {', '.join(valid_agents)}")
         raise typer.Exit(1)
+
+    # Type narrowing: agent is now guaranteed to be an AgentType value after validation
+    agent = AgentType(agent)
 
     # Run the command
     eval_command(
         source=source,
         full=full,
-        agent=agent,  # type: ignore
+        agent=agent,
         model=model,
         allowed_tools=allowed_tools,
         max_concurrent=max_concurrent,
@@ -1069,6 +1096,51 @@ def rl(
         yes=yes,
         skip_vllm_startup=skip_vllm_startup,
     )
+
+
+@app.command()
+def convert(
+    tasks_file: str = typer.Argument(
+        ..., help="Path to tasks file (JSON/JSONL) to convert to remote MCP configuration"
+    ),
+) -> None:
+    """Convert local MCP task configs to remote (mcp.hud.so) format.
+
+    This mirrors the implicit conversion flow used by 'hud rl' and writes a new
+    remote_<name>.json next to the source file when needed.
+    """
+    from pathlib import Path
+
+    from hud.utils.hud_console import HUDConsole
+
+    hud_console = HUDConsole()
+
+    try:
+        from .flows.tasks import convert_tasks_to_remote
+
+        result_path = convert_tasks_to_remote(tasks_file)
+
+        # If nothing changed, inform the user
+        try:
+            if Path(result_path).resolve() == Path(tasks_file).resolve():
+                hud_console.success(
+                    "Tasks already reference remote MCP URLs. No conversion needed."
+                )
+                hud_console.hint("You can run them directly with: hud eval <tasks_file> --full")
+                return
+        except Exception as e:
+            # Best effort; continue with success message
+            hud_console.debug(f"Path comparison failed, continuing: {e}")
+
+        hud_console.success(f"Converted tasks written to: {result_path}")
+        hud_console.hint(
+            "You can now run remote flows: hud rl <converted_file> or hud eval <converted_file>"
+        )
+    except typer.Exit:
+        raise
+    except Exception as e:
+        hud_console.error(f"Failed to convert tasks: {e}")
+        raise typer.Exit(1) from e
 
 
 @app.command()

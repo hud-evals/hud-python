@@ -70,6 +70,12 @@ class Settings(BaseSettings):
         validation_alias="HUD_RL_URL",
     )
 
+    hud_api_url: str = Field(
+        default="https://api.hud.so",
+        description="Base URL for the HUD API server",
+        validation_alias="HUD_API_URL",
+    )
+
     api_key: str | None = Field(
         default=None,
         description="API key for authentication with the HUD API",
