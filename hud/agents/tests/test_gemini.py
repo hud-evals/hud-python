@@ -62,22 +62,23 @@ class TestGeminiAgent:
     @pytest.mark.asyncio
     async def test_init_without_model_client(self, mock_mcp_client):
         """Test agent initialization without model client."""
-        with patch("hud.settings.settings.gemini_api_key", "test_key"):
-            with patch("hud.agents.gemini.genai.Client") as mock_client_class:
-                mock_client = MagicMock()
-                mock_client.api_key = "test_key"
-                mock_client.models = MagicMock()
-                mock_client.models.list = MagicMock(return_value=iter([]))
-                mock_client_class.return_value = mock_client
+        with patch("hud.settings.settings.gemini_api_key", "test_key"), patch(
+            "hud.agents.gemini.genai.Client"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.api_key = "test_key"
+            mock_client.models = MagicMock()
+            mock_client.models.list = MagicMock(return_value=iter([]))
+            mock_client_class.return_value = mock_client
 
-                agent = GeminiAgent(
-                    mcp_client=mock_mcp_client,
-                    model="gemini-2.5-computer-use-preview-10-2025",
-                    validate_api_key=False,
-                )
+            agent = GeminiAgent(
+                mcp_client=mock_mcp_client,
+                model="gemini-2.5-computer-use-preview-10-2025",
+                validate_api_key=False,
+            )
 
-                assert agent.model_name == "gemini-2.5-computer-use-preview-10-2025"
-                assert agent.gemini_client is not None
+            assert agent.model_name == "gemini-2.5-computer-use-preview-10-2025"
+            assert agent.gemini_client is not None
 
     @pytest.mark.asyncio
     async def test_format_blocks(self, mock_mcp_client, mock_gemini_client):
@@ -95,8 +96,10 @@ class TestGeminiAgent:
         messages = await agent.format_blocks(text_blocks)
         assert len(messages) == 1
         assert messages[0].role == "user"
-        assert len(messages[0].parts) == 1
-        assert messages[0].parts[0].text == "Hello, Gemini!"
+        parts = messages[0].parts
+        assert parts is not None
+        assert len(parts) == 1
+        assert parts[0].text == "Hello, Gemini!"
 
         # Test with screenshot
         image_blocks: list[types.ContentBlock] = [
@@ -110,11 +113,13 @@ class TestGeminiAgent:
         messages = await agent.format_blocks(image_blocks)
         assert len(messages) == 1
         assert messages[0].role == "user"
-        assert len(messages[0].parts) == 2
+        parts = messages[0].parts
+        assert parts is not None
+        assert len(parts) == 2
         # First part is text
-        assert messages[0].parts[0].text == "Look at this"
+        assert parts[0].text == "Look at this"
         # Second part is image - check that it was created from bytes
-        assert messages[0].parts[1].inline_data is not None
+        assert parts[1].inline_data is not None
 
     @pytest.mark.asyncio
     async def test_format_tool_results(self, mock_mcp_client, mock_gemini_client):
@@ -154,10 +159,14 @@ class TestGeminiAgent:
         assert len(messages) == 1
         assert messages[0].role == "user"
         # The content contains function response parts
-        assert len(messages[0].parts) == 1
-        assert messages[0].parts[0].function_response is not None
-        assert messages[0].parts[0].function_response.name == "click_at"
-        assert messages[0].parts[0].function_response.response.get("success") is True
+        parts = messages[0].parts
+        assert parts is not None
+        assert len(parts) == 1
+        function_response = parts[0].function_response
+        assert function_response is not None
+        assert function_response.name == "click_at"
+        response_payload = function_response.response or {}
+        assert response_payload.get("success") is True
 
     @pytest.mark.asyncio
     async def test_format_tool_results_with_error(self, mock_mcp_client, mock_gemini_client):
@@ -189,8 +198,12 @@ class TestGeminiAgent:
         # Check that error is in the response
         assert len(messages) == 1
         assert messages[0].role == "user"
-        assert messages[0].parts[0].function_response is not None
-        assert "error" in messages[0].parts[0].function_response.response
+        parts = messages[0].parts
+        assert parts is not None
+        function_response = parts[0].function_response
+        assert function_response is not None
+        response_payload = function_response.response or {}
+        assert "error" in response_payload
 
     @pytest.mark.asyncio
     async def test_get_response(self, mock_mcp_client, mock_gemini_client):
@@ -328,8 +341,10 @@ class TestGeminiAgent:
         message = await agent.create_user_message("Hello Gemini")
 
         assert message.role == "user"
-        assert len(message.parts) == 1
-        assert message.parts[0].text == "Hello Gemini"
+        parts = message.parts
+        assert parts is not None
+        assert len(parts) == 1
+        assert parts[0].text == "Hello Gemini"
 
     @pytest.mark.asyncio
     async def test_handle_empty_response(self, mock_mcp_client, mock_gemini_client):

@@ -19,6 +19,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+ACTION_FIELD = Field(..., description="Gemini Computer Use action to perform")
+X_FIELD = Field(None, description="X coordinate (pixels in agent space)")
+Y_FIELD = Field(None, description="Y coordinate (pixels in agent space)")
+TEXT_FIELD = Field(None, description="Text to type")
+PRESS_ENTER_FIELD = Field(
+    None, description="Whether to press Enter after typing (type_text_at)"
+)
+CLEAR_BEFORE_TYPING_FIELD = Field(
+    None, description="Whether to select-all before typing (type_text_at)"
+)
+DIRECTION_FIELD = Field(
+    None, description="Scroll direction for scroll_document/scroll_at"
+)
+MAGNITUDE_FIELD = Field(
+    None, description="Scroll magnitude (pixels in agent space)"
+)
+URL_FIELD = Field(None, description="Target URL for navigate")
+KEYS_FIELD = Field(None, description="Keys for key_combination")
+DESTINATION_X_FIELD = Field(
+    None, description="Destination X for drag_and_drop (agent space)"
+)
+DESTINATION_Y_FIELD = Field(
+    None, description="Destination Y for drag_and_drop (agent space)"
+)
+TAKE_SCREENSHOT_ON_CLICK_FIELD = Field(
+    True, description="Whether to include a screenshot for interactive actions"
+)
+
+
 class GeminiComputerTool(HudComputerTool):
     """
     Gemini Computer Use tool for interacting with a computer via MCP.
@@ -62,38 +91,26 @@ class GeminiComputerTool(HudComputerTool):
 
     async def __call__(
         self,
-        action: str = Field(..., description="Gemini Computer Use action to perform"),
+        action: str = ACTION_FIELD,
         # Common coordinates
-        x: int | None = Field(None, description="X coordinate (pixels in agent space)"),
-        y: int | None = Field(None, description="Y coordinate (pixels in agent space)"),
+        x: int | None = X_FIELD,
+        y: int | None = Y_FIELD,
         # Text input
-        text: str | None = Field(None, description="Text to type"),
-        press_enter: bool | None = Field(
-            None, description="Whether to press Enter after typing (type_text_at)"
-        ),
-        clear_before_typing: bool | None = Field(
-            None, description="Whether to select-all before typing (type_text_at)"
-        ),
+        text: str | None = TEXT_FIELD,
+        press_enter: bool | None = PRESS_ENTER_FIELD,
+        clear_before_typing: bool | None = CLEAR_BEFORE_TYPING_FIELD,
         # Scroll parameters
-        direction: Literal["up", "down", "left", "right"] | None = Field(
-            None, description="Scroll direction for scroll_document/scroll_at"
-        ),
-        magnitude: int | None = Field(None, description="Scroll magnitude (pixels in agent space)"),
+        direction: Literal["up", "down", "left", "right"] | None = DIRECTION_FIELD,
+        magnitude: int | None = MAGNITUDE_FIELD,
         # Navigation
-        url: str | None = Field(None, description="Target URL for navigate"),
+        url: str | None = URL_FIELD,
         # Key combos
-        keys: list[str] | str | None = Field(None, description="Keys for key_combination"),
+        keys: list[str] | str | None = KEYS_FIELD,
         # Drag parameters
-        destination_x: int | None = Field(
-            None, description="Destination X for drag_and_drop (agent space)"
-        ),
-        destination_y: int | None = Field(
-            None, description="Destination Y for drag_and_drop (agent space)"
-        ),
+        destination_x: int | None = DESTINATION_X_FIELD,
+        destination_y: int | None = DESTINATION_Y_FIELD,
         # Behavior
-        take_screenshot_on_click: bool = Field(
-            True, description="Whether to include a screenshot for interactive actions"
-        ),
+        take_screenshot_on_click: bool = TAKE_SCREENSHOT_ON_CLICK_FIELD,
     ) -> list[ContentBlock]:
         """
         Handle Gemini Computer Use API calls by mapping to executor actions.
@@ -137,14 +154,14 @@ class GeminiComputerTool(HudComputerTool):
                 target = self.width if axis == "x" else self.height
                 numeric = numeric / 1000 * target
 
-            return int(round(numeric))
+            return round(numeric)
 
         def _scale_distance(value: int | None, axis: Literal["x", "y"]) -> int | None:
             if value is None:
                 return None
             scale = self.scale_x if axis == "x" else self.scale_y
             if scale != 1.0:
-                return int(round(value / scale))
+                return round(value / scale)
             return value
 
         # Map actions
@@ -215,6 +232,13 @@ class GeminiComputerTool(HudComputerTool):
                         )
                     )
                 distance = _scale_distance(distance, "y")
+                if distance is None:
+                    raise McpError(
+                        ErrorData(
+                            code=INVALID_PARAMS,
+                            message="Unable to determine scroll magnitude",
+                        )
+                    )
                 scroll_y = distance if direction == "down" else -distance
                 scroll_x = None
             elif direction in ("right", "left"):
@@ -226,6 +250,13 @@ class GeminiComputerTool(HudComputerTool):
                         )
                     )
                 distance = _scale_distance(distance, "x")
+                if distance is None:
+                    raise McpError(
+                        ErrorData(
+                            code=INVALID_PARAMS,
+                            message="Unable to determine scroll magnitude",
+                        )
+                    )
                 scroll_x = distance if direction == "right" else -distance
                 scroll_y = None
             else:
@@ -253,6 +284,13 @@ class GeminiComputerTool(HudComputerTool):
                         )
                     )
                 distance = _scale_distance(distance, "y")
+                if distance is None:
+                    raise McpError(
+                        ErrorData(
+                            code=INVALID_PARAMS,
+                            message="Unable to determine scroll magnitude",
+                        )
+                    )
                 scroll_y = distance if direction == "down" else -distance
                 scroll_x = None
             elif direction in ("right", "left"):
@@ -264,6 +302,13 @@ class GeminiComputerTool(HudComputerTool):
                         )
                     )
                 distance = _scale_distance(distance, "x")
+                if distance is None:
+                    raise McpError(
+                        ErrorData(
+                            code=INVALID_PARAMS,
+                            message="Unable to determine scroll magnitude",
+                        )
+                    )
                 scroll_x = distance if direction == "right" else -distance
                 scroll_y = None
             else:
