@@ -373,7 +373,6 @@ ENV API_KEY
         mock_analyze.return_value = {
             "success": True,
             "toolCount": 2,
-            "internalToolCount": 0,
             "initializeMs": 1500,
             "tools": [
                 {"name": "tool1", "description": "Tool 1"},

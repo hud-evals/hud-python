@@ -388,6 +388,13 @@ def collect_runtime_metadata(image: str, *, verbose: bool = False) -> dict[str, 
                 )
             return {}
 
+        if not isinstance(data, dict):
+            if verbose:
+                hud_console.debug(
+                    "Runtime probe returned JSON that is not an object; skipping metadata capture"
+                )
+            return {}
+
         return {
             "python": data.get("python"),
             "cuda": data.get("cuda"),
@@ -442,15 +449,19 @@ async def analyze_mcp_environment(
         normalized_tools: list[dict[str, Any]] = []
         internal_total = 0
         for t in tools_list:
+            # Extract core fields (support object or dict forms)
             if hasattr(t, "name"):
                 name = getattr(t, "name", None)
                 description = getattr(t, "description", None)
                 input_schema = getattr(t, "inputSchema", None)
+                existing_internal = getattr(t, "internalTools", None)
             else:
                 name = t.get("name")
                 description = t.get("description")
                 # accept either inputSchema or input_schema
                 input_schema = t.get("inputSchema") or t.get("input_schema")
+                # accept either internalTools or internal_tools
+                existing_internal = t.get("internalTools") or t.get("internal_tools")
 
             tool_entry: dict[str, Any] = {"name": name}
             if description:
@@ -458,18 +469,24 @@ async def analyze_mcp_environment(
             if input_schema:
                 tool_entry["inputSchema"] = input_schema
 
-            if isinstance(hub_map, dict) and name in hub_map:
-                internal = list(dict.fromkeys(hub_map[name]))  # unique, preserve order
-                if internal:
-                    tool_entry["internalTools"] = internal
-                    internal_total += len(internal)
+            # Merge internal tools: preserve any existing declaration and add hub_map[name]
+            merged_internal: list[str] = []
+            if isinstance(existing_internal, list):
+                merged_internal.extend([str(x) for x in existing_internal])
+            if isinstance(hub_map, dict) and name in hub_map and isinstance(hub_map[name], list):
+                merged_internal.extend([str(x) for x in hub_map[name]])
+            if merged_internal:
+                # Deduplicate while preserving order
+                merged_internal = list(dict.fromkeys(merged_internal))
+                tool_entry["internalTools"] = merged_internal
+                internal_total += len(merged_internal)
 
             normalized_tools.append(tool_entry)
 
         return {
             "initializeMs": initialize_ms,
             "toolCount": len(tools_list),
-            "internalToolCount": internal_total if internal_total else None,
+            "internalToolCount": internal_total,
             "tools": normalized_tools,
             "success": True,
         }
@@ -727,8 +744,8 @@ def build_environment(
 
     if runtime_info:
         lock_content["environment"]["runtime"] = runtime_info
-    if analysis.get("internalToolCount") is not None:
-        lock_content["environment"]["internalToolCount"] = analysis["internalToolCount"]
+    internal_count = int(analysis.get("internalToolCount", 0) or 0)
+    lock_content["environment"]["internalToolCount"] = internal_count
 
     # Add environment variables section if any exist
     # Include env vars from .env file as well
@@ -770,11 +787,10 @@ def build_environment(
         for tool in analysis["tools"]:
             entry: dict[str, Any] = {
                 "name": tool["name"],
+                # Preserve legacy shape: always include description/inputSchema
+                "description": tool.get("description", ""),
+                "inputSchema": tool.get("inputSchema", {}),
             }
-            if tool.get("description"):
-                entry["description"] = tool.get("description")
-            if tool.get("inputSchema"):
-                entry["inputSchema"] = tool.get("inputSchema")
             if tool.get("internalTools"):
                 entry["internalTools"] = tool.get("internalTools")
             tools_serialized.append(entry)
