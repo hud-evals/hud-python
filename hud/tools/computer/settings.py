@@ -109,6 +109,11 @@ class ComputerSettings(BaseSettings):
         description="Whether to rescale images to the agent width and height",
         validation_alias="GEMINI_RESCALE_IMAGES",
     )
+    GEMINI_MAX_RECENT_TURN_WITH_SCREENSHOTS: int = Field(
+        default=3,
+        description="Maximum number of recent turns to keep screenshots for in Gemini agent",
+        validation_alias="GEMINI_MAX_RECENT_TURN_WITH_SCREENSHOTS",
+    )
 
 
 computer_settings = ComputerSettings()

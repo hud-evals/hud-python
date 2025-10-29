@@ -24,9 +24,6 @@ from .base import MCPAgent
 
 logger = logging.getLogger(__name__)
 
-# Maximum number of recent turns to keep screenshots for
-MAX_RECENT_TURN_WITH_SCREENSHOTS = 3
-
 # Predefined Gemini computer use functions
 PREDEFINED_COMPUTER_USE_FUNCTIONS = [
     "open_web_browser",
@@ -109,6 +106,12 @@ class GeminiAgent(MCPAgent):
         self.max_output_tokens = max_output_tokens
         self.excluded_predefined_functions = excluded_predefined_functions or []
         self.hud_console = HUDConsole(logger=logger)
+
+        # Context management: Maximum number of recent turns to keep screenshots for
+        # Configurable via GEMINI_MAX_RECENT_TURN_WITH_SCREENSHOTS environment variable
+        self.max_recent_turn_with_screenshots = (
+            computer_settings.GEMINI_MAX_RECENT_TURN_WITH_SCREENSHOTS
+        )
 
         self.model_name = self.model
 
@@ -458,7 +461,7 @@ class GeminiAgent(MCPAgent):
     def _remove_old_screenshots(self, messages: list[genai_types.Content]) -> None:
         """
         Remove screenshots from old turns to manage context length.
-        Keeps only the last MAX_RECENT_TURN_WITH_SCREENSHOTS turns with screenshots.
+        Keeps only the last N turns with screenshots (configured via self.max_recent_turn_with_screenshots).
         """
         turn_with_screenshots_found = 0
 
@@ -478,7 +481,7 @@ class GeminiAgent(MCPAgent):
                 if has_screenshot:
                     turn_with_screenshots_found += 1
                     # Remove the screenshot image if the number of screenshots exceeds the limit
-                    if turn_with_screenshots_found > MAX_RECENT_TURN_WITH_SCREENSHOTS:
+                    if turn_with_screenshots_found > self.max_recent_turn_with_screenshots:
                         for part in content.parts:
                             if (
                                 part.function_response
