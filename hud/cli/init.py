@@ -152,7 +152,7 @@ def _download_tarball_repo(
                 if not name.startswith(top + "/"):
                     continue
 
-                rel_path = name[len(top) + 1:]
+                rel_path = name[len(top) + 1 :]
                 if not rel_path:
                     continue
 
@@ -200,8 +200,7 @@ def create_environment(
     if preset_normalized not in PRESET_MAP:
         available = ", ".join(sorted(PRESET_MAP.keys()))
         hud_console.warning(
-            f"Unknown preset '{preset_normalized}', defaulting to 'blank' "
-            f"(available: {available})"
+            f"Unknown preset '{preset_normalized}', defaulting to 'blank' (available: {available})"
         )
         preset_normalized = "blank"
 
