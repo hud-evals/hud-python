@@ -84,6 +84,9 @@ class PlaywrightTool(BaseTool):
                             code=INVALID_PARAMS, message="url parameter is required for navigate"
                         )
                     )
+                # Guard against pydantic FieldInfo default leaking through
+                if not isinstance(wait_for_load_state, str):
+                    wait_for_load_state = None
                 result = await self.navigate(url, wait_for_load_state or "networkidle")
 
             elif action == "screenshot":
@@ -179,11 +182,16 @@ class PlaywrightTool(BaseTool):
                 if self._browser is None:
                     raise RuntimeError("Failed to connect to remote browser")
 
-                # Use existing context or create new one
+                # Reuse existing context and page where possible to avoid spawning new windows
                 contexts = self._browser.contexts
                 if contexts:
                     self._browser_context = contexts[0]
+                    # Prefer the first existing page to keep using the already visible window/tab
+                    existing_pages = self._browser_context.pages
+                    if existing_pages:
+                        self.page = existing_pages[0]
                 else:
+                    # As a fallback, create a new context
                     self._browser_context = await self._browser.new_context(
                         viewport={"width": 1920, "height": 1080},
                         ignore_https_errors=True,
