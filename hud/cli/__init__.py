@@ -93,14 +93,14 @@ def analyze(
 ) -> None:
     """🔍 Analyze MCP environment - discover tools, resources, and capabilities.
 
-    By default, uses cached metadata for instant results.
+    [not dim]By default, uses cached metadata for instant results.
     Use --live to run the container for real-time analysis.
 
     Examples:
         hud analyze hudpython/test_init      # Fast metadata inspection
         hud analyze my-env --live            # Full container analysis
         hud analyze --config mcp-config.json # From MCP config
-        hud analyze --cursor text-2048-dev   # From Cursor config
+        hud analyze --cursor text-2048-dev   # From Cursor config[/not dim]
     """
     if config:
         # Load config from JSON file (always live for configs)
@@ -177,7 +177,7 @@ def debug(
 ) -> None:
     """🐛 Debug MCP environment - test initialization, tools, and readiness.
 
-    Examples:
+    [not dim]Examples:
         hud debug .                              # Debug current directory
         hud debug environments/browser           # Debug specific directory
         hud debug . --build                      # Build then debug
@@ -185,7 +185,7 @@ def debug(
         hud debug my-mcp-server:v1 -e API_KEY=xxx
         hud debug --config mcp-config.json
         hud debug --cursor text-2048-dev
-        hud debug . --max-phase 3               # Stop after phase 3
+        hud debug . --max-phase 3               # Stop after phase 3[/not dim]
     """
     # Import here to avoid circular imports
     from hud.utils.hud_console import HUDConsole
@@ -403,7 +403,7 @@ def dev(
 ) -> None:
     """🔥 Development mode - run MCP server with hot-reload.
 
-    TWO MODES:
+    [not dim]TWO MODES:
 
     1. Python Module:
        hud dev                    # Auto-detects module
@@ -424,7 +424,7 @@ def dev(
         hud dev --watch ../shared    # Watch additional directories
 
     For environment backend servers, use uvicorn directly:
-        uvicorn server:app --reload
+        uvicorn server:app --reload[/not dim]
     """
     # Extract module from params if provided (first param when not --docker)
     module = params[0] if params and not docker else None
@@ -492,7 +492,7 @@ def run(
 ) -> None:
     """🚀 Run Docker image as MCP server.
 
-    A simple wrapper around 'docker run' that can launch images locally or remotely.
+    [not dim]A simple wrapper around 'docker run' that can launch images locally or remotely.
     By default, runs remotely via mcp.hud.so. Use --local to run with local Docker.
 
     For local Python development with hot-reload, use 'hud dev' instead.
@@ -502,7 +502,7 @@ def run(
         hud run my-image:latest --local            # Run with local Docker
         hud run my-image:latest -e KEY=value       # Remote with env vars
         hud run my-image:latest --local -e KEY=val # Local with env vars
-        hud run my-image:latest --transport http   # Use HTTP transport
+        hud run my-image:latest --transport http   # Use HTTP transport[/not dim]
     """
     if not params:
         console.print("[red]❌ Docker image is required[/red]")
@@ -559,7 +559,7 @@ def clone(
 ) -> None:
     """🚀 Clone a git repository quietly with a pretty output.
 
-    This command wraps 'git clone' with the --quiet flag and displays
+    [not dim]This command wraps 'git clone' with the --quiet flag and displays
     a rich formatted success message. If the repository contains a clone
     message in pyproject.toml, it will be displayed as a tutorial.
 
@@ -574,7 +574,7 @@ def clone(
     # style = "cyan"
 
     Examples:
-        hud clone https://github.com/user/repo.git
+        hud clone https://github.com/user/repo.git[/not dim]
     """
     # Run the clone
     success, result = clone_repository(url)
@@ -605,7 +605,7 @@ def build(
 ) -> None:
     """🏗️ Build a HUD environment and generate lock file.
 
-    This command:
+    [not dim]This command:
     - Builds a Docker image from your environment
     - Analyzes the MCP server to extract metadata
     - Generates a hud.lock.yaml file for reproducibility
@@ -614,7 +614,7 @@ def build(
         hud build                    # Build current directory
         hud build environments/text_2048 -e API_KEY=secret
         hud build . --tag my-env:v1.0 -e VAR1=value1 -e VAR2=value2
-        hud build . --no-cache       # Force rebuild
+        hud build . --no-cache       # Force rebuild[/not dim]
     """
     # Parse directory and extra arguments
     if params:
@@ -670,14 +670,14 @@ def push(
 ) -> None:
     """📤 Push HUD environment to registry.
 
-    Reads hud.lock.yaml from the directory and pushes to registry.
+    [not dim]Reads hud.lock.yaml from the directory and pushes to registry.
     Auto-detects your Docker username if --image not specified.
 
     Examples:
         hud push                     # Push with auto-detected name
         hud push --tag v1.0          # Push with specific tag
         hud push . --image myuser/myenv:v1.0
-        hud push --yes               # Skip confirmation
+        hud push --yes               # Skip confirmation[/not dim]
     """
     push_command(directory, image, tag, sign, yes, verbose)
 
@@ -696,12 +696,12 @@ def pull(
 ) -> None:
     """📥 Pull HUD environment from registry with metadata preview.
 
-    Shows environment details before downloading.
+    [not dim]Shows environment details before downloading.
 
     Examples:
         hud pull hud.lock.yaml               # Pull from lock file
         hud pull myuser/myenv:latest        # Pull by image reference
-        hud pull myuser/myenv --verify-only # Check metadata only
+        hud pull myuser/myenv --verify-only # Check metadata only[/not dim]
     """
     pull_command(target, lock_file, yes, verify_only, verbose)
 
@@ -717,14 +717,14 @@ def list_environments(
 ) -> None:
     """📋 List all HUD environments in local registry.
 
-    Shows environments pulled with 'hud pull' stored in ~/.hud/envs/
+    [not dim]Shows environments pulled with 'hud pull' stored in ~/.hud/envs/
 
     Examples:
         hud list                    # List all environments
         hud list --filter text      # Filter by name
         hud list --json            # Output as JSON
         hud list --all             # Show digest column
-        hud list --verbose         # Show full descriptions
+        hud list --verbose         # Show full descriptions[/not dim]
     """
     list_module.list_command(filter_name, json_output, show_all, verbose)
 
@@ -739,7 +739,7 @@ def remove(
 ) -> None:
     """🗑️ Remove HUD environments from local registry.
 
-    Removes environment metadata from ~/.hud/envs/
+    [not dim]Removes environment metadata from ~/.hud/envs/
     Note: This does not remove the Docker images.
 
     Examples:
@@ -747,7 +747,7 @@ def remove(
         hud remove text_2048           # Remove by name
         hud remove hudpython/test_init # Remove by full name
         hud remove all                 # Remove all environments
-        hud remove all --yes           # Remove all without confirmation
+        hud remove all --yes           # Remove all without confirmation[/not dim]
     """
     remove_command(target, yes, verbose)
 
@@ -766,7 +766,7 @@ def init(
 ) -> None:
     """🚀 Initialize a new HUD environment with minimal boilerplate.
 
-    Creates a working MCP environment with:
+    [not dim]Creates a working MCP environment with:
     - Dockerfile for containerization
     - pyproject.toml for dependencies
     - Minimal MCP server with context
@@ -775,7 +775,8 @@ def init(
     Examples:
         hud init                    # Choose preset interactively, create ./preset-name/
         hud init my-env             # Create new directory ./my-env/
-        hud init my-env --dir /tmp  # Create in /tmp/my-env/
+        hud init my-env --dir /tmp  # Create in /tmp/my-env/[/not dim]
+
     """
     create_environment(name, directory, force, preset)
 
@@ -1152,11 +1153,11 @@ def set(
 ) -> None:
     """Persist API keys or other variables for HUD to use by default.
 
-    Examples:
+    [not dim]Examples:
         hud set ANTHROPIC_API_KEY=sk-... OPENAI_API_KEY=sk-...
 
     Values are stored in ~/.hud/.env and are loaded by hud.settings with
-    the lowest precedence (overridden by process env and project .env).
+    the lowest precedence (overridden by process env and project .env).[/not dim]
     """
     from hud.utils.hud_console import HUDConsole
 
