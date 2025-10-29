@@ -98,17 +98,24 @@ They’re recorded in the lock file as placeholders under `environment.variables
 Minimal structure you’ll see:
 
 ```yaml
-version: "1.0"
-image: "my-env:dev@sha256:..."
+version: "1.2"
+image: "my-env:0.1.0@sha256:..."
 build:
   generatedAt: "2025-01-01T12:00:00Z"
   hudVersion: "0.x.y"
   directory: "my-env"
   version: "0.1.0"
   sourceHash: "..."
+  baseImage: "python:3.11-slim"
+  platform: "linux/amd64"
 environment:
   initializeMs: 450
   toolCount: 3
+  runtime:
+    python: "3.11.6"
+    cuda: null
+    cudnn: null
+    pytorch: null
   variables:
     provided: { API_KEY: "${API_KEY}" }
     required: ["OTHER_KEY"]
@@ -116,6 +123,7 @@ tools:
   - name: setup
     description: Initialize environment
     inputSchema: { type: object }
+    internalTools: ["board", "seed"]
 ```
 
 ## Next Steps
