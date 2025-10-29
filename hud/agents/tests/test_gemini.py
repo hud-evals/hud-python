@@ -62,9 +62,10 @@ class TestGeminiAgent:
     @pytest.mark.asyncio
     async def test_init_without_model_client(self, mock_mcp_client):
         """Test agent initialization without model client."""
-        with patch("hud.settings.settings.gemini_api_key", "test_key"), patch(
-            "hud.agents.gemini.genai.Client"
-        ) as mock_client_class:
+        with (
+            patch("hud.settings.settings.gemini_api_key", "test_key"),
+            patch("hud.agents.gemini.genai.Client") as mock_client_class,
+        ):
             mock_client = MagicMock()
             mock_client.api_key = "test_key"
             mock_client.models = MagicMock()

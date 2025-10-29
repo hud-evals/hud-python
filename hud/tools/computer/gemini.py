@@ -23,26 +23,16 @@ ACTION_FIELD = Field(..., description="Gemini Computer Use action to perform")
 X_FIELD = Field(None, description="X coordinate (pixels in agent space)")
 Y_FIELD = Field(None, description="Y coordinate (pixels in agent space)")
 TEXT_FIELD = Field(None, description="Text to type")
-PRESS_ENTER_FIELD = Field(
-    None, description="Whether to press Enter after typing (type_text_at)"
-)
+PRESS_ENTER_FIELD = Field(None, description="Whether to press Enter after typing (type_text_at)")
 CLEAR_BEFORE_TYPING_FIELD = Field(
     None, description="Whether to select-all before typing (type_text_at)"
 )
-DIRECTION_FIELD = Field(
-    None, description="Scroll direction for scroll_document/scroll_at"
-)
-MAGNITUDE_FIELD = Field(
-    None, description="Scroll magnitude (pixels in agent space)"
-)
+DIRECTION_FIELD = Field(None, description="Scroll direction for scroll_document/scroll_at")
+MAGNITUDE_FIELD = Field(None, description="Scroll magnitude (pixels in agent space)")
 URL_FIELD = Field(None, description="Target URL for navigate")
 KEYS_FIELD = Field(None, description="Keys for key_combination")
-DESTINATION_X_FIELD = Field(
-    None, description="Destination X for drag_and_drop (agent space)"
-)
-DESTINATION_Y_FIELD = Field(
-    None, description="Destination Y for drag_and_drop (agent space)"
-)
+DESTINATION_X_FIELD = Field(None, description="Destination X for drag_and_drop (agent space)")
+DESTINATION_Y_FIELD = Field(None, description="Destination Y for drag_and_drop (agent space)")
 TAKE_SCREENSHOT_ON_CLICK_FIELD = Field(
     True, description="Whether to include a screenshot for interactive actions"
 )
