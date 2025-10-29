@@ -94,6 +94,12 @@ class Settings(BaseSettings):
         validation_alias="OPENAI_API_KEY",
     )
 
+    gemini_api_key: str | None = Field(
+        default=None,
+        description="API key for Google Gemini models",
+        validation_alias="GEMINI_API_KEY",
+    )
+
     openrouter_api_key: str | None = Field(
         default=None,
         description="API key for OpenRouter models",
