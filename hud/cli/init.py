@@ -23,8 +23,6 @@ PRESET_MAP: dict[str, str | None] = {
     "deep-research": "hud-deepresearch",
     "browser": "hud-browser",
     "rubrics": "hud-rubrics",
-    "remote-browser": "hud-remote-browser",
-    "text-2048": "hud-text-2048",
 }
 
 SKIP_DIR_NAMES = {"node_modules", "__pycache__", "dist", "build", ".next", ".git"}
@@ -93,9 +91,7 @@ def _prompt_for_preset() -> str:
             {"name": "blank", "message": "blank"},
             {"name": "browser", "message": "browser"},
             {"name": "deep-research", "message": "deep-research"},
-            {"name": "remote-browser", "message": "remote-browser"},
             {"name": "rubrics", "message": "rubrics"},
-            {"name": "text-2048", "message": "text-2048"},
         ]
         display_choices = [c["message"] for c in choices]
         selected = questionary.select(
