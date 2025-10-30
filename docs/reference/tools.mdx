@@ -175,6 +175,44 @@ await tool(action="click", selector="button.submit")
 await tool(action="type", selector="input#search", text="query")
 ```
 
+### JupyterTool
+
+```python
+from hud.tools import JupyterTool
+```
+
+Execute Python code in a Jupyter kernel.
+
+**Constructor Parameters:**
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `url_suffix` | `str` | (Optional) Kernel gateway host:port | "localhost:8888" |
+| `kernel_name` | `str` | (Optional) Kernel name | "python3" |
+| `kernel_id` | `str` | (Optional) If set, connect to the existed kernel with `kernel_id` | ""(empty string) |
+
+**Tool Parameters:**
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `code` | `str` | Python code to execute | Required |
+| `execution_timeout` | `int` | Execution timeout in seconds | 15 |
+
+**Example: Tool Calling**
+```python
+jupyter_tool = JupyterTool()
+result = await jupyter_tool(code="print(\"hello world!\")")
+# Returns: [TextContent(text="hello world\n", type="text")]
+```
+**Example: Reuse the same kernel**
+
+```python
+# When initializing, register the kernel
+jupyter_tool = JupyterTool()
+JupyterTool.register_shared_kernel("my-jupyter", jupyter_tool.get_kernel_id())
+
+# Reuse the same kernel in other places:
+jupyter_tool_reuse = JupyterTool.from_shared_kernel("my-jupyter")
+```
+
 ## Computer Control Tools
 
 ### HudComputerTool
