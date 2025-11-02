@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 
 from hud.settings import settings
 from hud.shared import make_request, make_request_sync
-from hud.utils.async_utils import fire_and_forget
 
 logger = logging.getLogger(__name__)
 
@@ -301,32 +300,6 @@ async def _update_task_status_async(
             logger.warning("Failed to update task status: %s", e)
 
 
-def _fire_and_forget_status_update(
-    task_run_id: str,
-    status: str,
-    job_id: str | None = None,
-    error_message: str | None = None,
-    trace_name: str | None = None,
-    task_id: str | None = None,
-    group_id: str | None = None,
-    extra_metadata: dict[str, Any] | None = None,
-) -> None:
-    """Fire and forget status update - works in any context including Jupyter."""
-    fire_and_forget(
-        _update_task_status_async(
-            task_run_id,
-            status,
-            job_id,
-            error_message,
-            trace_name,
-            task_id,
-            group_id,
-            extra_metadata,
-        ),
-        f"update task {task_run_id} status to {status}",
-    )
-
-
 def _update_task_status_sync(
     task_run_id: str,
     status: str,
@@ -532,9 +505,9 @@ class trace:
         )
         self._span = self._span_manager.__enter__()
 
-        # Update task status to running if root (only for HUD backend)
+        # Update task status to running (sync call - blocking is expected)
         if self.is_root and settings.telemetry_enabled and settings.api_key:
-            _fire_and_forget_status_update(
+            _update_task_status_sync(
                 self.task_run_id,
                 "running",
                 job_id=self.job_id,
@@ -542,7 +515,6 @@ class trace:
                 task_id=self.task_id,
                 group_id=self.group_id,
             )
-            # Print the nice trace URL box (only if not part of a job)
             if not self.job_id:
                 _print_trace_url(self.task_run_id)
 
@@ -556,35 +528,20 @@ class trace:
         exc_tb: TracebackType | None,
     ) -> None:
         """Exit the trace context."""
-        # Update task status if root (only for HUD backend)
+        # Update task status (sync call - blocking is expected for sync context manager)
         if self.is_root and settings.telemetry_enabled and settings.api_key:
-            if exc_type is not None:
-                # Use fire-and-forget to avoid blocking the event loop
-                _fire_and_forget_status_update(
-                    self.task_run_id,
-                    "error",
-                    job_id=self.job_id,
-                    error_message=str(exc_val),
-                    trace_name=self.span_name,
-                    task_id=self.task_id,
-                    group_id=self.group_id,
-                )
-                # Print error completion message (only if not part of a job)
-                if not self.job_id:
-                    _print_trace_complete_url(self.task_run_id, error_occurred=True)
-            else:
-                # Use fire-and-forget to avoid blocking the event loop
-                _fire_and_forget_status_update(
-                    self.task_run_id,
-                    "completed",
-                    job_id=self.job_id,
-                    trace_name=self.span_name,
-                    task_id=self.task_id,
-                    group_id=self.group_id,
-                )
-                # Print success completion message (only if not part of a job)
-                if not self.job_id:
-                    _print_trace_complete_url(self.task_run_id, error_occurred=False)
+            status = "error" if exc_type else "completed"
+            _update_task_status_sync(
+                self.task_run_id,
+                status,
+                job_id=self.job_id,
+                error_message=str(exc_val) if exc_val else None,
+                trace_name=self.span_name,
+                task_id=self.task_id,
+                group_id=self.group_id,
+            )
+            if not self.job_id:
+                _print_trace_complete_url(self.task_run_id, error_occurred=bool(exc_type))
 
         # End the span
         if self._span and self._span_manager is not None:
