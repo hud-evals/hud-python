@@ -34,7 +34,6 @@ from .instrument import instrument
 from .job import Job, create_job, job
 from .replay import clear_trace, get_trace
 from .trace import Trace, trace
-from .utils import flush_telemetry
 
 __all__ = [
     "Job",
@@ -43,7 +42,6 @@ __all__ = [
     "async_trace",
     "clear_trace",
     "create_job",
-    "flush_telemetry",
     "get_trace",
     "instrument",
     "job",

@@ -514,11 +514,13 @@ async def run_full_dataset(
     # Convert Task objects to dicts for dataset runners
     dataset_or_tasks = [task.model_dump() for task in tasks]
 
+    # Determine dataset name
     path = Path(source)
     dataset_name = f"Dataset: {path.name}" if path.exists() else source.split("/")[-1]
 
+    # Build agent class + config for run_dataset
     agent_config: dict[str, Any]
-    if agent_type == AgentType.INTEGRATION_TEST:
+    if agent_type == AgentType.INTEGRATION_TEST:  # --integration-test mode
         from hud.agents.misc.integration_test_agent import IntegrationTestRunner
 
         agent_class = IntegrationTestRunner
@@ -622,7 +624,7 @@ async def run_full_dataset(
         hud_console.info(f"🔄 Running dataset with group_size={group_size}")
 
         # Run with job tracking
-        with hud.job(
+        async with hud.async_job(
             name=f"Evaluation {dataset_name} (group_size={group_size})",
             metadata={
                 "dataset": source,
