@@ -260,9 +260,8 @@ async def run_single_task(
 ) -> None:
     """Load one task and execute it, or detect if JSON contains a list and run as dataset."""
 
-    # Provide early feedback to user
     hud_console.info("🔧 Initializing evaluation...")
-    # Import Task and run_dataset lazily
+    
     try:
         from hud.utils.tasks import load_tasks
     except ImportError as e:
@@ -415,7 +414,7 @@ async def run_single_task(
         logging.getLogger("hud.agents").setLevel(logging.INFO)
         logging.getLogger("hud.agents.base").setLevel(logging.INFO)
 
-        with hud.trace(name=task_prompt):
+        async with hud.async_trace(name=task_prompt):
             agent = build_agent(
                 agent_type,
                 model=model,
@@ -442,10 +441,8 @@ async def run_full_dataset(
 ) -> list[Any]:
     """Run evaluation across the entire dataset using asyncio-based concurrency."""
 
-    # Provide early feedback to user
     hud_console.info("🔧 Initializing evaluation...")
 
-    # Import run_dataset lazily
     try:
         from hud.datasets import run_dataset
         from hud.utils.tasks import load_tasks
@@ -517,13 +514,11 @@ async def run_full_dataset(
     # Convert Task objects to dicts for dataset runners
     dataset_or_tasks = [task.model_dump() for task in tasks]
 
-    # Determine dataset name
     path = Path(source)
     dataset_name = f"Dataset: {path.name}" if path.exists() else source.split("/")[-1]
 
-    # Build agent class + config for run_dataset
     agent_config: dict[str, Any]
-    if agent_type == AgentType.INTEGRATION_TEST:  # --integration-test mode
+    if agent_type == AgentType.INTEGRATION_TEST:
         from hud.agents.misc.integration_test_agent import IntegrationTestRunner
 
         agent_class = IntegrationTestRunner

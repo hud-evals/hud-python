@@ -16,6 +16,9 @@ from .parallel import (
 )
 from .runner import run_dataset
 
+# Re-export flush_telemetry from telemetry module for convenience
+from hud.telemetry import flush_telemetry
+
 # Utilities
 from .utils import fetch_system_prompt_from_dataset, save_tasks
 
@@ -25,6 +28,7 @@ __all__ = [
     "calculate_optimal_workers",
     # Utilities
     "fetch_system_prompt_from_dataset",
+    "flush_telemetry",
     # Execution
     "run_dataset",
     "run_dataset_parallel",

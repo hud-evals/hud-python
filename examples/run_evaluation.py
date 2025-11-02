@@ -65,37 +65,11 @@ def _build_agent(
     allowed_tools: list[str] | None = None,
 ) -> ClaudeAgent | OperatorAgent:
     """Create and return the requested agent type."""
-
     if agent_type == AgentType.OPENAI:
-        # Only pass allowed_tools if explicitly provided
-        # This allows tasks to specify their own via agent_config
-        if allowed_tools:
-            return OperatorAgent(
-                allowed_tools=allowed_tools,
-                validate_api_key=False,
-            )
-        else:
-            return OperatorAgent(
-                validate_api_key=False,
-            )
+        return OperatorAgent(allowed_tools=allowed_tools, validate_api_key=False)
 
-    # Fallback Claude agent (Anthropic)
-    # model = model or "claude-sonnet-4-20250514"
     model = model or "claude-sonnet-4-5-20250929"
-
-    # Only pass allowed_tools if explicitly provided
-    # This allows tasks to specify their own via agent_config
-    if allowed_tools:
-        return ClaudeAgent(
-            model=model,
-            allowed_tools=allowed_tools,
-            validate_api_key=False,
-        )
-    else:
-        return ClaudeAgent(
-            model=model,
-            validate_api_key=False,
-        )
+    return ClaudeAgent(model=model, allowed_tools=allowed_tools, validate_api_key=False)
 
 
 # ---------------------------------------------------------------------------
@@ -111,27 +85,19 @@ async def run_single_task(
     allowed_tools: list[str] | None = None,
     max_steps: int = 10,
 ) -> None:
-    """Load *one* task from *dataset_name* and execute it."""
-
-    # Enable agent step logging for single task mode
+    """Load one task from dataset and execute it."""
     logging.getLogger("hud.agents").setLevel(logging.INFO)
     logging.getLogger("hud.agents.base").setLevel(logging.INFO)
 
     print("📊 Loading dataset…")
     dataset = load_dataset(dataset_name, split="train")
 
-    # Get a simple task from dataset (Open last tab task)
     sample_task = dataset[1]  # type: ignore[index]
     task_prompt = sample_task.get("prompt", f"Task {sample_task.get('id', 0)}")  # type: ignore[attr-defined]
 
-    with hud.trace(name=task_prompt):
+    async with hud.async_trace(name=task_prompt):
         task = Task(**sample_task)  # type: ignore[arg-type]
-
-        agent = _build_agent(
-            agent_type,
-            model=model,
-            allowed_tools=allowed_tools,
-        )
+        agent = _build_agent(agent_type, model=model, allowed_tools=allowed_tools)
         print("Task prompt: ", task.prompt)
         result = await agent.run(task, max_steps=max_steps)
         print("✅ Reward:", result.reward)
@@ -151,29 +117,21 @@ async def run_full_dataset(
     max_concurrent: int = 50,
     max_steps: int = 10,
 ) -> list[Any]:
-    """Run evaluation across the entire dataset using asyncio-based concurrency."""
-
-    # Build agent class + config for run_dataset – we pass the *class* and a minimal
-    # config dict, run_dataset will create a fresh agent per task.
+    """Run evaluation across entire dataset with asyncio concurrency."""
     if agent_type == AgentType.OPENAI:
         agent_class = OperatorAgent
-        agent_config: dict[str, Any] = {
-            "validate_api_key": False,
-        }
-        # Only add allowed_tools if explicitly provided
-        # This allows tasks to specify their own via agent_config
+        agent_config: dict[str, Any] = {"validate_api_key": False}
         if allowed_tools:
+            # Only pass allowed tools if they are provided, otherwise all tools are enabled
             agent_config["allowed_tools"] = allowed_tools
     else:
         agent_class = ClaudeAgent
         agent_config = {
-            # "model": model or "claude-sonnet-4-20250514",
             "model": model or "claude-sonnet-4-5-20250929",
             "validate_api_key": False,
         }
-        # Only add allowed_tools if explicitly provided
-        # This allows tasks to specify their own via agent_config
         if allowed_tools:
+            # Only pass allowed tools if they are provided, otherwise all tools are enabled
             agent_config["allowed_tools"] = allowed_tools
 
     eval_name = f"Evaluation {dataset_name.split('/')[-1]}"
@@ -293,7 +251,6 @@ async def main() -> None:
 
         elapsed = time.time() - start_time
 
-        # Print statistics
         print("\n" + "=" * 50)
         print("📊 Evaluation Complete!")
         print("=" * 50)
@@ -302,7 +259,6 @@ async def main() -> None:
         print(f"Throughput: {len(results) / elapsed:.2f} tasks/second")
         print(f"Execution mode: ASYNCIO (max_concurrent: {args.max_concurrent})")
 
-        # Count successes
         successful = sum(1 for r in results if getattr(r, "reward", 0) > 0.7)
         print(
             f"Successful tasks: {successful}/{len(results)} ({100 * successful / len(results):.1f}%)"

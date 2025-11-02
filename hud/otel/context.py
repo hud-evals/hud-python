@@ -468,7 +468,7 @@ def _print_trace_complete_url(task_run_id: str, error_occurred: bool = False) ->
 class trace:
     """Internal OpenTelemetry trace context manager.
 
-    This is the implementation class. Users should use hud.trace() instead.
+    This is the sync implementation. For async code, use hud.async_trace() instead.
     """
 
     def __init__(

@@ -2,30 +2,29 @@
 
 Provides telemetry APIs for tracking agent execution and experiments.
 
-Standard Usage:
+Async Usage (Recommended):
     >>> import hud
-    >>> with hud.trace("My Task"):
-    ...     do_work()
+    >>> async with hud.async_trace("Task"):
+    ...     await agent.run(task)
+    >>> 
+    >>> async with hud.async_job("Evaluation") as job:
+    ...     async with hud.async_trace("Task", job_id=job.id):
+    ...         await agent.run(task)
 
+Sync Usage:
+    >>> import hud
+    >>> with hud.trace("Task"):
+    ...     do_work()
+    >>> 
     >>> with hud.job("My Job") as job:
     ...     with hud.trace("Task", job_id=job.id):
     ...         do_work()
 
-High-Concurrency Usage (200+ parallel tasks):
-    >>> import hud
-    >>> async with hud.async_job("Evaluation") as job:
-    ...     async with hud.async_trace("Task", job_id=job.id):
-    ...         await do_async_work()
-
 APIs:
-    - trace(), job() - Standard context managers (for typical usage)
-    - async_trace(), async_job() - Async context managers (for high concurrency)
-    - instrument() - Decorator for instrumenting functions
-    - get_trace() - Retrieve collected traces for replay
-
-Note:
-    Use async_trace/async_job only for high-concurrency scenarios (200+ tasks).
-    The run_dataset() function uses them automatically.
+    - async_trace(), async_job() - Async context managers (recommended)
+    - trace(), job() - Sync context managers
+    - flush_telemetry() - Manual span flushing (rarely needed)
+    - instrument() - Function instrumentation decorator
 """
 
 from __future__ import annotations
@@ -35,6 +34,7 @@ from .instrument import instrument
 from .job import Job, create_job, job
 from .replay import clear_trace, get_trace
 from .trace import Trace, trace
+from .utils import flush_telemetry
 
 __all__ = [
     "Job",
@@ -43,6 +43,7 @@ __all__ = [
     "async_trace",
     "clear_trace",
     "create_job",
+    "flush_telemetry",
     "get_trace",
     "instrument",
     "job",
