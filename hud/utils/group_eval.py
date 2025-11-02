@@ -89,7 +89,7 @@ async def run_tasks_grouped(
                 trace_name = f"Eval | {task.id if hasattr(task, 'id') else 'Task'} | Group {task_mapping[idx]}"  # noqa: E501
                 # Use the group_id for this specific task
                 task_group_id = task_group_ids[task_mapping[idx]]
-                with hud.trace(trace_name, job_id=job_id, group_id=task_group_id):
+                async with hud.async_trace(trace_name, job_id=job_id, group_id=task_group_id):
                     result = await agent.run(task, max_steps=max_steps)
                     return result
 

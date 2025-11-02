@@ -68,7 +68,7 @@ from hud.agents import ClaudeAgent
 async def main():
     # The trace context captures ALL agent interactions within a "task run"
     # Everything inside this context shows up as one trace on hud.ai
-    with hud.trace("quickstart-2048"):
+    async with hud.async_trace("quickstart-2048"):
         # Define task with remote MCP environment
         task = Task(
             prompt="Win a game of 2048 by reaching the 128 tile",
