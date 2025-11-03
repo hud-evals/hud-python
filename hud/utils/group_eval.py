@@ -184,24 +184,27 @@ def calculate_group_statistics(
 
 def display_group_statistics(stats: list[dict[str, Any]], show_details: bool = True) -> None:
     """Display statistics from grouped evaluation."""
+    if not stats:
+        hud_console.warning("No statistics to display")
+        return
+
     from rich.console import Console
     from rich.table import Table
 
     console = Console()
 
-    # Overall statistics
     all_means = [s["mean_reward"] for s in stats]
     overall_mean = mean(all_means) if all_means else 0.0
     overall_std = stdev(all_means) if len(all_means) > 1 else 0.0
 
     hud_console.success("\n📊 Evaluation Summary")
     hud_console.info(f"Tasks evaluated: {len(stats)}")
-    hud_console.info(f"Episodes per task: {stats[0]['group_size'] if stats else 0}")
-    hud_console.info(f"Total episodes: {sum(len(s['rewards']) for s in stats)}")
+    hud_console.info(f"Episodes per task: {stats[0].get('group_size', 0)}")
+    hud_console.info(f"Total episodes: {sum(len(s.get('rewards', [])) for s in stats)}")
     hud_console.info(f"Overall mean reward: {overall_mean:.3f} ± {overall_std:.3f}")
 
     # Detailed table
-    if show_details and len(stats) <= 50:  # Only show for reasonable dataset sizes
+    if show_details and stats and len(stats) <= 50:
         table = Table(title="\nPer-Task Performance Distribution")
         table.add_column("Task", style="cyan", no_wrap=True)
         table.add_column("Mean±Std", justify="right", style="green")
@@ -210,16 +213,17 @@ def display_group_statistics(stats: list[dict[str, Any]], show_details: bool = T
         table.add_column("Rewards", style="dim")
 
         for stat in stats:
-            task_name = stat["prompt"][:30] + "..." if len(stat["prompt"]) > 30 else stat["prompt"]
-            rewards_str = " ".join([f"{r:.2f}" for r in stat["rewards"][:5]])
-            if len(stat["rewards"]) > 5:
+            task_name = stat.get("prompt", "Unknown")[:30] + "..." if len(stat.get("prompt", "")) > 30 else stat.get("prompt", "Unknown")
+            rewards = stat.get("rewards", [])
+            rewards_str = " ".join([f"{r:.2f}" for r in rewards[:5]])
+            if len(rewards) > 5:
                 rewards_str += " ..."
 
             table.add_row(
                 task_name,
-                f"{stat['mean_reward']:.3f}±{stat['std_reward']:.3f}",
-                f"{stat['min_reward']:.2f}/{stat['max_reward']:.2f}",
-                f"{stat['success_rate'] * 100:.0f}%",
+                f"{stat.get('mean_reward', 0):.3f}±{stat.get('std_reward', 0):.3f}",
+                f"{stat.get('min_reward', 0):.2f}/{stat.get('max_reward', 0):.2f}",
+                f"{stat.get('success_rate', 0) * 100:.0f}%",
                 rewards_str,
             )
 
