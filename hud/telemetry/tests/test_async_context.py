@@ -327,7 +327,7 @@ async def test_async_trace_with_attrs():
         mock_otel.return_value = mock_otel_instance
 
         attrs = {"key": "value", "count": 42}
-        async with async_trace("Test", attrs=attrs) as trace_obj:
+        async with async_trace("Test", attrs=attrs):
             # attrs are passed to OtelTrace, not exposed on Trace object
             mock_otel.assert_called_once()
             call_kwargs = mock_otel.call_args[1]
@@ -447,7 +447,7 @@ async def test_async_trace_telemetry_disabled():
         patch(
             "hud.telemetry.async_context._update_task_status_async",
             new_callable=AsyncMock,
-        ) as mock_update,
+        ),
     ):
         mock_settings.telemetry_enabled = False
         mock_otel_instance = MagicMock()
