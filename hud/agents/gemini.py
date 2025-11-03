@@ -461,7 +461,8 @@ class GeminiAgent(MCPAgent):
     def _remove_old_screenshots(self, messages: list[genai_types.Content]) -> None:
         """
         Remove screenshots from old turns to manage context length.
-        Keeps only the last N turns with screenshots (configured via self.max_recent_turn_with_screenshots).
+        Keeps only the last N turns with screenshots (configured via
+        self.max_recent_turn_with_screenshots).
         """
         turn_with_screenshots_found = 0
 

@@ -109,7 +109,7 @@ class Actor:
 
         # Run the task
         try:
-            with hud.trace(f"Training | {task.prompt}", job_id=job_id):
+            async with hud.async_trace(f"Training | {task.prompt}", job_id=job_id):
                 result = await agent.run(task, max_steps=self.actor_config.max_steps_per_episode)
 
         except Exception:

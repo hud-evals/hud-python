@@ -156,7 +156,7 @@ Real-time observability:
 ```python
 import hud
 
-with hud.trace("my-evaluation"):
+async with hud.async_trace("my-evaluation"):
     result = await agent.run(task)
     # View at hud.ai/traces/{trace_id}
 ```

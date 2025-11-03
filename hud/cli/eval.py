@@ -260,9 +260,8 @@ async def run_single_task(
 ) -> None:
     """Load one task and execute it, or detect if JSON contains a list and run as dataset."""
 
-    # Provide early feedback to user
     hud_console.info("🔧 Initializing evaluation...")
-    # Import Task and run_dataset lazily
+
     try:
         from hud.utils.tasks import load_tasks
     except ImportError as e:
@@ -399,23 +398,31 @@ async def run_single_task(
 
     if group_size > 1:
         hud_console.info(f"🔄 Running task with group_size={group_size}")
-        # Run with grouping
-        stats = await run_tasks_grouped(
-            tasks=[task],
-            agent_class=agent_class,
-            agent_config=agent_config,
-            group_size=group_size,
-            max_parallel_episodes=48,  # Same as RL default
-            max_steps=max_steps,
-            verbose=verbose,
-        )
+        async with hud.async_job(
+            name=f"Group Eval: {task_prompt[:50]}... (x{group_size})",
+            metadata={
+                "task_id": getattr(task, "id", None),
+                "group_size": group_size,
+                "total_episodes": group_size,
+            },
+        ) as job:
+            stats = await run_tasks_grouped(
+                tasks=[task],
+                agent_class=agent_class,
+                agent_config=agent_config,
+                group_size=group_size,
+                max_parallel_episodes=48,
+                max_steps=max_steps,
+                verbose=verbose,
+                job_id=job.id,
+            )
         display_group_statistics(stats, show_details=True)
     else:
         # Enable agent step logging for single task mode
         logging.getLogger("hud.agents").setLevel(logging.INFO)
         logging.getLogger("hud.agents.base").setLevel(logging.INFO)
 
-        with hud.trace(name=task_prompt):
+        async with hud.async_trace(name=task_prompt):
             agent = build_agent(
                 agent_type,
                 model=model,
@@ -442,10 +449,8 @@ async def run_full_dataset(
 ) -> list[Any]:
     """Run evaluation across the entire dataset using asyncio-based concurrency."""
 
-    # Provide early feedback to user
     hud_console.info("🔧 Initializing evaluation...")
 
-    # Import run_dataset lazily
     try:
         from hud.datasets import run_dataset
         from hud.utils.tasks import load_tasks
@@ -627,7 +632,7 @@ async def run_full_dataset(
         hud_console.info(f"🔄 Running dataset with group_size={group_size}")
 
         # Run with job tracking
-        with hud.job(
+        async with hud.async_job(
             name=f"Evaluation {dataset_name} (group_size={group_size})",
             metadata={
                 "dataset": source,

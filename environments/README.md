@@ -496,7 +496,7 @@ from hud.clients import MCPClient
 
 async def main():
     # `trace` captures *everything* that happens and sends it to hud.ai
-    with hud.trace("local_test"):
+    async with hud.async_trace("local_test"):
         task = Task(
             prompt="Complete the task",
             mcp_config={

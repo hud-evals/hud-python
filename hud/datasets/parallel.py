@@ -371,7 +371,7 @@ async def run_dataset_parallel_manual(
             logger.warning("Failed to extract dataset verification info")
 
     # Create job context
-    with hud.job(name, metadata=job_metadata, dataset_link=dataset_link) as job_obj:
+    async with hud.async_job(name, metadata=job_metadata, dataset_link=dataset_link) as job_obj:
         # Prepare agent class info for pickling
         agent_module = agent_class.__module__
         agent_name = agent_class.__name__
