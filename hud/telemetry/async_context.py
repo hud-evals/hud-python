@@ -6,7 +6,6 @@ Usage:
     >>> import hud
     >>> async with hud.async_trace("Task"):
     ...     await agent.run(task)
-    >>> 
     >>> async with hud.async_job("Evaluation") as job:
     ...     async with hud.async_trace("Task", job_id=job.id):
     ...         await agent.run(task)
@@ -143,6 +142,7 @@ class AsyncTrace:
         # Flush spans for standalone traces (not part of a job)
         if not self.job_id and self.root:
             from hud.telemetry.utils import flush_telemetry
+
             await flush_telemetry()
 
         logger.debug("Ended trace: %s (%s)", self.name, self.task_run_id)
@@ -216,6 +216,7 @@ class AsyncJob:
 
         # Flush all child trace spans before updating job status
         from hud.telemetry.utils import flush_telemetry
+
         await flush_telemetry()
 
         # Update job status to "completed" or "failed"
@@ -275,7 +276,6 @@ def async_trace(
 
     Example:
         >>> import hud
-        >>> 
         >>> # Single task - everything is automatic!
         >>> async with hud.async_trace("My Task"):
         ...     result = await agent.run(task)
@@ -324,7 +324,6 @@ def async_job(
 
     Example:
         >>> import hud
-        >>> 
         >>> async with hud.async_job("Batch Processing") as job:
         ...     for item in items:
         ...         async with hud.async_trace(f"Task {item.id}", job_id=job.id):

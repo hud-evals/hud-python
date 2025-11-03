@@ -213,7 +213,11 @@ def display_group_statistics(stats: list[dict[str, Any]], show_details: bool = T
         table.add_column("Rewards", style="dim")
 
         for stat in stats:
-            task_name = stat.get("prompt", "Unknown")[:30] + "..." if len(stat.get("prompt", "")) > 30 else stat.get("prompt", "Unknown")
+            task_name = (
+                stat.get("prompt", "Unknown")[:30] + "..."
+                if len(stat.get("prompt", "")) > 30
+                else stat.get("prompt", "Unknown")
+            )
             rewards = stat.get("rewards", [])
             rewards_str = " ".join([f"{r:.2f}" for r in rewards[:5]])
             if len(rewards) > 5:

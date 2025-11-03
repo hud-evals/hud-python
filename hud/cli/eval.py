@@ -261,7 +261,7 @@ async def run_single_task(
     """Load one task and execute it, or detect if JSON contains a list and run as dataset."""
 
     hud_console.info("🔧 Initializing evaluation...")
-    
+
     try:
         from hud.utils.tasks import load_tasks
     except ImportError as e:
@@ -399,7 +399,7 @@ async def run_single_task(
     if group_size > 1:
         hud_console.info(f"🔄 Running task with group_size={group_size}")
         async with hud.async_job(
-            name=f"Group Eval: {task_prompt[:50]}... (×{group_size})",
+            name=f"Group Eval: {task_prompt[:50]}... (x{group_size})",
             metadata={
                 "task_id": getattr(task, "id", None),
                 "group_size": group_size,

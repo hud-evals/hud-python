@@ -6,7 +6,6 @@ Async Usage (Recommended):
     >>> import hud
     >>> async with hud.async_trace("Task"):
     ...     await agent.run(task)
-    >>> 
     >>> async with hud.async_job("Evaluation") as job:
     ...     async with hud.async_trace("Task", job_id=job.id):
     ...         await agent.run(task)
@@ -15,7 +14,6 @@ Sync Usage:
     >>> import hud
     >>> with hud.trace("Task"):
     ...     do_work()
-    >>> 
     >>> with hud.job("My Job") as job:
     ...     with hud.trace("Task", job_id=job.id):
     ...         do_work()

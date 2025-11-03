@@ -117,7 +117,6 @@ def trace(
         >>> with hud.trace("My Task") as trace:
         ...     do_work()
         ...     trace.log_sync({"step": 1, "progress": 0.5})
-        >>> 
         >>> # For async code, use async_trace
         >>> async with hud.async_trace("Async Task") as trace:
         ...     await do_async_work()

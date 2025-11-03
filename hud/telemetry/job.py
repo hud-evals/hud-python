@@ -233,7 +233,6 @@ def job(
         ...     for epoch in range(10):
         ...         with hud.trace(f"epoch_{epoch}", job_id=job.id):
         ...             train_epoch()
-        >>> 
         >>> # For async code, use async_job
         >>> async with hud.async_job("batch_processing") as job:
         ...     async with hud.async_trace("task", job_id=job.id):

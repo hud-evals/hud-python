@@ -40,4 +40,3 @@ async def flush_telemetry() -> None:
                 logger.debug("OpenTelemetry flush timed out (will export on exit)")
     except Exception as e:
         logger.debug("Failed to flush OpenTelemetry: %s", e)
-
