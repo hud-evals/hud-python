@@ -297,7 +297,7 @@ def async_trace(
         attrs=attrs,
         job_id=job_id,
         task_id=task_id,
-        group_id=group_id if group_id else str(uuid.uuid4()),
+        group_id=group_id,
     )
 
 
