@@ -12,9 +12,7 @@ async def test_async_trace_basic():
     """Test basic AsyncTrace usage."""
     with (
         patch("hud.telemetry.async_context.OtelTrace") as mock_otel,
-        patch("hud.telemetry.async_context.track_task"),
-        patch("hud.telemetry.async_context._print_trace_url"),
-        patch("hud.telemetry.async_context._print_trace_complete_url"),
+        patch("hud.telemetry.async_context._update_task_status_async", new_callable=AsyncMock),
     ):
         mock_otel_instance = MagicMock()
         mock_otel.return_value = mock_otel_instance
@@ -29,7 +27,7 @@ async def test_async_trace_with_job_id():
     """Test AsyncTrace with job_id parameter."""
     with (
         patch("hud.telemetry.async_context.OtelTrace") as mock_otel,
-        patch("hud.telemetry.async_context.track_task"),
+        patch("hud.telemetry.async_context._update_task_status_async", new_callable=AsyncMock),
     ):
         mock_otel_instance = MagicMock()
         mock_otel.return_value = mock_otel_instance
@@ -43,7 +41,7 @@ async def test_async_trace_with_task_id():
     """Test AsyncTrace with task_id parameter."""
     with (
         patch("hud.telemetry.async_context.OtelTrace") as mock_otel,
-        patch("hud.telemetry.async_context.track_task"),
+        patch("hud.telemetry.async_context._update_task_status_async", new_callable=AsyncMock),
     ):
         mock_otel_instance = MagicMock()
         mock_otel.return_value = mock_otel_instance
@@ -53,13 +51,13 @@ async def test_async_trace_with_task_id():
 
 
 @pytest.mark.asyncio
-async def test_async_trace_prints_url_without_job():
-    """Test AsyncTrace prints URL when not part of a job."""
+async def test_async_trace_status_updates():
+    """Test AsyncTrace sends and awaits status updates."""
     with (
         patch("hud.telemetry.async_context.settings") as mock_settings,
         patch("hud.telemetry.async_context.OtelTrace") as mock_otel,
-        patch("hud.telemetry.async_context.track_task"),
-        patch("hud.telemetry.async_context._print_trace_url") as mock_print_url,
+        patch("hud.telemetry.async_context._update_task_status_async", new_callable=AsyncMock) as mock_update,
+        patch("hud.telemetry.utils.flush_telemetry", new_callable=AsyncMock),
     ):
         mock_settings.telemetry_enabled = True
         mock_settings.api_key = "test-key"
@@ -69,18 +67,80 @@ async def test_async_trace_prints_url_without_job():
         async with async_trace("Test", job_id=None):
             pass
 
-        # Should print trace URL
-        mock_print_url.assert_called_once()
+        # Should call update twice: running and completed
+        assert mock_update.call_count == 2
 
 
 @pytest.mark.asyncio
-async def test_async_trace_no_print_url_with_job():
-    """Test AsyncTrace doesn't print URL when part of a job."""
+async def test_async_trace_with_exception():
+    """Test AsyncTrace handles exceptions."""
     with (
         patch("hud.telemetry.async_context.settings") as mock_settings,
         patch("hud.telemetry.async_context.OtelTrace") as mock_otel,
-        patch("hud.telemetry.async_context.track_task"),
-        patch("hud.telemetry.async_context._print_trace_url") as mock_print_url,
+        patch("hud.telemetry.async_context._update_task_status_async", new_callable=AsyncMock) as mock_update,
+        patch("hud.telemetry.utils.flush_telemetry", new_callable=AsyncMock),
+    ):
+        mock_settings.telemetry_enabled = True
+        mock_settings.api_key = "test-key"
+        mock_otel_instance = MagicMock()
+        mock_otel.return_value = mock_otel_instance
+
+        with pytest.raises(ValueError):
+            async with async_trace("Test"):
+                raise ValueError("Test error")
+
+        # Should call update with "error" status
+        assert mock_update.call_count == 2
+        final_call = mock_update.call_args_list[1]
+        assert final_call[0][1] == "error"
+
+
+@pytest.mark.asyncio
+async def test_async_trace_non_root():
+    """Test AsyncTrace with root=False."""
+    with (
+        patch("hud.telemetry.async_context.OtelTrace") as mock_otel,
+        patch("hud.telemetry.async_context._update_task_status_async", new_callable=AsyncMock) as mock_update,
+    ):
+        mock_otel_instance = MagicMock()
+        mock_otel.return_value = mock_otel_instance
+
+        async with async_trace("Test", root=False):
+            pass
+
+        # Should not send status updates for non-root traces
+        mock_update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_trace_flushes_when_standalone():
+    """Test AsyncTrace flushes spans when not part of a job."""
+    with (
+        patch("hud.telemetry.async_context.settings") as mock_settings,
+        patch("hud.telemetry.async_context.OtelTrace") as mock_otel,
+        patch("hud.telemetry.async_context._update_task_status_async", new_callable=AsyncMock),
+        patch("hud.telemetry.utils.flush_telemetry", new_callable=AsyncMock) as mock_flush,
+    ):
+        mock_settings.telemetry_enabled = True
+        mock_settings.api_key = "test-key"
+        mock_otel_instance = MagicMock()
+        mock_otel.return_value = mock_otel_instance
+
+        async with async_trace("Test", job_id=None):
+            pass
+
+        # Should flush for standalone traces
+        mock_flush.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_async_trace_no_flush_when_in_job():
+    """Test AsyncTrace doesn't flush when part of a job."""
+    with (
+        patch("hud.telemetry.async_context.settings") as mock_settings,
+        patch("hud.telemetry.async_context.OtelTrace") as mock_otel,
+        patch("hud.telemetry.async_context._update_task_status_async", new_callable=AsyncMock),
+        patch("hud.telemetry.utils.flush_telemetry", new_callable=AsyncMock) as mock_flush,
     ):
         mock_settings.telemetry_enabled = True
         mock_settings.api_key = "test-key"
@@ -90,8 +150,29 @@ async def test_async_trace_no_print_url_with_job():
         async with async_trace("Test", job_id="job-123"):
             pass
 
-        # Should NOT print trace URL when job_id is set
-        mock_print_url.assert_not_called()
+        # Should NOT flush when part of a job
+        mock_flush.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_trace_status_updates():
+    """Test AsyncTrace sends and awaits status updates."""
+    with (
+        patch("hud.telemetry.async_context.settings") as mock_settings,
+        patch("hud.telemetry.async_context.OtelTrace") as mock_otel,
+        patch("hud.telemetry.async_context._update_task_status_async", new_callable=AsyncMock) as mock_update,
+        patch("hud.telemetry.utils.flush_telemetry", new_callable=AsyncMock),
+    ):
+        mock_settings.telemetry_enabled = True
+        mock_settings.api_key = "test-key"
+        mock_otel_instance = MagicMock()
+        mock_otel.return_value = mock_otel_instance
+
+        async with async_trace("Test", job_id=None):
+            pass
+
+        # Should call update twice: running and completed
+        assert mock_update.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -100,13 +181,11 @@ async def test_async_trace_with_exception():
     with (
         patch("hud.telemetry.async_context.settings") as mock_settings,
         patch("hud.telemetry.async_context.OtelTrace") as mock_otel,
-        patch("hud.telemetry.async_context.track_task"),
-        patch("hud.telemetry.async_context._print_trace_complete_url") as mock_print,
+        patch("hud.telemetry.async_context._update_task_status_async", new_callable=AsyncMock) as mock_update,
+        patch("hud.telemetry.utils.flush_telemetry", new_callable=AsyncMock),
     ):
-        # Enable telemetry for this test
         mock_settings.telemetry_enabled = True
         mock_settings.api_key = "test-key"
-
         mock_otel_instance = MagicMock()
         mock_otel.return_value = mock_otel_instance
 
@@ -114,17 +193,77 @@ async def test_async_trace_with_exception():
             async with async_trace("Test"):
                 raise ValueError("Test error")
 
-        # Should have been called with error_occurred keyword arg
-        mock_print.assert_called_once()
-        call_kwargs = mock_print.call_args[1]
-        assert call_kwargs["error_occurred"] is True
+        # Should call update with "error" status
+        assert mock_update.call_count == 2
+        final_call = mock_update.call_args_list[1]
+        assert final_call[0][1] == "error"
+
+
+@pytest.mark.asyncio
+async def test_async_trace_non_root():
+    """Test AsyncTrace with root=False."""
+    with (
+        patch("hud.telemetry.async_context.OtelTrace") as mock_otel,
+        patch("hud.telemetry.async_context._update_task_status_async", new_callable=AsyncMock) as mock_update,
+    ):
+        mock_otel_instance = MagicMock()
+        mock_otel.return_value = mock_otel_instance
+
+        async with async_trace("Test", root=False):
+            pass
+
+        # Should not send status updates for non-root traces
+        mock_update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_trace_flushes_when_standalone():
+    """Test AsyncTrace flushes spans when not part of a job."""
+    with (
+        patch("hud.telemetry.async_context.settings") as mock_settings,
+        patch("hud.telemetry.async_context.OtelTrace") as mock_otel,
+        patch("hud.telemetry.async_context._update_task_status_async", new_callable=AsyncMock),
+        patch("hud.telemetry.utils.flush_telemetry", new_callable=AsyncMock) as mock_flush,
+    ):
+        mock_settings.telemetry_enabled = True
+        mock_settings.api_key = "test-key"
+        mock_otel_instance = MagicMock()
+        mock_otel.return_value = mock_otel_instance
+
+        async with async_trace("Test", job_id=None):
+            pass
+
+        # Should flush for standalone traces
+        mock_flush.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_async_trace_no_flush_when_in_job():
+    """Test AsyncTrace doesn't flush when part of a job."""
+    with (
+        patch("hud.telemetry.async_context.settings") as mock_settings,
+        patch("hud.telemetry.async_context.OtelTrace") as mock_otel,
+        patch("hud.telemetry.async_context._update_task_status_async", new_callable=AsyncMock),
+        patch("hud.telemetry.utils.flush_telemetry", new_callable=AsyncMock) as mock_flush,
+    ):
+        mock_settings.telemetry_enabled = True
+        mock_settings.api_key = "test-key"
+        mock_otel_instance = MagicMock()
+        mock_otel.return_value = mock_otel_instance
+
+        async with async_trace("Test", job_id="job-123"):
+            pass
+
+        # Should NOT flush when part of a job
+        mock_flush.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_async_job_basic():
     """Test basic AsyncJob usage."""
     with (
-        patch("hud.telemetry.async_context.track_task"),
+        patch("hud.telemetry.async_context.make_request", new_callable=AsyncMock),
+        patch("hud.telemetry.utils.flush_telemetry", new_callable=AsyncMock),
         patch("hud.telemetry.async_context._print_job_url"),
         patch("hud.telemetry.async_context._print_job_complete_url"),
     ):
@@ -137,7 +276,8 @@ async def test_async_job_basic():
 async def test_async_job_with_metadata():
     """Test AsyncJob with metadata."""
     with (
-        patch("hud.telemetry.async_context.track_task"),
+        patch("hud.telemetry.async_context.make_request", new_callable=AsyncMock),
+        patch("hud.telemetry.utils.flush_telemetry", new_callable=AsyncMock),
         patch("hud.telemetry.async_context._print_job_url"),
         patch("hud.telemetry.async_context._print_job_complete_url"),
     ):
@@ -149,7 +289,8 @@ async def test_async_job_with_metadata():
 async def test_async_job_with_dataset_link():
     """Test AsyncJob with dataset_link."""
     with (
-        patch("hud.telemetry.async_context.track_task"),
+        patch("hud.telemetry.async_context.make_request", new_callable=AsyncMock),
+        patch("hud.telemetry.utils.flush_telemetry", new_callable=AsyncMock),
         patch("hud.telemetry.async_context._print_job_url"),
         patch("hud.telemetry.async_context._print_job_complete_url"),
     ):
@@ -161,7 +302,8 @@ async def test_async_job_with_dataset_link():
 async def test_async_job_with_custom_job_id():
     """Test AsyncJob with custom job_id."""
     with (
-        patch("hud.telemetry.async_context.track_task"),
+        patch("hud.telemetry.async_context.make_request", new_callable=AsyncMock),
+        patch("hud.telemetry.utils.flush_telemetry", new_callable=AsyncMock),
         patch("hud.telemetry.async_context._print_job_url"),
         patch("hud.telemetry.async_context._print_job_complete_url"),
     ):
@@ -173,7 +315,8 @@ async def test_async_job_with_custom_job_id():
 async def test_async_job_with_exception():
     """Test AsyncJob handles exceptions."""
     with (
-        patch("hud.telemetry.async_context.track_task"),
+        patch("hud.telemetry.async_context.make_request", new_callable=AsyncMock),
+        patch("hud.telemetry.utils.flush_telemetry", new_callable=AsyncMock),
         patch("hud.telemetry.async_context._print_job_url"),
         patch("hud.telemetry.async_context._print_job_complete_url") as mock_print,
     ):
@@ -181,7 +324,7 @@ async def test_async_job_with_exception():
             async with async_job("Test"):
                 raise ValueError("Job error")
 
-        # Should print with error_occurred keyword arg
+        # Should print with error_occurred=True
         mock_print.assert_called_once()
         call_kwargs = mock_print.call_args[1]
         assert call_kwargs["error_occurred"] is True
@@ -192,7 +335,8 @@ async def test_async_job_status_updates():
     """Test AsyncJob sends status updates."""
     with (
         patch("hud.telemetry.async_context.settings") as mock_settings,
-        patch("hud.telemetry.async_context.track_task") as mock_track,
+        patch("hud.telemetry.async_context.make_request", new_callable=AsyncMock) as mock_request,
+        patch("hud.telemetry.utils.flush_telemetry", new_callable=AsyncMock),
         patch("hud.telemetry.async_context._print_job_url"),
         patch("hud.telemetry.async_context._print_job_complete_url"),
     ):
@@ -203,40 +347,21 @@ async def test_async_job_status_updates():
         async with async_job("Test"):
             pass
 
-        # Should have called track_task twice (running and completed)
-        assert mock_track.call_count == 2
+        # Should call make_request twice (running and completed)
+        assert mock_request.call_count == 2
 
 
 @pytest.mark.asyncio
-async def test_async_job_includes_dataset_link_in_status():
-    """Test AsyncJob includes dataset_link in status updates."""
+async def test_async_job_flushes_on_exit():
+    """Test AsyncJob flushes telemetry on exit."""
     with (
-        patch("hud.telemetry.async_context.settings") as mock_settings,
-        patch("hud.telemetry.async_context.track_task"),
         patch("hud.telemetry.async_context.make_request", new_callable=AsyncMock),
+        patch("hud.telemetry.utils.flush_telemetry", new_callable=AsyncMock) as mock_flush,
         patch("hud.telemetry.async_context._print_job_url"),
         patch("hud.telemetry.async_context._print_job_complete_url"),
     ):
-        mock_settings.telemetry_enabled = True
-        mock_settings.api_key = "test-key"
-        mock_settings.hud_telemetry_url = "https://test.com"
-
-        async with async_job("Test", dataset_link="test/dataset"):
+        async with async_job("Test"):
             pass
 
-
-@pytest.mark.asyncio
-async def test_async_trace_non_root():
-    """Test AsyncTrace with root=False."""
-    with (
-        patch("hud.telemetry.async_context.OtelTrace") as mock_otel,
-        patch("hud.telemetry.async_context.track_task") as mock_track,
-    ):
-        mock_otel_instance = MagicMock()
-        mock_otel.return_value = mock_otel_instance
-
-        async with async_trace("Test", root=False):
-            pass
-
-        # Should not track status updates for non-root traces
-        mock_track.assert_not_called()
+        # Should flush telemetry before exit
+        mock_flush.assert_called_once()

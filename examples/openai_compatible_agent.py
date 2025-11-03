@@ -142,7 +142,7 @@ async def run_example(mode: Literal["text", "browser"], target: int) -> None:
         print(f"🧩 Mode: {mode}")
         print("=" * 50)
 
-        with hud.trace("Game Execution", job_id=job.id):
+        async with hud.async_trace("Game Execution", job_id=job.id):
             result = await agent.run(task, max_steps=100)
 
         print("=" * 50)
