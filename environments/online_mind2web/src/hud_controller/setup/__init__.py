@@ -11,6 +11,6 @@ from hud.tools.base import BaseHub
 setup = BaseHub("setup")
 
 # Import all setup functions to register them
-from . import navigate, cookies, interact
+from . import navigate
 
 __all__ = ["setup"]

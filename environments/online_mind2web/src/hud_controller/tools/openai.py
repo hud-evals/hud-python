@@ -157,8 +157,8 @@ class OpenAIComputerToolWithRecord(OpenAIComputerTool):
             if len(path) >= 2:
                 start = path[0]
                 end = path[-1]
-                attributes.append(f"start=[{start['x']}, {start['y']}]")
-                attributes.append(f"end=[{end['x']}, {end['y']}]")
+                attributes.append(f"start={list(start)}")
+                attributes.append(f"end={list(end)}")
 
         if scroll_x is not None or scroll_y is not None:
             if scroll_y and scroll_y > 0:

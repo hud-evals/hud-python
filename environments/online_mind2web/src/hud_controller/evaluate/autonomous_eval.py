@@ -13,7 +13,7 @@ async def autonomous(
     ctx: Context,
     task_description: dict | str,
 ) -> dict | EvaluationResult:
-    return await autonomous(ctx, task_description)
+    return await autonomous_eval(ctx, task_description)
 
 
 async def autonomous_eval(

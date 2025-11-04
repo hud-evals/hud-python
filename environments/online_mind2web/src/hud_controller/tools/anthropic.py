@@ -225,12 +225,12 @@ class AnthropicComputerToolWithRecord(AnthropicComputerTool):
         attributes = []
 
         if coordinate:
-            attributes.append(f"coordinate={coordinate}")
+            attributes.append(f"coordinate={list(coordinate)}")
 
         if start_coordinate and action_name == "DRAG":
-            attributes.append(f"start={start_coordinate}")
+            attributes.append(f"start={list(start_coordinate)}")
             if coordinate:
-                attributes.append(f"end={coordinate}")
+                attributes.append(f"end={list(coordinate)}")
 
         if scroll_direction:
             attributes.append(f"direction={scroll_direction}")
