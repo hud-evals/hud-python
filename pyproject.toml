@@ -43,6 +43,7 @@ dependencies = [
     "anthropic",
     "openai",
     "google-genai",
+    "tornado>=6.5.2",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

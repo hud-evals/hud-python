@@ -5,7 +5,7 @@ description = "MCP server for XLSX spreadsheet manipulation"
 authors = [{name = "HUD Team"}]
 requires-python = ">=3.11"
 dependencies = [
-    "hud-python",
+    "hud-python==0.4.60",
     "pandas>=2.0.0",
     "openpyxl>=3.1.0",
     "xlsxwriter>=3.1.0",
