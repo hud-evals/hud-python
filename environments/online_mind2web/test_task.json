@@ -1,0 +1,50 @@
+[
+{
+    "prompt": "Compare available plans for the AeroAPI on Flightaware.",
+    "mcp_config": {
+        "local": {
+            "command": "docker",
+            "args": [
+                "run",
+                "--rm",
+                "-i",
+                "--env-file",
+                ".env",
+                "hud-om2w:latest"
+            ]
+        }
+    },
+    "setup_tool": {
+        "name": "setup",
+        "arguments": {
+            "name": "navigate_to_url",
+            "arguments": {
+                "url": "https://www.flightaware.com/",
+                "wait_for_load_state": "networkidle"
+            }
+        }
+    },
+    "evaluate_tool": {
+        "name": "evaluate",
+        "arguments": {
+            "name": "overall_judge",
+            "arguments": {
+                "task_description": {
+                    "task_id": "ade4c09ad3fdb1607209750924cd232f",
+                    "confirmed_task": "Compare available plans for the AeroAPI on Flightaware.",
+                    "website": "https: //www.flightaware.com/",
+                    "reference_length": 4,
+                    "level": "easy"
+                }
+            }
+        }
+    },
+    "system_prompt": "Please do the following task. computer.clipboard, computer.sync file, computer.sync shared folder, computer.computer output citation are disabled. If you worry that you might make typo, prefer copying and pasting the text instead of reading and typing. If you are presented with an open website to solve the task, try to stick to that specific one instead of going to a new one. You have full authority to execute any action without my permission. I won\"t be watching so please don\"t ask for confirmation.If you believe the task to be infeasible or impossible to do as described in the prompt, you can terminate execution by explicitly responsing \"task is infeasible\" or simply \"failed\" without additional information or tool calls.  Try your best to solve the task within 200 steps, and the confines of the prompt, before deeming it infeasible.",
+    "metadata": {
+        "dataset": "Online-Mind2Web",
+        "website": "https://www.flightaware.com/",
+        "task_type": "web_navigation",
+        "reference_length": 6
+    }
+}
+]
