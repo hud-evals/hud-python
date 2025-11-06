@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp.shared.exceptions import McpError
@@ -62,18 +62,20 @@ class TestPlaywrightTool:
         tool = PlaywrightTool()
 
         # Mock the browser components
-        mock_page = AsyncMock()
-        mock_page.click = AsyncMock()
+        locator = AsyncMock()
+        locator.click = AsyncMock(return_value=None)
 
-        with patch.object(tool, "_ensure_browser", new_callable=AsyncMock):
-            # Set up the tool with mocked page
-            tool.page = mock_page
+        with (
+            patch.object(tool, "_ensure_browser", new_callable=AsyncMock),
+            patch.object(tool, "_get_locator", return_value=locator),
+        ):
+            tool.page = MagicMock()
 
             blocks = await tool(action="click", selector="button#submit")
 
             assert blocks is not None
             assert any(isinstance(b, TextContent) for b in blocks)
-            mock_page.click.assert_called_once_with("button#submit", button="left", click_count=1)
+            locator.click.assert_awaited_once_with(button="left", click_count=1, timeout=30000)
 
     @pytest.mark.asyncio
     async def test_playwright_tool_type_with_mocked_browser(self):
@@ -81,18 +83,20 @@ class TestPlaywrightTool:
         tool = PlaywrightTool()
 
         # Mock the browser components
-        mock_page = AsyncMock()
-        mock_page.fill = AsyncMock()  # Playwright uses fill, not type
+        locator = AsyncMock()
+        locator.fill = AsyncMock(return_value=None)
 
-        with patch.object(tool, "_ensure_browser", new_callable=AsyncMock):
-            # Set up the tool with mocked page
-            tool.page = mock_page
+        with (
+            patch.object(tool, "_ensure_browser", new_callable=AsyncMock),
+            patch.object(tool, "_get_locator", return_value=locator),
+        ):
+            tool.page = MagicMock()
 
             blocks = await tool(action="type", selector="input#name", text="John Doe")
 
             assert blocks is not None
             assert any(isinstance(b, TextContent) for b in blocks)
-            mock_page.fill.assert_called_once_with("input#name", "John Doe")
+            locator.fill.assert_awaited_once_with("John Doe", timeout=30000)
 
     @pytest.mark.asyncio
     async def test_playwright_tool_screenshot_with_mocked_browser(self):
@@ -145,12 +149,14 @@ class TestPlaywrightTool:
         tool = PlaywrightTool()
 
         # Mock the browser components
-        mock_page = AsyncMock()
-        mock_page.wait_for_selector = AsyncMock()
+        locator = AsyncMock()
+        locator.wait_for = AsyncMock(return_value=None)
 
-        with patch.object(tool, "_ensure_browser", new_callable=AsyncMock):
-            # Set up the tool with mocked page
-            tool.page = mock_page
+        with (
+            patch.object(tool, "_ensure_browser", new_callable=AsyncMock),
+            patch.object(tool, "_get_locator", return_value=locator),
+        ):
+            tool.page = MagicMock()
 
             # wait_for_element doesn't accept timeout parameter directly
             blocks = await tool(action="wait_for_element", selector="div#loaded")
@@ -158,7 +164,25 @@ class TestPlaywrightTool:
             assert blocks is not None
             assert any(isinstance(b, TextContent) for b in blocks)
             # Default timeout is used
-            mock_page.wait_for_selector.assert_called_once()
+            locator.wait_for.assert_awaited_once_with(state="visible", timeout=30000)
+
+    async def test_playwright_tool_get_iframes_action(self):
+        """Test get_iframes action with mocked browser."""
+        tool = PlaywrightTool()
+
+        mock_locator = MagicMock()
+        mock_locator.count = AsyncMock(return_value=0)
+
+        with patch.object(tool, "_ensure_browser", new_callable=AsyncMock):
+            tool.page = MagicMock()
+            tool.page.locator.return_value = mock_locator
+
+            blocks = await tool(action="get_iframes")
+
+            assert blocks is not None
+            text_blocks = [b for b in blocks if isinstance(b, TextContent)]
+            assert any("No iframes found" in b.text for b in text_blocks)
+            mock_locator.count.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_playwright_tool_cleanup(self):
@@ -181,3 +205,38 @@ class TestPlaywrightTool:
         assert tool._browser is None
         assert tool._browser_context is None
         assert tool.page is None
+
+    def test_playwright_tool_get_locator_standard_selector(self):
+        """Ensure plain >> selectors remain supported."""
+        tool = PlaywrightTool()
+        tool.page = MagicMock()
+        expected_locator = MagicMock()
+        tool.page.locator.return_value = expected_locator
+
+        result = tool._get_locator(" form >> text='Submit' ")
+
+        tool.page.locator.assert_called_once_with("form >> text='Submit'")
+        assert result is expected_locator
+
+    def test_playwright_tool_get_locator_iframe_selector(self):
+        """Ensure iframe traversal uses frame locators."""
+        tool = PlaywrightTool()
+        tool.page = MagicMock()
+
+        first_frame = MagicMock()
+        inner_frame = MagicMock()
+        final_locator = MagicMock()
+
+        tool.page.frame_locator.return_value = first_frame
+        first_frame.frame_locator.return_value = inner_frame
+        inner_frame.locator.return_value = final_locator
+
+        result = tool._get_locator(
+            " iframe#iframe1  >>  iframe[name='inner']  >>  button.submit "
+        )
+
+        tool.page.frame_locator.assert_called_once_with("iframe#iframe1")
+        first_frame.frame_locator.assert_called_once_with("iframe[name='inner']")
+        inner_frame.locator.assert_called_once_with("button.submit")
+        tool.page.locator.assert_not_called()
+        assert result is final_locator

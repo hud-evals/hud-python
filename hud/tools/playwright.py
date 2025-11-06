@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import TYPE_CHECKING, Any, Literal
@@ -55,7 +56,11 @@ class PlaywrightTool(BaseTool):
         self,
         action: str = Field(
             ...,
-            description="The action to perform (navigate, screenshot, click, type, get_page_info, wait_for_element)",  # noqa: E501
+            description=(
+                "The action to perform (navigate, screenshot, click, type, hover, press, focus, "
+                "select_option, check, uncheck, clear, set_input_files, scroll_into_view, "
+                "wait_for_element, wait_for_load_state, evaluate, get_page_info, get_iframes)"
+            ),
         ),
         url: str | None = Field(None, description="URL to navigate to (for navigate action)"),
         selector: str | None = Field(
@@ -66,6 +71,25 @@ class PlaywrightTool(BaseTool):
         | None = Field(
             None,
             description="State to wait for: commit, domcontentloaded, load, networkidle (default: networkidle)",  # noqa: E501
+        ),
+        key: str | None = Field(None, description="Single key to press (for press action)"),
+        keys: list[str] | None = Field(None, description="Sequence of keys to press (press action)"),
+        values: list[str] | str | None = Field(
+            None, description="Option value(s) to select (for select_option action)"
+        ),
+        files: list[str] | None = Field(
+            None, description="File paths to upload (for set_input_files action)"
+        ),
+        expression: str | None = Field(None, description="JavaScript expression for evaluate action"),
+        argument: Any | None = Field(
+            None, description="Optional JSON-serializable argument for evaluate action"
+        ),
+        state: Literal["commit", "domcontentloaded", "load", "networkidle"] | None = Field(
+            None, description="Load state to wait for (for wait_for_load_state action)"
+        ),
+        force: bool = Field(False, description="Whether to force the action when applicable"),
+        timeout_ms: int | None = Field(
+            None, description="Override default timeout in milliseconds for the action"
         ),
     ) -> list[ContentBlock]:
         """
@@ -128,6 +152,9 @@ class PlaywrightTool(BaseTool):
                         )
                     )
                 result = await self.wait_for_element(selector)
+
+            elif action == "get_iframes":
+                result = await self.get_iframes()
 
             else:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Unknown action: {action}"))
@@ -304,17 +331,59 @@ class PlaywrightTool(BaseTool):
             logger.error("Screenshot failed: %s", e)
             return ContentResult(error=f"Failed to take screenshot: {e}")
 
+    def _get_locator(self, selector: str):
+        """Get a locator that handles iframe traversal.
+
+        Args:
+            selector: CSS selector, potentially with iframe >> syntax
+                     Examples:
+                     - "button" - regular selector
+                     - "iframe#myframe >> button" - iframe traversal
+                     - "iframe >> iframe >> button" - nested iframes
+
+        Returns:
+            Playwright locator or FrameLocator
+        """
+        if self.page is None:
+            raise RuntimeError("Page not initialized")
+
+        # Split on >> to handle iframe traversal
+        parts = [part.strip() for part in selector.split(">>")]
+
+        if len(parts) == 1:
+            return self.page.locator(parts[0])
+
+        # Detect iframe traversal. Only treat the chain specially if every intermediate
+        # segment explicitly targets an iframe/frame element (e.g., iframe#foo, frame[name="x"]).
+        iframe_segments = parts[:-1]
+        if not iframe_segments or any(
+            not seg.lower().startswith(("iframe", "frame")) for seg in iframe_segments
+        ):
+            return self.page.locator(" >> ".join(parts))
+
+        locator = self.page.frame_locator(iframe_segments[0])
+
+        for segment in iframe_segments[1:]:
+            locator = locator.frame_locator(segment)
+
+        return locator.locator(parts[-1].strip())
+
     async def click(
         self,
         selector: str,
         button: Literal["left", "right", "middle"] = "left",
         count: int = 1,
         wait_for_navigation: bool = True,
+        force: bool = False,
+        timeout_ms: int | None = None,
+        navigation_state: Literal["commit", "domcontentloaded", "load", "networkidle"] | None = None,
     ) -> dict[str, Any]:
         """Click an element by selector.
 
         Args:
-            selector: CSS selector for element to click
+            selector: CSS selector for element to click (supports iframe >> selector syntax)
+                     For iframes, use: "iframe#id >> button"
+                     For nested iframes: "iframe.outer >> iframe.inner >> button"
 
         Returns:
             Dict with click result
@@ -324,7 +393,17 @@ class PlaywrightTool(BaseTool):
             raise RuntimeError("Page not initialized after _ensure_browser")
 
         try:
-            await self.page.click(selector, button=button, click_count=count)
+            locator = self._get_locator(selector)
+            timeout = timeout_ms if timeout_ms is not None else 30000
+            click_kwargs: dict[str, Any] = {"button": button, "click_count": count, "timeout": timeout}
+            if force:
+                click_kwargs["force"] = True
+            await locator.click(**click_kwargs)
+
+            if wait_for_navigation:
+                await self.page.wait_for_load_state(
+                    navigation_state or "load", timeout=timeout_ms if timeout_ms is not None else 30000
+                )
             return {"success": True, "message": f"Clicked element: {selector}"}
         except Exception as e:
             logger.error("Click failed: %s", e)
@@ -334,11 +413,13 @@ class PlaywrightTool(BaseTool):
                 "message": f"Failed to click {selector}: {e}",
             }
 
-    async def type_text(self, selector: str, text: str) -> dict[str, Any]:
+    async def type_text(
+        self, selector: str, text: str, force: bool = False, timeout_ms: int | None = None
+    ) -> dict[str, Any]:
         """Type text into an element.
 
         Args:
-            selector: CSS selector for input element
+            selector: CSS selector for input element (supports iframe >> selector syntax)
             text: Text to type
 
         Returns:
@@ -349,7 +430,12 @@ class PlaywrightTool(BaseTool):
             raise RuntimeError("Page not initialized after _ensure_browser")
 
         try:
-            await self.page.fill(selector, text)
+            locator = self._get_locator(selector)
+            timeout = timeout_ms if timeout_ms is not None else 30000
+            fill_kwargs: dict[str, Any] = {"timeout": timeout}
+            if force:
+                fill_kwargs["force"] = True
+            await locator.fill(text, **fill_kwargs)
             return {"success": True, "message": f"Typed '{text}' into {selector}"}
         except Exception as e:
             logger.error("Type failed: %s", e)
@@ -382,11 +468,11 @@ class PlaywrightTool(BaseTool):
             logger.error("Get page info failed: %s", e)
             return {"success": False, "error": str(e), "message": f"Failed to get page info: {e}"}
 
-    async def wait_for_element(self, selector: str) -> dict[str, Any]:
+    async def wait_for_element(self, selector: str, timeout_ms: int | None = None) -> dict[str, Any]:
         """Wait for an element to appear.
 
         Args:
-            selector: CSS selector for element
+            selector: CSS selector for element (supports iframe >> selector syntax)
 
         Returns:
             Dict with wait result
@@ -396,7 +482,9 @@ class PlaywrightTool(BaseTool):
             raise RuntimeError("Page not initialized after _ensure_browser")
 
         try:
-            await self.page.wait_for_selector(selector, timeout=30000)
+            locator = self._get_locator(selector)
+            timeout = timeout_ms if timeout_ms is not None else 30000
+            await locator.wait_for(state="visible", timeout=timeout)
             return {"success": True, "message": f"Element {selector} appeared"}
         except Exception as e:
             logger.error("Wait for element failed: %s", e)
@@ -404,6 +492,100 @@ class PlaywrightTool(BaseTool):
                 "success": False,
                 "error": str(e),
                 "message": f"Element {selector} did not appear within 30000ms: {e}",
+            }
+
+    async def get_iframes(self) -> dict[str, Any]:
+        """Get information about all iframes on the page.
+
+        Returns:
+            Dict with iframe structure information
+        """
+        await self._ensure_browser()
+        if self.page is None:
+            raise RuntimeError("Page not initialized after _ensure_browser")
+
+        try:
+            # Get all iframe elements via selector
+            iframe_locator = self.page.locator("iframe")
+            iframe_count = await iframe_locator.count()
+            
+            iframes = []
+            for i in range(min(iframe_count, 20)):  # Limit to first 20 to avoid overwhelming
+                try:
+                    iframe_elem = iframe_locator.nth(i)
+                    
+                    # Get iframe attributes
+                    iframe_id = await iframe_elem.get_attribute("id") or f"(no id)"
+                    iframe_name = await iframe_elem.get_attribute("name") or "(no name)"
+                    iframe_src = await iframe_elem.get_attribute("src") or "(no src)"
+                    
+                    # Try to get element counts inside the iframe
+                    frame_loc = self.page.frame_locator(f"iframe").nth(i)
+                    try:
+                        # Count basic elements inside the iframe
+                        body_count = await frame_loc.locator("body").count()
+                        link_count = await frame_loc.locator("a").count()
+                        button_count = await frame_loc.locator("button").count()
+                        iframe_nested_count = await frame_loc.locator("iframe").count()
+                        
+                        content_info = f"{link_count} links, {button_count} buttons"
+                        if iframe_nested_count > 0:
+                            content_info += f", {iframe_nested_count} nested iframes"
+                        if body_count == 0:
+                            content_info = "(empty or not loaded)"
+                    except Exception:
+                        content_info = "(unable to inspect - may be cross-origin or not loaded)"
+                    
+                    # Build selector hint
+                    if iframe_id and iframe_id != "(no id)":
+                        selector = f"iframe#{iframe_id}"
+                    elif iframe_name and iframe_name != "(no name)":
+                        selector = f"iframe[name='{iframe_name}']"
+                    else:
+                        selector = f"iframe (index {i})"
+                    
+                    iframes.append({
+                        "index": i,
+                        "selector": selector,
+                        "id": iframe_id,
+                        "name": iframe_name,
+                        "src": iframe_src[:80] if len(iframe_src) > 80 else iframe_src,
+                        "content": content_info
+                    })
+                except Exception as e:
+                    iframes.append({
+                        "index": i,
+                        "error": f"Could not inspect: {e}"
+                    })
+            
+            # Format output message
+            if iframe_count == 0:
+                message = "No iframes found on this page."
+            else:
+                message = f"Found {iframe_count} iframe(s) on page:\n\n"
+                for iframe in iframes:
+                    if "error" in iframe:
+                        message += f"  [{iframe['index']}] {iframe['error']}\n"
+                    else:
+                        message += f"  [{iframe['index']}] {iframe['selector']}\n"
+                        message += f"      ID: {iframe['id']}, Name: {iframe['name']}\n"
+                        message += f"      Src: {iframe['src']}\n"
+                        message += f"      Content: {iframe['content']}\n"
+                        message += "\n"
+                
+                if iframe_count > 20:
+                    message += f"\n(Showing first 20 of {iframe_count} iframes)\n"
+                
+                message += "\nTo interact with iframe content, use: 'iframe#id >> selector' or 'iframe[name=\"name\"] >> selector'"
+            
+            return {"success": True, "message": message}
+        
+        except Exception as e:
+            logger.error("Get iframes failed: %s", e)
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"Failed to get iframe information: {e}",
             }
 
     async def close(self) -> None:
