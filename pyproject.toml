@@ -1,6 +1,6 @@
 [project]
 name = "hud-python"
-version = "0.4.54"
+version = "0.4.60"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
@@ -42,6 +42,8 @@ dependencies = [
     # AI providers
     "anthropic",
     "openai",
+    "google-genai",
+    "tornado>=6.5.2",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

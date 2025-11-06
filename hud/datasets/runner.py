@@ -30,20 +30,14 @@ async def run_dataset(
 ) -> list[Any]:
     """Run all tasks in a dataset with automatic job and telemetry tracking.
 
-    This function handles concurrent task execution with proper telemetry collection.
-    All tasks are executed in parallel up to `max_concurrent`, with full telemetry
-    automatically uploaded to the HUD platform.
-
     Args:
         name: Name for the job
         dataset: HuggingFace dataset identifier (e.g. "hud-evals/SheetBench-50"),
                 Dataset object, OR list of Task objects
         agent_class: Agent class to instantiate (e.g., ClaudeAgent)
-        agent_config: Configuration/kwargs for agent (model, etc.)
-        max_concurrent: Maximum parallel task execution. Higher values improve throughput
-                       but may increase memory usage. Recommended: 30-200 depending on
-                       task complexity and available resources.
-        metadata: Optional metadata for the job
+        agent_config: Configuration kwargs for agent initialization
+        max_concurrent: Maximum concurrent tasks (recommended: 50-200)
+        metadata: Optional job metadata
         max_steps: Maximum steps per task
         split: Dataset split to use when loading from string (default: "train")
         auto_respond: Whether to use auto-response agent
@@ -101,7 +95,6 @@ async def run_dataset(
         except Exception:
             logger.warning("Failed to extract dataset verification info")
 
-    # Use async job context manager for high-concurrency telemetry
     async with hud.async_job(name, metadata=job_metadata, dataset_link=dataset_link) as job_obj:
         # Run tasks with semaphore for concurrency control
         sem = asyncio.Semaphore(max_concurrent)
@@ -112,12 +105,10 @@ async def run_dataset(
                 try:
                     # Create trace for this task
                     task_name = task_dict.get("prompt") or f"Task {index}"
-
-                    # Ensure task_id is a string for baggage propagation
                     raw_task_id = task_dict.get("id")
                     safe_task_id = str(raw_task_id) if raw_task_id is not None else None
+
                     async with hud.async_trace(task_name, job_id=job_obj.id, task_id=safe_task_id):
-                        # with hud.trace(task_name, job_id=job_obj.id, task_id=safe_task_id):
                         # Convert dict to Task here, at trace level
                         task = Task(**task_dict)
 
@@ -141,44 +132,4 @@ async def run_dataset(
             if isinstance(result, Exception):
                 logger.error("Worker %s failed with exception: %s", i, result, exc_info=result)
 
-    # Ensure all telemetry is uploaded before returning
-    await _flush_telemetry()
-
     return results
-
-
-async def _flush_telemetry() -> None:
-    """Flush all pending telemetry operations.
-
-    Ensures complete telemetry upload by:
-    1. Waiting for all async status updates to complete
-    2. Forcing OpenTelemetry span processor to export remaining spans
-
-    This prevents telemetry loss at high concurrency (200+ tasks) by ensuring
-    all operations complete before process exit.
-    """
-    from hud.otel.config import is_telemetry_configured
-    from hud.utils import hud_console
-    from hud.utils.task_tracking import wait_all_tasks
-
-    hud_console.info("Uploading telemetry...")
-
-    # Step 1: Wait for async status updates (job/trace status)
-    completed_tasks = await wait_all_tasks(timeout_seconds=20.0)
-    if completed_tasks > 0:
-        hud_console.info(f"Completed {completed_tasks} pending telemetry tasks")
-
-    # Step 2: Flush OpenTelemetry span exports
-    if is_telemetry_configured():
-        try:
-            from opentelemetry import trace
-            from opentelemetry.sdk.trace import TracerProvider
-
-            provider = trace.get_tracer_provider()
-            if isinstance(provider, TracerProvider):
-                provider.force_flush(timeout_millis=20000)
-                logger.debug("OpenTelemetry spans flushed successfully")
-        except Exception as e:
-            logger.warning("Failed to flush OpenTelemetry: %s", e)
-
-    hud_console.info("Telemetry uploaded successfully")

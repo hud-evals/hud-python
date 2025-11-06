@@ -104,6 +104,7 @@ class BaseHUDClient(AgentMCPClient):
 
         self._initialized = False
         self._telemetry_data = {}  # Initialize telemetry data
+        self._cached_resources: list[types.Resource] = []  # Cache for resources
 
         if self.verbose:
             self._setup_verbose_logging()
@@ -139,7 +140,7 @@ class BaseHUDClient(AgentMCPClient):
                     raise HudAuthenticationError(
                         f'Sending authorization "{headers.get("Authorization", "")}", which may'
                         " be incomplete. Ensure HUD_API_KEY environment variable is set or send it"
-                        " as a header. You can get an API key at https://hud.so"
+                        " as a header. You can get an API key at https://hud.ai"
                     )
             # Subclasses implement connection
             await self._connect(self._mcp_config)
@@ -170,6 +171,7 @@ class BaseHUDClient(AgentMCPClient):
         if self._initialized:
             await self._disconnect()
             self._initialized = False
+            self._cached_resources.clear()
             hud_console.info("Environment Shutdown completed")
         else:
             hud_console.debug("Client was not initialized, skipping disconnect")
@@ -211,9 +213,22 @@ class BaseHUDClient(AgentMCPClient):
         """List all available tools."""
         raise NotImplementedError
 
-    @abstractmethod
     async def list_resources(self) -> list[types.Resource]:
-        """List all available resources."""
+        """List all available resources.
+
+        Uses cached resources if available, otherwise fetches from the server.
+
+        Returns:
+            List of available resources.
+        """
+        # If cache is empty, populate it
+        if not self._cached_resources:
+            self._cached_resources = await self._list_resources_impl()
+        return self._cached_resources
+
+    @abstractmethod
+    async def _list_resources_impl(self) -> list[types.Resource]:
+        """Implementation-specific resource listing. Subclasses must implement this."""
         raise NotImplementedError
 
     @abstractmethod
@@ -270,6 +285,17 @@ class BaseHUDClient(AgentMCPClient):
     async def _fetch_telemetry(self) -> None:
         """Common telemetry fetching for all hud clients."""
         try:
+            # Get resources (will use cache if available, otherwise fetch)
+            resources = await self.list_resources()
+            telemetry_available = any(
+                str(resource.uri) == "telemetry://live" for resource in resources
+            )
+
+            if not telemetry_available:
+                if self.verbose:
+                    hud_console.debug("Telemetry resource not available from server")
+                return
+
             # Try to read telemetry resource directly
             result = await self.read_resource("telemetry://live")
             if result and result.contents:
@@ -333,7 +359,7 @@ class BaseHUDClient(AgentMCPClient):
             tool_info = {
                 "name": tool.name,
                 "description": tool.description,
-                "input_schema": tool.inputSchema,
+                "inputSchema": tool.inputSchema,
             }
             analysis["tools"].append(tool_info)
 

@@ -22,6 +22,28 @@ logger = logging.getLogger(__name__)
 hud_console = HUDConsole()
 
 
+def _tasks_use_local_mcp(tasks: list[Task]) -> bool:
+    """Return True if any task's MCP config uses a local command instead of a URL.
+
+    A config is considered local when a server entry contains a 'command' key and
+    does not provide a 'url'.
+    """
+    try:
+        for t in tasks:
+            cfg = getattr(t, "mcp_config", {}) or {}
+            if not isinstance(cfg, dict):
+                continue
+            for server_cfg in cfg.values():
+                if isinstance(server_cfg, dict) and (
+                    "command" in server_cfg and not server_cfg.get("url")
+                ):
+                    return True
+        return False
+    except Exception:
+        # Be conservative: if detection fails, do not block
+        return False
+
+
 def get_available_models() -> list[dict[str, str | None]]:
     """Fetch available models from the HUD API (only ready models).
 
@@ -31,7 +53,7 @@ def get_available_models() -> list[dict[str, str | None]]:
     try:
         from hud.cli.rl import rl_api
 
-        hud_console.info("Fetching your models from https://hud.so/models")
+        hud_console.info("Fetching your models from https://hud.ai/models")
         models = rl_api.list_models()
 
         # Filter for ready models only and sort by recency
@@ -166,6 +188,24 @@ def build_agent(
         else:
             return OperatorAgent(verbose=verbose)
 
+    elif agent_type == AgentType.GEMINI:
+        try:
+            from hud.agents import GeminiAgent
+        except ImportError as e:
+            hud_console.error(
+                "Gemini agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
+
+        gemini_kwargs: dict[str, Any] = {
+            "model": model or "gemini-2.5-computer-use-preview-10-2025",
+            "verbose": verbose,
+        }
+        if allowed_tools:
+            gemini_kwargs["allowed_tools"] = allowed_tools
+        return GeminiAgent(**gemini_kwargs)
+
     elif agent_type == AgentType.LITELLM:
         try:
             from hud.agents.lite_llm import LiteAgent
@@ -220,9 +260,8 @@ async def run_single_task(
 ) -> None:
     """Load one task and execute it, or detect if JSON contains a list and run as dataset."""
 
-    # Provide early feedback to user
     hud_console.info("🔧 Initializing evaluation...")
-    # Import Task and run_dataset lazily
+
     try:
         from hud.utils.tasks import load_tasks
     except ImportError as e:
@@ -265,7 +304,33 @@ async def run_single_task(
             "Using first task from dataset (run with --full to run the entire dataset)..."
         )
 
-    task_prompt = task.prompt[:50] + "..." if len(task.prompt) > 50 else task.prompt
+    # Warn/confirm if the task uses local MCP config
+    try:
+        if group_size > 1 and _tasks_use_local_mcp([task]):
+            hud_console.warning(
+                "Detected a local MCP configuration (uses 'command' instead of a 'url')."
+            )
+            hud_console.info(
+                "Ensure there are no exposed port conflicts during Docker runs/builds in eval."
+            )
+            proceed = hud_console.confirm(
+                "Proceed with running local MCP servers for this evaluation?",
+                default=True,
+            )
+            if not proceed:
+                # Provide a helpful next step
+                hud_console.hint("You can convert tasks to remote with: hud convert <tasks_file>")
+                raise typer.Exit(1)
+            # Always show the convert hint for awareness
+            hud_console.hint(
+                "Avoid local port conflicts by converting to remote: hud convert <tasks_file>"
+            )
+    except typer.Exit:
+        raise
+    except Exception as e:
+        hud_console.debug(f"Local MCP confirmation skipped due to error: {e}")
+
+    task_prompt = task.prompt
 
     # Use grouped evaluation if group_size > 1
     agent_config: dict[str, Any] = {}
@@ -296,6 +361,17 @@ async def run_single_task(
         agent_config = {"verbose": verbose}
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
+    elif agent_type == AgentType.GEMINI:
+        from hud.agents import GeminiAgent
+
+        agent_class = GeminiAgent
+        agent_config = {
+            "model": model or "gemini-2.5-computer-use-preview-10-2025",
+            "verbose": verbose,
+            "validate_api_key": False,
+        }
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
     elif agent_type == AgentType.LITELLM:
         from hud.agents.lite_llm import LiteAgent
 
@@ -322,23 +398,31 @@ async def run_single_task(
 
     if group_size > 1:
         hud_console.info(f"🔄 Running task with group_size={group_size}")
-        # Run with grouping
-        stats = await run_tasks_grouped(
-            tasks=[task],
-            agent_class=agent_class,
-            agent_config=agent_config,
-            group_size=group_size,
-            max_parallel_episodes=48,  # Same as RL default
-            max_steps=max_steps,
-            verbose=verbose,
-        )
+        async with hud.async_job(
+            name=f"Group Eval: {task_prompt[:50]}... (x{group_size})",
+            metadata={
+                "task_id": getattr(task, "id", None),
+                "group_size": group_size,
+                "total_episodes": group_size,
+            },
+        ) as job:
+            stats = await run_tasks_grouped(
+                tasks=[task],
+                agent_class=agent_class,
+                agent_config=agent_config,
+                group_size=group_size,
+                max_parallel_episodes=48,
+                max_steps=max_steps,
+                verbose=verbose,
+                job_id=job.id,
+            )
         display_group_statistics(stats, show_details=True)
     else:
         # Enable agent step logging for single task mode
         logging.getLogger("hud.agents").setLevel(logging.INFO)
         logging.getLogger("hud.agents.base").setLevel(logging.INFO)
 
-        with hud.trace(name=task_prompt):
+        async with hud.async_trace(name=task_prompt):
             agent = build_agent(
                 agent_type,
                 model=model,
@@ -365,10 +449,8 @@ async def run_full_dataset(
 ) -> list[Any]:
     """Run evaluation across the entire dataset using asyncio-based concurrency."""
 
-    # Provide early feedback to user
     hud_console.info("🔧 Initializing evaluation...")
 
-    # Import run_dataset lazily
     try:
         from hud.datasets import run_dataset
         from hud.utils.tasks import load_tasks
@@ -386,6 +468,56 @@ async def run_full_dataset(
     if len(tasks) == 0:
         hud_console.error(f"No tasks found in: {source}")
         raise typer.Exit(1)
+
+    # Warn/confirm once if any task uses local MCP config
+    try:
+        if _tasks_use_local_mcp(tasks):
+            hud_console.warning(
+                "Detected local MCP configurations (use 'command' instead of a 'url')."
+            )
+            hud_console.info(
+                "When running many tasks concurrently, exposed host ports from Docker may conflict."
+            )
+            proceed = hud_console.confirm(
+                "Proceed with running local MCP servers for this evaluation?",
+                default=True,
+            )
+            if not proceed:
+                # Helpful hint when source is a file path
+                try:
+                    path = Path(source)
+                    if path.exists():
+                        hud_console.hint(
+                            f"You can convert tasks to remote with: hud convert {path.name}"
+                        )
+                    else:
+                        hud_console.hint(
+                            "You can convert tasks to remote with: hud convert <tasks_file>"
+                        )
+                except Exception:
+                    hud_console.hint(
+                        "You can convert tasks to remote with: hud convert <tasks_file>"
+                    )
+                raise typer.Exit(1)
+            # Always show the convert hint for awareness
+            try:
+                path = Path(source)
+                if path.exists():
+                    hud_console.hint(
+                        f"Convert to remote to avoid port conflicts: hud convert {path.name}"
+                    )
+                else:
+                    hud_console.hint(
+                        "Convert to remote to avoid port conflicts: hud convert <tasks_file>"
+                    )
+            except Exception:
+                hud_console.hint(
+                    "Convert to remote to avoid port conflicts: hud convert <tasks_file>"
+                )
+    except typer.Exit:
+        raise
+    except Exception as e:
+        hud_console.debug(f"Local MCP confirmation skipped due to error: {e}")
 
     # Convert Task objects to dicts for dataset runners
     dataset_or_tasks = [task.model_dump() for task in tasks]
@@ -436,6 +568,26 @@ async def run_full_dataset(
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
 
+    elif agent_type == AgentType.GEMINI:
+        try:
+            from hud.agents import GeminiAgent
+
+            agent_class = GeminiAgent
+        except ImportError as e:
+            hud_console.error(
+                "Gemini agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
+
+        agent_config = {
+            "model": model or "gemini-2.5-computer-use-preview-10-2025",
+            "verbose": verbose,
+            "validate_api_key": False,
+        }
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+
     elif agent_type == AgentType.LITELLM:
         try:
             from hud.agents.lite_llm import LiteAgent
@@ -480,7 +632,7 @@ async def run_full_dataset(
         hud_console.info(f"🔄 Running dataset with group_size={group_size}")
 
         # Run with job tracking
-        with hud.job(
+        async with hud.async_job(
             name=f"Evaluation {dataset_name} (group_size={group_size})",
             metadata={
                 "dataset": source,
@@ -543,7 +695,7 @@ def eval_command(
     agent: AgentType = typer.Option(  # noqa: B008
         AgentType.CLAUDE,
         "--agent",
-        help="Agent backend to use (claude, openai, vllm for local server, or litellm)",
+        help="Agent backend to use (claude, gemini, openai, vllm for local servers, or litellm)",
     ),
     model: str | None = typer.Option(
         None,
@@ -659,6 +811,13 @@ def eval_command(
                 "Set it in your environment or run: hud set ANTHROPIC_API_KEY=your-key-here"
             )
             raise typer.Exit(1)
+    elif agent == AgentType.GEMINI:
+        if not settings.gemini_api_key:
+            hud_console.error("GEMINI_API_KEY is required for Gemini agent")
+            hud_console.info(
+                "Set it in your environment or run: hud set GEMINI_API_KEY=your-key-here"
+            )
+            raise typer.Exit(1)
     elif agent == AgentType.OPENAI and not settings.openai_api_key:
         hud_console.error("OPENAI_API_KEY is required for OpenAI agent")
         hud_console.info("Set it in your environment or run: hud set OPENAI_API_KEY=your-key-here")
@@ -673,7 +832,7 @@ def eval_command(
     # Check for HUD_API_KEY if using HUD services
     if not settings.api_key:
         hud_console.warning("HUD_API_KEY not set. Some features may be limited.")
-        hud_console.info("Get your API key at: https://hud.so")
+        hud_console.info("Get your API key at: https://hud.ai")
         hud_console.info("Set it in your environment or run: hud set HUD_API_KEY=your-key-here")
 
     # Parse allowed tools

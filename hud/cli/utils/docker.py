@@ -308,7 +308,10 @@ def require_docker_running() -> None:
             "Is Docker running? Open Docker Desktop and wait until it reports 'Running'"
         )
         raise typer.Exit(1) from e
-    except Exception as e:
-        hud_console.error(f"Docker check failed: {e}")
+    except typer.Exit:
+        # Propagate cleanly without extra noise; hints already printed above
+        raise
+    except Exception:
+        # Unknown failure - keep output minimal and avoid stack traces
         hud_console.hint("Is the Docker daemon running?")
-        raise typer.Exit(1) from e
+        raise typer.Exit(1)  # noqa: B904

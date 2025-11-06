@@ -136,13 +136,13 @@ async def run_example(mode: Literal["text", "browser"], target: int) -> None:
     )
 
     title = "OpenAI 2048 Game (Browser)" if mode == "browser" else "OpenAI 2048 Game (Text)"
-    with hud.job(title, metadata={"model": model_name, "mode": mode}) as job:
+    async with hud.async_job(title, metadata={"model": model_name, "mode": mode}) as job:
         print("🎮 Starting 2048 game with OpenAI-compatible agent...")
         print(f"🤖 Model: {agent.model_name}")
         print(f"🧩 Mode: {mode}")
         print("=" * 50)
 
-        with hud.trace("Game Execution", job_id=job.id):
+        async with hud.async_trace("Game Execution", job_id=job.id):
             result = await agent.run(task, max_steps=100)
 
         print("=" * 50)

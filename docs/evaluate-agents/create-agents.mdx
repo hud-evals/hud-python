@@ -193,7 +193,7 @@ import os
 from hud.datasets import Task
 
 async def test_agent():
-    with hud.trace("test-custom-agent"):
+    async with hud.async_trace("test-custom-agent"):
         task = Task(
             prompt="Navigate to example.com",
             mcp_config={

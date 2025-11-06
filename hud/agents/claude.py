@@ -89,7 +89,8 @@ class ClaudeAgent(MCPAgent):
         self.use_computer_beta = use_computer_beta
         self.hud_console = HUDConsole(logger=logger)
 
-        self.model_name = self.model
+        self.model_name = "Claude"
+        self.checkpoint_name = self.model
 
         # Track mapping from Claude tool names to MCP tool names
         self._claude_to_mcp_tool_map: dict[str, str] = {}
@@ -98,14 +99,14 @@ class ClaudeAgent(MCPAgent):
         # Append Claude-specific instructions to the base system prompt
         claude_instructions = """
         You are Claude, an AI assistant created by Anthropic. You are helpful, harmless, and honest.
-        
+
         When working on tasks:
         1. Be thorough and systematic in your approach
         2. Complete tasks autonomously without asking for confirmation
         3. Use available tools efficiently to accomplish your goals
         4. Verify your actions and ensure task completion
         5. Be precise and accurate in all operations
-        
+
         Remember: You are expected to complete tasks autonomously. The user trusts you to accomplish what they asked.
         """.strip()  # noqa: E501
 

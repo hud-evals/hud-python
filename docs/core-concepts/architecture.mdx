@@ -11,7 +11,7 @@ HUD is built as a thin orchestration layer on top of MCP, providing structure fo
 ```mermaid
 graph TB
     subgraph "Remote"
-        Dashboard["📊 Dashboard<br/>(hud.so)"]
+        Dashboard["📊 Dashboard<br/>(hud.ai)"]
         API["🔌 MCP Orchestrator<br/>(mcp.hud.so)"]
     end
     
@@ -156,9 +156,9 @@ Real-time observability:
 ```python
 import hud
 
-with hud.trace("my-evaluation"):
+async with hud.async_trace("my-evaluation"):
     result = await agent.run(task)
-    # View at hud.so/traces/{trace_id}
+    # View at hud.ai/traces/{trace_id}
 ```
 
 ## Execution Flow

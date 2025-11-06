@@ -11,7 +11,7 @@ import yaml
 
 from hud.cli.push import push_environment
 from hud.cli.utils.docker import require_docker_running
-from hud.cli.utils.env_check import ensure_built, find_environment_dir
+from hud.cli.utils.env_check import find_environment_dir
 from hud.cli.utils.registry import extract_name_and_tag
 from hud.utils.hud_console import hud_console
 from hud.utils.tasks import load_tasks
@@ -56,7 +56,9 @@ def _validate_tasks(tasks: list[Task]) -> bool:
     return True
 
 
-def _ensure_pushed(env_dir: Path, lock_data: dict[str, Any]) -> dict[str, Any]:
+def _ensure_pushed(
+    env_dir: Path, lock_data: dict[str, Any], check_docker: bool = True
+) -> dict[str, Any]:
     """Ensure the environment is pushed to a registry; return updated lock data."""
     pushed = bool(lock_data.get("push"))
     if not pushed:
@@ -64,7 +66,8 @@ def _ensure_pushed(env_dir: Path, lock_data: dict[str, Any]) -> dict[str, Any]:
         if not hud_console.confirm("Push to a registry now (runs 'hud push')?", default=True):
             raise typer.Exit(1)
         # Check Docker availability before attempting a push
-        require_docker_running()
+        if check_docker:
+            require_docker_running()
 
         # If Docker or login is not configured, the push function will fail and halt.
         push_environment(str(env_dir), yes=True)
@@ -293,9 +296,24 @@ def convert_tasks_to_remote(tasks_file: str) -> str:
         hud_console.hint("Ensure you're in or near your environment folder before running 'hud rl'")
         raise typer.Exit(1)
 
-    # Ensure built and pushed
-    lock_data = ensure_built(env_dir, interactive=True)
-    lock_data = _ensure_pushed(env_dir, lock_data)
+    # For convert command, we don't need Docker running - just check for lock file
+    # This avoids showing Docker-related messages during conversion
+    lock_path = env_dir / "hud.lock.yaml"
+    if not lock_path.exists():
+        hud_console.error("No hud.lock.yaml found. The environment needs to be built first.")
+        hud_console.info("Run 'hud build' in the environment directory to build it.")
+        raise typer.Exit(1)
+
+    # Load lock data directly
+    try:
+        with open(lock_path) as f:
+            lock_data: dict[str, Any] = yaml.safe_load(f) or {}
+    except Exception as e:
+        hud_console.error(f"Failed to read hud.lock.yaml: {e}")
+        raise typer.Exit(1) from e
+
+    # Check if pushed - don't check Docker for convert command
+    lock_data = _ensure_pushed(env_dir, lock_data, check_docker=False)
 
     # Derive remote image name org/name:tag
     remote_image = _derive_remote_image(lock_data)
@@ -387,8 +405,11 @@ def convert_tasks_to_remote(tasks_file: str) -> str:
             f"Detected env vars in .env that look like API keys: {names_preview}.\n"
             "Include them as remote headers (values will be ${VAR} placeholders)?"
         )
-        if hud_console.confirm(prompt, default=True):
-            all_detected.update(missing)
+        if not hud_console.confirm(prompt, default=True):
+            # User cancelled - exit without creating the file
+            hud_console.info("Conversion cancelled by user")
+            raise typer.Exit(0)
+        all_detected.update(missing)
 
     # Final set of env vars to convert to headers
     provided_keys = all_detected
@@ -461,6 +482,5 @@ def convert_tasks_to_remote(tasks_file: str) -> str:
         f.write("\n")
 
     hud_console.success(f"Created remote tasks file: {remote_path.name}")
-    hud_console.hint("Proceeding with RL training on the remote environment")
 
     return str(remote_path)

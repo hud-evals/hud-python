@@ -152,7 +152,7 @@ def push_environment(
         hud_console.error("No HUD API key found")
         hud_console.warning("A HUD API key is required to push environments.")
         hud_console.info("\nTo get started:")
-        hud_console.info("1. Get your API key at: https://hud.so/settings")
+        hud_console.info("1. Get your API key at: https://hud.ai/settings")
         hud_console.info("Set it in your environment or run: hud set HUD_API_KEY=your-key-here")
         hud_console.command_example("hud push", "Try again")
         hud_console.info("")
@@ -440,7 +440,7 @@ def push_environment(
         elif response.status_code == 401:
             hud_console.error("Authentication failed")
             hud_console.info("Check your HUD_API_KEY is valid")
-            hud_console.info("Get a new key at: https://hud.so/settings")
+            hud_console.info("Get a new key at: https://hud.ai/settings")
             hud_console.info("Set it in your environment or run: hud set HUD_API_KEY=your-key-here")
         elif response.status_code == 403:
             hud_console.error("Permission denied")

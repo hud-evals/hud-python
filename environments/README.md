@@ -495,8 +495,8 @@ from hud.agents import ClaudeAgent
 from hud.clients import MCPClient
 
 async def main():
-    # `trace` captures *everything* that happens and sends it to hud.so
-    with hud.trace("local_test"):
+    # `trace` captures *everything* that happens and sends it to hud.ai
+    async with hud.async_trace("local_test"):
         task = Task(
             prompt="Complete the task",
             mcp_config={
@@ -524,7 +524,7 @@ async def main():
 asyncio.run(main())
 ```
 
-The `trace` context manager sends a full timeline of agent actions, tool calls, and rewards to hud.so – perfect for debugging.
+The `trace` context manager sends a full timeline of agent actions, tool calls, and rewards to hud.ai – perfect for debugging.
 
 See `examples/01_hello_2048.py` and `examples/task_with_setup_eval.py` for larger end-to-end demos.
 
@@ -532,7 +532,7 @@ See `examples/01_hello_2048.py` and `examples/task_with_setup_eval.py` for large
 
 ## Phase 4 – Remote Deployment & HUD Runner
 
-**Goal →** the exact same image runs in parallel on hundreds of instances, and exposes more telemetry so the hud.so can visualise the whole lifecycle.
+**Goal →** the exact same image runs in parallel on hundreds of instances, and exposes more telemetry so the hud.ai can visualise the whole lifecycle.
 
 ### 1. Publish your image
 
@@ -595,11 +595,11 @@ async def initialize_environment(session=None, progress_token=None):
     await send(100, "ready")
 ```
 
-Those messages are displayed live on hud.so alongside resource graphs – perfect feedback while you wait.
+Those messages are displayed live on hud.ai alongside resource graphs – perfect feedback while you wait.
 
 ### 4. Live telemetry (`telemetry://live`) (Optional)
 
-Expose a resource named `telemetry://live` exactly like in `environments/browser/src/hud_controller/server.py` to return live url to be displayed on hud.so.
+Expose a resource named `telemetry://live` exactly like in `environments/browser/src/hud_controller/server.py` to return live url to be displayed on hud.ai.
 
 Once all of the above works you can unleash *hundreds* of concurrent agents on your new environment.
 
