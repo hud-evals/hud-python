@@ -365,7 +365,7 @@ def build_docker_image(
     verbose: bool = False,
     build_args: dict[str, str] | None = None,
     platform: str | None = None,
-    remote_cache: bool = False,
+    remote_cache: str | None = None,
 ) -> bool:
     """Build a Docker image from a directory."""
     hud_console = HUDConsole()
@@ -394,32 +394,37 @@ def build_docker_image(
     if remote_cache:
         try:
             import os
+            import re
+            
+            # Validate ECR repo name
+            if not re.match(r'^[a-z0-9]([a-z0-9\-_]*[a-z0-9])?$', remote_cache):
+                hud_console.error(f"Invalid ECR repo name: {remote_cache}")
+                hud_console.info("ECR repo names must contain only lowercase letters, numbers, hyphens, and underscores")
+                return False
             
             # Get required environment variables
             aws_account_id = os.getenv("AWS_ACCOUNT_ID")
             aws_region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
             
             if not aws_account_id:
-                hud_console.warning("AWS_ACCOUNT_ID environment variable not set, skipping remote cache")
-            else:
-                # ECR repository name based on image tag
-                ecr_repo = tag.split(":")[0] if ":" in tag else tag
-                
-                # ECR cache image reference
-                cache_image = f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/{ecr_repo}:cache"
-                
-                # Add cache arguments with proper ECR format
-                cmd.extend([
-                    "--cache-from", f"type=registry,ref={cache_image}",
-                    "--cache-to", f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}",
-                    "--load"  # Load image to local Docker after build
-                ])
-                
-                hud_console.success(f"Remote cache configured: {cache_image}")
+                hud_console.error("AWS_ACCOUNT_ID environment variable not set")
+                return False
+            
+            # ECR cache image reference
+            cache_image = f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/{remote_cache}:cache"
+            
+            # Add cache arguments with proper ECR format
+            cmd.extend([
+                "--cache-from", f"type=registry,ref={cache_image}",
+                "--cache-to", f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}",
+                "--load"  # Load image to local Docker after build
+            ])
+            
+            hud_console.success(f"Remote cache configured: {cache_image}")
                 
         except Exception as e:
-            hud_console.warning(f"Remote cache setup error: {e}")
-            hud_console.info("Continuing with local build...")
+            hud_console.error(f"Remote cache setup error: {e}")
+            return False
 
     # Add build args
     for key, value in build_args.items():
@@ -446,7 +451,7 @@ def build_environment(
     verbose: bool = False,
     env_vars: dict[str, str] | None = None,
     platform: str | None = None,
-    remote_cache: bool = False,
+    remote_cache: str | None = None,
 ) -> None:
     """Build a HUD environment and generate lock file."""
     hud_console = HUDConsole()
@@ -706,21 +711,29 @@ def build_environment(
     if remote_cache:
         try:
             import os
+            import re
+            
+            if not re.match(r'^[a-z0-9]([a-z0-9\-_]*[a-z0-9])?$', remote_cache):
+                hud_console.error(f"Invalid ECR repo name: {remote_cache}")
+                raise typer.Exit(1)
             
             aws_account_id = os.getenv("AWS_ACCOUNT_ID")
             aws_region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
             
-            if aws_account_id:
-                ecr_repo = base_name
-                cache_image = f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/{ecr_repo}:cache"
-                
-                label_cmd.extend([
-                    "--cache-from", f"type=registry,ref={cache_image}",
-                    "--cache-to", f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}",
-                    "--load"  # Load image to local Docker after build
-                ])
-        except Exception:
-            pass  # Continue without cache if there's an error
+            if not aws_account_id:
+                hud_console.error("AWS_ACCOUNT_ID environment variable not set")
+                raise typer.Exit(1)
+            
+            cache_image = f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/{remote_cache}:cache"
+            
+            label_cmd.extend([
+                "--cache-from", f"type=registry,ref={cache_image}",
+                "--cache-to", f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}",
+                "--load"  # Load image to local Docker after build
+            ])
+        except Exception as e:
+            hud_console.error(f"Remote cache setup error: {e}")
+            raise typer.Exit(1)
     
     label_cmd.extend(
         [
@@ -842,7 +855,7 @@ def build_command(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
     env_vars: dict[str, str] | None = None,
     platform: str | None = None,
-    remote_cache: bool = False,
+    remote_cache: str | None = None,
 ) -> None:
     """Build a HUD environment and generate lock file."""
     build_environment(directory, tag, no_cache, verbose, env_vars, platform, remote_cache)
