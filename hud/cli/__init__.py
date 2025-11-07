@@ -602,6 +602,9 @@ def build(
     platform: str | None = typer.Option(
         None, "--platform", help="Set Docker target platform (e.g., linux/amd64)"
     ),
+    remote_cache: bool = typer.Option(
+        False, "--remote-cache", help="Enable remote cache support using Amazon ECR"
+    ),
 ) -> None:
     """🏗️ Build a HUD environment and generate lock file.
 
@@ -614,7 +617,8 @@ def build(
         hud build                    # Build current directory
         hud build environments/text_2048 -e API_KEY=secret
         hud build . --tag my-env:v1.0 -e VAR1=value1 -e VAR2=value2
-        hud build . --no-cache       # Force rebuild[/not dim]
+        hud build . --no-cache       # Force rebuild
+        hud build . --remote-cache   # Use ECR remote cache (requires AWS_ACCOUNT_ID and AWS_DEFAULT_REGION)[/not dim]
     """
     # Parse directory and extra arguments
     if params:
@@ -652,7 +656,7 @@ def build(
         else:
             i += 1
 
-    build_command(directory, tag, no_cache, verbose, env_vars, platform)
+    build_command(directory, tag, no_cache, verbose, env_vars, platform, remote_cache)
 
 
 @app.command()
