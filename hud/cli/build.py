@@ -377,11 +377,12 @@ def build_docker_image(
         hud_console.error(f"No Dockerfile found in {directory}")
         return False
 
-    # Default platform to match RL pipeline unless explicitly overridden
-    effective_platform = platform if platform is not None else "linux/amd64"
-
-    # Build command
-    cmd = ["docker", "build"]
+    # Build command - use buildx when remote cache is enabled
+    if remote_cache:
+        cmd = ["docker", "buildx", "build"]
+    else:
+        cmd = ["docker", "build"]
+    
     if effective_platform:
         cmd.extend(["--platform", effective_platform])
     cmd.extend(["-t", tag])
@@ -409,7 +410,8 @@ def build_docker_image(
                 # Add cache arguments with proper ECR format
                 cmd.extend([
                     "--cache-from", f"type=registry,ref={cache_image}",
-                    "--cache-to", f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}"
+                    "--cache-to", f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}",
+                    "--load"  # Load image to local Docker after build
                 ])
                 
                 hud_console.success(f"Remote cache configured: {cache_image}")
@@ -688,7 +690,12 @@ def build_environment(
     version_tag = f"{base_name}:{new_version}"
     latest_tag = f"{base_name}:latest"
 
-    label_cmd = ["docker", "build"]
+    # Build command - use buildx when remote cache is enabled
+    if remote_cache:
+        label_cmd = ["docker", "buildx", "build"]
+    else:
+        label_cmd = ["docker", "build"]
+    
     # Use same defaulting for the second build step
     label_platform = platform if platform is not None else "linux/amd64"
     if label_platform:
@@ -708,7 +715,8 @@ def build_environment(
                 
                 label_cmd.extend([
                     "--cache-from", f"type=registry,ref={cache_image}",
-                    "--cache-to", f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}"
+                    "--cache-to", f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}",
+                    "--load"  # Load image to local Docker after build
                 ])
         except Exception:
             pass  # Continue without cache if there's an error
