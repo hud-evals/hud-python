@@ -619,7 +619,7 @@ def build(
         hud build . --tag my-env:v1.0 -e VAR1=value1 -e VAR2=value2
         hud build . --no-cache       # Force rebuild
         hud build . --remote-cache my-cache-repo   # Use ECR remote cache (requires AWS_ACCOUNT_ID and AWS_DEFAULT_REGION)[/not dim]
-    """
+    """  # noqa: E501
     # Parse directory and extra arguments
     if params:
         directory = params[0]
