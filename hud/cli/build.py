@@ -378,6 +378,7 @@ def build_docker_image(
         return False
 
     # Build command - use buildx when remote cache is enabled
+    effective_platform = platform if platform is not None else "linux/amd64"
     if remote_cache:
         cmd = ["docker", "buildx", "build"]
     else:
