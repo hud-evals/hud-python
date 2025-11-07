@@ -422,6 +422,8 @@ def build_docker_image(
             
             hud_console.success(f"Remote cache configured: {cache_image}")
                 
+        except typer.Exit:
+            raise
         except Exception as e:
             hud_console.error(f"Remote cache setup error: {e}")
             return False
@@ -731,6 +733,8 @@ def build_environment(
                 "--cache-to", f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}",
                 "--load"  # Load image to local Docker after build
             ])
+        except typer.Exit:
+            raise
         except Exception as e:
             hud_console.error(f"Remote cache setup error: {e}")
             raise typer.Exit(1)
