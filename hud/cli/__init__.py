@@ -454,7 +454,7 @@ def run(
     local: bool = typer.Option(
         False,
         "--local",
-        help="Run locally with Docker (default: remote via mcp.hud.so)",
+        help="Run locally with Docker (default: remote via mcp.hud.ai)",
     ),
     transport: str = typer.Option(
         "stdio",
@@ -471,7 +471,7 @@ def run(
     url: str = typer.Option(
         None,
         "--url",
-        help="Remote MCP server URL (default: HUD_MCP_URL or mcp.hud.so)",
+        help="Remote MCP server URL (default: HUD_MCP_URL or mcp.hud.ai)",
     ),
     api_key: str | None = typer.Option(
         None,
@@ -493,7 +493,7 @@ def run(
     """🚀 Run Docker image as MCP server.
 
     [not dim]A simple wrapper around 'docker run' that can launch images locally or remotely.
-    By default, runs remotely via mcp.hud.so. Use --local to run with local Docker.
+    By default, runs remotely via mcp.hud.ai. Use --local to run with local Docker.
 
     For local Python development with hot-reload, use 'hud dev' instead.
 
@@ -1021,7 +1021,7 @@ def rl(
     ),
     model: str | None = typer.Argument(
         None,
-        help="Model to train from https://hud.so/models (default: interactive selection)",
+        help="Model to train from https://hud.ai/models (default: interactive selection)",
     ),
     config_file: Path | None = typer.Option(  # noqa: B008
         None,
@@ -1110,7 +1110,7 @@ def convert(
         ..., help="Path to tasks file (JSON/JSONL) to convert to remote MCP configuration"
     ),
 ) -> None:
-    """Convert local MCP task configs to remote (mcp.hud.so) format.
+    """Convert local MCP task configs to remote (mcp.hud.ai) format.
 
     This mirrors the implicit conversion flow used by 'hud rl' and writes a new
     remote_<name>.json next to the source file when needed.

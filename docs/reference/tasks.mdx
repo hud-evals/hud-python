@@ -34,7 +34,7 @@ task = Task(
     prompt="Navigate to the dashboard",
     mcp_config={
         "browser": {
-            "url": "${HUD_MCP_URL:https://mcp.hud.so/v3/mcp}",
+            "url": "${HUD_MCP_URL:https://mcp.hud.ai/v3/mcp}",
             "headers": {
                 "Authorization": "Bearer ${HUD_API_KEY}",
                 "Mcp-Image": "hudpython/hud-browser:latest"
@@ -341,7 +341,7 @@ for url in ["example.com", "test.com"]:
         prompt=f"Navigate to {url} and find the login button",
         mcp_config={
             "browser": {
-                "url": "${HUD_MCP_URL:https://mcp.hud.so/v3/mcp}",
+                "url": "${HUD_MCP_URL:https://mcp.hud.ai/v3/mcp}",
                 "headers": {
                     "Authorization": "Bearer ${HUD_API_KEY}",
                     "X-Provider": "${BROWSER_PROVIDER}"

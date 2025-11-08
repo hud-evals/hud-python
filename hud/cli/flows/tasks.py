@@ -33,7 +33,7 @@ def _validate_tasks(tasks: list[Task]) -> bool:
     """Validate the tasks file: return True if tasks already reference a remote MCP URL.
 
     A task is considered remote if any "url" field anywhere inside mcp_config
-    is a valid remote URL (e.g., https://mcp.hud.so/v3/mcp).
+    is a valid remote URL (e.g., https://mcp.hud.ai/v3/mcp).
     """
 
     def _has_remote_url(obj: Any) -> bool:
@@ -262,7 +262,7 @@ def convert_tasks_to_remote(tasks_file: str) -> str:
     1) Find env dir; ensure built (hud.lock.yaml), otherwise build
     2) Ensure pushed to registry, otherwise push
     3) Check for outdated images in existing task configurations
-    4) Create remote_[tasks].json with mcp_config pointing to mcp.hud.so and Mcp-Image
+    4) Create remote_[tasks].json with mcp_config pointing to mcp.hud.ai and Mcp-Image
     5) Return the new tasks file path
     """
     tasks_path = Path(tasks_file).resolve()
@@ -449,7 +449,7 @@ def convert_tasks_to_remote(tasks_file: str) -> str:
             "prompt": t.prompt,
             "mcp_config": {
                 "hud": {
-                    "url": "https://mcp.hud.so/v3/mcp",
+                    "url": "https://mcp.hud.ai/v3/mcp",
                     "headers": {
                         "Authorization": "Bearer ${HUD_API_KEY}",
                         "Mcp-Image": remote_image,

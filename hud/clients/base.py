@@ -136,7 +136,7 @@ class BaseHUDClient(AgentMCPClient):
             for server_config in self._mcp_config.values():
                 url = server_config.get("url", "")
                 headers = server_config.get("headers", {})
-                if "mcp.hud.so" in url and len(headers.get("Authorization", "")) < 10:
+                if "mcp.hud.ai" in url and len(headers.get("Authorization", "")) < 10:
                     raise HudAuthenticationError(
                         f'Sending authorization "{headers.get("Authorization", "")}", which may'
                         " be incomplete. Ensure HUD_API_KEY environment variable is set or send it"

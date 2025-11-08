@@ -63,7 +63,7 @@ def ensure_vllm_deployed(
             info = rl_api.get_model(model_name)
             if info.status == "ready":
                 hud_console.success(
-                    f"vLLM server ready at http://rl.hud.so/v1/models/{model_name}/vllm"
+                    f"vLLM server ready at http://rl.hud.ai/v1/models/{model_name}/vllm"
                 )
                 break
             time.sleep(5)

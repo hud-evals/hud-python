@@ -28,7 +28,7 @@ async def main():
 
         mcp_config = {
             "hud": {
-                "url": "https://mcp.hud.so/v3/mcp",
+                "url": "https://mcp.hud.ai/v3/mcp",
                 "headers": {
                     "Authorization": f"Bearer {settings.api_key}",
                     "Mcp-Image": "hudpython/hud-remote-browser:latest",

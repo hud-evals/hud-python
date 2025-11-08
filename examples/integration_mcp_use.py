@@ -32,7 +32,7 @@ async def main():
         config = {
             "mcp_config": {
                 "hud": {
-                    "url": "https://mcp.hud.so/v3/mcp",
+                    "url": "https://mcp.hud.ai/v3/mcp",
                     "headers": {
                         "Authorization": f"Bearer {os.getenv('HUD_API_KEY')}",
                         "Mcp-Image": "hudpython/hud-browser:latest",
@@ -89,7 +89,7 @@ if __name__ == "__main__":
     # Check for required API keys
     if not os.getenv("HUD_API_KEY"):
         print("⚠️  HUD_API_KEY not set")
-        print("   Get your key at: https://hud.so")
+        print("   Get your key at: https://hud.ai")
         exit(1)
 
     if not os.getenv("OPENAI_API_KEY"):

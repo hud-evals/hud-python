@@ -60,8 +60,8 @@ Here we introduce the main parts of the environments
 * [Genteki/SpreadSheetBench](https://huggingface.co/datasets/Genteki/SpreadSheetBench) (Size: 912)
 
 ### Example Traces (May require permission)
-* [Single Test Task](https://www.hud.so/trace/d31de170-e70a-4abb-8f95-70512515dade)
-* [Genteki/SpreadSheetBench-Tiny Test](https://www.hud.so/jobs/2c426368-e352-4c79-af4a-aefb136e3f58)
+* [Single Test Task](https://www.hud.ai/trace/d31de170-e70a-4abb-8f95-70512515dade)
+* [Genteki/SpreadSheetBench-Tiny Test](https://www.hud.ai/jobs/2c426368-e352-4c79-af4a-aefb136e3f58)
 
 ### Github
 

@@ -41,7 +41,7 @@ class Task(BaseModel):
     Example:
         mcp_config: {
             "hud": {
-                "url": "${HUD_MCP_URL:https://mcp.hud.so/v3/mcp}",
+                "url": "${HUD_MCP_URL:https://mcp.hud.ai/v3/mcp}",
                 "headers": {
                     "Authorization": "Bearer ${HUD_API_KEY}",
                     "Mcp-Image": "your-mcp-image"

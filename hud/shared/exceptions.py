@@ -131,7 +131,7 @@ class HudException(Exception):
             ),
             (
                 lambda: ("api key" in error_msg or "authorization" in error_msg)
-                and ("hud" in error_msg or "mcp.hud.so" in error_msg),
+                and ("hud" in error_msg or "mcp.hud.ai" in error_msg),
                 HudAuthenticationError,
             ),
             (
