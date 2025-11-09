@@ -9,15 +9,18 @@
                     "run",
                     "--rm",
                     "-i",
-                    "jupyter:v1.1"
+                    "hudevals/jupyter:v1.1"
                 ]
             }
         },
         "evaluate_tool": {
-            "name": "eval_all",
+            "name": "evaluate",
             "arguments": {
-                "id": "59196",
-                "answer_position": "H3:H5"
+                "name": "eval_all",
+                "arguments": {
+                    "id": "59196",
+                    "answer_position": "H3:H5"
+                }
             }
         }
     }

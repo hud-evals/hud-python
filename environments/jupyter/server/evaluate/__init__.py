@@ -1,7 +1,11 @@
-from hud.server import MCPRouter
-from .eval_all import router as eval_all_router
+"""Evaluation tools for the Jupyter environment."""
 
-router = MCPRouter(name="evaluate")
-router.include_router(eval_all_router)
+from hud.tools.base import BaseHub
 
-__all__ = ["router"]
+# Create evaluate hub (tools will be hidden from agents)
+evaluate = BaseHub("evaluate")
+
+# Import evaluation tools to register them with the hub
+from . import eval_all
+
+__all__ = ["evaluate"]

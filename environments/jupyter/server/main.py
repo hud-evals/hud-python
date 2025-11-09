@@ -4,8 +4,8 @@ from pathlib import Path
 from hud.server import MCPServer
 
 from .tools import JupyterToolWithRecord as JupyterTool
-from .setup import router as setup_router
-from .evaluate import router as evalute_router
+from .setup import setup as setup_hub
+from .evaluate import evaluate as evaluate_hub
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -16,8 +16,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 mcp = MCPServer(name="Jupyter")
-mcp.include_router(setup_router)
-mcp.include_router(evalute_router)
 
 # Global tool instance
 jupyter_tool = None
@@ -36,6 +34,14 @@ async def initialize_environment():
     # Ensure kernel is started and register it for reuse
     await jupyter_tool._ensure_kernel()
     JupyterTool.register_shared_kernel("SpreadSheetBench", jupyter_tool._kernel_id)
+
+    # Set environment on hubs so they can access the jupyter tool
+    setup_hub.env = jupyter_tool
+    evaluate_hub.env = jupyter_tool
+
+    # Mount hubs (this creates dispatcher tools, hiding individual tools from agents)
+    mcp.mount(setup_hub)
+    mcp.mount(evaluate_hub)
 
     logger.info("Jupyter environment initialized successfully")
 

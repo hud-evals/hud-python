@@ -1,8 +1,10 @@
 """Setup tools for the sheet environment."""
 
-from hud.server import MCPRouter
+from hud.tools.base import BaseHub
 
-# Not setup tool here
-router = MCPRouter(name="setup")
+# Create setup hub (tools will be hidden from agents)
+setup = BaseHub("setup")
 
-__all__ = ["router"]
+# No Setup Tools for Jupyter Environment for now
+
+__all__ = ["setup"]

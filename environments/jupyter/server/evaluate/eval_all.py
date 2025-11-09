@@ -1,17 +1,16 @@
 import os
 import logging
 from pathlib import Path
-from hud.server.router import MCPRouter
 from .compare import compare
 from .generalize import generalize_code
 from ..config import VOLUMES_PATH, SOLUTIONS_PATH
 from ..tools import JupyterToolWithRecord
+from . import evaluate
 
 logger = logging.getLogger(__name__)
-router = MCPRouter()
 
 
-@router.tool("eval_all")
+@evaluate.tool("eval_all")
 async def eval_all(id: str, answer_position: str, dataset_path: str = "all_data_912"):
     """
     Evaluate solution on all three instances (generalization test).
