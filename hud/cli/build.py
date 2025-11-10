@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import os
 import re
 import subprocess
 import time
@@ -390,14 +391,11 @@ def build_docker_image(
     # Add remote cache support for ECR
     if remote_cache:
         try:
-            import os
-            import re
-
             # Validate ECR repo name
-            if not re.match(r"^[a-z0-9]([a-z0-9\-_]*[a-z0-9])?$", remote_cache):
+            if not re.match(r"^[a-z0-9]([a-z0-9\-_/]*[a-z0-9])?$", remote_cache):
                 hud_console.error(f"Invalid ECR repo name: {remote_cache}")
                 hud_console.info(
-                    "ECR repo names must contain only lowercase letters, numbers, hyphens, and underscores"  # noqa: E501
+                    "ECR repo names must contain only lowercase letters, numbers, hyphens, underscores, and forward slashes"  # noqa: E501
                 )
                 return False
 
@@ -714,10 +712,7 @@ def build_environment(
     # Add remote cache support for final build
     if remote_cache:
         try:
-            import os
-            import re
-
-            if not re.match(r"^[a-z0-9]([a-z0-9\-_]*[a-z0-9])?$", remote_cache):
+            if not re.match(r"^[a-z0-9]([a-z0-9\-_/]*[a-z0-9])?$", remote_cache):
                 hud_console.error(f"Invalid ECR repo name: {remote_cache}")
                 raise typer.Exit(1)
 
