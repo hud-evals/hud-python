@@ -397,9 +397,9 @@ def build_docker_image(
             import re
             
             # Validate ECR repo name
-            if not re.match(r'^[a-z0-9]([a-z0-9\-_]*[a-z0-9])?$', remote_cache):
+            if not re.match(r'^[a-z0-9]([a-z0-9\-_/]*[a-z0-9])?$', remote_cache):
                 hud_console.error(f"Invalid ECR repo name: {remote_cache}")
-                hud_console.info("ECR repo names must contain only lowercase letters, numbers, hyphens, and underscores")
+                hud_console.info("ECR repo names must contain only lowercase letters, numbers, hyphens, underscores, and forward slashes")
                 return False
             
             # Get required environment variables
