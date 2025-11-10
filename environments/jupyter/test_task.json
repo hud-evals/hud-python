@@ -9,7 +9,7 @@
                     "run",
                     "--rm",
                     "-i",
-                    "hudevals/jupyter:v1.1"
+                    "hudevals/jupyter:v1.2"
                 ]
             }
         },
