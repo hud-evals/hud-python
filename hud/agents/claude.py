@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 import copy
+import json
 import logging
+import os
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from anthropic import Anthropic, AsyncAnthropic, BadRequestError
 from anthropic.types.beta import (
     BetaContentBlockParam,
-    BetaDocumentBlock,
     BetaImageBlockParam,
     BetaTextBlockParam,
 )
+
+# BetaDocumentBlock may not be available in all versions
+try:
+    from anthropic.types.beta import BetaDocumentBlock
+except ImportError:
+    # Fallback: use dict type for document blocks
+    BetaDocumentBlock = dict
 
 import hud
 
@@ -209,7 +217,14 @@ class ClaudeAgent(MCPAgent):
                 create_kwargs["betas"] = ["computer-use-2025-01-24"]
 
             try:
+                # Log request JSON
+                _log_anthropic_request(create_kwargs)
+                
                 response = await self.anthropic_client.beta.messages.create(**create_kwargs)
+                
+                # Log response JSON
+                _log_anthropic_response(response)
+                
                 break
             except BadRequestError as e:
                 if (
@@ -276,10 +291,8 @@ class ClaudeAgent(MCPAgent):
     ) -> list[BetaMessageParam]:
         """Format tool results into Claude messages.
         
-        Handles file attachments (PDFs from JSON), images, and text content.
+        Handles EmbeddedResource (PDFs), images, and text content.
         """
-        import json
-        
         # Process each tool result
         user_content = []
 
@@ -292,41 +305,8 @@ class ClaudeAgent(MCPAgent):
 
             # Convert MCP tool results to Claude format
             claude_blocks = []
-            
-            # NEW: Try to parse JSON from TextContent to check for file data
-            if result.content and len(result.content) > 0:
-                first_content = result.content[0]
-                
-                if isinstance(first_content, types.TextContent):
-                    try:
-                        data = json.loads(first_content.text)
-                        
-                        # Check if JSON contains PDF/file data
-                        if isinstance(data, dict) and data.get("pdf_base64"):
-                            # Add document attachment
-                            claude_blocks.append(
-                                document_to_content_block(
-                                    filename=data.get("filename", "document.pdf"),
-                                    mime_type=data.get("mime_type", "application/pdf"),
-                                    base64_data=data["pdf_base64"]
-                                )
-                            )
-                            
-                            # Add text description
-                            if data.get("title"):
-                                claude_blocks.append(
-                                    text_to_content_block(f"Retrieved document: {data['title']}")
-                                )
-                            
-                            # Add tool result and continue to next
-                            user_content.append(tool_use_content_block(tool_use_id, claude_blocks))
-                            continue
-                            
-                    except (json.JSONDecodeError, KeyError, TypeError):
-                        # Not JSON or no file data, handle normally below
-                        pass
 
-            # EXISTING: Handle errors and regular content
+            # Handle errors and regular content
             if result.isError:
                 # Extract error message from content
                 error_msg = "Tool execution failed"
@@ -342,6 +322,25 @@ class ClaudeAgent(MCPAgent):
                         claude_blocks.append(text_to_content_block(content.text))
                     elif isinstance(content, types.ImageContent):
                         claude_blocks.append(base64_to_content_block(content.data))
+                    elif isinstance(content, types.EmbeddedResource):
+                        # Handle embedded resources (PDFs, documents)
+                        resource = content.resource
+                        if isinstance(resource, types.BlobResourceContents):
+                            # Extract filename from URI (e.g., "doc://12345" -> "document.pdf")
+                            # Convert URI to string (it may be a Pydantic AnyUrl type)
+                            uri_str = str(resource.uri) if resource.uri else "document"
+                            filename = uri_str.split("/")[-1] if "/" in uri_str else uri_str
+                            # Add file extension if not present
+                            if not filename.endswith(".pdf") and resource.mimeType == "application/pdf":
+                                filename = f"{filename}.pdf"
+                            
+                            claude_blocks.append(
+                                document_to_content_block(
+                                    filename=filename,
+                                    mime_type=resource.mimeType or "application/pdf",
+                                    base64_data=resource.blob
+                                )
+                            )
 
             # Add tool result
             user_content.append(tool_use_content_block(tool_use_id, claude_blocks))
@@ -476,3 +475,170 @@ def tool_use_content_block(
 ) -> BetaToolResultBlockParam:
     """Create tool result content block."""
     return {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
+
+
+# Global variable to track log file path
+# Use absolute path if provided, otherwise use relative to current working directory
+_log_file_env = os.getenv("ANTHROPIC_API_LOG_FILE", "anthropic_api_logs.txt")
+if os.path.isabs(_log_file_env):
+    _ANTHROPIC_LOG_FILE = _log_file_env
+else:
+    # Use absolute path relative to the original working directory
+    # This ensures the file is created in the expected location
+    _ANTHROPIC_LOG_FILE = os.path.abspath(_log_file_env)
+
+
+def _serialize_for_json(obj: Any) -> Any:
+    """Recursively serialize objects for JSON."""
+    if isinstance(obj, dict):
+        return {k: _serialize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_serialize_for_json(item) for item in obj]
+    elif hasattr(obj, "model_dump"):
+        return _serialize_for_json(obj.model_dump())
+    elif hasattr(obj, "dict"):
+        return _serialize_for_json(obj.dict())
+    elif hasattr(obj, "__dict__"):
+        # Try to extract attributes
+        try:
+            result = {}
+            for key, value in obj.__dict__.items():
+                if not key.startswith("_"):
+                    result[key] = _serialize_for_json(value)
+            return result if result else str(obj)
+        except Exception:
+            return str(obj)
+    elif isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    else:
+        # Fallback: convert to string
+        return str(obj)
+
+
+def _log_anthropic_request(request_kwargs: dict[str, Any]) -> None:
+    """Log Anthropic API request JSON to file."""
+    try:
+        # Serialize the request data
+        log_data = _serialize_for_json(request_kwargs)
+        
+        # Remove API key if present (for security)
+        if "api_key" in log_data:
+            log_data["api_key"] = "***REDACTED***"
+        
+        request_json = json.dumps(log_data, indent=2, ensure_ascii=False, default=str)
+        
+        with open(_ANTHROPIC_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write("=" * 80 + "\n")
+            f.write("ANTHROPIC API REQUEST\n")
+            f.write("=" * 80 + "\n")
+            f.write(request_json + "\n")
+            f.write("\n")
+    except Exception as e:
+        logger.warning(f"Failed to log Anthropic request: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+
+
+def _log_anthropic_response(response: Any) -> None:
+    """Log Anthropic API response JSON to file."""
+    try:
+        # Convert response to dict
+        response_dict = {}
+        
+        # Try different methods to serialize the response
+        if hasattr(response, "model_dump"):
+            response_dict = response.model_dump()
+        elif hasattr(response, "dict"):
+            response_dict = response.dict()
+        elif hasattr(response, "__dict__"):
+            # Convert object attributes to dict
+            response_dict = {}
+            for key, value in response.__dict__.items():
+                if hasattr(value, "model_dump"):
+                    response_dict[key] = value.model_dump()
+                elif hasattr(value, "dict"):
+                    response_dict[key] = value.dict()
+                else:
+                    try:
+                        json.dumps(value)  # Test if serializable
+                        response_dict[key] = value
+                    except (TypeError, ValueError):
+                        response_dict[key] = str(value)
+        else:
+            # Try to extract common fields manually
+            response_dict = {
+                "id": getattr(response, "id", None),
+                "type": getattr(response, "type", None),
+                "role": getattr(response, "role", None),
+                "content": _serialize_content(getattr(response, "content", None)),
+                "model": getattr(response, "model", None),
+                "stop_reason": getattr(response, "stop_reason", None),
+                "stop_sequence": getattr(response, "stop_sequence", None),
+                "usage": _serialize_usage(getattr(response, "usage", None)),
+            }
+            # Remove None values
+            response_dict = {k: v for k, v in response_dict.items() if v is not None}
+        
+        response_json = json.dumps(response_dict, indent=2, ensure_ascii=False, default=str)
+        
+        with open(_ANTHROPIC_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write("=" * 80 + "\n")
+            f.write("ANTHROPIC API RESPONSE\n")
+            f.write("=" * 80 + "\n")
+            f.write(response_json + "\n")
+            f.write("\n" * 2)
+    except Exception as e:
+        logger.warning(f"Failed to log Anthropic response: {e}")
+        # Fallback: log as string
+        try:
+            with open(_ANTHROPIC_LOG_FILE, "a", encoding="utf-8") as f:
+                f.write("=" * 80 + "\n")
+                f.write("ANTHROPIC API RESPONSE (FALLBACK)\n")
+                f.write("=" * 80 + "\n")
+                f.write(f"Response type: {type(response)}\n")
+                f.write(f"Response: {str(response)}\n")
+                f.write(f"Error: {e}\n")
+                f.write("\n" * 2)
+        except Exception:
+            pass
+
+
+def _serialize_content(content: Any) -> Any:
+    """Serialize content blocks."""
+    if content is None:
+        return None
+    if isinstance(content, list):
+        result = []
+        for item in content:
+            if hasattr(item, "model_dump"):
+                result.append(item.model_dump())
+            elif hasattr(item, "dict"):
+                result.append(item.dict())
+            elif isinstance(item, dict):
+                result.append(item)
+            else:
+                result.append({
+                    "type": getattr(item, "type", None),
+                    "text": getattr(item, "text", None),
+                    "thinking": getattr(item, "thinking", None),
+                    "name": getattr(item, "name", None),
+                    "input": getattr(item, "input", None),
+                })
+        return result
+    return str(content)
+
+
+def _serialize_usage(usage: Any) -> Any:
+    """Serialize usage object."""
+    if usage is None:
+        return None
+    if hasattr(usage, "model_dump"):
+        return usage.model_dump()
+    if hasattr(usage, "dict"):
+        return usage.dict()
+    if isinstance(usage, dict):
+        return usage
+    return {
+        "input_tokens": getattr(usage, "input_tokens", None),
+        "output_tokens": getattr(usage, "output_tokens", None),
+    }
