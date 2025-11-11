@@ -164,11 +164,14 @@ class MCPAgent(ABC):
                 # If allowed_tools has already been set, we take the intersection of the two
                 # If the list had been empty, we were allowing all tools, so we overwrite this
                 if isinstance(self.allowed_tools, list) and len(self.allowed_tools) > 0:
-                    self.allowed_tools = [
-                        tool
-                        for tool in self.allowed_tools
-                        if tool in task.agent_config["allowed_tools"]
-                    ]
+                    # If task allows "*", keep CLI's allowed_tools unchanged
+                    if "*" not in task.agent_config["allowed_tools"]:
+                        self.allowed_tools = [
+                            tool
+                            for tool in self.allowed_tools
+                            if tool in task.agent_config["allowed_tools"]
+                        ]
+                    # else: task allows all tools, so CLI's allowed_tools takes precedence
                 else:  # If allowed_tools is None, we overwrite it
                     self.allowed_tools = task.agent_config["allowed_tools"]
             if "disallowed_tools" in task.agent_config:
