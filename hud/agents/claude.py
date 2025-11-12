@@ -55,6 +55,8 @@ class ClaudeAgent(MCPAgent):
         max_tokens: int = 4096,
         use_computer_beta: bool = True,
         validate_api_key: bool = True,
+        max_retries: int = 5,
+        timeout: float = 120.0,
         **kwargs: Any,
     ) -> None:
         """
@@ -65,6 +67,9 @@ class ClaudeAgent(MCPAgent):
             model: Claude model to use
             max_tokens: Maximum tokens for response
             use_computer_beta: Whether to use computer-use beta features
+            validate_api_key: Whether to validate API key on initialization
+            max_retries: Number of retry attempts for API errors (default: 5)
+            timeout: Request timeout in seconds (default: 120.0)
             **kwargs: Additional arguments passed to BaseMCPAgent (including mcp_client)
         """
         super().__init__(**kwargs)
@@ -74,7 +79,11 @@ class ClaudeAgent(MCPAgent):
             api_key = settings.anthropic_api_key
             if not api_key:
                 raise ValueError("Anthropic API key not found. Set ANTHROPIC_API_KEY.")
-            model_client = AsyncAnthropic(api_key=api_key)
+            model_client = AsyncAnthropic(
+                api_key=api_key,
+                max_retries=max_retries,
+                timeout=timeout
+            )
 
         # validate api key if requested
         if validate_api_key:
