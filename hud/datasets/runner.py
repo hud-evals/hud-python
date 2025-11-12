@@ -4,99 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 from typing import TYPE_CHECKING, Any, cast
 
 from datasets import Dataset, load_dataset
 
 from hud.agents.misc import ResponseAgent
 from hud.types import Task
+from hud.utils.adaptive_semaphore import AdaptiveSemaphore
 
 if TYPE_CHECKING:
     from hud.agents import MCPAgent
 
 logger = logging.getLogger("hud.datasets")
-
-
-class AdaptiveSemaphore:
-    """Semaphore that can adapt its concurrency based on rate limit errors."""
-    
-    def __init__(self, initial_value: int, min_value: int = 1):
-        self._initial_value = initial_value
-        self._current_value = initial_value
-        self._min_value = min_value
-        self._lock = asyncio.Lock()
-        self._active_count = 0
-        self._rate_limit_count = 0
-        self._rate_limit_threshold = 3
-        
-    async def acquire(self):
-        """Acquire a slot, respecting current concurrency limit."""
-        async with self._lock:
-            # Wait until we have available capacity
-            while self._active_count >= self._current_value:
-                # Release lock temporarily and wait
-                pass
-            self._active_count += 1
-            
-    async def release(self):
-        """Release a slot."""
-        async with self._lock:
-            self._active_count -= 1
-            
-    async def __aenter__(self):
-        # Wait until we can acquire
-        while True:
-            async with self._lock:
-                if self._active_count < self._current_value:
-                    self._active_count += 1
-                    break
-            await asyncio.sleep(0.1)  # Small delay before checking again
-        return self
-        
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        # Release slot
-        async with self._lock:
-            self._active_count -= 1
-        
-        # Check if this was a rate limit error
-        if exc_val and self._is_rate_limit_error(exc_val):
-            await self._handle_rate_limit()
-        
-        return False
-    
-    def _is_rate_limit_error(self, exc: Exception) -> bool:
-        """Check if exception is a rate limit error."""
-        exc_str = str(exc).lower()
-        return "429" in exc_str or "rate limit" in exc_str or "quota" in exc_str or "overloaded" in exc_str
-    
-    async def _handle_rate_limit(self):
-        """Handle rate limit by reducing concurrency by half (ceiling)."""
-        async with self._lock:
-            self._rate_limit_count += 1
-            
-            if self._rate_limit_count >= self._rate_limit_threshold:
-                if self._current_value > self._min_value:
-                    old_value = self._current_value
-                    # Reduce by ceiling of half
-                    reduction = math.ceil(self._current_value / 2)
-                    self._current_value = max(reduction, self._min_value)
-                    
-                    logger.warning(
-                        f"🔽 Rate limit threshold reached ({self._rate_limit_count} errors). "
-                        f"Reducing concurrency by ~50%: {old_value} → {self._current_value}"
-                    )
-                    # Reset counter
-                    self._rate_limit_count = 0
-                else:
-                    logger.warning(
-                        f"⚠️  At minimum concurrency ({self._min_value}), "
-                        f"cannot reduce further despite rate limits"
-                    )
-    
-    def get_current_value(self) -> int:
-        """Get current concurrency limit."""
-        return self._current_value
 
 
 async def run_dataset(
