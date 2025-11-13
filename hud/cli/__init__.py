@@ -894,13 +894,13 @@ def eval(
     agent = agent or config.get("agent")
     model = model or config.get("model")
     full = full or config.get("full", False)
-    max_concurrent = max_concurrent or config.get("max_concurrent", 30)
+    max_concurrent = int(max_concurrent or config.get("max_concurrent", 30))
     max_steps = max_steps or config.get("max_steps")
     allowed_tools = allowed_tools or config.get("allowed_tools")
     verbose = verbose or config.get("verbose", False)
     very_verbose = very_verbose or config.get("very_verbose", False)
     vllm_base_url = vllm_base_url or config.get("vllm_base_url")
-    group_size = group_size or config.get("group_size", 1)
+    group_size = int(group_size or config.get("group_size", 1))
 
     if integration_test:
         agent = AgentType.INTEGRATION_TEST
