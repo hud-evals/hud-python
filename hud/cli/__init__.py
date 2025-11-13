@@ -873,6 +873,12 @@ def eval(
             "spinning up an agent"
         ),
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompt and proceed automatically",
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents."""
     hud_console = HUDConsole()
@@ -992,9 +998,9 @@ def eval(
     )
 
     hud_console.info("\n" + format_settings_for_display(settings_dict))
-    if not questionary.confirm("\nProceed?", default=True).ask():
+    if not yes and not questionary.confirm("\nProceed?", default=True).ask():
         hud_console.info("Evaluation cancelled.")
-        raise typer.Exit()
+        raise typer.Exit(1)
 
     # Run the command
     eval_command(
