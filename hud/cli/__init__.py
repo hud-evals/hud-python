@@ -991,10 +991,17 @@ def eval(
     agent = AgentType(agent)
 
     settings_dict = dict(
-        source=source, agent=agent, full=full, model=model,
-        allowed_tools=allowed_tools, max_concurrent=max_concurrent,
-        max_steps=max_steps, verbose=verbose, very_verbose=very_verbose,
-        vllm_base_url=vllm_base_url, group_size=group_size
+        source=source,
+        agent=agent,
+        full=full,
+        model=model,
+        allowed_tools=allowed_tools,
+        max_concurrent=max_concurrent,
+        max_steps=max_steps,
+        verbose=verbose,
+        very_verbose=very_verbose,
+        vllm_base_url=vllm_base_url,
+        group_size=group_size,
     )
 
     hud_console.info("\n" + format_settings_for_display(settings_dict))
