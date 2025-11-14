@@ -17,6 +17,7 @@ flushed on context exit. No manual cleanup required.
 from __future__ import annotations
 
 import logging
+import traceback
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -125,13 +126,16 @@ class AsyncTrace:
         # Update trace status to "completed" or "error"
         if self.root and settings.telemetry_enabled and settings.api_key:
             status = "error" if exc_type else "completed"
+            error_msg = None
+            if exc_type is not None:
+                error_msg = "".join(traceback.format_exception(exc_type, exc_val, exc_tb))
 
             try:
                 await _update_task_status_async(
                     self.task_run_id,
                     status,
                     job_id=self.job_id,
-                    error_message=str(exc_val) if exc_val else None,
+                    error_message=error_msg,
                     trace_name=self.name,
                     task_id=self.task_id,
                     group_id=self.group_id,
