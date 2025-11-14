@@ -15,7 +15,6 @@ from rich.table import Table
 
 from hud.cli.eval_config import (
     format_settings_for_display,
-    generate_default_config,
     load_eval_config,
 )
 from hud.settings import settings
@@ -884,10 +883,6 @@ def eval(
     hud_console = HUDConsole()
 
     config = load_eval_config()
-
-    if not config:
-        generate_default_config()
-        hud_console.info("Generated .hud_eval_config")
 
     # Precedence: CLI args > config file > defaults
     source = source or config.get("source")

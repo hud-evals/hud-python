@@ -6,6 +6,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from hud.utils import hud_console
+
 VALID_CONFIG_KEYS = [
     "agent",
     "source",
@@ -75,6 +77,8 @@ def load_eval_config(path: str = ".hud_eval_config") -> dict[str, Any]:
     """Load and parse .hud_eval_config file."""
     config_path = Path(path)
     if not config_path.exists():
+        generate_default_config()
+        hud_console.info("Generated .hud_eval_config")
         return {}
 
     config = {}
