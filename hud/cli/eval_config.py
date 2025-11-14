@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -113,6 +114,8 @@ def format_settings_for_display(settings: dict[str, Any]) -> str:
     for key in VALID_CONFIG_KEYS:
         if key in display_settings:
             value = display_settings[key]
+            if isinstance(value, Enum):
+                value = value.value
             lines.append(f"  {key.ljust(max_key_length)}: {value}")
 
     return "\n".join(lines)
