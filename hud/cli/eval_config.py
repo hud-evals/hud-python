@@ -7,17 +7,17 @@ from pathlib import Path
 from typing import Any
 
 VALID_CONFIG_KEYS = [
-    "source",
     "agent",
+    "source",
     "model",
     "full",
-    "max_concurrent",
     "max_steps",
+    "max_concurrent",
+    "group_size",
     "allowed_tools",
     "verbose",
     "very_verbose",
     "vllm_base_url",
-    "group_size",
 ]
 
 DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
