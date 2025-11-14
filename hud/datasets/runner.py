@@ -114,7 +114,24 @@ async def run_dataset(
                         # Convert dict to Task here, at trace level
                         task = Task(**task_dict)
 
-                        agent = agent_class(**(agent_config or {}))
+                        # Create agent with retry logic for quota/rate limit errors during init
+                        agent = None
+                        for attempt in range(3):  # Try up to 3 times to create agent
+                            try:
+                                agent = agent_class(**(agent_config or {}))
+                                break  # Success
+                            except ValueError as e:
+                                # Check if it's a quota/rate limit error during initialization
+                                error_str = str(e).lower()
+                                if ('429' in error_str or 'quota' in error_str or 'rate limit' in error_str) and attempt < 2:
+                                    wait_time = 2 ** attempt  # 1s, 2s
+                                    logger.warning(f"⏳ Agent creation quota error, retrying in {wait_time}s...")
+                                    await asyncio.sleep(wait_time)
+                                else:
+                                    raise
+                        
+                        if agent is None:
+                            raise RuntimeError("Failed to create agent after retries")
 
                         if auto_respond:
                             agent.response_agent = ResponseAgent()

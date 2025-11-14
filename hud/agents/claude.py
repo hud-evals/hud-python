@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-from anthropic import Anthropic, AsyncAnthropic, BadRequestError
+from anthropic import Anthropic, AsyncAnthropic, BadRequestError, InternalServerError, APIError
 from anthropic.types.beta import BetaContentBlockParam, BetaImageBlockParam, BetaTextBlockParam
 
 import hud
@@ -96,6 +97,7 @@ class ClaudeAgent(MCPAgent):
         self.model = model
         self.max_tokens = max_tokens
         self.use_computer_beta = use_computer_beta
+        self.max_retries = max_retries  # Store for use in get_response()
         self.hud_console = HUDConsole(logger=logger)
 
         self.model_name = "Claude"
@@ -212,23 +214,61 @@ class ClaudeAgent(MCPAgent):
             ):
                 create_kwargs["betas"] = ["computer-use-2025-01-24"]
 
-            try:
-                response = await self.anthropic_client.beta.messages.create(**create_kwargs)
-                break
-            except BadRequestError as e:
-                if (
-                    "prompt is too long" in str(e)
-                    or "request_too_large" in str(e)
-                    or e.status_code == 413
-                ):
-                    self.hud_console.warning("Prompt too long, truncating message history")
-                    # Keep first message and last 20 messages
-                    if len(current_messages) > 21:
-                        current_messages = [current_messages[0], *current_messages[-20:]]
+            # Retry logic for API errors
+            last_error = None
+            for retry_attempt in range(self.max_retries):
+                try:
+                    response = await self.anthropic_client.beta.messages.create(**create_kwargs)
+                    break  # Success!
+                    
+                except BadRequestError as e:
+                    # Handle prompt too long errors (not retryable)
+                    if (
+                        "prompt is too long" in str(e)
+                        or "request_too_large" in str(e)
+                        or e.status_code == 413
+                    ):
+                        self.hud_console.warning("Prompt too long, truncating message history")
+                        # Keep first message and last 20 messages
+                        if len(current_messages) > 21:
+                            current_messages = [current_messages[0], *current_messages[-20:]]
+                            break  # Retry with truncated messages (breaks inner loop, continues outer while True)
+                        else:
+                            raise
                     else:
-                        raise
-                else:
-                    raise
+                        raise  # Other BadRequest errors are not retryable
+                        
+                except (InternalServerError, APIError) as e:
+                    # Retry on 500 errors, overloaded, etc.
+                    error_str = str(e).lower()
+                    is_retryable = (
+                        "500" in error_str or 
+                        "overloaded" in error_str or
+                        "internal" in error_str or
+                        "503" in error_str or
+                        "502" in error_str
+                    )
+                    
+                    if is_retryable and retry_attempt < self.max_retries - 1:
+                        wait_time = 2 ** retry_attempt  # Exponential backoff: 1s, 2s, 4s, 8s, 16s
+                        self.hud_console.warning(
+                            f"🔄 API error (attempt {retry_attempt + 1}/{self.max_retries}): {str(e)[:100]}"
+                        )
+                        self.hud_console.warning(f"   Retrying in {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+                        last_error = e
+                        continue  # Retry
+                    else:
+                        if is_retryable:
+                            self.hud_console.error(f"❌ All {self.max_retries} retry attempts exhausted")
+                        raise  # Not retryable or out of retries
+            else:
+                # If we exhausted retries without success
+                if last_error:
+                    raise last_error
+            
+            # Break outer while True loop after successful API call
+            break
 
         messages.append(
             cast(

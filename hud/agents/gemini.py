@@ -90,13 +90,20 @@ class GeminiAgent(MCPAgent):
                 raise ValueError("Gemini API key not found. Set GEMINI_API_KEY.")
             model_client = genai.Client(api_key=api_key)
 
-        # Validate API key if requested
+        # Validate API key if requested (skip if quota errors - non-critical)
         if validate_api_key:
             try:
                 # Simple validation - try to list models
                 list(model_client.models.list(config=genai_types.ListModelsConfig(page_size=1)))
             except Exception as e:
-                raise ValueError(f"Gemini API key is invalid: {e}") from e
+                # Check if it's a quota/rate limit error (not an invalid key)
+                error_str = str(e).lower()
+                if '429' in error_str or 'quota' in error_str or 'rate limit' in error_str:
+                    # Skip validation - likely a temporary quota issue, not invalid key
+                    logger.warning(f"Skipping API key validation due to quota limits: {str(e)[:200]}")
+                else:
+                    # Actual invalid key or other error
+                    raise ValueError(f"Gemini API key is invalid: {e}") from e
 
         self.gemini_client = model_client
         self.model = model
