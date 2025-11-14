@@ -10,6 +10,7 @@ from datasets import Dataset, load_dataset
 
 from hud.agents.misc import ResponseAgent
 from hud.types import Task
+from hud.utils.adaptive_semaphore import AdaptiveSemaphore
 
 if TYPE_CHECKING:
     from hud.agents import MCPAgent
@@ -96,8 +97,9 @@ async def run_dataset(
             logger.warning("Failed to extract dataset verification info")
 
     async with hud.async_job(name, metadata=job_metadata, dataset_link=dataset_link) as job_obj:
-        # Run tasks with semaphore for concurrency control
-        sem = asyncio.Semaphore(max_concurrent)
+        # Run tasks with adaptive semaphore for rate-limit-aware concurrency control
+        sem = AdaptiveSemaphore(max_concurrent, min_value=1)
+        logger.info(f"Starting with max_concurrent={max_concurrent}, will adapt if rate limits detected")
         results: list[Any | None] = [None] * len(dataset)
 
         async def _worker(index: int, task_dict: Any, max_steps: int = 10) -> None:
@@ -112,7 +114,24 @@ async def run_dataset(
                         # Convert dict to Task here, at trace level
                         task = Task(**task_dict)
 
-                        agent = agent_class(**(agent_config or {}))
+                        # Create agent with retry logic for quota/rate limit errors during init
+                        agent = None
+                        for attempt in range(3):  # Try up to 3 times to create agent
+                            try:
+                                agent = agent_class(**(agent_config or {}))
+                                break  # Success
+                            except ValueError as e:
+                                # Check if it's a quota/rate limit error during initialization
+                                error_str = str(e).lower()
+                                if ('429' in error_str or 'quota' in error_str or 'rate limit' in error_str) and attempt < 2:
+                                    wait_time = 2 ** attempt  # 1s, 2s
+                                    logger.warning(f"⏳ Agent creation quota error, retrying in {wait_time}s...")
+                                    await asyncio.sleep(wait_time)
+                                else:
+                                    raise
+                        
+                        if agent is None:
+                            raise RuntimeError("Failed to create agent after retries")
 
                         if auto_respond:
                             agent.response_agent = ResponseAgent()
@@ -131,5 +150,13 @@ async def run_dataset(
         for i, result in enumerate(worker_results):
             if isinstance(result, Exception):
                 logger.error("Worker %s failed with exception: %s", i, result, exc_info=result)
+        
+        # Report if concurrency was adapted
+        final_concurrency = sem.get_current_value()
+        if final_concurrency < max_concurrent:
+            logger.warning(
+                f"📊 Adaptive concurrency: Started at {max_concurrent}, "
+                f"ended at {final_concurrency} due to rate limit errors"
+            )
 
     return results
