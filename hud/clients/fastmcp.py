@@ -91,11 +91,11 @@ class FastMCPHUDClient(BaseHUDClient):
                     # Check if connecting to HUD API
                     for server_config in mcp_config.values():
                         url = server_config.get("url", "")
-                        if "mcp.hud.so" in url:
+                        if "mcp.hud.ai" in url:
                             raise RuntimeError(
                                 "Authentication failed for HUD API. "
                                 "Please ensure your HUD_API_KEY environment variable is set correctly."  # noqa: E501
-                                "You can get an API key at https://hud.so"
+                                "You can get an API key at https://hud.ai"
                             ) from e
                     # Generic 401 error
                     raise RuntimeError(
@@ -143,8 +143,8 @@ class FastMCPHUDClient(BaseHUDClient):
             structuredContent=result.structured_content,
         )
 
-    async def list_resources(self) -> list[types.Resource]:
-        """List all available resources."""
+    async def _list_resources_impl(self) -> list[types.Resource]:
+        """Implementation of resource listing for FastMCP client."""
         if self._client is None:
             raise ValueError("Client is not connected, call initialize() first")
         return await self._client.list_resources()

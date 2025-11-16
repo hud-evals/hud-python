@@ -34,7 +34,7 @@ task = Task(
     prompt="Navigate to the dashboard",
     mcp_config={
         "browser": {
-            "url": "${HUD_MCP_URL:https://mcp.hud.so/v3/mcp}",
+            "url": "${HUD_MCP_URL:https://mcp.hud.ai/v3/mcp}",
             "headers": {
                 "Authorization": "Bearer ${HUD_API_KEY}",
                 "Mcp-Image": "hudpython/hud-browser:latest"
@@ -87,25 +87,23 @@ When developing and testing agents, follow this progression for optimal debuggin
 Start with individual tasks to debug your agent and environment setup:
 
 ```python
-# Test one task at a time for full debugging visibility
+import hud
 from hud.agents import ClaudeAgent
 from hud.datasets import Task
 
-task = Task(
-    prompt="Click the submit button",
-    mcp_config={...}
-)
+task = Task(prompt="Click the submit button", mcp_config={...})
 
-agent = ClaudeAgent()
-result = await agent.run(task, max_steps=50)
-print(f"Result: {result.reward}")
+async with hud.async_trace(task.prompt):
+    agent = ClaudeAgent()
+    result = await agent.run(task, max_steps=50)
+    print(f"Result: {result.reward}")
 ```
 
 **Benefits:**
 - Full error stack traces
 - Clear log output
 - Quick iteration cycle
-- Easy to debug environment issues
+- Automatic telemetry tracking
 
 ### Step 2: Full Dataset Evaluation
 
@@ -113,39 +111,23 @@ Once single tasks work reliably, scale up to full dataset evaluation:
 
 ```python
 from hud.datasets import run_dataset
+from hud.agents import ClaudeAgent
 
-# Start with moderate concurrency
 results = await run_dataset(
     name="SheetBench Evaluation",
     dataset="hud-evals/SheetBench-50",
     agent_class=ClaudeAgent,
-    max_concurrent=50,  # Good starting point
-    max_steps=50,
-    auto_respond=True
-)
-
-# Scale up for larger datasets (adjust based on API rate limits)
-results = await run_dataset(
-    name="Large Dataset Evaluation",
-    dataset="hud-evals/OSWorld-Verified-Gold",
-    agent_class=ClaudeAgent,
-    max_concurrent=100,  # Higher concurrency for speed
+    agent_config={"model": "claude-sonnet-4-5-20250929", "validate_api_key": False},
+    max_concurrent=50,
     max_steps=50,
     auto_respond=True
 )
 ```
 
-**Benefits:**
-- See all agent logs in CLI in real-time
-- Catch intermittent environment issues
-- Validate agent behavior at scale
-- Efficient asyncio-based concurrency
-
 **Concurrency Guidelines:**
 - Start with `max_concurrent=50` and adjust based on results
 - Increase to 100-200 for faster evaluation (if API limits allow)
 - Decrease to 10-20 if hitting rate limits
-- Most datasets work well with 50-100 concurrent tasks
 
 ### Quick Reference
 
@@ -160,20 +142,18 @@ results = await run_dataset(
 
 ```python
 from hud.datasets import run_dataset
+from hud.agents import ClaudeAgent
 
-# Run full dataset with asyncio-based concurrency
 results = await run_dataset(
     name="SheetBench Evaluation",
-    dataset="hud-evals/SheetBench-50",  # or Dataset object or list[dict]
+    dataset="hud-evals/SheetBench-50",
     agent_class=ClaudeAgent,
-    agent_config={"model": "claude-sonnet-4-20250514", "validate_api_key": False},
-    max_concurrent=50,  # Adjust based on API rate limits (1-200)
+    agent_config={"model": "claude-sonnet-4-5-20250929", "validate_api_key": False},
+    max_concurrent=50,
     max_steps=50,
-    auto_respond=True  # Automatically handle response continuations
+    auto_respond=True
 )
 ```
-
-Run all tasks with asyncio-based concurrency for optimal performance and debuggability.
 
 **Parameters:**
 | Parameter | Type | Description | Default |
@@ -182,46 +162,33 @@ Run all tasks with asyncio-based concurrency for optimal performance and debugga
 | `dataset` | `str \| Dataset \| list[dict]` | HF dataset ID, Dataset object, or task dicts | Required |
 | `agent_class` | `type[MCPAgent]` | Agent class to instantiate | Required |
 | `agent_config` | `dict[str, Any] \| None` | Constructor kwargs for agent | `None` |
-| `max_concurrent` | `int` | Maximum concurrent tasks (1-200 recommended) | `30` |
-| `metadata` | `dict[str, Any] \| None` | Job metadata | `None` |
+| `max_concurrent` | `int` | Maximum concurrent tasks (recommended: 50-200) | `30` |
 | `max_steps` | `int` | Max steps per task | `10` |
-| `split` | `str` | Dataset split when loading by ID | `"train"` |
 | `auto_respond` | `bool` | Use ResponseAgent for continuations | `False` |
+| `metadata` | `dict[str, Any] \| None` | Job metadata | `None` |
+| `split` | `str` | Dataset split when loading by ID | `"train"` |
 
 **Returns:** `list[Any]` - Results in dataset order
 
-**Features:**
-- Automatic job tracking with `hud.async_job()`
-- Per-task trace tracking with `hud.async_trace()`
-- Efficient asyncio-based concurrency with semaphores
-- Automatic telemetry flushing
-- Progress tracking with individual traces
-- Graceful error handling (continues on failures)
-
-**Example:**
+**Examples:**
 ```python
-# From HuggingFace dataset ID
+from hud.datasets import run_dataset
+from hud.agents import ClaudeAgent, OperatorAgent
+
+# From HuggingFace dataset
 results = await run_dataset(
-    "SheetBench Evaluation",
-    "hud-evals/SheetBench-50",
-    ClaudeAgent,
-    {"model": "claude-3-5-sonnet-20241022"}
+    "Eval", "hud-evals/SheetBench-50", ClaudeAgent,
+    {"model": "claude-sonnet-4-5-20250929"}, max_concurrent=50
 )
 
-# From Dataset object
+# From Dataset object  
 from datasets import load_dataset
 dataset = load_dataset("hud-evals/OSWorld-Verified", split="train")
-results = await run_dataset("OSWorld Test", dataset, OperatorAgent)
+results = await run_dataset("Eval", dataset, OperatorAgent)
 
 # From list of dicts
-tasks = [
-    {
-        "prompt": "Click submit",
-        "mcp_config": {...},
-        "setup_tool": {"name": "setup"}
-    }
-]
-results = await run_dataset("Custom", tasks, ClaudeAgent)
+tasks = [{"prompt": "...", "mcp_config": {...}, "setup_tool": {...}}]
+results = await run_dataset("Eval", tasks, ClaudeAgent)
 ```
 
 ### fetch_system_prompt_from_dataset
@@ -374,7 +341,7 @@ for url in ["example.com", "test.com"]:
         prompt=f"Navigate to {url} and find the login button",
         mcp_config={
             "browser": {
-                "url": "${HUD_MCP_URL:https://mcp.hud.so/v3/mcp}",
+                "url": "${HUD_MCP_URL:https://mcp.hud.ai/v3/mcp}",
                 "headers": {
                     "Authorization": "Bearer ${HUD_API_KEY}",
                     "X-Provider": "${BROWSER_PROVIDER}"

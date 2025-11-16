@@ -1,11 +1,11 @@
 [project]
 name = "hud-python"
-version = "0.4.54"
+version = "0.4.62"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
 authors = [
-{ name = "HUD SDK", email = "founders@hud.so" },
+{ name = "HUD", email = "founders@hud.ai" },
 ]
 license = { file = "LICENSE" }
 dependencies = [
@@ -42,6 +42,8 @@ dependencies = [
     # AI providers
     "anthropic",
     "openai",
+    "google-genai",
+    "tornado>=6.5.2",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -55,7 +57,7 @@ classifiers = [
 [project.urls]
 "Homepage" = "https://github.com/hud-evals/hud-python"
 "Bug Tracker" = "https://github.com/hud-evals/hud-python/issues"
-"Documentation" = "https://docs.hud.so"
+"Documentation" = "https://docs.hud.ai"
 
 [project.scripts]
 hud = "hud.cli:main"

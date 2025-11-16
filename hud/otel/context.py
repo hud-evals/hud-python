@@ -6,8 +6,10 @@ User-facing APIs are in hud.telemetry.
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import logging
+import traceback
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -21,7 +23,6 @@ if TYPE_CHECKING:
 
 from hud.settings import settings
 from hud.shared import make_request, make_request_sync
-from hud.utils.async_utils import fire_and_forget
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +233,8 @@ async def _update_task_status_async(
     error_message: str | None = None,
     trace_name: str | None = None,
     task_id: str | None = None,
+    group_id: str | None = None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Async task status update."""
     if not settings.telemetry_enabled:
@@ -271,11 +274,19 @@ async def _update_task_status_async(
         metadata["mcp_tool_steps"] = get_mcp_tool_steps()
         metadata["agent_steps"] = get_agent_steps()
 
+        # Merge any extra metadata provided by callers (e.g., task config summaries)
+        if extra_metadata:
+            with contextlib.suppress(Exception):
+                metadata.update(extra_metadata)
+
         if metadata:
             data["metadata"] = metadata
 
         if task_id:
             data["task_id"] = task_id
+
+        if group_id:
+            data["group_id"] = group_id
 
         await make_request(
             method="POST",
@@ -290,21 +301,6 @@ async def _update_task_status_async(
             logger.warning("Failed to update task status: %s", e)
 
 
-def _fire_and_forget_status_update(
-    task_run_id: str,
-    status: str,
-    job_id: str | None = None,
-    error_message: str | None = None,
-    trace_name: str | None = None,
-    task_id: str | None = None,
-) -> None:
-    """Fire and forget status update - works in any context including Jupyter."""
-    fire_and_forget(
-        _update_task_status_async(task_run_id, status, job_id, error_message, trace_name, task_id),
-        f"update task {task_run_id} status to {status}",
-    )
-
-
 def _update_task_status_sync(
     task_run_id: str,
     status: str,
@@ -312,6 +308,8 @@ def _update_task_status_sync(
     error_message: str | None = None,
     trace_name: str | None = None,
     task_id: str | None = None,
+    group_id: str | None = None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Synchronous task status update."""
     if not settings.telemetry_enabled:
@@ -351,11 +349,19 @@ def _update_task_status_sync(
         metadata["mcp_tool_steps"] = get_mcp_tool_steps()
         metadata["agent_steps"] = get_agent_steps()
 
+        # Merge any extra metadata provided by callers
+        if extra_metadata:
+            with contextlib.suppress(Exception):
+                metadata.update(extra_metadata)
+
         if metadata:
             data["metadata"] = metadata
 
         if task_id:
             data["task_id"] = task_id
+
+        if group_id:
+            data["group_id"] = group_id
 
         make_request_sync(
             method="POST",
@@ -376,7 +382,7 @@ def _print_trace_url(task_run_id: str) -> None:
     if not (settings.telemetry_enabled and settings.api_key):
         return
 
-    url = f"https://hud.so/trace/{task_run_id}"
+    url = f"https://hud.ai/trace/{task_run_id}"
     header = "🚀 See your agent live at:"
 
     # ANSI color codes
@@ -415,7 +421,7 @@ def _print_trace_complete_url(task_run_id: str, error_occurred: bool = False) ->
     if not (settings.telemetry_enabled and settings.api_key):
         return
 
-    url = f"https://hud.so/trace/{task_run_id}"
+    url = f"https://hud.ai/trace/{task_run_id}"
 
     # ANSI color codes
     GREEN = "\033[92m"
@@ -436,7 +442,7 @@ def _print_trace_complete_url(task_run_id: str, error_occurred: bool = False) ->
 class trace:
     """Internal OpenTelemetry trace context manager.
 
-    This is the implementation class. Users should use hud.trace() instead.
+    This is the sync implementation. For async code, use hud.async_trace() instead.
     """
 
     def __init__(
@@ -447,10 +453,12 @@ class trace:
         attributes: dict[str, Any] | None = None,
         job_id: str | None = None,
         task_id: str | None = None,
+        group_id: str | None = None,
     ) -> None:
         self.task_run_id = task_run_id
         self.job_id = job_id
         self.task_id = task_id
+        self.group_id = group_id
         self.is_root = is_root
         self.span_name = span_name
         self.attributes = attributes or {}
@@ -473,6 +481,8 @@ class trace:
             ctx = baggage.set_baggage("hud.job_id", self.job_id, context=ctx)
         if self.task_id:
             ctx = baggage.set_baggage("hud.task_id", self.task_id, context=ctx)
+        if self.group_id:
+            ctx = baggage.set_baggage("hud.group_id", self.group_id, context=ctx)
         self._otel_token = context.attach(ctx)
 
         # Start a span as current
@@ -486,6 +496,8 @@ class trace:
             span_attrs["hud.job_id"] = self.job_id
         if self.task_id:
             span_attrs["hud.task_id"] = self.task_id
+        if self.group_id:
+            span_attrs["hud.group_id"] = self.group_id
 
         # Use start_as_current_span context manager
         self._span_manager = tracer.start_as_current_span(
@@ -494,16 +506,16 @@ class trace:
         )
         self._span = self._span_manager.__enter__()
 
-        # Update task status to running if root (only for HUD backend)
+        # Update task status to running (sync call - blocking is expected)
         if self.is_root and settings.telemetry_enabled and settings.api_key:
-            _fire_and_forget_status_update(
+            _update_task_status_sync(
                 self.task_run_id,
                 "running",
                 job_id=self.job_id,
                 trace_name=self.span_name,
                 task_id=self.task_id,
+                group_id=self.group_id,
             )
-            # Print the nice trace URL box (only if not part of a job)
             if not self.job_id:
                 _print_trace_url(self.task_run_id)
 
@@ -517,33 +529,23 @@ class trace:
         exc_tb: TracebackType | None,
     ) -> None:
         """Exit the trace context."""
-        # Update task status if root (only for HUD backend)
+        # Update task status (sync call - blocking is expected for sync context manager)
         if self.is_root and settings.telemetry_enabled and settings.api_key:
+            status = "error" if exc_type else "completed"
+            error_msg = None
             if exc_type is not None:
-                # Use fire-and-forget to avoid blocking the event loop
-                _fire_and_forget_status_update(
-                    self.task_run_id,
-                    "error",
-                    job_id=self.job_id,
-                    error_message=str(exc_val),
-                    trace_name=self.span_name,
-                    task_id=self.task_id,
-                )
-                # Print error completion message (only if not part of a job)
-                if not self.job_id:
-                    _print_trace_complete_url(self.task_run_id, error_occurred=True)
-            else:
-                # Use fire-and-forget to avoid blocking the event loop
-                _fire_and_forget_status_update(
-                    self.task_run_id,
-                    "completed",
-                    job_id=self.job_id,
-                    trace_name=self.span_name,
-                    task_id=self.task_id,
-                )
-                # Print success completion message (only if not part of a job)
-                if not self.job_id:
-                    _print_trace_complete_url(self.task_run_id, error_occurred=False)
+                error_msg = "".join(traceback.format_exception(exc_type, exc_val, exc_tb))
+            _update_task_status_sync(
+                self.task_run_id,
+                status,
+                job_id=self.job_id,
+                error_message=error_msg,
+                trace_name=self.span_name,
+                task_id=self.task_id,
+                group_id=self.group_id,
+            )
+            if not self.job_id:
+                _print_trace_complete_url(self.task_run_id, error_occurred=bool(exc_type))
 
         # End the span
         if self._span and self._span_manager is not None:

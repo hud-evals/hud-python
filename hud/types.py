@@ -25,6 +25,7 @@ _missing_api_key_error_logged: bool = False
 class AgentType(str, Enum):
     CLAUDE = "claude"
     OPENAI = "openai"
+    GEMINI = "gemini"
     VLLM = "vllm"
     LITELLM = "litellm"
     INTEGRATION_TEST = "integration_test"
@@ -40,7 +41,7 @@ class Task(BaseModel):
     Example:
         mcp_config: {
             "hud": {
-                "url": "${HUD_MCP_URL:https://mcp.hud.so/v3/mcp}",
+                "url": "${HUD_MCP_URL:https://mcp.hud.ai/v3/mcp}",
                 "headers": {
                     "Authorization": "Bearer ${HUD_API_KEY}",
                     "Mcp-Image": "your-mcp-image"
@@ -230,7 +231,7 @@ class AgentResponse(BaseModel):
     tool_calls: list[MCPToolCall] = Field(default_factory=list)
     done: bool = Field(default=False)
 
-    # --- TELEMETRY [hud.so] ---
+    # --- TELEMETRY [hud.ai] ---
     # Responses
     content: str | None = Field(default=None)
     reasoning: str | None = Field(default=None)

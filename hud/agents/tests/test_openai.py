@@ -50,7 +50,7 @@ class TestOperatorAgent:
             validate_api_key=False,  # Skip validation in tests
         )
 
-        assert agent.model_name == "openai-gpt-4"
+        assert agent.model_name == "Operator"
         assert agent.model == "gpt-4"
         assert agent.openai_client == mock_model_client
 

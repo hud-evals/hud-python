@@ -8,7 +8,7 @@ icon: "graduation-cap"
 - HUD API key: Remote training requires authentication. Set `HUD_API_KEY` before running:
 
 ```bash
-export HUD_API_KEY="sk-hud-..."  # get one at https://hud.so
+export HUD_API_KEY="sk-hud-..."  # get one at https://hud.ai
 # Or persist it locally:
 hud set HUD_API_KEY=sk-hud-...
 ```
@@ -30,7 +30,7 @@ hud get hud-evals/2048-basic
 hud rl 2048-basic.json
 ```
 
-This launches training remotely and automatically provisions a vLLM server and a trainer for you. You can monitor progress on https://hud.so. The server persists between runs, so you can rerun training or evaluate against the same endpoint.
+This launches training remotely and automatically provisions a vLLM server and a trainer for you. You can monitor progress on https://hud.ai. The server persists between runs, so you can rerun training or evaluate against the same endpoint.
 
 Optional baseline first (Claude or Operator):
 
@@ -95,7 +95,7 @@ Some general findings from our internal training runs:
 
 ### Pricing
 
-Below is the pricing by GPU type. Actual prices vary — see https://hud.so/project/billing for current rates.
+Below is the pricing by GPU type. Actual prices vary — see https://hud.ai/project/billing for current rates.
 
 vLLM GPU Pricing (2 Hosted GPUs)
 

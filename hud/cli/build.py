@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import json
+import os
+import re
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -48,6 +51,140 @@ def increment_version(version_str: str, increment_type: str = "patch") -> str:
         return f"{major}.{minor + 1}.0"
     else:  # patch
         return f"{major}.{minor}.{patch + 1}"
+
+
+def find_task_files_in_env(env_dir: Path) -> list[Path]:
+    """Find all task files in an environment directory.
+
+    This looks for .json and .jsonl files that contain task definitions,
+    excluding config files and lock files.
+
+    Args:
+        env_dir: Environment directory to search
+
+    Returns:
+        List of task file paths
+    """
+    task_files: list[Path] = []
+
+    # Find all .json and .jsonl files
+    json_files = list(env_dir.glob("*.json")) + list(env_dir.glob("*.jsonl"))
+
+    # Filter out config files and lock files
+    for file in json_files:
+        # Skip hidden files, config files, and lock files
+        if (
+            file.name.startswith(".")
+            or file.name == "package.json"
+            or file.name == "tsconfig.json"
+            or file.name == "gcp.json"
+            or file.name.endswith(".lock.json")
+        ):
+            continue
+
+        # Check if it's a task file by looking for mcp_config
+        try:
+            with open(file, encoding="utf-8") as f:
+                content = json.load(f)
+
+            # It's a task file if it's a list with mcp_config entries
+            if (
+                isinstance(content, list)
+                and len(content) > 0
+                and any(isinstance(item, dict) and "mcp_config" in item for item in content)
+            ):
+                task_files.append(file)
+        except (json.JSONDecodeError, Exception):  # noqa: S112
+            continue
+
+    return task_files
+
+
+def update_tasks_json_versions(
+    env_dir: Path, base_name: str, old_version: str | None, new_version: str
+) -> list[Path]:
+    """Update image references in tasks.json files to use the new version.
+
+    Args:
+        env_dir: Environment directory
+        base_name: Base image name (without version)
+        old_version: Previous version (if any)
+        new_version: New version to use
+
+    Returns:
+        List of updated task files
+    """
+    hud_console = HUDConsole()
+    updated_files: list[Path] = []
+
+    for task_file in find_task_files_in_env(env_dir):
+        try:
+            with open(task_file, encoding="utf-8") as f:
+                tasks = json.load(f)
+            if not isinstance(tasks, list):
+                continue
+
+            modified = False
+
+            # Process each task
+            for task in tasks:
+                if not isinstance(task, dict) or "mcp_config" not in task:
+                    continue
+
+                mcp_config = task["mcp_config"]
+
+                # Handle local Docker format
+                if "local" in mcp_config and isinstance(mcp_config["local"], dict):
+                    local_config = mcp_config["local"]
+
+                    # Check for docker run args
+                    if "args" in local_config and isinstance(local_config["args"], list):
+                        for i, arg in enumerate(local_config["args"]):
+                            # Match image references
+                            if isinstance(arg, str) and (
+                                arg == f"{base_name}:latest"
+                                or (old_version and arg == f"{base_name}:{old_version}")
+                                or re.match(rf"^{re.escape(base_name)}:\d+\.\d+\.\d+$", arg)
+                            ):
+                                # Update to new version
+                                local_config["args"][i] = f"{base_name}:{new_version}"
+                                modified = True
+
+                # Handle HUD API format (remote MCP)
+                elif "hud" in mcp_config and isinstance(mcp_config["hud"], dict):
+                    hud_config = mcp_config["hud"]
+
+                    # Check headers for Mcp-Image
+                    if "headers" in hud_config and isinstance(hud_config["headers"], dict):
+                        headers = hud_config["headers"]
+
+                        if "Mcp-Image" in headers:
+                            image_ref = headers["Mcp-Image"]
+
+                            # Match various image formats
+                            if isinstance(image_ref, str) and ":" in image_ref:
+                                # Split into image name and tag
+                                image_name, _ = image_ref.rsplit(":", 1)
+
+                                if (
+                                    image_name == base_name  # Exact match
+                                    or image_name.endswith(f"/{base_name}")  # With prefix
+                                ):
+                                    # Update to new version, preserving the full image path
+                                    headers["Mcp-Image"] = f"{image_name}:{new_version}"
+                                    modified = True
+
+            # Save the file if modified
+            if modified:
+                with open(task_file, "w") as f:
+                    json.dump(tasks, f, indent=2)
+                updated_files.append(task_file)
+                hud_console.success(f"Updated {task_file.name} with version {new_version}")
+
+        except Exception as e:
+            hud_console.warning(f"Could not update {task_file.name}: {e}")
+
+    return updated_files
 
 
 def get_existing_version(lock_path: Path) -> str | None:
@@ -229,6 +366,7 @@ def build_docker_image(
     verbose: bool = False,
     build_args: dict[str, str] | None = None,
     platform: str | None = None,
+    remote_cache: str | None = None,
 ) -> bool:
     """Build a Docker image from a directory."""
     hud_console = HUDConsole()
@@ -240,16 +378,58 @@ def build_docker_image(
         hud_console.error(f"No Dockerfile found in {directory}")
         return False
 
-    # Default platform to match RL pipeline unless explicitly overridden
+    # Build command - use buildx when remote cache is enabled
     effective_platform = platform if platform is not None else "linux/amd64"
+    cmd = ["docker", "buildx", "build"] if remote_cache else ["docker", "build"]
 
-    # Build command
-    cmd = ["docker", "build"]
     if effective_platform:
         cmd.extend(["--platform", effective_platform])
     cmd.extend(["-t", tag])
     if no_cache:
         cmd.append("--no-cache")
+
+    # Add remote cache support for ECR
+    if remote_cache:
+        try:
+            # Validate ECR repo name
+            if not re.match(r"^[a-z0-9]([a-z0-9\-_/]*[a-z0-9])?$", remote_cache):
+                hud_console.error(f"Invalid ECR repo name: {remote_cache}")
+                hud_console.info(
+                    "ECR repo names must contain only lowercase letters, numbers, hyphens, underscores, and forward slashes"  # noqa: E501
+                )
+                return False
+
+            # Get required environment variables
+            aws_account_id = os.getenv("AWS_ACCOUNT_ID")
+            aws_region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+
+            if not aws_account_id:
+                hud_console.error("AWS_ACCOUNT_ID environment variable not set")
+                return False
+
+            # ECR cache image reference
+            cache_image = (
+                f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/{remote_cache}:cache"
+            )
+
+            # Add cache arguments with proper ECR format
+            cmd.extend(
+                [
+                    "--cache-from",
+                    f"type=registry,ref={cache_image}",
+                    "--cache-to",
+                    f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}",
+                    "--load",  # Load image to local Docker after build
+                ]
+            )
+
+            hud_console.success(f"Remote cache configured: {cache_image}")
+
+        except typer.Exit:
+            raise
+        except Exception as e:
+            hud_console.error(f"Remote cache setup error: {e}")
+            return False
 
     # Add build args
     for key, value in build_args.items():
@@ -276,6 +456,7 @@ def build_environment(
     verbose: bool = False,
     env_vars: dict[str, str] | None = None,
     platform: str | None = None,
+    remote_cache: str | None = None,
 ) -> None:
     """Build a HUD environment and generate lock file."""
     hud_console = HUDConsole()
@@ -346,6 +527,7 @@ def build_environment(
         verbose,
         build_args=None,
         platform=platform,
+        remote_cache=remote_cache,
     ):
         hud_console.error("Docker build failed")
         raise typer.Exit(1)
@@ -386,28 +568,24 @@ def build_environment(
     dockerfile_path = env_dir / "Dockerfile"
     required_env, optional_env = extract_env_vars_from_dockerfile(dockerfile_path)
 
-    # Merge user-provided env vars with detected ones
-    provided_env_vars: dict[str, str] = {}
-    missing_required = []
-    if env_vars:
-        # Use placeholders in lock file for any provided values to avoid storing secrets
-        provided_env_vars = {k: f"${{{k}}}" for k in env_vars}
-        # Track which required vars are still missing
-        missing_required = [e for e in required_env if e not in env_vars]
-
-        # Show what env vars were provided
-        hud_console.success(f"Using provided environment variables: {', '.join(env_vars.keys())}")
-    else:
-        missing_required = required_env[:]
-
-    # Warn about missing required variables
-    if missing_required:
-        hud_console.warning(
-            f"Missing required environment variables: {', '.join(missing_required)}"
-        )
+    # Show env vars detected from .env file
+    if env_from_file:
         hud_console.info(
-            "These can be added to the lock file after build or provided with -e flags"
+            f"Detected environment variables from .env file: {', '.join(sorted(env_from_file.keys()))}"  # noqa: E501
         )
+
+    # Create a complete set of all required variables for warning
+    all_required_for_warning = set(required_env)
+    all_required_for_warning.update(env_from_file.keys())
+
+    # Find which ones are missing (not provided via -e flags)
+    all_missing = all_required_for_warning - set(env_vars.keys() if env_vars else [])
+
+    if all_missing:
+        hud_console.warning(
+            f"Environment variables not provided via -e flags: {', '.join(sorted(all_missing))}"
+        )
+        hud_console.info("These will be added to the required list in the lock file")
 
     # Check for existing version and increment
     lock_path = env_dir / "hud.lock.yaml"
@@ -449,7 +627,13 @@ def build_environment(
     }
 
     # Add environment variables section if any exist
-    if missing_required or optional_env or provided_env_vars:
+    # Include env vars from .env file as well
+    env_vars_from_file = set(env_from_file.keys()) if env_from_file else set()
+
+    # Check if we have any env vars to document
+    has_env_vars = bool(required_env or optional_env or env_vars or env_vars_from_file)
+
+    if has_env_vars:
         lock_content["environment"]["variables"] = {}
 
         # Add note about editing environment variables
@@ -458,10 +642,21 @@ def build_environment(
             "Provided variables will be used when running the environment."
         )
 
-        if provided_env_vars:
-            lock_content["environment"]["variables"]["provided"] = provided_env_vars
-        if missing_required:
-            lock_content["environment"]["variables"]["required"] = missing_required
+        # Combine all required variables: from Dockerfile, .env file, and provided vars
+        all_required = set(required_env)
+
+        # Add all env vars from .env file to required
+        all_required.update(env_vars_from_file)
+
+        # Add all provided env vars to required
+        if env_vars:
+            all_required.update(env_vars.keys())
+
+        # Remove any that are optional - they stay in optional
+        all_required = all_required - set(optional_env)
+
+        if all_required:
+            lock_content["environment"]["variables"]["required"] = sorted(list(all_required))
         if optional_env:
             lock_content["environment"]["variables"]["optional"] = optional_env
 
@@ -506,11 +701,47 @@ def build_environment(
     version_tag = f"{base_name}:{new_version}"
     latest_tag = f"{base_name}:latest"
 
-    label_cmd = ["docker", "build"]
+    # Build command - use buildx when remote cache is enabled
+    label_cmd = ["docker", "buildx", "build"] if remote_cache else ["docker", "build"]
+
     # Use same defaulting for the second build step
     label_platform = platform if platform is not None else "linux/amd64"
     if label_platform:
         label_cmd.extend(["--platform", label_platform])
+
+    # Add remote cache support for final build
+    if remote_cache:
+        try:
+            if not re.match(r"^[a-z0-9]([a-z0-9\-_/]*[a-z0-9])?$", remote_cache):
+                hud_console.error(f"Invalid ECR repo name: {remote_cache}")
+                raise typer.Exit(1)
+
+            aws_account_id = os.getenv("AWS_ACCOUNT_ID")
+            aws_region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+
+            if not aws_account_id:
+                hud_console.error("AWS_ACCOUNT_ID environment variable not set")
+                raise typer.Exit(1)
+
+            cache_image = (
+                f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/{remote_cache}:cache"
+            )
+
+            label_cmd.extend(
+                [
+                    "--cache-from",
+                    f"type=registry,ref={cache_image}",
+                    "--cache-to",
+                    f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}",
+                    "--load",  # Load image to local Docker after build
+                ]
+            )
+        except typer.Exit:
+            raise
+        except Exception as e:
+            hud_console.error(f"Remote cache setup error: {e}")
+            raise typer.Exit(1) from e
+
     label_cmd.extend(
         [
             "--label",
@@ -579,6 +810,17 @@ def build_environment(
         local_ref = lock_content.get("images", {}).get("local", version_tag)
         save_to_registry(lock_content, local_ref, verbose)
 
+    # Update tasks.json files with new version
+    hud_console.progress_message("Updating task files with new version...")
+    updated_task_files = update_tasks_json_versions(
+        env_dir, base_name, existing_version, new_version
+    )
+
+    if updated_task_files:
+        hud_console.success(f"Updated {len(updated_task_files)} task file(s)")
+    else:
+        hud_console.dim_info("No task files found or updated", value="")
+
     # Print summary
     hud_console.section_title("Build Complete")
 
@@ -602,7 +844,7 @@ def build_environment(
     hud_console.section_title("Next Steps")
     hud_console.info("Test locally:")
     hud_console.command_example("hud dev", "Hot-reload development")
-    hud_console.command_example(f"hud run {latest_tag}", "Run the built image")
+    hud_console.command_example(f"hud run {version_tag}", "Run the built image")
     hud_console.info("")
     hud_console.info("Publish to registry:")
     hud_console.command_example("hud push", f"Push as {version_tag}")
@@ -620,6 +862,7 @@ def build_command(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
     env_vars: dict[str, str] | None = None,
     platform: str | None = None,
+    remote_cache: str | None = None,
 ) -> None:
     """Build a HUD environment and generate lock file."""
-    build_environment(directory, tag, no_cache, verbose, env_vars, platform)
+    build_environment(directory, tag, no_cache, verbose, env_vars, platform, remote_cache)

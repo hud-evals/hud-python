@@ -94,5 +94,26 @@ class ComputerSettings(BaseSettings):
         validation_alias="QWEN_RESCALE_IMAGES",
     )
 
+    GEMINI_COMPUTER_WIDTH: int = Field(
+        default=1440,
+        description="Width of the display to use for the Gemini computer tools",
+        validation_alias="GEMINI_COMPUTER_WIDTH",
+    )
+    GEMINI_COMPUTER_HEIGHT: int = Field(
+        default=900,
+        description="Height of the display to use for the Gemini computer tools",
+        validation_alias="GEMINI_COMPUTER_HEIGHT",
+    )
+    GEMINI_RESCALE_IMAGES: bool = Field(
+        default=True,
+        description="Whether to rescale images to the agent width and height",
+        validation_alias="GEMINI_RESCALE_IMAGES",
+    )
+    GEMINI_MAX_RECENT_TURN_WITH_SCREENSHOTS: int = Field(
+        default=3,
+        description="Maximum number of recent turns to keep screenshots for in Gemini agent",
+        validation_alias="GEMINI_MAX_RECENT_TURN_WITH_SCREENSHOTS",
+    )
+
 
 computer_settings = ComputerSettings()

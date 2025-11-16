@@ -36,7 +36,7 @@ task = Task(
     prompt="Navigate to the login page and sign in as testuser@example.com",
     mcp_config={
         "hud": {
-            "url": "https://mcp.hud.so/v3/mcp",
+            "url": "https://mcp.hud.ai/v3/mcp",
             "headers": {
                 "Authorization": "Bearer ${HUD_API_KEY}",
                 "Mcp-Image": "hudpython/hud-browser:latest"
@@ -109,7 +109,7 @@ Tasks automatically resolve `${VAR}` patterns when deserialized from dictionarie
     "prompt": "Complete the TODO list",
     "mcp_config": {
         "hud": {
-            "url": "https://mcp.hud.so/v3/mcp",
+            "url": "https://mcp.hud.ai/v3/mcp",
             "headers": {
                 "Authorization": "Bearer ${HUD_API_KEY}",
                 "Mcp-Image": "${BROWSER_IMAGE}"

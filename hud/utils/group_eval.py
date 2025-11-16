@@ -60,6 +60,13 @@ async def run_tasks_grouped(
     # Run all episodes, respecting max_parallel_episodes
     all_traces = []
 
+    # Generate group_ids for each unique task
+    import uuid
+
+    task_group_ids = {}
+    for i in range(len(tasks)):
+        task_group_ids[i] = str(uuid.uuid4())
+
     for batch_start in range(0, len(grouped_tasks), max_parallel_episodes):
         batch_end = min(batch_start + max_parallel_episodes, len(grouped_tasks))
         batch = grouped_tasks[batch_start:batch_end]
@@ -80,7 +87,9 @@ async def run_tasks_grouped(
 
                 # Run the task
                 trace_name = f"Eval | {task.id if hasattr(task, 'id') else 'Task'} | Group {task_mapping[idx]}"  # noqa: E501
-                with hud.trace(trace_name, job_id=job_id):
+                # Use the group_id for this specific task
+                task_group_id = task_group_ids[task_mapping[idx]]
+                async with hud.async_trace(trace_name, job_id=job_id, group_id=task_group_id):
                     result = await agent.run(task, max_steps=max_steps)
                     return result
 
@@ -106,7 +115,7 @@ async def run_tasks_grouped(
             hud_console.info(f"Completed batch: {len(all_traces)}/{len(grouped_tasks)} episodes")
 
     # Group results back by original task and calculate statistics
-    return calculate_group_statistics(tasks, all_traces, task_mapping, group_size)
+    return calculate_group_statistics(tasks, all_traces, task_mapping, group_size, task_group_ids)
 
 
 def calculate_group_statistics(
@@ -114,6 +123,7 @@ def calculate_group_statistics(
     traces: list[Trace],
     task_mapping: list[int],
     group_size: int,
+    task_group_ids: dict[int, str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Calculate statistics for each group, similar to preprocess_advantages.
@@ -123,6 +133,7 @@ def calculate_group_statistics(
         traces: All traces from grouped runs
         task_mapping: Mapping of trace index to task index
         group_size: Number of runs per task
+        task_group_ids: Dict mapping task index to group ID
 
     Returns:
         List of statistics for each task
@@ -147,6 +158,7 @@ def calculate_group_statistics(
             else f"task_{task_idx}",
             "prompt": task.prompt if isinstance(task, Task) else task.get("prompt", ""),
             "group_size": group_size,
+            "group_id": task_group_ids.get(task_idx) if task_group_ids else None,
             "rewards": rewards.tolist(),
             "mean_reward": float(np.mean(rewards)),
             "std_reward": float(np.std(rewards)) if len(rewards) > 1 else 0.0,
@@ -172,24 +184,27 @@ def calculate_group_statistics(
 
 def display_group_statistics(stats: list[dict[str, Any]], show_details: bool = True) -> None:
     """Display statistics from grouped evaluation."""
+    if not stats:
+        hud_console.warning("No statistics to display")
+        return
+
     from rich.console import Console
     from rich.table import Table
 
     console = Console()
 
-    # Overall statistics
     all_means = [s["mean_reward"] for s in stats]
     overall_mean = mean(all_means) if all_means else 0.0
     overall_std = stdev(all_means) if len(all_means) > 1 else 0.0
 
     hud_console.success("\n📊 Evaluation Summary")
     hud_console.info(f"Tasks evaluated: {len(stats)}")
-    hud_console.info(f"Episodes per task: {stats[0]['group_size'] if stats else 0}")
-    hud_console.info(f"Total episodes: {sum(len(s['rewards']) for s in stats)}")
+    hud_console.info(f"Episodes per task: {stats[0].get('group_size', 0)}")
+    hud_console.info(f"Total episodes: {sum(len(s.get('rewards', [])) for s in stats)}")
     hud_console.info(f"Overall mean reward: {overall_mean:.3f} ± {overall_std:.3f}")
 
     # Detailed table
-    if show_details and len(stats) <= 50:  # Only show for reasonable dataset sizes
+    if show_details and stats and len(stats) <= 50:
         table = Table(title="\nPer-Task Performance Distribution")
         table.add_column("Task", style="cyan", no_wrap=True)
         table.add_column("Mean±Std", justify="right", style="green")
@@ -198,16 +213,21 @@ def display_group_statistics(stats: list[dict[str, Any]], show_details: bool = T
         table.add_column("Rewards", style="dim")
 
         for stat in stats:
-            task_name = stat["prompt"][:30] + "..." if len(stat["prompt"]) > 30 else stat["prompt"]
-            rewards_str = " ".join([f"{r:.2f}" for r in stat["rewards"][:5]])
-            if len(stat["rewards"]) > 5:
+            task_name = (
+                stat.get("prompt", "Unknown")[:30] + "..."
+                if len(stat.get("prompt", "")) > 30
+                else stat.get("prompt", "Unknown")
+            )
+            rewards = stat.get("rewards", [])
+            rewards_str = " ".join([f"{r:.2f}" for r in rewards[:5]])
+            if len(rewards) > 5:
                 rewards_str += " ..."
 
             table.add_row(
                 task_name,
-                f"{stat['mean_reward']:.3f}±{stat['std_reward']:.3f}",
-                f"{stat['min_reward']:.2f}/{stat['max_reward']:.2f}",
-                f"{stat['success_rate'] * 100:.0f}%",
+                f"{stat.get('mean_reward', 0):.3f}±{stat.get('std_reward', 0):.3f}",
+                f"{stat.get('min_reward', 0):.2f}/{stat.get('max_reward', 0):.2f}",
+                f"{stat.get('success_rate', 0) * 100:.0f}%",
                 rewards_str,
             )
 

@@ -99,7 +99,7 @@ class TestHudExceptionAutoConversion:
     def test_hud_api_key_error(self):
         """Test that HUD API key errors become HudAuthenticationError."""
         try:
-            raise ValueError("API key missing for mcp.hud.so")
+            raise ValueError("API key missing for mcp.hud.ai")
         except Exception as e:
             with pytest.raises(HudAuthenticationError) as exc_info:
                 raise HudException from e

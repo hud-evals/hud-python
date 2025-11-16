@@ -68,6 +68,26 @@ class TestBuildAgent:
             )
             assert result == mock_instance
 
+    def test_builds_gemini_agent(self) -> None:
+        """Test building a Gemini agent."""
+        with patch("hud.agents.GeminiAgent") as mock_runner:
+            mock_instance = Mock()
+            mock_runner.return_value = mock_instance
+
+            result = build_agent(
+                AgentType.GEMINI,
+                model="gemini-test",
+                allowed_tools=["gemini_computer"],
+                verbose=True,
+            )
+
+            mock_runner.assert_called_once_with(
+                model="gemini-test",
+                verbose=True,
+                allowed_tools=["gemini_computer"],
+            )
+            assert result == mock_instance
+
 
 class TestRunSingleTask:
     """Test the run_single_task function."""

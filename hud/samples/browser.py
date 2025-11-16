@@ -17,7 +17,7 @@ class BrowserTask(Task):
     mcp_config: dict[str, Any] = Field(
         default_factory=lambda: {
             "browser": {
-                "url": "https://mcp.hud.so/v3/mcp",
+                "url": "https://mcp.hud.ai/v3/mcp",
                 "headers": {
                     "Authorization": f"Bearer {settings.api_key}",
                     "Mcp-Image": "hudevals/hud-remote-browser:0.1.1",

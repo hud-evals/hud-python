@@ -23,6 +23,7 @@ PRESET_MAP: dict[str, str | None] = {
     "blank": "blank",
     "deep-research": "deepresearch",
     "browser": "browser",
+    "rubrics": "rubrics",
 }
 
 SKIP_DIR_NAMES = {"node_modules", "__pycache__", "dist", "build", ".next", ".git"}
@@ -91,6 +92,7 @@ def _prompt_for_preset() -> str:
             {"name": "blank", "message": "blank"},
             {"name": "deep-research", "message": "deep-research"},
             {"name": "browser", "message": "browser"},
+            {"name": "rubrics", "message": "rubrics"},
         ]
         display_choices = [c["message"] for c in choices]
         selected = questionary.select(
@@ -180,21 +182,21 @@ def create_environment(
 
     hud_console = HUDConsole()
 
-    # Determine environment name/target directory
-    if name is None:
-        current_dir = Path.cwd()
-        name = current_dir.name
-        target_dir = current_dir
-        hud_console.info(f"Using current directory name: {name}")
-    else:
-        target_dir = Path(directory) / name
-
     # Choose preset
     preset_normalized = (preset or "").strip().lower() if preset else _prompt_for_preset()
+
+    # If no name is provided, use the preset name as the environment name
+    if name is None:
+        name = preset_normalized
+        hud_console.info(f"Using preset name as environment name: {name}")
+
+    # Always create a new directory based on the name
+    target_dir = Path.cwd() / name if directory == "." else Path(directory) / name
+
     if preset_normalized not in PRESET_MAP:
         hud_console.warning(
             f"Unknown preset '{preset_normalized}', defaulting to 'blank' "
-            "(available: blank, deep-research, browser)"
+            "(available: blank, deep-research, browser, rubrics)"
         )
         preset_normalized = "blank"
 
@@ -261,14 +263,10 @@ def create_environment(
         hud_console.status_item(entry, "added")
 
     hud_console.section_title("Next steps")
-    if target_dir == Path.cwd():
-        hud_console.info("1. Start development server (with MCP inspector):")
-        hud_console.command_example("hud dev --inspector")
-    else:
-        hud_console.info("1. Enter the directory:")
-        hud_console.command_example(f"cd {target_dir}")
-        hud_console.info("\n2. Start development server (with MCP inspector):")
-        hud_console.command_example("hud dev --inspector")
-
+    # Since we now almost always create a new directory, show cd command
+    hud_console.info("1. Enter the directory:")
+    hud_console.command_example(f"cd {target_dir.name}")
+    hud_console.info("\n2. Start development server (with MCP inspector):")
+    hud_console.command_example("hud dev --inspector")
     hud_console.info("\n3. Review the README in this preset for specific instructions.")
     hud_console.info("\n4. Customize as needed.")

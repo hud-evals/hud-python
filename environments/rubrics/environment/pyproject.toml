@@ -1,0 +1,19 @@
+[project]
+name = "rubrics-environment"
+version = "0.1.0"
+description = "Backend service for Rubrics environment with SEC EDGAR integration"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.104.1",
+    "uvicorn[standard]>=0.24.0",
+    "httpx>=0.24.0",
+    "rubric==1.1.8",
+    "edgartools>=4.21.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["environment"]

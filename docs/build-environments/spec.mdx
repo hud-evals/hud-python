@@ -26,7 +26,7 @@ graph TD
 
 Recommended (for HUD RL/evals): provide tools named `setup` and `evaluate`.
 
-## Make it runnable remotely (mcp.hud.so)
+## Make it runnable remotely (mcp.hud.ai)
 
 Remote execution is built‑in. Push your image, then either:
 
@@ -44,7 +44,7 @@ hud run myorg/my-env:latest   # remote container with MCP
 {
   "mcp_config": {
     "hud": {
-      "url": "https://mcp.hud.so/v3/mcp",
+      "url": "https://mcp.hud.ai/v3/mcp",
       "headers": {
         "Authorization": "Bearer ${HUD_API_KEY}",
         "Mcp-Image": "myorg/my-env:latest"
@@ -89,7 +89,7 @@ task = Task(
     prompt="...",
     mcp_config={
         "hud": {
-            "url": "https://mcp.hud.so/v3/mcp",
+            "url": "https://mcp.hud.ai/v3/mcp",
             "headers": {
                 "Authorization": "Bearer ${HUD_API_KEY}",
                 "Mcp-Image": "myorg/my-env:latest"
@@ -107,7 +107,7 @@ The same structure is used by `hud init`’s template and by programmatic tasks.
 {
   "mcp_config": {
     "hud": {
-      "url": "https://mcp.hud.so/v3/mcp",
+      "url": "https://mcp.hud.ai/v3/mcp",
       "headers": {
         "Authorization": "Bearer ${HUD_API_KEY}",
         "Mcp-Image": "myorg/my-env:latest"

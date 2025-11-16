@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import mcp.types as types
 
+from hud.agents.utils import log_agent_metadata_to_status, log_task_config_to_current_trace
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Trace
 from hud.utils.hud_console import HUDConsole
 from hud.utils.mcp import MCPConfigPatch, patch_mcp_config, setup_hud_telemetry
@@ -62,6 +63,7 @@ class MCPAgent(ABC):
         initial_screenshot: bool = True,
         # Misc
         model_name: str = "mcp-agent",
+        checkpoint_name: str | None = None,
         response_agent: ResponseAgent | None = None,
         auto_trace: bool = True,
         verbose: bool = False,
@@ -92,6 +94,7 @@ class MCPAgent(ABC):
         self._auto_created_client = False  # Track if we created the client
 
         self.model_name = model_name
+        self.checkpoint_name = checkpoint_name
         self.console = HUDConsole(logger=logger)
 
         # Set verbose mode if requested
@@ -161,11 +164,14 @@ class MCPAgent(ABC):
                 # If allowed_tools has already been set, we take the intersection of the two
                 # If the list had been empty, we were allowing all tools, so we overwrite this
                 if isinstance(self.allowed_tools, list) and len(self.allowed_tools) > 0:
-                    self.allowed_tools = [
-                        tool
-                        for tool in self.allowed_tools
-                        if tool in task.agent_config["allowed_tools"]
-                    ]
+                    # If task allows "*", keep CLI's allowed_tools unchanged
+                    if "*" not in task.agent_config["allowed_tools"]:
+                        self.allowed_tools = [
+                            tool
+                            for tool in self.allowed_tools
+                            if tool in task.agent_config["allowed_tools"]
+                        ]
+                    # else: task allows all tools, so CLI's allowed_tools takes precedence
                 else:  # If allowed_tools is None, we overwrite it
                     self.allowed_tools = task.agent_config["allowed_tools"]
             if "disallowed_tools" in task.agent_config:
@@ -198,6 +204,8 @@ class MCPAgent(ABC):
             f"Agent initialized with {len(self.get_available_tools())} tools: {', '.join([t.name for t in self.get_available_tools()])}"  # noqa: E501
         )
 
+        await log_agent_metadata_to_status(self.model_name, self.checkpoint_name)
+
     async def run(self, prompt_or_task: str | Task | dict[str, Any], max_steps: int = 10) -> Trace:
         """
         Run the agent with the given prompt or task.
@@ -223,6 +231,9 @@ class MCPAgent(ABC):
 
             # Handle Task objects with full lifecycle
             if isinstance(prompt_or_task, Task):
+                # Log a compact summary of task config to the current trace (async)
+                await log_task_config_to_current_trace(prompt_or_task)
+
                 return await self.run_task(prompt_or_task, max_steps)
 
             # Handle simple string prompts
