@@ -238,7 +238,8 @@ async def run_mcp_module(
         if env_dir.exists() and (env_dir / "server.py").exists():
             hud_console.info("")
             hud_console.info(
-                f"{hud_console.sym.FLOW} Don't forget to start the environment backend in another terminal:"
+                f"{hud_console.sym.FLOW} Don't forget to start the environment "
+                "backend in another terminal:"
             )
             hud_console.info("   cd environment && uv run python uvicorn server:app --reload")
 
