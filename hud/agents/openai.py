@@ -60,7 +60,6 @@ class OperatorAgent(MCPAgent):
             **kwargs: Additional arguments passed to MCPAgent
         """
         super().__init__(**kwargs)
-
         # Initialize client if not provided
         if model_client is None:
             api_key = settings.openai_api_key

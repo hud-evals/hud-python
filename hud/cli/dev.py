@@ -262,6 +262,8 @@ async def run_mcp_module(
                     build_status=False,
                     environment_name=mcp_server.name or "mcp-server",
                 )
+            except SystemExit:
+                raise  # Let API key requirement exits through
             except Exception:  # noqa: S110
                 pass
 
@@ -708,6 +710,8 @@ def run_docker_dev_server(
                 environment_name=image_name,
             )
         )
+    except SystemExit:
+        raise  # Let API key requirement exits through
     except Exception:  # noqa: S110
         pass
 
