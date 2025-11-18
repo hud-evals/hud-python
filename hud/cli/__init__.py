@@ -885,17 +885,17 @@ def eval(
     config = load_eval_config()
 
     # Precedence: CLI args > config file > defaults
-    source = source or config.get("source")
-    agent = agent or config.get("agent")
-    model = model or config.get("model")
+    source = source if source is not None else config.get("source")
+    agent = agent if agent is not None else config.get("agent")
+    model = model if model is not None else config.get("model")
     full = full or config.get("full", False)
-    max_concurrent = int(max_concurrent or config.get("max_concurrent", 30))
-    max_steps = max_steps or config.get("max_steps")
-    allowed_tools = allowed_tools or config.get("allowed_tools")
+    max_concurrent = int(max_concurrent) if max_concurrent is not None else int(config.get("max_concurrent", 30))
+    max_steps = max_steps if max_steps is not None else config.get("max_steps")
+    allowed_tools = allowed_tools if allowed_tools is not None else config.get("allowed_tools")
     verbose = verbose or config.get("verbose", False)
     very_verbose = very_verbose or config.get("very_verbose", False)
-    vllm_base_url = vllm_base_url or config.get("vllm_base_url")
-    group_size = int(group_size or config.get("group_size", 1))
+    vllm_base_url = vllm_base_url if vllm_base_url is not None else config.get("vllm_base_url")
+    group_size = int(group_size) if group_size is not None else int(config.get("group_size", 1))
 
     if integration_test:
         agent = AgentType.INTEGRATION_TEST
