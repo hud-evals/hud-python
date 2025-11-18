@@ -25,6 +25,15 @@ VALID_CONFIG_KEYS = [
     "vllm_base_url",
 ]
 
+CONFIG_TYPES = {
+    "max_concurrent": int,
+    "group_size": int,
+    "max_steps": int,
+    "full": bool,
+    "verbose": bool,
+    "very_verbose": bool,
+}
+
 DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # This file configures default settings for the 'hud eval' command
 # Command-line arguments override these settings
@@ -97,6 +106,14 @@ def load_eval_config(path: str = ".hud_eval_config") -> dict[str, Any]:
                     continue
                 value = parse_value(value)
                 if value is not None:
+                    if key in CONFIG_TYPES:
+                        expected_type = CONFIG_TYPES[key]
+                        if not isinstance(value, expected_type):
+                            hud_console.warning(
+                                f"Config error: '{key}' expects {expected_type.__name__}, "
+                                f"got '{value}'. Using default."
+                            )
+                            continue
                     config[key] = value
 
     return config
