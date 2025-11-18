@@ -186,6 +186,7 @@ class ClaudeAgent(MCPAgent):
                 response = await self.anthropic_client.beta.messages.create(**create_kwargs)
                 break
             except BadRequestError as e:
+                raise e
                 if (
                     "prompt is too long" in str(e)
                     or "request_too_large" in str(e)
