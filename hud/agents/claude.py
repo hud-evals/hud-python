@@ -51,8 +51,8 @@ class ClaudeAgent(MCPAgent):
     def __init__(
         self,
         model_client: AsyncAnthropic | None = None,
-        model: str = "claude-sonnet-4-20250514",
-        max_tokens: int = 4096,
+        model: str = "claude-sonnet-4-5-20250929",
+        max_tokens: int = 8192,
         use_computer_beta: bool = True,
         validate_api_key: bool = True,
         **kwargs: Any,
