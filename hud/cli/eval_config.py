@@ -151,9 +151,8 @@ def display_eval_settings(settings: dict[str, Any]) -> None:
             seen.add(key)
 
     # Add any keys in settings but not in VALID_CONFIG_KEYS (shouldn't happen but good for safety)
-    for key in display_settings:
+    for key, value in display_settings.items():
         if key not in seen:
-            value = display_settings[key]
             if isinstance(value, Enum):
                 value = value.value
             table.add_row(key, str(value))
