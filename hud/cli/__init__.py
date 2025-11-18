@@ -889,7 +889,9 @@ def eval(
     agent = agent if agent is not None else config.get("agent")
     model = model if model is not None else config.get("model")
     full = full or config.get("full", False)
-    max_concurrent = int(max_concurrent) if max_concurrent is not None else int(config.get("max_concurrent", 30))
+    max_concurrent = (
+        int(max_concurrent) if max_concurrent is not None else int(config.get("max_concurrent", 30))
+    )
     max_steps = max_steps if max_steps is not None else config.get("max_steps")
     allowed_tools = allowed_tools if allowed_tools is not None else config.get("allowed_tools")
     verbose = verbose or config.get("verbose", False)
