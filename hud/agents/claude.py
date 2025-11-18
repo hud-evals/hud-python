@@ -173,7 +173,7 @@ class ClaudeAgent(MCPAgent):
                 "system": self.system_prompt,
                 "messages": messages_cached,
                 "tools": self.claude_tools,
-                "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
+                "tool_choice": {"type": "auto", "disable_parallel_tool_use": False},
             }
 
             # Add beta features if using computer tools
