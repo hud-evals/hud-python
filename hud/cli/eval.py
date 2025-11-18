@@ -754,6 +754,11 @@ def eval_command(
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
 
+    Configuration:
+        - Uses defaults from .hud_eval_config if present
+        - CLI arguments override config file settings
+        - Prompts for confirmation unless -y/--yes is used
+
     Examples:
         # Evaluate a single task from SheetBench
         hud eval hud-evals/SheetBench-50
@@ -767,7 +772,7 @@ def eval_command(
         # Limit concurrent tasks to prevent rate limits
         hud eval hud-evals/SheetBench-50 --full --max-concurrent 20
 
-        # Run a single task from a JSON file
+        # Run a single task from a JSON file (uses interactive/config defaults)
         hud eval task.json
 
         # Run multiple tasks from a JSON file
