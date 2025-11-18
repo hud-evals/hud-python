@@ -14,7 +14,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from hud.cli.eval_config import (
-    format_settings_for_display,
+    display_eval_settings,
     load_eval_config,
 )
 from hud.settings import settings
@@ -999,8 +999,9 @@ def eval(
         group_size=group_size,
     )
 
-    hud_console.info("\n" + format_settings_for_display(settings_dict))
-    if not yes and not questionary.confirm("\nProceed?", default=True).ask():
+    hud_console.info("")  # Add some spacing
+    display_eval_settings(settings_dict)
+    if not yes and not questionary.confirm("Proceed?", default=True, qmark="").ask():
         hud_console.info("Evaluation cancelled.")
         raise typer.Exit(1)
 

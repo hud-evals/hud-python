@@ -6,6 +6,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from rich import box
+from rich.table import Table
+
 from hud.utils import hud_console
 
 VALID_CONFIG_KEYS = [
@@ -105,21 +108,54 @@ def generate_default_config(path: str = ".hud_eval_config") -> None:
         f.write(DEFAULT_CONFIG_TEMPLATE)
 
 
-def format_settings_for_display(settings: dict[str, Any]) -> str:
-    """Format settings dictionary for display in confirmation prompt."""
-    lines = ["Evaluation Settings:"]
-
+def display_eval_settings(settings: dict[str, Any]) -> None:
+    """Display settings in a formatted table."""
     display_settings = {k: v for k, v in settings.items() if v is not None}
+
     if not display_settings:
-        return "Evaluation Settings: (none configured)"
+        hud_console.info("Evaluation Settings: (none configured)")
+        return
 
-    max_key_length = max(len(k) for k in display_settings)
+    table = Table(
+        title="Evaluation Settings",
+        title_style="bold cyan",
+        box=box.ROUNDED,
+        show_lines=True,
+    )
+    table.add_column("Setting", style="yellow")
+    table.add_column("Value", style="green")
 
+    # User requested order
+    order = [
+        "agent",
+        "source",
+        "full",
+        "max_steps",
+        "max_concurrent",
+        "group_size",
+        "verbose",
+        "very_verbose",
+    ]
+    # Add remaining keys
     for key in VALID_CONFIG_KEYS:
+        if key not in order:
+            order.append(key)
+
+    seen = set()
+    for key in order:
         if key in display_settings:
             value = display_settings[key]
             if isinstance(value, Enum):
                 value = value.value
-            lines.append(f"  {key.ljust(max_key_length)}: {value}")
+            table.add_row(key, str(value))
+            seen.add(key)
 
-    return "\n".join(lines)
+    # Add any keys in settings but not in VALID_CONFIG_KEYS (shouldn't happen but good for safety)
+    for key in display_settings:
+        if key not in seen:
+            value = display_settings[key]
+            if isinstance(value, Enum):
+                value = value.value
+            table.add_row(key, str(value))
+
+    hud_console.console.print(table)
