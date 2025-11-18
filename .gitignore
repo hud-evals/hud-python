@@ -52,3 +52,5 @@ hud/rl/checkpoints/
 hud/rl/checkpoints_test/
 
 .ck/
+
+.hud_eval_config
