@@ -232,7 +232,7 @@ def build_agent(
             )
             raise typer.Exit(1) from e
 
-        model = model or "claude-3-5-sonnet-20241022"
+        model = model or "claude-sonnet-4-5"
 
         if allowed_tools:
             return Claude2Agent(
@@ -242,6 +242,30 @@ def build_agent(
             )
         else:
             return Claude2Agent(
+                model=model,
+                verbose=verbose,
+            )
+
+    elif agent_type == AgentType.CLAUDE3:
+        try:
+            from hud.agents import Claude3Agent
+        except ImportError as e:
+            hud_console.error(
+                "Claude3 agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
+
+        model = model or "claude-sonnet-4-5"
+
+        if allowed_tools:
+            return Claude3Agent(
+                model=model,
+                allowed_tools=allowed_tools,
+                verbose=verbose,
+            )
+        else:
+            return Claude3Agent(
                 model=model,
                 verbose=verbose,
             )
@@ -256,7 +280,7 @@ def build_agent(
         )
         raise typer.Exit(1) from e
 
-    model = model or "claude-sonnet-4-20250514"
+    model = model or "claude-sonnet-4-5"
 
     if allowed_tools:
         return ClaudeAgent(
@@ -411,7 +435,18 @@ async def run_single_task(
 
         agent_class = Claude2Agent
         agent_config = {
-            "model": model or "claude-3-5-sonnet-20241022",
+            "model": model or "claude-sonnet-4-5",
+            "verbose": verbose,
+            "validate_api_key": False,
+        }
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+    elif agent_type == AgentType.CLAUDE3:
+        from hud.agents import Claude3Agent
+
+        agent_class = Claude3Agent
+        agent_config = {
+            "model": model or "claude-sonnet-4-5",
             "verbose": verbose,
             "validate_api_key": False,
         }
@@ -422,7 +457,7 @@ async def run_single_task(
 
         agent_class = ClaudeAgent
         agent_config = {
-            "model": model or "claude-sonnet-4-20250514",
+            "model": model or "claude-sonnet-4-5",
             "verbose": verbose,
             "validate_api_key": False,
         }
@@ -655,7 +690,27 @@ async def run_full_dataset(
             raise typer.Exit(1) from e
 
         agent_config = {
-            "model": model or "claude-3-5-sonnet-20241022",
+            "model": model or "claude-sonnet-4-5",
+            "verbose": verbose,
+            "validate_api_key": False,
+        }
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+
+    elif agent_type == AgentType.CLAUDE3:
+        try:
+            from hud.agents import Claude3Agent
+
+            agent_class = Claude3Agent
+        except ImportError as e:
+            hud_console.error(
+                "Claude3 agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
+
+        agent_config = {
+            "model": model or "claude-sonnet-4-5",
             "verbose": verbose,
             "validate_api_key": False,
         }
@@ -675,7 +730,7 @@ async def run_full_dataset(
             raise typer.Exit(1) from e
 
         agent_config = {
-            "model": model or "claude-sonnet-4-20250514",
+            "model": model or "claude-sonnet-4-5",
             "verbose": verbose,
             "validate_api_key": False,
         }
@@ -750,7 +805,10 @@ def eval_command(
     agent: AgentType = typer.Option(  # noqa: B008
         AgentType.CLAUDE,
         "--agent",
-        help="Agent backend to use (claude, claude2, gemini, openai, vllm for local servers, or litellm)",
+        help=(
+            "Agent backend to use (claude, claude2, claude3, gemini, openai, "
+            "vllm for local servers, or litellm)"
+        ),
     ),
     model: str | None = typer.Option(
         None,
@@ -859,7 +917,7 @@ def eval_command(
         agent = AgentType.INTEGRATION_TEST
 
     # Check for required API keys
-    if agent == AgentType.CLAUDE or agent == AgentType.CLAUDE2:
+    if agent == AgentType.CLAUDE or agent == AgentType.CLAUDE2 or agent == AgentType.CLAUDE3:
         if not settings.anthropic_api_key:
             hud_console.error("ANTHROPIC_API_KEY is required for Claude agent")
             hud_console.info(

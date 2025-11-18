@@ -160,45 +160,26 @@ class ClaudeAgent(MCPAgent):
     async def get_response(self, messages: list[BetaMessageParam]) -> AgentResponse:
         """Get response from Claude including any tool calls."""
 
-        # Make API call with retry for prompt length
-        current_messages = messages.copy()
 
-        while True:
-            messages_cached = self._add_prompt_caching(current_messages)
+        messages_cached = self._add_prompt_caching(messages)
 
-            # Build create kwargs
-            create_kwargs = {
-                "model": self.model,
-                "max_tokens": self.max_tokens,
-                "system": self.system_prompt,
-                "messages": messages_cached,
-                "tools": self.claude_tools,
-                "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
-            }
+        # Build create kwargs
+        create_kwargs = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "system": self.system_prompt,
+            "messages": messages_cached,
+            "tools": self.claude_tools,
+            "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
+        }
 
-            # Add beta features if using computer tools
-            if self.use_computer_beta and any(
-                tool.get("type") == "computer_20250124" for tool in self.claude_tools
-            ):
-                create_kwargs["betas"] = ["computer-use-2025-01-24"]
+        # Add beta features if using computer tools
+        if self.use_computer_beta and any(
+            tool.get("type") == "computer_20250124" for tool in self.claude_tools
+        ):
+            create_kwargs["betas"] = ["computer-use-2025-01-24"]
 
-            try:
-                response = await self.anthropic_client.beta.messages.create(**create_kwargs)
-                break
-            except BadRequestError as e:
-                if (
-                    "prompt is too long" in str(e)
-                    or "request_too_large" in str(e)
-                    or e.status_code == 413
-                ):
-                    self.hud_console.warning("Prompt too long, truncating message history")
-                    # Keep first message and last 20 messages
-                    if len(current_messages) > 21:
-                        current_messages = [current_messages[0], *current_messages[-20:]]
-                    else:
-                        raise
-                else:
-                    raise
+        response = await self.anthropic_client.beta.messages.create(**create_kwargs)
 
         messages.append(
             cast(
@@ -237,11 +218,8 @@ class ClaudeAgent(MCPAgent):
             elif hasattr(block, "type") and block.type == "thinking":
                 thinking_content += f"Thinking: {block.thinking}\n"
 
-        # Combine text and thinking for final content
-        if thinking_content:
-            result.content = thinking_content + text_content
-        else:
-            result.content = text_content
+
+        result.content = thinking_content + text_content
 
         return result
 
