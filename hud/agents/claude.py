@@ -34,7 +34,6 @@ from .base import MCPAgent
 
 logger = logging.getLogger(__name__)
 
-
 class ClaudeAgent(MCPAgent):
     """
     Claude agent that uses MCP servers for tool execution.
@@ -95,26 +94,6 @@ class ClaudeAgent(MCPAgent):
         # Track mapping from Claude tool names to MCP tool names
         self._claude_to_mcp_tool_map: dict[str, str] = {}
         self.claude_tools: list[dict] = []
-
-        # Append Claude-specific instructions to the base system prompt
-        claude_instructions = """
-        You are Claude, an AI assistant created by Anthropic. You are helpful, harmless, and honest.
-
-        When working on tasks:
-        1. Be thorough and systematic in your approach
-        2. Complete tasks autonomously without asking for confirmation
-        3. Use available tools efficiently to accomplish your goals
-        4. Verify your actions and ensure task completion
-        5. Be precise and accurate in all operations
-
-        Remember: You are expected to complete tasks autonomously. The user trusts you to accomplish what they asked.
-        """.strip()  # noqa: E501
-
-        # Append Claude instructions to any base system prompt
-        if self.system_prompt:
-            self.system_prompt = f"{self.system_prompt}\n\n{claude_instructions}"
-        else:
-            self.system_prompt = claude_instructions
 
     async def initialize(self, task: str | Task | None = None) -> None:
         """Initialize the agent and build tool mappings."""
