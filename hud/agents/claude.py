@@ -173,7 +173,7 @@ class ClaudeAgent(MCPAgent):
                 "system": self.system_prompt,
                 "messages": messages_cached,
                 "tools": self.claude_tools,
-                "tool_choice": {"type": "auto", "disable_parallel_tool_use": False},
+                "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
             }
 
             # Add beta features if using computer tools
@@ -186,7 +186,6 @@ class ClaudeAgent(MCPAgent):
                 response = await self.anthropic_client.beta.messages.create(**create_kwargs)
                 break
             except BadRequestError as e:
-                raise e
                 if (
                     "prompt is too long" in str(e)
                     or "request_too_large" in str(e)
