@@ -288,6 +288,21 @@ async def _update_task_status_async(
         if group_id:
             data["group_id"] = group_id
 
+        # DEBUG: Dump task status update
+        try:
+            import json
+            from pathlib import Path
+            import time
+            telemetry_dir = Path("telemetry_dumps")
+            telemetry_dir.mkdir(exist_ok=True)
+            timestamp = int(time.time() * 1000)
+            dump_file = telemetry_dir / f"{task_run_id}_status_{timestamp}.json"
+            with open(dump_file, "w") as f:
+                json.dump({"url": f"{settings.hud_telemetry_url}/trace/{task_run_id}/status", "data": data}, f, indent=2, default=str)
+            logger.info("Dumped status update to %s", dump_file)
+        except Exception as e:
+            logger.debug("Failed to dump status: %s", e)
+
         await make_request(
             method="POST",
             url=f"{settings.hud_telemetry_url}/trace/{task_run_id}/status",
@@ -362,6 +377,21 @@ def _update_task_status_sync(
 
         if group_id:
             data["group_id"] = group_id
+
+        # DEBUG: Dump task status update (sync)
+        try:
+            import json
+            from pathlib import Path
+            import time
+            telemetry_dir = Path("telemetry_dumps")
+            telemetry_dir.mkdir(exist_ok=True)
+            timestamp = int(time.time() * 1000)
+            dump_file = telemetry_dir / f"{task_run_id}_status_sync_{timestamp}.json"
+            with open(dump_file, "w") as f:
+                json.dump({"url": f"{settings.hud_telemetry_url}/trace/{task_run_id}/status", "data": data}, f, indent=2, default=str)
+            logger.info("Dumped status update (sync) to %s", dump_file)
+        except Exception as e:
+            logger.debug("Failed to dump status: %s", e)
 
         make_request_sync(
             method="POST",

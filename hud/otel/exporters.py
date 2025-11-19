@@ -375,12 +375,21 @@ class HudSpanExporter(SpanExporter):
 
         # Group spans by task_run_id for batched uploads
         grouped: dict[str, list[ReadableSpan]] = defaultdict(list)
+        skipped_spans = 0
         for span in spans:
             run_id = span.attributes.get("hud.task_run_id") if span.attributes else None
             if not run_id:
                 # Skip spans outside HUD traces
+                skipped_spans += 1
                 continue
             grouped[str(run_id)].append(span)
+        
+        if skipped_spans > 0:
+            logger.debug("Skipped %d spans without hud.task_run_id", skipped_spans)
+        
+        if not grouped:
+            logger.debug("No spans with hud.task_run_id to export")
+            return SpanExportResult.SUCCESS
 
         # Detect async context to avoid event loop blocking
         import asyncio
@@ -414,6 +423,19 @@ class HudSpanExporter(SpanExporter):
                         # Only include step_count if we found any steps
                         if step_count > 0:
                             payload["step_count"] = step_count
+
+                        # DEBUG: Dump telemetry payload
+                        import json
+                        from pathlib import Path
+                        telemetry_dir = Path("telemetry_dumps")
+                        telemetry_dir.mkdir(exist_ok=True)
+                        # Use run_id and timestamp for unique filename
+                        import time
+                        timestamp = int(time.time() * 1000)
+                        dump_file = telemetry_dir / f"{run_id}_{timestamp}.json"
+                        with open(dump_file, "w") as f:
+                            json.dump(payload, f, indent=2, default=str)
+                        logger.info("Dumped telemetry to %s", dump_file)
 
                         logger.debug("HUD exporter sending %d spans to %s", len(span_batch), url)
                         make_request_sync(
@@ -471,6 +493,19 @@ class HudSpanExporter(SpanExporter):
                     # Only include step_count if we found any steps
                     if step_count > 0:
                         payload["step_count"] = step_count
+
+                    # DEBUG: Dump telemetry payload (sync path)
+                    import json
+                    from pathlib import Path
+                    telemetry_dir = Path("telemetry_dumps")
+                    telemetry_dir.mkdir(exist_ok=True)
+                    # Use run_id and timestamp for unique filename
+                    import time
+                    timestamp = int(time.time() * 1000)
+                    dump_file = telemetry_dir / f"{run_id}_{timestamp}_sync.json"
+                    with open(dump_file, "w") as f:
+                        json.dump(payload, f, indent=2, default=str)
+                    logger.info("Dumped telemetry (sync path) to %s", dump_file)
 
                     logger.debug("HUD exporter sending %d spans to %s", len(span_batch), url)
                     make_request_sync(

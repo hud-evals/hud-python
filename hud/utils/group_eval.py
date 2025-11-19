@@ -140,6 +140,22 @@ def calculate_group_statistics(
     """
     stats = []
 
+    # DEBUG: create a folder and dump the traces into it
+    import json
+    from pathlib import Path
+    
+    traces_dir = Path("traces")
+    traces_dir.mkdir(exist_ok=True)
+    
+    for i, trace in enumerate(traces):
+        trace_file = traces_dir / f"{i}.json"
+        with open(trace_file, "w") as f:
+            # Convert trace to dict for JSON serialization
+            trace_dict = trace.model_dump() if hasattr(trace, "model_dump") else trace.__dict__
+            json.dump(trace_dict, f, indent=2, default=str)
+    
+    hud_console.info(f"Dumped {len(traces)} traces to {traces_dir.absolute()}/")
+
     # Process each original task
     for task_idx, task in enumerate(original_tasks):
         # Get all traces for this task
