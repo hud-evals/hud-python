@@ -759,14 +759,39 @@ def text_to_blocks(text: str) -> list[types.ContentBlock]:
 def find_reward(result: MCPToolResult) -> float:
     """Find the reward in the result.
 
-    Agent accepts "reward", "grade", "score"
+    Agent accepts "reward", "grade", "score", or weighted subscores
 
     If not found, return 0.0
     """
     accept_keys = ["reward", "grade", "score"]
+    
+    # Check for direct reward/grade/score keys
     for key in accept_keys:
         if isinstance(result.structuredContent, dict) and key in result.structuredContent:
             return result.structuredContent[key]
+    
+    # Check for subscores and weights format
+    if (
+        isinstance(result.structuredContent, dict)
+        and "subscores" in result.structuredContent
+        and "weights" in result.structuredContent
+    ):
+        subscores = result.structuredContent["subscores"]
+        weights = result.structuredContent["weights"]
+        if isinstance(subscores, dict) and isinstance(weights, dict):
+            try:
+                # Multiply each subscore by its corresponding weight and sum
+                reward = sum(
+                    float(subscores[key]) * float(weights.get(key, 0.0))
+                    for key in subscores
+                    if key in weights
+                )
+                return reward
+            except (ValueError, TypeError) as e:
+                logger.error("Failed to parse subscores/weights: %s", e)
+                return 0.0
+    
+    # Check for reward in JSON text content
     if isinstance(result.content, list):
         for content in result.content:
             if isinstance(content, types.TextContent):
@@ -777,6 +802,8 @@ def find_reward(result: MCPToolResult) -> float:
                             return value
                 except json.JSONDecodeError:
                     pass
+    
+    logger.error("Couldn't parse reward from result: %s", result)
     return 0.0
 
 
