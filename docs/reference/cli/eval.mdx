@@ -24,6 +24,10 @@ hud eval [SOURCE] [AGENT] [OPTIONS]
 
 ## Options
 
+<ParamField path="--yes" type="boolean" default="false">
+  Skip confirmation prompt and proceed automatically
+</ParamField>
+
 <ParamField path="--full" type="boolean" default="false">
   Run the entire dataset (omit for single-task debug mode)
 </ParamField>
@@ -60,11 +64,31 @@ hud eval [SOURCE] [AGENT] [OPTIONS]
   Number of times to run each task (mini-batch style)
 </ParamField>
 
+## Configuration & Precedence
+
+`hud eval` uses a precedence system for config settings:
+1. **CLI Arguments** (highest priority)
+2. **Config File** (`.hud_eval_config`)
+
+When you run `hud eval`, it checks for a `.hud_eval_config` file in the current directory. If missing, it generates a default one.
+
+```properties
+# .hud_eval_config example
+agent=claude
+max_concurrent=50
+verbose=true
+```
+
+Before execution, `hud eval` displays a summary table of the resolved settings and asks for confirmation (unless `-y` is used).
+
 ## Examples
 
 ```bash
-# Single task (debug mode)
+# Single task evaluation
 hud eval hud-evals/SheetBench-50
+
+# Skip confirmation
+hud eval hud-evals/SheetBench-50 -y
 
 # Entire huggingface dataset with Claude
 hud eval hud-evals/SheetBench-50 claude --full
