@@ -43,6 +43,7 @@ from .base import MCPAgent
 
 logger = logging.getLogger(__name__)
 
+
 class ClaudeAgent(MCPAgent):
     """
     Claude agent that uses MCP servers for tool execution.
