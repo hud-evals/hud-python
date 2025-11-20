@@ -10,18 +10,18 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from anthropic import Anthropic, AsyncAnthropic
 from anthropic.types import (
-    Base64ImageSourceParam,
     CacheControlEphemeralParam,
-    ContentBlock,
-    ImageBlockParam,
-    MessageParam,
-    TextBlockParam,
 )
 from anthropic.types.beta import (
+    BetaBase64ImageSourceParam,
+    BetaContentBlockParam,
+    BetaImageBlockParam,
     BetaMessageParam,
+    BetaTextBlockParam,
     BetaToolBash20250124Param,
     BetaToolComputerUse20250124Param,
     BetaToolParam,
+    BetaToolResultBlockParam,
     BetaToolTextEditor20250728Param,
     BetaToolUnionParam,
 )
@@ -29,11 +29,6 @@ from anthropic.types.beta import (
 import hud
 
 if TYPE_CHECKING:
-    from anthropic.types import (
-        ContentBlockParam,
-        ToolResultBlockParam,
-    )
-
     from hud.datasets import Task
 
 import mcp.types as types
@@ -127,13 +122,13 @@ class ClaudeAgent(MCPAgent):
     async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
         """Format messages for Claude."""
         # Convert MCP content types to Anthropic content types
-        anthropic_blocks: list[ContentBlockParam] = []
+        anthropic_blocks: list[BetaContentBlockParam] = []
 
         for block in blocks:
             if isinstance(block, types.TextContent):
                 # Only include fields that Anthropic expects
                 anthropic_blocks.append(
-                    TextBlockParam(
+                    BetaTextBlockParam(
                         type="text",
                         text=block.text,
                     )
@@ -141,9 +136,9 @@ class ClaudeAgent(MCPAgent):
             elif isinstance(block, types.ImageContent):
                 # Convert MCP ImageContent to Anthropic format
                 anthropic_blocks.append(
-                    ImageBlockParam(
+                    BetaImageBlockParam(
                         type="image",
-                        source=Base64ImageSourceParam(
+                        source=BetaBase64ImageSourceParam(
                             type="base64",
                             media_type=cast(
                                 "Literal['image/jpeg', 'image/png', 'image/gif', 'image/webp']",
@@ -156,14 +151,14 @@ class ClaudeAgent(MCPAgent):
             else:
                 raise ValueError(f"Unknown content block type: {type(block)}")
 
-        return [MessageParam(role="user", content=anthropic_blocks)]
+        return [BetaMessageParam(role="user", content=anthropic_blocks)]
 
     @hud.instrument(
         span_type="agent",
         record_args=False,  # Messages can be large
         record_result=True,
     )
-    async def get_response(self, messages: list[MessageParam]) -> AgentResponse:
+    async def get_response(self, messages: list[BetaMessageParam]) -> AgentResponse:
         """Get response from Claude including any tool calls."""
 
         messages_cached = self._add_prompt_caching(messages)
@@ -171,16 +166,16 @@ class ClaudeAgent(MCPAgent):
         response = await self.anthropic_client.beta.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
-            messages=cast("list[BetaMessageParam]", messages_cached),
+            messages=messages_cached,
             tools=self.claude_tools,
             tool_choice={"type": "auto", "disable_parallel_tool_use": True},
             betas=["computer-use-2025-01-24"],
         )
 
         messages.append(
-            MessageParam(
+            BetaMessageParam(
                 role="assistant",
-                content=cast("list[ContentBlock]", response.content),
+                content=response.content,
             )
         )
 
@@ -195,7 +190,8 @@ class ClaudeAgent(MCPAgent):
             if block.type == "tool_use":
                 tool_call = MCPToolCall(
                     id=block.id,
-                    name=self.tool_mapping[block.name],
+                    # look up name in tool_mapping if available, otherwise use the name from the block
+                    name=self.tool_mapping.get(block.name, block.name),
                     arguments=block.input,
                 )
                 result.tool_calls.append(tool_call)
@@ -211,7 +207,7 @@ class ClaudeAgent(MCPAgent):
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
-    ) -> list[MessageParam]:
+    ) -> list[BetaMessageParam]:
         """Format tool results into Claude messages."""
         # Process each tool result
         user_content = []
@@ -247,15 +243,15 @@ class ClaudeAgent(MCPAgent):
 
         # Return as a user message containing all tool results
         return [
-            MessageParam(
+            BetaMessageParam(
                 role="user",
                 content=user_content,
             )
         ]
 
-    async def create_user_message(self, text: str) -> MessageParam:
+    async def create_user_message(self, text: str) -> BetaMessageParam:
         """Create a user message in Claude's format."""
-        return MessageParam(role="user", content=text)
+        return BetaMessageParam(role="user", content=text)
 
     def _convert_tools_for_claude(self) -> None:
         """Convert MCP tools to Claude API tools."""
@@ -308,14 +304,14 @@ class ClaudeAgent(MCPAgent):
                 cache_control=CacheControlEphemeralParam(type="ephemeral"),
             )
 
-        has_computer_tool = False
+        self.has_computer_tool = False
         self.tool_mapping = {}
         self.claude_tools = []
         for tool in self.get_available_tools():
             claude_tool = to_api_tool(tool)
             # warn if multiple computer tools are found
             if claude_tool["name"] == "computer":
-                if has_computer_tool:
+                if self.has_computer_tool:
                     logger.warning(
                         "Multiple computer tools found. Ignoring %s since %s is already present",
                         tool.name,
@@ -323,11 +319,11 @@ class ClaudeAgent(MCPAgent):
                     )
                     continue
                 else:
-                    has_computer_tool = True
+                    self.has_computer_tool = True
             self.tool_mapping[claude_tool["name"]] = tool.name
             self.claude_tools.append(claude_tool)
 
-    def _add_prompt_caching(self, messages: list[MessageParam]) -> list[MessageParam]:
+    def _add_prompt_caching(self, messages: list[BetaMessageParam]) -> list[BetaMessageParam]:
         """Add prompt caching to messages."""
         messages_cached = copy.deepcopy(messages)
         cache_control: CacheControlEphemeralParam = {"type": "ephemeral"}
@@ -353,11 +349,11 @@ class ClaudeAgent(MCPAgent):
         return messages_cached
 
 
-def base64_to_content_block(base64: str) -> ImageBlockParam:
+def base64_to_content_block(base64: str) -> BetaImageBlockParam:
     """Convert base64 image to Claude content block."""
-    return ImageBlockParam(
+    return BetaImageBlockParam(
         type="image",
-        source=Base64ImageSourceParam(
+        source=BetaBase64ImageSourceParam(
             type="base64",
             media_type="image/png",
             data=base64,
@@ -365,13 +361,13 @@ def base64_to_content_block(base64: str) -> ImageBlockParam:
     )
 
 
-def text_to_content_block(text: str) -> TextBlockParam:
+def text_to_content_block(text: str) -> BetaTextBlockParam:
     """Convert text to Claude content block."""
     return {"type": "text", "text": text}
 
 
 def tool_use_content_block(
-    tool_use_id: str, content: list[TextBlockParam | ImageBlockParam]
-) -> ToolResultBlockParam:
+    tool_use_id: str, content: list[BetaTextBlockParam | BetaImageBlockParam]
+) -> BetaToolResultBlockParam:
     """Create tool result content block."""
     return {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
