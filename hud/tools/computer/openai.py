@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from mcp import ErrorData, McpError
 from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ContentBlock, TextContent
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from hud.tools.computer.settings import computer_settings
 from hud.tools.types import ContentResult
@@ -17,6 +17,12 @@ if TYPE_CHECKING:
     from hud.tools.executors.base import BaseExecutor
 
 logger = logging.getLogger(__name__)
+
+
+class Coordinate(BaseModel):
+    """A coordinate point with x and y values."""
+    x: int = Field(..., description="X coordinate")
+    y: int = Field(..., description="Y coordinate")
 
 # Map OpenAI key names to CLA standard keys
 OPENAI_TO_CLA_KEYS = {
@@ -95,7 +101,7 @@ class OpenAIComputerTool(HudComputerTool):
         # OpenAI uses lowercase key names
         return OPENAI_TO_CLA_KEYS.get(key.lower(), key.lower())
 
-    async def __call__(
+    async def __call__(  # type: ignore[override]
         self,
         type: str = Field(..., description="The action type to perform"),
         # Coordinate parameters
@@ -115,7 +121,7 @@ class OpenAIComputerTool(HudComputerTool):
         # Key press parameter
         keys: list[str] | None = Field(None, description="Keys to press"),
         # Drag parameter
-        path: list[dict[str, int]] | None = Field(
+        path: list[Coordinate] | None = Field(
             None, description="Path for drag actions as list of {x, y} dicts"
         ),
         # Custom action parameter
@@ -227,17 +233,8 @@ class OpenAIComputerTool(HudComputerTool):
                     )
                 )
 
-            # Convert path from list of dicts to list of tuples
-            drag_path = []
-            for point in path:
-                if "x" in point and "y" in point:
-                    drag_path.append((point["x"], point["y"]))
-                else:
-                    raise McpError(
-                        ErrorData(
-                            code=INVALID_PARAMS, message="Each point in path must have x and y"
-                        )
-                    )
+            # Convert path from list of Coordinate objects to list of tuples
+            drag_path = [(point.x, point.y) for point in path]
 
             scaled_path = self._scale_path(drag_path)
             result = await self.executor.drag(path=scaled_path)
