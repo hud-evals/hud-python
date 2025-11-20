@@ -195,9 +195,21 @@ class TestToolFiltering:
     async def test_no_filters_returns_all_tools(self, mock_mcp_client, mock_model_client) -> None:
         """Test that no filters in agent_config returns all tools."""
         tools = [
-            types.Tool(name="tool1", description="Tool 1", inputSchema={}),
-            types.Tool(name="tool2", description="Tool 2", inputSchema={}),
-            types.Tool(name="debug_tool", description="Debug", inputSchema={}),
+            types.Tool(
+                name="tool1",
+                description="Tool 1",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            types.Tool(
+                name="tool2",
+                description="Tool 2",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            types.Tool(
+                name="debug_tool",
+                description="Debug",
+                inputSchema={"type": "object", "properties": {}},
+            ),
         ]
 
         result = await self._run_agent_with_tools(mock_mcp_client, mock_model_client, tools)
@@ -210,9 +222,21 @@ class TestToolFiltering:
     ) -> None:
         """Test that allowed_tools in agent_config filters to matching patterns."""
         tools = [
-            types.Tool(name="screenshot_take", description="Tool 1", inputSchema={}),
-            types.Tool(name="screenshot_full", description="Tool 2", inputSchema={}),
-            types.Tool(name="click", description="Tool 3", inputSchema={}),
+            types.Tool(
+                name="screenshot_take",
+                description="Tool 1",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            types.Tool(
+                name="screenshot_full",
+                description="Tool 2",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            types.Tool(
+                name="click",
+                description="Tool 3",
+                inputSchema={"type": "object", "properties": {}},
+            ),
         ]
         agent_config = {"allowed_tools": ["screenshot_*"]}
 
@@ -229,9 +253,21 @@ class TestToolFiltering:
     ) -> None:
         """Test that disallowed_tools in agent_config excludes matching patterns."""
         tools = [
-            types.Tool(name="tool1", description="Tool 1", inputSchema={}),
-            types.Tool(name="debug_tool", description="Tool 2", inputSchema={}),
-            types.Tool(name="internal_secret", description="Tool 3", inputSchema={}),
+            types.Tool(
+                name="tool1",
+                description="Tool 1",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            types.Tool(
+                name="debug_tool",
+                description="Tool 2",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            types.Tool(
+                name="internal_secret",
+                description="Tool 3",
+                inputSchema={"type": "object", "properties": {}},
+            ),
         ]
         agent_config = {"disallowed_tools": ["debug_*", "internal_*"]}
 
@@ -248,9 +284,21 @@ class TestToolFiltering:
     ) -> None:
         """Test that both filters in agent_config work together (disallowed takes precedence)."""
         tools = [
-            types.Tool(name="browser_click", description="Tool 1", inputSchema={}),
-            types.Tool(name="browser_debug", description="Tool 2", inputSchema={}),
-            types.Tool(name="system_click", description="Tool 3", inputSchema={}),
+            types.Tool(
+                name="browser_click",
+                description="Tool 1",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            types.Tool(
+                name="browser_debug",
+                description="Tool 2",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            types.Tool(
+                name="system_click",
+                description="Tool 3",
+                inputSchema={"type": "object", "properties": {}},
+            ),
         ]
         agent_config = {"allowed_tools": ["browser_*"], "disallowed_tools": ["*_debug"]}
 
@@ -269,11 +317,31 @@ class TestRunDatasetToolFiltering:
     def all_tools(self):
         """Fixture for a standard set of tools."""
         return [
-            types.Tool(name="browser_click", description="Click", inputSchema={}),
-            types.Tool(name="browser_type", description="Type", inputSchema={}),
-            types.Tool(name="browser_debug", description="Debug", inputSchema={}),
-            types.Tool(name="system_screenshot", description="Screenshot", inputSchema={}),
-            types.Tool(name="system_execute", description="Execute", inputSchema={}),
+            types.Tool(
+                name="browser_click",
+                description="Click",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            types.Tool(
+                name="browser_type",
+                description="Type",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            types.Tool(
+                name="browser_debug",
+                description="Debug",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            types.Tool(
+                name="system_screenshot",
+                description="Screenshot",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            types.Tool(
+                name="system_execute",
+                description="Execute",
+                inputSchema={"type": "object", "properties": {}},
+            ),
         ]
 
     @pytest.fixture

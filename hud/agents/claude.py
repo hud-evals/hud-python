@@ -74,7 +74,7 @@ class ClaudeAgent(MCPAgent):
             model: Claude model to use
             max_tokens: Maximum tokens for response
             use_computer_beta: Whether to use computer-use beta features
-            computer_tool_name: Claude treats the computer tool specially, we use this regex to identify it
+            computer_tool_regex: we use this regex to identify the computer tool
             **kwargs: Additional arguments passed to BaseMCPAgent (including mcp_client)
         """
         super().__init__(**kwargs)
@@ -190,7 +190,7 @@ class ClaudeAgent(MCPAgent):
             if block.type == "tool_use":
                 tool_call = MCPToolCall(
                     id=block.id,
-                    # look up name in tool_mapping if available, otherwise use the name from the block
+                    # look up name in tool_mapping if available, otherwise use block name
                     name=self.tool_mapping.get(block.name, block.name),
                     arguments=block.input,
                 )
@@ -281,19 +281,10 @@ class ClaudeAgent(MCPAgent):
 
             if not tool.description or not tool.inputSchema:
                 raise ValueError(
-                    cleandoc(f"""Custom MCP tool {tool.name} requires both a description and inputSchema.
+                    cleandoc(f"""MCP tool {tool.name} requires both a description and inputSchema.
                     Add these by:
                     1. Adding a docstring to your @mcp.tool decorated function for the description
                     2. Using pydantic Field() annotations on function parameters for the schema
-                    
-                    Example:
-                    @mcp.tool()
-                    def search_files(
-                        query: str = Field(description="Search term to look for"),
-                        max_results: int = Field(default=10, description="Maximum number of results to return")
-                    ):
-                        '''Search for files matching the given query.''' <-- this is processed as the description
-                        # implementation here
                     """)
                 )
             """Convert a tool to the API format"""
