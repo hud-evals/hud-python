@@ -170,7 +170,7 @@ class ClaudeAgent(MCPAgent):
             messages=messages_cached,
             tools=self.claude_tools,
             tool_choice={"type": "auto", "disable_parallel_tool_use": True},
-            betas=["computer-use-2025-01-24"],
+            betas=["computer-use-2025-01-24"] if self.has_computer_tool else [],
         )
 
         messages.append(
@@ -280,7 +280,7 @@ class ClaudeAgent(MCPAgent):
                     cache_control=CacheControlEphemeralParam(type="ephemeral"),
                 )
 
-            if not tool.description or not tool.inputSchema:
+            if tool.description is None or tool.inputSchema is None:
                 raise ValueError(
                     cleandoc(f"""MCP tool {tool.name} requires both a description and inputSchema.
                     Add these by:
