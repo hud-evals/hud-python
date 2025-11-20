@@ -42,7 +42,7 @@ class TestBuildAgent:
             # Test with verbose=False
             result = build_agent(AgentType.CLAUDE, verbose=False)
 
-            mock_runner.assert_called_once_with(model="claude-sonnet-4-20250514", verbose=False)
+            mock_runner.assert_called_once_with(model="claude-sonnet-4-5", verbose=False)
             assert result == mock_instance
 
     def test_builds_claude_agent_with_custom_model_and_allowed_tools(self) -> None:
@@ -56,13 +56,13 @@ class TestBuildAgent:
             # Test with verbose=False
             result = build_agent(
                 AgentType.CLAUDE,
-                model="claude-sonnet-4-20250514",
+                model="claude-sonnet-4-5",
                 allowed_tools=["act"],
                 verbose=True,
             )
 
             mock_runner.assert_called_once_with(
-                model="claude-sonnet-4-20250514",
+                model="claude-sonnet-4-5",
                 allowed_tools=["act"],
                 verbose=True,
             )

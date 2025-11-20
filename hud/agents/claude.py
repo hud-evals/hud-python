@@ -4,21 +4,31 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+import re
+from inspect import cleandoc
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
-from anthropic import Anthropic, AsyncAnthropic, BadRequestError
-from anthropic.types.beta import BetaContentBlockParam, BetaImageBlockParam, BetaTextBlockParam
+from anthropic import Anthropic, AsyncAnthropic
+from anthropic.types import (
+    Base64ImageSourceParam,
+    ImageBlockParam,
+    MessageParam,
+    TextBlockParam,
+    ToolBash20250124Param,
+    ToolParam,
+    ToolTextEditor20250124Param,
+    ToolTextEditor20250728Param,
+    ToolUnionParam,
+)
+from anthropic.types.beta import BetaToolComputerUse20250124Param
 
 import hud
 
 if TYPE_CHECKING:
-    from anthropic.types.beta import (
-        BetaCacheControlEphemeralParam,
-        BetaContentBlockParam,
-        BetaImageBlockParam,
-        BetaMessageParam,
-        BetaTextBlockParam,
-        BetaToolResultBlockParam,
+    from anthropic.types import (
+        CacheControlEphemeralParam,
+        ContentBlockParam,
+        ToolResultBlockParam,
     )
 
     from hud.datasets import Task
@@ -51,10 +61,11 @@ class ClaudeAgent(MCPAgent):
     def __init__(
         self,
         model_client: AsyncAnthropic | None = None,
-        model: str = "claude-sonnet-4-20250514",
-        max_tokens: int = 4096,
+        model: str = "claude-sonnet-4-5",
+        max_tokens: int = 16384,
         use_computer_beta: bool = True,
         validate_api_key: bool = True,
+        computer_tool_regex: str = r"(^|_)(anthropic_computer|computer_anthropic|computer)$",
         **kwargs: Any,
     ) -> None:
         """
@@ -65,6 +76,7 @@ class ClaudeAgent(MCPAgent):
             model: Claude model to use
             max_tokens: Maximum tokens for response
             use_computer_beta: Whether to use computer-use beta features
+            computer_tool_name: Claude treats the computer tool specially, we use this regex to identify it
             **kwargs: Additional arguments passed to BaseMCPAgent (including mcp_client)
         """
         super().__init__(**kwargs)
@@ -92,29 +104,9 @@ class ClaudeAgent(MCPAgent):
         self.model_name = "Claude"
         self.checkpoint_name = self.model
 
-        # Track mapping from Claude tool names to MCP tool names
-        self._claude_to_mcp_tool_map: dict[str, str] = {}
-        self.claude_tools: list[dict] = []
-
-        # Append Claude-specific instructions to the base system prompt
-        claude_instructions = """
-        You are Claude, an AI assistant created by Anthropic. You are helpful, harmless, and honest.
-
-        When working on tasks:
-        1. Be thorough and systematic in your approach
-        2. Complete tasks autonomously without asking for confirmation
-        3. Use available tools efficiently to accomplish your goals
-        4. Verify your actions and ensure task completion
-        5. Be precise and accurate in all operations
-
-        Remember: You are expected to complete tasks autonomously. The user trusts you to accomplish what they asked.
-        """.strip()  # noqa: E501
-
-        # Append Claude instructions to any base system prompt
-        if self.system_prompt:
-            self.system_prompt = f"{self.system_prompt}\n\n{claude_instructions}"
-        else:
-            self.system_prompt = claude_instructions
+        self.computer_tool_regex = computer_tool_regex
+        self.tool_mapping: dict[str, str] = {}
+        self.claude_tools: list[ToolUnionParam] = []
 
     async def initialize(self, task: str | Task | None = None) -> None:
         """Initialize the agent and build tool mappings."""
@@ -129,105 +121,59 @@ class ClaudeAgent(MCPAgent):
     async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
         """Format messages for Claude."""
         # Convert MCP content types to Anthropic content types
-        anthropic_blocks: list[BetaContentBlockParam] = []
+        anthropic_blocks: list[ContentBlockParam] = []
 
         for block in blocks:
             if isinstance(block, types.TextContent):
                 # Only include fields that Anthropic expects
                 anthropic_blocks.append(
-                    cast(
-                        "BetaTextBlockParam",
-                        {
-                            "type": "text",
-                            "text": block.text,
-                        },
+                    TextBlockParam(
+                        type="text",
+                        text=block.text,
                     )
                 )
             elif isinstance(block, types.ImageContent):
                 # Convert MCP ImageContent to Anthropic format
                 anthropic_blocks.append(
-                    cast(
-                        "BetaImageBlockParam",
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": block.mimeType,
-                                "data": block.data,
-                            },
-                        },
+                    ImageBlockParam(
+                        type="image",
+                        source=Base64ImageSourceParam(
+                            type="base64",
+                            media_type=cast(
+                                "Literal['image/jpeg', 'image/png', 'image/gif', 'image/webp']",
+                                block.mimeType,
+                            ),
+                            data=block.data,
+                        ),
                     )
                 )
             else:
-                # For other types, try to cast but log a warning
-                self.hud_console.log(f"Unknown content block type: {type(block)}", level="warning")
-                anthropic_blocks.append(cast("BetaContentBlockParam", block))
+                raise ValueError(f"Unknown content block type: {type(block)}")
 
-        return [
-            cast(
-                "BetaMessageParam",
-                {
-                    "role": "user",
-                    "content": anthropic_blocks,
-                },
-            )
-        ]
+        return [MessageParam(role="user", content=anthropic_blocks)]
 
     @hud.instrument(
         span_type="agent",
         record_args=False,  # Messages can be large
         record_result=True,
     )
-    async def get_response(self, messages: list[BetaMessageParam]) -> AgentResponse:
+    async def get_response(self, messages: list[MessageParam]) -> AgentResponse:
         """Get response from Claude including any tool calls."""
 
-        # Make API call with retry for prompt length
-        current_messages = messages.copy()
+        messages_cached = self._add_prompt_caching(messages)
 
-        while True:
-            messages_cached = self._add_prompt_caching(current_messages)
-
-            # Build create kwargs
-            create_kwargs = {
-                "model": self.model,
-                "max_tokens": self.max_tokens,
-                "system": self.system_prompt,
-                "messages": messages_cached,
-                "tools": self.claude_tools,
-                "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
-            }
-
-            # Add beta features if using computer tools
-            if self.use_computer_beta and any(
-                tool.get("type") == "computer_20250124" for tool in self.claude_tools
-            ):
-                create_kwargs["betas"] = ["computer-use-2025-01-24"]
-
-            try:
-                response = await self.anthropic_client.beta.messages.create(**create_kwargs)
-                break
-            except BadRequestError as e:
-                if (
-                    "prompt is too long" in str(e)
-                    or "request_too_large" in str(e)
-                    or e.status_code == 413
-                ):
-                    self.hud_console.warning("Prompt too long, truncating message history")
-                    # Keep first message and last 20 messages
-                    if len(current_messages) > 21:
-                        current_messages = [current_messages[0], *current_messages[-20:]]
-                    else:
-                        raise
-                else:
-                    raise
+        response = await self.anthropic_client.messages.create(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            messages=messages_cached,
+            tools=self.claude_tools,
+            tool_choice={"type": "auto", "disable_parallel_tool_use": True},
+        )
 
         messages.append(
-            cast(
-                "BetaMessageParam",
-                {
-                    "role": "assistant",
-                    "content": response.content,
-                },
+            MessageParam(
+                role="assistant",
+                content=response.content,
             )
         )
 
@@ -240,16 +186,10 @@ class ClaudeAgent(MCPAgent):
 
         for block in response.content:
             if block.type == "tool_use":
-                # Map Claude tool name back to MCP tool name
-                mcp_tool_name = self._claude_to_mcp_tool_map.get(block.name, block.name)
-
-                # Create MCPToolCall object with Claude metadata as extra fields
-                # Pyright will complain but the tool class accepts extra fields
                 tool_call = MCPToolCall(
-                    id=block.id,  # canonical identifier for telemetry
-                    name=mcp_tool_name,
+                    id=block.id,
+                    name=self.tool_mapping[block.name],
                     arguments=block.input,
-                    claude_name=block.name,  # type: ignore
                 )
                 result.tool_calls.append(tool_call)
                 result.done = False
@@ -258,17 +198,13 @@ class ClaudeAgent(MCPAgent):
             elif hasattr(block, "type") and block.type == "thinking":
                 thinking_content += f"Thinking: {block.thinking}\n"
 
-        # Combine text and thinking for final content
-        if thinking_content:
-            result.content = thinking_content + text_content
-        else:
-            result.content = text_content
+        result.content = thinking_content + text_content
 
         return result
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
-    ) -> list[BetaMessageParam]:
+    ) -> list[MessageParam]:
         """Format tool results into Claude messages."""
         # Process each tool result
         user_content = []
@@ -304,80 +240,99 @@ class ClaudeAgent(MCPAgent):
 
         # Return as a user message containing all tool results
         return [
-            cast(
-                "BetaMessageParam",
-                {
-                    "role": "user",
-                    "content": user_content,
-                },
+            MessageParam(
+                role="user",
+                content=user_content,
             )
         ]
 
-    async def create_user_message(self, text: str) -> BetaMessageParam:
+    async def create_user_message(self, text: str) -> MessageParam:
         """Create a user message in Claude's format."""
-        return cast("BetaMessageParam", {"role": "user", "content": text})
+        return MessageParam(role="user", content=text)
 
-    def _convert_tools_for_claude(self) -> list[dict]:
-        """Convert MCP tools to Claude tool format."""
-        claude_tools = []
-        self._claude_to_mcp_tool_map = {}  # Reset mapping
+    def _convert_tools_for_claude(self):
+        """Convert MCP tools to Claude API tools."""
 
-        # Find computer tool by priority
-        computer_tool_priority = ["anthropic_computer", "computer_anthropic", "computer"]
-        selected_computer_tool = None
+        def to_api_tool(tool: types.Tool) -> ToolUnionParam:
+            if tool.name == "str_replace_editor":
+                return ToolTextEditor20250124Param(
+                    type="text_editor_20250124",
+                    name="str_replace_editor",
+                    cache_control=CacheControlEphemeralParam(type="ephemeral"),
+                )
+            if tool.name == "str_replace_based_edit_tool":
+                return ToolTextEditor20250728Param(
+                    type="text_editor_20250728",
+                    name="str_replace_based_edit_tool",
+                    cache_control=CacheControlEphemeralParam(type="ephemeral"),
+                )
+            if tool.name == "bash":
+                return ToolBash20250124Param(
+                    type="bash_20250124",
+                    name="bash",
+                    cache_control=CacheControlEphemeralParam(type="ephemeral"),
+                )
+            if re.fullmatch(self.computer_tool_regex, tool.name):
+                return cast(
+                    "ToolUnionParam",
+                    BetaToolComputerUse20250124Param(
+                        name="computer",
+                        type="computer_20250124",
+                        display_number=1,
+                        display_width_px=computer_settings.ANTHROPIC_COMPUTER_WIDTH,
+                        display_height_px=computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
+                        cache_control=CacheControlEphemeralParam(type="ephemeral"),
+                    ),
+                )
 
-        for priority_name in computer_tool_priority:
-            for tool in self.get_available_tools():
-                # Check both exact match and suffix match (for prefixed tools)
-                if tool.name == priority_name or tool.name.endswith(f"_{priority_name}"):
-                    selected_computer_tool = tool
-                    break
-            if selected_computer_tool:
-                break
-
-        # Add the selected computer tool if found
-        if selected_computer_tool:
-            claude_tool = {
-                "type": "computer_20250124",
-                "name": "computer",
-                "display_width_px": self.metadata["display_width"],
-                "display_height_px": self.metadata["display_height"],
-            }
-            # Map Claude's "computer" back to the actual MCP tool name
-            self._claude_to_mcp_tool_map["computer"] = selected_computer_tool.name
-            claude_tools.append(claude_tool)
-            self.hud_console.debug(
-                f"Using {selected_computer_tool.name} as computer tool for Claude"
+            if not tool.description or not tool.inputSchema:
+                raise ValueError(
+                    cleandoc(f"""Custom MCP tool {tool.name} requires both a description and inputSchema.
+                    Add these by:
+                    1. Adding a docstring to your @mcp.tool decorated function for the description
+                    2. Using pydantic Field() annotations on function parameters for the schema
+                    
+                    Example:
+                    @mcp.tool()
+                    def search_files(
+                        query: str = Field(description="Search term to look for"),
+                        max_results: int = Field(default=10, description="Maximum number of results to return")
+                    ):
+                        '''Search for files matching the given query.''' <-- this is processed as the description
+                        # implementation here
+                    """)
+                )
+            """Convert a tool to the API format"""
+            return ToolParam(
+                name=tool.name,
+                description=tool.description,
+                input_schema=tool.inputSchema,
+                cache_control=CacheControlEphemeralParam(type="ephemeral"),
             )
 
-        # Add other non-computer tools
+        has_computer_tool = False
+        self.tool_mapping = {}
+        self.claude_tools = []
         for tool in self.get_available_tools():
-            # Skip computer tools (already handled)
-            if any(
-                tool.name == priority_name or tool.name.endswith(f"_{priority_name}")
-                for priority_name in computer_tool_priority
-            ):
-                continue
+            claude_tool = to_api_tool(tool)
+            # warn if multiple computer tools are found
+            if claude_tool["name"] == "computer":
+                if has_computer_tool:
+                    logger.warning(
+                        "Multiple computer tools found. Ignoring %s since %s is already present",
+                        tool.name,
+                        self.tool_mapping["computer"],
+                    )
+                    continue
+                else:
+                    has_computer_tool = True
+            self.tool_mapping[claude_tool["name"]] = tool.name
+            self.claude_tools.append(claude_tool)
 
-            claude_tool = {
-                "name": tool.name,
-                "description": tool.description or f"Execute {tool.name}",
-                "input_schema": tool.inputSchema
-                or {
-                    "type": "object",
-                    "properties": {},
-                },
-            }
-            # Direct mapping for non-computer tools
-            self._claude_to_mcp_tool_map[tool.name] = tool.name
-            claude_tools.append(claude_tool)
-
-        self.claude_tools = claude_tools
-        return claude_tools
-
-    def _add_prompt_caching(self, messages: list[BetaMessageParam]) -> list[BetaMessageParam]:
+    def _add_prompt_caching(self, messages: list[MessageParam]) -> list[MessageParam]:
         """Add prompt caching to messages."""
         messages_cached = copy.deepcopy(messages)
+        cache_control: CacheControlEphemeralParam = {"type": "ephemeral"}
 
         # Mark last user message with cache control
         if (
@@ -391,29 +346,34 @@ class ClaudeAgent(MCPAgent):
                 for block in last_content:
                     # Only add cache control to dict-like block types that support it
                     if isinstance(block, dict):
-                        block_type = block.get("type")
-                        if block_type in ["text", "image", "tool_use", "tool_result"]:
-                            cache_control: BetaCacheControlEphemeralParam = {"type": "ephemeral"}
-                            block["cache_control"] = cache_control  # type: ignore[reportGeneralTypeIssues]
+                        match block["type"]:
+                            case "redacted_thinking" | "thinking":
+                                pass
+                            case _:
+                                block["cache_control"] = cache_control
 
         return messages_cached
 
 
-def base64_to_content_block(base64: str) -> BetaImageBlockParam:
+def base64_to_content_block(base64: str) -> ImageBlockParam:
     """Convert base64 image to Claude content block."""
-    return {
-        "type": "image",
-        "source": {"type": "base64", "media_type": "image/png", "data": base64},
-    }
+    return ImageBlockParam(
+        type="image",
+        source=Base64ImageSourceParam(
+            type="base64",
+            media_type="image/png",
+            data=base64,
+        ),
+    )
 
 
-def text_to_content_block(text: str) -> BetaTextBlockParam:
+def text_to_content_block(text: str) -> TextBlockParam:
     """Convert text to Claude content block."""
     return {"type": "text", "text": text}
 
 
 def tool_use_content_block(
-    tool_use_id: str, content: list[BetaTextBlockParam | BetaImageBlockParam]
-) -> BetaToolResultBlockParam:
+    tool_use_id: str, content: list[TextBlockParam | ImageBlockParam]
+) -> ToolResultBlockParam:
     """Create tool result content block."""
     return {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
