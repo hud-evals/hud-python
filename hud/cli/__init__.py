@@ -872,6 +872,11 @@ def eval(
             "spinning up an agent"
         ),
     ),
+    task_id: str | None = typer.Option(
+        None,
+        "--task-id",
+        help="Run a specific task by ID (from the dataset)",
+    ),
     yes: bool = typer.Option(
         False,
         "--yes",
@@ -888,6 +893,7 @@ def eval(
     source = source if source is not None else config.get("source")
     agent = agent if agent is not None else config.get("agent")
     model = model if model is not None else config.get("model")
+    task_id = task_id if task_id is not None else config.get("task_id")
     full = full or config.get("full", False)
     max_concurrent = (
         int(max_concurrent) if max_concurrent is not None else int(config.get("max_concurrent", 30))
@@ -999,6 +1005,7 @@ def eval(
         very_verbose=very_verbose,
         vllm_base_url=vllm_base_url,
         group_size=group_size,
+        task_id=task_id,
     )
 
     hud_console.info("")  # Add some spacing
@@ -1021,6 +1028,7 @@ def eval(
         vllm_base_url=vllm_base_url,
         group_size=group_size,
         integration_test=integration_test,
+        task_id=task_id,
     )
 
 
