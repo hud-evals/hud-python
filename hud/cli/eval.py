@@ -257,6 +257,7 @@ async def run_single_task(
     verbose: bool = False,
     vllm_base_url: str | None = None,
     group_size: int = 1,
+    task_id: str | None = None,
 ) -> None:
     """Load one task and execute it, or detect if JSON contains a list and run as dataset."""
 
@@ -285,20 +286,25 @@ async def run_single_task(
         except Exception as e:
             hud_console.debug(f"Eval preflight env check skipped: {e}")
 
-        # Single task - use the first (and only) task
-        task = tasks[0]
-        hud_console.info("Found 1 task, running as single task…")
-
     else:
         # Load from HuggingFace dataset or non-file source
         hud_console.info(f"📊 Loading tasks from: {source}…")
         tasks: list[Task] = load_tasks(source)  # type: ignore[assignment]
 
-        if not tasks:
-            hud_console.error(f"No tasks found in: {source}")
-            raise typer.Exit(1)
+    if not tasks:
+        hud_console.error(f"No tasks found in: {source}")
+        raise typer.Exit(1)
 
-        # Single task - use the first task
+    # Filter by task_id if provided
+    if task_id:
+        found = next((t for t in tasks if str(getattr(t, "id", "")) == str(task_id)), None)
+        if not found:
+            hud_console.error(f"Task with ID '{task_id}' not found in source.")
+            raise typer.Exit(1)
+        task = found
+        hud_console.info(f"Found task with ID '{task_id}', running as single task…")
+    else:
+        # Default behavior: use the first task
         task = tasks[0]
         hud_console.info(
             "Using first task from dataset (run with --full to run the entire dataset)..."
@@ -751,8 +757,18 @@ def eval_command(
             "spinning up an agent"
         ),
     ),
+    task_id: str | None = typer.Option(
+        None,
+        "--task-id",
+        help="Run a specific task by ID (from the dataset)",
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
+
+    Configuration:
+        - Uses defaults from .hud_eval_config if present
+        - CLI arguments override config file settings
+        - Prompts for confirmation unless -y/--yes is used
 
     Examples:
         # Evaluate a single task from SheetBench
@@ -767,7 +783,7 @@ def eval_command(
         # Limit concurrent tasks to prevent rate limits
         hud eval hud-evals/SheetBench-50 --full --max-concurrent 20
 
-        # Run a single task from a JSON file
+        # Run a single task from a JSON file (uses interactive/config defaults)
         hud eval task.json
 
         # Run multiple tasks from a JSON file
@@ -892,5 +908,6 @@ def eval_command(
                 verbose=very_verbose or verbose,
                 vllm_base_url=vllm_base_url,
                 group_size=group_size,
+                task_id=task_id,
             )
         )

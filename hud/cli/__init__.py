@@ -7,12 +7,19 @@ import json
 import sys
 from pathlib import Path
 
+import questionary
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from hud.cli.eval_config import (
+    display_eval_settings,
+    load_eval_config,
+)
+from hud.settings import settings
 from hud.types import AgentType
+from hud.utils.hud_console import HUDConsole
 
 from . import list_func as list_module
 from .analyze import (
@@ -826,7 +833,7 @@ def eval(
     agent: str | None = typer.Argument(
         None,
         help=(
-            "Agent backend to use (claude, openai, vllm, or litellm). If not provided, will prompt interactively."  # noqa: E501
+            "Agent backend to use (claude, openai, gemini, vllm, or litellm). If not provided, will prompt interactively."  # noqa: E501
         ),
     ),
     full: bool = typer.Option(
@@ -844,10 +851,10 @@ def eval(
         "--allowed-tools",
         help="Comma-separated list of allowed tools",
     ),
-    max_concurrent: int = typer.Option(
-        30,
+    max_concurrent: int | None = typer.Option(
+        None,
         "--max-concurrent",
-        help="Maximum concurrent tasks (1-200 recommended, prevents rate limits)",
+        help="Maximum concurrent tasks (1-200 recommended, prevents rate limits, default: 30)",
     ),
     max_steps: int | None = typer.Option(
         None,
@@ -871,10 +878,10 @@ def eval(
         "--vllm-base-url",
         help="Base URL for vLLM server (when using --agent vllm)",
     ),
-    group_size: int = typer.Option(
-        1,
+    group_size: int | None = typer.Option(
+        None,
         "--group-size",
-        help="Number of times to run each task (similar to RL training)",
+        help="Number of times to run each task (similar to RL training, default: 1)",
     ),
     integration_test: bool = typer.Option(
         False,
@@ -885,12 +892,38 @@ def eval(
             "spinning up an agent"
         ),
     ),
+    task_id: str | None = typer.Option(
+        None,
+        "--task-id",
+        help="Run a specific task by ID (from the dataset)",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompt and proceed automatically",
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents."""
-    from hud.settings import settings
-    from hud.utils.hud_console import HUDConsole
-
     hud_console = HUDConsole()
+
+    config = load_eval_config()
+
+    # Precedence: CLI args > config file > defaults
+    source = source if source is not None else config.get("source")
+    agent = agent if agent is not None else config.get("agent")
+    model = model if model is not None else config.get("model")
+    task_id = task_id if task_id is not None else config.get("task_id")
+    full = full or config.get("full", False)
+    max_concurrent = (
+        int(max_concurrent) if max_concurrent is not None else int(config.get("max_concurrent", 30))
+    )
+    max_steps = max_steps if max_steps is not None else config.get("max_steps")
+    allowed_tools = allowed_tools if allowed_tools is not None else config.get("allowed_tools")
+    verbose = verbose or config.get("verbose", False)
+    very_verbose = very_verbose or config.get("very_verbose", False)
+    vllm_base_url = vllm_base_url if vllm_base_url is not None else config.get("vllm_base_url")
+    group_size = int(group_size) if group_size is not None else int(config.get("group_size", 1))
 
     if integration_test:
         agent = AgentType.INTEGRATION_TEST
@@ -980,6 +1013,27 @@ def eval(
     # Type narrowing: agent is now guaranteed to be an AgentType value after validation
     agent = AgentType(agent)
 
+    settings_dict = dict(
+        source=source,
+        agent=agent,
+        full=full,
+        model=model,
+        allowed_tools=allowed_tools,
+        max_concurrent=max_concurrent,
+        max_steps=max_steps,
+        verbose=verbose,
+        very_verbose=very_verbose,
+        vllm_base_url=vllm_base_url,
+        group_size=group_size,
+        task_id=task_id,
+    )
+
+    hud_console.info("")  # Add some spacing
+    display_eval_settings(settings_dict)
+    if not yes and not questionary.confirm("Proceed?", default=True, qmark="").ask():
+        hud_console.info("Evaluation cancelled.")
+        raise typer.Exit(1)
+
     # Run the command
     eval_command(
         source=source,
@@ -994,6 +1048,7 @@ def eval(
         vllm_base_url=vllm_base_url,
         group_size=group_size,
         integration_test=integration_test,
+        task_id=task_id,
     )
 
 
