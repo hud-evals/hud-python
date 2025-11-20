@@ -121,28 +121,29 @@ def rft_command(
 
         # Show task preview
         if tasks:
-            try:
-                from hud.cli.rl.viewer import show_json_interactive
+            if yes:
+                # Skip interactive preview in auto-accept mode
+                hud_console.info("Skipping task preview in auto-accept mode (--yes)")
+            else:
+                try:
+                    from hud.cli.rl.viewer import show_json_interactive
 
-                hud_console.section_title("Task Preview")
-                show_json_interactive(
-                    tasks[0], title="Example Task from Dataset", initial_expanded=False
-                )
-                hud_console.info("This is how your task will be sent to the RFT service.")
+                    hud_console.section_title("Task Preview")
+                    show_json_interactive(
+                        tasks[0], title="Example Task from Dataset", initial_expanded=False
+                    )
+                    hud_console.info("This is how your task will be sent to the RFT service.")
 
-                # Ask for confirmation unless --yes is specified
-                if not yes:
+                    # Ask for confirmation
                     if not hud_console.confirm(
                         "\nProceed with RFT training on this dataset?", default=True
                     ):
                         hud_console.error("RFT training cancelled")
                         raise typer.Exit(0)
-                else:
-                    hud_console.info("Auto-accepting task configuration (--yes mode)")
-            except typer.Exit:
-                raise  # Re-raise typer.Exit to properly exit on cancellation
-            except Exception as e:
-                hud_console.warning(f"Could not display task preview: {e}")
+                except typer.Exit:
+                    raise  # Re-raise typer.Exit to properly exit on cancellation
+                except Exception as e:
+                    hud_console.warning(f"Could not display task preview: {e}")
 
     except typer.Exit:
         raise  # Re-raise typer.Exit to properly exit
