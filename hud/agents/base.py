@@ -25,8 +25,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-GLOBAL_SYSTEM_PROMPT = "You are an assistant that can use tools to help the user. You will be given a task and you will need to use the tools to complete the task."  # noqa: E501
-
 
 class MCPAgent(ABC):
     """
@@ -58,7 +56,7 @@ class MCPAgent(ABC):
         disallowed_tools: list[str] | None = None,
         response_tool_name: str | None = None,
         # Messages
-        system_prompt: str = GLOBAL_SYSTEM_PROMPT,
+        system_prompt: str | None = None,
         append_setup_output: bool = True,
         initial_screenshot: bool = True,
         # Misc
@@ -155,7 +153,7 @@ class MCPAgent(ABC):
         # If task is provided, apply agent_config and add lifecycle tools
         if isinstance(task, Task) and task.agent_config:
             if task.agent_config.get("system_prompt"):
-                self.system_prompt += "\n\n" + task.agent_config["system_prompt"]
+                self.system_prompt = task.agent_config["system_prompt"]
             if "append_setup_output" in task.agent_config:
                 self.append_setup_output = task.agent_config["append_setup_output"]
             if "initial_screenshot" in task.agent_config:

@@ -8,7 +8,7 @@ import re
 from inspect import cleandoc
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
-from anthropic import Anthropic, AsyncAnthropic
+from anthropic import Anthropic, AsyncAnthropic, Omit
 from anthropic.types import (
     CacheControlEphemeralParam,
 )
@@ -165,6 +165,7 @@ class ClaudeAgent(MCPAgent):
 
         response = await self.anthropic_client.beta.messages.create(
             model=self.model,
+            system=self.system_prompt if self.system_prompt is not None else Omit(),
             max_tokens=self.max_tokens,
             messages=messages_cached,
             tools=self.claude_tools,
