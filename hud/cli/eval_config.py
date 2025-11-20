@@ -14,6 +14,7 @@ from hud.utils import hud_console
 VALID_CONFIG_KEYS = [
     "agent",
     "source",
+    "task_id",
     "model",
     "full",
     "max_steps",
@@ -146,6 +147,7 @@ def display_eval_settings(settings: dict[str, Any]) -> None:
     order = [
         "agent",
         "source",
+        "task_id",
         "full",
         "max_steps",
         "max_concurrent",
