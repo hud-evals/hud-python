@@ -242,6 +242,7 @@ class MCPAgent(ABC):
                 return await self._run_context(context, max_steps=max_steps)
 
         except Exception as e:
+            logger.exception("Error while running agent:")
             # Always return a Trace object for any exception
             if self._is_connection_error(e):
                 # Return error trace for connection failures

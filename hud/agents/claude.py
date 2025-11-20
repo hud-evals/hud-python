@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 from anthropic import Anthropic, AsyncAnthropic
 from anthropic.types import (
     Base64ImageSourceParam,
+    CacheControlEphemeralParam,
     ImageBlockParam,
     MessageParam,
     TextBlockParam,
     ToolBash20250124Param,
     ToolParam,
-    ToolTextEditor20250124Param,
     ToolTextEditor20250728Param,
     ToolUnionParam,
 )
@@ -26,7 +26,6 @@ import hud
 
 if TYPE_CHECKING:
     from anthropic.types import (
-        CacheControlEphemeralParam,
         ContentBlockParam,
         ToolResultBlockParam,
     )
@@ -43,7 +42,6 @@ from hud.utils.hud_console import HUDConsole
 from .base import MCPAgent
 
 logger = logging.getLogger(__name__)
-
 
 class ClaudeAgent(MCPAgent):
     """
@@ -258,16 +256,10 @@ class ClaudeAgent(MCPAgent):
         """Create a user message in Claude's format."""
         return MessageParam(role="user", content=text)
 
-    def _convert_tools_for_claude(self):
+    def _convert_tools_for_claude(self) -> None:
         """Convert MCP tools to Claude API tools."""
 
         def to_api_tool(tool: types.Tool) -> ToolUnionParam:
-            if tool.name == "str_replace_editor":
-                return ToolTextEditor20250124Param(
-                    type="text_editor_20250124",
-                    name="str_replace_editor",
-                    cache_control=CacheControlEphemeralParam(type="ephemeral"),
-                )
             if tool.name == "str_replace_based_edit_tool":
                 return ToolTextEditor20250728Param(
                     type="text_editor_20250728",
