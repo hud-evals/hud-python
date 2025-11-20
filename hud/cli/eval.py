@@ -308,7 +308,7 @@ async def run_single_task(
         task = tasks[0]
         hud_console.info(
             "Using first task from dataset (run with --full to run the entire dataset)..."
-            )
+        )
 
     # Warn/confirm if the task uses local MCP config
     try:
