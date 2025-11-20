@@ -170,7 +170,7 @@ class ClaudeAgent(MCPAgent):
             messages=messages_cached,
             tools=self.claude_tools,
             tool_choice={"type": "auto", "disable_parallel_tool_use": True},
-            betas=["computer-use-2025-01-24"] if self.has_computer_tool else [],
+            betas=["computer-use-2025-01-24"] if self.has_computer_tool else Omit(),
         )
 
         messages.append(
