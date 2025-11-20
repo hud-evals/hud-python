@@ -30,6 +30,7 @@ from .init import create_environment
 from .pull import pull_command
 from .push import push_command
 from .remove import remove_command
+from .rft import rft_command
 from .utils.config import set_env_values
 from .utils.cursor import get_cursor_config_path, list_cursor_servers, parse_cursor_config
 from .utils.logging import CaptureLogger
@@ -548,6 +549,25 @@ def run(
             url = settings.hud_mcp_url
 
         run_remote_server(image, docker_args, transport, port, url, api_key, run_id, verbose)
+
+
+@app.command()
+def rft(
+    tasks_file: str = typer.Argument(
+        ...,
+        help="Path to tasks file (JSON/JSONL)",
+    ),
+    provider: str = typer.Option(
+        "openai",
+        "--provider",
+        help="Provider to use (e.g., openai)",
+    ),
+) -> None:
+    """🚀 Launch Reinforcement Fine-Tuning (RFT) job."""
+    rft_command(
+        tasks_file=tasks_file,
+        provider=provider,
+    )
 
 
 @app.command()
@@ -1079,7 +1099,7 @@ def rl(
     ),
     skip_vllm_startup: bool = typer.Option(
         False,
-        "--skip-vllm-startup",
+        "--skip_vllm_startup",
         help="Skip the vLLM server startup",
     ),
 ) -> None:
