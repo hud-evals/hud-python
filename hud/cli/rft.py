@@ -191,6 +191,9 @@ def rft_command(
             hud_console.success(f"Job launched successfully! ID: {job_id}")
             hud_console.info(f"Model ID: {model_id}")
 
+            # Provide helpful next steps
+            hud_console.info(f"To check job status, run: hud rft status {model_id}")
+
     except httpx.RequestError as e:
         hud_console.error(f"Connection error: {e}")
         hud_console.info("Is the RL service running?")
