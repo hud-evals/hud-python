@@ -12,15 +12,19 @@ from anthropic import Anthropic, AsyncAnthropic
 from anthropic.types import (
     Base64ImageSourceParam,
     CacheControlEphemeralParam,
+    ContentBlock,
     ImageBlockParam,
     MessageParam,
     TextBlockParam,
-    ToolBash20250124Param,
-    ToolParam,
-    ToolTextEditor20250728Param,
-    ToolUnionParam,
 )
-from anthropic.types.beta import BetaToolComputerUse20250124Param
+from anthropic.types.beta import (
+    BetaMessageParam,
+    BetaToolBash20250124Param,
+    BetaToolComputerUse20250124Param,
+    BetaToolParam,
+    BetaToolTextEditor20250728Param,
+    BetaToolUnionParam,
+)
 
 import hud
 
@@ -108,7 +112,7 @@ class ClaudeAgent(MCPAgent):
         # these will be initialized in _convert_tools_for_claude
         self.has_computer_tool = False
         self.tool_mapping: dict[str, str] = {}
-        self.claude_tools: list[ToolUnionParam] = []
+        self.claude_tools: list[BetaToolUnionParam] = []
 
     async def initialize(self, task: str | Task | None = None) -> None:
         """Initialize the agent and build tool mappings."""
@@ -164,23 +168,19 @@ class ClaudeAgent(MCPAgent):
 
         messages_cached = self._add_prompt_caching(messages)
 
-        extra_headers = {}
-        if self.has_computer_tool:
-            extra_headers["anthropic-beta"] = "computer_20250124"
-
-        response = await self.anthropic_client.messages.create(
+        response = await self.anthropic_client.beta.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
-            messages=messages_cached,
+            messages=cast("list[BetaMessageParam]", messages_cached),
             tools=self.claude_tools,
             tool_choice={"type": "auto", "disable_parallel_tool_use": True},
-            extra_headers=extra_headers,
+            betas=["computer-use-2025-01-24"],
         )
 
         messages.append(
             MessageParam(
                 role="assistant",
-                content=response.content,
+                content=cast("list[ContentBlock]", response.content),
             )
         )
 
@@ -260,30 +260,27 @@ class ClaudeAgent(MCPAgent):
     def _convert_tools_for_claude(self) -> None:
         """Convert MCP tools to Claude API tools."""
 
-        def to_api_tool(tool: types.Tool) -> ToolUnionParam:
+        def to_api_tool(tool: types.Tool) -> BetaToolUnionParam:
             if tool.name == "str_replace_based_edit_tool":
-                return ToolTextEditor20250728Param(
+                return BetaToolTextEditor20250728Param(
                     type="text_editor_20250728",
                     name="str_replace_based_edit_tool",
                     cache_control=CacheControlEphemeralParam(type="ephemeral"),
                 )
             if tool.name == "bash":
-                return ToolBash20250124Param(
+                return BetaToolBash20250124Param(
                     type="bash_20250124",
                     name="bash",
                     cache_control=CacheControlEphemeralParam(type="ephemeral"),
                 )
             if re.fullmatch(self.computer_tool_regex, tool.name):
-                return cast(
-                    "ToolUnionParam",
-                    BetaToolComputerUse20250124Param(
-                        name="computer",
-                        type="computer_20250124",
-                        display_number=1,
-                        display_width_px=computer_settings.ANTHROPIC_COMPUTER_WIDTH,
-                        display_height_px=computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
-                        cache_control=CacheControlEphemeralParam(type="ephemeral"),
-                    ),
+                return BetaToolComputerUse20250124Param(
+                    type="computer_20250124",
+                    name="computer",
+                    display_number=1,
+                    display_width_px=computer_settings.ANTHROPIC_COMPUTER_WIDTH,
+                    display_height_px=computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
+                    cache_control=CacheControlEphemeralParam(type="ephemeral"),
                 )
 
             if not tool.description or not tool.inputSchema:
@@ -304,7 +301,7 @@ class ClaudeAgent(MCPAgent):
                     """)
                 )
             """Convert a tool to the API format"""
-            return ToolParam(
+            return BetaToolParam(
                 name=tool.name,
                 description=tool.description,
                 input_schema=tool.inputSchema,
