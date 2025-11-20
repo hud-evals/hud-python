@@ -84,7 +84,10 @@ class GenericOpenAIChatAgent(MCPAgent):
 
     async def get_system_messages(self) -> list[Any]:
         """Get system messages for OpenAI."""
-        return [{"role": "system", "content": self.system_prompt}]
+        if self.system_prompt is not None:
+            return [{"role": "system", "content": self.system_prompt}]
+        else:
+            return []
 
     async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
         """Format blocks for OpenAI."""

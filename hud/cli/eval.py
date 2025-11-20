@@ -232,7 +232,7 @@ def build_agent(
         )
         raise typer.Exit(1) from e
 
-    model = model or "claude-sonnet-4-20250514"
+    model = model or "claude-sonnet-4-5"
 
     if allowed_tools:
         return ClaudeAgent(
@@ -393,7 +393,7 @@ async def run_single_task(
 
         agent_class = ClaudeAgent
         agent_config = {
-            "model": model or "claude-sonnet-4-20250514",
+            "model": model or "claude-sonnet-4-5",
             "verbose": verbose,
             "validate_api_key": False,
         }
@@ -626,7 +626,7 @@ async def run_full_dataset(
             raise typer.Exit(1) from e
 
         agent_config = {
-            "model": model or "claude-sonnet-4-20250514",
+            "model": model or "claude-sonnet-4-5",
             "verbose": verbose,
             "validate_api_key": False,
         }

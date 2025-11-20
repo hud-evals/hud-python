@@ -89,7 +89,10 @@ class LangChainAgent(MCPAgent):
 
     async def get_system_messages(self) -> list[BaseMessage]:
         """Get system messages for LangChain."""
-        return [SystemMessage(content=self.system_prompt)]
+        if self.system_prompt is not None:
+            return [SystemMessage(content=self.system_prompt)]
+        else:
+            return []
 
     async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[BaseMessage]:
         """Create initial messages for LangChain."""
