@@ -522,6 +522,9 @@ class TestRunDatasetToolFiltering:
             )
 
 
+SYSTEM_PROMPT = "You are an assistant that can use tools to help the user. You will be given a task and you will need to use the tools to complete the task."  # noqa: E501
+
+
 class TestSystemPromptHandling:
     """Test system prompt handling through run_dataset flow."""
 
@@ -565,7 +568,6 @@ class TestSystemPromptHandling:
     ) -> None:
         """Test that task system_prompt is appended when agent has default system prompt."""
         from hud.agents import ClaudeAgent
-        from hud.agents.base import GLOBAL_SYSTEM_PROMPT
         from hud.datasets.runner import run_dataset
 
         task_system_prompt = "Task prompt"
@@ -580,9 +582,7 @@ class TestSystemPromptHandling:
         }
 
         # Agent config with no custom system_prompt (will use default)
-        agent_init_config = {
-            "validate_api_key": False,
-        }
+        agent_init_config = {"validate_api_key": False, "system_prompt": SYSTEM_PROMPT}
 
         with (
             patch("hud.job"),
@@ -608,7 +608,7 @@ class TestSystemPromptHandling:
             # Verify the task system prompt was appended
             assert captured_agent.system_prompt.endswith(f"\n\n{task_system_prompt}")
             # Verify it starts with the base global system prompt
-            assert captured_agent.system_prompt.startswith(GLOBAL_SYSTEM_PROMPT)
+            assert captured_agent.system_prompt.startswith(SYSTEM_PROMPT)
 
     @pytest.mark.asyncio
     async def test_both_agent_and_task_system_prompts(
