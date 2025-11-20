@@ -153,7 +153,10 @@ class MCPAgent(ABC):
         # If task is provided, apply agent_config and add lifecycle tools
         if isinstance(task, Task) and task.agent_config:
             if task.agent_config.get("system_prompt"):
-                self.system_prompt = task.agent_config["system_prompt"]
+                if self.system_prompt is None:
+                    self.system_prompt = task.agent_config["system_prompt"]
+                else:
+                    self.system_prompt += "\n\n" + task.agent_config["system_prompt"]
             if "append_setup_output" in task.agent_config:
                 self.append_setup_output = task.agent_config["append_setup_output"]
             if "initial_screenshot" in task.agent_config:
