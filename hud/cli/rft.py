@@ -76,7 +76,7 @@ def rft_command(
     # Load and validate tasks
     try:
         # Load tasks with env vars already resolved
-        from hud.types import Task
+        from hud.types import Task  # noqa: TC001
 
         tasks_objects: list[Task] = load_tasks(tasks_file)  # type: ignore[assignment]
         # Convert to dicts for patching and serialization
@@ -168,7 +168,9 @@ def rft_command(
 
     headers = {"Authorization": f"Bearer {settings.api_key}", "Content-Type": "application/json"}
 
-    hud_console.info(f"Submitting job to {url}... (this may take a few minutes to run all safety checks)")
+    hud_console.info(
+        f"Submitting job to {url}... (this may take a few minutes to run all safety checks)"
+    )
 
     try:
         with httpx.Client(timeout=300.0) as client:
