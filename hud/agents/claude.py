@@ -105,6 +105,9 @@ class ClaudeAgent(MCPAgent):
         self.checkpoint_name = self.model
 
         self.computer_tool_regex = computer_tool_regex
+
+        # these will be initialized in _convert_tools_for_claude
+        self.has_computer_tool = False
         self.tool_mapping: dict[str, str] = {}
         self.claude_tools: list[ToolUnionParam] = []
 
@@ -162,12 +165,17 @@ class ClaudeAgent(MCPAgent):
 
         messages_cached = self._add_prompt_caching(messages)
 
+        extra_headers = {}
+        if self.has_computer_tool:
+            extra_headers["anthropic-beta"] = "computer_20250124"
+
         response = await self.anthropic_client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
             messages=messages_cached,
             tools=self.claude_tools,
             tool_choice={"type": "auto", "disable_parallel_tool_use": True},
+            extra_headers=extra_headers,
         )
 
         messages.append(
