@@ -8,10 +8,7 @@ import re
 from inspect import cleandoc
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
-from anthropic import Anthropic, AsyncAnthropic, NotGiven
-from anthropic.types import (
-    CacheControlEphemeralParam,
-)
+from anthropic import Anthropic, AsyncAnthropic, Omit
 from anthropic.types.beta import (
     BetaBase64ImageSourceParam,
     BetaContentBlockParam,
@@ -165,12 +162,12 @@ class ClaudeAgent(MCPAgent):
 
         response = await self.anthropic_client.beta.messages.create(
             model=self.model,
-            system=self.system_prompt if self.system_prompt is not None else NotGiven(),
+            system=self.system_prompt if self.system_prompt is not None else Omit(),
             max_tokens=self.max_tokens,
             messages=messages_cached,
             tools=self.claude_tools,
             tool_choice={"type": "auto", "disable_parallel_tool_use": True},
-            betas=["computer-use-2025-01-24"] if self.has_computer_tool else NotGiven(),
+            betas=["computer-use-2025-01-24"] if self.has_computer_tool else Omit(),
         )
 
         messages.append(
@@ -264,13 +261,11 @@ class ClaudeAgent(MCPAgent):
                 return BetaToolTextEditor20250728Param(
                     type="text_editor_20250728",
                     name="str_replace_based_edit_tool",
-                    cache_control=CacheControlEphemeralParam(type="ephemeral"),
                 )
             if tool.name == "bash":
                 return BetaToolBash20250124Param(
                     type="bash_20250124",
                     name="bash",
-                    cache_control=CacheControlEphemeralParam(type="ephemeral"),
                 )
             if re.fullmatch(self.computer_tool_regex, tool.name):
                 return BetaToolComputerUse20250124Param(
@@ -279,7 +274,6 @@ class ClaudeAgent(MCPAgent):
                     display_number=1,
                     display_width_px=computer_settings.ANTHROPIC_COMPUTER_WIDTH,
                     display_height_px=computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
-                    cache_control=CacheControlEphemeralParam(type="ephemeral"),
                 )
 
             if tool.description is None or tool.inputSchema is None:
@@ -295,7 +289,6 @@ class ClaudeAgent(MCPAgent):
                 name=tool.name,
                 description=tool.description,
                 input_schema=tool.inputSchema,
-                cache_control=CacheControlEphemeralParam(type="ephemeral"),
             )
 
         self.has_computer_tool = False
