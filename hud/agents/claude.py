@@ -9,6 +9,7 @@ from inspect import cleandoc
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from anthropic import Anthropic, AsyncAnthropic, Omit
+from anthropic.types import CacheControlEphemeralParam
 from anthropic.types.beta import (
     BetaBase64ImageSourceParam,
     BetaContentBlockParam,
@@ -313,7 +314,7 @@ class ClaudeAgent(MCPAgent):
     def _add_prompt_caching(self, messages: list[BetaMessageParam]) -> list[BetaMessageParam]:
         """Add prompt caching to messages."""
         messages_cached = copy.deepcopy(messages)
-        cache_control: CacheControlEphemeralParam = {"type": "ephemeral"}
+        cache_control = CacheControlEphemeralParam(type="ephemeral")
 
         # Mark last user message with cache control
         if (
