@@ -259,25 +259,18 @@ class ClaudeAgent(MCPAgent):
 
         # First pass: identify all computer tools and find the longest match
         available_tools = self.get_available_tools()
-        computer_tool_candidates = [
-            tool for tool in available_tools if re.fullmatch(self.computer_tool_regex, tool.name)
-        ]
 
-        # Select the computer tool with the longest name (longest match wins)
+        # find potential computer tools by priority
         selected_computer_tool = None
-        if computer_tool_candidates:
-            selected_computer_tool = max(computer_tool_candidates, key=lambda t: len(t.name))
-            if len(computer_tool_candidates) > 1:
-                ignored_tools = [
-                    t.name
-                    for t in computer_tool_candidates
-                    if t.name != selected_computer_tool.name
-                ]
-                logger.info(
-                    "Multiple computer tools found. Selected %s (longest match). Ignoring: %s",
-                    selected_computer_tool.name,
-                    ", ".join(ignored_tools),
-                )
+        computer_tool_names_by_priority = ["anthropic_computer", "computer_anthropic", "computer"]
+        for computer_tool_name in computer_tool_names_by_priority:
+            for tool in available_tools:
+                # Check both exact match and suffix match (for prefixed tools)
+                if tool.name == computer_tool_name or tool.name.endswith(f"_{computer_tool_name}"):
+                    selected_computer_tool = tool
+                    break
+            if selected_computer_tool:
+                break
 
         def to_api_tool(tool: types.Tool) -> BetaToolUnionParam:
             if tool.name == "str_replace_based_edit_tool":
