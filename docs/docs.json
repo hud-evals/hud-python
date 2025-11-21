@@ -59,6 +59,13 @@
             ]
           },
           {
+            "group": "Beta Features",
+            "pages": [
+              "beta/index",
+              "beta/rft"
+            ]
+          },
+          {
             "group": "Agents",
             "pages": [
               "evaluate-agents/create-agents",
@@ -78,6 +85,7 @@
               "reference/cli/run",
               "reference/cli/eval",
               "reference/cli/rl",
+              "reference/cli/rft",
               "reference/cli/misc"
             ]
           },
