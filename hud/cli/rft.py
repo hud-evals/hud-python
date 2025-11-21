@@ -187,7 +187,7 @@ def rft_command(
 
             data = resp.json()
             job_id = data.get("job_id")
-            model_id = data.get("model").get("id")
+            model_id = data.get("model", {}).get("id")
 
             hud_console.success(f"Job launched successfully! ID: {job_id}")
             hud_console.info(f"Model ID: {model_id}")

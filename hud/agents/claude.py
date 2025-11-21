@@ -8,7 +8,7 @@ import re
 from inspect import cleandoc
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
-from anthropic import Anthropic, AsyncAnthropic, Omit
+from anthropic import Anthropic, AsyncAnthropic, NotGiven
 from anthropic.types import (
     CacheControlEphemeralParam,
 )
@@ -165,12 +165,12 @@ class ClaudeAgent(MCPAgent):
 
         response = await self.anthropic_client.beta.messages.create(
             model=self.model,
-            system=self.system_prompt if self.system_prompt is not None else Omit(),
+            system=self.system_prompt if self.system_prompt is not None else NotGiven(),
             max_tokens=self.max_tokens,
             messages=messages_cached,
             tools=self.claude_tools,
             tool_choice={"type": "auto", "disable_parallel_tool_use": True},
-            betas=["computer-use-2025-01-24"] if self.has_computer_tool else Omit(),
+            betas=["computer-use-2025-01-24"] if self.has_computer_tool else NotGiven(),
         )
 
         messages.append(
@@ -193,7 +193,9 @@ class ClaudeAgent(MCPAgent):
                     id=block.id,
                     # look up name in tool_mapping if available, otherwise use block name
                     name=self.tool_mapping.get(block.name, block.name),
-                    arguments=block.input,
+                    arguments=block.input
+                    if isinstance(block.input, dict)
+                    else block.input.__dict__,
                 )
                 result.tool_calls.append(tool_call)
                 result.done = False
