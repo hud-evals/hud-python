@@ -61,7 +61,6 @@ class ClaudeAgent(MCPAgent):
         max_tokens: int = 16384,
         use_computer_beta: bool = True,
         validate_api_key: bool = True,
-        computer_tool_regex: str = r"(^|_)(anthropic_computer|computer_anthropic|computer)$",
         **kwargs: Any,
     ) -> None:
         """
@@ -72,7 +71,6 @@ class ClaudeAgent(MCPAgent):
             model: Claude model to use
             max_tokens: Maximum tokens for response
             use_computer_beta: Whether to use computer-use beta features
-            computer_tool_regex: we use this regex to identify the computer tool. Longest match wins
             **kwargs: Additional arguments passed to BaseMCPAgent (including mcp_client)
         """
         super().__init__(**kwargs)
@@ -99,8 +97,6 @@ class ClaudeAgent(MCPAgent):
 
         self.model_name = "Claude"
         self.checkpoint_name = self.model
-
-        self.computer_tool_regex = computer_tool_regex
 
         # these will be initialized in _convert_tools_for_claude
         self.has_computer_tool = False
@@ -311,12 +307,6 @@ class ClaudeAgent(MCPAgent):
         self.tool_mapping = {}
         self.claude_tools = []
         for tool in available_tools:
-            # Skip computer tools that weren't selected (shorter matches)
-            if re.fullmatch(self.computer_tool_regex, tool.name) and (
-                not selected_computer_tool or tool.name != selected_computer_tool.name
-            ):
-                continue
-
             claude_tool = to_api_tool(tool)
             if claude_tool["name"] == "computer":
                 self.has_computer_tool = True
