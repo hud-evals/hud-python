@@ -72,7 +72,7 @@ class ClaudeAgent(MCPAgent):
             model: Claude model to use
             max_tokens: Maximum tokens for response
             use_computer_beta: Whether to use computer-use beta features
-            computer_tool_regex: we use this regex to identify the computer tool
+            computer_tool_regex: we use this regex to identify the computer tool. Longest match wins
             **kwargs: Additional arguments passed to BaseMCPAgent (including mcp_client)
         """
         super().__init__(**kwargs)
@@ -257,6 +257,28 @@ class ClaudeAgent(MCPAgent):
     def _convert_tools_for_claude(self) -> None:
         """Convert MCP tools to Claude API tools."""
 
+        # First pass: identify all computer tools and find the longest match
+        available_tools = self.get_available_tools()
+        computer_tool_candidates = [
+            tool for tool in available_tools if re.fullmatch(self.computer_tool_regex, tool.name)
+        ]
+
+        # Select the computer tool with the longest name (longest match wins)
+        selected_computer_tool = None
+        if computer_tool_candidates:
+            selected_computer_tool = max(computer_tool_candidates, key=lambda t: len(t.name))
+            if len(computer_tool_candidates) > 1:
+                ignored_tools = [
+                    t.name
+                    for t in computer_tool_candidates
+                    if t.name != selected_computer_tool.name
+                ]
+                logger.info(
+                    "Multiple computer tools found. Selected %s (longest match). Ignoring: %s",
+                    selected_computer_tool.name,
+                    ", ".join(ignored_tools),
+                )
+
         def to_api_tool(tool: types.Tool) -> BetaToolUnionParam:
             if tool.name == "str_replace_based_edit_tool":
                 return BetaToolTextEditor20250728Param(
@@ -268,7 +290,7 @@ class ClaudeAgent(MCPAgent):
                     type="bash_20250124",
                     name="bash",
                 )
-            if re.fullmatch(self.computer_tool_regex, tool.name):
+            if selected_computer_tool and tool.name == selected_computer_tool.name:
                 return BetaToolComputerUse20250124Param(
                     type="computer_20250124",
                     name="computer",
@@ -295,19 +317,16 @@ class ClaudeAgent(MCPAgent):
         self.has_computer_tool = False
         self.tool_mapping = {}
         self.claude_tools = []
-        for tool in self.get_available_tools():
+        for tool in available_tools:
+            # Skip computer tools that weren't selected (shorter matches)
+            if re.fullmatch(self.computer_tool_regex, tool.name) and (
+                not selected_computer_tool or tool.name != selected_computer_tool.name
+            ):
+                continue
+
             claude_tool = to_api_tool(tool)
-            # warn if multiple computer tools are found
             if claude_tool["name"] == "computer":
-                if self.has_computer_tool:
-                    logger.warning(
-                        "Multiple computer tools found. Ignoring %s since %s is already present",
-                        tool.name,
-                        self.tool_mapping["computer"],
-                    )
-                    continue
-                else:
-                    self.has_computer_tool = True
+                self.has_computer_tool = True
             self.tool_mapping[claude_tool["name"]] = tool.name
             self.claude_tools.append(claude_tool)
 
