@@ -21,8 +21,10 @@ logger = logging.getLogger(__name__)
 
 class Coordinate(BaseModel):
     """A coordinate point with x and y values."""
+
     x: int = Field(..., description="X coordinate")
     y: int = Field(..., description="Y coordinate")
+
 
 # Map OpenAI key names to CLA standard keys
 OPENAI_TO_CLA_KEYS = {
