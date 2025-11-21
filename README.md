@@ -86,7 +86,7 @@ async def main() -> None:
         client = MCPClient(mcp_config=task.mcp_config)
         agent = ClaudeAgent(
             mcp_client=client,
-            model="claude-sonnet-4-20250514",  # requires ANTHROPIC_API_KEY
+            model="claude-sonnet-4-5",  # requires ANTHROPIC_API_KEY
         )
 
         result = await agent.run(task)
@@ -151,7 +151,7 @@ results = await run_dataset(
     name="My SheetBench-50 Evaluation",
     dataset="hud-evals/SheetBench-50",      # <-- HuggingFace dataset
     agent_class=ClaudeAgent,                # <-- Your custom agent can replace this (see https://docs.hud.ai/evaluate-agents/create-agents)
-    agent_config={"model": "claude-sonnet-4-20250514"},
+    agent_config={"model": "claude-sonnet-4-5"},
     max_concurrent=50,
     max_steps=30,
 )
