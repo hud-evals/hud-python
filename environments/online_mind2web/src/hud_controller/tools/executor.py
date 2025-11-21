@@ -112,11 +112,16 @@ class BrowserExecutor(BaseExecutor):
     async def screenshot(self) -> str | None:
         """Take a screenshot and return base64 encoded image."""
         try:
-            page = await self._ensure_page()
-            screenshot_bytes = await page.screenshot(full_page=False)
-            screenshot_b64 = base64.b64encode(screenshot_bytes).decode()
-            logger.debug("Browser screenshot captured")
-            return screenshot_b64
+            result = await self.playwright_tool.screenshot()
+            if result.base64_image:
+                logger.debug("Browser screenshot captured via playwright tool")
+                return result.base64_image
+            elif result.error:
+                logger.error(f"Screenshot failed: {result.error}")
+                return None
+            else:
+                logger.error("Screenshot returned no image or error")
+                return None
         except Exception as e:
             logger.error(f"Screenshot failed: {e}")
             return None
