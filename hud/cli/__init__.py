@@ -37,6 +37,8 @@ from .init import create_environment
 from .pull import pull_command
 from .push import push_command
 from .remove import remove_command
+from .rft import rft_command
+from .rft_status import rft_status_command
 from .utils.config import set_env_values
 from .utils.cursor import get_cursor_config_path, list_cursor_servers, parse_cursor_config
 from .utils.logging import CaptureLogger
@@ -555,6 +557,73 @@ def run(
             url = settings.hud_mcp_url
 
         run_remote_server(image, docker_args, transport, port, url, api_key, run_id, verbose)
+
+
+# Create RFT subcommand app
+rft_app = typer.Typer(help="🚀 Reinforcement Fine-Tuning (RFT) commands")
+
+
+@rft_app.command("run")
+def rft_run(
+    tasks_file: str = typer.Argument(
+        ...,
+        help="Path to tasks file (JSON/JSONL)",
+    ),
+    provider: str = typer.Option(
+        "openai",
+        "--provider",
+        help="Provider to use (e.g., openai)",
+    ),
+    reasoning_effort: str = typer.Option(
+        "medium",
+        "--reasoning-effort",
+        help="Reasoning effort level (low, medium, high)",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Enable verbose output",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Auto-accept all prompts",
+    ),
+) -> None:
+    """Launch an RFT training job."""
+    rft_command(
+        tasks_file=tasks_file,
+        provider=provider,
+        reasoning_effort=reasoning_effort,
+        verbose=verbose,
+        yes=yes,
+    )
+
+
+@rft_app.command("status")
+def rft_status(
+    model_id: str = typer.Argument(
+        ...,
+        help="Model ID or job ID to check status for",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Show full status details",
+    ),
+) -> None:
+    """Check the status of an RFT job."""
+    rft_status_command(
+        model_id=model_id,
+        verbose=verbose,
+    )
+
+
+# Add RFT app as a command group
+app.add_typer(rft_app, name="rft")
 
 
 @app.command()
@@ -1134,7 +1203,7 @@ def rl(
     ),
     skip_vllm_startup: bool = typer.Option(
         False,
-        "--skip-vllm-startup",
+        "--skip_vllm_startup",
         help="Skip the vLLM server startup",
     ),
 ) -> None:
