@@ -26,7 +26,7 @@ from hud.tools.computer import (
     OpenAIComputerTool,
     HudComputerTool,
 )
-from hud.tools import PlaywrightTool
+from .tools import OlineMind2Web_PlaywrightTool as PlaywrightTool
 
 # Import setup and evaluate hubs
 from .setup import setup as setup_hub
