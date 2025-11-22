@@ -181,7 +181,7 @@ class AnthropicComputerToolWithRecord(AnthropicComputerTool):
         if action in screenshot_actions and action != "screenshot" and take_screenshot_on_click:
             await self._trigger_callbacks("on_screenshot_action")
             logger.debug(
-                "Env display size %s x %s to %s x %s",
+                "Env display size %s x %s",
                 self.environment_width,
                 self.environment_height,
             )
