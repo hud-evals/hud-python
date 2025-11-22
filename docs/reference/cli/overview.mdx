@@ -22,6 +22,7 @@ The HUD CLI provides a complete toolkit for creating, developing, and running MC
   - `hud run` — Execute (Python module/command/Docker)
   - `hud eval` — Run agents on tasks/datasets
   - `hud rl` — Train with GRPO on tasks
+  - `hud rft` — Fine-tune models with RL (BETA, invite-only)
 </Card>
 </CardGroup>
 
@@ -62,6 +63,7 @@ hud --version
 | `hud run` | Module/command/image | Execute server (local/remote) | `hud run controller --reload` |
 | `hud eval` | Tasks/dataset | Run agent on tasks | `hud eval tasks.json claude` |
 | `hud rl` | Tasks/dataset | Train with GRPO | `hud rl tasks.json --local` |
+| `hud rft` | Tasks file | Fine-tune with RL (BETA, invite-only) | `hud rft run tasks.json` |
 
 ### Other Commands
 | Command | Description | Example |
