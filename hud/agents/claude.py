@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import copy
 import logging
-import re
 from inspect import cleandoc
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
-from anthropic import Anthropic, AsyncAnthropic, NotGiven
-from anthropic.types import (
-    CacheControlEphemeralParam,
-)
+from anthropic import Anthropic, AsyncAnthropic, Omit
+from anthropic.types import CacheControlEphemeralParam
 from anthropic.types.beta import (
     BetaBase64ImageSourceParam,
     BetaContentBlockParam,
@@ -63,7 +60,6 @@ class ClaudeAgent(MCPAgent):
         max_tokens: int = 16384,
         use_computer_beta: bool = True,
         validate_api_key: bool = True,
-        computer_tool_regex: str = r"(^|_)(anthropic_computer|computer_anthropic|computer)$",
         **kwargs: Any,
     ) -> None:
         """
@@ -74,7 +70,6 @@ class ClaudeAgent(MCPAgent):
             model: Claude model to use
             max_tokens: Maximum tokens for response
             use_computer_beta: Whether to use computer-use beta features
-            computer_tool_regex: we use this regex to identify the computer tool
             **kwargs: Additional arguments passed to BaseMCPAgent (including mcp_client)
         """
         super().__init__(**kwargs)
@@ -101,8 +96,6 @@ class ClaudeAgent(MCPAgent):
 
         self.model_name = "Claude"
         self.checkpoint_name = self.model
-
-        self.computer_tool_regex = computer_tool_regex
 
         # these will be initialized in _convert_tools_for_claude
         self.has_computer_tool = False
@@ -165,12 +158,12 @@ class ClaudeAgent(MCPAgent):
 
         response = await self.anthropic_client.beta.messages.create(
             model=self.model,
-            system=self.system_prompt if self.system_prompt is not None else NotGiven(),
+            system=self.system_prompt if self.system_prompt is not None else Omit(),
             max_tokens=self.max_tokens,
             messages=messages_cached,
             tools=self.claude_tools,
             tool_choice={"type": "auto", "disable_parallel_tool_use": True},
-            betas=["computer-use-2025-01-24"] if self.has_computer_tool else NotGiven(),
+            betas=["computer-use-2025-01-24"] if self.has_computer_tool else Omit(),
         )
 
         messages.append(
@@ -259,27 +252,39 @@ class ClaudeAgent(MCPAgent):
     def _convert_tools_for_claude(self) -> None:
         """Convert MCP tools to Claude API tools."""
 
+        # First pass: identify all computer tools and find the longest match
+        available_tools = self.get_available_tools()
+
+        # find potential computer tools by priority
+        selected_computer_tool = None
+        computer_tool_names_by_priority = ["anthropic_computer", "computer_anthropic", "computer"]
+        for computer_tool_name in computer_tool_names_by_priority:
+            for tool in available_tools:
+                # Check both exact match and suffix match (for prefixed tools)
+                if tool.name == computer_tool_name or tool.name.endswith(f"_{computer_tool_name}"):
+                    selected_computer_tool = tool
+                    break
+            if selected_computer_tool:
+                break
+
         def to_api_tool(tool: types.Tool) -> BetaToolUnionParam:
             if tool.name == "str_replace_based_edit_tool":
                 return BetaToolTextEditor20250728Param(
                     type="text_editor_20250728",
                     name="str_replace_based_edit_tool",
-                    cache_control=CacheControlEphemeralParam(type="ephemeral"),
                 )
             if tool.name == "bash":
                 return BetaToolBash20250124Param(
                     type="bash_20250124",
                     name="bash",
-                    cache_control=CacheControlEphemeralParam(type="ephemeral"),
                 )
-            if re.fullmatch(self.computer_tool_regex, tool.name):
+            if selected_computer_tool and tool.name == selected_computer_tool.name:
                 return BetaToolComputerUse20250124Param(
                     type="computer_20250124",
                     name="computer",
                     display_number=1,
                     display_width_px=computer_settings.ANTHROPIC_COMPUTER_WIDTH,
                     display_height_px=computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
-                    cache_control=CacheControlEphemeralParam(type="ephemeral"),
                 )
 
             if tool.description is None or tool.inputSchema is None:
@@ -295,32 +300,22 @@ class ClaudeAgent(MCPAgent):
                 name=tool.name,
                 description=tool.description,
                 input_schema=tool.inputSchema,
-                cache_control=CacheControlEphemeralParam(type="ephemeral"),
             )
 
         self.has_computer_tool = False
         self.tool_mapping = {}
         self.claude_tools = []
-        for tool in self.get_available_tools():
+        for tool in available_tools:
             claude_tool = to_api_tool(tool)
-            # warn if multiple computer tools are found
             if claude_tool["name"] == "computer":
-                if self.has_computer_tool:
-                    logger.warning(
-                        "Multiple computer tools found. Ignoring %s since %s is already present",
-                        tool.name,
-                        self.tool_mapping["computer"],
-                    )
-                    continue
-                else:
-                    self.has_computer_tool = True
+                self.has_computer_tool = True
             self.tool_mapping[claude_tool["name"]] = tool.name
             self.claude_tools.append(claude_tool)
 
     def _add_prompt_caching(self, messages: list[BetaMessageParam]) -> list[BetaMessageParam]:
         """Add prompt caching to messages."""
         messages_cached = copy.deepcopy(messages)
-        cache_control: CacheControlEphemeralParam = {"type": "ephemeral"}
+        cache_control = CacheControlEphemeralParam(type="ephemeral")
 
         # Mark last user message with cache control
         if (
