@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import logging
-import re
 from inspect import cleandoc
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
