@@ -7,7 +7,7 @@ import logging
 from inspect import cleandoc
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
-from anthropic import Anthropic, AsyncAnthropic, Omit
+from anthropic import Anthropic, AsyncAnthropic, NotGiven
 from anthropic.types import CacheControlEphemeralParam
 from anthropic.types.beta import (
     BetaBase64ImageSourceParam,
@@ -158,12 +158,12 @@ class ClaudeAgent(MCPAgent):
 
         response = await self.anthropic_client.beta.messages.create(
             model=self.model,
-            system=self.system_prompt if self.system_prompt is not None else Omit(),
+            system=self.system_prompt if self.system_prompt is not None else NotGiven(),
             max_tokens=self.max_tokens,
             messages=messages_cached,
             tools=self.claude_tools,
             tool_choice={"type": "auto", "disable_parallel_tool_use": True},
-            betas=["computer-use-2025-01-24"] if self.has_computer_tool else Omit(),
+            betas=["computer-use-2025-01-24"] if self.has_computer_tool else NotGiven(),
         )
 
         messages.append(
@@ -267,7 +267,7 @@ class ClaudeAgent(MCPAgent):
             if selected_computer_tool:
                 break
 
-        def to_api_tool(tool: types.Tool) -> BetaToolUnionParam:
+        def to_api_tool(tool: types.Tool) -> BetaToolUnionParam | None:
             if tool.name == "str_replace_based_edit_tool":
                 return BetaToolTextEditor20250728Param(
                     type="text_editor_20250728",
@@ -278,14 +278,21 @@ class ClaudeAgent(MCPAgent):
                     type="bash_20250124",
                     name="bash",
                 )
-            if selected_computer_tool and tool.name == selected_computer_tool.name:
-                return BetaToolComputerUse20250124Param(
-                    type="computer_20250124",
-                    name="computer",
-                    display_number=1,
-                    display_width_px=computer_settings.ANTHROPIC_COMPUTER_WIDTH,
-                    display_height_px=computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
-                )
+            if selected_computer_tool is not None:
+                if tool.name == selected_computer_tool.name:
+                    return BetaToolComputerUse20250124Param(
+                        type="computer_20250124",
+                        name="computer",
+                        display_number=1,
+                        display_width_px=computer_settings.ANTHROPIC_COMPUTER_WIDTH,
+                        display_height_px=computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
+                    )
+                elif tool.name == "computer":
+                    logger.warning(
+                        "Renamed tool %s to 'computer', dropping original 'computer' tool",
+                        selected_computer_tool.name,
+                    )
+                    return None
 
             if tool.description is None or tool.inputSchema is None:
                 raise ValueError(
@@ -295,7 +302,7 @@ class ClaudeAgent(MCPAgent):
                     2. Using pydantic Field() annotations on function parameters for the schema
                     """)
                 )
-            """Convert a tool to the API format"""
+
             return BetaToolParam(
                 name=tool.name,
                 description=tool.description,
@@ -307,6 +314,8 @@ class ClaudeAgent(MCPAgent):
         self.claude_tools = []
         for tool in available_tools:
             claude_tool = to_api_tool(tool)
+            if claude_tool is None:
+                continue
             if claude_tool["name"] == "computer":
                 self.has_computer_tool = True
             self.tool_mapping[claude_tool["name"]] = tool.name
