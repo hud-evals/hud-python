@@ -13,7 +13,6 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import typer
 import yaml
@@ -202,61 +201,6 @@ def get_existing_version(lock_path: Path) -> str | None:
         return build_data.get("version", None)
     except Exception:
         return None
-
-
-def extract_debugging_ports(telemetry: dict[str, Any]) -> list[int]:
-    """Extract debugging ports from telemetry URLs.
-
-    Args:
-        telemetry: Telemetry data from analyze_environment
-
-    Returns:
-        List of unique port numbers to expose
-    """
-    ports = set()
-
-    # Fields that might contain URLs with ports
-    url_fields = ["live_url", "vnc_url", "cdp_url", "debug_url", "websocket_url"]
-
-    for field in url_fields:
-        if field in telemetry:
-            try:
-                parsed = urlparse(telemetry[field])
-                if parsed.port:
-                    ports.add(parsed.port)
-                elif parsed.netloc and ":" in parsed.netloc:
-                    port_str = parsed.netloc.split(":")[-1]
-                    try:
-                        port = int(port_str)
-                        ports.add(port)
-                    except ValueError:
-                        pass
-            except Exception:  # noqa: S110
-                # Ignore parsing errors
-                pass
-
-    # Check services for common debugging ports
-    if "services" in telemetry:
-        services = telemetry.get("services", {})
-        # Common service to port mappings
-        service_ports = {
-            "novnc": 6080,
-            "vnc": 5900,
-            "chrome": 9222,
-            "firefox": 9223,
-            "webapp": 8080,
-            "api": 8000,
-            "debug": 5005,
-        }
-
-        for service, status in services.items():
-            if status == "running":
-                service_lower = service.lower()
-                for name, port in service_ports.items():
-                    if name in service_lower:
-                        ports.add(port)
-
-    return sorted(list(ports))
 
 
 def get_docker_image_digest(image: str) -> str | None:
