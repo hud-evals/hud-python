@@ -66,10 +66,14 @@ class ClaudeAgent(MCPAgent):
         Initialize Claude MCP agent.
 
         Args:
-            model_client: AsyncAnthropic client (created if not provided)
-            model: Claude model to use
+            model_client: AsyncAnthropic or AsyncAnthropicBedrock client (created if not provided)
+            model: Claude model to use (required for Bedrock, optional for standard Anthropic)
             max_tokens: Maximum tokens for response
             use_computer_beta: Whether to use computer-use beta features
+            validate_api_key: Whether to validate API key on initialization.
+                For standard Anthropic, uses models.list() (non-billable).
+                For Bedrock, validation is skipped to avoid billable API calls
+                (AWS credentials are validated on first real API call).
             **kwargs: Additional arguments passed to BaseMCPAgent (including mcp_client)
         """
         super().__init__(**kwargs)
@@ -116,11 +120,11 @@ class ClaudeAgent(MCPAgent):
                     # Test with models.list() for standard Anthropic
                     await self.anthropic_client.models.list()
                 elif isinstance(self.anthropic_client, AsyncAnthropicBedrock):
-                    # Test with a minimal message call for Bedrock (no models endpoint)
-                    await self.anthropic_client.messages.create(
-                        model=self.model,
-                        max_tokens=1,
-                        messages=[{"role": "user", "content": "test"}],
+                    # Skip validation for Bedrock - AWS credentials are validated by AWS SDK
+                    # on first API call. Making a test call here would be a billable operation.
+                    logger.debug(
+                        "Skipping API key validation for Bedrock (AWS credentials "
+                        "will be validated on first API call)"
                     )
             except Exception as e:
                 raise ValueError(f"API key validation failed: {e}") from e
