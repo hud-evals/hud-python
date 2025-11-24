@@ -393,7 +393,7 @@ async def webjudge_eval(ctx: Context, task_description: dict | str, score_thresh
             main_score = int(scores[0]) if scores else 3
         except:
             main_score = 3  # Default score if parsing fails
-        logger.info("Score: ", main_score)
+        logger.info(f"Score: {main_score}")
 
         # Extract reasoning
         try:

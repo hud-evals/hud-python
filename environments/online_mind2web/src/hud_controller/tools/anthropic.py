@@ -118,6 +118,15 @@ class AnthropicComputerToolWithRecord(AnthropicComputerTool):
         except Exception as e:
             logger.warning(f"Failed to record action: {e}")
 
+    def _scale_coordinates(self, x: int | None, y: int | None) -> tuple[int | None, int | None]:
+        """Scale coordinates from target space to screen space."""
+        if x is not None and self.scale_x != 1.0:
+            x = round(x / self.scale_x)
+        if y is not None and self.scale_y != 1.0:
+            y = round(y / self.scale_y)
+
+        return x, y
+
     async def __call__(
         self,
         action: str = Field(..., description="The action to perform on the computer"),
@@ -171,6 +180,12 @@ class AnthropicComputerToolWithRecord(AnthropicComputerTool):
         }
         if action in screenshot_actions and action != "screenshot" and take_screenshot_on_click:
             await self._trigger_callbacks("on_screenshot_action")
+            logger.debug(
+                "Env display size %s x %s",
+                self.environment_width,
+                self.environment_height,
+            )
+
         recorded_actions = {
             "left_click",
             "click",

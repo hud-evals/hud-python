@@ -40,8 +40,8 @@ class AnchorBrowserProvider(BrowserProvider):
 
         Args:
             **kwargs: Launch options including:
-                - max_duration: Maximum session duration in seconds (default: 120)
-                - idle_timeout: Idle timeout in seconds (default: 30)
+                - max_duration: Maximum session duration in seconds (default: 300)
+                - idle_timeout: Idle timeout in seconds (default: 120)
                 - proxy: Proxy configuration dict with:
                     - type: "custom" or "anchor_residential"
                     - server: Proxy server address (for custom)
@@ -61,8 +61,8 @@ class AnchorBrowserProvider(BrowserProvider):
         request_data = {
             "session": {
                 "timeout": {
-                    "max_duration": kwargs.get("max_duration", 120),
-                    "idle_timeout": kwargs.get("idle_timeout", 30),
+                    "max_duration": kwargs.get("max_duration", 300),
+                    "idle_timeout": kwargs.get("idle_timeout", 120),
                 },
             },
             "browser": {
@@ -71,6 +71,19 @@ class AnchorBrowserProvider(BrowserProvider):
                 "captcha_solver": {"active": True},
             },
         }
+
+        # Add viewport configuration
+        if "viewport" in kwargs:
+            request_data["browser"]["viewport"] = kwargs["viewport"]
+        else:
+            # Use environment variables or AnchorBrowser's recommended default (1440x900)
+            request_data["browser"]["viewport"] = {
+                "width": int(os.getenv("DISPLAY_WIDTH", "1440")),
+                "height": int(os.getenv("DISPLAY_HEIGHT", "900")),
+            }
+            logger.info(
+                f"Setting viewport to {request_data['browser']['viewport']['width']}x{request_data['browser']['viewport']['height']}"
+            )
 
         proxy_config = await get_proxy_config()
 
