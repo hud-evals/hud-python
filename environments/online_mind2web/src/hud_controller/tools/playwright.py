@@ -29,44 +29,6 @@ class OnlineMind2Web_PlaywrightTool(PlaywrightTool):
         self.add_callback("on_screenshot_action", self._on_screenshot_action)
         self.add_callback("on_recorded_action", self._on_recorded_action)
 
-    async def _ensure_browser(self) -> None:
-        """Override to add page health check before reusing existing pages."""
-        # First check if we need to reconnect the browser
-        if self._browser is None or not self._browser.is_connected():
-            logger.info("Browser not connected, calling parent _ensure_browser")
-            await super()._ensure_browser()
-            return
-
-        # Browser is connected, but verify the page is still valid
-        if self.page is not None:
-            try:
-                # Check if page is closed
-                if self.page.is_closed():
-                    logger.warning("Current page is closed, creating new page")
-                    self.page = None
-                else:
-                    # Page exists and not closed, verify it's responsive with a quick check
-                    logger.debug("Page exists and not closed, verifying responsiveness")
-                    return
-            except Exception as e:
-                logger.warning(f"Page health check failed: {e}, will recreate page")
-                self.page = None
-
-        # If we get here, page is None or invalid - ensure we have a valid one
-        if self.page is None and self._browser_context is not None:
-            pages = self._browser_context.pages
-            if pages:
-                # Try to find a valid open page
-                for page_candidate in pages:
-                    if not page_candidate.is_closed():
-                        self.page = page_candidate
-                        logger.info("Found valid existing page")
-                        return
-
-            # No valid pages found, create new one
-            self.page = await self._browser_context.new_page()
-            logger.info("Created new browser page")
-
     async def _on_screenshot_action(self, **_) -> bytes | None:
         """Callback to take and save screenshots to /screenshot directory."""
         try:
@@ -615,12 +577,13 @@ If selector matches multiple elements, Playwright will use the first visible one
         selector: str,
         button: Literal["left", "right", "middle"] = "left",
         count: int = 1,
-        wait_for_navigation: bool = True,
     ) -> dict[str, Any]:
         """Click an element by selector.
 
         Args:
             selector: CSS selector for element to click
+            button: Mouse button to use (left, right, middle)
+            count: Number of clicks
 
         Returns:
             Dict with click result

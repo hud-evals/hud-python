@@ -47,7 +47,8 @@
         "agent_config": {
             "disallowed_tools": [
                 "setup",
-                "evaluate"
+                "evaluate",
+                "computer"
             ]
         }
     }
