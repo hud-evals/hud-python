@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -71,9 +72,13 @@ class TestOperatorAgent:
         ]
 
         messages = await agent.format_blocks(blocks)
-        assert len(messages) == 2
-        assert messages[0] == {"type": "input_text", "text": "Hello, GPT!"}
-        assert messages[1] == {"type": "input_text", "text": "Another message"}
+        assert len(messages) == 1
+        msg = cast(dict[str, Any], messages[0])
+        assert msg["role"] == "user"
+        content = cast(list[dict[str, Any]], msg["content"])
+        assert len(content) == 2
+        assert content[0] == {"type": "input_text", "text": "Hello, GPT!"}
+        assert content[1] == {"type": "input_text", "text": "Another message"}
 
         # Test with mixed content
         blocks = [
@@ -82,9 +87,13 @@ class TestOperatorAgent:
         ]
 
         messages = await agent.format_blocks(blocks)
-        assert len(messages) == 2
-        assert messages[0] == {"type": "input_text", "text": "Text content"}
-        assert messages[1] == {
+        assert len(messages) == 1
+        msg = cast(dict[str, Any], messages[0])
+        assert msg["role"] == "user"
+        content = cast(list[dict[str, Any]], msg["content"])
+        assert len(content) == 2
+        assert content[0] == {"type": "input_text", "text": "Text content"}
+        assert content[1] == {
             "type": "input_image",
             "image_url": "data:image/png;base64,base64data",
         }
@@ -113,12 +122,22 @@ class TestOperatorAgent:
 
         messages = await agent.format_tool_results(tool_calls, tool_results)
 
-        # OpenAI's format_tool_results returns input_image with screenshot
-        assert len(messages) == 1
-        msg = messages[0]
-        assert msg.get("type") == "input_image"
-        assert "image_url" in msg
-        assert msg.get("image_url") == "data:image/png;base64,base64data"
+        # Should return both tool results as function_call_output
+        assert len(messages) == 2
+        # First result is text
+        msg0 = cast(dict[str, Any], messages[0])
+        assert msg0["type"] == "function_call_output"
+        assert msg0["call_id"] == "call_123"
+        output0 = cast(list[dict[str, Any]], msg0["output"])
+        assert output0[0]["type"] == "input_text"
+        assert output0[0]["text"] == "Success"
+        # Second result is image
+        msg1 = cast(dict[str, Any], messages[1])
+        assert msg1["type"] == "function_call_output"
+        assert msg1["call_id"] == "call_456"
+        output1 = cast(list[dict[str, Any]], msg1["output"])
+        assert output1[0]["type"] == "input_image"
+        assert output1[0]["image_url"] == "data:image/png;base64,base64data"
 
     @pytest.mark.asyncio
     async def test_format_tool_results_with_error(self, mock_mcp_client, mock_openai):
@@ -141,8 +160,16 @@ class TestOperatorAgent:
 
         messages = await agent.format_tool_results(tool_calls, tool_results)
 
-        # Since the result has isError=True and no screenshot, returns empty list
-        assert len(messages) == 0
+        # Error results are returned with error flag and content
+        assert len(messages) == 1
+        msg = cast(dict[str, Any], messages[0])
+        assert msg["type"] == "function_call_output"
+        assert msg["call_id"] == "call_error"
+        output = cast(list[dict[str, Any]], msg["output"])
+        assert output[0]["type"] == "input_text"
+        assert output[0]["text"] == "[tool_error] true"
+        assert output[1]["type"] == "input_text"
+        assert output[1]["text"] == "Something went wrong"
 
     @pytest.mark.asyncio
     async def test_get_model_response(self, mock_mcp_client, mock_openai):

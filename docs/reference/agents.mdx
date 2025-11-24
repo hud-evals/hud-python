@@ -126,13 +126,65 @@ result = await agent.run(
 )
 ```
 
+### OpenAIAgent
+
+```python
+from hud.agents import OpenAIAgent
+```
+
+Generic OpenAI agent using the Responses API for function calling and tool execution.
+
+**Constructor Parameters:**
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `model_client` | `AsyncOpenAI` | OpenAI client | Auto-created |
+| `model` | `str` | Responses model to use | `"gpt-5.1"` |
+| `max_output_tokens` | `int \| None` | Maximum response tokens | `None` |
+| `temperature` | `float \| None` | Sampling temperature | `None` |
+| `reasoning` | `dict \| Literal["auto"] \| None` | Reasoning configuration | `None` |
+| `tool_choice` | `dict \| Literal["auto"] \| None` | Tool selection strategy | `None` |
+| `parallel_tool_calls` | `bool \| None` | Enable parallel tool execution | `None` |
+| `validate_api_key` | `bool` | Validate key on init | `True` |
+
+**Features:**
+- OpenAI Responses API integration
+- Function calling with strict mode schemas
+- Reasoning support for extended thinking
+- Automatic tool schema conversion
+- Response continuation with previous_response_id
+
+**Example:**
+```python
+agent = OpenAIAgent(
+    model="gpt-4o",
+    max_output_tokens=2048,
+    temperature=0.7,
+    reasoning="auto",
+)
+
+result = await agent.run(
+    Task(
+        prompt="Analyze the website and extract key information",
+        mcp_config={
+            "hud": {
+                "url": "https://mcp.hud.ai/v3/mcp",
+                "headers": {
+                    "Authorization": "Bearer ${HUD_API_KEY}",
+                    "Mcp-Image": "hudpython/hud-remote-browser:latest"
+                }
+            }
+        }
+    )
+)
+```
+
 ### OperatorAgent
 
 ```python
 from hud.agents import OperatorAgent
 ```
 
-OpenAI Operator-style agent built on the Responses API with computer-use.
+OpenAI Operator-style agent built on the Responses API with computer-use. Extends `OpenAIAgent` with computer-use capabilities.
 
 **Constructor Parameters:**
 | Parameter | Type | Description | Default |
@@ -146,6 +198,57 @@ OpenAI Operator-style agent built on the Responses API with computer-use.
 - OpenAI Responses computer-use
 - Operator-style system prompt guidance
 - Display metadata injection
+- Inherits all OpenAIAgent features
+
+### GeminiAgent
+
+```python
+from hud.agents import GeminiAgent
+```
+
+Google Gemini-specific implementation using Google's Generative AI API with computer-use capabilities.
+
+**Constructor Parameters:**
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `model_client` | `genai.Client` | Gemini client | Auto-created |
+| `model` | `str` | Gemini model to use | `"gemini-2.5-computer-use-preview-10-2025"` |
+| `temperature` | `float` | Sampling temperature | `1.0` |
+| `top_p` | `float` | Top-p sampling parameter | `0.95` |
+| `top_k` | `int` | Top-k sampling parameter | `40` |
+| `max_output_tokens` | `int` | Maximum response tokens | `8192` |
+| `validate_api_key` | `bool` | Validate key on init | `True` |
+| `excluded_predefined_functions` | `list[str] \| None` | Predefined functions to exclude | `None` |
+
+**Features:**
+- Native Gemini computer-use capabilities
+- Predefined computer-use functions (click, type, scroll, etc.)
+- Display metadata injection
+- MCP tool execution
+
+**Example:**
+```python
+agent = GeminiAgent(
+    model="gemini-2.5-computer-use-preview-10-2025",
+    temperature=0.7,
+    max_output_tokens=4096,
+)
+
+result = await agent.run(
+    Task(
+        prompt="Navigate to the website and fill out the form",
+        mcp_config={
+            "hud": {
+                "url": "https://mcp.hud.ai/v3/mcp",
+                "headers": {
+                    "Authorization": "Bearer ${HUD_API_KEY}",
+                    "Mcp-Image": "hudpython/hud-remote-browser:latest"
+                }
+            }
+        }
+    )
+)
+```
 
 ### OpenAIChatAgent
 
