@@ -22,7 +22,7 @@ Pydantic model that defines an agent's objective, setup, and evaluation criteria
 | `mcp_config` | `dict[str, Any]` | MCP server configuration | Required |
 | `setup_tool` | `MCPToolCall \| list[MCPToolCall] \| None` | Tool(s) to prepare environment | `None` |
 | `evaluate_tool` | `MCPToolCall \| list[MCPToolCall] \| None` | Tool(s) to score performance | `None` |
-| `agent_config` | `dict[str, Any] \| None` | Agent configuration (system_prompt, allowed_tools, etc.) | `None` |
+| `agent_config` | `BaseAgentConfig \| dict[str, Any] \| None` | Agent configuration (system_prompt, allowed_tools, etc.) | `None` |
 | `metadata` | `dict[str, Any]` | Extra task metadata | `{}` |
 
 ### Environment Variable Substitution

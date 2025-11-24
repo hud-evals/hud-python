@@ -152,37 +152,38 @@ class MCPAgent(ABC):
 
         # If task is provided, apply agent_config and add lifecycle tools
         if isinstance(task, Task) and task.agent_config:
-            if task.agent_config.get("system_prompt"):
+            agent_cfg = task.agent_config
+            if agent_cfg.system_prompt:
                 if self.system_prompt is None:
-                    self.system_prompt = task.agent_config["system_prompt"]
+                    self.system_prompt = agent_cfg.system_prompt
                 else:
-                    self.system_prompt += "\n\n" + task.agent_config["system_prompt"]
-            if "append_setup_output" in task.agent_config:
-                self.append_setup_output = task.agent_config["append_setup_output"]
-            if "initial_screenshot" in task.agent_config:
-                self.initial_screenshot = task.agent_config["initial_screenshot"]
-            if "allowed_tools" in task.agent_config:
+                    self.system_prompt += "\n\n" + agent_cfg.system_prompt
+            if agent_cfg.append_setup_output is not None:
+                self.append_setup_output = agent_cfg.append_setup_output
+            if agent_cfg.initial_screenshot is not None:
+                self.initial_screenshot = agent_cfg.initial_screenshot
+            if agent_cfg.allowed_tools is not None:
                 # If allowed_tools has already been set, we take the intersection of the two
                 # If the list had been empty, we were allowing all tools, so we overwrite this
                 if isinstance(self.allowed_tools, list) and len(self.allowed_tools) > 0:
                     # If task allows "*", keep CLI's allowed_tools unchanged
-                    if "*" not in task.agent_config["allowed_tools"]:
+                    if "*" not in agent_cfg.allowed_tools:
                         self.allowed_tools = [
                             tool
                             for tool in self.allowed_tools
-                            if tool in task.agent_config["allowed_tools"]
+                            if tool in agent_cfg.allowed_tools
                         ]
                     # else: task allows all tools, so CLI's allowed_tools takes precedence
                 else:  # If allowed_tools is None, we overwrite it
-                    self.allowed_tools = task.agent_config["allowed_tools"]
-            if "disallowed_tools" in task.agent_config:
+                    self.allowed_tools = agent_cfg.allowed_tools
+            if agent_cfg.disallowed_tools is not None:
                 # If disallowed_tools has already been set, we take the union of the two
                 if isinstance(self.disallowed_tools, list):
-                    self.disallowed_tools.extend(task.agent_config["disallowed_tools"])
+                    self.disallowed_tools.extend(agent_cfg.disallowed_tools)
                 else:  # If disallowed_tools is None, we overwrite it
-                    self.disallowed_tools = task.agent_config["disallowed_tools"]
-            if "response_tool_name" in task.agent_config:
-                self.response_tool_name = task.agent_config["response_tool_name"]
+                    self.disallowed_tools = agent_cfg.disallowed_tools
+            if agent_cfg.response_tool_name is not None:
+                self.response_tool_name = agent_cfg.response_tool_name
 
         all_tools = await self.mcp_client.list_tools()
         self._available_tools = []
