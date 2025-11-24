@@ -97,6 +97,8 @@ class ClaudeAgent(MCPAgent):
                     "Bedrock -> Cross-region inference -> Inference profile ARN column"
                 )
             self.model = model
+        else:
+            raise ValueError(f"Invalid model client: {type(self.anthropic_client)}")
         self.model_name = "Claude"
         self.checkpoint_name = self.model
 
@@ -122,7 +124,7 @@ class ClaudeAgent(MCPAgent):
                     )
             except Exception as e:
                 raise ValueError(f"API key validation failed: {e}") from e
-        
+
         await super().initialize(task)
         # Build tool mappings after tools are discovered
         self._convert_tools_for_claude()
