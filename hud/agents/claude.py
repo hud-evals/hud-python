@@ -7,7 +7,7 @@ import logging
 from inspect import cleandoc
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
-from anthropic import Anthropic, AsyncAnthropic, Omit
+from anthropic import AsyncAnthropic, Omit
 from anthropic.types import CacheControlEphemeralParam
 from anthropic.types.beta import (
     BetaBase64ImageSourceParam,
@@ -89,7 +89,7 @@ class ClaudeAgent(MCPAgent):
 
         if self.config.validate_api_key:
             try:
-                Anthropic(api_key=model_client.api_key).models.list()
+                AsyncAnthropic(api_key=model_client.api_key).models.list()
             except Exception as e:
                 raise ValueError(f"Anthropic API key is invalid: {e}") from e
 
