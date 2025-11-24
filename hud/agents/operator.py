@@ -109,6 +109,7 @@ class OperatorAgent(OpenAIAgent):
     def _build_request_payload(self, new_items: ResponseInputParam) -> dict[str, Any]:
         payload = super()._build_request_payload(new_items)
         payload["truncation"] = "auto"
+        payload["reasoning"] = {"summary": "auto"}
         return payload
 
     @hud.instrument(
