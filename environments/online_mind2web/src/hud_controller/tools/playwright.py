@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class OlineMind2Web_PlaywrightTool(PlaywrightTool):
+class OnlineMind2Web_PlaywrightTool(PlaywrightTool):
     """Enhanced Playwright tool with screenshot and action recording for Mind2Web."""
 
     def __init__(self, page=None, cdp_url=None):

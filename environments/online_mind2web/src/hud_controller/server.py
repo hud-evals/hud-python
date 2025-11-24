@@ -26,7 +26,7 @@ from hud.tools.computer import (
     OpenAIComputerTool,
     HudComputerTool,
 )
-from .tools import OlineMind2Web_PlaywrightTool as PlaywrightTool
+from .tools import OnlineMind2Web_PlaywrightTool as PlaywrightTool
 
 # Import setup and evaluate hubs
 from .setup import setup as setup_hub
@@ -283,10 +283,14 @@ async def initialize_environment(ctx):
 
         # Create and register computer tools with default dimensions
         mcp.add_tool(HudComputerTool(executor=browser_executor))
-        # mcp.add_tool(AnthropicComputerTool(executor=browser_executor))
-        # mcp.add_tool(OpenAIComputerTool(executor=browser_executor))
-        mcp.add_tool(AnthropicComputerToolWithRecord(executor=browser_executor))
-        mcp.add_tool(OpenAIComputerToolWithRecord(executor=browser_executor))
+        mcp.add_tool(
+            AnthropicComputerToolWithRecord(
+                executor=browser_executor, name="anthropic_computer_tool"
+            )
+        )
+        mcp.add_tool(
+            OpenAIComputerToolWithRecord(executor=browser_executor, name="openai_computer_tool")
+        )
 
         await send_progress(80, "Registered hud computer tools")
 
