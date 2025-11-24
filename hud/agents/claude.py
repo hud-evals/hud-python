@@ -7,7 +7,7 @@ import logging
 from inspect import cleandoc
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
-from anthropic import AsyncAnthropic, Omit
+from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, Omit
 from anthropic.types import CacheControlEphemeralParam
 from anthropic.types.beta import (
     BetaBase64ImageSourceParam,
@@ -98,6 +98,25 @@ class ClaudeAgent(MCPAgent):
         self.use_computer_beta = self.config.use_computer_beta
         self.hud_console = HUDConsole(logger=logger)
 
+        # self.anthropic_client = model_client
+        # self.validate_api_key = validate_api_key
+        # self.max_tokens = max_tokens
+        # self.use_computer_beta = use_computer_beta
+        # self.hud_console = HUDConsole(logger=logger)
+
+        # if isinstance(self.anthropic_client, AsyncAnthropic):
+        #     self.model = model or "claude-sonnet-4-5"
+        # elif isinstance(self.anthropic_client, AsyncAnthropicBedrock):
+        #     if model is None:
+        #         raise ValueError(
+        #             "`model` field must be set for Bedrock because it requires "
+        #             "an account-specific ARN: find this in the AWS console under "
+        #             "Bedrock -> Cross-region inference -> Inference profile ARN column"
+        #         )
+        #     self.model = model
+        # self.model_name = "Claude"
+        # self.checkpoint_name = self.model
+
         # these will be initialized in _convert_tools_for_claude
         self.has_computer_tool = False
         self.tool_mapping: dict[str, str] = {}
@@ -105,6 +124,22 @@ class ClaudeAgent(MCPAgent):
 
     async def initialize(self, task: str | Task | None = None) -> None:
         """Initialize the agent and build tool mappings."""
+        # Validate API key if requested (must be done in async context)
+        if self.validate_api_key:
+            try:
+                if isinstance(self.anthropic_client, AsyncAnthropic):
+                    # Test with models.list() for standard Anthropic
+                    await self.anthropic_client.models.list()
+                elif isinstance(self.anthropic_client, AsyncAnthropicBedrock):
+                    # Test with a minimal message call for Bedrock (no models endpoint)
+                    await self.anthropic_client.messages.create(
+                        model=self.model,
+                        max_tokens=1,
+                        messages=[{"role": "user", "content": "test"}],
+                    )
+            except Exception as e:
+                raise ValueError(f"API key validation failed: {e}") from e
+        
         await super().initialize(task)
         # Build tool mappings after tools are discovered
         self._convert_tools_for_claude()
