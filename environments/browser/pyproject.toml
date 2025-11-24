@@ -3,7 +3,7 @@ name = "hud-browser-controller"
 version = "0.1.0"
 description = "HUD Browser Controller - MCP interface for browser environments"
 requires-python = ">=3.11,<3.14"
-dependencies = [ "pydantic>=2.6,<3", "pydantic-settings>=2.2,<3", "hud-python@git+https://github.com/hud-evals/hud-python@env-cli-improvements", "playwright", "pyautogui", "httpx", "typer", "fastapi>=0.104.1", "uvicorn[standard]>=0.24.0", "python-multipart>=0.0.6",]
+dependencies = [ "pydantic>=2.6,<3", "pydantic-settings>=2.2,<3", "hud-python>=0.4.67", "playwright", "pyautogui", "httpx", "typer", "fastapi>=0.104.1", "uvicorn[standard]>=0.24.0", "python-multipart>=0.0.6",]
 
 [build-system]
 requires = [ "hatchling",]
