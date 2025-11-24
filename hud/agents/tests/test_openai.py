@@ -16,7 +16,7 @@ from openai.types.responses import (
 from openai.types.responses.response_reasoning_item import Summary
 
 from hud.agents.openai import OpenAIAgent
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.types import MCPToolCall, MCPToolResult
 
 
 class TestOpenAIAgent:
@@ -111,9 +111,9 @@ class TestOpenAIAgent:
 
         messages = await agent.format_blocks(blocks)
         assert len(messages) == 1
-        msg = cast(dict[str, Any], messages[0])
+        msg = cast("dict[str, Any]", messages[0])
         assert msg["role"] == "user"
-        content = cast(list[dict[str, Any]], msg["content"])
+        content = cast("list[dict[str, Any]]", msg["content"])
         assert len(content) == 2
         assert content[0] == {"type": "input_text", "text": "Hello, world!"}
         assert content[1] == {"type": "input_text", "text": "How are you?"}
@@ -134,9 +134,9 @@ class TestOpenAIAgent:
 
         messages = await agent.format_blocks(blocks)
         assert len(messages) == 1
-        msg = cast(dict[str, Any], messages[0])
+        msg = cast("dict[str, Any]", messages[0])
         assert msg["role"] == "user"
-        content = cast(list[dict[str, Any]], msg["content"])
+        content = cast("list[dict[str, Any]]", msg["content"])
         assert len(content) == 2
         assert content[0] == {"type": "input_text", "text": "Check this out:"}
         assert content[1] == {
@@ -157,9 +157,9 @@ class TestOpenAIAgent:
 
         messages = await agent.format_blocks(blocks)
         assert len(messages) == 1
-        msg = cast(dict[str, Any], messages[0])
+        msg = cast("dict[str, Any]", messages[0])
         assert msg["role"] == "user"
-        content = cast(list[dict[str, Any]], msg["content"])
+        content = cast("list[dict[str, Any]]", msg["content"])
         assert len(content) == 1
         assert content[0] == {"type": "input_text", "text": ""}
 
@@ -186,10 +186,10 @@ class TestOpenAIAgent:
         messages = await agent.format_tool_results(tool_calls, tool_results)
 
         assert len(messages) == 1
-        msg = cast(dict[str, Any], messages[0])
+        msg = cast("dict[str, Any]", messages[0])
         assert msg["type"] == "function_call_output"
         assert msg["call_id"] == "call_123"
-        output = cast(list[dict[str, Any]], msg["output"])
+        output = cast("list[dict[str, Any]]", msg["output"])
         assert len(output) == 1
         assert output[0]["type"] == "input_text"
         assert output[0]["text"] == "Tool executed successfully"
@@ -209,7 +209,9 @@ class TestOpenAIAgent:
 
         tool_results = [
             MCPToolResult(
-                content=[types.ImageContent(type="image", data="screenshot_data", mimeType="image/png")],
+                content=[
+                    types.ImageContent(type="image", data="screenshot_data", mimeType="image/png")
+                ],
                 isError=False,
             ),
         ]
@@ -217,10 +219,10 @@ class TestOpenAIAgent:
         messages = await agent.format_tool_results(tool_calls, tool_results)
 
         assert len(messages) == 1
-        msg = cast(dict[str, Any], messages[0])
+        msg = cast("dict[str, Any]", messages[0])
         assert msg["type"] == "function_call_output"
         assert msg["call_id"] == "call_456"
-        output = cast(list[dict[str, Any]], msg["output"])
+        output = cast("list[dict[str, Any]]", msg["output"])
         assert len(output) == 1
         assert output[0]["type"] == "input_image"
         assert output[0]["image_url"] == "data:image/png;base64,screenshot_data"
@@ -248,10 +250,10 @@ class TestOpenAIAgent:
         messages = await agent.format_tool_results(tool_calls, tool_results)
 
         assert len(messages) == 1
-        msg = cast(dict[str, Any], messages[0])
+        msg = cast("dict[str, Any]", messages[0])
         assert msg["type"] == "function_call_output"
         assert msg["call_id"] == "call_error"
-        output = cast(list[dict[str, Any]], msg["output"])
+        output = cast("list[dict[str, Any]]", msg["output"])
         assert len(output) == 2
         assert output[0]["type"] == "input_text"
         assert output[0]["text"] == "[tool_error] true"
@@ -282,14 +284,15 @@ class TestOpenAIAgent:
         messages = await agent.format_tool_results(tool_calls, tool_results)
 
         assert len(messages) == 1
-        msg = cast(dict[str, Any], messages[0])
+        msg = cast("dict[str, Any]", messages[0])
         assert msg["type"] == "function_call_output"
         assert msg["call_id"] == "call_789"
-        output = cast(list[dict[str, Any]], msg["output"])
+        output = cast("list[dict[str, Any]]", msg["output"])
         assert len(output) == 1
         assert output[0]["type"] == "input_text"
         # Structured content is JSON serialized
         import json
+
         parsed = json.loads(output[0]["text"])
         assert parsed == {"key": "value", "number": 42}
 
@@ -321,9 +324,9 @@ class TestOpenAIAgent:
         messages = await agent.format_tool_results(tool_calls, tool_results)
 
         assert len(messages) == 2
-        msg0 = cast(dict[str, Any], messages[0])
+        msg0 = cast("dict[str, Any]", messages[0])
         assert msg0["call_id"] == "call_1"
-        msg1 = cast(dict[str, Any], messages[1])
+        msg1 = cast("dict[str, Any]", messages[1])
         assert msg1["call_id"] == "call_2"
 
     @pytest.mark.asyncio
@@ -424,7 +427,9 @@ class TestOpenAIAgent:
 
             mock_openai.responses.create = AsyncMock(return_value=mock_response)
 
-            messages = [{"role": "user", "content": [{"type": "input_text", "text": "Do something"}]}]
+            messages = [
+                {"role": "user", "content": [{"type": "input_text", "text": "Do something"}]}
+            ]
             response = await agent.get_response(messages)
 
             assert response.done is False
@@ -478,7 +483,9 @@ class TestOpenAIAgent:
 
             mock_openai.responses.create = AsyncMock(return_value=mock_response)
 
-            messages = [{"role": "user", "content": [{"type": "input_text", "text": "Hard question"}]}]
+            messages = [
+                {"role": "user", "content": [{"type": "input_text", "text": "Hard question"}]}
+            ]
             response = await agent.get_response(messages)
 
             assert "Thinking: Let me think about this..." in response.content
@@ -508,7 +515,9 @@ class TestOpenAIAgent:
             assert response.tool_calls == []
 
     @pytest.mark.asyncio
-    async def test_get_response_no_new_messages_with_previous_id(self, mock_mcp_client, mock_openai):
+    async def test_get_response_no_new_messages_with_previous_id(
+        self, mock_mcp_client, mock_openai
+    ):
         """Test getting model response when no new messages and previous response exists."""
         with patch("hud.settings.settings.telemetry_enabled", False):
             agent = OpenAIAgent(
@@ -543,11 +552,13 @@ class TestOpenAIAgent:
             validate_api_key=False,
         )
 
-        agent._openai_tools = [cast(Any, {"type": "function", "name": "test"})]
+        agent._openai_tools = [cast("Any", {"type": "function", "name": "test"})]
         agent.system_prompt = "You are a helpful assistant"
         agent.last_response_id = "prev_123"
 
-        new_items = cast(Any, [{"role": "user", "content": [{"type": "input_text", "text": "Hi"}]}])
+        new_items = cast(
+            "Any", [{"role": "user", "content": [{"type": "input_text", "text": "Hi"}]}]
+        )
         payload = agent._build_request_payload(new_items)
 
         assert payload["model"] == "gpt-4o"
@@ -570,7 +581,9 @@ class TestOpenAIAgent:
             validate_api_key=False,
         )
 
-        new_items = cast(Any, [{"role": "user", "content": [{"type": "input_text", "text": "Hi"}]}])
+        new_items = cast(
+            "Any", [{"role": "user", "content": [{"type": "input_text", "text": "Hi"}]}]
+        )
         payload = agent._build_request_payload(new_items)
 
         assert payload["model"] == "gpt-5.1"  # default
@@ -655,7 +668,7 @@ class TestOpenAIAgent:
         assert len(agent._openai_tools) == 2
         assert agent._tool_name_map == {"tool1": "tool1", "tool2": "tool2"}
 
-        tool1 = cast(dict[str, Any], agent._openai_tools[0])
+        tool1 = cast("dict[str, Any]", agent._openai_tools[0])
         assert tool1["type"] == "function"
         assert tool1["name"] == "tool1"
         assert tool1["description"] == "First tool"
@@ -692,7 +705,7 @@ class TestOpenAIAgent:
 
         # Should only have the complete tool
         assert len(agent._openai_tools) == 1
-        tool = cast(dict[str, Any], agent._openai_tools[0])
+        tool = cast("dict[str, Any]", agent._openai_tools[0])
         assert tool["name"] == "complete"
 
     @pytest.mark.asyncio
