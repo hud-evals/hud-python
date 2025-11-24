@@ -844,9 +844,10 @@ def build_environment(
             tools_serialized.append(entry)
         lock_content["tools"] = tools_serialized
 
-    # Add hub tools if present
-    if analysis.get("hubTools"):
-        lock_content["hubTools"] = analysis["hubTools"]
+    # Add hub tools if present (analyze_environment returns hub_tools with snake_case)
+    hub_tools = analysis.get("hub_tools") or analysis.get("hubTools")
+    if hub_tools:
+        lock_content["hubTools"] = hub_tools
 
     # Write lock file
     lock_path = env_dir / "hud.lock.yaml"
