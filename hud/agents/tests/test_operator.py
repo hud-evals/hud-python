@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from mcp import types
 
-from hud.agents.openai import OperatorAgent
+from hud.agents.operator import OperatorAgent
 from hud.types import MCPToolCall, MCPToolResult
 
 
