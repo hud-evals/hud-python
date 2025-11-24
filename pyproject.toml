@@ -151,7 +151,7 @@ dev = [
     "pytest-asyncio",
     "pytest-mock",
     "pytest-cov",
-    "pyright==1.1.401",
+    "pyright==1.1.407",
     # Automation and computer control
     "playwright",
     "pyautogui>=0.9.54",
