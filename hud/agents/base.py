@@ -290,6 +290,10 @@ class MCPAgent(ABC):
                 self.console.progress_log(f"Setting up tool phase: {task.setup_tool}")
                 results = await self.call_tools(task.setup_tool)
                 if any(result.isError for result in results):
+                    for result in results:
+                        if result.isError:
+                            self.console.error_log(f"Error in setup tool: {result}")
+
                     return Trace(
                         reward=0.0,
                         done=True,
