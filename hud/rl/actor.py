@@ -9,7 +9,7 @@ import httpx
 from openai import AsyncOpenAI
 
 import hud
-from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
+from hud.agents.openai_chat import OpenAIChatAgent
 from hud.clients.utils.retry_transport import create_retry_httpx_client
 from hud.types import Task, Trace
 from hud.utils.hud_console import HUDConsole
@@ -46,9 +46,9 @@ class Actor:
             max_retries=2,
         )
 
-    def create_agent(self) -> GenericOpenAIChatAgent:
+    def create_agent(self) -> OpenAIChatAgent:
         """Create an agent with the current adapter."""
-        return GenericOpenAIChatAgent(
+        return OpenAIChatAgent(
             openai_client=self.openai_client,
             model_name=self.current_adapter,
             allowed_tools=self.actor_config.allowed_tools,
@@ -109,7 +109,7 @@ class Actor:
 
         # Run the task
         try:
-            with hud.trace(f"Training | {task.prompt}", job_id=job_id):
+            async with hud.async_trace(f"Training | {task.prompt}", job_id=job_id):
                 result = await agent.run(task, max_steps=self.actor_config.max_steps_per_episode)
 
         except Exception:

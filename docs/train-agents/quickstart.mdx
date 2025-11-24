@@ -20,7 +20,7 @@ hud set HUD_API_KEY=sk-hud-...
 Install and download a taskset:
 
 ```bash
-uv tool install hud-python
+uv tool install hud-python@latest
 hud get hud-evals/2048-basic
 ```
 
@@ -30,7 +30,7 @@ hud get hud-evals/2048-basic
 hud rl 2048-basic.json
 ```
 
-This launches training remotely and automatically provisions a vLLM server and a trainer for you. You can monitor progress on https://hud.so. The server persists between runs, so you can rerun training or evaluate against the same endpoint.
+This launches training remotely and automatically provisions a vLLM server and a trainer for you. You can monitor progress on https://hud.ai. The server persists between runs, so you can rerun training or evaluate against the same endpoint.
 
 Optional baseline first (Claude or Operator):
 
@@ -43,7 +43,7 @@ hud eval 2048-basic.json
 Use any provider with at least 2 GPUs (one for inference, one for training). Run locally with the flag `--local`:
 
 ```bash
-uv tool install hud-python
+uv tool install hud-python@latest
 hud get hud-evals/2048-basic
 hud rl 2048-basic.json --local
 ```
@@ -95,7 +95,7 @@ Some general findings from our internal training runs:
 
 ### Pricing
 
-Below is the pricing by GPU type. Actual prices vary — see https://hud.so/project/billing for current rates.
+Below is the pricing by GPU type. Actual prices vary — see https://hud.ai/project/billing for current rates.
 
 vLLM GPU Pricing (2 Hosted GPUs)
 

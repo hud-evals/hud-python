@@ -1,4 +1,4 @@
-"""Generic OpenAI chat-completions agent.
+"""OpenAI Chat Completions Agent.
 
 This class provides the minimal glue required to connect any endpoint that
 implements the OpenAI compatible *chat.completions* API with MCP tool calling
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class GenericOpenAIChatAgent(MCPAgent):
+class OpenAIChatAgent(MCPAgent):
     """MCP-enabled agent that speaks the OpenAI *chat.completions* protocol."""
 
     metadata: ClassVar[dict[str, Any]] = {}
@@ -62,7 +62,7 @@ class GenericOpenAIChatAgent(MCPAgent):
         else:
             raise ValueError("Either openai_client or (api_key and base_url) must be provided")
 
-        self.model_name = "GenericOpenAI"
+        self.model_name = "OpenAI"
         self.checkpoint_name = model_name
         self.completion_kwargs: dict[str, Any] = completion_kwargs or {}
         self.mcp_schemas = []
@@ -84,7 +84,10 @@ class GenericOpenAIChatAgent(MCPAgent):
 
     async def get_system_messages(self) -> list[Any]:
         """Get system messages for OpenAI."""
-        return [{"role": "system", "content": self.system_prompt}]
+        if self.system_prompt is not None:
+            return [{"role": "system", "content": self.system_prompt}]
+        else:
+            return []
 
     async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
         """Format blocks for OpenAI."""
@@ -192,7 +195,7 @@ class GenericOpenAIChatAgent(MCPAgent):
         extra: dict[str, Any],
     ) -> Any:
         if self.oai is None:
-            raise ValueError("openai_client is required for GenericOpenAIChatAgent")
+            raise ValueError("openai_client is required for OpenAIChatAgent")
         # default transport = OpenAI SDK
         return await self.oai.chat.completions.create(
             model=self.checkpoint_name,

@@ -53,25 +53,25 @@ class Settings(BaseSettings):
         )
 
     hud_telemetry_url: str = Field(
-        default="https://telemetry.hud.so/v3/api",
+        default="https://telemetry.hud.ai/v3/api",
         description="Base URL for the HUD API",
         validation_alias="HUD_TELEMETRY_URL",
     )
 
     hud_mcp_url: str = Field(
-        default="https://mcp.hud.so/v3/mcp",
+        default="https://mcp.hud.ai/v3/mcp",
         description="Base URL for the MCP Server",
         validation_alias="HUD_MCP_URL",
     )
 
     hud_rl_url: str = Field(
-        default="https://rl.hud.so/v1",
+        default="https://rl.hud.ai/v1",
         description="Base URL for the HUD RL API server",
         validation_alias="HUD_RL_URL",
     )
 
     hud_api_url: str = Field(
-        default="https://api.hud.so",
+        default="https://api.hud.ai",
         description="Base URL for the HUD API server",
         validation_alias="HUD_API_URL",
     )
@@ -92,6 +92,12 @@ class Settings(BaseSettings):
         default=None,
         description="API key for OpenAI models",
         validation_alias="OPENAI_API_KEY",
+    )
+
+    gemini_api_key: str | None = Field(
+        default=None,
+        description="API key for Google Gemini models",
+        validation_alias="GEMINI_API_KEY",
     )
 
     openrouter_api_key: str | None = Field(

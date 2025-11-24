@@ -41,7 +41,7 @@ class TestConvertCommand:
         # Create lock file
         lock_data = {
             "images": {
-                "remote": "registry.hud.so/test-org/test-env:v1.0.0",
+                "remote": "registry.hud.ai/test-org/test-env:v1.0.0",
                 "local": "test-env:latest",
             }
         }
@@ -75,13 +75,13 @@ class TestConvertCommand:
         # Mock the push check to return updated lock data
         mock_ensure_pushed.return_value = {
             "images": {
-                "remote": "registry.hud.so/test-org/test-env:v1.0.0",
+                "remote": "registry.hud.ai/test-org/test-env:v1.0.0",
                 "local": "test-env:v1.0.0",
             }
         }
 
         # Mock derive remote image
-        mock_derive_remote.return_value = "registry.hud.so/test-org/test-env:v1.0.0"
+        mock_derive_remote.return_value = "registry.hud.ai/test-org/test-env:v1.0.0"
 
         task = Task(
             prompt="Test task",
@@ -111,7 +111,7 @@ class TestConvertCommand:
 
         assert len(converted_tasks) == 1
         assert "hud" in converted_tasks[0]["mcp_config"]
-        assert converted_tasks[0]["mcp_config"]["hud"]["url"] == "https://mcp.hud.so/v3/mcp"
+        assert converted_tasks[0]["mcp_config"]["hud"]["url"] == "https://mcp.hud.ai/v3/mcp"
 
     @patch("hud.settings.settings")
     def test_convert_missing_api_key(self, mock_settings, temp_tasks_file):
@@ -136,8 +136,8 @@ class TestConvertCommand:
             prompt="Test task",
             mcp_config={
                 "remote": {
-                    "url": "https://mcp.hud.so",
-                    "headers": {"Mcp-Image": "registry.hud.so/test/image:v1"},
+                    "url": "https://mcp.hud.ai",
+                    "headers": {"Mcp-Image": "registry.hud.ai/test/image:v1"},
                 }
             },
         )
@@ -195,13 +195,13 @@ class TestConvertCommand:
         # Mock the push check to return updated lock data
         mock_ensure_pushed.return_value = {
             "images": {
-                "remote": "registry.hud.so/test-org/test-env:v1.0.0",
+                "remote": "registry.hud.ai/test-org/test-env:v1.0.0",
                 "local": "test-env:v1.0.0",
             }
         }
 
         # Mock derive remote image
-        mock_derive_remote.return_value = "registry.hud.so/test-org/test-env:v1.0.0"
+        mock_derive_remote.return_value = "registry.hud.ai/test-org/test-env:v1.0.0"
 
         # Add .env file with API keys
         env_file = mock_env_dir / ".env"
@@ -262,7 +262,7 @@ SOME_TOKEN=abc123
 CLIENT_SECRET=secret789
 USER_PASSWORD=pass123
 REGULAR_VAR=not_included
-HUD_API_URL=https://api.hud.so
+HUD_API_URL=https://api.hud.ai
 """)
 
             result = _extract_dotenv_api_key_vars(env_dir)
@@ -281,9 +281,9 @@ HUD_API_URL=https://api.hud.so
         from hud.cli.flows.tasks import _is_remote_url
 
         # This function matches URLs with domain names (not localhost or IPs)
-        assert _is_remote_url("https://mcp.hud.so")
-        assert _is_remote_url("http://mcp.hud.so")
-        assert _is_remote_url("https://mcp.hud.so/some/path")
+        assert _is_remote_url("https://mcp.hud.ai")
+        assert _is_remote_url("http://mcp.hud.ai")
+        assert _is_remote_url("https://mcp.hud.ai/some/path")
         assert _is_remote_url("https://example.com")  # Also matches
         assert not _is_remote_url("http://localhost:8000")  # localhost doesn't match
         assert not _is_remote_url("file:///path/to/file")  # file:// doesn't match
@@ -356,7 +356,7 @@ HUD_API_URL=https://api.hud.so
                     }
                 },
             },
-            {"prompt": "Task 3", "mcp_config": {"remote": {"url": "https://mcp.hud.so"}}},
+            {"prompt": "Task 3", "mcp_config": {"remote": {"url": "https://mcp.hud.ai"}}},
         ]
 
         result = _extract_vars_from_task_configs(raw_tasks)

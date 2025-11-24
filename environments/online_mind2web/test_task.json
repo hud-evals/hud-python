@@ -1,0 +1,55 @@
+[
+    {
+        "prompt": "Find the store location and hours of the closest Trader Joe's to zip code 90028 and set it as my home store.",
+        "mcp_config": {
+            "local": {
+                "command": "docker",
+                "args": [
+                    "run",
+                    "--rm",
+                    "-i",
+                    "--env-file",
+                    ".env",
+                    "hud-om2w:latest"
+                ]
+            }
+        },
+        "setup_tool": {
+            "name": "playwright",
+            "arguments": {
+                "action": "navigate",
+                "url": "https://www.traderjoes.com/",
+                "wait_for_load_state": "networkidle"
+            }
+        },
+        "evaluate_tool": {
+            "name": "evaluate",
+            "arguments": {
+                "name": "webjudge",
+                "arguments": {
+                    "task_description": {
+                        "task_id": "b7258ee05d75e6c50673a59914db412e_110325",
+                        "confirmed_task": "Find the store location and hours of the closest Trader Joe's to zip code 90028 and set it as my home store.",
+                        "website": "https://www.traderjoes.com/",
+                        "reference_length": 6,
+                        "level": "medium"
+                    }
+                }
+            }
+        },
+        "metadata": {
+            "dataset": "Online-Mind2Web",
+            "website": "https://www.traderjoes.com/",
+            "task_type": "web_navigation",
+            "reference_length": 6
+        },
+        "system_prompt": "\nYou are assisting humans doing web navigation tasks step by step. At each stage, you can see the webpage by a screenshot.\n\n**Instructions**:\n1. Read the task description carefully.\n2. Identify and extract **key points** directly stated in the task description.\n  - A **key point** is a critical element, condition, or step explicitly mentioned in the task description.\n  - Do not infer or add any unstated elements.\n  - Words such as \"best\", \"highest\", \"cheapest\", \"latest\", \"most recent\", \"lowest\", \"closest\", \"highest-rated\", \"largest, \" and \"newest\" must go through the sort function(e.g., the key point should be \"Filter by highest\").\n3. Execute the task step-by-step, ensuring you address each identified key point. Use appropriate sort/filter functions for any comparative requirements.\n\n**Allowed Tools**\nPlaywright TOOL:\n- navigate(url, wait_for_load_state=\"load\") - Go to URL (default: load, can use: commit, domcontentloaded, load, networkidle)\n- screenshot() - See current page\n- get_elements(element_type=None) - List interactive elements with selectors\n- get_page_content() - Get page structure and text\n- click(selector) - Click element\n- type(selector, text) - Type into input\n- select_option(selector, value/label/index) - Select dropdown\n- wait_for_element(selector) - Wait for element\n\nSELECTORS:\n1. ID: \"#unique-id\"\n2. Text: \"text=Button Label\"\n3. Role: \"role=button[name=\"Submit\"]\"\n4. CSS: \"button.primary\"\n5. XPath: \" //button[contains(text(),\"Submit\")]\"\n\nCOMPUTER TOOL:\n- computer, anthropic_computer_tool, openai_computer_tool\n- Actions: click(coordinate=[x,y]), type(text), mouse_move(coordinate), scroll(direction)\n\nWORKFLOW:\n1. screenshot → see state\n2. get_elements (if unsure) → discover elements\n3. action → interact\n4. screenshot → verify\n5. repeat\n\nTIPS:\n- Always start with screenshot\n- Use get_elements when unsure what\"s clickable\n- Prefer text selectors: \"text=Pricing\" over \".nav-link:nth-child(3)\"\n- If \"element not found\" → use get_elements to find correct selector\n- If \"multiple elements match\" → make selector more specific or use text-based\n- When encountering websites protected by security measures like Cloudflare and CAPTCHA, use COMPUTER TOOL the validation mechanism, then continue the task.\n ",
+        "agent_config": {
+            "disallowed_tools": [
+                "setup",
+                "evaluate",
+                "computer"
+            ]
+        }
+    }
+]

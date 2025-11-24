@@ -56,7 +56,7 @@ class PreReleaseChecker:
             # Run the evaluation
             agent_class = ClaudeAgent
             agent_config = {
-                "model": "claude-sonnet-4-20250514",
+                "model": "claude-sonnet-4-5",
                 "allowed_tools": ["anthropic_computer"],
                 "verbose": False,
             }

@@ -17,15 +17,23 @@ class MCPConfigPatch(BaseModel):
     meta: dict[str, Any] | None = Field(default_factory=dict, alias="meta")
 
 
+def _is_hud_server(url: str) -> bool:
+    """Check if a URL is a HUD MCP server.
+
+    Matches any mcp.hud.* domain (including .ai, .so, and future domains).
+    """
+    if not url:
+        return False
+    return "mcp.hud." in url.lower()
+
+
 def patch_mcp_config(mcp_config: dict[str, dict[str, Any]], patch: MCPConfigPatch) -> None:
     """Patch MCP config with additional values."""
-    hud_mcp_url = settings.hud_mcp_url
-
     for server_cfg in mcp_config.values():
         url = server_cfg.get("url", "")
 
         # 1) HTTP header lane (only for hud MCP servers)
-        if hud_mcp_url in url and patch.headers:
+        if _is_hud_server(url) and patch.headers:
             for key, value in patch.headers.items():
                 headers = server_cfg.setdefault("headers", {})
                 headers.setdefault(key, value)
@@ -50,9 +58,8 @@ def setup_hud_telemetry(
         raise ValueError("Please run initialize() before setting up client-side telemetry")
 
     # Check if there are any HUD servers to setup telemetry for
-    hud_mcp_url = settings.hud_mcp_url
     has_hud_servers = any(
-        hud_mcp_url in server_cfg.get("url", "") for server_cfg in mcp_config.values()
+        _is_hud_server(server_cfg.get("url", "")) for server_cfg in mcp_config.values()
     )
 
     # If no HUD servers, no need for telemetry setup

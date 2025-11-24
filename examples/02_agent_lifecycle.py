@@ -30,7 +30,7 @@ async def main():
             "prompt": "Create a new todo item with the title 'Buy groceries' and description 'Milk, eggs, bread'",
             "mcp_config": {
                 "hud": {
-                    "url": "https://mcp.hud.so/v3/mcp",
+                    "url": "https://mcp.hud.ai/v3/mcp",
                     "headers": {
                         "Authorization": "Bearer ${HUD_API_KEY}",  # Automatically filled from env
                         "Mcp-Image": "hudevals/hud-browser:0.1.6",

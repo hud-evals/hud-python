@@ -198,52 +198,6 @@ def test_job_update_status_sync_error():
         job_obj.update_status_sync("completed")
 
 
-def test_job_update_status_fire_and_forget():
-    """Test fire-and-forget status update."""
-    job_obj = Job(job_id="test-id", name="Test")
-
-    with (
-        patch("hud.telemetry.job.settings") as mock_settings,
-        patch("hud.utils.async_utils.fire_and_forget") as mock_fire,
-    ):
-        mock_settings.telemetry_enabled = True
-
-        job_obj.update_status_fire_and_forget("running")
-
-        assert job_obj.status == "running"
-        mock_fire.assert_called_once()
-
-
-def test_job_update_status_fire_and_forget_with_dataset():
-    """Test fire-and-forget update includes dataset link."""
-    job_obj = Job(job_id="test-id", name="Test", dataset_link="test/dataset")
-
-    with (
-        patch("hud.telemetry.job.settings") as mock_settings,
-        patch("hud.utils.async_utils.fire_and_forget"),
-    ):
-        mock_settings.telemetry_enabled = True
-
-        job_obj.update_status_fire_and_forget("running")
-
-        assert job_obj.status == "running"
-
-
-def test_job_update_status_fire_and_forget_telemetry_disabled():
-    """Test fire-and-forget when telemetry is disabled."""
-    job_obj = Job(job_id="test-id", name="Test")
-
-    with (
-        patch("hud.telemetry.job.settings") as mock_settings,
-        patch("hud.utils.async_utils.fire_and_forget") as mock_fire,
-    ):
-        mock_settings.telemetry_enabled = False
-
-        job_obj.update_status_fire_and_forget("running")
-
-        mock_fire.assert_not_called()
-
-
 @pytest.mark.asyncio
 async def test_job_log():
     """Test async log method."""

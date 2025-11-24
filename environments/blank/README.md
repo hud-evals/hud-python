@@ -1,7 +1,7 @@
 # Blank Environment
 
 Minimal starter template for building HUD environments.
-See [docs](https://docs.hud.so/build-environments) for the complete environment design workflow.
+See [docs](https://docs.hud.ai/build-environments) for the complete environment design workflow.
 
 ## Architecture
 
@@ -120,9 +120,9 @@ save_tasks(tasks, repo_id="your-org/your-dataset")
 hud eval "your-org/your-dataset" claude
 
 # View results at:
-# hud.so/leaderboards/your-org/your-dataset
+# hud.ai/leaderboards/your-org/your-dataset
 ```
 
 **Note**: Only public HuggingFace datasets appear as leaderboards!
 
-📚 Learn more: [Creating Benchmarks](https://docs.hud.so/evaluate-agents/create-benchmarks) | [Leaderboards](https://docs.hud.so/evaluate-agents/leaderboards)
+📚 Learn more: [Creating Benchmarks](https://docs.hud.ai/evaluate-agents/create-benchmarks) | [Leaderboards](https://docs.hud.ai/evaluate-agents/leaderboards)

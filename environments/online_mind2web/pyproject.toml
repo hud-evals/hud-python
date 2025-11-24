@@ -1,0 +1,22 @@
+[project]
+name = "hud-om2w"
+version = "0.1.0"
+description = "HUD Remote Browser Controller with MCP tools for cloud browser providers"
+requires-python = ">=3.11,<3.13"
+dependencies = [ "hud-python>=0.4.67", "anthropic>=0.74.0", "pyautogui", "playwright", "httpx", "typer", "google-api-python-client", "google-auth",]
+
+[build-system]
+requires = [ "hatchling",]
+build-backend = "hatchling.build"
+
+[project.scripts]
+hud-om2w = "hud_controller.__main__:main"
+
+[tool.hud]
+image = "hud-om2w:dev"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = [ "src/hud_controller",]

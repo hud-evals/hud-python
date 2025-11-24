@@ -1,0 +1,503 @@
+version: '1.1'
+images:
+  local: browser:0.1.0
+  full: browser:0.1.0@sha256:561425e39f921b7df4869fc474b7ad76d719a614a7f98dd9bd088f053bb5b2f2
+  pushed: null
+build:
+  generatedAt: 2025-11-24T01:36:13.480264+00:00Z
+  hudVersion: 0.4.66
+  directory: browser
+  version: 0.1.0
+  sourceHash: e9e1af9f9cc521a2ddf91694b393c7532a0d4814a0b749bbc9112c31d8779888
+  sourceFiles:
+  - Dockerfile
+  - environment/2048/README.md
+  - environment/2048/backend/game.py
+  - environment/2048/backend/main.py
+  - environment/2048/backend/pyproject.toml
+  - environment/2048/frontend/app/globals.css
+  - environment/2048/frontend/app/layout.tsx
+  - environment/2048/frontend/app/page.tsx
+  - environment/2048/frontend/components/GameBoard.tsx
+  - environment/2048/frontend/components/GameControls.tsx
+  - environment/2048/frontend/components/GameTile.tsx
+  - environment/2048/frontend/next.config.js
+  - environment/2048/frontend/package.json
+  - environment/2048/frontend/postcss.config.js
+  - environment/2048/frontend/tailwind.config.js
+  - environment/2048/frontend/tsconfig.json
+  - environment/2048/launch.py
+  - environment/README.md
+  - environment/__init__.py
+  - environment/pyproject.toml
+  - environment/server.py
+  - environment/todo/README.md
+  - environment/todo/backend/main.py
+  - environment/todo/backend/pyproject.toml
+  - environment/todo/frontend/app/globals.css
+  - environment/todo/frontend/app/layout.tsx
+  - environment/todo/frontend/app/page.tsx
+  - environment/todo/frontend/next.config.js
+  - environment/todo/frontend/package-lock.json
+  - environment/todo/frontend/package.json
+  - environment/todo/frontend/postcss.config.js
+  - environment/todo/frontend/tailwind.config.js
+  - environment/todo/frontend/tsconfig.json
+  - environment/todo/launch.py
+  - pyproject.toml
+  - server/__init__.py
+  - server/evaluate/__init__.py
+  - server/evaluate/game_2048.py
+  - server/evaluate/todo.py
+  - server/main.py
+  - server/pyproject.toml
+  - server/resources.py
+  - server/setup/__init__.py
+  - server/setup/game_2048.py
+  - server/setup/todo.py
+  - server/shared.py
+  - server/tools.py
+environment:
+  initializeMs: 15450
+  toolCount: 8
+tools:
+- name: playwright
+  description: Web automation tool using Playwright
+  inputSchema:
+    properties:
+      action:
+        description: The action to perform (navigate, screenshot, click, type, get_page_info,
+          wait_for_element)
+        title: Action
+        type: string
+      url:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: URL to navigate to (for navigate action)
+        title: Url
+      selector:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: CSS selector for element (for click, type, wait_for_element actions)
+        title: Selector
+      text:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: Text to type (for type action)
+        title: Text
+      wait_for_load_state:
+        anyOf:
+        - enum:
+          - commit
+          - domcontentloaded
+          - load
+          - networkidle
+          type: string
+        - type: 'null'
+        default: null
+        description: 'State to wait for: commit, domcontentloaded, load, networkidle
+          (default: networkidle)'
+        title: Wait For Load State
+    required:
+    - action
+    type: object
+- name: computer
+  description: Control computer with mouse, keyboard, and screenshots
+  inputSchema:
+    properties:
+      action:
+        description: The action name (click, press, write, move, etc.)
+        title: Action
+        type: string
+      x:
+        anyOf:
+        - type: integer
+        - type: 'null'
+        default: null
+        description: X coordinate for click/move/scroll actions
+        title: X
+      y:
+        anyOf:
+        - type: integer
+        - type: 'null'
+        default: null
+        description: Y coordinate for click/move/scroll actions
+        title: Y
+      button:
+        anyOf:
+        - enum:
+          - left
+          - right
+          - middle
+          - back
+          - forward
+          type: string
+        - type: 'null'
+        default: null
+        description: Mouse button for click actions
+        title: Button
+      pattern:
+        anyOf:
+        - items:
+            type: integer
+          type: array
+        - type: 'null'
+        default: null
+        description: Click pattern for multi-clicks (e.g., [100] for double-click)
+        title: Pattern
+      text:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: Text for write/response actions
+        title: Text
+      keys:
+        anyOf:
+        - items:
+            type: string
+          type: array
+        - type: 'null'
+        default: null
+        description: Keys for press/keydown/keyup actions
+        title: Keys
+      enter_after:
+        anyOf:
+        - type: boolean
+        - type: 'null'
+        default: null
+        description: Whether to press Enter after typing
+        title: Enter After
+      scroll_x:
+        anyOf:
+        - type: integer
+        - type: 'null'
+        default: null
+        description: Horizontal scroll amount (positive = right)
+        title: Scroll X
+      scroll_y:
+        anyOf:
+        - type: integer
+        - type: 'null'
+        default: null
+        description: Vertical scroll amount (positive = down)
+        title: Scroll Y
+      offset_x:
+        anyOf:
+        - type: integer
+        - type: 'null'
+        default: null
+        description: X offset for relative move
+        title: Offset X
+      offset_y:
+        anyOf:
+        - type: integer
+        - type: 'null'
+        default: null
+        description: Y offset for relative move
+        title: Offset Y
+      path:
+        anyOf:
+        - items:
+            maxItems: 2
+            minItems: 2
+            prefixItems:
+            - type: integer
+            - type: integer
+            type: array
+          type: array
+        - type: 'null'
+        default: null
+        description: Path for drag actions as list of (x, y) coordinates
+        title: Path
+      time:
+        anyOf:
+        - type: integer
+        - type: 'null'
+        default: null
+        description: Time in milliseconds for wait action
+        title: Time
+      hold_keys:
+        anyOf:
+        - items:
+            type: string
+          type: array
+        - type: 'null'
+        default: null
+        description: Keys to hold during action
+        title: Hold Keys
+      duration:
+        anyOf:
+        - type: number
+        - type: 'null'
+        default: null
+        description: Duration in seconds for hold_key action
+        title: Duration
+    required:
+    - action
+    type: object
+- name: anthropic_computer
+  description: Control computer with mouse, keyboard, and screenshot
+  inputSchema:
+    properties:
+      action:
+        description: The action to perform on the computer
+        title: Action
+        type: string
+      coordinate:
+        anyOf:
+        - items:
+            type: integer
+          type: array
+        - maxItems: 2
+          minItems: 2
+          prefixItems:
+          - type: integer
+          - type: integer
+          type: array
+        - type: 'null'
+        default: null
+        description: The coordinate to interact with on the computer [x, y]
+        title: Coordinate
+      text:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: The text to type on the computer or key to press
+        title: Text
+      start_coordinate:
+        anyOf:
+        - items:
+            type: integer
+          type: array
+        - maxItems: 2
+          minItems: 2
+          prefixItems:
+          - type: integer
+          - type: integer
+          type: array
+        - type: 'null'
+        default: null
+        description: The starting coordinate for drag actions [x, y]
+        title: Start Coordinate
+      scroll_direction:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: The direction to scroll (up, down, left, right)
+        title: Scroll Direction
+      scroll_amount:
+        anyOf:
+        - type: integer
+        - type: 'null'
+        default: null
+        description: The amount to scroll
+        title: Scroll Amount
+      duration:
+        anyOf:
+        - type: number
+        - type: 'null'
+        default: null
+        description: The duration of the action in seconds
+        title: Duration
+      take_screenshot_on_click:
+        default: true
+        description: Whether to take a screenshot after clicking
+        title: Take Screenshot On Click
+        type: boolean
+    required:
+    - action
+    type: object
+- name: openai_computer
+  description: Control computer with mouse, keyboard, and screenshots
+  inputSchema:
+    $defs:
+      Coordinate:
+        description: A coordinate point with x and y values.
+        properties:
+          x:
+            description: X coordinate
+            title: X
+            type: integer
+          y:
+            description: Y coordinate
+            title: Y
+            type: integer
+        required:
+        - x
+        - y
+        title: Coordinate
+        type: object
+    properties:
+      type:
+        description: The action type to perform
+        title: Type
+        type: string
+      x:
+        anyOf:
+        - type: integer
+        - type: 'null'
+        default: null
+        description: X coordinate for click/move/scroll actions
+        title: X
+      y:
+        anyOf:
+        - type: integer
+        - type: 'null'
+        default: null
+        description: Y coordinate for click/move/scroll actions
+        title: Y
+      button:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: Mouse button for click actions (left, right, middle, wheel)
+        title: Button
+      text:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: Text to type or response text
+        title: Text
+      scroll_x:
+        anyOf:
+        - type: integer
+        - type: 'null'
+        default: null
+        description: Horizontal scroll amount
+        title: Scroll X
+      scroll_y:
+        anyOf:
+        - type: integer
+        - type: 'null'
+        default: null
+        description: Vertical scroll amount
+        title: Scroll Y
+      ms:
+        anyOf:
+        - type: integer
+        - type: 'null'
+        default: null
+        description: Time to wait in milliseconds
+        title: Ms
+      keys:
+        anyOf:
+        - items:
+            type: string
+          type: array
+        - type: 'null'
+        default: null
+        description: Keys to press
+        title: Keys
+      path:
+        anyOf:
+        - items:
+            $ref: '#/$defs/Coordinate'
+          type: array
+        - type: 'null'
+        default: null
+        description: Path for drag actions as list of {x, y} dicts
+        title: Path
+      action:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        description: Custom action name
+        title: Action
+    required:
+    - type
+    type: object
+- name: launch_app
+  description: "Launch a specific application dynamically and navigate to it.\n\n\
+    Args:\n    app_name: Name of the app to launch (e.g., 'todo', '2048')\n\nReturns:\n\
+    \    Success message with app URL"
+  inputSchema:
+    properties:
+      app_name:
+        title: App Name
+        type: string
+    required:
+    - app_name
+    type: object
+- name: api_request
+  description: "Make HTTP API requests.\n\nArgs:\n    url: The URL to request\n  \
+    \  method: HTTP method (GET, POST, etc.)\n    data: Optional JSON data for POST/PUT\
+    \ requests\n\nReturns:\n    Response data as dict"
+  inputSchema:
+    properties:
+      url:
+        title: Url
+        type: string
+      method:
+        default: GET
+        title: Method
+        type: string
+      data:
+        anyOf:
+        - additionalProperties: true
+          type: object
+        - type: 'null'
+        default: null
+        title: Data
+    required:
+    - url
+    type: object
+- name: setup
+  description: Call internal 'setup' functions
+  inputSchema:
+    properties:
+      name:
+        title: Name
+        type: string
+      arguments:
+        anyOf:
+        - additionalProperties: true
+          type: object
+        - type: string
+        - type: 'null'
+        default: null
+        title: Arguments
+      ctx:
+        anyOf:
+        - {}
+        - type: 'null'
+        default: null
+        title: Ctx
+    required:
+    - name
+    type: object
+- name: evaluate
+  description: Call internal 'evaluate' functions
+  inputSchema:
+    properties:
+      name:
+        title: Name
+        type: string
+      arguments:
+        anyOf:
+        - additionalProperties: true
+          type: object
+        - type: string
+        - type: 'null'
+        default: null
+        title: Arguments
+      ctx:
+        anyOf:
+        - {}
+        - type: 'null'
+        default: null
+        title: Ctx
+    required:
+    - name
+    type: object

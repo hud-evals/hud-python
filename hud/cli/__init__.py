@@ -7,12 +7,19 @@ import json
 import sys
 from pathlib import Path
 
+import questionary
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from hud.cli.eval_config import (
+    display_eval_settings,
+    load_eval_config,
+)
+from hud.settings import settings
 from hud.types import AgentType
+from hud.utils.hud_console import HUDConsole
 
 from . import list_func as list_module
 from .analyze import (
@@ -30,6 +37,8 @@ from .init import create_environment
 from .pull import pull_command
 from .push import push_command
 from .remove import remove_command
+from .rft import rft_command
+from .rft_status import rft_status_command
 from .utils.config import set_env_values
 from .utils.cursor import get_cursor_config_path, list_cursor_servers, parse_cursor_config
 from .utils.logging import CaptureLogger
@@ -93,14 +102,14 @@ def analyze(
 ) -> None:
     """🔍 Analyze MCP environment - discover tools, resources, and capabilities.
 
-    By default, uses cached metadata for instant results.
+    [not dim]By default, uses cached metadata for instant results.
     Use --live to run the container for real-time analysis.
 
     Examples:
         hud analyze hudpython/test_init      # Fast metadata inspection
         hud analyze my-env --live            # Full container analysis
         hud analyze --config mcp-config.json # From MCP config
-        hud analyze --cursor text-2048-dev   # From Cursor config
+        hud analyze --cursor text-2048-dev   # From Cursor config[/not dim]
     """
     if config:
         # Load config from JSON file (always live for configs)
@@ -177,7 +186,7 @@ def debug(
 ) -> None:
     """🐛 Debug MCP environment - test initialization, tools, and readiness.
 
-    Examples:
+    [not dim]Examples:
         hud debug .                              # Debug current directory
         hud debug environments/browser           # Debug specific directory
         hud debug . --build                      # Build then debug
@@ -185,7 +194,7 @@ def debug(
         hud debug my-mcp-server:v1 -e API_KEY=xxx
         hud debug --config mcp-config.json
         hud debug --cursor text-2048-dev
-        hud debug . --max-phase 3               # Stop after phase 3
+        hud debug . --max-phase 3               # Stop after phase 3[/not dim]
     """
     # Import here to avoid circular imports
     from hud.utils.hud_console import HUDConsole
@@ -398,7 +407,7 @@ def dev(
 ) -> None:
     """🔥 Development mode - run MCP server with hot-reload.
 
-    TWO MODES:
+    [not dim]TWO MODES:
 
     1. Python Module:
        hud dev                    # Auto-detects module
@@ -419,7 +428,7 @@ def dev(
         hud dev --watch ../shared    # Watch additional directories
 
     For environment backend servers, use uvicorn directly:
-        uvicorn server:app --reload
+        uvicorn server:app --reload[/not dim]
     """
     # Extract module from params if provided (first param when not --docker)
     module = params[0] if params and not docker else None
@@ -448,7 +457,7 @@ def run(
     local: bool = typer.Option(
         False,
         "--local",
-        help="Run locally with Docker (default: remote via mcp.hud.so)",
+        help="Run locally with Docker (default: remote via mcp.hud.ai)",
     ),
     transport: str = typer.Option(
         "stdio",
@@ -465,7 +474,7 @@ def run(
     url: str = typer.Option(
         None,
         "--url",
-        help="Remote MCP server URL (default: HUD_MCP_URL or mcp.hud.so)",
+        help="Remote MCP server URL (default: HUD_MCP_URL or mcp.hud.ai)",
     ),
     api_key: str | None = typer.Option(
         None,
@@ -486,8 +495,8 @@ def run(
 ) -> None:
     """🚀 Run Docker image as MCP server.
 
-    A simple wrapper around 'docker run' that can launch images locally or remotely.
-    By default, runs remotely via mcp.hud.so. Use --local to run with local Docker.
+    [not dim]A simple wrapper around 'docker run' that can launch images locally or remotely.
+    By default, runs remotely via mcp.hud.ai. Use --local to run with local Docker.
 
     For local Python development with hot-reload, use 'hud dev' instead.
 
@@ -496,7 +505,7 @@ def run(
         hud run my-image:latest --local            # Run with local Docker
         hud run my-image:latest -e KEY=value       # Remote with env vars
         hud run my-image:latest --local -e KEY=val # Local with env vars
-        hud run my-image:latest --transport http   # Use HTTP transport
+        hud run my-image:latest --transport http   # Use HTTP transport[/not dim]
     """
     if not params:
         console.print("[red]❌ Docker image is required[/red]")
@@ -544,6 +553,73 @@ def run(
         run_remote_server(image, docker_args, transport, port, url, api_key, run_id, verbose)
 
 
+# Create RFT subcommand app
+rft_app = typer.Typer(help="🚀 Reinforcement Fine-Tuning (RFT) commands")
+
+
+@rft_app.command("run")
+def rft_run(
+    tasks_file: str = typer.Argument(
+        ...,
+        help="Path to tasks file (JSON/JSONL)",
+    ),
+    provider: str = typer.Option(
+        "openai",
+        "--provider",
+        help="Provider to use (e.g., openai)",
+    ),
+    reasoning_effort: str = typer.Option(
+        "medium",
+        "--reasoning-effort",
+        help="Reasoning effort level (low, medium, high)",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Enable verbose output",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Auto-accept all prompts",
+    ),
+) -> None:
+    """Launch an RFT training job."""
+    rft_command(
+        tasks_file=tasks_file,
+        provider=provider,
+        reasoning_effort=reasoning_effort,
+        verbose=verbose,
+        yes=yes,
+    )
+
+
+@rft_app.command("status")
+def rft_status(
+    model_id: str = typer.Argument(
+        ...,
+        help="Model ID or job ID to check status for",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Show full status details",
+    ),
+) -> None:
+    """Check the status of an RFT job."""
+    rft_status_command(
+        model_id=model_id,
+        verbose=verbose,
+    )
+
+
+# Add RFT app as a command group
+app.add_typer(rft_app, name="rft")
+
+
 @app.command()
 def clone(
     url: str = typer.Argument(
@@ -553,7 +629,7 @@ def clone(
 ) -> None:
     """🚀 Clone a git repository quietly with a pretty output.
 
-    This command wraps 'git clone' with the --quiet flag and displays
+    [not dim]This command wraps 'git clone' with the --quiet flag and displays
     a rich formatted success message. If the repository contains a clone
     message in pyproject.toml, it will be displayed as a tutorial.
 
@@ -568,7 +644,7 @@ def clone(
     # style = "cyan"
 
     Examples:
-        hud clone https://github.com/user/repo.git
+        hud clone https://github.com/user/repo.git[/not dim]
     """
     # Run the clone
     success, result = clone_repository(url)
@@ -596,10 +672,13 @@ def build(
     platform: str | None = typer.Option(
         None, "--platform", help="Set Docker target platform (e.g., linux/amd64)"
     ),
+    remote_cache: str | None = typer.Option(
+        None, "--remote-cache", help="Enable remote cache using Amazon ECR with specified repo name"
+    ),
 ) -> None:
     """🏗️ Build a HUD environment and generate lock file.
 
-    This command:
+    [not dim]This command:
     - Builds a Docker image from your environment
     - Analyzes the MCP server to extract metadata
     - Generates a hud.lock.yaml file for reproducibility
@@ -609,7 +688,8 @@ def build(
         hud build environments/text_2048 -e API_KEY=secret
         hud build . --tag my-env:v1.0 -e VAR1=value1 -e VAR2=value2
         hud build . --no-cache       # Force rebuild
-    """
+        hud build . --remote-cache my-cache-repo   # Use ECR remote cache (requires AWS_ACCOUNT_ID and AWS_DEFAULT_REGION)[/not dim]
+    """  # noqa: E501
     # Parse directory and extra arguments
     if params:
         directory = params[0]
@@ -646,7 +726,7 @@ def build(
         else:
             i += 1
 
-    build_command(directory, tag, no_cache, verbose, env_vars, platform)
+    build_command(directory, tag, no_cache, verbose, env_vars, platform, remote_cache)
 
 
 @app.command()
@@ -664,14 +744,14 @@ def push(
 ) -> None:
     """📤 Push HUD environment to registry.
 
-    Reads hud.lock.yaml from the directory and pushes to registry.
+    [not dim]Reads hud.lock.yaml from the directory and pushes to registry.
     Auto-detects your Docker username if --image not specified.
 
     Examples:
         hud push                     # Push with auto-detected name
         hud push --tag v1.0          # Push with specific tag
         hud push . --image myuser/myenv:v1.0
-        hud push --yes               # Skip confirmation
+        hud push --yes               # Skip confirmation[/not dim]
     """
     push_command(directory, image, tag, sign, yes, verbose)
 
@@ -690,12 +770,12 @@ def pull(
 ) -> None:
     """📥 Pull HUD environment from registry with metadata preview.
 
-    Shows environment details before downloading.
+    [not dim]Shows environment details before downloading.
 
     Examples:
         hud pull hud.lock.yaml               # Pull from lock file
         hud pull myuser/myenv:latest        # Pull by image reference
-        hud pull myuser/myenv --verify-only # Check metadata only
+        hud pull myuser/myenv --verify-only # Check metadata only[/not dim]
     """
     pull_command(target, lock_file, yes, verify_only, verbose)
 
@@ -711,14 +791,14 @@ def list_environments(
 ) -> None:
     """📋 List all HUD environments in local registry.
 
-    Shows environments pulled with 'hud pull' stored in ~/.hud/envs/
+    [not dim]Shows environments pulled with 'hud pull' stored in ~/.hud/envs/
 
     Examples:
         hud list                    # List all environments
         hud list --filter text      # Filter by name
         hud list --json            # Output as JSON
         hud list --all             # Show digest column
-        hud list --verbose         # Show full descriptions
+        hud list --verbose         # Show full descriptions[/not dim]
     """
     list_module.list_command(filter_name, json_output, show_all, verbose)
 
@@ -733,7 +813,7 @@ def remove(
 ) -> None:
     """🗑️ Remove HUD environments from local registry.
 
-    Removes environment metadata from ~/.hud/envs/
+    [not dim]Removes environment metadata from ~/.hud/envs/
     Note: This does not remove the Docker images.
 
     Examples:
@@ -741,7 +821,7 @@ def remove(
         hud remove text_2048           # Remove by name
         hud remove hudpython/test_init # Remove by full name
         hud remove all                 # Remove all environments
-        hud remove all --yes           # Remove all without confirmation
+        hud remove all --yes           # Remove all without confirmation[/not dim]
     """
     remove_command(target, yes, verbose)
 
@@ -760,7 +840,7 @@ def init(
 ) -> None:
     """🚀 Initialize a new HUD environment with minimal boilerplate.
 
-    Creates a working MCP environment with:
+    [not dim]Creates a working MCP environment with:
     - Dockerfile for containerization
     - pyproject.toml for dependencies
     - Minimal MCP server with context
@@ -769,7 +849,8 @@ def init(
     Examples:
         hud init                    # Choose preset interactively, create ./preset-name/
         hud init my-env             # Create new directory ./my-env/
-        hud init my-env --dir /tmp  # Create in /tmp/my-env/
+        hud init my-env --dir /tmp  # Create in /tmp/my-env/[/not dim]
+
     """
     create_environment(name, directory, force, preset)
 
@@ -795,7 +876,7 @@ def eval(
     agent: str | None = typer.Argument(
         None,
         help=(
-            "Agent backend to use (claude, openai, vllm, or litellm). If not provided, will prompt interactively."  # noqa: E501
+            "Agent backend to use (claude, openai, gemini, vllm, or litellm). If not provided, will prompt interactively."  # noqa: E501
         ),
     ),
     full: bool = typer.Option(
@@ -813,10 +894,10 @@ def eval(
         "--allowed-tools",
         help="Comma-separated list of allowed tools",
     ),
-    max_concurrent: int = typer.Option(
-        30,
+    max_concurrent: int | None = typer.Option(
+        None,
         "--max-concurrent",
-        help="Maximum concurrent tasks (1-200 recommended, prevents rate limits)",
+        help="Maximum concurrent tasks (1-200 recommended, prevents rate limits, default: 30)",
     ),
     max_steps: int | None = typer.Option(
         None,
@@ -840,10 +921,10 @@ def eval(
         "--vllm-base-url",
         help="Base URL for vLLM server (when using --agent vllm)",
     ),
-    group_size: int = typer.Option(
-        1,
+    group_size: int | None = typer.Option(
+        None,
         "--group-size",
-        help="Number of times to run each task (similar to RL training)",
+        help="Number of times to run each task (similar to RL training, default: 1)",
     ),
     integration_test: bool = typer.Option(
         False,
@@ -854,12 +935,38 @@ def eval(
             "spinning up an agent"
         ),
     ),
+    task_id: str | None = typer.Option(
+        None,
+        "--task-id",
+        help="Run a specific task by ID (from the dataset)",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompt and proceed automatically",
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents."""
-    from hud.settings import settings
-    from hud.utils.hud_console import HUDConsole
-
     hud_console = HUDConsole()
+
+    config = load_eval_config()
+
+    # Precedence: CLI args > config file > defaults
+    source = source if source is not None else config.get("source")
+    agent = agent if agent is not None else config.get("agent")
+    model = model if model is not None else config.get("model")
+    task_id = task_id if task_id is not None else config.get("task_id")
+    full = full or config.get("full", False)
+    max_concurrent = (
+        int(max_concurrent) if max_concurrent is not None else int(config.get("max_concurrent", 30))
+    )
+    max_steps = max_steps if max_steps is not None else config.get("max_steps")
+    allowed_tools = allowed_tools if allowed_tools is not None else config.get("allowed_tools")
+    verbose = verbose or config.get("verbose", False)
+    very_verbose = very_verbose or config.get("very_verbose", False)
+    vllm_base_url = vllm_base_url if vllm_base_url is not None else config.get("vllm_base_url")
+    group_size = int(group_size) if group_size is not None else int(config.get("group_size", 1))
 
     if integration_test:
         agent = AgentType.INTEGRATION_TEST
@@ -910,7 +1017,9 @@ def eval(
         choices.extend(
             [
                 {"name": "Claude 4 Sonnet", "value": AgentType.CLAUDE},
-                {"name": "OpenAI Computer Use", "value": AgentType.OPENAI},
+                {"name": "OpenAI", "value": AgentType.OPENAI},
+                {"name": "Operator (OpenAI Computer Use)", "value": AgentType.OPERATOR},
+                {"name": "Gemini Computer Use", "value": AgentType.GEMINI},
                 {"name": "vLLM (Local Server)", "value": AgentType.VLLM},
                 {"name": "LiteLLM (Multi-provider)", "value": AgentType.LITELLM},
             ]
@@ -948,6 +1057,27 @@ def eval(
     # Type narrowing: agent is now guaranteed to be an AgentType value after validation
     agent = AgentType(agent)
 
+    settings_dict = dict(
+        source=source,
+        agent=agent,
+        full=full,
+        model=model,
+        allowed_tools=allowed_tools,
+        max_concurrent=max_concurrent,
+        max_steps=max_steps,
+        verbose=verbose,
+        very_verbose=very_verbose,
+        vllm_base_url=vllm_base_url,
+        group_size=group_size,
+        task_id=task_id,
+    )
+
+    hud_console.info("")  # Add some spacing
+    display_eval_settings(settings_dict)
+    if not yes and not questionary.confirm("Proceed?", default=True, qmark="").ask():
+        hud_console.info("Evaluation cancelled.")
+        raise typer.Exit(1)
+
     # Run the command
     eval_command(
         source=source,
@@ -962,6 +1092,7 @@ def eval(
         vllm_base_url=vllm_base_url,
         group_size=group_size,
         integration_test=integration_test,
+        task_id=task_id,
     )
 
 
@@ -1009,7 +1140,7 @@ def rl(
     ),
     model: str | None = typer.Argument(
         None,
-        help="Model to train from https://hud.so/models (default: interactive selection)",
+        help="Model to train from https://hud.ai/models (default: interactive selection)",
     ),
     config_file: Path | None = typer.Option(  # noqa: B008
         None,
@@ -1067,7 +1198,7 @@ def rl(
     ),
     skip_vllm_startup: bool = typer.Option(
         False,
-        "--skip-vllm-startup",
+        "--skip_vllm_startup",
         help="Skip the vLLM server startup",
     ),
 ) -> None:
@@ -1098,7 +1229,7 @@ def convert(
         ..., help="Path to tasks file (JSON/JSONL) to convert to remote MCP configuration"
     ),
 ) -> None:
-    """Convert local MCP task configs to remote (mcp.hud.so) format.
+    """Convert local MCP task configs to remote (mcp.hud.ai) format.
 
     This mirrors the implicit conversion flow used by 'hud rl' and writes a new
     remote_<name>.json next to the source file when needed.
@@ -1145,11 +1276,11 @@ def set(
 ) -> None:
     """Persist API keys or other variables for HUD to use by default.
 
-    Examples:
+    [not dim]Examples:
         hud set ANTHROPIC_API_KEY=sk-... OPENAI_API_KEY=sk-...
 
     Values are stored in ~/.hud/.env and are loaded by hud.settings with
-    the lowest precedence (overridden by process env and project .env).
+    the lowest precedence (overridden by process env and project .env).[/not dim]
     """
     from hud.utils.hud_console import HUDConsole
 

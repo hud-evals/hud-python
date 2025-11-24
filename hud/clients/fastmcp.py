@@ -91,7 +91,7 @@ class FastMCPHUDClient(BaseHUDClient):
                     # Check if connecting to HUD API
                     for server_config in mcp_config.values():
                         url = server_config.get("url", "")
-                        if "mcp.hud.so" in url:
+                        if "mcp.hud.ai" in url:
                             raise RuntimeError(
                                 "Authentication failed for HUD API. "
                                 "Please ensure your HUD_API_KEY environment variable is set correctly."  # noqa: E501

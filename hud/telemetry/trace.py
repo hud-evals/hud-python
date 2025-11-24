@@ -114,19 +114,17 @@ def trace(
 
     Example:
         >>> import hud
-        >>> # Synchronous code
         >>> with hud.trace("My Task") as trace:
         ...     do_work()
         ...     trace.log_sync({"step": 1, "progress": 0.5})
-        >>> # For async code with HIGH CONCURRENCY (200+ tasks), use async_trace
-        >>> async with hud.async_trace("My Async Task") as trace:
+        >>> # For async code, use async_trace
+        >>> async with hud.async_trace("Async Task") as trace:
         ...     await do_async_work()
-        ...     await trace.log({"loss": 0.23, "accuracy": 0.95})
+        ...     await trace.log({"loss": 0.23})
 
     Note:
-        For simple async code (< 30 parallel tasks), this context manager works fine
-        with `async with`. Use `hud.async_trace()` only for high-concurrency scenarios
-        (200+ parallel tasks) where event loop blocking becomes an issue.
+        This is a synchronous context manager that uses blocking HTTP calls.
+        For async code, use `hud.async_trace()` instead.
     """
     # Ensure telemetry is configured
     configure_telemetry()

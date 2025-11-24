@@ -1,0 +1,139 @@
+---
+title: "Reinforcement Fine-Tuning (RFT)"
+description: "Fine-tune models with reinforcement learning on HUD tasks"
+icon: "brain-circuit"
+---
+
+<Warning>
+This feature is in BETA. The API and behavior may change in future releases.
+</Warning>
+
+## Overview
+
+Reinforcement Fine-Tuning (RFT) allows you to fine-tune language models using reinforcement learning on HUD tasks. This creates specialized models optimized for your specific use cases.
+
+<Info>
+**Access Required**: RFT is currently available by invite only. Contact [founders@hud.ai](mailto:founders@hud.ai) to request access.
+</Info>
+
+<Note>
+RFT currently supports OpenAI models and requires a minimum of 10 tasks for effective training.
+</Note>
+
+## Prerequisites
+
+- **RFT access** (contact [founders@hud.ai](mailto:founders@hud.ai) to request)
+- HUD API key set in environment (`HUD_API_KEY`)
+- A HUD environment with remote tasks configured
+- At least 10 tasks in your dataset
+- **No vision support required** (RFT doesn't support vision-based environments)
+
+## Step-by-Step Process
+
+### 1. Prepare Your Tasks
+
+First, ensure you have a tasks file with at least 10 tasks. You can download existing datasets or create your own:
+
+```bash
+# Download a dataset
+hud get hud-evals/SheetBench-50
+
+# Or use your existing tasks
+ls tasks.json
+```
+
+### 2. Launch RFT Training
+
+Run the RFT command from within your environment directory:
+
+```bash
+hud rft run tasks.json
+```
+
+The command will submit the job to the RFT service
+
+<Info>
+Use `--yes` flag to skip all confirmation prompts for automation.
+</Info>
+
+### 3. Monitor Training Progress
+
+Check the status of your training job:
+
+```bash
+# Get status using the model ID from the launch output
+hud rft status <model_id>
+
+# View detailed status information
+hud rft status <model_id> --verbose
+```
+
+### 4. Use Your Fine-Tuned Model
+
+Once training is complete (status shows "succeeded"), you'll receive a fine-tuned model ID. Use it with the HUD inference API:
+
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://inference.hud.ai", 
+    api_key=os.getenv("HUD_API_KEY")
+)
+
+response = client.chat.completions.create(
+    model="openai/ft:o4-mini-2025-04-16:human-union-data::CdqkVdJy",
+    messages=[
+        {"role": "user", "content": "Say hello!"}
+    ],
+)
+
+print(response.choices[0].message.content)
+```
+
+<Note>
+Replace the model ID in the example with your actual fine-tuned model ID from the status command.
+</Note>
+
+## Command Reference
+
+### Launch Training
+```bash
+hud rft run <tasks_file> [OPTIONS]
+
+Options:
+  --provider TEXT           Provider to use (default: openai)
+  --reasoning-effort TEXT   Reasoning effort level: low, medium, high (default: medium)
+  --verbose / -v           Enable verbose output
+  --yes / -y               Auto-accept all prompts
+```
+
+### Check Status
+```bash
+hud rft status <model_id> [OPTIONS]
+
+Options:
+  --verbose / -v   Show full status details
+```
+
+## Tips
+
+- Start with smaller datasets (10-50 tasks) to test your approach
+- Use `--verbose` during development to see detailed information
+- Monitor logs for any errors during training
+- Fine-tuned models are optimized for tasks similar to your training data
+
+## Limitations
+
+- Minimum 10 tasks required
+- No vision support (text-based tasks only)
+- Currently supports OpenAI models only
+- Training time varies based on dataset size
+
+## Troubleshooting
+
+If training fails:
+1. Verify your tasks have valid remote configurations
+2. Ensure all environment variables are set
+3. Check that your environment doesn't require vision support
+4. Use `--verbose` flag for detailed error messages

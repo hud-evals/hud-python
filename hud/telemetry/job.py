@@ -89,33 +89,6 @@ class Job:
             except Exception as e:
                 logger.warning("Failed to update job status: %s", e)
 
-    def update_status_fire_and_forget(self, status: str) -> None:
-        """Update job status without blocking (fire-and-forget)."""
-        self.status = status
-        if settings.telemetry_enabled:
-            from hud.utils.async_utils import fire_and_forget
-
-            async def _update() -> None:
-                try:
-                    payload = {
-                        "name": self.name,
-                        "status": status,
-                        "metadata": self.metadata,
-                    }
-                    if self.dataset_link:
-                        payload["dataset_link"] = self.dataset_link
-
-                    await make_request(
-                        method="POST",
-                        url=f"{settings.hud_telemetry_url}/jobs/{self.id}/status",
-                        json=payload,
-                        api_key=settings.api_key,
-                    )
-                except Exception as e:
-                    logger.warning("Failed to update job status: %s", e)
-
-            fire_and_forget(_update(), f"update job {self.id} status to {status}")
-
     async def log(self, metrics: dict[str, Any]) -> None:
         """Log metrics to the job.
 
@@ -256,21 +229,18 @@ def job(
 
     Example:
         >>> import hud
-        >>> # Synchronous code
         >>> with hud.job("training_run", {"model": "gpt-4"}) as job:
         ...     for epoch in range(10):
         ...         with hud.trace(f"epoch_{epoch}", job_id=job.id):
         ...             train_epoch()
-        >>> # For async code with HIGH CONCURRENCY (200+ tasks), use async_job
+        >>> # For async code, use async_job
         >>> async with hud.async_job("batch_processing") as job:
-        ...     for item in items:
-        ...         async with hud.async_trace(f"process_{item}", job_id=job.id):
-        ...             await process(item)
+        ...     async with hud.async_trace("task", job_id=job.id):
+        ...         await process()
 
     Note:
-        For simple async code (< 30 parallel tasks), this context manager works fine.
-        Use `hud.async_job()` only for high-concurrency scenarios (200+ parallel tasks)
-        where event loop blocking becomes an issue.
+        This is a synchronous context manager that uses blocking HTTP calls.
+        For async code, use `hud.async_job()` instead.
     """
     global _current_job
 
@@ -284,19 +254,13 @@ def job(
     _current_job = job_obj
 
     try:
-        # Update status to running (fire-and-forget to avoid blocking)
-        job_obj.update_status_fire_and_forget("running")
-        # Print the nice job URL box
+        job_obj.update_status_sync("running")
         _print_job_url(job_obj.id, job_obj.name)
         yield job_obj
-        # Update status to completed (fire-and-forget to avoid blocking)
-        job_obj.update_status_fire_and_forget("completed")
-        # Print job completion message
+        job_obj.update_status_sync("completed")
         _print_job_complete_url(job_obj.id, job_obj.name, error_occurred=False)
     except Exception:
-        # Update status to failed (fire-and-forget to avoid blocking)
-        job_obj.update_status_fire_and_forget("failed")
-        # Print job failure message
+        job_obj.update_status_sync("failed")
         _print_job_complete_url(job_obj.id, job_obj.name, error_occurred=True)
         raise
     finally:

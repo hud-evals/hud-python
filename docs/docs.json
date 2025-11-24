@@ -29,19 +29,28 @@
   "navigation": {
     "versions": [
       {
-        "version": "0.4.58",
+        "version": "0.4.67",
         "groups": [
           {
             "group": "Get Started",
             "pages": ["index", "quickstart", "llm-quickstart"]
           },
           {
-            "group": "Ideas",
+            "group": "Core Concepts",
             "pages": [
-              "core-concepts/mcp-protocol",
               "core-concepts/architecture", 
+              "core-concepts/mcp-protocol",
               "core-concepts/task-system",
               "core-concepts/tricks"
+            ]
+          },
+          {
+            "group": "SDK Reference",
+            "pages": [
+              "reference/tools",
+              "reference/agents",
+              "reference/environments",
+              "reference/tasks"
             ]
           },
           {
@@ -52,10 +61,17 @@
             ]
           },
           {
-            "group": "RL",
+            "group": "Training (RL)",
             "pages": [
               "train-agents/quickstart",
               "train-agents/tasks"
+            ]
+          },
+          {
+            "group": "Beta Features",
+            "pages": [
+              "beta/index",
+              "beta/rft"
             ]
           },
           {
@@ -78,16 +94,14 @@
               "reference/cli/run",
               "reference/cli/eval",
               "reference/cli/rl",
+              "reference/cli/rft",
               "reference/cli/misc"
             ]
           },
           {
-            "group": "SDK Reference",
+            "group": "Community",
             "pages": [
-              "reference/tools",
-              "reference/agents",
-              "reference/environments",
-              "reference/tasks"
+              "contributing"
             ]
           }
         ]

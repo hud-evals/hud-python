@@ -153,7 +153,7 @@ def build_agent(
     elif agent_type == AgentType.VLLM:
         # Create a generic OpenAI agent for vLLM server
         try:
-            from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
+            from hud.agents.openai_chat import OpenAIChatAgent
         except ImportError as e:
             hud_console.error(
                 "OpenAI dependencies are not installed. "
@@ -168,9 +168,26 @@ def build_agent(
             allowed_tools=allowed_tools,
             verbose=verbose,
         )
-        return GenericOpenAIChatAgent(**config)
+        return OpenAIChatAgent(**config)
 
     elif agent_type == AgentType.OPENAI:
+        try:
+            from hud.agents import OpenAIAgent
+        except ImportError as e:
+            hud_console.error(
+                "OpenAI agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
+
+        agent_kwargs: dict[str, Any] = {"verbose": verbose}
+        if allowed_tools:
+            agent_kwargs["allowed_tools"] = allowed_tools
+        if model:
+            agent_kwargs["model"] = model
+        return OpenAIAgent(**agent_kwargs)
+
+    elif agent_type == AgentType.OPERATOR:
         try:
             from hud.agents import OperatorAgent
         except ImportError as e:
@@ -180,13 +197,28 @@ def build_agent(
             )
             raise typer.Exit(1) from e
 
+        operator_kwargs: dict[str, Any] = {"verbose": verbose}
         if allowed_tools:
-            return OperatorAgent(
-                allowed_tools=allowed_tools,
-                verbose=verbose,
+            operator_kwargs["allowed_tools"] = allowed_tools
+        return OperatorAgent(**operator_kwargs)
+
+    elif agent_type == AgentType.GEMINI:
+        try:
+            from hud.agents import GeminiAgent
+        except ImportError as e:
+            hud_console.error(
+                "Gemini agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
             )
-        else:
-            return OperatorAgent(verbose=verbose)
+            raise typer.Exit(1) from e
+
+        gemini_kwargs: dict[str, Any] = {
+            "model": model or "gemini-2.5-computer-use-preview-10-2025",
+            "verbose": verbose,
+        }
+        if allowed_tools:
+            gemini_kwargs["allowed_tools"] = allowed_tools
+        return GeminiAgent(**gemini_kwargs)
 
     elif agent_type == AgentType.LITELLM:
         try:
@@ -214,7 +246,7 @@ def build_agent(
         )
         raise typer.Exit(1) from e
 
-    model = model or "claude-sonnet-4-20250514"
+    model = model or "claude-sonnet-4-5"
 
     if allowed_tools:
         return ClaudeAgent(
@@ -239,12 +271,12 @@ async def run_single_task(
     verbose: bool = False,
     vllm_base_url: str | None = None,
     group_size: int = 1,
+    task_id: str | None = None,
 ) -> None:
     """Load one task and execute it, or detect if JSON contains a list and run as dataset."""
 
-    # Provide early feedback to user
     hud_console.info("🔧 Initializing evaluation...")
-    # Import Task and run_dataset lazily
+
     try:
         from hud.utils.tasks import load_tasks
     except ImportError as e:
@@ -268,20 +300,25 @@ async def run_single_task(
         except Exception as e:
             hud_console.debug(f"Eval preflight env check skipped: {e}")
 
-        # Single task - use the first (and only) task
-        task = tasks[0]
-        hud_console.info("Found 1 task, running as single task…")
-
     else:
         # Load from HuggingFace dataset or non-file source
         hud_console.info(f"📊 Loading tasks from: {source}…")
         tasks: list[Task] = load_tasks(source)  # type: ignore[assignment]
 
-        if not tasks:
-            hud_console.error(f"No tasks found in: {source}")
-            raise typer.Exit(1)
+    if not tasks:
+        hud_console.error(f"No tasks found in: {source}")
+        raise typer.Exit(1)
 
-        # Single task - use the first task
+    # Filter by task_id if provided
+    if task_id:
+        found = next((t for t in tasks if str(getattr(t, "id", "")) == str(task_id)), None)
+        if not found:
+            hud_console.error(f"Task with ID '{task_id}' not found in source.")
+            raise typer.Exit(1)
+        task = found
+        hud_console.info(f"Found task with ID '{task_id}', running as single task…")
+    else:
+        # Default behavior: use the first task
         task = tasks[0]
         hud_console.info(
             "Using first task from dataset (run with --full to run the entire dataset)..."
@@ -326,9 +363,9 @@ async def run_single_task(
             agent_config["allowed_tools"] = allowed_tools
     elif agent_type == AgentType.VLLM:
         # Special handling for vLLM
-        from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
+        from hud.agents.openai_chat import OpenAIChatAgent
 
-        agent_class = GenericOpenAIChatAgent
+        agent_class = OpenAIChatAgent
 
         # Use the shared config builder
         agent_config = _build_vllm_config(
@@ -338,10 +375,30 @@ async def run_single_task(
             verbose=verbose,
         )
     elif agent_type == AgentType.OPENAI:
+        from hud.agents import OpenAIAgent
+
+        agent_class = OpenAIAgent
+        agent_config = {"verbose": verbose}
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+        if model:
+            agent_config["model"] = model
+    elif agent_type == AgentType.OPERATOR:
         from hud.agents import OperatorAgent
 
         agent_class = OperatorAgent
         agent_config = {"verbose": verbose}
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+    elif agent_type == AgentType.GEMINI:
+        from hud.agents import GeminiAgent
+
+        agent_class = GeminiAgent
+        agent_config = {
+            "model": model or "gemini-2.5-computer-use-preview-10-2025",
+            "verbose": verbose,
+            "validate_api_key": False,
+        }
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
     elif agent_type == AgentType.LITELLM:
@@ -359,7 +416,7 @@ async def run_single_task(
 
         agent_class = ClaudeAgent
         agent_config = {
-            "model": model or "claude-sonnet-4-20250514",
+            "model": model or "claude-sonnet-4-5",
             "verbose": verbose,
             "validate_api_key": False,
         }
@@ -370,23 +427,31 @@ async def run_single_task(
 
     if group_size > 1:
         hud_console.info(f"🔄 Running task with group_size={group_size}")
-        # Run with grouping
-        stats = await run_tasks_grouped(
-            tasks=[task],
-            agent_class=agent_class,
-            agent_config=agent_config,
-            group_size=group_size,
-            max_parallel_episodes=48,  # Same as RL default
-            max_steps=max_steps,
-            verbose=verbose,
-        )
+        async with hud.async_job(
+            name=f"Group Eval: {task_prompt[:50]}... (x{group_size})",
+            metadata={
+                "task_id": getattr(task, "id", None),
+                "group_size": group_size,
+                "total_episodes": group_size,
+            },
+        ) as job:
+            stats = await run_tasks_grouped(
+                tasks=[task],
+                agent_class=agent_class,
+                agent_config=agent_config,
+                group_size=group_size,
+                max_parallel_episodes=48,
+                max_steps=max_steps,
+                verbose=verbose,
+                job_id=job.id,
+            )
         display_group_statistics(stats, show_details=True)
     else:
         # Enable agent step logging for single task mode
         logging.getLogger("hud.agents").setLevel(logging.INFO)
         logging.getLogger("hud.agents.base").setLevel(logging.INFO)
 
-        with hud.trace(name=task_prompt):
+        async with hud.async_trace(name=task_prompt):
             agent = build_agent(
                 agent_type,
                 model=model,
@@ -413,10 +478,8 @@ async def run_full_dataset(
 ) -> list[Any]:
     """Run evaluation across the entire dataset using asyncio-based concurrency."""
 
-    # Provide early feedback to user
     hud_console.info("🔧 Initializing evaluation...")
 
-    # Import run_dataset lazily
     try:
         from hud.datasets import run_dataset
         from hud.utils.tasks import load_tasks
@@ -501,9 +564,9 @@ async def run_full_dataset(
         agent_config = {"verbose": verbose}
     elif agent_type == AgentType.VLLM:
         try:
-            from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
+            from hud.agents.openai_chat import OpenAIChatAgent
 
-            agent_class = GenericOpenAIChatAgent
+            agent_class = OpenAIChatAgent
         except ImportError as e:
             hud_console.error(
                 "OpenAI dependencies are not installed. "
@@ -520,6 +583,26 @@ async def run_full_dataset(
         )
     elif agent_type == AgentType.OPENAI:
         try:
+            from hud.agents import OpenAIAgent
+
+            agent_class = OpenAIAgent
+        except ImportError as e:
+            hud_console.error(
+                "OpenAI agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
+
+        agent_config = {
+            "verbose": verbose,
+            "validate_api_key": False,
+        }
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+        if model:
+            agent_config["model"] = model
+    elif agent_type == AgentType.OPERATOR:
+        try:
             from hud.agents import OperatorAgent
 
             agent_class = OperatorAgent
@@ -531,6 +614,26 @@ async def run_full_dataset(
             raise typer.Exit(1) from e
 
         agent_config = {"verbose": verbose, "validate_api_key": False}
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+
+    elif agent_type == AgentType.GEMINI:
+        try:
+            from hud.agents import GeminiAgent
+
+            agent_class = GeminiAgent
+        except ImportError as e:
+            hud_console.error(
+                "Gemini agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
+
+        agent_config = {
+            "model": model or "gemini-2.5-computer-use-preview-10-2025",
+            "verbose": verbose,
+            "validate_api_key": False,
+        }
         if allowed_tools:
             agent_config["allowed_tools"] = allowed_tools
 
@@ -566,7 +669,7 @@ async def run_full_dataset(
             raise typer.Exit(1) from e
 
         agent_config = {
-            "model": model or "claude-sonnet-4-20250514",
+            "model": model or "claude-sonnet-4-5",
             "verbose": verbose,
             "validate_api_key": False,
         }
@@ -578,7 +681,7 @@ async def run_full_dataset(
         hud_console.info(f"🔄 Running dataset with group_size={group_size}")
 
         # Run with job tracking
-        with hud.job(
+        async with hud.async_job(
             name=f"Evaluation {dataset_name} (group_size={group_size})",
             metadata={
                 "dataset": source,
@@ -641,7 +744,7 @@ def eval_command(
     agent: AgentType = typer.Option(  # noqa: B008
         AgentType.CLAUDE,
         "--agent",
-        help="Agent backend to use (claude, openai, vllm for local server, or litellm)",
+        help=("Agent (claude, gemini, openai, operator, vllm, or litellm)"),
     ),
     model: str | None = typer.Option(
         None,
@@ -697,8 +800,18 @@ def eval_command(
             "spinning up an agent"
         ),
     ),
+    task_id: str | None = typer.Option(
+        None,
+        "--task-id",
+        help="Run a specific task by ID (from the dataset)",
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
+
+    Configuration:
+        - Uses defaults from .hud_eval_config if present
+        - CLI arguments override config file settings
+        - Prompts for confirmation unless -y/--yes is used
 
     Examples:
         # Evaluate a single task from SheetBench
@@ -713,14 +826,17 @@ def eval_command(
         # Limit concurrent tasks to prevent rate limits
         hud eval hud-evals/SheetBench-50 --full --max-concurrent 20
 
-        # Run a single task from a JSON file
+        # Run a single task from a JSON file (uses interactive/config defaults)
         hud eval task.json
 
         # Run multiple tasks from a JSON file
         hud eval tasks.json --full
 
-        # Run with OpenAI Operator agent
-        hud eval hud-evals/OSWorld-Gold-Beta --agent openai
+        # Run with OpenAI agent (choose model via --model)
+        hud eval hud-evals/OSWorld-Gold-Beta --agent openai --model gpt-5
+
+        # Run with the legacy Operator computer-use agent
+        hud eval hud-evals/OSWorld-Gold-Beta --agent operator
 
         # Use local vLLM server (default: localhost:8000)
         hud eval task.json --agent vllm --model Qwen/Qwen2.5-VL-3B-Instruct
@@ -757,7 +873,14 @@ def eval_command(
                 "Set it in your environment or run: hud set ANTHROPIC_API_KEY=your-key-here"
             )
             raise typer.Exit(1)
-    elif agent == AgentType.OPENAI and not settings.openai_api_key:
+    elif agent == AgentType.GEMINI:
+        if not settings.gemini_api_key:
+            hud_console.error("GEMINI_API_KEY is required for Gemini agent")
+            hud_console.info(
+                "Set it in your environment or run: hud set GEMINI_API_KEY=your-key-here"
+            )
+            raise typer.Exit(1)
+    elif agent in (AgentType.OPENAI, AgentType.OPERATOR) and not settings.openai_api_key:
         hud_console.error("OPENAI_API_KEY is required for OpenAI agent")
         hud_console.info("Set it in your environment or run: hud set OPENAI_API_KEY=your-key-here")
         raise typer.Exit(1)
@@ -831,5 +954,6 @@ def eval_command(
                 verbose=very_verbose or verbose,
                 vllm_base_url=vllm_base_url,
                 group_size=group_size,
+                task_id=task_id,
             )
         )

@@ -25,8 +25,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-GLOBAL_SYSTEM_PROMPT = "You are an assistant that can use tools to help the user. You will be given a task and you will need to use the tools to complete the task."  # noqa: E501
-
 
 class MCPAgent(ABC):
     """
@@ -58,7 +56,7 @@ class MCPAgent(ABC):
         disallowed_tools: list[str] | None = None,
         response_tool_name: str | None = None,
         # Messages
-        system_prompt: str = GLOBAL_SYSTEM_PROMPT,
+        system_prompt: str | None = None,
         append_setup_output: bool = True,
         initial_screenshot: bool = True,
         # Misc
@@ -155,7 +153,10 @@ class MCPAgent(ABC):
         # If task is provided, apply agent_config and add lifecycle tools
         if isinstance(task, Task) and task.agent_config:
             if task.agent_config.get("system_prompt"):
-                self.system_prompt += "\n\n" + task.agent_config["system_prompt"]
+                if self.system_prompt is None:
+                    self.system_prompt = task.agent_config["system_prompt"]
+                else:
+                    self.system_prompt += "\n\n" + task.agent_config["system_prompt"]
             if "append_setup_output" in task.agent_config:
                 self.append_setup_output = task.agent_config["append_setup_output"]
             if "initial_screenshot" in task.agent_config:
@@ -164,11 +165,14 @@ class MCPAgent(ABC):
                 # If allowed_tools has already been set, we take the intersection of the two
                 # If the list had been empty, we were allowing all tools, so we overwrite this
                 if isinstance(self.allowed_tools, list) and len(self.allowed_tools) > 0:
-                    self.allowed_tools = [
-                        tool
-                        for tool in self.allowed_tools
-                        if tool in task.agent_config["allowed_tools"]
-                    ]
+                    # If task allows "*", keep CLI's allowed_tools unchanged
+                    if "*" not in task.agent_config["allowed_tools"]:
+                        self.allowed_tools = [
+                            tool
+                            for tool in self.allowed_tools
+                            if tool in task.agent_config["allowed_tools"]
+                        ]
+                    # else: task allows all tools, so CLI's allowed_tools takes precedence
                 else:  # If allowed_tools is None, we overwrite it
                     self.allowed_tools = task.agent_config["allowed_tools"]
             if "disallowed_tools" in task.agent_config:
@@ -239,6 +243,7 @@ class MCPAgent(ABC):
                 return await self._run_context(context, max_steps=max_steps)
 
         except Exception as e:
+            logger.exception("Error while running agent:")
             # Always return a Trace object for any exception
             if self._is_connection_error(e):
                 # Return error trace for connection failures
@@ -285,6 +290,10 @@ class MCPAgent(ABC):
                 self.console.progress_log(f"Setting up tool phase: {task.setup_tool}")
                 results = await self.call_tools(task.setup_tool)
                 if any(result.isError for result in results):
+                    for result in results:
+                        if result.isError:
+                            self.console.error_log(f"Error in setup tool: {result}")
+
                     return Trace(
                         reward=0.0,
                         done=True,
@@ -756,14 +765,39 @@ def text_to_blocks(text: str) -> list[types.ContentBlock]:
 def find_reward(result: MCPToolResult) -> float:
     """Find the reward in the result.
 
-    Agent accepts "reward", "grade", "score"
+    Agent accepts "reward", "grade", "score", or weighted subscores
 
     If not found, return 0.0
     """
     accept_keys = ["reward", "grade", "score"]
+
+    # Check for direct reward/grade/score keys
     for key in accept_keys:
         if isinstance(result.structuredContent, dict) and key in result.structuredContent:
             return result.structuredContent[key]
+
+    # Check for subscores and weights format
+    if (
+        isinstance(result.structuredContent, dict)
+        and "subscores" in result.structuredContent
+        and "weights" in result.structuredContent
+    ):
+        subscores = result.structuredContent["subscores"]
+        weights = result.structuredContent["weights"]
+        if isinstance(subscores, dict) and isinstance(weights, dict):
+            try:
+                # Multiply each subscore by its corresponding weight and sum
+                reward = sum(
+                    float(subscores[key]) * float(weights.get(key, 0.0))
+                    for key in subscores
+                    if key in weights
+                )
+                return reward
+            except (ValueError, TypeError) as e:
+                logger.error("Failed to parse subscores/weights: %s", e)
+                return 0.0
+
+    # Check for reward in JSON text content
     if isinstance(result.content, list):
         for content in result.content:
             if isinstance(content, types.TextContent):
@@ -774,6 +808,8 @@ def find_reward(result: MCPToolResult) -> float:
                             return value
                 except json.JSONDecodeError:
                     pass
+
+    logger.error("Couldn't parse reward from result: %s", result)
     return 0.0
 
 

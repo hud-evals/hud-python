@@ -12,7 +12,7 @@ HUD is built as a thin orchestration layer on top of MCP, providing structure fo
 graph TB
     subgraph "Remote"
         Dashboard["📊 Dashboard<br/>(hud.ai)"]
-        API["🔌 MCP Orchestrator<br/>(mcp.hud.so)"]
+        API["🔌 MCP Orchestrator<br/>(mcp.hud.ai)"]
     end
     
     subgraph Code["Your Code"]
@@ -92,7 +92,7 @@ task = Task(
     prompt="Complete 3 items in the TODO list",
     mcp_config={
         "hud": {
-            "url": "https://mcp.hud.so/v3/mcp",
+            "url": "https://mcp.hud.ai/v3/mcp",
             "headers": {
                 "Authorization": f"Bearer {api_key}",
                 "Mcp-Image": "hudpython/hud-browser:latest"
@@ -156,7 +156,7 @@ Real-time observability:
 ```python
 import hud
 
-with hud.trace("my-evaluation"):
+async with hud.async_trace("my-evaluation"):
     result = await agent.run(task)
     # View at hud.ai/traces/{trace_id}
 ```
