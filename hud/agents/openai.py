@@ -176,26 +176,23 @@ class OpenAIAgent(MCPAgent):
     )
     async def get_response(self, messages: ResponseInputParam) -> AgentResponse:
         """Send the latest input items to OpenAI's Responses API."""
-        new_items = cast("ResponseInputParam", messages[self._message_cursor :])
+        new_items: ResponseInputParam = messages[self._message_cursor :]
         if not new_items:
             if self.last_response_id is None:
-                new_items = cast(
-                    "ResponseInputParam",
-                    [
-                        cast(
-                            "Message",
-                            {
-                                "role": "user",
-                                "content": [
-                                    cast(
-                                        "ResponseInputTextParam",
-                                        {"type": "input_text", "text": ""},
-                                    )
-                                ],
-                            },
-                        )
-                    ],
-                )
+                new_items = [
+                    cast(
+                        "Message",
+                        {
+                            "role": "user",
+                            "content": [
+                                cast(
+                                    "ResponseInputTextParam",
+                                    {"type": "input_text", "text": ""},
+                                )
+                            ],
+                        },
+                    )
+                ]
             else:
                 self.console.debug("No new messages to send to OpenAI.")
                 return AgentResponse(content="", tool_calls=[], done=True)
