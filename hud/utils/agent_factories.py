@@ -7,11 +7,11 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from hud.agents.grounded_openai import GroundedOpenAIChatAgent
-from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
+from hud.agents.openai_chat import OpenAIChatAgent
 from hud.tools.grounding import GrounderConfig
 
 
-def create_openai_agent(**kwargs: Any) -> GenericOpenAIChatAgent:
+def create_openai_agent(**kwargs: Any) -> OpenAIChatAgent:
     """Factory for GenericOpenAIChatAgent with run_dataset compatibility.
 
     Args:
@@ -36,7 +36,7 @@ def create_openai_agent(**kwargs: Any) -> GenericOpenAIChatAgent:
     api_key = kwargs.pop("api_key", None)
     base_url = kwargs.pop("base_url", None)
 
-    return GenericOpenAIChatAgent(api_key=api_key, base_url=base_url, **kwargs)
+    return OpenAIChatAgent(api_key=api_key, base_url=base_url, **kwargs)
 
 
 def create_grounded_agent(**kwargs: Any) -> GroundedOpenAIChatAgent:

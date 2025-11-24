@@ -1,4 +1,4 @@
-"""Generic OpenAI chat-completions agent.
+"""OpenAI Chat Completions Agent.
 
 This class provides the minimal glue required to connect any endpoint that
 implements the OpenAI compatible *chat.completions* API with MCP tool calling
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class GenericOpenAIChatAgent(MCPAgent):
+class OpenAIChatAgent(MCPAgent):
     """MCP-enabled agent that speaks the OpenAI *chat.completions* protocol."""
 
     metadata: ClassVar[dict[str, Any]] = {}
@@ -62,7 +62,7 @@ class GenericOpenAIChatAgent(MCPAgent):
         else:
             raise ValueError("Either openai_client or (api_key and base_url) must be provided")
 
-        self.model_name = "GenericOpenAI"
+        self.model_name = "OpenAI"
         self.checkpoint_name = model_name
         self.completion_kwargs: dict[str, Any] = completion_kwargs or {}
         self.mcp_schemas = []

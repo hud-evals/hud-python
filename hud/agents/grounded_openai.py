@@ -9,10 +9,10 @@ from hud import instrument
 from hud.tools.grounding import GroundedComputerTool, Grounder, GrounderConfig
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
-from .openai_chat_generic import GenericOpenAIChatAgent
+from .openai_chat import OpenAIChatAgent
 
 
-class GroundedOpenAIChatAgent(GenericOpenAIChatAgent):
+class GroundedOpenAIChatAgent(OpenAIChatAgent):
     """OpenAI agent that uses a separate grounding model for element detection.
 
     This agent:

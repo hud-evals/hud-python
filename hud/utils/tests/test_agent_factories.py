@@ -4,13 +4,13 @@ from unittest.mock import MagicMock, patch
 
 
 def test_create_openai_agent():
-    from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
+    from hud.agents.openai_chat import OpenAIChatAgent
     from hud.utils.agent_factories import create_openai_agent
 
     agent = create_openai_agent(
         api_key="test_key", model_name="test_model", completion_kwargs={"temperature": 0.5}
     )
-    assert isinstance(agent, GenericOpenAIChatAgent)
+    assert isinstance(agent, OpenAIChatAgent)
     assert agent.model_name == "GenericOpenAI"
     assert agent.checkpoint_name == "test_model"
     assert agent.completion_kwargs["temperature"] == 0.5
