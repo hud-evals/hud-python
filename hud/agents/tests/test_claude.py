@@ -99,6 +99,7 @@ class TestClaudeAgent:
         """Create a mock Anthropic client."""
         # Create mock instance with spec to make it behave like AsyncAnthropic
         from anthropic import AsyncAnthropic
+
         client = AsyncMock(spec=AsyncAnthropic)
         # Add beta attribute with messages
         client.beta = AsyncMock()
