@@ -314,7 +314,7 @@ class ClaudeAgent(MCPAgent):
         self.claude_tools = []
         for tool in available_tools:
             claude_tool = to_api_tool(tool)
-            if claude_tool is None:
+            if claude_tool is None or "name" not in claude_tool:
                 continue
             if claude_tool["name"] == "computer":
                 self.has_computer_tool = True
