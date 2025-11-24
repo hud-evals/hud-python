@@ -32,7 +32,7 @@ def test_find_tasks_file_single_file(mock_cwd, mock_console):
     """Test that when only one file exists, it's returned without prompting."""
     mock_path = MagicMock(spec=Path)
     mock_file = MagicMock(spec=Path)
-    mock_file.__str__.return_value = "test.json"
+    mock_file.__str__.return_value = "test.json" # type: ignore
 
     def glob_side_effect(pattern):
         if pattern == "*.json":
@@ -40,7 +40,7 @@ def test_find_tasks_file_single_file(mock_cwd, mock_console):
         return []
 
     mock_path.glob.side_effect = glob_side_effect
-    mock_path.__str__.return_value = str(Path.cwd())
+    mock_path.__str__.return_value = str(Path.cwd()) # type: ignore
     mock_cwd.return_value = mock_path
 
     result = find_tasks_file(None)
@@ -54,9 +54,9 @@ def test_find_tasks_file_multiple_files(mock_cwd, mock_console):
     """Test that when multiple files exist, user is prompted to select one."""
     mock_path = MagicMock(spec=Path)
     mock_file1 = MagicMock(spec=Path)
-    mock_file1.__str__.return_value = "test1.json"
+    mock_file1.__str__.return_value = "test1.json" # type: ignore
     mock_file2 = MagicMock(spec=Path)
-    mock_file2.__str__.return_value = "test2.jsonl"
+    mock_file2.__str__.return_value = "test2.jsonl" # type: ignore
 
     def glob_side_effect(pattern):
         if pattern == "*.json":
@@ -66,7 +66,7 @@ def test_find_tasks_file_multiple_files(mock_cwd, mock_console):
         return []
 
     mock_path.glob.side_effect = glob_side_effect
-    mock_path.__str__.return_value = str(Path.cwd())
+    mock_path.__str__.return_value = str(Path.cwd()) # type: ignore
     mock_cwd.return_value = mock_path
     mock_console.select.return_value = "test2.jsonl"
 
