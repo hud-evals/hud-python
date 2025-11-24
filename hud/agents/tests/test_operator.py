@@ -115,9 +115,10 @@ class TestOperatorAgent:
 
         # OpenAI's format_tool_results returns input_image with screenshot
         assert len(messages) == 1
-        assert messages[0]["type"] == "input_image"
-        assert "image_url" in messages[0]
-        assert messages[0]["image_url"] == "data:image/png;base64,base64data"
+        msg = messages[0]
+        assert msg.get("type") == "input_image"
+        assert "image_url" in msg
+        assert msg.get("image_url") == "data:image/png;base64,base64data"
 
     @pytest.mark.asyncio
     async def test_format_tool_results_with_error(self, mock_mcp_client, mock_openai):

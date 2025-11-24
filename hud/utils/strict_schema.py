@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-from typing_extensions import TypeGuard
+from typing import Any, TypeGuard
 
 _EMPTY_SCHEMA = {
     "additionalProperties": False,
@@ -47,11 +45,11 @@ def _ensure_strict_json_schema(
 
     typ = json_schema.get("type")
     if typ == "object":
-        if "additionalProperties" not in json_schema:
+        if "additionalProperties" not in json_schema or json_schema["additionalProperties"] is True:
             json_schema["additionalProperties"] = False
-        elif json_schema["additionalProperties"] is True:
-            json_schema["additionalProperties"] = False
-        elif json_schema["additionalProperties"] and json_schema["additionalProperties"] is not False:
+        elif (
+            json_schema["additionalProperties"] and json_schema["additionalProperties"] is not False
+        ):
             raise ValueError(
                 "additionalProperties should not be set for object types in strict mode."
             )
@@ -129,7 +127,9 @@ def _ensure_strict_json_schema(
             raise ValueError(f"Received non-string $ref - {ref}")
         resolved = _resolve_ref(root=root, ref=ref)
         if not _is_dict(resolved):
-            raise ValueError(f"Expected `$ref: {ref}` to resolve to a dictionary but got {resolved}")
+            raise ValueError(
+                f"Expected `$ref: {ref}` to resolve to a dictionary but got {resolved}"
+            )
         json_schema.update({**resolved, **json_schema})
         json_schema.pop("$ref")
         return _ensure_strict_json_schema(json_schema, path=path, root=root)
@@ -144,7 +144,7 @@ def _resolve_ref(*, root: dict[str, Any], ref: str) -> object:
     path = ref[2:].split("/")
     resolved: object = root
     for key in path:
-        assert _is_dict(resolved), f"Encountered non-dictionary entry while resolving {ref}"
+        assert _is_dict(resolved), f"Encountered non-dictionary entry while resolving {ref}"  # noqa: S101
         resolved = resolved[key]
 
     return resolved
@@ -159,10 +159,4 @@ def _is_list(obj: object) -> TypeGuard[list[object]]:
 
 
 def _has_more_than_n_keys(obj: dict[str, object], n: int) -> bool:
-    count = 0
-    for _ in obj.keys():
-        count += 1
-        if count > n:
-            return True
-    return False
-
+    return any(count > n for count, _ in enumerate(obj, start=1))

@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import Any, ClassVar, Literal, cast
 
-import hud
 import mcp.types as types
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI  # noqa: TC002
 from openai.types.responses import (
     ResponseComputerToolCall,
     ResponseFunctionToolCall,
@@ -17,8 +16,12 @@ from openai.types.responses import (
     ResponseReasoningItem,
     ToolParam,
 )
-from openai.types.responses.response_input_param import ComputerCallOutput, Message
+from openai.types.responses.response_input_param import (
+    ComputerCallOutput,  # noqa: TC002
+    Message,  # noqa: TC002
+)
 
+import hud
 from hud.tools.computer.settings import computer_settings
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
@@ -28,14 +31,20 @@ OPERATOR_INSTRUCTIONS = """
 You are an autonomous computer-using agent. Follow these guidelines:
 
 1. NEVER ask for confirmation. Complete all tasks autonomously.
-2. Do NOT send messages like "I need to confirm before..." or "Do you want me to continue?" - just proceed.
-3. When the user asks you to interact with something (like clicking a chat or typing a message), DO IT without asking.
-4. Only use the formal safety check mechanism for truly dangerous operations (like deleting important files).
-5. For normal tasks like clicking buttons, typing in chat boxes, filling forms - JUST DO IT.
-6. The user has already given you permission by running this agent. No further confirmation is needed.
+2. Do NOT send messages like "I need to confirm before..." or "Do you want me to
+   continue?" - just proceed.
+3. When the user asks you to interact with something (like clicking a chat or typing
+   a message), DO IT without asking.
+4. Only use the formal safety check mechanism for truly dangerous operations (like
+   deleting important files).
+5. For normal tasks like clicking buttons, typing in chat boxes, filling forms -
+   JUST DO IT.
+6. The user has already given you permission by running this agent. No further
+   confirmation is needed.
 7. Be decisive and action-oriented. Complete the requested task fully.
 
-Remember: You are expected to complete tasks autonomously. The user trusts you to do what they asked.
+Remember: You are expected to complete tasks autonomously. The user trusts you to do
+what they asked.
 """.strip()
 
 
@@ -44,7 +53,7 @@ class OperatorAgent(OpenAIAgent):
     Backwards-compatible Operator agent built on top of OpenAIAgent.
     """
 
-    metadata: dict[str, Any] | None = {
+    metadata: ClassVar[dict[str, Any] | None] = {
         "display_width": computer_settings.OPENAI_COMPUTER_WIDTH,
         "display_height": computer_settings.OPENAI_COMPUTER_HEIGHT,
     }
@@ -78,13 +87,16 @@ class OperatorAgent(OpenAIAgent):
 
     def _build_openai_tools(self) -> None:
         super()._build_openai_tools()
-        if not any(tool.name == self._operator_computer_tool_name for tool in self.get_available_tools()):
+        if not any(
+            tool.name == self._operator_computer_tool_name for tool in self.get_available_tools()
+        ):
             raise ValueError(
-                f"MCP computer tool '{self._operator_computer_tool_name}' is required but not available."
+                f"MCP computer tool '{self._operator_computer_tool_name}' is required "
+                "but not available."
             )
         self._openai_tools.append(
             cast(
-                ToolParam,
+                "ToolParam",
                 {
                     "type": "computer_use_preview",
                     "display_width": self._operator_display_width,
@@ -105,19 +117,19 @@ class OperatorAgent(OpenAIAgent):
         record_result=True,
     )
     async def get_response(self, messages: ResponseInputParam) -> AgentResponse:
-        new_items = cast(ResponseInputParam, messages[self._message_cursor :])
+        new_items = cast("ResponseInputParam", messages[self._message_cursor :])
         if not new_items:
             if self.last_response_id is None:
                 new_items = cast(
-                    ResponseInputParam,
+                    "ResponseInputParam",
                     [
                         cast(
-                            Message,
+                            "Message",
                             {
                                 "role": "user",
                                 "content": [
                                     cast(
-                                        ResponseInputTextParam,
+                                        "ResponseInputTextParam",
                                         {"type": "input_text", "text": ""},
                                     )
                                 ],
@@ -180,7 +192,9 @@ class OperatorAgent(OpenAIAgent):
             if call.name == self._operator_computer_tool_name:
                 screenshot = self._extract_latest_screenshot(result)
                 if not screenshot:
-                    self.console.warning_log("Computer tool result missing screenshot; skipping output.")
+                    self.console.warning_log(
+                        "Computer tool result missing screenshot; skipping output."
+                    )
                     continue
                 call_id = call.id or self.pending_call_id
                 if not call_id:
@@ -202,7 +216,7 @@ class OperatorAgent(OpenAIAgent):
                 }
                 if acknowledged_checks:
                     output_payload["acknowledged_safety_checks"] = acknowledged_checks
-                computer_outputs.append(cast(ComputerCallOutput, output_payload))
+                computer_outputs.append(cast("ComputerCallOutput", output_payload))
                 self.pending_call_id = None
                 self.pending_safety_checks = []
                 ordering.append(("computer", len(computer_outputs) - 1))
@@ -245,6 +259,5 @@ class OperatorAgent(OpenAIAgent):
             arguments=tool_call.action.model_dump(),
             id=tool_call.call_id,
         )
-        setattr(call, "pending_safety_checks", tool_call.pending_safety_checks)
+        call.pending_safety_checks = tool_call.pending_safety_checks  # type: ignore[attr-defined]
         return call
-

@@ -4,7 +4,14 @@ from .base import MCPAgent
 from .claude import ClaudeAgent
 from .gemini import GeminiAgent
 from .openai import OpenAIAgent
-from .operator import OperatorAgent
 from .openai_chat import OpenAIChatAgent
+from .operator import OperatorAgent
 
-__all__ = ["ClaudeAgent", "GeminiAgent", "OpenAIAgent", "OpenAIChatAgent", "MCPAgent", "OperatorAgent"]
+__all__ = [
+    "ClaudeAgent",
+    "GeminiAgent",
+    "MCPAgent",
+    "OpenAIAgent",
+    "OpenAIChatAgent",
+    "OperatorAgent",
+]

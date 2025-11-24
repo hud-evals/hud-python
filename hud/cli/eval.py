@@ -744,9 +744,7 @@ def eval_command(
     agent: AgentType = typer.Option(  # noqa: B008
         AgentType.CLAUDE,
         "--agent",
-        help=(
-            "Agent (claude, gemini, openai, operator, vllm, or litellm)"
-        ),
+        help=("Agent (claude, gemini, openai, operator, vllm, or litellm)"),
     ),
     model: str | None = typer.Option(
         None,

@@ -21,8 +21,8 @@ from openai.types.responses import (
     ToolParam,
 )
 from openai.types.responses.response_input_param import (
-    FunctionCallOutput,
-    Message,
+    FunctionCallOutput,  # noqa: TC002
+    Message,  # noqa: TC002
 )
 
 import hud
@@ -98,7 +98,8 @@ class OpenAIAgent(MCPAgent):
         for tool in self.get_available_tools():
             if tool.description is None or tool.inputSchema is None:
                 self.console.warning_log(
-                    f"Skipping tool '{tool.name}' – description and input schema are required for OpenAI tools."
+                    f"Skipping tool '{tool.name}' - description and input schema "
+                    "are required for OpenAI tools."
                 )
                 continue
             self._tool_name_map[tool.name] = tool.name
@@ -114,7 +115,7 @@ class OpenAIAgent(MCPAgent):
                 )
 
             function_tool = cast(
-                ToolParam,
+                "ToolParam",
                 {
                     "type": "function",
                     "name": tool.name,
@@ -142,16 +143,14 @@ class OpenAIAgent(MCPAgent):
         """System messages are provided via the `instructions` field."""
         return []
 
-    async def format_blocks(
-        self, blocks: list[types.ContentBlock]
-    ) -> ResponseInputParam:
+    async def format_blocks(self, blocks: list[types.ContentBlock]) -> ResponseInputParam:
         """Convert MCP content blocks into OpenAI user messages."""
         content: ResponseInputMessageContentListParam = []
         for block in blocks:
             if isinstance(block, types.TextContent):
                 content.append(
                     cast(
-                        ResponseInputTextParam,
+                        "ResponseInputTextParam",
                         {"type": "input_text", "text": block.text},
                     )
                 )
@@ -159,7 +158,7 @@ class OpenAIAgent(MCPAgent):
                 mime_type = getattr(block, "mimeType", "image/png")
                 content.append(
                     cast(
-                        ResponseInputImageParam,
+                        "ResponseInputImageParam",
                         {
                             "type": "input_image",
                             "image_url": f"data:{mime_type};base64,{block.data}",
@@ -167,10 +166,8 @@ class OpenAIAgent(MCPAgent):
                     )
                 )
         if not content:
-            content.append(
-                cast(ResponseInputTextParam, {"type": "input_text", "text": ""})
-            )
-        return [cast(Message, {"role": "user", "content": content})]
+            content.append(cast("ResponseInputTextParam", {"type": "input_text", "text": ""}))
+        return [cast("Message", {"role": "user", "content": content})]
 
     @hud.instrument(
         span_type="agent",
@@ -179,19 +176,19 @@ class OpenAIAgent(MCPAgent):
     )
     async def get_response(self, messages: ResponseInputParam) -> AgentResponse:
         """Send the latest input items to OpenAI's Responses API."""
-        new_items = cast(ResponseInputParam, messages[self._message_cursor :])
+        new_items = cast("ResponseInputParam", messages[self._message_cursor :])
         if not new_items:
             if self.last_response_id is None:
                 new_items = cast(
-                    ResponseInputParam,
+                    "ResponseInputParam",
                     [
                         cast(
-                            Message,
+                            "Message",
                             {
                                 "role": "user",
                                 "content": [
                                     cast(
-                                        ResponseInputTextParam,
+                                        "ResponseInputTextParam",
                                         {"type": "input_text", "text": ""},
                                     )
                                 ],
@@ -237,7 +234,6 @@ class OpenAIAgent(MCPAgent):
 
         agent_response.content = "".join(reasoning_chunks) + "".join(text_chunks)
         return agent_response
-
 
     def _build_request_payload(self, new_items: ResponseInputParam) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -317,7 +313,7 @@ class OpenAIAgent(MCPAgent):
 
             formatted.append(
                 cast(
-                    FunctionCallOutput,
+                    "FunctionCallOutput",
                     {
                         "type": "function_call_output",
                         "call_id": call.id,
@@ -326,4 +322,3 @@ class OpenAIAgent(MCPAgent):
                 )
             )
         return formatted
-
