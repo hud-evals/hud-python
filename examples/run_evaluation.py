@@ -59,13 +59,13 @@ logging.basicConfig(
 
 
 def _build_agent(
-    agent_type: Literal[AgentType.CLAUDE, AgentType.OPENAI],
+    agent_type: Literal[AgentType.CLAUDE, AgentType.OPERATOR],
     *,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
 ) -> ClaudeAgent | OperatorAgent:
     """Create and return the requested agent type."""
-    if agent_type == AgentType.OPENAI:
+    if agent_type == AgentType.OPERATOR:
         return OperatorAgent(allowed_tools=allowed_tools, validate_api_key=False)
 
     model = model or "claude-sonnet-4-5-20250929"
@@ -80,7 +80,7 @@ def _build_agent(
 async def run_single_task(
     dataset_name: str,
     *,
-    agent_type: Literal[AgentType.CLAUDE, AgentType.OPENAI] = AgentType.CLAUDE,
+    agent_type: Literal[AgentType.CLAUDE, AgentType.OPERATOR] = AgentType.CLAUDE,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_steps: int = 10,
@@ -111,16 +111,18 @@ async def run_single_task(
 async def run_full_dataset(
     dataset_name: str,
     *,
-    agent_type: Literal[AgentType.CLAUDE, AgentType.OPENAI] = AgentType.CLAUDE,
+    agent_type: Literal[AgentType.CLAUDE, AgentType.OPERATOR] = AgentType.CLAUDE,
     model: str | None = None,
     allowed_tools: list[str] | None = None,
     max_concurrent: int = 50,
     max_steps: int = 10,
 ) -> list[Any]:
     """Run evaluation across entire dataset with asyncio concurrency."""
-    if agent_type == AgentType.OPENAI:
+    if agent_type == AgentType.OPERATOR:
         agent_class = OperatorAgent
-        agent_config: dict[str, Any] = {"validate_api_key": False}
+        agent_config = {"validate_api_key": False}
+        if model:
+            agent_config["model"] = model
         if allowed_tools:
             # Only pass allowed tools if they are provided, otherwise all tools are enabled
             agent_config["allowed_tools"] = allowed_tools
@@ -171,7 +173,7 @@ Examples:
     parser.add_argument("--full", action="store_true", help="Run entire dataset")
 
     # Agent
-    parser.add_argument("--agent", choices=["claude", "openai"], default="claude")
+    parser.add_argument("--agent", choices=["claude", "operator"], default="claude")
     parser.add_argument("--model", default=None, help="Model override")
     parser.add_argument(
         "--allowed-tools", dest="allowed_tools", help="Tool allowlist (comma-separated)"

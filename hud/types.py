@@ -25,6 +25,7 @@ _missing_api_key_error_logged: bool = False
 class AgentType(str, Enum):
     CLAUDE = "claude"
     OPENAI = "openai"
+    OPERATOR = "operator"
     GEMINI = "gemini"
     VLLM = "vllm"
     LITELLM = "litellm"

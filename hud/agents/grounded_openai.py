@@ -9,10 +9,10 @@ from hud import instrument
 from hud.tools.grounding import GroundedComputerTool, Grounder, GrounderConfig
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
-from .openai_chat_generic import GenericOpenAIChatAgent
+from .openai_chat import OpenAIChatAgent
 
 
-class GroundedOpenAIChatAgent(GenericOpenAIChatAgent):
+class GroundedOpenAIChatAgent(OpenAIChatAgent):
     """OpenAI agent that uses a separate grounding model for element detection.
 
     This agent:
@@ -45,7 +45,7 @@ class GroundedOpenAIChatAgent(GenericOpenAIChatAgent):
             openai_client: OpenAI client for the planning model
             model: Name of the OpenAI model to use for planning (e.g., "gpt-4o", "gpt-4o-mini")
             real_computer_tool_name: Name of the actual computer tool to execute
-            **kwargs: Additional arguments passed to GenericOpenAIChatAgent
+            **kwargs: Additional arguments passed to OpenAIChatAgent
         """
         # Set defaults for grounded agent
         if allowed_tools is None:
