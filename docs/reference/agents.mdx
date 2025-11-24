@@ -91,7 +91,7 @@ Claude-specific implementation using Anthropic's API.
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
 | `model_client` | `AsyncAnthropic` | Anthropic client | Auto-created |
-| `model` | `str` | Claude model to use | `"claude-sonnet-4-20250514"` |
+| `model` | `str` | Claude model to use | `"claude-sonnet-4-5"` |
 | `max_tokens` | `int` | Maximum response tokens | `4096` |
 | `use_computer_beta` | `bool` | Enable computer-use beta features | `True` |
 | `validate_api_key` | `bool` | Validate key on init | `True` |
@@ -105,7 +105,7 @@ Claude-specific implementation using Anthropic's API.
 **Example:**
 ```python
 agent = ClaudeAgent(
-    model="claude-sonnet-4-20250514",
+    model="claude-sonnet-4-5",
     max_tokens=8192,
 )
 

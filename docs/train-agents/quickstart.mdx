@@ -20,7 +20,7 @@ hud set HUD_API_KEY=sk-hud-...
 Install and download a taskset:
 
 ```bash
-uv tool install hud-python
+uv tool install hud-python@latest
 hud get hud-evals/2048-basic
 ```
 
@@ -43,7 +43,7 @@ hud eval 2048-basic.json
 Use any provider with at least 2 GPUs (one for inference, one for training). Run locally with the flag `--local`:
 
 ```bash
-uv tool install hud-python
+uv tool install hud-python@latest
 hud get hud-evals/2048-basic
 hud rl 2048-basic.json --local
 ```

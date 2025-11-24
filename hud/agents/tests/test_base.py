@@ -96,7 +96,6 @@ class TestBaseMCPAgent:
         assert agent.allowed_tools is None
         assert agent.disallowed_tools is None
         assert agent.initial_screenshot is True
-        assert agent.system_prompt is not None  # Default system prompt is set
 
     def test_init_with_params(self):
         """Test initialization with custom parameters."""

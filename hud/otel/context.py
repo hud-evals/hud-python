@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import logging
+import traceback
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -531,11 +532,14 @@ class trace:
         # Update task status (sync call - blocking is expected for sync context manager)
         if self.is_root and settings.telemetry_enabled and settings.api_key:
             status = "error" if exc_type else "completed"
+            error_msg = None
+            if exc_type is not None:
+                error_msg = "".join(traceback.format_exception(exc_type, exc_val, exc_tb))
             _update_task_status_sync(
                 self.task_run_id,
                 status,
                 job_id=self.job_id,
-                error_message=str(exc_val) if exc_val else None,
+                error_message=error_msg,
                 trace_name=self.span_name,
                 task_id=self.task_id,
                 group_id=self.group_id,

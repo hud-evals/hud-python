@@ -60,7 +60,7 @@ The HUD SDK includes a powerful CLI for debugging and analyzing MCP environments
 
 ```bash
 # Install HUD CLI globally with uv (recommended)
-uv tool install hud-python
+uv tool install hud-python@latest
 
 # Or use without installing
 uvx --from hud-python hud --help
