@@ -18,7 +18,7 @@ OSS RL environment + evals toolkit. Wrap software as environments, run benchmark
 
 ### Are you a startup building agents?
 
-[📅 Hop on a call](https://cal.com/jay-ram-z6st6w/demo) or [📧 founders@hud.ai](mailto:founders@hud.ai)
+[📅 Hop on a call](https://cal.com/jay-hud) or [📧 founders@hud.ai](mailto:founders@hud.ai)
 
 ## Highlights
 
