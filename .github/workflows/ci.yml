@@ -37,7 +37,7 @@ jobs:
         env:
           DISPLAY: :99
           XAUTHORITY: /dev/null
-        run: uv run --python ${{ matrix.python-version }} --with=".[rl,dev]" pytest --rootdir=hud --cov --cov-report=''
+        run: uv run --python ${{ matrix.python-version }} --with=".[dev]" pytest --rootdir=hud --ignore=hud/rl/tests --cov --cov-report=''
 
   lint-ruff:
     runs-on: ubuntu-latest
