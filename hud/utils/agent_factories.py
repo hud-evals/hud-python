@@ -12,16 +12,16 @@ from hud.tools.grounding import GrounderConfig
 
 
 def create_openai_agent(**kwargs: Any) -> OpenAIChatAgent:
-    """Factory for GenericOpenAIChatAgent with run_dataset compatibility.
+    """Factory for OpenAIChatAgent with run_dataset compatibility.
 
     Args:
         api_key: OpenAI API key
         base_url: Optional custom API endpoint
         model_name: Model to use (e.g., "gpt-4o-mini")
-        **kwargs: Additional arguments passed to GenericOpenAIChatAgent
+        **kwargs: Additional arguments passed to OpenAIChatAgent
 
     Returns:
-        Configured GenericOpenAIChatAgent instance
+        Configured OpenAIChatAgent instance
 
     Example:
         >>> from hud.datasets import run_dataset

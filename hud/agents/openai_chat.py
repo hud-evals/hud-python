@@ -195,7 +195,7 @@ class OpenAIChatAgent(MCPAgent):
         extra: dict[str, Any],
     ) -> Any:
         if self.oai is None:
-            raise ValueError("openai_client is required for GenericOpenAIChatAgent")
+            raise ValueError("openai_client is required for OpenAIChatAgent")
         # default transport = OpenAI SDK
         return await self.oai.chat.completions.create(
             model=self.checkpoint_name,

@@ -45,7 +45,7 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
             openai_client: OpenAI client for the planning model
             model: Name of the OpenAI model to use for planning (e.g., "gpt-4o", "gpt-4o-mini")
             real_computer_tool_name: Name of the actual computer tool to execute
-            **kwargs: Additional arguments passed to GenericOpenAIChatAgent
+            **kwargs: Additional arguments passed to OpenAIChatAgent
         """
         # Set defaults for grounded agent
         if allowed_tools is None:

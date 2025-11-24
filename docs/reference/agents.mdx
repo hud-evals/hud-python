@@ -147,10 +147,10 @@ OpenAI Operator-style agent built on the Responses API with computer-use.
 - Operator-style system prompt guidance
 - Display metadata injection
 
-### GenericOpenAIChatAgent
+### OpenAIChatAgent
 
 ```python
-from hud.agents import GenericOpenAIChatAgent
+from hud.agents import OpenAIChatAgent
 ```
 
 OpenAI-compatible chat.completions agent that works with any endpoint implementing the OpenAI schema (OpenAI, vLLM, Ollama, Together, custom, etc.).
@@ -171,7 +171,7 @@ openai_client = AsyncOpenAI(
     api_key="not-needed",
 )
 
-agent = GenericOpenAIChatAgent(
+agent = OpenAIChatAgent(
     openai_client=openai_client,
     model_name="llama3.1",
     completion_kwargs={"temperature": 0.2},

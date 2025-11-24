@@ -11,7 +11,7 @@ def test_create_openai_agent():
         api_key="test_key", model_name="test_model", completion_kwargs={"temperature": 0.5}
     )
     assert isinstance(agent, OpenAIChatAgent)
-    assert agent.model_name == "GenericOpenAI"
+    assert agent.model_name == "OpenAI"
     assert agent.checkpoint_name == "test_model"
     assert agent.completion_kwargs["temperature"] == 0.5
 
