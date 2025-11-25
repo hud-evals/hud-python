@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, ClassVar, Literal, cast
 
 import mcp.types as types
-from openai import AsyncOpenAI  # noqa: TC002
+from openai import AsyncOpenAI, Omit  # noqa: TC002
 from openai.types.responses import (
     ResponseComputerToolCall,
     ResponseFunctionToolCall,
@@ -86,7 +87,7 @@ class OperatorAgent(OpenAIAgent):
             self.system_prompt = OPERATOR_INSTRUCTIONS
 
     def _build_openai_tools(self) -> None:
-        super()._build_openai_tools()
+        super()._convert_tools_for_openai()
         if not any(
             tool.name == self._operator_computer_tool_name for tool in self.get_available_tools()
         ):
@@ -105,12 +106,6 @@ class OperatorAgent(OpenAIAgent):
                 },
             )
         )
-
-    def _build_request_payload(self, new_items: ResponseInputParam) -> dict[str, Any]:
-        payload = super()._build_request_payload(new_items)
-        payload["truncation"] = "auto"
-        payload["reasoning"] = {"summary": "auto"}
-        return payload
 
     @hud.instrument(
         span_type="agent",
@@ -142,9 +137,20 @@ class OperatorAgent(OpenAIAgent):
                 self.console.debug("No new messages to send to OpenAI.")
                 return AgentResponse(content="", tool_calls=[], done=True)
 
-        payload = self._build_request_payload(new_items)
-        response = await self.openai_client.responses.create(**payload)
-
+        response = await self.openai_client.responses.create(
+            model=self.model,
+            input=new_items,
+            instructions=self.system_prompt,
+            max_output_tokens=self.max_output_tokens,
+            temperature=self.temperature,
+            tool_choice=self.tool_choice if self.tool_choice is not None else Omit(),
+            parallel_tool_calls=self.parallel_tool_calls,
+            reasoning=self.reasoning,
+            tools=self._openai_tools if self._openai_tools else Omit(),
+            previous_response_id=(
+                self.last_response_id if self.last_response_id is not None else Omit()
+            ),
+        )
         self.last_response_id = response.id
         self._message_cursor = len(messages)
         self.pending_call_id = None
@@ -159,9 +165,17 @@ class OperatorAgent(OpenAIAgent):
                 if tool_call:
                     agent_response.tool_calls.append(tool_call)
             elif isinstance(item, ResponseFunctionToolCall):
-                tool_call = self._convert_function_tool_call(item)
-                if tool_call:
-                    agent_response.tool_calls.append(tool_call)
+                target_name = self._tool_name_map.get(item.name, item.name)
+                try:
+                    arguments = json.loads(item.arguments)
+                except json.JSONDecodeError:
+                    self.console.warning_log(
+                        f"Failed to parse arguments for tool '{item.name}', passing raw string."
+                    )
+                    arguments = {"raw_arguments": item.arguments}
+                agent_response.tool_calls.append(
+                    MCPToolCall(name=target_name, arguments=arguments, id=item.call_id)
+                )
             elif isinstance(item, ResponseOutputMessage) and item.type == "message":
                 text = "".join(
                     content.text

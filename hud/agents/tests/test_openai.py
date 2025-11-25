@@ -75,7 +75,7 @@ class TestOpenAIAgent:
             model="gpt-4o",
             max_output_tokens=2048,
             temperature=0.7,
-            reasoning="auto",
+            reasoning={"effort": "high"},
             tool_choice="auto",
             parallel_tool_calls=True,
             validate_api_key=False,
@@ -83,7 +83,7 @@ class TestOpenAIAgent:
 
         assert agent.max_output_tokens == 2048
         assert agent.temperature == 0.7
-        assert agent.reasoning == "auto"
+        assert agent.reasoning == {"effort": "high"}
         assert agent.tool_choice == "auto"
         assert agent.parallel_tool_calls is True
 
@@ -142,6 +142,7 @@ class TestOpenAIAgent:
         assert content[1] == {
             "type": "input_image",
             "image_url": "data:image/jpeg;base64,base64imagedata",
+            "detail": "auto",
         }
 
     @pytest.mark.asyncio
@@ -538,61 +539,84 @@ class TestOpenAIAgent:
             mock_openai.responses.create.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_build_request_payload(self, mock_mcp_client, mock_openai):
-        """Test building request payload."""
-        agent = OpenAIAgent(
-            mcp_client=mock_mcp_client,
-            model_client=mock_openai,
-            model="gpt-4o",
-            max_output_tokens=1024,
-            temperature=0.5,
-            reasoning="auto",
-            tool_choice="auto",
-            parallel_tool_calls=True,
-            validate_api_key=False,
-        )
+    async def test_get_response_passes_correct_payload(self, mock_mcp_client, mock_openai):
+        """Test that get_response passes correct parameters to OpenAI API."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = OpenAIAgent(
+                mcp_client=mock_mcp_client,
+                model_client=mock_openai,
+                model="gpt-4o",
+                max_output_tokens=1024,
+                temperature=0.5,
+                reasoning={"effort": "high"},
+                tool_choice="auto",
+                parallel_tool_calls=True,
+                validate_api_key=False,
+            )
 
-        agent._openai_tools = [cast("Any", {"type": "function", "name": "test"})]
-        agent.system_prompt = "You are a helpful assistant"
-        agent.last_response_id = "prev_123"
+            agent._openai_tools = [cast("Any", {"type": "function", "name": "test"})]
+            agent.system_prompt = "You are a helpful assistant"
+            agent.last_response_id = "prev_123"
 
-        new_items = cast(
-            "Any", [{"role": "user", "content": [{"type": "input_text", "text": "Hi"}]}]
-        )
-        payload = agent._build_request_payload(new_items)
+            # Mock the API response
+            mock_response = MagicMock()
+            mock_response.id = "response_new"
+            mock_response.output = []
+            mock_openai.responses.create = AsyncMock(return_value=mock_response)
 
-        assert payload["model"] == "gpt-4o"
-        assert payload["input"] == new_items
-        assert payload["instructions"] == "You are a helpful assistant"
-        assert payload["max_output_tokens"] == 1024
-        assert payload["temperature"] == 0.5
-        assert payload["reasoning"] == "auto"
-        assert payload["tool_choice"] == "auto"
-        assert payload["parallel_tool_calls"] is True
-        assert payload["tools"] == [{"type": "function", "name": "test"}]
-        assert payload["previous_response_id"] == "prev_123"
+            messages = [{"role": "user", "content": [{"type": "input_text", "text": "Hi"}]}]
+            await agent.get_response(messages)
+
+            # Verify the API was called with the correct parameters
+            mock_openai.responses.create.assert_called_once()
+            call_kwargs = mock_openai.responses.create.call_args.kwargs
+
+            assert call_kwargs["model"] == "gpt-4o"
+            assert call_kwargs["input"] == messages
+            assert call_kwargs["instructions"] == "You are a helpful assistant"
+            assert call_kwargs["max_output_tokens"] == 1024
+            assert call_kwargs["temperature"] == 0.5
+            assert call_kwargs["reasoning"] == {"effort": "high"}
+            assert call_kwargs["tool_choice"] == "auto"
+            assert call_kwargs["parallel_tool_calls"] is True
+            assert call_kwargs["tools"] == [{"type": "function", "name": "test"}]
+            assert call_kwargs["previous_response_id"] == "prev_123"
 
     @pytest.mark.asyncio
-    async def test_build_request_payload_minimal(self, mock_mcp_client, mock_openai):
-        """Test building request payload with minimal parameters."""
-        agent = OpenAIAgent(
-            mcp_client=mock_mcp_client,
-            model_client=mock_openai,
-            validate_api_key=False,
-        )
+    async def test_get_response_passes_minimal_payload(self, mock_mcp_client, mock_openai):
+        """Test that get_response passes minimal parameters when not configured."""
+        from openai import Omit
 
-        new_items = cast(
-            "Any", [{"role": "user", "content": [{"type": "input_text", "text": "Hi"}]}]
-        )
-        payload = agent._build_request_payload(new_items)
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = OpenAIAgent(
+                mcp_client=mock_mcp_client,
+                model_client=mock_openai,
+                validate_api_key=False,
+            )
 
-        assert payload["model"] == "gpt-5.1"  # default
-        assert payload["input"] == new_items
-        assert "max_output_tokens" not in payload
-        assert "temperature" not in payload
-        assert "reasoning" not in payload
-        assert "tools" not in payload
-        assert "previous_response_id" not in payload
+            # Mock the API response
+            mock_response = MagicMock()
+            mock_response.id = "response_new"
+            mock_response.output = []
+            mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+            messages = [{"role": "user", "content": [{"type": "input_text", "text": "Hi"}]}]
+            await agent.get_response(messages)
+
+            # Verify the API was called with minimal parameters
+            mock_openai.responses.create.assert_called_once()
+            call_kwargs = mock_openai.responses.create.call_args.kwargs
+
+            assert call_kwargs["model"] == "gpt-5.1"  # default
+            assert call_kwargs["input"] == messages
+            assert call_kwargs["max_output_tokens"] is None
+            assert call_kwargs["temperature"] is None
+            # tool_choice should be Omit() when not set
+            assert isinstance(call_kwargs["tool_choice"], Omit)
+            # tools should be Omit() when empty
+            assert isinstance(call_kwargs["tools"], Omit)
+            # previous_response_id should be Omit() when not set
+            assert isinstance(call_kwargs["previous_response_id"], Omit)
 
     @pytest.mark.asyncio
     async def test_reset_response_state(self, mock_mcp_client, mock_openai):
@@ -631,8 +655,8 @@ class TestOpenAIAgent:
         assert messages == []
 
     @pytest.mark.asyncio
-    async def test_build_openai_tools(self, mock_mcp_client, mock_openai):
-        """Test building OpenAI tools from MCP tools."""
+    async def test_convert_tools_for_openai(self, mock_mcp_client, mock_openai):
+        """Test converting MCP tools to OpenAI format."""
         agent = OpenAIAgent(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
@@ -663,7 +687,7 @@ class TestOpenAIAgent:
         ]
 
         agent._available_tools = mock_tools
-        agent._build_openai_tools()
+        agent._convert_tools_for_openai()
 
         assert len(agent._openai_tools) == 2
         assert agent._tool_name_map == {"tool1": "tool1", "tool2": "tool2"}
@@ -675,8 +699,8 @@ class TestOpenAIAgent:
         assert tool1["strict"] is True
 
     @pytest.mark.asyncio
-    async def test_build_openai_tools_skips_incomplete(self, mock_mcp_client, mock_openai):
-        """Test building OpenAI tools skips tools without description or schema."""
+    async def test_convert_tools_raises_on_incomplete(self, mock_mcp_client, mock_openai):
+        """Test that converting tools raises error for incomplete tool definitions."""
         agent = OpenAIAgent(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
@@ -689,89 +713,146 @@ class TestOpenAIAgent:
         incomplete1.description = None
         incomplete1.inputSchema = {"type": "object"}
 
-        incomplete2 = MagicMock(spec=types.Tool)
-        incomplete2.name = "incomplete2"
-        incomplete2.description = "Has description"
-        incomplete2.inputSchema = None
+        agent._available_tools = [incomplete1]
 
-        complete = types.Tool(
-            name="complete",
-            description="Complete tool",
-            inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+        # Should raise ValueError for tool without description
+        with pytest.raises(ValueError, match="requires both a description and inputSchema"):
+            agent._convert_tools_for_openai()
+
+    @pytest.mark.asyncio
+    async def test_convert_tools_for_openai_via_initialize(self, mock_mcp_client, mock_openai):
+        """Test that initialize properly converts tools."""
+        agent = OpenAIAgent(
+            mcp_client=mock_mcp_client,
+            model_client=mock_openai,
+            validate_api_key=False,
         )
 
-        agent._available_tools = [incomplete1, incomplete2, complete]
-        agent._build_openai_tools()
+        # Mock the list_tools to return our test tools
+        mock_mcp_client.list_tools = AsyncMock(
+            return_value=[
+                types.Tool(
+                    name="complete",
+                    description="Complete tool",
+                    inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+                )
+            ]
+        )
 
-        # Should only have the complete tool
+        await agent.initialize()
+
+        # Should have the complete tool converted
         assert len(agent._openai_tools) == 1
         tool = cast("dict[str, Any]", agent._openai_tools[0])
         assert tool["name"] == "complete"
 
     @pytest.mark.asyncio
-    async def test_convert_function_tool_call(self, mock_mcp_client, mock_openai):
-        """Test converting OpenAI function tool call to MCP format."""
-        agent = OpenAIAgent(
-            mcp_client=mock_mcp_client,
-            model_client=mock_openai,
-            validate_api_key=False,
-        )
+    async def test_get_response_converts_function_tool_call(self, mock_mcp_client, mock_openai):
+        """Test that get_response properly converts OpenAI function tool calls to MCP format."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = OpenAIAgent(
+                mcp_client=mock_mcp_client,
+                model_client=mock_openai,
+                validate_api_key=False,
+            )
 
-        agent._tool_name_map = {"openai_name": "mcp_name"}
+            # Set up tool name map (simulating tool conversion)
+            agent._tool_name_map = {"openai_name": "mcp_name"}
 
-        mock_call = MagicMock()
-        mock_call.call_id = "call_123"
-        mock_call.name = "openai_name"
-        mock_call.arguments = '{"key": "value", "number": 42}'
+            # Mock OpenAI API response with function call
+            mock_response = MagicMock()
+            mock_response.id = "response_123"
 
-        result = agent._convert_function_tool_call(mock_call)
+            mock_function_call = ResponseFunctionToolCall(
+                type="function_call",
+                call_id="call_123",
+                name="openai_name",
+                arguments='{"key": "value", "number": 42}',
+            )
 
-        assert result is not None
-        assert result.name == "mcp_name"
-        assert result.id == "call_123"
-        assert result.arguments == {"key": "value", "number": 42}
+            mock_response.output = [mock_function_call]
+            mock_openai.responses.create = AsyncMock(return_value=mock_response)
 
-    @pytest.mark.asyncio
-    async def test_convert_function_tool_call_invalid_json(self, mock_mcp_client, mock_openai):
-        """Test converting function tool call with invalid JSON."""
-        agent = OpenAIAgent(
-            mcp_client=mock_mcp_client,
-            model_client=mock_openai,
-            validate_api_key=False,
-        )
+            messages = [
+                {"role": "user", "content": [{"type": "input_text", "text": "Do something"}]}
+            ]
+            response = await agent.get_response(messages)
 
-        agent._tool_name_map = {"tool": "tool"}
-
-        mock_call = MagicMock()
-        mock_call.call_id = "call_456"
-        mock_call.name = "tool"
-        mock_call.arguments = "invalid json {{"
-
-        result = agent._convert_function_tool_call(mock_call)
-
-        assert result is not None
-        assert result.name == "tool"
-        assert result.id == "call_456"
-        # Should wrap invalid JSON in raw_arguments
-        assert result.arguments == {"raw_arguments": "invalid json {{"}
+            # Verify the tool call was converted correctly
+            assert len(response.tool_calls) == 1
+            assert response.tool_calls[0].name == "mcp_name"
+            assert response.tool_calls[0].id == "call_123"
+            assert response.tool_calls[0].arguments == {"key": "value", "number": 42}
 
     @pytest.mark.asyncio
-    async def test_convert_function_tool_call_empty_args(self, mock_mcp_client, mock_openai):
-        """Test converting function tool call with empty arguments."""
-        agent = OpenAIAgent(
-            mcp_client=mock_mcp_client,
-            model_client=mock_openai,
-            validate_api_key=False,
-        )
+    async def test_get_response_handles_invalid_json_arguments(self, mock_mcp_client, mock_openai):
+        """Test that get_response handles invalid JSON in function call arguments."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = OpenAIAgent(
+                mcp_client=mock_mcp_client,
+                model_client=mock_openai,
+                validate_api_key=False,
+            )
 
-        agent._tool_name_map = {"tool": "tool"}
+            agent._tool_name_map = {"tool": "tool"}
 
-        mock_call = MagicMock()
-        mock_call.call_id = "call_789"
-        mock_call.name = "tool"
-        mock_call.arguments = None
+            # Mock OpenAI API response with function call that has invalid JSON
+            mock_response = MagicMock()
+            mock_response.id = "response_456"
 
-        result = agent._convert_function_tool_call(mock_call)
+            mock_function_call = ResponseFunctionToolCall(
+                type="function_call",
+                call_id="call_456",
+                name="tool",
+                arguments="invalid json {{",
+            )
 
-        assert result is not None
-        assert result.arguments == {}
+            mock_response.output = [mock_function_call]
+            mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+            messages = [
+                {"role": "user", "content": [{"type": "input_text", "text": "Do something"}]}
+            ]
+            response = await agent.get_response(messages)
+
+            # Verify invalid JSON is wrapped in raw_arguments
+            assert len(response.tool_calls) == 1
+            assert response.tool_calls[0].name == "tool"
+            assert response.tool_calls[0].id == "call_456"
+            assert response.tool_calls[0].arguments == {"raw_arguments": "invalid json {{"}
+
+    @pytest.mark.asyncio
+    async def test_get_response_handles_tool_name_mapping(self, mock_mcp_client, mock_openai):
+        """Test that get_response correctly maps tool names that aren't in the map."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = OpenAIAgent(
+                mcp_client=mock_mcp_client,
+                model_client=mock_openai,
+                validate_api_key=False,
+            )
+
+            # Tool name is NOT in the map, should fall back to the original name
+            agent._tool_name_map = {}
+
+            mock_response = MagicMock()
+            mock_response.id = "response_789"
+
+            mock_function_call = ResponseFunctionToolCall(
+                type="function_call",
+                call_id="call_789",
+                name="unmapped_tool",
+                arguments="{}",
+            )
+
+            mock_response.output = [mock_function_call]
+            mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+            messages = [
+                {"role": "user", "content": [{"type": "input_text", "text": "Do something"}]}
+            ]
+            response = await agent.get_response(messages)
+
+            # Should use the original tool name when not in map
+            assert len(response.tool_calls) == 1
+            assert response.tool_calls[0].name == "unmapped_tool"
+            assert response.tool_calls[0].arguments == {}

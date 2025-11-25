@@ -96,6 +96,7 @@ class TestOperatorAgent:
         assert content[1] == {
             "type": "input_image",
             "image_url": "data:image/png;base64,base64data",
+            "detail": "auto",
         }
 
     @pytest.mark.asyncio
