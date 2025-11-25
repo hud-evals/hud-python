@@ -21,6 +21,7 @@ from openai.types.responses.response_input_param import (
     ComputerCallOutput,  # noqa: TC002
     Message,  # noqa: TC002
 )
+from openai.types.shared_params.reasoning import Reasoning
 
 import hud
 from hud.tools.computer.settings import computer_settings
@@ -81,6 +82,12 @@ class OperatorAgent(OpenAIAgent):
         self.model_name = "Operator"
         self.environment = environment
 
+        # override reasoning to "summary": "auto"
+        if self.reasoning is None:
+            self.reasoning = Reasoning(summary="auto")
+        else:
+            self.reasoning["summary"] = "auto"
+
         if self.system_prompt:
             self.system_prompt = f"{self.system_prompt}\n\n{OPERATOR_INSTRUCTIONS}"
         else:
@@ -113,26 +120,14 @@ class OperatorAgent(OpenAIAgent):
         record_result=True,
     )
     async def get_response(self, messages: ResponseInputParam) -> AgentResponse:
-        new_items = cast("ResponseInputParam", messages[self._message_cursor :])
+        new_items: ResponseInputParam = messages[self._message_cursor :]
         if not new_items:
             if self.last_response_id is None:
-                new_items = cast(
-                    "ResponseInputParam",
-                    [
-                        cast(
-                            "Message",
-                            {
-                                "role": "user",
-                                "content": [
-                                    cast(
-                                        "ResponseInputTextParam",
-                                        {"type": "input_text", "text": ""},
-                                    )
-                                ],
-                            },
-                        )
-                    ],
-                )
+                new_items = [
+                    Message(
+                        role="user", content=[ResponseInputTextParam(type="input_text", text="")]
+                    )
+                ]
             else:
                 self.console.debug("No new messages to send to OpenAI.")
                 return AgentResponse(content="", tool_calls=[], done=True)
@@ -150,6 +145,8 @@ class OperatorAgent(OpenAIAgent):
             previous_response_id=(
                 self.last_response_id if self.last_response_id is not None else Omit()
             ),
+            # truncation MUST be set to "auto" for the computer-use-preview model
+            truncation="auto",
         )
         self.last_response_id = response.id
         self._message_cursor = len(messages)
