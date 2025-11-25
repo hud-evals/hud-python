@@ -6,7 +6,7 @@ import json
 from typing import Any, ClassVar, Literal, cast
 
 import mcp.types as types
-from openai import AsyncOpenAI, Omit  # noqa: TC002
+from openai import AsyncOpenAI, Omit
 from openai.types.responses import (
     ResponseComputerToolCall,
     ResponseFunctionToolCall,
