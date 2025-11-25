@@ -93,7 +93,7 @@ class OperatorAgent(OpenAIAgent):
         else:
             self.system_prompt = OPERATOR_INSTRUCTIONS
 
-    def _build_openai_tools(self) -> None:
+    def _convert_tools_for_openai(self) -> None:
         super()._convert_tools_for_openai()
         if not any(
             tool.name == self._operator_computer_tool_name for tool in self.get_available_tools()
