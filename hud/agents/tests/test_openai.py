@@ -856,3 +856,234 @@ class TestOpenAIAgent:
             assert len(response.tool_calls) == 1
             assert response.tool_calls[0].name == "unmapped_tool"
             assert response.tool_calls[0].arguments == {}
+
+    @pytest.mark.asyncio
+    async def test_convert_tools_for_openai_shell_tool(self, mock_mcp_client, mock_openai):
+        """Test that shell tool is converted to OpenAI native shell type."""
+        agent = OpenAIAgent(
+            mcp_client=mock_mcp_client,
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+
+        # Mock a shell tool
+        shell_tool = types.Tool(
+            name="shell",
+            description="Execute shell commands",
+            inputSchema={"type": "object", "properties": {}},
+        )
+
+        agent._available_tools = [shell_tool]
+        agent._convert_tools_for_openai()
+
+        assert len(agent._openai_tools) == 1
+        tool = cast("dict[str, Any]", agent._openai_tools[0])
+        assert tool["type"] == "shell"
+
+    @pytest.mark.asyncio
+    async def test_convert_tools_for_openai_apply_patch_tool(self, mock_mcp_client, mock_openai):
+        """Test that apply_patch tool is converted to OpenAI native apply_patch type."""
+        agent = OpenAIAgent(
+            mcp_client=mock_mcp_client,
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+
+        # Mock an apply_patch tool
+        apply_patch_tool = types.Tool(
+            name="apply_patch",
+            description="Apply patches to files",
+            inputSchema={"type": "object", "properties": {}},
+        )
+
+        agent._available_tools = [apply_patch_tool]
+        agent._convert_tools_for_openai()
+
+        assert len(agent._openai_tools) == 1
+        tool = cast("dict[str, Any]", agent._openai_tools[0])
+        assert tool["type"] == "apply_patch"
+
+    @pytest.mark.asyncio
+    async def test_convert_tools_for_openai_strict_schema_failure(
+        self, mock_mcp_client, mock_openai
+    ):
+        """Test that tool conversion handles strict schema failures gracefully."""
+        agent = OpenAIAgent(
+            mcp_client=mock_mcp_client,
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+
+        # Mock a tool with a schema that will fail strict conversion
+        # Using a schema without additionalProperties which is required for strict mode
+        mock_tool = types.Tool(
+            name="non_strict_tool",
+            description="A tool with non-strict schema",
+            inputSchema={
+                "type": "object",
+                "properties": {"arg": {"type": "string"}},
+                # Missing additionalProperties and required - will fail strict conversion
+            },
+        )
+
+        agent._available_tools = [mock_tool]
+
+        # Mock ensure_strict_json_schema to raise an exception
+        with patch("hud.agents.openai.ensure_strict_json_schema") as mock_strict:
+            mock_strict.side_effect = ValueError("Schema not strict compatible")
+            agent._convert_tools_for_openai()
+
+        # Tool should still be added but with strict=False
+        assert len(agent._openai_tools) == 1
+        tool = cast("dict[str, Any]", agent._openai_tools[0])
+        assert tool["strict"] is False
+
+    @pytest.mark.asyncio
+    async def test_format_tool_results_with_resource_link(self, mock_mcp_client, mock_openai):
+        """Test formatting tool results with ResourceLink content."""
+        agent = OpenAIAgent(
+            mcp_client=mock_mcp_client,
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+
+        tool_calls = [
+            MCPToolCall(name="resource_tool", arguments={}, id="call_resource"),
+        ]
+
+        # Create a ResourceLink content
+        resource_link = types.ResourceLink(
+            type="resource_link",
+            name="test_resource",
+            uri="file:///test/resource",
+        )
+
+        tool_results = [
+            MCPToolResult(
+                content=[resource_link],
+                isError=False,
+            ),
+        ]
+
+        messages = await agent.format_tool_results(tool_calls, tool_results)
+
+        assert len(messages) == 1
+        msg = cast("dict[str, Any]", messages[0])
+        output = cast("list[dict[str, Any]]", msg["output"])
+        assert len(output) == 1
+        assert output[0]["type"] == "input_text"
+        assert output[0]["text"] == "<resource_link>"
+
+    @pytest.mark.asyncio
+    async def test_format_tool_results_with_embedded_text_resource(
+        self, mock_mcp_client, mock_openai
+    ):
+        """Test formatting tool results with EmbeddedResource containing text."""
+        agent = OpenAIAgent(
+            mcp_client=mock_mcp_client,
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+
+        tool_calls = [
+            MCPToolCall(name="embed_tool", arguments={}, id="call_embed"),
+        ]
+
+        # Create an EmbeddedResource with TextResourceContents
+        text_resource = types.TextResourceContents(
+            uri="file:///test.txt",
+            mimeType="text/plain",
+            text="Embedded text content",
+        )
+        embedded = types.EmbeddedResource(
+            type="resource",
+            resource=text_resource,
+        )
+
+        tool_results = [
+            MCPToolResult(
+                content=[embedded],
+                isError=False,
+            ),
+        ]
+
+        messages = await agent.format_tool_results(tool_calls, tool_results)
+
+        assert len(messages) == 1
+        msg = cast("dict[str, Any]", messages[0])
+        output = cast("list[dict[str, Any]]", msg["output"])
+        assert len(output) == 1
+        assert output[0]["type"] == "input_text"
+        assert output[0]["text"] == "Embedded text content"
+
+    @pytest.mark.asyncio
+    async def test_format_tool_results_with_embedded_blob_resource(
+        self, mock_mcp_client, mock_openai
+    ):
+        """Test formatting tool results with EmbeddedResource containing blob."""
+        agent = OpenAIAgent(
+            mcp_client=mock_mcp_client,
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+
+        tool_calls = [
+            MCPToolCall(name="blob_tool", arguments={}, id="call_blob"),
+        ]
+
+        # Create an EmbeddedResource with BlobResourceContents
+        blob_resource = types.BlobResourceContents(
+            uri="file:///test.bin",
+            mimeType="application/octet-stream",
+            blob="YmluYXJ5IGRhdGE=",  # base64 encoded "binary data"
+        )
+        embedded = types.EmbeddedResource(
+            type="resource",
+            resource=blob_resource,
+        )
+
+        tool_results = [
+            MCPToolResult(
+                content=[embedded],
+                isError=False,
+            ),
+        ]
+
+        messages = await agent.format_tool_results(tool_calls, tool_results)
+
+        assert len(messages) == 1
+        msg = cast("dict[str, Any]", messages[0])
+        output = cast("list[dict[str, Any]]", msg["output"])
+        assert len(output) == 1
+        assert output[0]["type"] == "input_file"
+        assert output[0]["file_data"] == "YmluYXJ5IGRhdGE="
+
+    @pytest.mark.asyncio
+    async def test_format_tool_results_empty_content(self, mock_mcp_client, mock_openai):
+        """Test formatting tool results with completely empty content."""
+        agent = OpenAIAgent(
+            mcp_client=mock_mcp_client,
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+
+        tool_calls = [
+            MCPToolCall(name="empty_tool", arguments={}, id="call_empty"),
+        ]
+
+        tool_results = [
+            MCPToolResult(
+                content=[],  # Empty content
+                isError=False,
+            ),
+        ]
+
+        messages = await agent.format_tool_results(tool_calls, tool_results)
+
+        assert len(messages) == 1
+        msg = cast("dict[str, Any]", messages[0])
+        output = cast("list[dict[str, Any]]", msg["output"])
+        # Should have fallback empty text when no content
+        assert len(output) == 1
+        assert output[0]["type"] == "input_text"
+        assert output[0]["text"] == ""
