@@ -18,8 +18,8 @@ from openai.types.responses import (
     ToolParam,
 )
 from openai.types.responses.response_input_param import (
-    ComputerCallOutput,  # noqa: TC002
-    Message,  # noqa: TC002
+    ComputerCallOutput,
+    Message,
 )
 from openai.types.shared_params.reasoning import Reasoning
 
