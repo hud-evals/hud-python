@@ -130,5 +130,3 @@ class TestAgentUtils:
         ):
             # Should not raise
             await log_agent_metadata_to_status(model_name="test-model")
-
-

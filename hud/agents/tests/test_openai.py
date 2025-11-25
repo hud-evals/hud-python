@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from pydantic import AnyUrl
 import pytest
 from mcp import types
 from openai.types.responses import (
@@ -955,7 +956,7 @@ class TestOpenAIAgent:
         resource_link = types.ResourceLink(
             type="resource_link",
             name="test_resource",
-            uri="file:///test/resource",
+            uri=AnyUrl("file:///test/resource"),
         )
 
         tool_results = [
@@ -991,7 +992,7 @@ class TestOpenAIAgent:
 
         # Create an EmbeddedResource with TextResourceContents
         text_resource = types.TextResourceContents(
-            uri="file:///test.txt",
+            uri=AnyUrl("file:///test.txt"),
             mimeType="text/plain",
             text="Embedded text content",
         )
@@ -1033,7 +1034,7 @@ class TestOpenAIAgent:
 
         # Create an EmbeddedResource with BlobResourceContents
         blob_resource = types.BlobResourceContents(
-            uri="file:///test.bin",
+            uri=AnyUrl("file:///test.bin"),
             mimeType="application/octet-stream",
             blob="YmluYXJ5IGRhdGE=",  # base64 encoded "binary data"
         )
