@@ -24,6 +24,8 @@ VALID_CONFIG_KEYS = [
     "verbose",
     "very_verbose",
     "vllm_base_url",
+    "remote",
+    "batch_size",
 ]
 
 CONFIG_TYPES = {
@@ -33,6 +35,8 @@ CONFIG_TYPES = {
     "full": bool,
     "verbose": bool,
     "very_verbose": bool,
+    "remote": bool,
+    "batch_size": int,
 }
 
 DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
@@ -69,6 +73,12 @@ DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 
 # Number of times to run each task (similar to RL training, default: 1)
 # group_size=1
+
+# Run evaluation remotely on HUD infrastructure (default: false)
+# remote=false
+
+# Batch size for remote API submissions (default: 10)
+# batch_size=10
 """
 
 
@@ -149,6 +159,8 @@ def display_eval_settings(settings: dict[str, Any]) -> None:
         "source",
         "task_id",
         "full",
+        "remote",
+        "batch_size",
         "max_steps",
         "max_concurrent",
         "group_size",

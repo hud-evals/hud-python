@@ -957,6 +957,11 @@ def eval(
         "--remote",
         help="Run evaluation remotely on HUD infrastructure",
     ),
+    batch_size: int | None = typer.Option(
+        None,
+        "--batch-size",
+        help="Batch size for remote API submissions (default: 10)",
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents."""
     hud_console = HUDConsole()
@@ -978,6 +983,8 @@ def eval(
     very_verbose = very_verbose or config.get("very_verbose", False)
     vllm_base_url = vllm_base_url if vllm_base_url is not None else config.get("vllm_base_url")
     group_size = int(group_size) if group_size is not None else int(config.get("group_size", 1))
+    remote = remote or config.get("remote", False)
+    batch_size = int(batch_size) if batch_size is not None else int(config.get("batch_size", 10))
 
     if integration_test:
         agent = AgentType.INTEGRATION_TEST
@@ -1082,6 +1089,7 @@ def eval(
         group_size=group_size,
         task_id=task_id,
         remote=remote,
+        batch_size=batch_size if remote else None,  # Only relevant for remote
     )
 
     hud_console.info("")  # Add some spacing
@@ -1106,6 +1114,7 @@ def eval(
         integration_test=integration_test,
         task_id=task_id,
         remote=remote,
+        batch_size=batch_size,
     )
 
 

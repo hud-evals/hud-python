@@ -810,6 +810,11 @@ def eval_command(
         "--remote",
         help="Run evaluation remotely on HUD infrastructure",
     ),
+    batch_size: int = typer.Option(
+        10,
+        "--batch-size",
+        help="Batch size for remote API submissions (default: 10)",
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
 
@@ -925,6 +930,7 @@ def eval_command(
                 group_size=group_size,
                 task_id=task_id,
                 full=full,
+                batch_size=batch_size,
             )
         )
         return

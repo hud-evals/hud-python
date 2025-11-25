@@ -119,6 +119,7 @@ async def run_remote_eval(
     group_size: int = 1,
     task_id: str | None = None,
     full: bool = False,
+    batch_size: int = 10,
 ) -> None:
     """Run evaluation remotely on HUD infrastructure."""
     
@@ -220,7 +221,7 @@ async def run_remote_eval(
         accepted, rejected = await submit_batch_payloads(
             rollouts,
             endpoint,
-            batch_size=10,  # Reasonable default
+            batch_size=batch_size,
             client=client,
             api_key=settings.api_key,
         )
