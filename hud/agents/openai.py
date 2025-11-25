@@ -5,25 +5,32 @@ from __future__ import annotations
 import copy
 import json
 import logging
+from inspect import cleandoc
 from typing import Any, Literal, cast
 
 import mcp.types as types
-from openai import AsyncOpenAI, OpenAI
+from openai import AsyncOpenAI, Omit, OpenAI
 from openai.types.responses import (
+    ApplyPatchToolParam,
+    FunctionShellToolParam,
+    FunctionToolParam,
+    ResponseFunctionCallOutputItemListParam,
     ResponseFunctionToolCall,
+    ResponseInputFileContentParam,
+    ResponseInputImageContentParam,
     ResponseInputImageParam,
     ResponseInputMessageContentListParam,
     ResponseInputParam,
+    ResponseInputTextContentParam,
     ResponseInputTextParam,
     ResponseOutputMessage,
     ResponseOutputText,
     ResponseReasoningItem,
     ToolParam,
 )
-from openai.types.responses.response_input_param import (
-    FunctionCallOutput,  # noqa: TC002
-    Message,  # noqa: TC002
-)
+from openai.types.responses.response_create_params import ToolChoice
+from openai.types.responses.response_input_param import FunctionCallOutput, Message
+from openai.types.shared_params.reasoning import Reasoning
 
 import hud
 from hud.settings import settings
@@ -46,8 +53,8 @@ class OpenAIAgent(MCPAgent):
         model: str = "gpt-5.1",
         max_output_tokens: int | None = None,
         temperature: float | None = None,
-        reasoning: dict[str, Any] | Literal["auto"] | None = None,
-        tool_choice: dict[str, Any] | Literal["auto"] | None = None,
+        reasoning: Reasoning | None = None,
+        tool_choice: ToolChoice | None = None,
         parallel_tool_calls: bool | None = None,
         validate_api_key: bool = True,
         **kwargs: Any,
@@ -71,7 +78,7 @@ class OpenAIAgent(MCPAgent):
         self.max_output_tokens = max_output_tokens
         self.temperature = temperature
         self.reasoning = reasoning
-        self.tool_choice = tool_choice
+        self.tool_choice: ToolChoice | None = tool_choice
         self.parallel_tool_calls = parallel_tool_calls
 
         self._openai_tools: list[ToolParam] = []
@@ -88,43 +95,64 @@ class OpenAIAgent(MCPAgent):
     async def initialize(self, task: Any | None = None) -> None:
         """Initialize agent and build tool metadata."""
         await super().initialize(task)
-        self._build_openai_tools()
+        self._convert_tools_for_openai()
 
-    def _build_openai_tools(self) -> None:
+    def _convert_tools_for_openai(self) -> None:
         """Convert MCP tools into OpenAI Responses tool definitions."""
-        self._openai_tools = []
-        self._tool_name_map = {}
+        available_tools = self.get_available_tools()
 
-        for tool in self.get_available_tools():
+        def to_api_tool(
+            tool: types.Tool,
+        ) -> FunctionShellToolParam | ApplyPatchToolParam | FunctionToolParam | None:
+            # Special case: shell tool -> OpenAI native shell
+            if tool.name == "shell":
+                return FunctionShellToolParam(type="shell")
+
+            # Special case: apply_patch tool -> OpenAI native apply_patch
+            if tool.name == "apply_patch":
+                return ApplyPatchToolParam(type="apply_patch")
+
+            # Regular function tool
             if tool.description is None or tool.inputSchema is None:
-                self.console.warning_log(
-                    f"Skipping tool '{tool.name}' - description and input schema "
-                    "are required for OpenAI tools."
+                raise ValueError(
+                    cleandoc(f"""MCP tool {tool.name} requires both a description and inputSchema.
+                    Add these by:
+                    1. Adding a docstring to your @mcp.tool decorated function for the description
+                    2. Using pydantic Field() annotations on function parameters for the schema
+                    """)
                 )
-                continue
-            self._tool_name_map[tool.name] = tool.name
-            schema_copy = copy.deepcopy(tool.inputSchema)
-            strict_schema = schema_copy
+
             strict_enforced = True
+            maybe_strict_schema = copy.deepcopy(tool.inputSchema)
             try:
-                strict_schema = ensure_strict_json_schema(schema_copy)
-            except Exception as exc:  # pragma: no cover - defensive
+                # update in place
+                ensure_strict_json_schema(maybe_strict_schema)
+            except Exception as exc:
                 strict_enforced = False
+                maybe_strict_schema = tool.inputSchema
                 self.console.warning_log(
                     f"Failed to convert schema for tool '{tool.name}' to strict mode: {exc}"
                 )
 
-            function_tool = cast(
-                "ToolParam",
-                {
-                    "type": "function",
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": strict_schema,
-                    "strict": strict_enforced,
-                },
+            return FunctionToolParam(
+                type="function",
+                name=tool.name,
+                description=tool.description,
+                parameters=maybe_strict_schema,
+                strict=strict_enforced,
             )
-            self._openai_tools.append(function_tool)
+
+        self._openai_tools = []
+        self._tool_name_map = {}
+
+        for tool in available_tools:
+            openai_tool = to_api_tool(tool)
+            if openai_tool is None:
+                continue
+
+            if "name" in openai_tool:
+                self._tool_name_map[openai_tool["name"]] = tool.name
+            self._openai_tools.append(openai_tool)
 
     async def _run_context(
         self, context: list[types.ContentBlock], *, max_steps: int = 10
@@ -148,26 +176,19 @@ class OpenAIAgent(MCPAgent):
         content: ResponseInputMessageContentListParam = []
         for block in blocks:
             if isinstance(block, types.TextContent):
-                content.append(
-                    cast(
-                        "ResponseInputTextParam",
-                        {"type": "input_text", "text": block.text},
-                    )
-                )
+                content.append(ResponseInputTextParam(type="input_text", text=block.text))
             elif isinstance(block, types.ImageContent):
                 mime_type = getattr(block, "mimeType", "image/png")
                 content.append(
-                    cast(
-                        "ResponseInputImageParam",
-                        {
-                            "type": "input_image",
-                            "image_url": f"data:{mime_type};base64,{block.data}",
-                        },
+                    ResponseInputImageParam(
+                        type="input_image",
+                        image_url=f"data:{mime_type};base64,{block.data}",
+                        detail="auto",
                     )
                 )
         if not content:
-            content.append(cast("ResponseInputTextParam", {"type": "input_text", "text": ""}))
-        return [cast("Message", {"role": "user", "content": content})]
+            content.append(ResponseInputTextParam(type="input_text", text=""))
+        return [Message(role="user", content=content)]
 
     @hud.instrument(
         span_type="agent",
@@ -180,25 +201,28 @@ class OpenAIAgent(MCPAgent):
         if not new_items:
             if self.last_response_id is None:
                 new_items = [
-                    cast(
-                        "Message",
-                        {
-                            "role": "user",
-                            "content": [
-                                cast(
-                                    "ResponseInputTextParam",
-                                    {"type": "input_text", "text": ""},
-                                )
-                            ],
-                        },
+                    Message(
+                        role="user", content=[ResponseInputTextParam(type="input_text", text="")]
                     )
                 ]
             else:
                 self.console.debug("No new messages to send to OpenAI.")
                 return AgentResponse(content="", tool_calls=[], done=True)
 
-        payload = self._build_request_payload(new_items)
-        response = await self.openai_client.responses.create(**payload)
+        response = await self.openai_client.responses.create(
+            model=self.model,
+            input=new_items,
+            instructions=self.system_prompt,
+            max_output_tokens=self.max_output_tokens,
+            temperature=self.temperature,
+            tool_choice=self.tool_choice if self.tool_choice is not None else Omit(),
+            parallel_tool_calls=self.parallel_tool_calls,
+            reasoning=self.reasoning,
+            tools=self._openai_tools if self._openai_tools else Omit(),
+            previous_response_id=(
+                self.last_response_id if self.last_response_id is not None else Omit()
+            ),
+        )
 
         self.last_response_id = response.id
         self._message_cursor = len(messages)
@@ -232,24 +256,6 @@ class OpenAIAgent(MCPAgent):
         agent_response.content = "".join(reasoning_chunks) + "".join(text_chunks)
         return agent_response
 
-    def _build_request_payload(self, new_items: ResponseInputParam) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "model": self.model,
-            "input": new_items,
-            "instructions": self.system_prompt,
-            "max_output_tokens": self.max_output_tokens,
-            "temperature": self.temperature,
-            "tool_choice": self.tool_choice,
-            "parallel_tool_calls": self.parallel_tool_calls,
-        }
-        if self.reasoning is not None:
-            payload["reasoning"] = self.reasoning
-        if self._openai_tools:
-            payload["tools"] = self._openai_tools
-        if self.last_response_id is not None:
-            payload["previous_response_id"] = self.last_response_id
-        return {k: v for k, v in payload.items() if v is not None}
-
     def _convert_function_tool_call(
         self, tool_call: ResponseFunctionToolCall
     ) -> MCPToolCall | None:
@@ -273,49 +279,61 @@ class OpenAIAgent(MCPAgent):
                 self.console.warning_log(f"Tool '{call.name}' missing call_id; skipping output.")
                 continue
 
-            output_items: list[dict[str, Any]] = []
+            output_items: ResponseFunctionCallOutputItemListParam = []
             if result.isError:
-                output_items.append({"type": "input_text", "text": "[tool_error] true"})
+                output_items.append(
+                    ResponseInputTextParam(type="input_text", text="[tool_error] true")
+                )
 
             if result.structuredContent is not None:
                 output_items.append(
-                    {
-                        "type": "input_text",
-                        "text": json.dumps(result.structuredContent, default=str),
-                    }
+                    ResponseInputTextParam(
+                        type="input_text", text=json.dumps(result.structuredContent, default=str)
+                    )
                 )
 
-            if result.content:
-                for block in result.content:
-                    if isinstance(block, types.TextContent):
-                        output_items.append({"type": "input_text", "text": block.text})
-                    elif isinstance(block, types.ImageContent):
+            for block in result.content:
+                match block:
+                    case types.TextContent():
+                        output_items.append(
+                            ResponseInputTextContentParam(type="input_text", text=block.text)
+                        )
+                    case types.ImageContent():
                         mime_type = getattr(block, "mimeType", "image/png")
                         output_items.append(
-                            {
-                                "type": "input_image",
-                                "image_url": f"data:{mime_type};base64,{block.data}",
-                            }
+                            ResponseInputImageContentParam(
+                                type="input_image",
+                                image_url=f"data:{mime_type};base64,{block.data}",
+                            )
                         )
-                    else:
+                    case types.ResourceLink():
+                        # seems to contain no content, so we just return a placeholder
                         output_items.append(
-                            {
-                                "type": "input_text",
-                                "text": getattr(block, "text", str(block)),
-                            }
+                            ResponseInputTextContentParam(type="input_text", text="<resource_link>")
                         )
+                    case types.EmbeddedResource():
+                        match block.resource:
+                            case types.TextResourceContents():
+                                output_items.append(
+                                    ResponseInputTextContentParam(
+                                        type="input_text", text=block.resource.text
+                                    )
+                                )
+                            case types.BlobResourceContents():
+                                output_items.append(
+                                    ResponseInputFileContentParam(
+                                        type="input_file", file_data=block.resource.blob
+                                    )
+                                )
+                    case _:
+                        self.console.warning_log(f"Unknown content block type: {type(block)}")
 
             if not output_items:
-                output_items.append({"type": "input_text", "text": ""})
+                output_items.append(ResponseInputTextParam(type="input_text", text=""))
 
             formatted.append(
-                cast(
-                    "FunctionCallOutput",
-                    {
-                        "type": "function_call_output",
-                        "call_id": call.id,
-                        "output": output_items,
-                    },
-                )
+                FunctionCallOutput(
+                    type="function_call_output", call_id=call.id, output=output_items
+                ),
             )
         return formatted
