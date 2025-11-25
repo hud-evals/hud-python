@@ -6,7 +6,7 @@ import copy
 import json
 import logging
 from inspect import cleandoc
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any
 
 import mcp.types as types
 from openai import AsyncOpenAI, Omit, OpenAI
@@ -28,9 +28,7 @@ from openai.types.responses import (
     ResponseReasoningItem,
     ToolParam,
 )
-from openai.types.responses.response_create_params import ToolChoice
 from openai.types.responses.response_input_param import FunctionCallOutput, Message
-from openai.types.shared_params.reasoning import Reasoning
 
 import hud
 from hud.settings import settings
@@ -38,6 +36,10 @@ from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Trace
 from hud.utils.strict_schema import ensure_strict_json_schema
 
 from .base import MCPAgent
+
+if TYPE_CHECKING:
+    from openai.types.responses.response_create_params import ToolChoice
+    from openai.types.shared_params.reasoning import Reasoning
 
 logger = logging.getLogger(__name__)
 
