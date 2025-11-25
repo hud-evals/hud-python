@@ -300,9 +300,10 @@ class OpenAIAgent(MCPAgent):
                             )
                         )
                     case types.ResourceLink():
-                        # seems to contain no content, so we just return a placeholder
                         output_items.append(
-                            ResponseInputTextContentParam(type="input_text", text="<resource_link>")
+                            ResponseInputFileContentParam(
+                                type="input_file", file_url=str(block.uri)
+                            )
                         )
                     case types.EmbeddedResource():
                         match block.resource:
