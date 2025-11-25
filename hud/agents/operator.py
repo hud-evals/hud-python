@@ -114,83 +114,6 @@ class OperatorAgent(OpenAIAgent):
             )
         )
 
-    @hud.instrument(
-        span_type="agent",
-        record_args=False,
-        record_result=True,
-    )
-    async def get_response(self, messages: ResponseInputParam) -> AgentResponse:
-        new_items: ResponseInputParam = messages[self._message_cursor :]
-        if not new_items:
-            if self.last_response_id is None:
-                new_items = [
-                    Message(
-                        role="user", content=[ResponseInputTextParam(type="input_text", text="")]
-                    )
-                ]
-            else:
-                self.console.debug("No new messages to send to OpenAI.")
-                return AgentResponse(content="", tool_calls=[], done=True)
-
-        response = await self.openai_client.responses.create(
-            model=self.model,
-            input=new_items,
-            instructions=self.system_prompt,
-            max_output_tokens=self.max_output_tokens,
-            temperature=self.temperature,
-            tool_choice=self.tool_choice if self.tool_choice is not None else Omit(),
-            parallel_tool_calls=self.parallel_tool_calls,
-            reasoning=self.reasoning,
-            tools=self._openai_tools if self._openai_tools else Omit(),
-            previous_response_id=(
-                self.last_response_id if self.last_response_id is not None else Omit()
-            ),
-            # truncation MUST be set to "auto" for the computer-use-preview model
-            truncation="auto",
-        )
-        self.last_response_id = response.id
-        self._message_cursor = len(messages)
-        self.pending_call_id = None
-
-        agent_response = AgentResponse(content="", tool_calls=[], done=True)
-        text_chunks: list[str] = []
-        reasoning_chunks: list[str] = []
-
-        for item in response.output:
-            if isinstance(item, ResponseComputerToolCall):
-                tool_call = self._convert_computer_tool_call(item)
-                if tool_call:
-                    agent_response.tool_calls.append(tool_call)
-            elif isinstance(item, ResponseFunctionToolCall):
-                target_name = self._tool_name_map.get(item.name, item.name)
-                try:
-                    arguments = json.loads(item.arguments)
-                except json.JSONDecodeError:
-                    self.console.warning_log(
-                        f"Failed to parse arguments for tool '{item.name}', passing raw string."
-                    )
-                    arguments = {"raw_arguments": item.arguments}
-                agent_response.tool_calls.append(
-                    MCPToolCall(name=target_name, arguments=arguments, id=item.call_id)
-                )
-            elif isinstance(item, ResponseOutputMessage) and item.type == "message":
-                text = "".join(
-                    content.text
-                    for content in item.content
-                    if isinstance(content, ResponseOutputText)
-                )
-                if text:
-                    text_chunks.append(text)
-            elif isinstance(item, ResponseReasoningItem) and item.summary:
-                reasoning_chunks.append(
-                    "".join(f"Thinking: {summary.text}\n" for summary in item.summary)
-                )
-
-        if agent_response.tool_calls:
-            agent_response.done = False
-
-        agent_response.content = "".join(reasoning_chunks) + "".join(text_chunks)
-        return agent_response
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
@@ -260,16 +183,3 @@ class OperatorAgent(OpenAIAgent):
             if isinstance(content, types.TextContent) and result.isError:
                 self.console.error_log(f"Computer tool error: {content.text}")
         return None
-
-    def _convert_computer_tool_call(
-        self, tool_call: ResponseComputerToolCall
-    ) -> MCPToolCall | None:
-        self.pending_call_id = tool_call.call_id
-        self.pending_safety_checks = tool_call.pending_safety_checks
-        call = MCPToolCall(
-            name=self._operator_computer_tool_name,
-            arguments=tool_call.action.model_dump(),
-            id=tool_call.call_id,
-        )
-        call.pending_safety_checks = tool_call.pending_safety_checks  # type: ignore[attr-defined]
-        return call

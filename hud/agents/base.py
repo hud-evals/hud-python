@@ -148,6 +148,7 @@ class MCPAgent(ABC):
         try:
             await self.mcp_client.initialize()
         except Exception as e:
+            self.console.error_log(f"Failed to initialize MCP client: {e}")
             self._handle_connection_error(e)
 
         # If task is provided, apply agent_config and add lifecycle tools

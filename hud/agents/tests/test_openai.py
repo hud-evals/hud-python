@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
 import pytest
 from mcp import types
 from openai.types.responses import (
@@ -631,7 +632,9 @@ class TestOpenAIAgent:
         # Set some state
         agent.last_response_id = "some_id"
         agent.pending_call_id = "call_id"
-        agent.pending_safety_checks = [{"check": "value"}]
+        agent.pending_safety_checks = [
+            PendingSafetyCheck(id="safety_check_id", code="value", message="message")
+        ]
         agent._message_cursor = 5
 
         # Reset

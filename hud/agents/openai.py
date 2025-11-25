@@ -6,7 +6,7 @@ import copy
 import json
 import logging
 from inspect import cleandoc
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import mcp.types as types
 from openai import AsyncOpenAI, Omit, OpenAI
@@ -25,6 +25,7 @@ from openai.types.responses import (
     ResponseOutputText,
     ToolParam,
 )
+from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
 from openai.types.responses.response_input_param import FunctionCallOutput, Message
 
 import hud
@@ -54,6 +55,7 @@ class OpenAIAgent(MCPAgent):
         temperature: float | None = None,
         reasoning: Reasoning | None = None,
         tool_choice: ToolChoice | None = None,
+        truncation: Literal["auto", "disabled"] | None = None,
         parallel_tool_calls: bool | None = None,
         validate_api_key: bool = True,
         **kwargs: Any,
@@ -79,13 +81,13 @@ class OpenAIAgent(MCPAgent):
         self.reasoning = reasoning
         self.tool_choice: ToolChoice | None = tool_choice
         self.parallel_tool_calls = parallel_tool_calls
-
+        self.truncation: Literal["auto", "disabled"] | None = truncation
         self._openai_tools: list[ToolParam] = []
         self._tool_name_map: dict[str, str] = {}
 
         self.last_response_id: str | None = None
         self.pending_call_id: str | None = None
-        self.pending_safety_checks: list[Any] = []
+        self.pending_safety_checks: list[PendingSafetyCheck] = []
         self._message_cursor = 0
 
         self.model_name = "OpenAI"
@@ -122,11 +124,19 @@ class OpenAIAgent(MCPAgent):
                 )
 
             # schema must be strict
+
+            try:
+                strict_schema = ensure_strict_json_schema(copy.deepcopy(tool.inputSchema))
+            except Exception as e:
+                self.console.warning_log(f"Failed to convert tool '{tool.name}' schema to strict: {e}")
+                logger.error(json.dumps(tool.inputSchema, indent=2))
+                raise e
+
             return FunctionToolParam(
                 type="function",
                 name=tool.name,
                 description=tool.description,
-                parameters=ensure_strict_json_schema(copy.deepcopy(tool.inputSchema)),
+                parameters=strict_schema,
                 strict=True,
             )
 
@@ -210,6 +220,7 @@ class OpenAIAgent(MCPAgent):
             previous_response_id=(
                 self.last_response_id if self.last_response_id is not None else Omit()
             ),
+            truncation=self.truncation,
         )
 
         self.last_response_id = response.id
@@ -250,6 +261,11 @@ class OpenAIAgent(MCPAgent):
                     MCPToolCall(
                         name="apply_patch", arguments=item.operation.to_dict(), id=item.call_id
                     )
+                )
+            elif item.type == "computer_call":
+                self.pending_safety_checks = item.pending_safety_checks
+                agent_response.tool_calls.append(
+                    MCPToolCall(name="computer", arguments=item.action.to_dict(), id=item.call_id)
                 )
             elif item.type == "reasoning":
                 reasoning_chunks.append(
@@ -318,6 +334,10 @@ class OpenAIAgent(MCPAgent):
                                     ResponseInputFileContentParam(
                                         type="input_file", file_data=block.resource.blob
                                     )
+                                )
+                            case _:
+                                self.console.warning_log(
+                                    f"Unknown resource type: {type(block.resource)}"
                                 )
                     case _:
                         self.console.warning_log(f"Unknown content block type: {type(block)}")
