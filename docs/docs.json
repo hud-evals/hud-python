@@ -68,6 +68,10 @@
             ]
           },
           {
+            "group": "HUD Gateway",
+            "pages": ["gateway/index"]
+          },
+          {
             "group": "Beta Features",
             "pages": [
               "beta/index",
