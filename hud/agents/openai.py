@@ -121,24 +121,13 @@ class OpenAIAgent(MCPAgent):
                     """)
                 )
 
-            strict_enforced = True
-            maybe_strict_schema = copy.deepcopy(tool.inputSchema)
-            try:
-                # update in place
-                ensure_strict_json_schema(maybe_strict_schema)
-            except Exception as exc:
-                strict_enforced = False
-                maybe_strict_schema = tool.inputSchema
-                self.console.warning_log(
-                    f"Failed to convert schema for tool '{tool.name}' to strict mode: {exc}"
-                )
-
+            # schema must be strict
             return FunctionToolParam(
                 type="function",
                 name=tool.name,
                 description=tool.description,
-                parameters=maybe_strict_schema,
-                strict=strict_enforced,
+                parameters=ensure_strict_json_schema(copy.deepcopy(tool.inputSchema)),
+                strict=True,
             )
 
         self._openai_tools = []
