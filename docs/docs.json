@@ -36,12 +36,21 @@
             "pages": ["index", "quickstart", "llm-quickstart"]
           },
           {
-            "group": "Ideas",
+            "group": "Core Concepts",
             "pages": [
-              "core-concepts/mcp-protocol",
               "core-concepts/architecture", 
+              "core-concepts/mcp-protocol",
               "core-concepts/task-system",
               "core-concepts/tricks"
+            ]
+          },
+          {
+            "group": "SDK Reference",
+            "pages": [
+              "reference/tools",
+              "reference/agents",
+              "reference/environments",
+              "reference/tasks"
             ]
           },
           {
@@ -52,7 +61,7 @@
             ]
           },
           {
-            "group": "RL",
+            "group": "Training (RL)",
             "pages": [
               "train-agents/quickstart",
               "train-agents/tasks"
@@ -90,12 +99,9 @@
             ]
           },
           {
-            "group": "SDK Reference",
+            "group": "Community",
             "pages": [
-              "reference/tools",
-              "reference/agents",
-              "reference/environments",
-              "reference/tasks"
+              "contributing"
             ]
           }
         ]

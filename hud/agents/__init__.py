@@ -3,13 +3,15 @@ from __future__ import annotations
 from .base import MCPAgent
 from .claude import ClaudeAgent
 from .gemini import GeminiAgent
-from .openai import OperatorAgent
-from .openai_chat_generic import GenericOpenAIChatAgent
+from .openai import OpenAIAgent
+from .openai_chat import OpenAIChatAgent
+from .operator import OperatorAgent
 
 __all__ = [
     "ClaudeAgent",
     "GeminiAgent",
-    "GenericOpenAIChatAgent",
     "MCPAgent",
+    "OpenAIAgent",
+    "OpenAIChatAgent",
     "OperatorAgent",
 ]

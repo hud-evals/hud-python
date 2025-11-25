@@ -1,21 +1,38 @@
 #!/bin/bash
 
 # Multi-architecture Docker build and push script for hud environments
-# Usage: ./build-and-push-env.sh <environment|directory> <version>
-# Example: ./build-and-push-env.sh browser 0.1.8
-#          ./build-and-push-env.sh environments/browser 0.1.8
-#          ./build-and-push-env.sh /full/path/to/env 0.1.8
+# Usage: ./build-and-push-env.sh <environment|directory> <image_name:version>
+# Example: ./build-and-push-env.sh browser hudevals/hud-browser:0.1.8
+#          ./build-and-push-env.sh environments/browser hudevals/hud-browser:0.1.8
+#          ./build-and-push-env.sh /full/path/to/env hudevals/hud-browser:0.1.8
 
 set -e
 
 ENV_INPUT=$1
-VERSION=$2
+IMAGE_TAG=$2
 
-if [ -z "$ENV_INPUT" ] || [ -z "$VERSION" ]; then
+if [ -z "$ENV_INPUT" ] || [ -z "$IMAGE_TAG" ]; then
     echo "Error: Missing required arguments"
-    echo "Usage: $0 <environment|directory> <version>"
-    echo "Example: $0 browser 0.1.8"
-    echo "         $0 environments/browser 0.1.8"
+    echo "Usage: $0 <environment|directory> <image_name:version>"
+    echo "Example: $0 browser hudevals/hud-browser:0.1.8"
+    echo "         $0 environments/browser hudevals/hud-browser:0.1.8"
+    exit 1
+fi
+
+# Validate image tag format
+if [[ ! "$IMAGE_TAG" == *":"* ]]; then
+    echo "Error: Invalid image tag format. Must include version tag (e.g., image_name:version)"
+    echo "Example: hudevals/hud-browser:0.1.8"
+    exit 1
+fi
+
+# Extract image name and version from the tag
+IMAGE_NAME="${IMAGE_TAG%:*}"
+VERSION="${IMAGE_TAG##*:}"
+
+if [ -z "$IMAGE_NAME" ] || [ -z "$VERSION" ]; then
+    echo "Error: Invalid image tag format"
+    echo "Example: hudevals/hud-browser:0.1.8"
     exit 1
 fi
 
@@ -37,9 +54,7 @@ else
     ENV_PATH="$PROJECT_ROOT/environments/${ENVIRONMENT}"
 fi
 
-IMAGE_NAME="hudevals/hud-${ENVIRONMENT}"
-
-echo "Building and pushing hud-${ENVIRONMENT} version ${VERSION}"
+echo "Building and pushing ${IMAGE_NAME}:${VERSION}"
 echo "Environment path: $ENV_PATH"
 
 if [ ! -d "$ENV_PATH" ]; then
@@ -87,11 +102,11 @@ docker manifest push $IMAGE_NAME:$VERSION
 docker manifest push $IMAGE_NAME:latest
 
 echo "Successfully built and pushed:"
-echo "  - $IMAGE_NAME:$VERSION (multi-arch)"
-echo "  - $IMAGE_NAME:latest (multi-arch)"
-echo "  - $IMAGE_NAME:$VERSION-arm64"
-echo "  - $IMAGE_NAME:$VERSION-amd64"
-echo "  - $IMAGE_NAME:latest-arm64"
-echo "  - $IMAGE_NAME:latest-amd64"
+echo "  - ${IMAGE_NAME}:${VERSION} (multi-arch)"
+echo "  - ${IMAGE_NAME}:latest (multi-arch)"
+echo "  - ${IMAGE_NAME}:${VERSION}-arm64"
+echo "  - ${IMAGE_NAME}:${VERSION}-amd64"
+echo "  - ${IMAGE_NAME}:latest-arm64"
+echo "  - ${IMAGE_NAME}:latest-amd64"
 
 echo "Done!"

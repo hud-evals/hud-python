@@ -15,8 +15,8 @@ RUN uv pip install --python /opt/venv -e .
 # Create directories for logs and data
 RUN mkdir -p /app/logs /app/data
 
-ENV DISPLAY_WIDTH=1448
-ENV DISPLAY_HEIGHT=944
+ENV DISPLAY_WIDTH=1400
+ENV DISPLAY_HEIGHT=850
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1

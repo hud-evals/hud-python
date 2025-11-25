@@ -11,7 +11,7 @@ from typing import Any, ClassVar
 
 import litellm
 
-from .openai_chat_generic import GenericOpenAIChatAgent
+from .openai_chat import OpenAIChatAgent
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - optional dependency
     transform_mcp_tool_to_openai_tool = None  # type: ignore
 
 
-class LiteAgent(GenericOpenAIChatAgent):
+class LiteAgent(OpenAIChatAgent):
     """
     Same OpenAI chat-completions shape + MCP tool plumbing,
     but transport is LiteLLM and (optionally) tools are shaped by LiteLLM's MCP transformer.
@@ -55,7 +55,7 @@ class LiteAgent(GenericOpenAIChatAgent):
                 for t in self.get_available_tools()
             ]
         # Fallback to the generic OpenAI sanitizer
-        return GenericOpenAIChatAgent.get_tool_schemas(self)
+        return OpenAIChatAgent.get_tool_schemas(self)
 
     async def _invoke_chat_completion(
         self,

@@ -4,115 +4,89 @@ description: "Run your first agent evaluation in 3 minutes"
 icon: "bolt"
 ---
 
-Get up and running with HUD in minutes. This guide walks you through installation, basic setup, and running your first agent evaluation.
+Get up and running with HUD in minutes. Follow these four steps to install the CLI and run your first evaluation.
 
-## Quick Clone
+<Steps>
+<Step title="Install uv">
+  HUD uses `uv` for fast, reliable Python package management.
 
-The fastest way to get started:
+  <Tabs>
+  <Tab title="macOS / Linux">
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+  </Tab>
+  <Tab title="Windows">
+  ```powershell
+  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  ```
+  </Tab>
+  </Tabs>
+</Step>
+
+<Step title="Install HUD Tool">
+  Install the HUD CLI globally using `uv`:
+
+  ```bash
+  uv tool install hud-python@latest
+  ```
+</Step>
+
+<Step title="Get and Set API Keys">
+  1. Get your **HUD API Key** from [hud.ai](https://hud.ai)
+  2. Get your **Anthropic API Key** from [console.anthropic.com](https://console.anthropic.com/settings/keys)
+  3. Set them using the CLI:
+
+  ```bash
+  hud set HUD_API_KEY=sk-hud-... ANTHROPIC_API_KEY=sk-ant-...
+  ```
+</Step>
+
+<Step title="Run Your First Evaluation">
+  Run the standard SheetBench-50 benchmark using Claude:
+
+  ```bash
+  hud eval hud-evals/SheetBench-50 claude
+  ```
+
+  <Note>
+  This will stream results to your terminal and the [HUD Dashboard](https://hud.ai/home).
+  </Note>
+</Step>
+</Steps>
+
+## Environments/CLI Quick Reference
 
 ```bash
-# Clone a complete example project with uv
-uvx hud-python quickstart
+# Create sample environment
+hud init
+
+# Change directory to the environment and build the docker container
+cd sample && hud build
+
+# Start hot-reload development server for an environment
+hud dev . --build --interactive
+
+# Run a task in your environment
+hud eval claude
 ```
-
-This sets you up with a working agent evaluation example you can run immediately.
-
-## Installation
-
-<Tabs>
-<Tab title="Basic Install">
-```bash
-pip install hud-python
-```
-</Tab>
-
-<Tab title="Agent Install">
-```bash
-# Includes AI providers and telemetry
-pip install "hud-python[agent]"
-```
-</Tab>
-
-<Tab title="CLI Tools">
-```bash
-# Install CLI in isolated environment
-uv tool install hud-python
-```
-</Tab>
-</Tabs>
-
-## API Keys
-
-Set your API keys as environment variables:
-
-```bash
-export HUD_API_KEY="sk-hud-..."      # Get from hud.ai
-export ANTHROPIC_API_KEY="sk-ant-..." # For Claude agents
-export OPENAI_API_KEY="sk-..."        # For OpenAI agents
-```
-
-<Tip>
-Create a `.env` file in your project root to manage API keys locally
-</Tip>
-
-## Your First Agent
-
-Run an agent on the 2048 game environment:
-
-```python
-import asyncio, os
-import hud
-from hud.datasets import Task
-from hud.agents import ClaudeAgent
-
-async def main():
-    # The trace context captures ALL agent interactions within a "task run"
-    # Everything inside this context shows up as one trace on hud.ai
-    async with hud.async_trace("quickstart-2048"):
-        # Define task with remote MCP environment
-        task = Task(
-            prompt="Win a game of 2048 by reaching the 128 tile",
-            mcp_config={
-                "hud": {
-                    "url": "https://mcp.hud.ai/v3/mcp",
-                    "headers": {
-                        "Authorization": f"Bearer {os.getenv('HUD_API_KEY')}",
-                        "Mcp-Image": "hudevals/hud-text-2048:0.1.3"
-                    }
-                }
-            },
-        setup_tool={"name": "setup", "arguments": {"name": "board", "arguments": { "board_size": 4}}},
-        evaluate_tool={"name": "evaluate", "arguments": {"name": "max_number", "arguments": {"target": 64}}}
-        )
-        
-        # Run agent (auto-creates MCP client from task.mcp_config)
-        agent = ClaudeAgent()
-        result = await agent.run(task)
-        print(f"Max tile reached: {result.reward}")
-
-asyncio.run(main())
-```
-
-<Check>
-The trace context ensures that the entire task run - from setup through evaluation - appears as one coherent trace on the platform
-</Check>
 
 ## What just happened?
 
 1. **Task Definition**: We created a `Task` with:
    - A prompt telling the agent what to do
    - An `mcp_config` pointing to a remote MCP environment
-   - Setup and evaluation tools to initialize and score the game
+   - Setup and evaluation tools to initialize and grade the trajectory
 
 2. **Auto Client**: The agent automatically created an MCP client from `task.mcp_config`
 
 3. **Telemetry**: The `trace` context captured all interactions for debugging
 
-4. **Evaluation**: The `evaluate_max_tile` tool returned the highest tile as reward
+4. **Evaluation**: The `evaluate` tool returns a reward at the end of the agent loop
 
 ## Next Steps
 
-<CardGroup cols={3}>
+<CardGroup cols={2}>
 <Card title="Understand MCP" icon="book" href="/core-concepts/mcp-protocol">
   Learn how agents connect to environments
 </Card>
@@ -124,22 +98,13 @@ The trace context ensures that the entire task run - from setup through evaluati
 <Card title="Build Environments" icon="cube" href="/build-environments">
   Create your own MCP environment
 </Card>
+
+<Card title="GitHub" icon="github" href="https://github.com/hud-evals/hud-python">
+  Star us and contribute!
+</Card>
 </CardGroup>
 
-## CLI Quick Reference
-
-```bash
-# Create sample environment
-hud init
-
-# Start hot-reload development server for an environment
-hud dev . --build --interactive
-
-# Train a model on your environment
-hud rl
-```
 
 <Note>
 See the [CLI Reference](/reference/cli/overview) for detailed command documentation
 </Note>
-

@@ -23,7 +23,7 @@ from typing import Literal
 from openai import AsyncOpenAI
 
 import hud
-from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
+from hud.agents.openai_chat import OpenAIChatAgent
 from hud.datasets import Task
 
 
@@ -127,7 +127,7 @@ async def run_example(mode: Literal["text", "browser"], target: int) -> None:
     allowed_tools = ["computer"] if mode == "browser" else ["move"]
 
     # Create OpenAI-compatible agent
-    agent = GenericOpenAIChatAgent(
+    agent = OpenAIChatAgent(
         openai_client=openai_client,
         model_name=model_name,
         allowed_tools=allowed_tools,

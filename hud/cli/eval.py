@@ -153,7 +153,7 @@ def build_agent(
     elif agent_type == AgentType.VLLM:
         # Create a generic OpenAI agent for vLLM server
         try:
-            from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
+            from hud.agents.openai_chat import OpenAIChatAgent
         except ImportError as e:
             hud_console.error(
                 "OpenAI dependencies are not installed. "
@@ -168,9 +168,26 @@ def build_agent(
             allowed_tools=allowed_tools,
             verbose=verbose,
         )
-        return GenericOpenAIChatAgent(**config)
+        return OpenAIChatAgent(**config)
 
     elif agent_type == AgentType.OPENAI:
+        try:
+            from hud.agents import OpenAIAgent
+        except ImportError as e:
+            hud_console.error(
+                "OpenAI agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
+
+        agent_kwargs: dict[str, Any] = {"verbose": verbose}
+        if allowed_tools:
+            agent_kwargs["allowed_tools"] = allowed_tools
+        if model:
+            agent_kwargs["model"] = model
+        return OpenAIAgent(**agent_kwargs)
+
+    elif agent_type == AgentType.OPERATOR:
         try:
             from hud.agents import OperatorAgent
         except ImportError as e:
@@ -180,13 +197,10 @@ def build_agent(
             )
             raise typer.Exit(1) from e
 
+        operator_kwargs: dict[str, Any] = {"verbose": verbose}
         if allowed_tools:
-            return OperatorAgent(
-                allowed_tools=allowed_tools,
-                verbose=verbose,
-            )
-        else:
-            return OperatorAgent(verbose=verbose)
+            operator_kwargs["allowed_tools"] = allowed_tools
+        return OperatorAgent(**operator_kwargs)
 
     elif agent_type == AgentType.GEMINI:
         try:
@@ -349,9 +363,9 @@ async def run_single_task(
             agent_config["allowed_tools"] = allowed_tools
     elif agent_type == AgentType.VLLM:
         # Special handling for vLLM
-        from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
+        from hud.agents.openai_chat import OpenAIChatAgent
 
-        agent_class = GenericOpenAIChatAgent
+        agent_class = OpenAIChatAgent
 
         # Use the shared config builder
         agent_config = _build_vllm_config(
@@ -361,6 +375,15 @@ async def run_single_task(
             verbose=verbose,
         )
     elif agent_type == AgentType.OPENAI:
+        from hud.agents import OpenAIAgent
+
+        agent_class = OpenAIAgent
+        agent_config = {"verbose": verbose}
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+        if model:
+            agent_config["model"] = model
+    elif agent_type == AgentType.OPERATOR:
         from hud.agents import OperatorAgent
 
         agent_class = OperatorAgent
@@ -541,9 +564,9 @@ async def run_full_dataset(
         agent_config = {"verbose": verbose}
     elif agent_type == AgentType.VLLM:
         try:
-            from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
+            from hud.agents.openai_chat import OpenAIChatAgent
 
-            agent_class = GenericOpenAIChatAgent
+            agent_class = OpenAIChatAgent
         except ImportError as e:
             hud_console.error(
                 "OpenAI dependencies are not installed. "
@@ -559,6 +582,26 @@ async def run_full_dataset(
             verbose=verbose,
         )
     elif agent_type == AgentType.OPENAI:
+        try:
+            from hud.agents import OpenAIAgent
+
+            agent_class = OpenAIAgent
+        except ImportError as e:
+            hud_console.error(
+                "OpenAI agent dependencies are not installed. "
+                "Please install with: pip install 'hud-python[agent]'"
+            )
+            raise typer.Exit(1) from e
+
+        agent_config = {
+            "verbose": verbose,
+            "validate_api_key": False,
+        }
+        if allowed_tools:
+            agent_config["allowed_tools"] = allowed_tools
+        if model:
+            agent_config["model"] = model
+    elif agent_type == AgentType.OPERATOR:
         try:
             from hud.agents import OperatorAgent
 
@@ -701,7 +744,7 @@ def eval_command(
     agent: AgentType = typer.Option(  # noqa: B008
         AgentType.CLAUDE,
         "--agent",
-        help="Agent backend to use (claude, gemini, openai, vllm for local servers, or litellm)",
+        help=("Agent (claude, gemini, openai, operator, vllm, or litellm)"),
     ),
     model: str | None = typer.Option(
         None,
@@ -789,8 +832,11 @@ def eval_command(
         # Run multiple tasks from a JSON file
         hud eval tasks.json --full
 
-        # Run with OpenAI Operator agent
-        hud eval hud-evals/OSWorld-Gold-Beta --agent openai
+        # Run with OpenAI agent (choose model via --model)
+        hud eval hud-evals/OSWorld-Gold-Beta --agent openai --model gpt-5
+
+        # Run with the legacy Operator computer-use agent
+        hud eval hud-evals/OSWorld-Gold-Beta --agent operator
 
         # Use local vLLM server (default: localhost:8000)
         hud eval task.json --agent vllm --model Qwen/Qwen2.5-VL-3B-Instruct
@@ -834,7 +880,7 @@ def eval_command(
                 "Set it in your environment or run: hud set GEMINI_API_KEY=your-key-here"
             )
             raise typer.Exit(1)
-    elif agent == AgentType.OPENAI and not settings.openai_api_key:
+    elif agent in (AgentType.OPENAI, AgentType.OPERATOR) and not settings.openai_api_key:
         hud_console.error("OPENAI_API_KEY is required for OpenAI agent")
         hud_console.info("Set it in your environment or run: hud set OPENAI_API_KEY=your-key-here")
         raise typer.Exit(1)

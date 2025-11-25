@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 @setup.tool("navigate_to_url")
-async def navigate_to_url(ctx: Context, url: str, wait_for_load_state: str = "networkidle"):
+async def navigate_to_url(ctx: Context, url: str, wait_for_load_state: str = "load"):
     """Navigate browser to a specific URL.
 
     Args:
