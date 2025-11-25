@@ -952,6 +952,11 @@ def eval(
         "-y",
         help="Skip confirmation prompt and proceed automatically",
     ),
+    remote: bool = typer.Option(
+        False,
+        "--remote",
+        help="Run evaluation remotely on HUD infrastructure",
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents."""
     hud_console = HUDConsole()
@@ -1076,6 +1081,7 @@ def eval(
         vllm_base_url=vllm_base_url,
         group_size=group_size,
         task_id=task_id,
+        remote=remote,
     )
 
     hud_console.info("")  # Add some spacing
@@ -1099,6 +1105,7 @@ def eval(
         group_size=group_size,
         integration_test=integration_test,
         task_id=task_id,
+        remote=remote,
     )
 
 

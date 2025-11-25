@@ -805,6 +805,11 @@ def eval_command(
         "--task-id",
         help="Run a specific task by ID (from the dataset)",
     ),
+    remote: bool = typer.Option(
+        False,
+        "--remote",
+        help="Run evaluation remotely on HUD infrastructure",
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
 
@@ -905,6 +910,24 @@ def eval_command(
     # Set default max_steps if not provided
     if max_steps is None:
         max_steps = 50 if full else 10
+
+    if remote:
+        from hud.cli.remote_eval import run_remote_eval
+
+        asyncio.run(
+            run_remote_eval(
+                source=source,
+                agent_type=agent,
+                model=model,
+                allowed_tools=allowed_tools_list,
+                max_steps=max_steps,
+                verbose=verbose,
+                group_size=group_size,
+                task_id=task_id,
+                full=full,
+            )
+        )
+        return
 
     # Run evaluation
     if full:
