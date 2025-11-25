@@ -15,7 +15,6 @@ from openai.types.responses import (
     FunctionShellToolParam,
     FunctionToolParam,
     ResponseFunctionCallOutputItemListParam,
-    ResponseFunctionToolCall,
     ResponseInputFileContentParam,
     ResponseInputImageContentParam,
     ResponseInputImageParam,
@@ -23,9 +22,7 @@ from openai.types.responses import (
     ResponseInputParam,
     ResponseInputTextContentParam,
     ResponseInputTextParam,
-    ResponseOutputMessage,
     ResponseOutputText,
-    ResponseReasoningItem,
     ToolParam,
 )
 from openai.types.responses.response_input_param import FunctionCallOutput, Message
@@ -235,7 +232,7 @@ class OpenAIAgent(MCPAgent):
         reasoning_chunks: list[str] = []
 
         for item in response.output:
-            if isinstance(item, ResponseOutputMessage) and item.type == "message":
+            if item.type == "message":
                 text = "".join(
                     content.text
                     for content in item.content
@@ -243,11 +240,29 @@ class OpenAIAgent(MCPAgent):
                 )
                 if text:
                     text_chunks.append(text)
-            elif isinstance(item, ResponseFunctionToolCall):
-                tool_call = self._convert_function_tool_call(item)
-                if tool_call:
-                    agent_response.tool_calls.append(tool_call)
-            elif isinstance(item, ResponseReasoningItem) and item.summary:
+            elif item.type == "function_call":
+                target_name = self._tool_name_map.get(item.name, item.name)
+                try:
+                    arguments = json.loads(item.arguments)
+                except json.JSONDecodeError:
+                    self.console.warning_log(
+                        f"Failed to parse arguments for tool '{item.name}', passing raw string."
+                    )
+                    arguments = {"raw_arguments": item.arguments}
+                agent_response.tool_calls.append(
+                    MCPToolCall(name=target_name, arguments=arguments, id=item.call_id)
+                )
+            elif item.type == "shell_call":
+                agent_response.tool_calls.append(
+                    MCPToolCall(name="shell", arguments=item.action.to_dict(), id=item.call_id)
+                )
+            elif item.type == "apply_patch_call":
+                agent_response.tool_calls.append(
+                    MCPToolCall(
+                        name="apply_patch", arguments=item.operation.to_dict(), id=item.call_id
+                    )
+                )
+            elif item.type == "reasoning":
                 reasoning_chunks.append(
                     "".join(f"Thinking: {summary.text}\n" for summary in item.summary)
                 )
@@ -257,19 +272,6 @@ class OpenAIAgent(MCPAgent):
 
         agent_response.content = "".join(reasoning_chunks) + "".join(text_chunks)
         return agent_response
-
-    def _convert_function_tool_call(
-        self, tool_call: ResponseFunctionToolCall
-    ) -> MCPToolCall | None:
-        target_name = self._tool_name_map.get(tool_call.name, tool_call.name)
-        try:
-            arguments = json.loads(tool_call.arguments) if tool_call.arguments else {}
-        except json.JSONDecodeError:
-            self.console.warning_log(
-                f"Failed to parse arguments for tool '{tool_call.name}', passing raw string."
-            )
-            arguments = {"raw_arguments": tool_call.arguments}
-        return MCPToolCall(name=target_name, arguments=arguments, id=tool_call.call_id)
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
