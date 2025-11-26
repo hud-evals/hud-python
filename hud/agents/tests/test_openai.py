@@ -13,7 +13,6 @@ from openai.types.responses import (
     ResponseOutputText,
     ResponseReasoningItem,
 )
-from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
 from openai.types.responses.response_reasoning_item import Summary
 from pydantic import AnyUrl
 
@@ -631,18 +630,12 @@ class TestOpenAIAgent:
 
         # Set some state
         agent.last_response_id = "some_id"
-        agent.pending_call_id = "call_id"
-        agent.pending_safety_checks = [
-            PendingSafetyCheck(id="safety_check_id", code="value", message="message")
-        ]
         agent._message_cursor = 5
 
         # Reset
         agent._reset_response_state()
 
         assert agent.last_response_id is None
-        assert agent.pending_call_id is None
-        assert agent.pending_safety_checks == []
         assert agent._message_cursor == 0
 
     @pytest.mark.asyncio
@@ -789,8 +782,17 @@ class TestOpenAIAgent:
             assert response.tool_calls[0].arguments == {"key": "value", "number": 42}
 
     @pytest.mark.asyncio
-    async def test_get_response_handles_invalid_json_arguments(self, mock_mcp_client, mock_openai):
-        """Test that get_response handles invalid JSON in function call arguments."""
+    async def test_get_response_raises_on_invalid_json_arguments(
+        self, mock_mcp_client, mock_openai
+    ):
+        """Test that get_response raises error on invalid JSON in function call arguments.
+
+        With strict mode being mandatory, invalid JSON arguments should never occur
+        in practice since schemas are validated. This test verifies that if it does
+        happen, we get an appropriate error rather than silently failing.
+        """
+        import json
+
         with patch("hud.settings.settings.telemetry_enabled", False):
             agent = OpenAIAgent(
                 mcp_client=mock_mcp_client,
@@ -817,13 +819,10 @@ class TestOpenAIAgent:
             messages = [
                 {"role": "user", "content": [{"type": "input_text", "text": "Do something"}]}
             ]
-            response = await agent.get_response(messages)
 
-            # Verify invalid JSON is wrapped in raw_arguments
-            assert len(response.tool_calls) == 1
-            assert response.tool_calls[0].name == "tool"
-            assert response.tool_calls[0].id == "call_456"
-            assert response.tool_calls[0].arguments == {"raw_arguments": "invalid json {{"}
+            # With strict mode mandatory, invalid JSON should raise an error
+            with pytest.raises(json.JSONDecodeError):
+                await agent.get_response(messages)
 
     @pytest.mark.asyncio
     async def test_get_response_handles_tool_name_mapping(self, mock_mcp_client, mock_openai):
@@ -911,7 +910,7 @@ class TestOpenAIAgent:
     async def test_convert_tools_for_openai_strict_schema_failure(
         self, mock_mcp_client, mock_openai
     ):
-        """Test that tool conversion handles strict schema failures gracefully."""
+        """Test that tool conversion raises error when strict schema conversion fails."""
         agent = OpenAIAgent(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
@@ -935,12 +934,9 @@ class TestOpenAIAgent:
         # Mock ensure_strict_json_schema to raise an exception
         with patch("hud.agents.openai.ensure_strict_json_schema") as mock_strict:
             mock_strict.side_effect = ValueError("Schema not strict compatible")
-            agent._convert_tools_for_openai()
-
-        # Tool should still be added but with strict=False
-        assert len(agent._openai_tools) == 1
-        tool = cast("dict[str, Any]", agent._openai_tools[0])
-        assert tool["strict"] is False
+            # Now strict compatibility is mandatory, so this should raise
+            with pytest.raises(ValueError, match="Schema not strict compatible"):
+                agent._convert_tools_for_openai()
 
     @pytest.mark.asyncio
     async def test_format_tool_results_with_resource_link(self, mock_mcp_client, mock_openai):

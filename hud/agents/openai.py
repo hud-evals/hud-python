@@ -25,7 +25,6 @@ from openai.types.responses import (
     ResponseOutputText,
     ToolParam,
 )
-from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
 from openai.types.responses.response_input_param import FunctionCallOutput, Message
 
 import hud
@@ -86,8 +85,6 @@ class OpenAIAgent(MCPAgent):
         self._tool_name_map: dict[str, str] = {}
 
         self.last_response_id: str | None = None
-        self.pending_call_id: str | None = None
-        self.pending_safety_checks: list[PendingSafetyCheck] = []
         self._message_cursor = 0
 
         self.model_name = "OpenAI"
@@ -98,7 +95,7 @@ class OpenAIAgent(MCPAgent):
         await super().initialize(task)
         self._convert_tools_for_openai()
 
-    def _to_api_tool(
+    def _to_openai_tool(
         self,
         tool: types.Tool,
     ) -> FunctionShellToolParam | ApplyPatchToolParam | FunctionToolParam | None:
@@ -145,13 +142,35 @@ class OpenAIAgent(MCPAgent):
         self._tool_name_map = {}
 
         for tool in available_tools:
-            openai_tool = self._to_api_tool(tool)
+            openai_tool = self._to_openai_tool(tool)
             if openai_tool is None:
                 continue
 
             if "name" in openai_tool:
                 self._tool_name_map[openai_tool["name"]] = tool.name
             self._openai_tools.append(openai_tool)
+
+    def _extract_tool_call(self, item: Any) -> MCPToolCall | None:
+        """Extract an MCPToolCall from a response output item.
+
+        Subclasses can override to customize tool call extraction (e.g., routing
+        computer_call to a different tool name).
+        """
+        if item.type == "function_call":
+            tool_name = item.name or ""
+            target_name = self._tool_name_map.get(tool_name, tool_name)
+            arguments = json.loads(item.arguments)
+            return MCPToolCall(name=target_name, arguments=arguments, id=item.call_id)
+        elif item.type == "shell_call":
+            return MCPToolCall(name="shell", arguments=item.action.to_dict(), id=item.call_id)
+        elif item.type == "apply_patch_call":
+            return MCPToolCall(
+                name="apply_patch", arguments=item.operation.to_dict(), id=item.call_id
+            )
+        elif item.type == "computer_call":
+            self.pending_safety_checks = item.pending_safety_checks
+            return MCPToolCall(name="computer", arguments=item.action.to_dict(), id=item.call_id)
+        return None
 
     async def _run_context(
         self, context: list[types.ContentBlock], *, max_steps: int = 10
@@ -241,32 +260,14 @@ class OpenAIAgent(MCPAgent):
                 )
                 if text:
                     text_chunks.append(text)
-            elif item.type == "function_call":
-                target_name = self._tool_name_map.get(item.name, item.name)
-                # since strict is True, we can safely load the arguments as a dict
-                arguments = json.loads(item.arguments)
-                agent_response.tool_calls.append(
-                    MCPToolCall(name=target_name, arguments=arguments, id=item.call_id)
-                )
-            elif item.type == "shell_call":
-                agent_response.tool_calls.append(
-                    MCPToolCall(name="shell", arguments=item.action.to_dict(), id=item.call_id)
-                )
-            elif item.type == "apply_patch_call":
-                agent_response.tool_calls.append(
-                    MCPToolCall(
-                        name="apply_patch", arguments=item.operation.to_dict(), id=item.call_id
-                    )
-                )
-            elif item.type == "computer_call":
-                self.pending_safety_checks = item.pending_safety_checks
-                agent_response.tool_calls.append(
-                    MCPToolCall(name="computer", arguments=item.action.to_dict(), id=item.call_id)
-                )
             elif item.type == "reasoning":
                 reasoning_chunks.append(
                     "".join(f"Thinking: {summary.text}\n" for summary in item.summary)
                 )
+            else:
+                tool_call = self._extract_tool_call(item)
+                if tool_call is not None:
+                    agent_response.tool_calls.append(tool_call)
 
         if agent_response.tool_calls:
             agent_response.done = False

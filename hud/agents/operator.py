@@ -20,13 +20,15 @@ from openai.types.responses.response_input_param import (
 from openai.types.shared_params.reasoning import Reasoning
 
 from hud.tools.computer.settings import computer_settings
+from hud.types import MCPToolCall
 
 from .openai import OpenAIAgent
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
+    from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
 
-    from hud.types import MCPToolCall, MCPToolResult
+    from hud.types import MCPToolResult
 
 OPERATOR_INSTRUCTIONS = """
 You are an autonomous computer-using agent. Follow these guidelines:
@@ -84,6 +86,10 @@ class OperatorAgent(OpenAIAgent):
         self.model_name = "Operator"
         self.environment = environment
 
+        # add pending call id and safety checks to the agent
+        self.pending_call_id: str | None = None
+        self.pending_safety_checks: list[PendingSafetyCheck] = []
+
         # override reasoning to "summary": "auto"
         if self.reasoning is None:
             self.reasoning = Reasoning(summary="auto")
@@ -98,7 +104,7 @@ class OperatorAgent(OpenAIAgent):
         else:
             self.system_prompt = OPERATOR_INSTRUCTIONS
 
-    def _to_api_tool(
+    def _to_openai_tool(
         self, tool: types.Tool
     ) -> (
         FunctionShellToolParam | ApplyPatchToolParam | FunctionToolParam | ComputerToolParam | None
@@ -110,7 +116,18 @@ class OperatorAgent(OpenAIAgent):
                 display_height=self._operator_display_height,
                 environment=self._operator_environment,
             )
-        return super()._to_api_tool(tool)
+        return super()._to_openai_tool(tool)
+
+    def _extract_tool_call(self, item: Any) -> MCPToolCall | None:
+        """Route computer_call to the OpenAI-specific computer tool."""
+        if item.type == "computer_call":
+            self.pending_safety_checks = item.pending_safety_checks
+            return MCPToolCall(
+                name=self._operator_computer_tool_name,
+                arguments=item.action.to_dict(),
+                id=item.call_id,
+            )
+        return super()._extract_tool_call(item)
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]

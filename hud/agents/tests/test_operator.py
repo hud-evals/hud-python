@@ -1,4 +1,4 @@
-"""Tests for OpenAI MCP Agent implementation."""
+"""Tests for OperatorAgent implementation."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp import types
+from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
 
 from hud.agents.operator import OperatorAgent
 from hud.types import MCPToolCall, MCPToolResult
@@ -240,3 +241,82 @@ class TestOperatorAgent:
 
         assert response.content == ""
         assert response.tool_calls == []
+
+    @pytest.mark.asyncio
+    async def test_pending_safety_checks_initialization(self, mock_mcp_client, mock_openai):
+        """Test that OperatorAgent initializes pending_call_id and pending_safety_checks."""
+        agent = OperatorAgent(
+            mcp_client=mock_mcp_client,
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+
+        # Verify initial state
+        assert agent.pending_call_id is None
+        assert agent.pending_safety_checks == []
+
+        # Set some state
+        agent.pending_call_id = "call_id"
+        agent.pending_safety_checks = [
+            PendingSafetyCheck(id="safety_check_id", code="value", message="message")
+        ]
+
+        # Verify state was set
+        assert agent.pending_call_id == "call_id"
+        assert len(agent.pending_safety_checks) == 1
+        assert agent.pending_safety_checks[0].id == "safety_check_id"
+
+    @pytest.mark.asyncio
+    async def test_extract_tool_call_computer(self, mock_mcp_client, mock_openai):
+        """Test that _extract_tool_call routes computer_call to openai_computer."""
+        agent = OperatorAgent(
+            mcp_client=mock_mcp_client,
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+
+        # Create a mock computer_call item
+        mock_item = MagicMock()
+        mock_item.type = "computer_call"
+        mock_item.call_id = "call_123"
+        mock_item.pending_safety_checks = [
+            PendingSafetyCheck(id="check_1", code="code", message="msg")
+        ]
+        mock_item.action.to_dict.return_value = {"type": "screenshot"}
+
+        tool_call = agent._extract_tool_call(mock_item)
+
+        # Should route to openai_computer tool
+        assert tool_call is not None
+        assert tool_call.name == "openai_computer"
+        assert tool_call.id == "call_123"
+        assert tool_call.arguments == {"type": "screenshot"}
+        # Should update pending_safety_checks
+        assert agent.pending_safety_checks == mock_item.pending_safety_checks
+
+    @pytest.mark.asyncio
+    async def test_extract_tool_call_delegates_to_super(self, mock_mcp_client, mock_openai):
+        """Test that _extract_tool_call delegates non-computer calls to parent."""
+        agent = OperatorAgent(
+            mcp_client=mock_mcp_client,
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+
+        # Set up tool name map
+        agent._tool_name_map = {"test_tool": "mcp_test_tool"}
+
+        # Create a mock function_call item
+        mock_item = MagicMock()
+        mock_item.type = "function_call"
+        mock_item.call_id = "call_456"
+        mock_item.name = "test_tool"
+        mock_item.arguments = '{"arg": "value"}'
+
+        tool_call = agent._extract_tool_call(mock_item)
+
+        # Should delegate to parent and map the tool name
+        assert tool_call is not None
+        assert tool_call.name == "mcp_test_tool"
+        assert tool_call.id == "call_456"
+        assert tool_call.arguments == {"arg": "value"}
