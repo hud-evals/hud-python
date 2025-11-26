@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import mcp.types as types
@@ -103,6 +102,11 @@ class OperatorAgent(OpenAIAgent):
             self.system_prompt = f"{self.system_prompt}\n\n{OPERATOR_INSTRUCTIONS}"
         else:
             self.system_prompt = OPERATOR_INSTRUCTIONS
+
+    def _reset_response_state(self) -> None:
+        super()._reset_response_state()
+        self.pending_call_id = None
+        self.pending_safety_checks = []
 
     def _to_openai_tool(
         self, tool: types.Tool

@@ -167,9 +167,6 @@ class OpenAIAgent(MCPAgent):
             return MCPToolCall(
                 name="apply_patch", arguments=item.operation.to_dict(), id=item.call_id
             )
-        elif item.type == "computer_call":
-            self.pending_safety_checks = item.pending_safety_checks
-            return MCPToolCall(name="computer", arguments=item.action.to_dict(), id=item.call_id)
         return None
 
     async def _run_context(
@@ -181,8 +178,6 @@ class OpenAIAgent(MCPAgent):
 
     def _reset_response_state(self) -> None:
         self.last_response_id = None
-        self.pending_call_id = None
-        self.pending_safety_checks = []
         self._message_cursor = 0
 
     async def get_system_messages(self) -> list[types.ContentBlock]:
@@ -245,7 +240,6 @@ class OpenAIAgent(MCPAgent):
 
         self.last_response_id = response.id
         self._message_cursor = len(messages)
-        self.pending_call_id = None
 
         agent_response = AgentResponse(content="", tool_calls=[], done=True)
         text_chunks: list[str] = []
