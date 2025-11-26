@@ -1,64 +1,11 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hud.datasets.utils import fetch_system_prompt_from_dataset, save_tasks
+from hud.datasets.utils import save_tasks
 from hud.types import Task
-
-
-@pytest.mark.asyncio
-async def test_fetch_system_prompt_success():
-    """Test successful fetch of system prompt."""
-    with patch("huggingface_hub.hf_hub_download") as mock_download:
-        mock_download.return_value = "/tmp/system_prompt.txt"
-        with patch("builtins.open", mock_open(read_data="Test system prompt")):
-            result = await fetch_system_prompt_from_dataset("test/dataset")
-            assert result == "Test system prompt"
-            mock_download.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_fetch_system_prompt_empty_file():
-    """Test fetch when file is empty."""
-    with patch("huggingface_hub.hf_hub_download") as mock_download:
-        mock_download.return_value = "/tmp/system_prompt.txt"
-        with patch("builtins.open", mock_open(read_data="  \n  ")):
-            result = await fetch_system_prompt_from_dataset("test/dataset")
-            assert result is None
-
-
-@pytest.mark.asyncio
-async def test_fetch_system_prompt_file_not_found():
-    """Test fetch when file doesn't exist."""
-    with patch("huggingface_hub.hf_hub_download") as mock_download:
-        from huggingface_hub.errors import EntryNotFoundError
-
-        mock_download.side_effect = EntryNotFoundError("File not found")
-        result = await fetch_system_prompt_from_dataset("test/dataset")
-        assert result is None
-
-
-@pytest.mark.asyncio
-async def test_fetch_system_prompt_import_error():
-    """Test fetch when huggingface_hub is not installed."""
-    # Mock the import itself to raise ImportError
-    import sys
-
-    with patch.dict(sys.modules, {"huggingface_hub": None}):
-        result = await fetch_system_prompt_from_dataset("test/dataset")
-        assert result is None
-
-
-@pytest.mark.asyncio
-async def test_fetch_system_prompt_general_exception():
-    """Test fetch with general exception."""
-    with patch("huggingface_hub.hf_hub_download") as mock_download:
-        mock_download.side_effect = Exception("Network error")
-        result = await fetch_system_prompt_from_dataset("test/dataset")
-        assert result is None
-
 
 def test_save_tasks_basic():
     """Test basic save_tasks functionality."""

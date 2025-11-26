@@ -12,54 +12,6 @@ from hud.types import Task
 
 logger = logging.getLogger("hud.datasets")
 
-
-async def fetch_system_prompt_from_dataset(dataset_id: str) -> str | None:
-    """
-    Fetch system_prompt.txt from a HuggingFace dataset repository.
-
-    Args:
-        dataset_id: HuggingFace dataset identifier (e.g., "hud-evals/SheetBench-50")
-
-    Returns:
-        System prompt text if found, None otherwise
-    """
-    try:
-        # Import here to avoid unnecessary dependency
-        from huggingface_hub import hf_hub_download
-        from huggingface_hub.errors import EntryNotFoundError
-
-        # Try to download the system_prompt.txt file
-        try:
-            file_path = hf_hub_download(
-                repo_id=dataset_id, filename="system_prompt.txt", repo_type="dataset"
-            )
-
-            # Read and return the content
-            with open(file_path, encoding="utf-8") as f:  # noqa: ASYNC230
-                content = f.read().strip()
-                if content:
-                    logger.info(
-                        "Loaded system prompt from %s (length: %d chars)", dataset_id, len(content)
-                    )
-                    return content
-                else:
-                    logger.warning("System prompt file is empty in %s", dataset_id)
-                    return None
-
-        except EntryNotFoundError:
-            logger.debug("No system_prompt.txt found in dataset %s", dataset_id)
-            return None
-
-    except ImportError:
-        logger.warning(
-            "huggingface_hub not installed. Install it to fetch system prompts from datasets."
-        )
-        return None
-    except Exception as e:
-        logger.error("Error fetching system prompt from %s: %s", dataset_id, e)
-        return None
-
-
 def save_tasks(
     tasks: list[dict[str, Any]], repo_id: str, fields: list[str] | None = None, **kwargs: Any
 ) -> None:
