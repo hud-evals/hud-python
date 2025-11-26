@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
 import pytest
 from mcp import types
 from openai.types.responses import (
@@ -14,6 +13,7 @@ from openai.types.responses import (
     ResponseOutputText,
     ResponseReasoningItem,
 )
+from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
 from openai.types.responses.response_reasoning_item import Summary
 from pydantic import AnyUrl
 
@@ -975,8 +975,8 @@ class TestOpenAIAgent:
         msg = cast("dict[str, Any]", messages[0])
         output = cast("list[dict[str, Any]]", msg["output"])
         assert len(output) == 1
-        assert output[0]["type"] == "input_text"
-        assert output[0]["text"] == "<resource_link>"
+        assert output[0]["type"] == "input_file"
+        assert output[0]["file_url"] == "file:///test/resource"
 
     @pytest.mark.asyncio
     async def test_format_tool_results_with_embedded_text_resource(
