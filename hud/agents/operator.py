@@ -160,7 +160,6 @@ class OperatorAgent(OpenAIAgent):
                     call_id=call_id,
                     output=ResponseComputerToolCallOutputScreenshotParam(
                         type="computer_screenshot",
-                        file_id=str(uuid.uuid4()),
                         image_url=f"data:image/png;base64,{screenshot}",
                     ),
                     acknowledged_safety_checks=acknowledged_checks if acknowledged_checks else None,
