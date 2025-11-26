@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Literal
 
 import pytest
 from mcp.types import ImageContent, TextContent
@@ -26,7 +27,26 @@ CASES = [
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action, params", CASES)
-async def test_hud_computer_actions(action: str, params: dict):
+async def test_hud_computer_actions(
+    action: Literal[
+        "click",
+        "press",
+        "keydown",
+        "keyup",
+        "write",
+        "scroll",
+        "move",
+        "wait",
+        "drag",
+        "response",
+        "screenshot",
+        "position",
+        "hold_key",
+        "mouse_down",
+        "mouse_up",
+    ],
+    params: dict,
+):
     comp = HudComputerTool()
     blocks = await comp(action=action, **params)
     # Ensure at least one content block is returned
