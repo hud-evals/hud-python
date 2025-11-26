@@ -128,6 +128,7 @@ class OpenAIAgent(MCPAgent):
 
 
         self.console.warning_log(f"Strict schema: {tool.description}")
+        self.console.warning_log(f"Tool original: {tool.inputSchema}")
         self.console.warning_log(f"Strict schema: {strict_schema}")
         return FunctionToolParam(
             type="function",
