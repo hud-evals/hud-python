@@ -40,7 +40,7 @@ DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # Command-line arguments override these settings
 # Uncomment and modify the settings you want to change
 
-# Agent backend to use (claude, openai, vllm, gemini, or litellm)
+# Agent backend to use (claude, openai, vllm, gemini)
 # agent=claude
 
 # Model name for the chosen agent

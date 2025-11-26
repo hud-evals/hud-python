@@ -18,13 +18,13 @@ from mcp import types
 from hud.agents import MCPAgent
 from hud.datasets import Task
 from hud.tools.executors.base import BaseExecutor
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Trace
+from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
 
 
 class MockMCPAgent(MCPAgent):
     """Concrete implementation of BaseMCPAgent for testing."""
 
-    metadata: ClassVar[dict[str, Any]] = {}  # Optional metadata for MCP config
+    metadata: ClassVar[dict[str, Any] | None] = {}  # Optional metadata for MCP config
 
     def __init__(self, mcp_client: Any = None, **kwargs: Any) -> None:
         if mcp_client is None:
@@ -34,13 +34,16 @@ class MockMCPAgent(MCPAgent):
             mcp_client.initialize = AsyncMock()
             mcp_client.list_tools = AsyncMock(return_value=[])
             mcp_client.mcp_config = {"test_server": {"url": "http://localhost"}}
-        super().__init__(mcp_client=mcp_client, **kwargs)
+
+        base_keys = {"mcp_client", "response_agent", "auto_trace", "verbose"}
+        base_kwargs = {key: kwargs[key] for key in base_keys if key in kwargs}
+        base_kwargs.setdefault("mcp_client", mcp_client)
+
+        config_data = {key: value for key, value in kwargs.items() if key not in base_keys}
+        self.config = BaseAgentConfig(**config_data)
+        super().__init__(config=self.config, **base_kwargs)
         self.executor = BaseExecutor()  # Use simulated executor
         self._messages = []
-
-    async def run(self, task: Task) -> list[dict[str, Any]]:
-        """Mock run method."""
-        return self._messages
 
     async def create_initial_messages(
         self, prompt: str, initial_screenshot: bool = False
@@ -130,8 +133,8 @@ class TestBaseMCPAgent:
             ) -> list[dict[str, Any]]:
                 return []
 
-            async def get_response(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
-                return {"content": "test"}
+            async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
+                return AgentResponse(content="test", tool_calls=[], done=True)
 
             async def get_system_messages(self) -> list[Any]:
                 return []
@@ -382,10 +385,15 @@ class TestBaseMCPAgent:
 class MockAgentExtended(MCPAgent):
     """Mock agent for testing with predefined responses."""
 
-    metadata: ClassVar[dict[str, Any]] = {}  # Optional metadata for MCP config
+    metadata: ClassVar[dict[str, Any] | None] = {}  # Optional metadata for MCP config
 
     def __init__(self, responses=None, **kwargs):
-        super().__init__(**kwargs)
+        base_keys = {"mcp_client", "response_agent", "auto_trace", "verbose"}
+        base_kwargs = {key: kwargs[key] for key in base_keys if key in kwargs}
+        self.config = BaseAgentConfig(
+            **{key: value for key, value in kwargs.items() if key not in base_keys}
+        )
+        super().__init__(config=self.config, **base_kwargs)
         self.responses = responses or []
         self.call_count = 0
 

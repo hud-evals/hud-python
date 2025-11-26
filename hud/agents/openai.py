@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import mcp.types as types
 from openai import AsyncOpenAI, OpenAI
@@ -26,53 +26,90 @@ from openai.types.responses.response_input_param import (
 )
 
 import hud
+from pydantic import ConfigDict
+
 from hud.settings import settings
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Trace
+from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
 from hud.utils.strict_schema import ensure_strict_json_schema
 
 from .base import MCPAgent
 
+if TYPE_CHECKING:
+    from hud.clients.base import AgentMCPClient
+
+    from .misc.response_agent import ResponseAgent
+
 logger = logging.getLogger(__name__)
+
+
+class OpenAIConfig(BaseAgentConfig):
+    """Configuration model for `OpenAIAgent`."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    model_client: AsyncOpenAI | None = None
+    model: str = "gpt-5.1"
+    max_output_tokens: int | None = None
+    temperature: float | None = None
+    reasoning: dict[str, Any] | Literal["auto"] | None = None
+    tool_choice: dict[str, Any] | Literal["auto"] | None = None
+    parallel_tool_calls: bool | None = None
+    validate_api_key: bool = True
 
 
 class OpenAIAgent(MCPAgent):
     """Generic OpenAI agent that can execute MCP tools through the Responses API."""
 
-    metadata: dict[str, Any] | None = None
+    metadata: ClassVar[dict[str, Any] | None] = None
+    config_cls: ClassVar[type[BaseAgentConfig]] = OpenAIConfig
 
     def __init__(
         self,
-        model_client: AsyncOpenAI | None = None,
-        model: str = "gpt-5.1",
-        max_output_tokens: int | None = None,
-        temperature: float | None = None,
-        reasoning: dict[str, Any] | Literal["auto"] | None = None,
-        tool_choice: dict[str, Any] | Literal["auto"] | None = None,
-        parallel_tool_calls: bool | None = None,
-        validate_api_key: bool = True,
-        **kwargs: Any,
+        *,
+        mcp_client: AgentMCPClient | None = None,
+        response_agent: ResponseAgent | None = None,
+        auto_trace: bool = True,
+        verbose: bool = False,
+        **config_kwargs: Any,
     ) -> None:
-        super().__init__(**kwargs)
+        config_instance = self.config_cls(**config_kwargs)
+        if not isinstance(config_instance, OpenAIConfig):
+            raise TypeError(
+                f"{type(self).__name__} expects config of type OpenAIConfig; "
+                f"got {type(config_instance).__name__}"
+            )
+        self.config = cast(OpenAIConfig, config_instance)
 
+        super().__init__(
+            config=self.config,
+            mcp_client=mcp_client,
+            response_agent=response_agent,
+            auto_trace=auto_trace,
+            model_name="OpenAI",
+            checkpoint_name=self.config.model,
+            verbose=verbose,
+        )
+
+        model_client = self.config.model_client
         if model_client is None:
             api_key = settings.openai_api_key
             if not api_key:
                 raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY.")
             model_client = AsyncOpenAI(api_key=api_key)
 
-        if validate_api_key:
+        if self.config.validate_api_key:
             try:
                 OpenAI(api_key=model_client.api_key).models.list()
             except Exception as exc:  # pragma: no cover - network validation
                 raise ValueError(f"OpenAI API key is invalid: {exc}") from exc
 
         self.openai_client = model_client
-        self.model = model
-        self.max_output_tokens = max_output_tokens
-        self.temperature = temperature
-        self.reasoning = reasoning
-        self.tool_choice = tool_choice
-        self.parallel_tool_calls = parallel_tool_calls
+        self.model = self.config.model
+        self.max_output_tokens = self.config.max_output_tokens
+        self.temperature = self.config.temperature
+        self.reasoning = self.config.reasoning
+        self.tool_choice = self.config.tool_choice
+        self.parallel_tool_calls = self.config.parallel_tool_calls
 
         self._openai_tools: list[ToolParam] = []
         self._tool_name_map: dict[str, str] = {}
@@ -81,9 +118,6 @@ class OpenAIAgent(MCPAgent):
         self.pending_call_id: str | None = None
         self.pending_safety_checks: list[Any] = []
         self._message_cursor = 0
-
-        self.model_name = "OpenAI"
-        self.checkpoint_name = self.model
 
     async def initialize(self, task: Any | None = None) -> None:
         """Initialize agent and build tool metadata."""

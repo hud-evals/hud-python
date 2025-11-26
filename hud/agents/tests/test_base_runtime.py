@@ -1,17 +1,25 @@
 from __future__ import annotations
 
+from typing import Any
 from unittest import mock
 
 import mcp.types as types
 import pytest
 
 from hud.agents.base import MCPAgent, find_content, find_reward, text_to_blocks
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
-
+from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 
 class DummyAgent(MCPAgent):
-    async def get_system_messages(self):
-        return [types.TextContent(text="sys", type="text")]
+    def __init__(self, *, config: BaseAgentConfig | None = None, **kwargs: Any) -> None:
+        base_keys = {"mcp_client", "response_agent", "auto_trace", "verbose"}
+        base_kwargs = {key: kwargs[key] for key in base_keys if key in kwargs}
+        config = config or BaseAgentConfig(
+            **{key: value for key, value in kwargs.items() if key not in base_keys}
+        )
+        super().__init__(config=config, **base_kwargs)
+
+    async def get_system_messages(self) -> list[types.ContentBlock]:
+        return [types.TextContent(type="text", text="sys")]
 
     async def get_response(self, messages):
         # Single step: no tool calls -> done

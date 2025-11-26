@@ -3,85 +3,84 @@
 from __future__ import annotations
 
 import json
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TYPE_CHECKING, cast
 
 from hud import instrument
 from hud.tools.grounding import GroundedComputerTool, Grounder, GrounderConfig
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from pydantic import ConfigDict, field_validator
 
-from .openai_chat import OpenAIChatAgent
+if TYPE_CHECKING:
+    from hud.clients.base import AgentMCPClient
+    from hud.types import BaseAgentConfig
+    from .misc.response_agent import ResponseAgent
+from .openai_chat import OpenAIChatAgent, OpenAIChatConfig
 
+
+DEFAULT_GROUNDED_PROMPT = (
+    "You are a helpful AI assistant that can control the computer through visual "
+    "interaction.\n\n"
+    "IMPORTANT: Always explain your reasoning and observations before taking actions:\n"
+    "1. First, describe what you see on the screen.\n"
+    "2. Explain what you plan to do and why.\n"
+    "3. Then use the computer tool with natural language descriptions.\n\n"
+    "Use descriptive element descriptions:\n"
+    '- Colors ("red button", "blue link")\n'
+    '- Position ("top right corner", "left sidebar")\n'
+    '- Text content ("Submit button", "Login link")\n'
+    '- Element type ("text field", "dropdown")'
+)
+
+
+class GroundedOpenAIConfig(OpenAIChatConfig):
+    """Configuration for grounded OpenAI chat agent."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    grounder_config: GrounderConfig
+    model_name: str = "gpt-4o-mini"
+    allowed_tools: list[str] | None = ["computer"]
+    append_setup_output: bool = False
+    system_prompt: str | None = DEFAULT_GROUNDED_PROMPT
+
+    @field_validator("grounder_config", mode="before")
+    @classmethod
+    def _coerce_grounder_config(
+        cls, value: GrounderConfig | dict[str, Any]
+    ) -> GrounderConfig:
+        if isinstance(value, GrounderConfig):
+            return value
+        if isinstance(value, dict):
+            return GrounderConfig(**value)
 
 class GroundedOpenAIChatAgent(OpenAIChatAgent):
-    """OpenAI agent that uses a separate grounding model for element detection.
+    """OpenAI chat agent that pipes 'computer' tool calls through a vision grounder."""
 
-    This agent:
-    - Exposes only a synthetic "computer" tool to the planning model
-    - Intercepts tool calls to ground element descriptions to coordinates
-    - Converts grounded results to real computer tool calls
-    - Maintains screenshot state for grounding operations
-
-    The architecture separates concerns:
-    - Planning model (GPT-4o etc) focuses on high-level reasoning
-    - Grounding model (Qwen2-VL etc) handles visual element detection
-    """
-
-    metadata: ClassVar[dict[str, Any]] = {}
+    metadata: ClassVar[dict[str, Any] | None] = None
+    config_cls: ClassVar[type[BaseAgentConfig]] = GroundedOpenAIConfig
 
     def __init__(
         self,
         *,
-        grounder_config: GrounderConfig,
-        model_name: str = "gpt-4o-mini",
-        allowed_tools: list[str] | None = None,
-        append_setup_output: bool = False,
-        system_prompt: str | None = None,
-        **kwargs: Any,
+        mcp_client: AgentMCPClient | None = None,
+        response_agent: ResponseAgent | None = None,
+        auto_trace: bool = True,
+        verbose: bool = False,
+        **config_kwargs: Any,
     ) -> None:
-        """Initialize the grounded OpenAI agent.
+        """Initialize the grounded OpenAI agent."""
 
-        Args:
-            grounder_config: Configuration for the grounding model
-            openai_client: OpenAI client for the planning model
-            model: Name of the OpenAI model to use for planning (e.g., "gpt-4o", "gpt-4o-mini")
-            real_computer_tool_name: Name of the actual computer tool to execute
-            **kwargs: Additional arguments passed to OpenAIChatAgent
-        """
-        # Set defaults for grounded agent
-        if allowed_tools is None:
-            allowed_tools = ["computer"]
-
-        if system_prompt is None:
-            system_prompt = (
-                "You are a helpful AI assistant that can control the computer "
-                "through visual interaction.\n\n"
-                "IMPORTANT: Always explain your reasoning and observations before taking actions:\n"
-                "1. First, describe what you see on the screen\n"
-                "2. Explain what you plan to do and why\n"
-                "3. Then use the computer tool with natural language descriptions\n\n"
-                "For example:\n"
-                "- 'I can see a login form with username and password fields. "
-                "I need to click on the username field first.'\n"
-                "- 'There's a blue submit button at the bottom. "
-                "I'll click on it to submit the form.'\n"
-                "- 'I notice a red close button in the top right corner. "
-                "I'll click it to close this dialog.'\n\n"
-                "Use descriptive element descriptions like:\n"
-                "- Colors: 'red button', 'blue link', 'green checkmark'\n"
-                "- Position: 'top right corner', 'bottom of the page', 'left sidebar'\n"
-                "- Text content: 'Submit button', 'Login link', 'Cancel option'\n"
-                "- Element type: 'text field', 'dropdown menu', 'checkbox'"
-            )
 
         super().__init__(
-            model_name=model_name,
-            allowed_tools=allowed_tools,
-            append_setup_output=append_setup_output,
-            system_prompt=system_prompt,
-            **kwargs,
+            mcp_client=mcp_client,
+            response_agent=response_agent,
+            auto_trace=auto_trace,
+            verbose=verbose,
+            **config_kwargs,
         )
 
-        self.grounder = Grounder(grounder_config)
+        grounded_config = cast("GroundedOpenAIConfig", self.config)
+        self.grounder = Grounder(grounded_config.grounder_config)
         self.grounded_tool = None
 
     async def initialize(self, task: Any = None) -> None:

@@ -135,7 +135,6 @@ rl = [
 # Development dependencies - includes testing, linting, and automation tools
 dev = [
     # Include agent dependencies
-    "litellm>=1.55.0",
     # Jupyter support
     "ipykernel",
     "ipython <9",

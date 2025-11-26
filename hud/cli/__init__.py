@@ -882,7 +882,7 @@ def eval(
     agent: str | None = typer.Argument(
         None,
         help=(
-            "Agent backend to use (claude, openai, gemini, vllm, or litellm). If not provided, will prompt interactively."  # noqa: E501
+            "Agent backend to use (claude, openai, gemini, vllm). If not provided, will prompt interactively."  # noqa: E501
         ),
     ),
     full: bool = typer.Option(
@@ -1027,7 +1027,6 @@ def eval(
                 {"name": "Operator (OpenAI Computer Use)", "value": AgentType.OPERATOR},
                 {"name": "Gemini Computer Use", "value": AgentType.GEMINI},
                 {"name": "vLLM (Local Server)", "value": AgentType.VLLM},
-                {"name": "LiteLLM (Multi-provider)", "value": AgentType.LITELLM},
             ]
         )
 

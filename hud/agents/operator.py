@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import mcp.types as types
-from openai import AsyncOpenAI  # noqa: TC002
 from openai.types.responses import (
     ResponseComputerToolCall,
     ResponseFunctionToolCall,
@@ -22,10 +21,17 @@ from openai.types.responses.response_input_param import (
 )
 
 import hud
-from hud.tools.computer.settings import computer_settings
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from pydantic import ConfigDict
 
-from .openai import OpenAIAgent
+from hud.tools.computer.settings import computer_settings
+from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
+
+from .openai import OpenAIAgent, OpenAIConfig
+
+if TYPE_CHECKING:
+    from hud.clients.base import AgentMCPClient
+
+    from .misc.response_agent import ResponseAgent
 
 OPERATOR_INSTRUCTIONS = """
 You are an autonomous computer-using agent. Follow these guidelines:
@@ -48,6 +54,15 @@ what they asked.
 """.strip()
 
 
+class OperatorConfig(OpenAIConfig):
+    """Configuration model for `OperatorAgent`."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    model: str = "computer-use-preview"
+    environment: Literal["windows", "mac", "linux", "browser"] = "linux"
+
+
 class OperatorAgent(OpenAIAgent):
     """
     Backwards-compatible Operator agent built on top of OpenAIAgent.
@@ -58,27 +73,36 @@ class OperatorAgent(OpenAIAgent):
         "display_height": computer_settings.OPENAI_COMPUTER_HEIGHT,
     }
     required_tools: ClassVar[list[str]] = ["openai_computer"]
+    config_cls: ClassVar[type[BaseAgentConfig]] = OperatorConfig
 
     def __init__(
         self,
-        model_client: AsyncOpenAI | None = None,
-        model: str = "computer-use-preview",
-        environment: Literal["windows", "mac", "linux", "browser"] = "linux",
-        validate_api_key: bool = True,
-        **kwargs: Any,
+        *,
+        mcp_client: AgentMCPClient | None = None,
+        response_agent: ResponseAgent | None = None,
+        auto_trace: bool = True,
+        verbose: bool = False,
+        **config_kwargs: Any,
     ) -> None:
         super().__init__(
-            model_client=model_client,
-            model=model,
-            validate_api_key=validate_api_key,
-            **kwargs,
+            mcp_client=mcp_client,
+            response_agent=response_agent,
+            auto_trace=auto_trace,
+            verbose=verbose,
+            **config_kwargs,
         )
+        if not isinstance(self.config, OperatorConfig):
+            raise TypeError(
+                f"{type(self).__name__} expects config of type OperatorConfig, "
+                f"got {type(self.config).__name__}"
+            )
+        operator_config = cast("OperatorConfig", self.config)
         self._operator_computer_tool_name = "openai_computer"
         self._operator_display_width = computer_settings.OPENAI_COMPUTER_WIDTH
         self._operator_display_height = computer_settings.OPENAI_COMPUTER_HEIGHT
-        self._operator_environment = environment
+        self._operator_environment = operator_config.environment
         self.model_name = "Operator"
-        self.environment = environment
+        self.environment = operator_config.environment
 
         if self.system_prompt:
             self.system_prompt = f"{self.system_prompt}\n\n{OPERATOR_INSTRUCTIONS}"

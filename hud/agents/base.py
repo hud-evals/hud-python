@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 import mcp.types as types
 
 from hud.agents.utils import log_agent_metadata_to_status, log_task_config_to_current_trace
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Trace
+from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
 from hud.utils.hud_console import HUDConsole
 from hud.utils.mcp import MCPConfigPatch, patch_mcp_config, setup_hud_telemetry
 
@@ -45,23 +45,16 @@ class MCPAgent(ABC):
     `format_blocks`, and `format_tool_results`.
     """
 
-    metadata: dict[str, Any] | None = None
+    metadata: ClassVar[dict[str, Any] | None] = None
     required_tools: ClassVar[list[str]] = []  # Tools that must be available
+    config_cls: ClassVar[type[BaseAgentConfig]] = BaseAgentConfig
 
     def __init__(
         self,
-        mcp_client: AgentMCPClient | None = None,
-        # Filtering
-        allowed_tools: list[str] | None = None,
-        disallowed_tools: list[str] | None = None,
-        response_tool_name: str | None = None,
-        # Messages
-        system_prompt: str | None = None,
-        append_setup_output: bool = True,
-        initial_screenshot: bool = True,
-        # Misc
         model_name: str = "mcp-agent",
         checkpoint_name: str | None = None,
+        config: BaseAgentConfig | None = None,
+        mcp_client: AgentMCPClient | None = None,
         response_agent: ResponseAgent | None = None,
         auto_trace: bool = True,
         verbose: bool = False,
@@ -70,48 +63,42 @@ class MCPAgent(ABC):
         Initialize the base MCP agent.
 
         Args:
-            mcp_client: Client for connecting to MCP servers. If None, a client
-                is auto-created at runtime when `run()` is called with a `Task`
-                that provides `mcp_config`.
-            allowed_tools: Names of tools to allow (None means allow all).
-            disallowed_tools: Names of tools to always exclude.
-            response_tool_name: Name of the tool to use for response.
-            system_prompt: System prompt to seed the conversation.
-            append_setup_output: Whether to append setup tool output to the
-                first turn's messages.
-            initial_screenshot: Whether to include an initial screenshot before
-                the first prompt (when supported by the environment).
             model_name: Label used in telemetry/logging to identify the model.
-            response_agent: Optional automation that can respond to the model's
-                outputs to keep the loop going (e.g., auto-continue/stop).
-            auto_trace: If True, automatically creates a trace/span for runs.
-            verbose: If True, increases logging verbosity for developer UX.
+            checkpoint_name: Optional identifier for checkpoint / version metadata.
+            config: Optional instance of `config_cls`; defaults to `self.config_cls()`.
+            mcp_client: Client for connecting to MCP servers. If None, a client
+                is auto-created when `run()` is called with a `Task` that provides `mcp_config`.
+            response_agent: Optional automation to respond to model outputs.
+            auto_trace: Whether to automatically create telemetry spans for runs.
+            verbose: Enable verbose console logging for development.
         """
+        config = config or self.config_cls()
+        if not isinstance(config, self.config_cls):
+            raise TypeError(
+                f"{type(self).__name__} expects config of type {self.config_cls.__name__}, "
+                f"got {type(config).__name__}"
+            )
 
         self.mcp_client = mcp_client
-        self._auto_created_client = False  # Track if we created the client
 
         self.model_name = model_name
         self.checkpoint_name = checkpoint_name
         self.console = HUDConsole(logger=logger)
 
-        # Set verbose mode if requested
         if verbose:
             self.console.set_verbose(True)
 
-        # User filtering
-        self.allowed_tools: list[str] | None = allowed_tools
-        self.disallowed_tools: list[str] | None = disallowed_tools
-        self._available_tools: list[types.Tool] | None = None
+        self.allowed_tools = config.allowed_tools
+        self.disallowed_tools = config.disallowed_tools
+        self.system_prompt = config.system_prompt
+        self.append_setup_output = config.append_setup_output
+        self.initial_screenshot = config.initial_screenshot
+        self.response_tool_name = config.response_tool_name
 
-        # Messages
-        self.system_prompt = system_prompt
-        self.append_setup_output = append_setup_output
-        self.initial_screenshot = initial_screenshot
+        self._available_tools: list[types.Tool] | None = None
 
         # Initialize these here so methods can be called before initialize()
         self._tool_map: dict[str, types.Tool] = {}  # Simplified: just name to tool
-        self.response_tool_name = response_tool_name
 
         # Trace
         self._auto_trace = auto_trace
@@ -129,7 +116,6 @@ class MCPAgent(ABC):
             from hud.clients import MCPClient
 
             self.mcp_client = MCPClient(mcp_config=task.mcp_config)
-            self._auto_created_client = True
             self.console.debug("Auto-created MCPClient from task.mcp_config")
 
         # Ensure we have a client
@@ -394,6 +380,8 @@ class MCPAgent(ABC):
         final_response = None
         error = None
 
+        messages: list[Any] = []
+        
         try:
             # Start with system messages
             messages = await self.get_system_messages()
@@ -704,8 +692,8 @@ class MCPAgent(ABC):
             finally:
                 self._auto_trace_cm = None
 
-        # Clean up auto-created client
-        if self._auto_created_client and self.mcp_client:
+        # Always clean up the client
+        if self.mcp_client:
             try:
                 await self.mcp_client.shutdown()
                 self.console.debug("Closed auto-created MCPClient")
@@ -713,7 +701,6 @@ class MCPAgent(ABC):
                 self.console.warning_log(f"Failed to close auto-created client: {e}")
             finally:
                 self.mcp_client = None
-                self._auto_created_client = False
 
     def _is_connection_error(self, e: Exception) -> bool:
         """Check if an exception is a connection error."""

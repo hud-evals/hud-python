@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from anthropic import BadRequestError
+from anthropic import AsyncAnthropic, BadRequestError
 from mcp import types
 
 from hud.agents.claude import (
@@ -67,23 +68,18 @@ class TestClaudeAgent:
 
     @pytest.fixture
     def mock_anthropic(self):
-        """Create a mock Anthropic client."""
-        with patch("hud.agents.claude.AsyncAnthropic") as mock:
-            client = AsyncMock()
-            # Add beta attribute with messages
-            client.beta = AsyncMock()
-            client.beta.messages = AsyncMock()
-            mock.return_value = client
+        """Create a stub AsyncAnthropic client and patch constructor."""
+        client = AsyncAnthropic(api_key="test_key")
+        client.__dict__["beta"] = SimpleNamespace(messages=AsyncMock())
+        with patch("hud.agents.claude.AsyncAnthropic", return_value=client):
             yield client
 
     @pytest.mark.asyncio
     async def test_init(self, mock_mcp_client, mock_anthropic):
         """Test agent initialization."""
-        # Test with provided model_client
-        mock_model_client = MagicMock()
         agent = ClaudeAgent(
             mcp_client=mock_mcp_client,
-            model_client=mock_model_client,
+            model_client=mock_anthropic,
             model="claude-3-opus-20240229",
             max_tokens=1000,
             validate_api_key=False,  # Skip validation in tests
@@ -91,7 +87,7 @@ class TestClaudeAgent:
 
         assert agent.model_name == "Claude"
         assert agent.max_tokens == 1000
-        assert agent.anthropic_client == mock_model_client
+        assert agent.anthropic_client == mock_anthropic
 
     @pytest.mark.asyncio
     async def test_init_without_model_client(self, mock_mcp_client, mock_anthropic):
@@ -107,12 +103,11 @@ class TestClaudeAgent:
             assert agent.anthropic_client is not None
 
     @pytest.mark.asyncio
-    async def test_format_blocks(self, mock_mcp_client):
+    async def test_format_blocks(self, mock_mcp_client, mock_anthropic):
         """Test formatting content blocks into Claude messages."""
-        mock_model_client = MagicMock()
         agent = ClaudeAgent(
             mcp_client=mock_mcp_client,
-            model_client=mock_model_client,
+            model_client=mock_anthropic,
             validate_api_key=False,  # Skip validation in tests
         )
 
@@ -147,12 +142,11 @@ class TestClaudeAgent:
         assert content[1]["source"]["data"] == "base64data"
 
     @pytest.mark.asyncio
-    async def test_format_tool_results_method(self, mock_mcp_client):
+    async def test_format_tool_results_method(self, mock_mcp_client, mock_anthropic):
         """Test the agent's format_tool_results method."""
-        mock_model_client = MagicMock()
         agent = ClaudeAgent(
             mcp_client=mock_mcp_client,
-            model_client=mock_model_client,
+            model_client=mock_anthropic,
             validate_api_key=False,  # Skip validation in tests
         )
 

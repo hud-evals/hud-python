@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp import types
+from openai import AsyncOpenAI
 
 from hud.agents.operator import OperatorAgent
 from hud.types import MCPToolCall, MCPToolResult
@@ -35,15 +36,15 @@ class TestOperatorAgent:
     @pytest.fixture
     def mock_openai(self):
         """Create a mock OpenAI client."""
-        with patch("hud.agents.openai.AsyncOpenAI") as mock:
-            client = AsyncMock()
-            mock.return_value = client
+        client = AsyncOpenAI(api_key="test", base_url="http://localhost")
+        client.responses.create = AsyncMock()
+        with patch("hud.agents.openai.AsyncOpenAI", return_value=client):
             yield client
 
     @pytest.mark.asyncio
     async def test_init(self, mock_mcp_client):
         """Test agent initialization."""
-        mock_model_client = MagicMock()
+        mock_model_client = AsyncOpenAI(api_key="test")
         agent = OperatorAgent(
             mcp_client=mock_mcp_client,
             model_client=mock_model_client,
@@ -58,7 +59,7 @@ class TestOperatorAgent:
     @pytest.mark.asyncio
     async def test_format_blocks(self, mock_mcp_client):
         """Test formatting content blocks."""
-        mock_model_client = MagicMock()
+        mock_model_client = AsyncOpenAI(api_key="test")
         agent = OperatorAgent(
             mcp_client=mock_mcp_client,
             model_client=mock_model_client,

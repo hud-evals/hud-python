@@ -28,7 +28,6 @@ class AgentType(str, Enum):
     OPERATOR = "operator"
     GEMINI = "gemini"
     VLLM = "vllm"
-    LITELLM = "litellm"
     INTEGRATION_TEST = "integration_test"
 
 
@@ -38,15 +37,17 @@ class BaseAgentConfig(BaseModel):
     These are the standard parameters that all agents support.
     Provider-specific parameters should not be included here.
     """
-    # Filtering
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    # Tools
     allowed_tools: list[str] | None = None
     disallowed_tools: list[str] | None = None
     response_tool_name: str | None = None
 
     # Messages
     system_prompt: str | None = None
-    append_setup_output: bool | None = None
-    initial_screenshot: bool | None = None
+    append_setup_output: bool = True
+    initial_screenshot: bool = True
 
 
 class Task(BaseModel):

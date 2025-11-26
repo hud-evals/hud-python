@@ -26,18 +26,35 @@ from anthropic.types.beta import (
 import hud
 
 if TYPE_CHECKING:
+    from hud.clients.base import AgentMCPClient
     from hud.datasets import Task
+
+    from .misc import ResponseAgent
 
 import mcp.types as types
 
+from pydantic import ConfigDict
+
 from hud.settings import settings
 from hud.tools.computer.settings import computer_settings
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 
 from .base import MCPAgent
 
 logger = logging.getLogger(__name__)
+
+
+class ClaudeConfig(BaseAgentConfig):
+    """Validated configuration for `ClaudeAgent`."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    model_client: AsyncAnthropic | None = None
+    model: str = "claude-sonnet-4-5"
+    max_tokens: int = 16384
+    use_computer_beta: bool = True
+    validate_api_key: bool = True
 
 
 class ClaudeAgent(MCPAgent):
@@ -48,33 +65,46 @@ class ClaudeAgent(MCPAgent):
     tools through MCP servers instead of direct implementation.
     """
 
-    metadata: ClassVar[dict[str, Any]] = {
+    metadata: ClassVar[dict[str, Any] | None] = {
         "display_width": computer_settings.ANTHROPIC_COMPUTER_WIDTH,
         "display_height": computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
     }
+    config_cls: ClassVar[type[BaseAgentConfig]] = ClaudeConfig
 
     def __init__(
         self,
-        model_client: AsyncAnthropic | None = None,
-        model: str = "claude-sonnet-4-5",
-        max_tokens: int = 16384,
-        use_computer_beta: bool = True,
-        validate_api_key: bool = True,
-        **kwargs: Any,
+        *,
+        mcp_client: AgentMCPClient | None = None,
+        response_agent: ResponseAgent | None = None,
+        auto_trace: bool = True,
+        verbose: bool = False,
+        **config_kwargs: Any,
     ) -> None:
         """
         Initialize Claude MCP agent.
 
         Args:
-            model_client: AsyncAnthropic client (created if not provided)
-            model: Claude model to use
-            max_tokens: Maximum tokens for response
-            use_computer_beta: Whether to use computer-use beta features
-            **kwargs: Additional arguments passed to BaseMCPAgent (including mcp_client)
+            mcp_client: Optional MCP client instance.
+            response_agent: Optional automation to handle tool responses.
+            auto_trace: Whether to create traces automatically for runs.
+            verbose: Enable verbose console logging for development.
+            **config_kwargs: Keyword arguments for `ClaudeConfig`
+                (e.g., `model`, `max_tokens`, `use_computer_beta`, `allowed_tools`, etc.).
         """
-        super().__init__(**kwargs)
+        self.config = ClaudeConfig(**config_kwargs)
+
+        super().__init__(
+            config=self.config,
+            mcp_client=mcp_client,
+            response_agent=response_agent,
+            auto_trace=auto_trace,
+            model_name="Claude",
+            checkpoint_name=self.config.model,
+            verbose=verbose,
+        )
 
         # Initialize client if not provided
+        model_client = self.config.model_client
         if model_client is None:
             api_key = settings.anthropic_api_key
             if not api_key:
@@ -82,20 +112,17 @@ class ClaudeAgent(MCPAgent):
             model_client = AsyncAnthropic(api_key=api_key)
 
         # validate api key if requested
-        if validate_api_key:
+        if self.config.validate_api_key:
             try:
                 Anthropic(api_key=model_client.api_key).models.list()
             except Exception as e:
                 raise ValueError(f"Anthropic API key is invalid: {e}") from e
 
         self.anthropic_client = model_client
-        self.model = model
-        self.max_tokens = max_tokens
-        self.use_computer_beta = use_computer_beta
+        self.model = self.config.model
+        self.max_tokens = self.config.max_tokens
+        self.use_computer_beta = self.config.use_computer_beta
         self.hud_console = HUDConsole(logger=logger)
-
-        self.model_name = "Claude"
-        self.checkpoint_name = self.model
 
         # these will be initialized in _convert_tools_for_claude
         self.has_computer_tool = False

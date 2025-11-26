@@ -6,6 +6,7 @@ import base64
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from google import genai
 from google.genai import types as genai_types
 from mcp import types
 
@@ -37,12 +38,10 @@ class TestGeminiAgent:
 
     @pytest.fixture
     def mock_gemini_client(self):
-        """Create a mock Gemini client."""
-        client = MagicMock()
-        client.api_key = "test_key"
-        # Mock models.list for validation
-        client.models = MagicMock()
+        """Create a stub Gemini client."""
+        client = genai.Client(api_key="test_key")
         client.models.list = MagicMock(return_value=iter([]))
+        client.models.generate_content = MagicMock()
         return client
 
     @pytest.mark.asyncio
@@ -243,7 +242,6 @@ class TestGeminiAgent:
 
             mock_response.candidates = [mock_candidate]
 
-            mock_gemini_client.models = MagicMock()
             mock_gemini_client.models.generate_content = MagicMock(return_value=mock_response)
 
             messages = [genai_types.Content(role="user", parts=[genai_types.Part(text="Click")])]
@@ -278,7 +276,6 @@ class TestGeminiAgent:
 
             mock_response.candidates = [mock_candidate]
 
-            mock_gemini_client.models = MagicMock()
             mock_gemini_client.models.generate_content = MagicMock(return_value=mock_response)
 
             messages = [genai_types.Content(role="user", parts=[genai_types.Part(text="Status?")])]
@@ -361,7 +358,6 @@ class TestGeminiAgent:
             mock_response = MagicMock()
             mock_response.candidates = []
 
-            mock_gemini_client.models = MagicMock()
             mock_gemini_client.models.generate_content = MagicMock(return_value=mock_response)
 
             messages = [genai_types.Content(role="user", parts=[genai_types.Part(text="Hi")])]

@@ -23,48 +23,76 @@ import mcp.types as types
 from openai import AsyncOpenAI
 
 from hud import instrument
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from pydantic import ConfigDict, Field
+
+from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 
 from .base import MCPAgent
 
 if TYPE_CHECKING:
+    from hud.clients.base import AgentMCPClient
     from openai.types.chat import ChatCompletionToolParam
 
+    from .misc.response_agent import ResponseAgent
+
 logger = logging.getLogger(__name__)
+
+
+class OpenAIChatConfig(BaseAgentConfig):
+    """Configuration for `OpenAIChatAgent`."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    openai_client: AsyncOpenAI | None = None
+    api_key: str | None = None
+    base_url: str | None = None
+    model_name: str = "gpt-5-mini"
+    completion_kwargs: dict[str, Any] = Field(default_factory=dict)
 
 
 class OpenAIChatAgent(MCPAgent):
     """MCP-enabled agent that speaks the OpenAI *chat.completions* protocol."""
 
-    metadata: ClassVar[dict[str, Any]] = {}
+    metadata: ClassVar[dict[str, Any] | None] = None
+    config_cls: ClassVar[type[BaseAgentConfig]] = OpenAIChatConfig
 
     def __init__(
         self,
         *,
-        openai_client: AsyncOpenAI | None = None,
-        api_key: str | None = None,
-        base_url: str | None = None,
-        model_name: str = "gpt-4o-mini",
-        completion_kwargs: dict[str, Any] | None = None,
-        **agent_kwargs: Any,
+        mcp_client: AgentMCPClient | None = None,
+        response_agent: ResponseAgent | None = None,
+        auto_trace: bool = True,
+        verbose: bool = False,
+        **config_kwargs: Any,
     ) -> None:
-        # Accept base-agent settings via **agent_kwargs (e.g., mcp_client, system_prompt, etc.)
-        super().__init__(**agent_kwargs)
+        config_instance = self.config_cls(**config_kwargs)
+        if not isinstance(config_instance, OpenAIChatConfig):
+            raise TypeError(
+                f"{type(self).__name__} expects config of type OpenAIChatConfig; "
+                f"got {type(config_instance).__name__}"
+            )
+        self.config = cast(OpenAIChatConfig, config_instance)
+        super().__init__(
+            config=self.config,
+            mcp_client=mcp_client,
+            response_agent=response_agent,
+            auto_trace=auto_trace,
+            model_name="OpenAI",
+            checkpoint_name=self.config.model_name,
+            verbose=verbose,
+        )
 
-        # Handle client creation - support both patterns
-        if openai_client is not None:
-            # Use provided client (backward compatibility)
-            self.oai = openai_client
-        elif api_key is not None or base_url is not None:
-            # Create client from config (new pattern, consistent with other agents)
-            self.oai = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        if self.config.openai_client is not None:
+            self.oai = self.config.openai_client
+        elif self.config.api_key is not None or self.config.base_url is not None:
+            self.oai = AsyncOpenAI(api_key=self.config.api_key, base_url=self.config.base_url)
         else:
             raise ValueError("Either openai_client or (api_key and base_url) must be provided")
 
         self.model_name = "OpenAI"
-        self.checkpoint_name = model_name
-        self.completion_kwargs: dict[str, Any] = completion_kwargs or {}
+        self.checkpoint_name = self.config.model_name
+        self.completion_kwargs = dict(self.config.completion_kwargs)
         self.mcp_schemas = []
         self.hud_console = HUDConsole(logger=logger)
 

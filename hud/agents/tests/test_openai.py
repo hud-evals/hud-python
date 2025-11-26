@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from typing import Any, cast
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp import types
+from openai import AsyncOpenAI
 from openai.types.responses import (
     ResponseFunctionToolCall,
     ResponseOutputMessage,
@@ -41,16 +43,18 @@ class TestOpenAIAgent:
 
     @pytest.fixture
     def mock_openai(self):
-        """Create a mock OpenAI client."""
-        with patch("hud.agents.openai.AsyncOpenAI") as mock:
-            client = AsyncMock()
-            mock.return_value = client
+        """Create a stub OpenAI client."""
+        with patch("hud.agents.openai.AsyncOpenAI") as mock_class:
+            client = AsyncOpenAI(api_key="test", base_url="http://localhost")
+            client.chat.completions.create = AsyncMock()
+            client.responses.create = AsyncMock()
+            mock_class.return_value = client
             yield client
 
     @pytest.mark.asyncio
     async def test_init_with_client(self, mock_mcp_client):
         """Test agent initialization with provided client."""
-        mock_model_client = MagicMock()
+        mock_model_client = AsyncOpenAI(api_key="test", base_url="http://localhost")
         agent = OpenAIAgent(
             mcp_client=mock_mcp_client,
             model_client=mock_model_client,
@@ -68,7 +72,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_init_with_parameters(self, mock_mcp_client):
         """Test agent initialization with various parameters."""
-        mock_model_client = MagicMock()
+        mock_model_client = AsyncOpenAI(api_key="test", base_url="http://localhost")
         agent = OpenAIAgent(
             mcp_client=mock_mcp_client,
             model_client=mock_model_client,
