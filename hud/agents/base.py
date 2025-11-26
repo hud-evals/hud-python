@@ -202,6 +202,15 @@ class MCPAgent(ABC):
                 continue
             self._available_tools.append(tool)
 
+        # Validate required tools are present
+        available_tool_names = {t.name for t in self._available_tools}
+        missing_tools = [tool for tool in self.required_tools if tool not in available_tool_names]
+        if missing_tools:
+            raise ValueError(
+                f"Required tools are missing: {missing_tools}. "
+                f"Available tools: {sorted(available_tool_names)}"
+            )
+
         self.console.info(
             f"Agent initialized with {len(self.get_available_tools())} tools: {', '.join([t.name for t in self.get_available_tools()])}"  # noqa: E501
         )

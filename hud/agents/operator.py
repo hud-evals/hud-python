@@ -2,32 +2,31 @@
 
 from __future__ import annotations
 
-import json
-from typing import Any, ClassVar, Literal, cast
+import uuid
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import mcp.types as types
-from openai import AsyncOpenAI, Omit
 from openai.types.responses import (
-    ResponseComputerToolCall,
-    ResponseFunctionToolCall,
+    ApplyPatchToolParam,
+    ComputerToolParam,
+    FunctionShellToolParam,
+    FunctionToolParam,
+    ResponseComputerToolCallOutputScreenshotParam,
     ResponseInputParam,
-    ResponseInputTextParam,
-    ResponseOutputMessage,
-    ResponseOutputText,
-    ResponseReasoningItem,
-    ToolParam,
 )
 from openai.types.responses.response_input_param import (
     ComputerCallOutput,
-    Message,
 )
 from openai.types.shared_params.reasoning import Reasoning
 
-import hud
 from hud.tools.computer.settings import computer_settings
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 from .openai import OpenAIAgent
+
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
+
+    from hud.types import MCPToolCall, MCPToolResult
 
 OPERATOR_INSTRUCTIONS = """
 You are an autonomous computer-using agent. Follow these guidelines:
@@ -59,6 +58,7 @@ class OperatorAgent(OpenAIAgent):
         "display_width": computer_settings.OPENAI_COMPUTER_WIDTH,
         "display_height": computer_settings.OPENAI_COMPUTER_HEIGHT,
     }
+    # base class will ensure that the computer tool is available
     required_tools: ClassVar[list[str]] = ["openai_computer"]
 
     def __init__(
@@ -78,7 +78,9 @@ class OperatorAgent(OpenAIAgent):
         self._operator_computer_tool_name = "openai_computer"
         self._operator_display_width = computer_settings.OPENAI_COMPUTER_WIDTH
         self._operator_display_height = computer_settings.OPENAI_COMPUTER_HEIGHT
-        self._operator_environment = environment
+        self._operator_environment: Literal["windows", "mac", "linux", "ubuntu", "browser"] = (
+            environment
+        )
         self.model_name = "Operator"
         self.environment = environment
 
@@ -88,32 +90,27 @@ class OperatorAgent(OpenAIAgent):
         else:
             self.reasoning["summary"] = "auto"
 
+        # override truncation to "auto"
+        self.truncation = "auto"
+
         if self.system_prompt:
             self.system_prompt = f"{self.system_prompt}\n\n{OPERATOR_INSTRUCTIONS}"
         else:
             self.system_prompt = OPERATOR_INSTRUCTIONS
 
-    def _convert_tools_for_openai(self) -> None:
-        super()._convert_tools_for_openai()
-        if not any(
-            tool.name == self._operator_computer_tool_name for tool in self.get_available_tools()
-        ):
-            raise ValueError(
-                f"MCP computer tool '{self._operator_computer_tool_name}' is required "
-                "but not available."
+    def _to_api_tool(
+        self, tool: types.Tool
+    ) -> (
+        FunctionShellToolParam | ApplyPatchToolParam | FunctionToolParam | ComputerToolParam | None
+    ):
+        if tool.name == self._operator_computer_tool_name:
+            return ComputerToolParam(
+                type="computer_use_preview",
+                display_width=self._operator_display_width,
+                display_height=self._operator_display_height,
+                environment=self._operator_environment,
             )
-        self._openai_tools.append(
-            cast(
-                "ToolParam",
-                {
-                    "type": "computer_use_preview",
-                    "display_width": self._operator_display_width,
-                    "display_height": self._operator_display_height,
-                    "environment": self._operator_environment,
-                },
-            )
-        )
-
+        return super()._to_api_tool(tool)
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
@@ -141,17 +138,17 @@ class OperatorAgent(OpenAIAgent):
                         acknowledged_checks.append(check.model_dump())
                     elif isinstance(check, dict):
                         acknowledged_checks.append(check)
-                output_payload: dict[str, Any] = {
-                    "type": "computer_call_output",
-                    "call_id": call_id,
-                    "output": {
-                        "type": "input_image",
-                        "image_url": f"data:image/png;base64,{screenshot}",
-                    },
-                }
-                if acknowledged_checks:
-                    output_payload["acknowledged_safety_checks"] = acknowledged_checks
-                computer_outputs.append(cast("ComputerCallOutput", output_payload))
+                output_payload = ComputerCallOutput(
+                    type="computer_call_output",
+                    call_id=call_id,
+                    output=ResponseComputerToolCallOutputScreenshotParam(
+                        type="computer_screenshot",
+                        file_id=str(uuid.uuid4()),
+                        image_url=f"data:image/png;base64,{screenshot}",
+                    ),
+                    acknowledged_safety_checks=acknowledged_checks if acknowledged_checks else None,
+                )
+                computer_outputs.append(output_payload)
                 self.pending_call_id = None
                 self.pending_safety_checks = []
                 ordering.append(("computer", len(computer_outputs) - 1))

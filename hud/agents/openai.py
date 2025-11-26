@@ -98,53 +98,54 @@ class OpenAIAgent(MCPAgent):
         await super().initialize(task)
         self._convert_tools_for_openai()
 
+    def _to_api_tool(
+        self,
+        tool: types.Tool,
+    ) -> FunctionShellToolParam | ApplyPatchToolParam | FunctionToolParam | None:
+        # Special case: shell tool -> OpenAI native shell
+        if tool.name == "shell":
+            return FunctionShellToolParam(type="shell")
+
+        # Special case: apply_patch tool -> OpenAI native apply_patch
+        if tool.name == "apply_patch":
+            return ApplyPatchToolParam(type="apply_patch")
+
+        # Regular function tool
+        if tool.description is None or tool.inputSchema is None:
+            raise ValueError(
+                cleandoc(f"""MCP tool {tool.name} requires both a description and inputSchema.
+                Add these by:
+                1. Adding a docstring to your @mcp.tool decorated function for the description
+                2. Using pydantic Field() annotations on function parameters for the schema
+                """)
+            )
+
+        # schema must be strict
+
+        try:
+            strict_schema = ensure_strict_json_schema(copy.deepcopy(tool.inputSchema))
+        except Exception as e:
+            self.console.warning_log(f"Failed to convert tool '{tool.name}' schema to strict: {e}")
+            logger.error(json.dumps(tool.inputSchema, indent=2))
+            raise e
+
+        return FunctionToolParam(
+            type="function",
+            name=tool.name,
+            description=tool.description,
+            parameters=strict_schema,
+            strict=True,
+        )
+
     def _convert_tools_for_openai(self) -> None:
         """Convert MCP tools into OpenAI Responses tool definitions."""
         available_tools = self.get_available_tools()
-
-        def to_api_tool(
-            tool: types.Tool,
-        ) -> FunctionShellToolParam | ApplyPatchToolParam | FunctionToolParam | None:
-            # Special case: shell tool -> OpenAI native shell
-            if tool.name == "shell":
-                return FunctionShellToolParam(type="shell")
-
-            # Special case: apply_patch tool -> OpenAI native apply_patch
-            if tool.name == "apply_patch":
-                return ApplyPatchToolParam(type="apply_patch")
-
-            # Regular function tool
-            if tool.description is None or tool.inputSchema is None:
-                raise ValueError(
-                    cleandoc(f"""MCP tool {tool.name} requires both a description and inputSchema.
-                    Add these by:
-                    1. Adding a docstring to your @mcp.tool decorated function for the description
-                    2. Using pydantic Field() annotations on function parameters for the schema
-                    """)
-                )
-
-            # schema must be strict
-
-            try:
-                strict_schema = ensure_strict_json_schema(copy.deepcopy(tool.inputSchema))
-            except Exception as e:
-                self.console.warning_log(f"Failed to convert tool '{tool.name}' schema to strict: {e}")
-                logger.error(json.dumps(tool.inputSchema, indent=2))
-                raise e
-
-            return FunctionToolParam(
-                type="function",
-                name=tool.name,
-                description=tool.description,
-                parameters=strict_schema,
-                strict=True,
-            )
 
         self._openai_tools = []
         self._tool_name_map = {}
 
         for tool in available_tools:
-            openai_tool = to_api_tool(tool)
+            openai_tool = self._to_api_tool(tool)
             if openai_tool is None:
                 continue
 
@@ -242,13 +243,8 @@ class OpenAIAgent(MCPAgent):
                     text_chunks.append(text)
             elif item.type == "function_call":
                 target_name = self._tool_name_map.get(item.name, item.name)
-                try:
-                    arguments = json.loads(item.arguments)
-                except json.JSONDecodeError:
-                    self.console.warning_log(
-                        f"Failed to parse arguments for tool '{item.name}', passing raw string."
-                    )
-                    arguments = {"raw_arguments": item.arguments}
+                # since strict is True, we can safely load the arguments as a dict
+                arguments = json.loads(item.arguments)
                 agent_response.tool_calls.append(
                     MCPToolCall(name=target_name, arguments=arguments, id=item.call_id)
                 )
