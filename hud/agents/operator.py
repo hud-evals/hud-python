@@ -66,7 +66,7 @@ class OperatorAgent(OpenAIAgent):
         self,
         model_client: AsyncOpenAI | None = None,
         model: str = "computer-use-preview",
-        environment: Literal["windows", "mac", "linux", "browser"] = "linux",
+        environment: Literal["windows", "mac", "linux", "ubuntu", "browser"] = "linux",
         validate_api_key: bool = True,
         **kwargs: Any,
     ) -> None:
