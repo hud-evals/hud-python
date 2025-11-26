@@ -10,8 +10,8 @@ import pytest
 from hud.datasets import (
     Task,
     run_dataset,
-    save_tasks,
 )
+from hud.utils.tasks import save_tasks
 from hud.types import MCPToolCall
 
 
@@ -128,7 +128,7 @@ class TestDatasetOperations:
 
     def test_save_taskconfigs_empty_list(self):
         """Test saving empty task list."""
-        with patch("hud.datasets.utils.Dataset") as MockDataset:
+        with patch("hud.utils.tasks.Dataset") as MockDataset:
             mock_instance = MagicMock()
             MockDataset.from_list.return_value = mock_instance
             mock_instance.push_to_hub.return_value = None
@@ -157,12 +157,12 @@ class TestRunDatasetExtended:
         """Test running empty dataset."""
         with (
             patch("hud.clients.MCPClient"),
-            patch("hud.job") as mock_job_func,
-            patch("hud.trace") as mock_trace,
+            patch("hud.async_job") as mock_job_func,
+            patch("hud.async_trace") as mock_trace,
         ):
             mock_job_obj = MagicMock()
             mock_job_obj.id = "job-empty"
-            mock_job_func.return_value.__enter__.return_value = mock_job_obj
+            mock_job_func.return_value.__aenter__.return_value = mock_job_obj
 
             # Create a mock agent class with proper type
             from hud.agents import MCPAgent
@@ -207,12 +207,12 @@ class TestRunDatasetExtended:
         with (
             patch("hud.clients.MCPClient") as MockClient,
             patch("hud.async_job") as mock_job_func,
-            patch("hud.trace") as mock_trace,
+            patch("hud.async_trace") as mock_trace,
         ):
             mock_job = AsyncMock()
             mock_job.id = "job-meta"
             mock_job_func.return_value.__aenter__.return_value = mock_job
-            mock_trace.return_value.__enter__.return_value = "trace-id"
+            mock_trace.return_value.__aenter__.return_value = "trace-id"
 
             mock_client = AsyncMock()
             MockClient.return_value = mock_client
@@ -282,13 +282,13 @@ class TestRunDatasetExtended:
 
         with (
             patch("hud.clients.MCPClient") as MockClient,
-            patch("hud.job") as mock_job_func,
-            patch("hud.trace") as mock_trace,
+            patch("hud.async_job") as mock_job_func,
+            patch("hud.async_trace") as mock_trace,
         ):
             mock_job = MagicMock()
             mock_job.id = "job-error"
-            mock_job_func.return_value.__enter__.return_value = mock_job
-            mock_trace.return_value.__enter__.return_value = "trace-id"
+            mock_job_func.return_value.__aenter__.return_value = mock_job
+            mock_trace.return_value.__aenter__.return_value = "trace-id"
 
             mock_client = AsyncMock()
             MockClient.return_value = mock_client

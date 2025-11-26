@@ -20,15 +20,13 @@ Abstract base class for all MCP-enabled agents. Handles the agent loop, MCP clie
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
 | `mcp_client` | `AgentMCPClient` | MCP client for server connections | `None` |
-| `allowed_tools` | `list[str]` | List of tool names to allow | `None` (all) |
-| `disallowed_tools` | `list[str]` | List of tool names to disallow | `[]` |
-| `system_prompt` | `str` | System prompt to seed the conversation | Default prompt |
-| `append_setup_output` | `bool` | Append setup tool output to initial context | `True` |
-| `initial_screenshot` | `bool` | Include an initial screenshot when supported | `True` |
-| `model_name` | `str` | Model label for telemetry/logging | `"mcp-agent"` |
 | `response_agent` | `ResponseAgent` | Optional auto-continue/stop helper | `None` |
 | `auto_trace` | `bool` | Enable automatic tracing spans | `True` |
+| `model_name` | `str` | Model label for telemetry/logging | `"mcp-agent"` |
+| `checkpoint_name` | `str \| None` | Label for checkpoints/telemetry | `None` |
 | `verbose` | `bool` | Verbose console logs for development | `False` |
+
+> All concrete agents accept standard keyword arguments defined by `BaseAgentConfig` (e.g., `allowed_tools`, `disallowed_tools`, `system_prompt`, `append_setup_output`, `initial_screenshot`, `response_tool_name`) plus their own provider-specific options. Those kwargs are validated against the agent’s internal config class before calling the base constructor.
 
 **Key Methods:**
 
@@ -79,6 +77,8 @@ If no `mcp_client` is provided but a `Task` with `mcp_config` is passed to `run(
 
 ## Pre-built Agents
 
+All pre-built agents accept the standard `BaseAgentConfig` keyword arguments (`allowed_tools`, `disallowed_tools`, `system_prompt`, `append_setup_output`, `initial_screenshot`, `response_tool_name`) in addition to the provider-specific parameters listed below.
+
 ### ClaudeAgent
 
 ```python
@@ -104,6 +104,8 @@ Claude-specific implementation using Anthropic's API.
 
 **Example:**
 ```python
+from hud.agents import ClaudeAgent
+
 agent = ClaudeAgent(
     model="claude-sonnet-4-5",
     max_tokens=8192,

@@ -120,7 +120,7 @@ results = await run_dataset(
     agent_config={"model": "claude-sonnet-4-5-20250929", "validate_api_key": False},
     max_concurrent=50,
     max_steps=50,
-    auto_respond=True
+    auto_respond=True,
 )
 ```
 
@@ -151,7 +151,7 @@ results = await run_dataset(
     agent_config={"model": "claude-sonnet-4-5-20250929", "validate_api_key": False},
     max_concurrent=50,
     max_steps=50,
-    auto_respond=True
+    auto_respond=True,
 )
 ```
 
@@ -191,24 +191,10 @@ tasks = [{"prompt": "...", "mcp_config": {...}, "setup_tool": {...}}]
 results = await run_dataset("Eval", tasks, ClaudeAgent)
 ```
 
-### fetch_system_prompt_from_dataset
-
-```python
-from hud.datasets import fetch_system_prompt_from_dataset
-
-system_prompt = await fetch_system_prompt_from_dataset("hud-evals/SheetBench-50")
-```
-
-Fetch `system_prompt.txt` from a HuggingFace dataset repository.
-
-**Returns:** `str | None` - System prompt text if found
-
-**Note:** Requires `huggingface_hub` to be installed.
-
 ### save_tasks  
 
 ```python
-from hud.datasets import save_tasks
+from hud.utils.tasks import save_tasks
 
 # IMPORTANT: Pass dicts, not Task objects!
 task_dicts = [task.model_dump() for task in tasks]

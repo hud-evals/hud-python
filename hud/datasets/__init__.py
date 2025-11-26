@@ -7,16 +7,15 @@ Provides data models, utilities, and execution functions for working with HUD da
 # Execution functions
 from __future__ import annotations
 
-from hud.types import Task
 from .runner import run_dataset
 
-# Utilities
-from .utils import save_tasks
+from hud.types import Task
+from hud.utils.tasks import save_tasks
 
 __all__ = [
-    # Core data model
+    # Backwards compatibility
     "Task",
+    "save_tasks",
     # Execution
     "run_dataset",
-    "save_tasks",
 ]
