@@ -121,7 +121,6 @@ class OpenAIComputerTool(HudComputerTool):
         # Coordinate parameters
         x: int | None = Field(None, description="X coordinate for click/move/scroll actions"),
         y: int | None = Field(None, description="Y coordinate for click/move/scroll actions"),
-        z: int | None = Field(None, description="Z coordinate for click/move/scroll actions"),
         # Button parameter
         button: Literal["left", "right", "middle", "back", "forward"] | None = Field(
             None, description="Mouse button for click actions (left, right, middle, wheel)"
