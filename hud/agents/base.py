@@ -60,8 +60,22 @@ class MCPAgent(ABC):
     required_tools: ClassVar[list[str]] = []  # Tools that must be available
     config_cls: ClassVar[type[BaseAgentConfig]] = BaseAgentConfig
 
-    def __init__(self, params: BaseCreateParams) -> None:
-        """Initialize MCP agent. Use `AgentClass.create()` for typed params."""
+    def __init__(self, params: BaseCreateParams | None = None, **kwargs: Any) -> None:
+        if params is None:
+            import warnings
+            warnings.warn(
+                f"Passing kwargs to {self.__class__.__name__}() is deprecated. "
+                f"Use {self.__class__.__name__}.create(...) instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            CreateParams = type(
+                f"{self.config_cls.__name__}CreateParams",
+                (BaseCreateParams, self.config_cls),
+                {"__module__": self.config_cls.__module__},
+            )
+            params = CreateParams(**kwargs)
+        
         config_kwargs = {
             k: getattr(params, k)
             for k in self.config_cls.model_fields.keys()

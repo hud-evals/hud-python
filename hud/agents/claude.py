@@ -78,8 +78,8 @@ class ClaudeAgent(MCPAgent):
     def create(cls, **kwargs: Any) -> "ClaudeAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
         return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
-    def __init__(self, params: ClaudeCreateParams) -> None:
-        super().__init__(params)
+    def __init__(self, params: ClaudeCreateParams | None = None, **kwargs: Any) -> None:
+        super().__init__(params, **kwargs)
         self.config: ClaudeConfig
 
         model_client = self.config.model_client

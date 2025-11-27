@@ -85,8 +85,8 @@ class OperatorAgent(OpenAIAgent):
     def create(cls, **kwargs: Any) -> "OperatorAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
         return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
-    def __init__(self, params: OperatorCreateParams) -> None:
-        super().__init__(params)  # type: ignore[arg-type]
+    def __init__(self, params: OperatorCreateParams | None = None, **kwargs: Any) -> None:
+        super().__init__(params, **kwargs)  # type: ignore[arg-type]
         self.config: OperatorConfig  # type: ignore[assignment]
 
         self._operator_computer_tool_name = "openai_computer"

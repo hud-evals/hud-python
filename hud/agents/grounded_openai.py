@@ -69,8 +69,8 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
         from .base import MCPAgent
         return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
-    def __init__(self, params: GroundedOpenAICreateParams) -> None:
-        super().__init__(params)  # type: ignore[arg-type]
+    def __init__(self, params: GroundedOpenAICreateParams | None = None, **kwargs: Any) -> None:
+        super().__init__(params, **kwargs)  # type: ignore[arg-type]
         self.config: GroundedOpenAIConfig  # type: ignore[assignment]
 
         self.grounder = Grounder(self.config.grounder_config)

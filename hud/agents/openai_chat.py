@@ -66,8 +66,8 @@ class OpenAIChatAgent(MCPAgent):
     def create(cls, **kwargs: Any) -> "OpenAIChatAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
         return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
-    def __init__(self, params: OpenAIChatCreateParams) -> None:
-        super().__init__(params)
+    def __init__(self, params: OpenAIChatCreateParams | None = None, **kwargs: Any) -> None:
+        super().__init__(params, **kwargs)
         self.config: OpenAIChatConfig
 
         if self.config.openai_client is not None:

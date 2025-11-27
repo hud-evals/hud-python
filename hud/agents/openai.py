@@ -76,8 +76,8 @@ class OpenAIAgent(MCPAgent):
     def create(cls, **kwargs: Any) -> "OpenAIAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
         return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
-    def __init__(self, params: OpenAICreateParams) -> None:
-        super().__init__(params)
+    def __init__(self, params: OpenAICreateParams | None = None, **kwargs: Any) -> None:
+        super().__init__(params, **kwargs)
         self.config: OpenAIConfig
 
         model_client = self.config.model_client

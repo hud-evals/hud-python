@@ -84,8 +84,8 @@ class GeminiAgent(MCPAgent):
     def create(cls, **kwargs: Any) -> "GeminiAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
         return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
-    def __init__(self, params: GeminiCreateParams) -> None:
-        super().__init__(params)
+    def __init__(self, params: GeminiCreateParams | None = None, **kwargs: Any) -> None:
+        super().__init__(params, **kwargs)
         self.config: GeminiConfig
 
         model_client = self.config.model_client
