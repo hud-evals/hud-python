@@ -1,959 +1,599 @@
-"""HUD evaluation command for running tasks and datasets."""
+"""HUD evaluation command for running tasks and datasets.
+
+Config Override Order: CLI arguments > .hud_eval.toml > defaults
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
+import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
+import questionary
 import typer
+from pydantic import BaseModel, Field, field_validator
+from rich import box
+from rich.table import Table
 
 import hud
 from hud.cli.utils.env_check import ensure_built, find_environment_dir
 from hud.settings import settings
 from hud.types import AgentType
-from hud.utils.group_eval import display_group_statistics, run_tasks_grouped
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
+    from hud.agents.base import MCPAgent
     from hud.types import Task
+
 logger = logging.getLogger(__name__)
 hud_console = HUDConsole()
 
+_CONFIG_PATH = ".hud_eval.toml"
 
-def _tasks_use_local_mcp(tasks: list[Task]) -> bool:
-    """Return True if any task's MCP config uses a local command instead of a URL.
+_DEFAULT_CONFIG_TEMPLATE = '''# HUD Eval Configuration
+# Command-line arguments override these settings
 
-    A config is considered local when a server entry contains a 'command' key and
-    does not provide a 'url'.
-    """
-    try:
-        for t in tasks:
-            cfg = getattr(t, "mcp_config", {}) or {}
-            if not isinstance(cfg, dict):
-                continue
-            for server_cfg in cfg.values():
-                if isinstance(server_cfg, dict) and (
-                    "command" in server_cfg and not server_cfg.get("url")
-                ):
-                    return True
-        return False
-    except Exception:
-        # Be conservative: if detection fails, do not block
-        return False
+[eval]
+# source = "hud-evals/SheetBench-50"
+# agent = "claude"
+# model = ""
+# full = false
+# max_concurrent = 30
+# max_steps = 50
+# group_size = 1
+# task_ids = ["task_1", "task_2"]
+# verbose = true
+# very_verbose = true
 
+[agent]
+# allowed_tools = ["computer", "playwright"]
+# disallowed_tools = []
 
-def get_available_models() -> list[dict[str, str | None]]:
-    """Fetch available models from the HUD API (only ready models).
+[claude]
+# max_tokens = 16384
+# use_computer_beta = true
 
-    Returns:
-        List of dicts with 'name', 'vllm_url', and 'base_model' keys
-    """
-    try:
-        from hud.cli.rl import rl_api
+[openai]
+# temperature = 0.7
+# max_output_tokens = 4096
 
-        hud_console.info("Fetching your models from https://hud.ai/models")
-        models = rl_api.list_models()
+[gemini]
+# temperature = 1.0
+# top_p = 0.95
 
-        # Filter for ready models only and sort by recency
-        ready_models = [m for m in models if m.status == "ready"]
-        ready_models.sort(key=lambda m: m.created_at or "", reverse=True)
+[openai_compatible]
+# base_url = "http://localhost:8000/v1"
+# model_name = "my-model"
+'''
 
-        # Count other statuses for informational purposes
-        training_count = sum(1 for m in models if m.status == "training")
-        # other_count = len(models) - len(ready_models) - training_count
-
-        if ready_models:
-            hud_console.success(f"Found {len(ready_models)} ready models:")
-            for model in ready_models:
-                vllm_status = " (vLLM deployed)" if model.vllm_url else ""
-                hud_console.info(f"  ✅ {model.name}{vllm_status}")
-
-            if training_count > 0:
-                hud_console.info(f"\n({training_count} models currently training)")
-
-            return [
-                {"name": model.name, "vllm_url": model.vllm_url, "base_model": model.base_model}
-                for model in ready_models
-            ]
-        else:
-            if training_count > 0:
-                hud_console.warning(
-                    f"No ready models found. You have {training_count} models currently training."
-                )
-            else:
-                hud_console.warning("No models found in your account.")
-            return []
-    except Exception as e:
-        hud_console.debug(f"Error fetching models: {e}")
-        # Don't show the error to the user, just proceed without HUD models
-        return []
+# Agent type -> (settings attr, env var name)
+_API_KEY_REQUIREMENTS: dict[AgentType, tuple[str, str]] = {
+    AgentType.CLAUDE: ("anthropic_api_key", "ANTHROPIC_API_KEY"),
+    AgentType.GEMINI: ("gemini_api_key", "GEMINI_API_KEY"),
+    AgentType.OPENAI: ("openai_api_key", "OPENAI_API_KEY"),
+    AgentType.OPERATOR: ("openai_api_key", "OPENAI_API_KEY"),
+}
 
 
-def _build_vllm_config(
-    vllm_base_url: str | None,
-    model: str | None,
-    allowed_tools: list[str] | None,
-    verbose: bool,
-) -> dict[str, Any]:
-    """Build configuration for vLLM agent.
+class EvalConfig(BaseModel):
+    """Configuration for hud eval command."""
 
-    Args:
-        vllm_base_url: Optional base URL for vLLM server
-        model: Model name to use
-        allowed_tools: Optional list of allowed tools
-        verbose: Enable verbose output
+    # Class-level registry
+    _agent_classes: ClassVar[dict[AgentType, type["MCPAgent"]]] = {}
 
-    Returns:
-        Dictionary with agent configuration
-    """
-    # Determine base URL and API key
-    if vllm_base_url is not None:
-        base_url = vllm_base_url
-        api_key = settings.api_key if base_url.startswith(settings.hud_rl_url) else "token-abc123"
-        hud_console.info(f"Using vLLM server at {base_url}")
-    else:
-        base_url = "http://localhost:8000/v1"
-        api_key = "token-abc123"
-
-    config: dict[str, Any] = {
-        "api_key": api_key,
-        "base_url": base_url,
-        "model_name": model or "served-model",
-        "verbose": verbose,
-        "completion_kwargs": {
-            "temperature": 0.7,
-            "max_tokens": 2048,
-            "tool_choice": "auto",
-        },
+    # Fields loaded from [eval] section
+    _EVAL_FIELDS: ClassVar[set[str]] = {
+        "source", "agent_type", "model", "task_ids", "full",
+        "max_concurrent", "max_steps", "verbose", "very_verbose", "group_size",
     }
+    # Fields loaded from [agent] section
+    _AGENT_FIELDS: ClassVar[set[str]] = {"allowed_tools", "disallowed_tools"}
 
-    if allowed_tools:
-        config["allowed_tools"] = allowed_tools
+    # Eval settings
+    source: str | None = None
+    agent_type: AgentType | None = None
+    model: str | None = None
+    task_ids: list[str] | None = None
+    full: bool = False
+    max_concurrent: int = 30
+    max_steps: int | None = None
+    verbose: bool = False
+    very_verbose: bool = False
+    group_size: int = 1
 
-    return config
+    # Base agent config (these merge with task's agent_config)
+    allowed_tools: list[str] | None = None
+    disallowed_tools: list[str] | None = None
 
+    agent_config: dict[str, Any] = Field(default_factory=dict)
 
-def build_agent(
-    agent_type: AgentType,
-    *,
-    model: str | None = None,
-    allowed_tools: list[str] | None = None,
-    verbose: bool = False,
-    vllm_base_url: str | None = None,
-) -> Any:
-    """Create and return the requested agent type."""
+    @field_validator("agent_type", mode="before")
+    @classmethod
+    def _parse_agent_type(cls, v: Any) -> AgentType | None:
+        """Convert string agent name to AgentType enum."""
+        if v is None:
+            return None
+        if isinstance(v, AgentType):
+            return v
+        if isinstance(v, str):
+            try:
+                return AgentType(v)
+            except ValueError:
+                valid = [e.value for e in AgentType]
+                raise ValueError(f"Invalid agent: {v}. Must be one of: {', '.join(valid)}")
+        return v
 
-    # Import agents lazily to avoid dependency issues
-    if agent_type == AgentType.INTEGRATION_TEST:
-        from hud.agents.misc.integration_test_agent import IntegrationTestRunner
+    def validate_api_keys(self) -> None:
+        """Validate required API keys for the selected agent. Raises typer.Exit on failure."""
+        if self.agent_type is None:
+            return
 
-        return IntegrationTestRunner(verbose=verbose)
-    elif agent_type == AgentType.VLLM:
-        # Create a generic OpenAI agent for vLLM server
-        try:
-            from hud.agents.openai_chat import OpenAIChatAgent
-        except ImportError as e:
-            hud_console.error(
-                "OpenAI dependencies are not installed. "
-                "Please install with: pip install 'hud-python[agent]'"
-            )
-            raise typer.Exit(1) from e
+        if self.agent_type in _API_KEY_REQUIREMENTS:
+            attr, env_var = _API_KEY_REQUIREMENTS[self.agent_type]
+            if not getattr(settings, attr, None):
+                hud_console.error(f"{env_var} is required for {self.agent_type.value} agent")
+                hud_console.info(f"Set it: hud set {env_var}=your-key-here")
+                raise typer.Exit(1)
 
-        # Use the shared config builder
-        config = _build_vllm_config(
-            vllm_base_url=vllm_base_url,
-            model=model,
-            allowed_tools=allowed_tools,
-            verbose=verbose,
-        )
-        return OpenAIChatAgent(**config)
+        if self.agent_type == AgentType.OPENAI_COMPATIBLE and not self.model:
+            hud_console.error("Model name is required for OpenAI compatible agent (--model)")
+            raise typer.Exit(1)
 
-    elif agent_type == AgentType.OPENAI:
-        try:
+        if not settings.api_key:
+            hud_console.warning("HUD_API_KEY not set. Some features may be limited.")
+
+    def get_agent_class(self) -> type["MCPAgent"]:
+        """Get the agent class for the configured agent type."""
+        if self.agent_type is None:
+            raise ValueError("agent_type must be set before calling get_agent_class()")
+
+        if self.agent_type == AgentType.CLAUDE:
+            from hud.agents import ClaudeAgent
+            return ClaudeAgent
+        if self.agent_type == AgentType.OPENAI:
             from hud.agents import OpenAIAgent
-        except ImportError as e:
-            hud_console.error(
-                "OpenAI agent dependencies are not installed. "
-                "Please install with: pip install 'hud-python[agent]'"
-            )
-            raise typer.Exit(1) from e
-
-        agent_kwargs: dict[str, Any] = {"verbose": verbose}
-        if allowed_tools:
-            agent_kwargs["allowed_tools"] = allowed_tools
-        if model:
-            agent_kwargs["model"] = model
-        return OpenAIAgent(**agent_kwargs)
-
-    elif agent_type == AgentType.OPERATOR:
-        try:
+            return OpenAIAgent
+        if self.agent_type == AgentType.OPERATOR:
             from hud.agents import OperatorAgent
-        except ImportError as e:
-            hud_console.error(
-                "OpenAI agent dependencies are not installed. "
-                "Please install with: pip install 'hud-python[agent]'"
-            )
-            raise typer.Exit(1) from e
-
-        operator_kwargs: dict[str, Any] = {"verbose": verbose}
-        if allowed_tools:
-            operator_kwargs["allowed_tools"] = allowed_tools
-        return OperatorAgent(**operator_kwargs)
-
-    elif agent_type == AgentType.GEMINI:
-        try:
+            return OperatorAgent
+        if self.agent_type == AgentType.GEMINI:
             from hud.agents import GeminiAgent
-        except ImportError as e:
-            hud_console.error(
-                "Gemini agent dependencies are not installed. "
-                "Please install with: pip install 'hud-python[agent]'"
-            )
-            raise typer.Exit(1) from e
+            return GeminiAgent
+        if self.agent_type == AgentType.OPENAI_COMPATIBLE:
+            from hud.agents import OpenAIChatAgent
+            return OpenAIChatAgent
+        if self.agent_type == AgentType.INTEGRATION_TEST:
+            from hud.agents.misc.integration_test_agent import IntegrationTestRunner
+            return IntegrationTestRunner
 
-        gemini_kwargs: dict[str, Any] = {
-            "model": model or "gemini-2.5-computer-use-preview-10-2025",
-            "verbose": verbose,
-        }
-        if allowed_tools:
-            gemini_kwargs["allowed_tools"] = allowed_tools
-        return GeminiAgent(**gemini_kwargs)
+        raise ValueError(f"Unsupported agent type: {self.agent_type}")
 
-    elif agent_type == AgentType.LITELLM:
+    def get_agent_kwargs(self) -> dict[str, Any]:
+        """Build agent kwargs from config."""
+        if self.agent_type is None:
+            raise ValueError("agent_type must be set before calling get_agent_kwargs()")
+
+        kwargs: dict[str, Any] = {}
+
+        if self.model:
+            kwargs["model"] = self.model
+
+        if self.allowed_tools:
+            kwargs["allowed_tools"] = self.allowed_tools
+        if self.disallowed_tools:
+            kwargs["disallowed_tools"] = self.disallowed_tools
+
+        agent_key = self.agent_type.value
+        if agent_key in self.agent_config:
+            kwargs.update(self.agent_config[agent_key])
+
+        kwargs["verbose"] = self.verbose or self.very_verbose
+
+        if self.agent_type != AgentType.INTEGRATION_TEST:
+            kwargs["validate_api_key"] = False
+
+        return kwargs
+
+    @classmethod
+    def load(cls, path: str = _CONFIG_PATH) -> "EvalConfig":
+        """Load config from TOML file."""
+        p = Path(path)
+        if not p.exists():
+            p.write_text(_DEFAULT_CONFIG_TEMPLATE)
+            hud_console.info(f"Generated {_CONFIG_PATH}")
+            return cls()
+
         try:
-            from hud.agents.lite_llm import LiteAgent
-        except ImportError as e:
-            hud_console.error(
-                "LiteLLM agent dependencies are not installed. "
-                "Please install with: pip install 'hud-python[agent]'"
-            )
-            raise typer.Exit(1) from e
+            with open(p, "rb") as f:
+                toml_data = tomllib.load(f)
+        except Exception as e:
+            hud_console.warning(f"Failed to parse {path}: {e}")
+            return cls()
 
-        return LiteAgent(
-            model_name=model or "gpt-4o-mini",
-            allowed_tools=allowed_tools,
-            verbose=verbose,
-        )
+        # Extract sections
+        eval_section = toml_data.get("eval", {})
+        agent_section = toml_data.get("agent", {})
 
-    # Fallback Claude agent (Anthropic)
-    try:
-        from hud.agents import ClaudeAgent
-    except ImportError as e:
-        hud_console.error(
-            "Claude agent dependencies are not installed. "
-            "Please install with: pip install 'hud-python[agent]'"
-        )
-        raise typer.Exit(1) from e
+        # Build config data
+        data: dict[str, Any] = {}
 
-    model = model or "claude-sonnet-4-5"
+        # Eval settings (map 'agent' -> 'agent_type')
+        if "agent" in eval_section:
+            data["agent_type"] = eval_section["agent"]
+        for key in cls._EVAL_FIELDS:
+            if key in eval_section:
+                data[key] = eval_section[key]
 
-    if allowed_tools:
-        return ClaudeAgent(
-            model=model,
-            allowed_tools=allowed_tools,
-            verbose=verbose,
-        )
-    else:
-        return ClaudeAgent(
-            model=model,
-            verbose=verbose,
-        )
+        # Agent base config
+        for key in cls._AGENT_FIELDS:
+            if key in agent_section:
+                data[key] = agent_section[key]
+
+        # Agent-specific configs (claude, openai, gemini, etc.)
+        agent_config: dict[str, Any] = {}
+        for agent_type in AgentType:
+            if agent_type.value in toml_data:
+                agent_config[agent_type.value] = toml_data[agent_type.value]
+        data["agent_config"] = agent_config
+
+        try:
+            return cls.model_validate(data)
+        except Exception as e:
+            hud_console.warning(f"Invalid config: {e}")
+            return cls()
+
+    def merge_cli(
+        self,
+        agent: str | None = None,
+        config: list[str] | None = None,
+        allowed_tools: str | None = None,
+        disallowed_tools: str | None = None,
+        task_ids: str | None = None,
+        **cli_args: Any,
+    ) -> "EvalConfig":
+        """Merge CLI args (non-None values override config)."""
+        overrides: dict[str, Any] = {}
+
+        if agent is not None:
+            overrides["agent_type"] = agent
+
+        # Parse comma-separated lists
+        if allowed_tools is not None:
+            overrides["allowed_tools"] = [t.strip() for t in allowed_tools.split(",") if t.strip()]
+        if disallowed_tools is not None:
+            overrides["disallowed_tools"] = [t.strip() for t in disallowed_tools.split(",") if t.strip()]
+        if task_ids is not None:
+            overrides["task_ids"] = [t.strip() for t in task_ids.split(",") if t.strip()]
+
+        for k, v in cli_args.items():
+            if v is not None and v is not False:
+                overrides[k] = v
+
+        for k in ("full", "verbose", "very_verbose"):
+            if cli_args.get(k) is True:
+                overrides[k] = True
+            elif k in overrides and cli_args.get(k) is False:
+                del overrides[k]
+
+        if config:
+            merged_agent_config = dict(self.agent_config)
+            for item in config:
+                if "=" in item:
+                    key, value = item.split("=", 1)
+                    key = key.strip()
+                    value = value.strip()
+
+                    # Parse value
+                    if value.lower() == "true":
+                        parsed_value: Any = True
+                    elif value.lower() == "false":
+                        parsed_value = False
+                    else:
+                        try:
+                            parsed_value = int(value)
+                        except ValueError:
+                            try:
+                                parsed_value = float(value)
+                            except ValueError:
+                                parsed_value = value
+
+                    # Handle namespaced keys (e.g., claude.max_tokens)
+                    if "." in key:
+                        agent_name, param = key.split(".", 1)
+                        if agent_name not in merged_agent_config:
+                            merged_agent_config[agent_name] = {}
+                        merged_agent_config[agent_name][param] = parsed_value
+                    else:
+                        # Non-namespaced: apply to current agent if set
+                        if self.agent_type:
+                            agent_name = self.agent_type.value
+                            if agent_name not in merged_agent_config:
+                                merged_agent_config[agent_name] = {}
+                            merged_agent_config[agent_name][key] = parsed_value
+
+            overrides["agent_config"] = merged_agent_config
+
+        return self.model_validate({**self.model_dump(), **overrides})
+
+    def resolve_agent_interactive(self) -> "EvalConfig":
+        """Prompt user to select agent if not set. Returns updated config."""
+        if self.agent_type is not None:
+            return self
+
+        choices: list[dict[str, Any]] = [
+            {"name": "Claude 4 Sonnet", "value": AgentType.CLAUDE},
+            {"name": "OpenAI", "value": AgentType.OPENAI},
+            {"name": "Operator (OpenAI Computer Use)", "value": AgentType.OPERATOR},
+            {"name": "Gemini Computer Use", "value": AgentType.GEMINI},
+            {"name": "OpenAI Compatible", "value": AgentType.OPENAI_COMPATIBLE},
+        ]
+
+        selected = hud_console.select("Select an agent:", choices=choices, default=0)  # type: ignore[arg-type]
+        return self.model_copy(update={"agent_type": selected})
+
+    def display(self) -> None:
+        """Display settings in a table."""
+        table = Table(title="Evaluation Settings", title_style="bold cyan", box=box.ROUNDED)
+        table.add_column("Setting", style="yellow")
+        table.add_column("Value", style="green")
+
+        # Core settings
+        table.add_row("source", str(self.source or "—"))
+        table.add_row("agent", self.agent_type.value if self.agent_type else "—")
+        table.add_row("full", str(self.full))
+        table.add_row("max_steps", str(self.max_steps or "auto"))
+        table.add_row("max_concurrent", str(self.max_concurrent))
+        if self.group_size > 1:
+            table.add_row("group_size", str(self.group_size))
+
+        # Tool filters (only if set)
+        if self.allowed_tools:
+            table.add_row("allowed_tools", ", ".join(self.allowed_tools))
+        if self.disallowed_tools:
+            table.add_row("disallowed_tools", ", ".join(self.disallowed_tools))
+
+        # Agent config section
+        if self.agent_type:
+            table.add_row("", "")
+            table.add_row(f"[dim]{self.agent_type.value} config[/dim]", "")
+
+            config_cls = self.get_agent_class().config_cls
+            defaults = config_cls()
+            overrides = self.agent_config.get(self.agent_type.value, {})
+            skip = {"model_client", "validate_api_key", "model_config",
+                    "allowed_tools", "disallowed_tools", "system_prompt",
+                    "response_tool_name", "append_setup_output", "initial_screenshot"}
+
+            for name in config_cls.model_fields:
+                if name in skip:
+                    continue
+                # Always show model; other fields only if explicitly set (via CLI or TOML)
+                if name == "model":
+                    value = self.model or overrides.get("model") or getattr(defaults, "model", None)
+                    table.add_row(f"  {name}", str(value) if value else "—")
+                elif name in overrides:
+                    table.add_row(f"  {name}", str(overrides[name]))
+
+        hud_console.console.print(table)
 
 
-async def run_single_task(
-    source: str,
-    *,
-    agent_type: AgentType = AgentType.CLAUDE,
-    model: str | None = None,
-    allowed_tools: list[str] | None = None,
-    max_steps: int = 10,
-    verbose: bool = False,
-    vllm_base_url: str | None = None,
-    group_size: int = 1,
-    task_id: str | None = None,
-) -> None:
-    """Load one task and execute it, or detect if JSON contains a list and run as dataset."""
+# =============================================================================
+# Task loading
+# =============================================================================
 
-    hud_console.info("🔧 Initializing evaluation...")
 
-    try:
-        from hud.utils.tasks import load_tasks
-    except ImportError as e:
-        hud_console.error(
-            "Dataset dependencies are not installed. "
-            "Please install with: pip install 'hud-python\u27e6agent\u27e7'"
-        )
-        raise typer.Exit(1) from e
+def _load_tasks_from_source(source: str) -> list["Task"]:
+    """Load tasks from file or HuggingFace dataset."""
+    from hud.utils.tasks import load_tasks
 
     path = Path(source)
-    if path.exists() and (path.suffix in [".json", ".jsonl"]):
+    if path.exists() and path.suffix in {".json", ".jsonl"}:
         hud_console.info("📊 Loading task file…")
-        tasks: list[Task] = load_tasks(str(path))  # type: ignore[assignment]
-
-        # If tasks reference a local environment (nearby), ensure it's built/up-to-date.
+        tasks = load_tasks(str(path))
         try:
             env_dir = find_environment_dir(path)
             if env_dir is not None:
-                # Non-interactive for eval; warn but don't block
                 ensure_built(env_dir, interactive=False)
-        except Exception as e:
-            hud_console.debug(f"Eval preflight env check skipped: {e}")
-
+        except Exception as exc:
+            hud_console.debug(f"Eval preflight env check skipped: {exc}")
     else:
-        # Load from HuggingFace dataset or non-file source
         hud_console.info(f"📊 Loading tasks from: {source}…")
-        tasks: list[Task] = load_tasks(source)  # type: ignore[assignment]
+        tasks = load_tasks(source)
 
     if not tasks:
         hud_console.error(f"No tasks found in: {source}")
         raise typer.Exit(1)
 
-    # Filter by task_id if provided
-    if task_id:
-        found = next((t for t in tasks if str(getattr(t, "id", "")) == str(task_id)), None)
-        if not found:
-            hud_console.error(f"Task with ID '{task_id}' not found in source.")
-            raise typer.Exit(1)
-        task = found
-        hud_console.info(f"Found task with ID '{task_id}', running as single task…")
-    else:
-        # Default behavior: use the first task
-        task = tasks[0]
-        hud_console.info(
-            "Using first task from dataset (run with --full to run the entire dataset)..."
+    return tasks  # type: ignore[return-value]
+
+
+def _warn_local_mcp(tasks: list["Task"], source: str) -> None:
+    """Warn user if tasks use local MCP configs."""
+    try:
+        has_local = any(
+            isinstance(server_cfg, dict) and "command" in server_cfg and not server_cfg.get("url")
+            for t in tasks
+            for server_cfg in (getattr(t, "mcp_config", {}) or {}).values()
+            if isinstance(getattr(t, "mcp_config", {}), dict)
         )
 
-    # Warn/confirm if the task uses local MCP config
-    try:
-        if group_size > 1 and _tasks_use_local_mcp([task]):
-            hud_console.warning(
-                "Detected a local MCP configuration (uses 'command' instead of a 'url')."
-            )
-            hud_console.info(
-                "Ensure there are no exposed port conflicts during Docker runs/builds in eval."
-            )
-            proceed = hud_console.confirm(
-                "Proceed with running local MCP servers for this evaluation?",
-                default=True,
-            )
-            if not proceed:
-                # Provide a helpful next step
-                hud_console.hint("You can convert tasks to remote with: hud convert <tasks_file>")
-                raise typer.Exit(1)
-            # Always show the convert hint for awareness
-            hud_console.hint(
-                "Avoid local port conflicts by converting to remote: hud convert <tasks_file>"
-            )
+        if not has_local:
+            return
+
+        hud_console.warning("Detected local MCP configurations (uses 'command' instead of 'url').")
+        hud_console.info("When running concurrently, exposed host ports from Docker may conflict.")
+
+        if not hud_console.confirm("Proceed with local MCP servers?", default=True):
+            hint_file = Path(source).name if Path(source).exists() else "<tasks_file>"
+            hud_console.hint(f"Convert to remote: hud convert {hint_file}")
+            raise typer.Exit(1)
+
+        hint_file = Path(source).name if Path(source).exists() else "<tasks_file>"
+        hud_console.hint(f"Convert to remote to avoid port conflicts: hud convert {hint_file}")
+
     except typer.Exit:
         raise
     except Exception as e:
-        hud_console.debug(f"Local MCP confirmation skipped due to error: {e}")
+        hud_console.debug(f"Local MCP check skipped: {e}")
 
-    task_prompt = task.prompt
 
-    # Use grouped evaluation if group_size > 1
-    agent_config: dict[str, Any] = {}
-    if agent_type == AgentType.INTEGRATION_TEST:
-        from hud.agents.misc.integration_test_agent import IntegrationTestRunner
+# =============================================================================
+# Evaluation runner
+# =============================================================================
 
-        agent_class = IntegrationTestRunner
-        agent_config = {"verbose": verbose}
-        if allowed_tools:
-            agent_config["allowed_tools"] = allowed_tools
-    elif agent_type == AgentType.VLLM:
-        # Special handling for vLLM
-        from hud.agents.openai_chat import OpenAIChatAgent
 
-        agent_class = OpenAIChatAgent
+async def _run_evaluation(cfg: EvalConfig) -> list[Any] | None:
+    """Run evaluation with the given config."""
+    from hud.datasets import run_tasks
 
-        # Use the shared config builder
-        agent_config = _build_vllm_config(
-            vllm_base_url=vllm_base_url,
-            model=model,
-            allowed_tools=allowed_tools,
-            verbose=verbose,
-        )
-    elif agent_type == AgentType.OPENAI:
-        from hud.agents import OpenAIAgent
+    assert cfg.source is not None
+    assert cfg.agent_type is not None
 
-        agent_class = OpenAIAgent
-        agent_config = {"verbose": verbose}
-        if allowed_tools:
-            agent_config["allowed_tools"] = allowed_tools
-        if model:
-            agent_config["model"] = model
-    elif agent_type == AgentType.OPERATOR:
-        from hud.agents import OperatorAgent
+    tasks = _load_tasks_from_source(cfg.source)
 
-        agent_class = OperatorAgent
-        agent_config = {"verbose": verbose}
-        if allowed_tools:
-            agent_config["allowed_tools"] = allowed_tools
-    elif agent_type == AgentType.GEMINI:
-        from hud.agents import GeminiAgent
+    if cfg.group_size > 1 or cfg.full:
+        _warn_local_mcp(tasks, cfg.source)
 
-        agent_class = GeminiAgent
-        agent_config = {
-            "model": model or "gemini-2.5-computer-use-preview-10-2025",
-            "verbose": verbose,
-            "validate_api_key": False,
-        }
-        if allowed_tools:
-            agent_config["allowed_tools"] = allowed_tools
-    elif agent_type == AgentType.LITELLM:
-        from hud.agents.lite_llm import LiteAgent
+    agent_class = cfg.get_agent_class()
+    agent_kwargs = cfg.get_agent_kwargs()
 
-        agent_class = LiteAgent
-        agent_config = {
-            "model_name": model or "gpt-4o-mini",
-            "verbose": verbose,
-        }
-        if allowed_tools:
-            agent_config["allowed_tools"] = allowed_tools
-    elif agent_type == AgentType.CLAUDE:
-        from hud.agents import ClaudeAgent
+    path = Path(cfg.source)
+    dataset_name = path.name if path.exists() else cfg.source.split("/")[-1]
+    max_steps = cfg.max_steps or (50 if cfg.full else 10)
 
-        agent_class = ClaudeAgent
-        agent_config = {
-            "model": model or "claude-sonnet-4-5",
-            "verbose": verbose,
-            "validate_api_key": False,
-        }
-        if allowed_tools:
-            agent_config["allowed_tools"] = allowed_tools
-    else:
-        raise ValueError(f"Invalid agent type: {agent_type}")
+    # Filter by task IDs if provided
+    if cfg.task_ids:
+        id_set = set(cfg.task_ids)
+        filtered = [t for t in tasks if str(getattr(t, "id", "")) in id_set]
+        if not filtered:
+            hud_console.error(f"No tasks found matching IDs: {', '.join(cfg.task_ids)}")
+            raise typer.Exit(1)
+        hud_console.info(f"Filtered to {len(filtered)} task(s) by ID")
+        tasks = filtered
+    elif not cfg.full:
+        # Single task mode (no --full, no --task-ids)
+        tasks = [tasks[0]]
+        hud_console.info("Using first task (run with --full or --task-ids for more)…")
 
-    if group_size > 1:
-        hud_console.info(f"🔄 Running task with group_size={group_size}")
-        async with hud.async_job(
-            name=f"Group Eval: {task_prompt[:50]}... (x{group_size})",
-            metadata={
-                "task_id": getattr(task, "id", None),
-                "group_size": group_size,
-                "total_episodes": group_size,
-            },
-        ) as job:
-            stats = await run_tasks_grouped(
-                tasks=[task],
-                agent_class=agent_class,
-                agent_config=agent_config,
-                group_size=group_size,
-                max_parallel_episodes=48,
-                max_steps=max_steps,
-                verbose=verbose,
-                job_id=job.id,
-            )
-        display_group_statistics(stats, show_details=True)
-    else:
-        # Enable agent step logging for single task mode
+    # Single task, single run
+    if len(tasks) == 1 and cfg.group_size == 1:
+        task = tasks[0]
         logging.getLogger("hud.agents").setLevel(logging.INFO)
         logging.getLogger("hud.agents.base").setLevel(logging.INFO)
 
-        async with hud.async_trace(name=task_prompt):
-            agent = build_agent(
-                agent_type,
-                model=model,
-                allowed_tools=allowed_tools,
-                verbose=verbose,
-                vllm_base_url=vllm_base_url,
-            )
+        async with hud.async_trace(name=task.prompt):
+            agent = agent_class(**agent_kwargs)
             hud_console.info(task.prompt)
             result = await agent.run(task, max_steps=max_steps)
             hud_console.success(f"Reward: {result.reward}")
+        return None
 
+    hud_console.info(f"🚀 Running evaluation (max_concurrent: {cfg.max_concurrent}, group_size: {cfg.group_size})…")
 
-async def run_full_dataset(
-    source: str,
-    *,
-    agent_type: AgentType = AgentType.CLAUDE,
-    model: str | None = None,
-    allowed_tools: list[str] | None = None,
-    max_concurrent: int = 30,
-    max_steps: int = 10,
-    verbose: bool = False,
-    vllm_base_url: str | None = None,
-    group_size: int = 1,
-) -> list[Any]:
-    """Run evaluation across the entire dataset using asyncio-based concurrency."""
-
-    hud_console.info("🔧 Initializing evaluation...")
-
-    try:
-        from hud.datasets import run_dataset
-        from hud.utils.tasks import load_tasks
-    except ImportError as e:
-        hud_console.error(
-            "Dataset dependencies are not installed. "
-            "Please install with: pip install 'hud-python[agent]'"
-        )
-        raise typer.Exit(1) from e
-
-    # Load tasks using unified loader
-    hud_console.info(f"📊 Loading tasks from: {source}…")
-    tasks: list[Task] = load_tasks(source)  # type: ignore[assignment]
-
-    if len(tasks) == 0:
-        hud_console.error(f"No tasks found in: {source}")
-        raise typer.Exit(1)
-
-    # Warn/confirm once if any task uses local MCP config
-    try:
-        if _tasks_use_local_mcp(tasks):
-            hud_console.warning(
-                "Detected local MCP configurations (use 'command' instead of a 'url')."
-            )
-            hud_console.info(
-                "When running many tasks concurrently, exposed host ports from Docker may conflict."
-            )
-            proceed = hud_console.confirm(
-                "Proceed with running local MCP servers for this evaluation?",
-                default=True,
-            )
-            if not proceed:
-                # Helpful hint when source is a file path
-                try:
-                    path = Path(source)
-                    if path.exists():
-                        hud_console.hint(
-                            f"You can convert tasks to remote with: hud convert {path.name}"
-                        )
-                    else:
-                        hud_console.hint(
-                            "You can convert tasks to remote with: hud convert <tasks_file>"
-                        )
-                except Exception:
-                    hud_console.hint(
-                        "You can convert tasks to remote with: hud convert <tasks_file>"
-                    )
-                raise typer.Exit(1)
-            # Always show the convert hint for awareness
-            try:
-                path = Path(source)
-                if path.exists():
-                    hud_console.hint(
-                        f"Convert to remote to avoid port conflicts: hud convert {path.name}"
-                    )
-                else:
-                    hud_console.hint(
-                        "Convert to remote to avoid port conflicts: hud convert <tasks_file>"
-                    )
-            except Exception:
-                hud_console.hint(
-                    "Convert to remote to avoid port conflicts: hud convert <tasks_file>"
-                )
-    except typer.Exit:
-        raise
-    except Exception as e:
-        hud_console.debug(f"Local MCP confirmation skipped due to error: {e}")
-
-    # Convert Task objects to dicts for dataset runners
-    dataset_or_tasks = [task.model_dump() for task in tasks]
-
-    # Determine dataset name
-    path = Path(source)
-    dataset_name = f"Dataset: {path.name}" if path.exists() else source.split("/")[-1]
-
-    # Build agent class + config for run_dataset
-    agent_config: dict[str, Any]
-    if agent_type == AgentType.INTEGRATION_TEST:  # --integration-test mode
-        from hud.agents.misc.integration_test_agent import IntegrationTestRunner
-
-        agent_class = IntegrationTestRunner
-        agent_config = {"verbose": verbose}
-    elif agent_type == AgentType.VLLM:
-        try:
-            from hud.agents.openai_chat import OpenAIChatAgent
-
-            agent_class = OpenAIChatAgent
-        except ImportError as e:
-            hud_console.error(
-                "OpenAI dependencies are not installed. "
-                "Please install with: pip install 'hud-python[agent]'"
-            )
-            raise typer.Exit(1) from e
-
-        # Use the shared config builder
-        agent_config = _build_vllm_config(
-            vllm_base_url=vllm_base_url,
-            model=model,
-            allowed_tools=allowed_tools,
-            verbose=verbose,
-        )
-    elif agent_type == AgentType.OPENAI:
-        try:
-            from hud.agents import OpenAIAgent
-
-            agent_class = OpenAIAgent
-        except ImportError as e:
-            hud_console.error(
-                "OpenAI agent dependencies are not installed. "
-                "Please install with: pip install 'hud-python[agent]'"
-            )
-            raise typer.Exit(1) from e
-
-        agent_config = {
-            "verbose": verbose,
-            "validate_api_key": False,
-        }
-        if allowed_tools:
-            agent_config["allowed_tools"] = allowed_tools
-        if model:
-            agent_config["model"] = model
-    elif agent_type == AgentType.OPERATOR:
-        try:
-            from hud.agents import OperatorAgent
-
-            agent_class = OperatorAgent
-        except ImportError as e:
-            hud_console.error(
-                "OpenAI agent dependencies are not installed. "
-                "Please install with: pip install 'hud-python[agent]'"
-            )
-            raise typer.Exit(1) from e
-
-        agent_config = {"verbose": verbose, "validate_api_key": False}
-        if allowed_tools:
-            agent_config["allowed_tools"] = allowed_tools
-
-    elif agent_type == AgentType.GEMINI:
-        try:
-            from hud.agents import GeminiAgent
-
-            agent_class = GeminiAgent
-        except ImportError as e:
-            hud_console.error(
-                "Gemini agent dependencies are not installed. "
-                "Please install with: pip install 'hud-python[agent]'"
-            )
-            raise typer.Exit(1) from e
-
-        agent_config = {
-            "model": model or "gemini-2.5-computer-use-preview-10-2025",
-            "verbose": verbose,
-            "validate_api_key": False,
-        }
-        if allowed_tools:
-            agent_config["allowed_tools"] = allowed_tools
-
-    elif agent_type == AgentType.LITELLM:
-        try:
-            from hud.agents.lite_llm import LiteAgent
-
-            agent_class = LiteAgent
-        except ImportError as e:
-            hud_console.error(
-                "LiteLLM agent dependencies are not installed. "
-                "Please install with: pip install 'hud-python[agent]'"
-            )
-            raise typer.Exit(1) from e
-
-        agent_config = {
-            "model_name": model or "gpt-4o-mini",
-            "verbose": verbose,
-        }
-        if allowed_tools:
-            agent_config["allowed_tools"] = allowed_tools
-
-    else:
-        try:
-            from hud.agents import ClaudeAgent
-
-            agent_class = ClaudeAgent
-        except ImportError as e:
-            hud_console.error(
-                "Claude agent dependencies are not installed. "
-                "Please install with: pip install 'hud-python[agent]'"
-            )
-            raise typer.Exit(1) from e
-
-        agent_config = {
-            "model": model or "claude-sonnet-4-5",
-            "verbose": verbose,
-            "validate_api_key": False,
-        }
-        if allowed_tools:
-            agent_config["allowed_tools"] = allowed_tools
-
-    # Use grouped evaluation if group_size > 1
-    if group_size > 1:
-        hud_console.info(f"🔄 Running dataset with group_size={group_size}")
-
-        # Run with job tracking
-        async with hud.async_job(
-            name=f"Evaluation {dataset_name} (group_size={group_size})",
-            metadata={
-                "dataset": source,
-                "group_size": group_size,
-                "tasks": len(dataset_or_tasks),
-                "total_episodes": len(dataset_or_tasks) * group_size,
-            },
-        ) as job:
-            # Convert dicts to Task objects if needed
-            from hud.datasets import Task
-
-            tasks = []
-            for item in dataset_or_tasks:
-                if isinstance(item, dict):
-                    tasks.append(Task(**item))
-                else:
-                    tasks.append(item)
-
-            stats = await run_tasks_grouped(
-                tasks=tasks,
-                agent_class=agent_class,
-                agent_config=agent_config,
-                group_size=group_size,
-                max_parallel_episodes=max_concurrent,
-                max_steps=max_steps,
-                verbose=verbose,
-                job_id=job.id,
-            )
-
-        # Display results
-        display_group_statistics(stats, show_details=len(stats) <= 50)
-
-        # Return stats for consistency with other modes
-        return stats
-
-    # Run evaluation with asyncio-based concurrency
-    hud_console.info(f"🚀 Running evaluation (max_concurrent: {max_concurrent})…")
-    return await run_dataset(
-        name=f"Evaluation {dataset_name}",
-        dataset=dataset_or_tasks,
+    return await run_tasks(
+        tasks=tasks,
         agent_class=agent_class,
-        agent_config=agent_config,
-        max_concurrent=max_concurrent,
-        metadata={"dataset": source},
+        agent_config=agent_kwargs,
+        name=f"Evaluation {dataset_name}",
+        max_concurrent=cfg.max_concurrent,
+        metadata={"dataset": cfg.source},
         max_steps=max_steps,
         auto_respond=True,
+        group_size=cfg.group_size,
     )
+
+
+# =============================================================================
+# CLI command
+# =============================================================================
 
 
 def eval_command(
-    source: str = typer.Argument(
-        ...,
-        help="HuggingFace dataset identifier (e.g. 'hud-evals/SheetBench-50'), JSON file (array of tasks), or JSONL file (one task per line)",  # noqa: E501
-    ),
-    full: bool = typer.Option(
-        False,
-        "--full",
-        help="Run the entire dataset (omit for single-task debug mode)",
-    ),
-    agent: AgentType = typer.Option(  # noqa: B008
-        AgentType.CLAUDE,
-        "--agent",
-        help=("Agent (claude, gemini, openai, operator, vllm, or litellm)"),
-    ),
-    model: str | None = typer.Option(
-        None,
-        "--model",
-        help="Model name for the chosen agent",
-    ),
-    allowed_tools: str | None = typer.Option(
-        None,
-        "--allowed-tools",
-        help="Comma-separated list of allowed tools",
-    ),
-    max_concurrent: int = typer.Option(
-        30,
-        "--max-concurrent",
-        help=(
-            "Maximum concurrent tasks (1-200 recommended, prevents rate limits "
-            "and resource exhaustion)"
-        ),
-    ),
-    max_steps: int | None = typer.Option(
-        None,
-        "--max-steps",
-        help="Maximum steps per task (default: 10 for single, 50 for full)",
-    ),
-    verbose: bool = typer.Option(
-        False,
-        "--verbose",
-        "-v",
-        help="Enable verbose output from the agent",
-    ),
-    very_verbose: bool = typer.Option(
-        False,
-        "--very-verbose",
-        "-vv",
-        help="Enable debug-level logs for maximum visibility",
-    ),
-    vllm_base_url: str | None = typer.Option(
-        None,
-        "--vllm-base-url",
-        help="Base URL for vLLM server (when using --agent vllm)",
-    ),
-    group_size: int = typer.Option(
-        1,
-        "--group-size",
-        help="Number of times to run each task (similar to RL training)",
-    ),
-    integration_test: bool = typer.Option(
-        False,
-        "--integration-test",
-        help=(
-            "Run integration_test_tool tool, where problem is setup, "
-            "actions are applied, and evaluation is performed, without "
-            "spinning up an agent"
-        ),
-    ),
-    task_id: str | None = typer.Option(
-        None,
-        "--task-id",
-        help="Run a specific task by ID (from the dataset)",
-    ),
+    source: str | None = typer.Argument(None, help="HuggingFace dataset or task JSON file"),
+    agent: str | None = typer.Argument(None, help="Agent: claude, openai, operator, gemini, openai_compatible, integration_test"),
+    full: bool = typer.Option(False, "--full", help="Run entire dataset"),
+    model: str | None = typer.Option(None, "--model", "-m", help="Model name"),
+    config: list[str] | None = typer.Option(None, "--config", "-c", help="Agent config: key=value"),
+    # Task-overridable settings
+    allowed_tools: str | None = typer.Option(None, "--allowed-tools", help="Comma-separated allowed tools"),
+    disallowed_tools: str | None = typer.Option(None, "--disallowed-tools", help="Comma-separated disallowed tools"),
+    # Eval settings
+    max_concurrent: int | None = typer.Option(None, "--max-concurrent", help="Max concurrent tasks"),
+    max_steps: int | None = typer.Option(None, "--max-steps", help="Max steps per task"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    very_verbose: bool = typer.Option(False, "--very-verbose", "-vv", help="Debug logs"),
+    group_size: int | None = typer.Option(None, "--group-size", help="Runs per task"),
+    task_ids: str | None = typer.Option(None, "--task-ids", help="Comma-separated task IDs to run"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
 
-    Configuration:
-        - Uses defaults from .hud_eval_config if present
-        - CLI arguments override config file settings
-        - Prompts for confirmation unless -y/--yes is used
-
     Examples:
-        # Evaluate a single task from SheetBench
-        hud eval hud-evals/SheetBench-50
-
-        # Evaluate the FULL SheetBench dataset with Claude
-        hud eval hud-evals/SheetBench-50 --full --agent claude
-
-        # Run with higher concurrency for faster evaluation
-        hud eval hud-evals/OSWorld-Verified-Gold --full --max-concurrent 100
-
-        # Limit concurrent tasks to prevent rate limits
-        hud eval hud-evals/SheetBench-50 --full --max-concurrent 20
-
-        # Run a single task from a JSON file (uses interactive/config defaults)
-        hud eval task.json
-
-        # Run multiple tasks from a JSON file
-        hud eval tasks.json --full
-
-        # Run with OpenAI agent (choose model via --model)
-        hud eval hud-evals/OSWorld-Gold-Beta --agent openai --model gpt-5
-
-        # Run with the legacy Operator computer-use agent
-        hud eval hud-evals/OSWorld-Gold-Beta --agent operator
-
-        # Use local vLLM server (default: localhost:8000)
-        hud eval task.json --agent vllm --model Qwen/Qwen2.5-VL-3B-Instruct
-
-        # Use custom vLLM server URL
-        hud eval task.json --agent vllm --vllm-base-url http://192.168.1.100:8000/v1
-
-        # Run with verbose output for debugging
-        hud eval task.json --verbose
+        hud eval tasks.json claude
+        hud eval hud-evals/SheetBench-50 claude --full
+        hud eval tasks.json claude --config max_tokens=32768
+        hud eval tasks.json openai --config temperature=0.7
     """
-    # Always configure basic logging so agent steps can be logged
-    # Set to INFO by default for consistency with run_evaluation.py
-    if very_verbose:
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format="%(asctime)s - %(name)s - %(message)s",
-            datefmt="%H:%M:%S",
-        )
-        logging.getLogger("hud.agents").setLevel(logging.DEBUG)
-        logging.getLogger("hud.agents.base").setLevel(logging.DEBUG)
-    elif verbose:
-        logging.getLogger("hud.agents").setLevel(logging.INFO)
-        logging.getLogger("hud.agents.base").setLevel(logging.INFO)
+    hud_console.info("🔧 Initializing evaluation...")
 
-    # We pass integration_test as the agent_type
-    if integration_test:
-        agent = AgentType.INTEGRATION_TEST
-
-    # Check for required API keys
-    if agent == AgentType.CLAUDE:
-        if not settings.anthropic_api_key:
-            hud_console.error("ANTHROPIC_API_KEY is required for Claude agent")
-            hud_console.info(
-                "Set it in your environment or run: hud set ANTHROPIC_API_KEY=your-key-here"
-            )
-            raise typer.Exit(1)
-    elif agent == AgentType.GEMINI:
-        if not settings.gemini_api_key:
-            hud_console.error("GEMINI_API_KEY is required for Gemini agent")
-            hud_console.info(
-                "Set it in your environment or run: hud set GEMINI_API_KEY=your-key-here"
-            )
-            raise typer.Exit(1)
-    elif agent in (AgentType.OPENAI, AgentType.OPERATOR) and not settings.openai_api_key:
-        hud_console.error("OPENAI_API_KEY is required for OpenAI agent")
-        hud_console.info("Set it in your environment or run: hud set OPENAI_API_KEY=your-key-here")
-        raise typer.Exit(1)
-    elif agent == AgentType.VLLM:
-        if model:
-            hud_console.info(f"Using vLLM with model: {model}")
-        else:
-            hud_console.error("Model name is required for vLLM agent, specify with --model")
-            raise typer.Exit(1)
-
-    # Check for HUD_API_KEY if using HUD services
-    if not settings.api_key:
-        hud_console.warning("HUD_API_KEY not set. Some features may be limited.")
-        hud_console.info("Get your API key at: https://hud.ai")
-        hud_console.info("Set it in your environment or run: hud set HUD_API_KEY=your-key-here")
-
-    # Parse allowed tools
-    allowed_tools_list = (
-        [t.strip() for t in allowed_tools.split(",") if t.strip()] if allowed_tools else None
+    # Load config and merge CLI args
+    cfg = EvalConfig.load().merge_cli(
+        source=source,
+        agent=agent,
+        model=model,
+        full=full,
+        max_concurrent=max_concurrent,
+        max_steps=max_steps,
+        allowed_tools=allowed_tools,
+        disallowed_tools=disallowed_tools,
+        task_ids=task_ids,
+        verbose=verbose,
+        very_verbose=very_verbose,
+        group_size=group_size,
+        config=config,
     )
 
-    # Set default max_steps if not provided
-    if max_steps is None:
-        max_steps = 50 if full else 10
+    # Find source if not provided
+    if cfg.source is None:
+        try:
+            from hud.cli.utils.tasks import find_tasks_file
 
-    # Run evaluation
-    if full:
-        import time
+            cfg = cfg.model_copy(update={"source": find_tasks_file(None, msg="Select a tasks file")})
+            hud_console.success(f"Selected: {cfg.source}")
+        except Exception:
+            hud_console.error("No source provided and no task files found")
+            raise typer.Exit(1) from None
 
-        start_time = time.time()
+    # Resolve agent interactively if needed
+    cfg = cfg.resolve_agent_interactive()
 
-        results = asyncio.run(
-            run_full_dataset(
-                source,
-                agent_type=agent,
-                model=model,
-                allowed_tools=allowed_tools_list,
-                max_concurrent=max_concurrent,
-                max_steps=max_steps,
-                verbose=very_verbose or verbose,
-                vllm_base_url=vllm_base_url,
-                group_size=group_size,
-            )
-        )
+    # Configure logging
+    if cfg.very_verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(message)s")
+        logging.getLogger("hud.agents").setLevel(logging.DEBUG)
+    elif cfg.verbose:
+        logging.getLogger("hud.agents").setLevel(logging.INFO)
 
-        elapsed = time.time() - start_time
+    # Validate API keys
+    cfg.validate_api_keys()
 
-        # Print statistics (only for non-grouped mode)
-        if group_size == 1 and results:
-            hud_console.info("\n" + "=" * 50)
-            hud_console.success("📊 Evaluation Complete!")
-            hud_console.info("=" * 50)
-            hud_console.info(f"Total tasks: {len(results)}")
-            hud_console.info(f"Time elapsed: {elapsed:.2f} seconds")
-            hud_console.info(f"Throughput: {len(results) / elapsed:.2f} tasks/second")
-            hud_console.info(f"Execution mode: ASYNCIO (max_concurrent: {max_concurrent})")
+    # Display and confirm
+    cfg.display()
 
-            # Count successes
-            successful = sum(1 for r in results if getattr(r, "reward", 0) > 0.7)
-            success_rate = 100 * successful / len(results)
-            hud_console.info(f"Successful tasks: {successful}/{len(results)} ({success_rate:.1f}%)")
-            hud_console.info("=" * 50)
-    else:
-        asyncio.run(
-            run_single_task(
-                source,
-                agent_type=agent,
-                model=model,
-                allowed_tools=allowed_tools_list,
-                max_steps=max_steps,
-                verbose=very_verbose or verbose,
-                vllm_base_url=vllm_base_url,
-                group_size=group_size,
-                task_id=task_id,
-            )
-        )
+    if not yes and not questionary.confirm("Proceed?", default=True, qmark="").ask():
+        hud_console.info("Cancelled.")
+        raise typer.Exit(1)
+
+    # Run
+    start_time = time.time()
+    results = asyncio.run(_run_evaluation(cfg))
+    elapsed = time.time() - start_time
+
+    # Display results for batch runs
+    if results:
+        from hud.datasets import display_results
+
+        display_results(results, elapsed=elapsed, show_details=len(results) <= 50)

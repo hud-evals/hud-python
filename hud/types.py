@@ -27,7 +27,7 @@ class AgentType(str, Enum):
     OPENAI = "openai"
     OPERATOR = "operator"
     GEMINI = "gemini"
-    VLLM = "vllm"
+    OPENAI_COMPATIBLE = "openai_compatible"
     INTEGRATION_TEST = "integration_test"
 
 
