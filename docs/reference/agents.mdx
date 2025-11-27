@@ -22,8 +22,8 @@ Abstract base class for all MCP-enabled agents. Handles the agent loop, MCP clie
 | `mcp_client` | `AgentMCPClient` | MCP client for server connections | `None` |
 | `auto_trace` | `bool` | Enable automatic tracing spans | `True` |
 | `auto_respond` | `bool` | Use the model to decide when to stop/continue | `False` |
-| `model_name` | `str` | Model label for telemetry/logging | `"mcp-agent"` |
-| `checkpoint_name` | `str \| None` | Label for checkpoints/telemetry | `None` |
+| `model_name` | `str` | Agent type label for telemetry ("Claude", "OpenAI") | `"MCPAgent"` |
+| `checkpoint_name` | `str` | Model/checkpoint ID for API calls | Provider default |
 | `verbose` | `bool` | Verbose console logs for development | `False` |
 
 > All concrete agents accept standard keyword arguments defined by `BaseAgentConfig` (e.g., `allowed_tools`, `disallowed_tools`, `system_prompt`, `append_setup_output`, `initial_screenshot`, `response_tool_name`) plus their own provider-specific options. Those kwargs are validated against the agent’s internal config class before calling the base constructor.

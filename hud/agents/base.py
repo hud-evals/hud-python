@@ -10,18 +10,31 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import mcp.types as types
+from pydantic import BaseModel, ConfigDict
 
 from hud.agents.utils import log_agent_metadata_to_status, log_task_config_to_current_trace
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
 from hud.utils.hud_console import HUDConsole
 from hud.utils.mcp import MCPConfigPatch, patch_mcp_config, setup_hud_telemetry
 
+from hud.clients.base import AgentMCPClient
+
 if TYPE_CHECKING:
-    from hud.clients.base import AgentMCPClient
     from hud.datasets import Task
 
 
 logger = logging.getLogger(__name__)
+
+
+class BaseCreateParams(BaseModel):
+    """Runtime parameters for agent creation."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    mcp_client: AgentMCPClient | None = None
+    auto_trace: bool = True
+    auto_respond: bool = False
+    verbose: bool = False
 
 
 class MCPAgent(ABC):
@@ -47,62 +60,50 @@ class MCPAgent(ABC):
     required_tools: ClassVar[list[str]] = []  # Tools that must be available
     config_cls: ClassVar[type[BaseAgentConfig]] = BaseAgentConfig
 
-    def __init__(
-        self,
-        model_name: str = "mcp-agent",
-        checkpoint_name: str | None = None,
-        config: BaseAgentConfig | None = None,
-        mcp_client: AgentMCPClient | None = None,
-        auto_trace: bool = True,
-        auto_respond: bool = False,
-        verbose: bool = False,
-    ) -> None:
-        """
-        Initialize the base MCP agent.
+    def __init__(self, params: BaseCreateParams) -> None:
+        """Initialize MCP agent. Use `AgentClass.create()` for typed params."""
+        config_kwargs = {
+            k: getattr(params, k)
+            for k in self.config_cls.model_fields.keys()
+            if hasattr(params, k)
+        }
+        self.config = self.config_cls(**config_kwargs)
 
-        Args:
-            model_name: Label used in telemetry/logging to identify the model.
-            checkpoint_name: Optional identifier for checkpoint / version metadata.
-            config: Optional instance of `config_cls`; defaults to `self.config_cls()`.
-            mcp_client: Client for connecting to MCP servers. If None, a client
-                is auto-created when `run()` is called with a `Task` that provides `mcp_config`.
-            auto_trace: Whether to automatically create telemetry spans for runs.
-            auto_respond: Whether to use the model to determine if agent should stop or continue
-                when it produces a response without tool calls.
-            verbose: Enable verbose console logging for development.
-        """
-        config = config or self.config_cls()
-        if not isinstance(config, self.config_cls):
-            raise TypeError(
-                f"{type(self).__name__} expects config of type {self.config_cls.__name__}, "
-                f"got {type(config).__name__}"
-            )
-
-        self.mcp_client = mcp_client
-
-        self.model_name = model_name
-        self.checkpoint_name = checkpoint_name
+        self.mcp_client = params.mcp_client
+        self.model_name: str = getattr(params, "model_name", "MCPAgent")
+        self.checkpoint_name: str = getattr(params, "checkpoint_name", "unknown")
+        self.auto_respond = params.auto_respond
+        
         self.console = HUDConsole(logger=logger)
 
-        if verbose:
+        if params.verbose:
             self.console.set_verbose(True)
 
-        self.allowed_tools = config.allowed_tools
-        self.disallowed_tools = config.disallowed_tools
-        self.system_prompt = config.system_prompt
-        self.append_setup_output = config.append_setup_output
-        self.initial_screenshot = config.initial_screenshot
-        self.response_tool_name = config.response_tool_name
-        self.auto_respond = auto_respond
+        self.allowed_tools = self.config.allowed_tools
+        self.disallowed_tools = self.config.disallowed_tools
+        self.system_prompt = self.config.system_prompt
+        self.append_setup_output = self.config.append_setup_output
+        self.initial_screenshot = self.config.initial_screenshot
+        self.response_tool_name = self.config.response_tool_name
 
         self._available_tools: list[types.Tool] | None = None
-
-        # Initialize these here so methods can be called before initialize()
-        self._tool_map: dict[str, types.Tool] = {}  # Simplified: just name to tool
+        self._tool_map: dict[str, types.Tool] = {}
 
         # Trace
-        self._auto_trace = auto_trace
-        self._auto_trace_cm: Any | None = None  # Store auto-created trace context manager
+        self._auto_trace = params.auto_trace
+        self._auto_trace_cm: Any | None = None
+
+    @classmethod
+    def create(cls, **kwargs: Any) -> "MCPAgent":
+        """
+        Factory method to create an agent with typed parameters.
+        """
+        CreateParams = type(
+            f"{cls.config_cls.__name__}CreateParams",
+            (BaseCreateParams, cls.config_cls),
+            {"__module__": cls.config_cls.__module__},
+        )
+        return cls(params=CreateParams(**kwargs))
 
     async def initialize(self, task: str | Task | None = None) -> None:
         """Initialize the agent with task-specific configuration."""
@@ -427,11 +428,7 @@ class MCPAgent(ABC):
 
                     # 2. Execute tools
                     tool_calls = response.tool_calls
-                    for tool_call in tool_calls:
-                        self.console.info_log(f"{tool_call}")
                     tool_results = await self.call_tools(tool_calls)
-                    for tool_result in tool_results:
-                        self.console.info_log(f"{tool_result}")
 
                     # 3. Format tool results and add to messages
                     tool_messages = await self.format_tool_results(tool_calls, tool_results)

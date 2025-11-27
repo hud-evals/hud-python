@@ -30,26 +30,18 @@ class AgentType(str, Enum):
     OPENAI_COMPATIBLE = "openai_compatible"
     INTEGRATION_TEST = "integration_test"
 
-
 class BaseAgentConfig(BaseModel):
     """Standard agent configuration that tasks can override.
-
-    These are the standard parameters that all agents support.
-    Provider-specific parameters should not be included here.
+    Provider-specific configs should not be included here.
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    # Tools
     allowed_tools: list[str] | None = None
     disallowed_tools: list[str] | None = None
     response_tool_name: str | None = None
-
-    # Messages
     system_prompt: str | None = None
     append_setup_output: bool = True
     initial_screenshot: bool = True
-
-
 class Task(BaseModel):
     """
     A task configuration that can be used to create a task.

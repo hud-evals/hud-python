@@ -61,12 +61,6 @@ class TestClaudeAgent:
     """Test ClaudeAgent class."""
 
     @pytest.fixture
-    def mock_mcp_client(self):
-        """Create a mock MCP client."""
-        mcp_client = MagicMock()
-        return mcp_client
-
-    @pytest.fixture
     def mock_anthropic(self):
         """Create a stub AsyncAnthropic client and patch constructor."""
         client = AsyncAnthropic(api_key="test_key")
@@ -77,10 +71,10 @@ class TestClaudeAgent:
     @pytest.mark.asyncio
     async def test_init(self, mock_mcp_client, mock_anthropic):
         """Test agent initialization."""
-        agent = ClaudeAgent(
+        agent = ClaudeAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_anthropic,
-            model="claude-3-opus-20240229",
+            checkpoint_name="claude-3-opus-20240229",
             max_tokens=1000,
             validate_api_key=False,  # Skip validation in tests
         )
@@ -93,9 +87,9 @@ class TestClaudeAgent:
     async def test_init_without_model_client(self, mock_mcp_client, mock_anthropic):
         """Test agent initialization without model client."""
         with patch("hud.settings.settings.anthropic_api_key", "test_key"):
-            agent = ClaudeAgent(
+            agent = ClaudeAgent.create(
                 mcp_client=mock_mcp_client,
-                model="claude-3-opus-20240229",
+                checkpoint_name="claude-3-opus-20240229",
                 validate_api_key=False,  # Skip validation in tests
             )
 
@@ -105,7 +99,7 @@ class TestClaudeAgent:
     @pytest.mark.asyncio
     async def test_format_blocks(self, mock_mcp_client, mock_anthropic):
         """Test formatting content blocks into Claude messages."""
-        agent = ClaudeAgent(
+        agent = ClaudeAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_anthropic,
             validate_api_key=False,  # Skip validation in tests
@@ -144,7 +138,7 @@ class TestClaudeAgent:
     @pytest.mark.asyncio
     async def test_format_tool_results_method(self, mock_mcp_client, mock_anthropic):
         """Test the agent's format_tool_results method."""
-        agent = ClaudeAgent(
+        agent = ClaudeAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_anthropic,
             validate_api_key=False,  # Skip validation in tests
@@ -178,7 +172,7 @@ class TestClaudeAgent:
         """Test getting model response from Claude API."""
         # Disable telemetry for this test to avoid backend configuration issues
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = ClaudeAgent(
+            agent = ClaudeAgent.create(
                 mcp_client=mock_mcp_client,
                 model_client=mock_anthropic,
                 validate_api_key=False,  # Skip validation in tests
@@ -226,7 +220,7 @@ class TestClaudeAgent:
         """Test getting text-only response."""
         # Disable telemetry for this test to avoid backend configuration issues
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = ClaudeAgent(
+            agent = ClaudeAgent.create(
                 mcp_client=mock_mcp_client,
                 model_client=mock_anthropic,
                 validate_api_key=False,  # Skip validation in tests
@@ -257,7 +251,7 @@ class TestClaudeAgent:
         """Test handling API errors."""
         # Disable telemetry for this test to avoid backend configuration issues
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = ClaudeAgent(
+            agent = ClaudeAgent.create(
                 mcp_client=mock_mcp_client,
                 model_client=mock_anthropic,
                 validate_api_key=False,  # Skip validation in tests
@@ -284,7 +278,7 @@ class TestClaudeAgent:
     #     """Test running agent with tool usage."""
     #     # Disable telemetry for this test to avoid backend configuration issues
     #     with patch("hud.settings.settings.telemetry_enabled", False):
-    #         agent = ClaudeAgent(mcp_client=mock_mcp_client, model_client=mock_anthropic)
+    #         agent = ClaudeAgent.create(mcp_client=mock_mcp_client, model_client=mock_anthropic)
 
     #         # Mock tool availability
     #         agent._available_tools = [

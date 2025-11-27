@@ -37,22 +37,26 @@ from hud.settings import settings
 from hud.tools.computer.settings import computer_settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
+from hud.utils.types import with_signature
 
-from .base import MCPAgent
+from .base import BaseCreateParams, MCPAgent
 
 logger = logging.getLogger(__name__)
 
 
 class ClaudeConfig(BaseAgentConfig):
-    """Validated configuration for `ClaudeAgent`."""
-
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    model_name: str = "Claude"
+    checkpoint_name: str = "claude-sonnet-4-5"
     model_client: AsyncAnthropic | None = None
-    model: str = "claude-sonnet-4-5"
     max_tokens: int = 16384
     use_computer_beta: bool = True
     validate_api_key: bool = True
+
+
+class ClaudeCreateParams(BaseCreateParams, ClaudeConfig):
+    pass
 
 
 class ClaudeAgent(MCPAgent):
@@ -69,39 +73,15 @@ class ClaudeAgent(MCPAgent):
     }
     config_cls: ClassVar[type[BaseAgentConfig]] = ClaudeConfig
 
-    def __init__(
-        self,
-        *,
-        mcp_client: AgentMCPClient | None = None,
-        auto_trace: bool = True,
-        auto_respond: bool = False,
-        verbose: bool = False,
-        **config_kwargs: Any,
-    ) -> None:
-        """
-        Initialize Claude MCP agent.
+    @with_signature(ClaudeCreateParams)
+    @classmethod
+    def create(cls, **kwargs: Any) -> "ClaudeAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
+        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
-        Args:
-            mcp_client: Optional MCP client instance.
-            auto_trace: Whether to create traces automatically for runs.
-            auto_respond: Whether to use the model to determine if agent should stop or continue.
-            verbose: Enable verbose console logging for development.
-            **config_kwargs: Keyword arguments for `ClaudeConfig`
-                (e.g., `model`, `max_tokens`, `use_computer_beta`, `allowed_tools`, etc.).
-        """
-        self.config = ClaudeConfig(**config_kwargs)
+    def __init__(self, params: ClaudeCreateParams) -> None:
+        super().__init__(params)
+        self.config: ClaudeConfig
 
-        super().__init__(
-            config=self.config,
-            mcp_client=mcp_client,
-            auto_trace=auto_trace,
-            auto_respond=auto_respond,
-            model_name="Claude",
-            checkpoint_name=self.config.model,
-            verbose=verbose,
-        )
-
-        # Initialize client if not provided
         model_client = self.config.model_client
         if model_client is None:
             api_key = settings.anthropic_api_key
@@ -109,7 +89,6 @@ class ClaudeAgent(MCPAgent):
                 raise ValueError("Anthropic API key not found. Set ANTHROPIC_API_KEY.")
             model_client = AsyncAnthropic(api_key=api_key)
 
-        # validate api key if requested
         if self.config.validate_api_key:
             try:
                 Anthropic(api_key=model_client.api_key).models.list()
@@ -117,7 +96,6 @@ class ClaudeAgent(MCPAgent):
                 raise ValueError(f"Anthropic API key is invalid: {e}") from e
 
         self.anthropic_client = model_client
-        self.model = self.config.model
         self.max_tokens = self.config.max_tokens
         self.use_computer_beta = self.config.use_computer_beta
         self.hud_console = HUDConsole(logger=logger)
@@ -182,7 +160,7 @@ class ClaudeAgent(MCPAgent):
         messages_cached = self._add_prompt_caching(messages)
 
         response = await self.anthropic_client.beta.messages.create(
-            model=self.model,
+            model=self.config.checkpoint_name,
             system=self.system_prompt if self.system_prompt is not None else Omit(),
             max_tokens=self.max_tokens,
             messages=messages_cached,

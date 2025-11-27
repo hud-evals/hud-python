@@ -26,9 +26,10 @@ from hud import instrument
 from pydantic import ConfigDict, Field
 
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.utils.types import with_signature
 from hud.utils.hud_console import HUDConsole
 
-from .base import MCPAgent
+from .base import BaseCreateParams, MCPAgent
 
 if TYPE_CHECKING:
     from hud.clients.base import AgentMCPClient
@@ -42,11 +43,16 @@ class OpenAIChatConfig(BaseAgentConfig):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    model_name: str = "OpenAI"
+    checkpoint_name: str = "gpt-5-mini"
     openai_client: AsyncOpenAI | None = None
     api_key: str | None = None
     base_url: str | None = None
-    model_name: str = "gpt-5-mini"
     completion_kwargs: dict[str, Any] = Field(default_factory=dict)
+
+
+class OpenAIChatCreateParams(BaseCreateParams, OpenAIChatConfig):
+    pass
 
 
 class OpenAIChatAgent(MCPAgent):
@@ -55,31 +61,14 @@ class OpenAIChatAgent(MCPAgent):
     metadata: ClassVar[dict[str, Any] | None] = None
     config_cls: ClassVar[type[BaseAgentConfig]] = OpenAIChatConfig
 
-    def __init__(
-        self,
-        *,
-        mcp_client: AgentMCPClient | None = None,
-        auto_trace: bool = True,
-        auto_respond: bool = False,
-        verbose: bool = False,
-        **config_kwargs: Any,
-    ) -> None:
-        config_instance = self.config_cls(**config_kwargs)
-        if not isinstance(config_instance, OpenAIChatConfig):
-            raise TypeError(
-                f"{type(self).__name__} expects config of type OpenAIChatConfig; "
-                f"got {type(config_instance).__name__}"
-            )
-        self.config = cast(OpenAIChatConfig, config_instance)
-        super().__init__(
-            config=self.config,
-            mcp_client=mcp_client,
-            auto_trace=auto_trace,
-            auto_respond=auto_respond,
-            model_name="OpenAI",
-            checkpoint_name=self.config.model_name,
-            verbose=verbose,
-        )
+    @with_signature(OpenAIChatCreateParams)
+    @classmethod
+    def create(cls, **kwargs: Any) -> "OpenAIChatAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
+        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
+
+    def __init__(self, params: OpenAIChatCreateParams) -> None:
+        super().__init__(params)
+        self.config: OpenAIChatConfig
 
         if self.config.openai_client is not None:
             self.oai = self.config.openai_client
@@ -88,10 +77,8 @@ class OpenAIChatAgent(MCPAgent):
         else:
             raise ValueError("Either openai_client or (api_key and base_url) must be provided")
 
-        self.model_name = "OpenAI"
-        self.checkpoint_name = self.config.model_name
         self.completion_kwargs = dict(self.config.completion_kwargs)
-        self.mcp_schemas = []
+        self.mcp_schemas: list[ChatCompletionToolParam] = []
         self.hud_console = HUDConsole(logger=logger)
 
     @staticmethod
@@ -224,7 +211,7 @@ class OpenAIChatAgent(MCPAgent):
             raise ValueError("openai_client is required for OpenAIChatAgent")
         # default transport = OpenAI SDK
         return await self.oai.chat.completions.create(
-            model=self.checkpoint_name,
+            model=self.config.checkpoint_name,
             messages=messages,
             tools=tools,  # type: ignore ready ChatCompletionToolParam-shaped
             **extra,

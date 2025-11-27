@@ -18,25 +18,6 @@ class TestGeminiAgent:
     """Test GeminiAgent class."""
 
     @pytest.fixture
-    def mock_mcp_client(self):
-        """Create a mock MCP client."""
-        mcp_client = AsyncMock()
-        # Set up the mcp_config attribute as a regular dict, not a coroutine
-        mcp_client.mcp_config = {"test_server": {"url": "http://test"}}
-        # Mock list_tools to return gemini_computer tool
-        mcp_client.list_tools = AsyncMock(
-            return_value=[
-                types.Tool(
-                    name="gemini_computer",
-                    description="Gemini computer use tool",
-                    inputSchema={},
-                )
-            ]
-        )
-        mcp_client.initialize = AsyncMock()
-        return mcp_client
-
-    @pytest.fixture
     def mock_gemini_client(self):
         """Create a stub Gemini client."""
         client = genai.Client(api_key="test_key")
@@ -45,21 +26,21 @@ class TestGeminiAgent:
         return client
 
     @pytest.mark.asyncio
-    async def test_init(self, mock_mcp_client, mock_gemini_client):
+    async def test_init(self, mock_mcp_client_gemini_computer, mock_gemini_client):
         """Test agent initialization."""
-        agent = GeminiAgent(
-            mcp_client=mock_mcp_client,
+        agent = GeminiAgent.create(
+            mcp_client=mock_mcp_client_gemini_computer,
             model_client=mock_gemini_client,
-            model="gemini-2.5-computer-use-preview-10-2025",
+            checkpoint_name="gemini-2.5-computer-use-preview-10-2025",
             validate_api_key=False,  # Skip validation in tests
         )
 
-        assert agent.model_name == "gemini-2.5-computer-use-preview-10-2025"
-        assert agent.model == "gemini-2.5-computer-use-preview-10-2025"
+        assert agent.model_name == "Gemini"
+        assert agent.config.checkpoint_name == "gemini-2.5-computer-use-preview-10-2025"
         assert agent.gemini_client == mock_gemini_client
 
     @pytest.mark.asyncio
-    async def test_init_without_model_client(self, mock_mcp_client):
+    async def test_init_without_model_client(self, mock_mcp_client_gemini_computer):
         """Test agent initialization without model client."""
         with (
             patch("hud.settings.settings.gemini_api_key", "test_key"),
@@ -71,20 +52,20 @@ class TestGeminiAgent:
             mock_client.models.list = MagicMock(return_value=iter([]))
             mock_client_class.return_value = mock_client
 
-            agent = GeminiAgent(
-                mcp_client=mock_mcp_client,
-                model="gemini-2.5-computer-use-preview-10-2025",
+            agent = GeminiAgent.create(
+                mcp_client=mock_mcp_client_gemini_computer,
+                checkpoint_name="gemini-2.5-computer-use-preview-10-2025",
                 validate_api_key=False,
             )
 
-            assert agent.model_name == "gemini-2.5-computer-use-preview-10-2025"
+            assert agent.model_name == "Gemini"
             assert agent.gemini_client is not None
 
     @pytest.mark.asyncio
-    async def test_format_blocks(self, mock_mcp_client, mock_gemini_client):
+    async def test_format_blocks(self, mock_mcp_client_gemini_computer, mock_gemini_client):
         """Test formatting content blocks into Gemini messages."""
-        agent = GeminiAgent(
-            mcp_client=mock_mcp_client,
+        agent = GeminiAgent.create(
+            mcp_client=mock_mcp_client_gemini_computer,
             model_client=mock_gemini_client,
             validate_api_key=False,
         )
@@ -122,10 +103,10 @@ class TestGeminiAgent:
         assert parts[1].inline_data is not None
 
     @pytest.mark.asyncio
-    async def test_format_tool_results(self, mock_mcp_client, mock_gemini_client):
+    async def test_format_tool_results(self, mock_mcp_client_gemini_computer, mock_gemini_client):
         """Test the agent's format_tool_results method."""
-        agent = GeminiAgent(
-            mcp_client=mock_mcp_client,
+        agent = GeminiAgent.create(
+            mcp_client=mock_mcp_client_gemini_computer,
             model_client=mock_gemini_client,
             validate_api_key=False,
         )
@@ -169,10 +150,10 @@ class TestGeminiAgent:
         assert response_payload.get("success") is True
 
     @pytest.mark.asyncio
-    async def test_format_tool_results_with_error(self, mock_mcp_client, mock_gemini_client):
+    async def test_format_tool_results_with_error(self, mock_mcp_client_gemini_computer, mock_gemini_client):
         """Test formatting tool results with errors."""
-        agent = GeminiAgent(
-            mcp_client=mock_mcp_client,
+        agent = GeminiAgent.create(
+            mcp_client=mock_mcp_client_gemini_computer,
             model_client=mock_gemini_client,
             validate_api_key=False,
         )
@@ -206,12 +187,12 @@ class TestGeminiAgent:
         assert "error" in response_payload
 
     @pytest.mark.asyncio
-    async def test_get_response(self, mock_mcp_client, mock_gemini_client):
+    async def test_get_response(self, mock_mcp_client_gemini_computer, mock_gemini_client):
         """Test getting model response from Gemini API."""
         # Disable telemetry for this test
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = GeminiAgent(
-                mcp_client=mock_mcp_client,
+            agent = GeminiAgent.create(
+                mcp_client=mock_mcp_client_gemini_computer,
                 model_client=mock_gemini_client,
                 validate_api_key=False,
             )
@@ -253,12 +234,12 @@ class TestGeminiAgent:
             assert response.done is False
 
     @pytest.mark.asyncio
-    async def test_get_response_text_only(self, mock_mcp_client, mock_gemini_client):
+    async def test_get_response_text_only(self, mock_mcp_client_gemini_computer, mock_gemini_client):
         """Test getting text-only response."""
         # Disable telemetry for this test
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = GeminiAgent(
-                mcp_client=mock_mcp_client,
+            agent = GeminiAgent.create(
+                mcp_client=mock_mcp_client_gemini_computer,
                 model_client=mock_gemini_client,
                 validate_api_key=False,
             )
@@ -286,10 +267,10 @@ class TestGeminiAgent:
             assert response.done is True
 
     @pytest.mark.asyncio
-    async def test_convert_tools_for_gemini(self, mock_mcp_client, mock_gemini_client):
+    async def test_convert_tools_for_gemini(self, mock_mcp_client_gemini_computer, mock_gemini_client):
         """Test converting MCP tools to Gemini format."""
-        agent = GeminiAgent(
-            mcp_client=mock_mcp_client,
+        agent = GeminiAgent.create(
+            mcp_client=mock_mcp_client_gemini_computer,
             model_client=mock_gemini_client,
             validate_api_key=False,
         )
@@ -328,10 +309,10 @@ class TestGeminiAgent:
         assert gemini_tools[1].function_declarations[0].name == "calculator"
 
     @pytest.mark.asyncio
-    async def test_create_user_message(self, mock_mcp_client, mock_gemini_client):
+    async def test_create_user_message(self, mock_mcp_client_gemini_computer, mock_gemini_client):
         """Test creating a user message."""
-        agent = GeminiAgent(
-            mcp_client=mock_mcp_client,
+        agent = GeminiAgent.create(
+            mcp_client=mock_mcp_client_gemini_computer,
             model_client=mock_gemini_client,
             validate_api_key=False,
         )
@@ -345,11 +326,11 @@ class TestGeminiAgent:
         assert parts[0].text == "Hello Gemini"
 
     @pytest.mark.asyncio
-    async def test_handle_empty_response(self, mock_mcp_client, mock_gemini_client):
+    async def test_handle_empty_response(self, mock_mcp_client_gemini_computer, mock_gemini_client):
         """Test handling empty response from API."""
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = GeminiAgent(
-                mcp_client=mock_mcp_client,
+            agent = GeminiAgent.create(
+                mcp_client=mock_mcp_client_gemini_computer,
                 model_client=mock_gemini_client,
                 validate_api_key=False,
             )

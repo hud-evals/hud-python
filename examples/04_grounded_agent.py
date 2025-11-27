@@ -46,10 +46,10 @@ async def main():
             api_key=os.getenv("OPENAI_API_KEY", settings.openai_api_key)
         )  # can use any OpenAI-compatible endpoint
 
-        agent = GroundedOpenAIChatAgent(
+        agent = GroundedOpenAIChatAgent.create(
             grounder_config=grounder_config,
             openai_client=openai_client,
-            model_name="gpt-4o-mini",  # Planning model
+            checkpoint_name="gpt-4o-mini",  # Planning model
         )
 
         try:

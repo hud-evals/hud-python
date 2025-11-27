@@ -9,6 +9,7 @@ import pytest
 from anthropic import AsyncAnthropic
 from mcp import types
 
+from hud.agents.tests.conftest import MockMCPClient
 from hud.types import AgentType, Task, Trace
 
 
@@ -18,10 +19,7 @@ class TestToolFiltering:
     @pytest.fixture
     def mock_mcp_client(self):
         """Fixture for mock MCP client."""
-        client = MagicMock()
-        client.initialize = AsyncMock()
-        client.mcp_config = {"local": {"url": "http://localhost"}}
-        return client
+        return MockMCPClient()
 
     @pytest.fixture
     def mock_model_client(self):
@@ -48,10 +46,10 @@ class TestToolFiltering:
             agent_config=agent_config or {},
         )
 
-        agent = ClaudeAgent(
+        agent = ClaudeAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_model_client,
-            model="test",
+            checkpoint_name="test",
             validate_api_key=False,
         )
         await agent.initialize(task)
@@ -397,12 +395,7 @@ class TestSystemPromptHandling:
     @pytest.fixture
     def mock_mcp_client(self):
         """Fixture for mock MCP client."""
-        client = MagicMock()
-        client.initialize = AsyncMock()
-        client.list_tools = AsyncMock(return_value=[])
-        client.shutdown = AsyncMock()
-        client.mcp_config = {"local": {"url": "http://localhost:8765/mcp"}}
-        return client
+        return MockMCPClient()
 
     @pytest.fixture
     def captured_agent_fixture(self):

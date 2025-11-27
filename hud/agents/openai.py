@@ -30,9 +30,10 @@ from pydantic import ConfigDict
 
 from hud.settings import settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
+from hud.utils.types import with_signature
 from hud.utils.strict_schema import ensure_strict_json_schema
 
-from .base import MCPAgent
+from .base import BaseCreateParams, MCPAgent
 
 if TYPE_CHECKING:
     from hud.clients.base import AgentMCPClient
@@ -45,8 +46,9 @@ class OpenAIConfig(BaseAgentConfig):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    model_name: str = "OpenAI"
+    checkpoint_name: str = "gpt-5.1"
     model_client: AsyncOpenAI | None = None
-    model: str = "gpt-5.1"
     max_output_tokens: int | None = None
     temperature: float | None = None
     reasoning: dict[str, Any] | Literal["auto"] | None = None
@@ -55,38 +57,24 @@ class OpenAIConfig(BaseAgentConfig):
     validate_api_key: bool = True
 
 
+class OpenAICreateParams(BaseCreateParams, OpenAIConfig):
+    pass
+
+
 class OpenAIAgent(MCPAgent):
     """Generic OpenAI agent that can execute MCP tools through the Responses API."""
 
     metadata: ClassVar[dict[str, Any] | None] = None
     config_cls: ClassVar[type[BaseAgentConfig]] = OpenAIConfig
 
-    def __init__(
-        self,
-        *,
-        mcp_client: AgentMCPClient | None = None,
-        auto_trace: bool = True,
-        auto_respond: bool = False,
-        verbose: bool = False,
-        **config_kwargs: Any,
-    ) -> None:
-        config_instance = self.config_cls(**config_kwargs)
-        if not isinstance(config_instance, OpenAIConfig):
-            raise TypeError(
-                f"{type(self).__name__} expects config of type OpenAIConfig; "
-                f"got {type(config_instance).__name__}"
-            )
-        self.config = cast(OpenAIConfig, config_instance)
+    @with_signature(OpenAICreateParams)
+    @classmethod
+    def create(cls, **kwargs: Any) -> "OpenAIAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
+        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
-        super().__init__(
-            config=self.config,
-            mcp_client=mcp_client,
-            auto_trace=auto_trace,
-            auto_respond=auto_respond,
-            model_name="OpenAI",
-            checkpoint_name=self.config.model,
-            verbose=verbose,
-        )
+    def __init__(self, params: OpenAICreateParams) -> None:
+        super().__init__(params)
+        self.config: OpenAIConfig
 
         model_client = self.config.model_client
         if model_client is None:
@@ -102,7 +90,6 @@ class OpenAIAgent(MCPAgent):
                 raise ValueError(f"OpenAI API key is invalid: {exc}") from exc
 
         self.openai_client = model_client
-        self.model = self.config.model
         self.max_output_tokens = self.config.max_output_tokens
         self.temperature = self.config.temperature
         self.reasoning = self.config.reasoning
@@ -269,7 +256,7 @@ class OpenAIAgent(MCPAgent):
 
     def _build_request_payload(self, new_items: ResponseInputParam) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "model": self.model,
+            "model": self.config.checkpoint_name,
             "input": new_items,
             "instructions": self.system_prompt,
             "max_output_tokens": self.max_output_tokens,

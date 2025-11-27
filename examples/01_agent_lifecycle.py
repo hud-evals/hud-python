@@ -46,9 +46,9 @@ async def main():
         client = MCPClient(mcp_config=task.mcp_config)
 
         # Create agent
-        agent = ClaudeAgent(
+        agent = ClaudeAgent.create(
             mcp_client=client,
-            model="claude-sonnet-4-5",
+            checkpoint_name="claude-sonnet-4-5",
             allowed_tools=["anthropic_computer"],
             initial_screenshot=True,
         )

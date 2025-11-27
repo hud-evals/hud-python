@@ -237,7 +237,7 @@ def _create_agent(
     if auto_respond:
         base_kwargs["auto_respond"] = True
 
-    return agent_class(**base_kwargs, **payload)
+    return agent_class.create(**base_kwargs, **payload)
 
 
 def _calculate_group_stats(
@@ -293,6 +293,7 @@ def _calculate_group_stats(
 def display_results(
     results: list[Any],
     *,
+    tasks: list["Task"],
     elapsed: float | None = None,
     show_details: bool = True,
 ) -> None:
@@ -327,16 +328,21 @@ def display_results(
 
         if show_details and len(results) <= 50:
             table = Table(title="\nPer-Task Performance")
-            table.add_column("Task", style="cyan", no_wrap=True)
+            table.add_column("#", style="dim", justify="right")
+            table.add_column("Task ID", style="cyan", no_wrap=True)
+            table.add_column("Prompt", style="dim", max_width=40)
             table.add_column("Mean±Std", justify="right", style="green")
             table.add_column("Min/Max", justify="right")
             table.add_column("Success%", justify="right", style="yellow")
 
-            for stat in results:
-                prompt = stat.get("prompt", "")[:30]
-                if len(stat.get("prompt", "")) > 30:
+            for i, (stat, task) in enumerate(zip(results, tasks, strict=False)):
+                task_id = (task.id or "")[:20]
+                prompt = (task.prompt or "")[:40]
+                if len(task.prompt or "") > 40:
                     prompt += "..."
                 table.add_row(
+                    str(i + 1),
+                    task_id,
                     prompt,
                     f"{stat.get('mean_reward', 0):.3f}±{stat.get('std_reward', 0):.3f}",
                     f"{stat.get('min_reward', 0):.2f}/{stat.get('max_reward', 0):.2f}",
@@ -371,14 +377,22 @@ def display_results(
         if show_details and len(results) <= 50:
             table = Table(title="\nPer-Task Results")
             table.add_column("#", style="dim", justify="right")
+            table.add_column("Task ID", style="cyan", no_wrap=True)
+            table.add_column("Prompt", style="dim", max_width=40)
             table.add_column("Reward", justify="right", style="green")
             table.add_column("Status", justify="center")
 
             for i, r in enumerate(results):
+                task = tasks[i]
+                task_id = (task.id or "")[:20]
+                prompt = (task.prompt or "")[:40]
+                if len(task.prompt or "") > 40:
+                    prompt += "..."
+
                 if r is None:
-                    table.add_row(str(i + 1), "—", "[red]Error[/red]")
+                    table.add_row(str(i + 1), task_id, prompt, "—", "[red]Error[/red]")
                 else:
                     reward = getattr(r, "reward", 0)
                     status = "[green]✓[/green]" if reward > 0.7 else "[yellow]✗[/yellow]"
-                    table.add_row(str(i + 1), f"{reward:.3f}", status)
+                    table.add_row(str(i + 1), task_id, prompt, f"{reward:.3f}", status)
             console.print(table)

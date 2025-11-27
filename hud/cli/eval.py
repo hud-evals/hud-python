@@ -9,6 +9,7 @@ import asyncio
 import logging
 import time
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -33,6 +34,37 @@ hud_console = HUDConsole()
 
 _CONFIG_PATH = ".hud_eval.toml"
 
+
+@dataclass(frozen=True)
+class AgentPreset:
+    """A preset agent configuration combining agent type, model, and optional config."""
+
+    name: str
+    agent_type: AgentType
+    model: str | None = None
+    agent_config: dict[str, Any] | None = None
+
+
+# HUD Gateway URL for unified LLM access
+_HUD_GATEWAY_URL = "https://inference.hud.ai"
+
+
+def _gateway_config(model_name: str) -> dict[str, Any]:
+    """Create agent_config for HUD gateway preset."""
+    return {"openai_compatible": {"base_url": _HUD_GATEWAY_URL, "model_name": model_name}}
+
+
+# Built-in presets for the interactive picker
+_AGENT_PRESETS: list[AgentPreset] = [
+    # Native agents (use provider SDKs directly)
+    AgentPreset("Claude Sonnet 4.5", AgentType.CLAUDE, "claude-sonnet-4-5-20250929"),
+    AgentPreset("GPT-5", AgentType.OPENAI, "gpt-5"),
+    AgentPreset("Operator (OpenAI Computer Use)", AgentType.OPERATOR, "computer-use-preview"),
+    AgentPreset("Gemini 2.5 Computer Use", AgentType.GEMINI, "gemini-2.5-computer-use-preview-10-2025"),
+    # HUD Gateway presets (OpenRouter/open source models via gateway)
+    AgentPreset("Grok 4", AgentType.OPENAI_COMPATIBLE, "grok-4-fast", _gateway_config("openrouter/x-ai/grok-4-fast")),
+]
+
 _DEFAULT_CONFIG_TEMPLATE = '''# HUD Eval Configuration
 # Command-line arguments override these settings
 
@@ -42,7 +74,7 @@ _DEFAULT_CONFIG_TEMPLATE = '''# HUD Eval Configuration
 # model = ""
 # full = false
 # max_concurrent = 30
-# max_steps = 50
+# max_steps = 10
 # group_size = 1
 # task_ids = ["task_1", "task_2"]
 # verbose = true
@@ -131,16 +163,16 @@ class EvalConfig(BaseModel):
         if self.agent_type is None:
             return
 
-        if self.agent_type in _API_KEY_REQUIREMENTS:
+        if self.agent_type == AgentType.OPENAI_COMPATIBLE:
+            if not self.model:
+                hud_console.error("Model name is required for OpenAI compatible agent (--model)")
+                raise typer.Exit(1)
+        elif self.agent_type in _API_KEY_REQUIREMENTS:
             attr, env_var = _API_KEY_REQUIREMENTS[self.agent_type]
             if not getattr(settings, attr, None):
                 hud_console.error(f"{env_var} is required for {self.agent_type.value} agent")
                 hud_console.info(f"Set it: hud set {env_var}=your-key-here")
                 raise typer.Exit(1)
-
-        if self.agent_type == AgentType.OPENAI_COMPATIBLE and not self.model:
-            hud_console.error("Model name is required for OpenAI compatible agent (--model)")
-            raise typer.Exit(1)
 
         if not settings.api_key:
             hud_console.warning("HUD_API_KEY not set. Some features may be limited.")
@@ -179,7 +211,7 @@ class EvalConfig(BaseModel):
         kwargs: dict[str, Any] = {}
 
         if self.model:
-            kwargs["model"] = self.model
+            kwargs["checkpoint_name"] = self.model
 
         if self.allowed_tools:
             kwargs["allowed_tools"] = self.allowed_tools
@@ -189,6 +221,11 @@ class EvalConfig(BaseModel):
         agent_key = self.agent_type.value
         if agent_key in self.agent_config:
             kwargs.update(self.agent_config[agent_key])
+
+        if self.agent_type == AgentType.OPENAI_COMPATIBLE:
+            base_url = kwargs.get("base_url", "")
+            if "inference.hud.ai" in base_url and "api_key" not in kwargs:
+                kwargs["api_key"] = settings.api_key
 
         kwargs["verbose"] = self.verbose or self.very_verbose
 
@@ -319,20 +356,33 @@ class EvalConfig(BaseModel):
         return self.model_validate({**self.model_dump(), **overrides})
 
     def resolve_agent_interactive(self) -> "EvalConfig":
-        """Prompt user to select agent if not set. Returns updated config."""
+        """Prompt user to select an agent preset if not set. Returns updated config."""
         if self.agent_type is not None:
             return self
 
+        # Build choices from presets
         choices: list[dict[str, Any]] = [
-            {"name": "Claude 4 Sonnet", "value": AgentType.CLAUDE},
-            {"name": "OpenAI", "value": AgentType.OPENAI},
-            {"name": "Operator (OpenAI Computer Use)", "value": AgentType.OPERATOR},
-            {"name": "Gemini Computer Use", "value": AgentType.GEMINI},
-            {"name": "OpenAI Compatible", "value": AgentType.OPENAI_COMPATIBLE},
+            {"name": preset.name, "value": preset}
+            for preset in _AGENT_PRESETS
         ]
 
-        selected = hud_console.select("Select an agent:", choices=choices, default=0)  # type: ignore[arg-type]
-        return self.model_copy(update={"agent_type": selected})
+        selected: AgentPreset = hud_console.select("Select an agent:", choices=choices, default=0)  # type: ignore[arg-type]
+
+        # Merge preset into config
+        updates: dict[str, Any] = {"agent_type": selected.agent_type}
+        if selected.model:
+            updates["model"] = selected.model
+        if selected.agent_config:
+            # Merge preset's agent_config with existing
+            merged = dict(self.agent_config)
+            for key, value in selected.agent_config.items():
+                if key in merged:
+                    merged[key] = {**merged[key], **value}
+                else:
+                    merged[key] = value
+            updates["agent_config"] = merged
+
+        return self.model_validate({**self.model_dump(), **updates})
 
     def display(self) -> None:
         """Display settings in a table."""
@@ -342,9 +392,9 @@ class EvalConfig(BaseModel):
 
         # Core settings
         table.add_row("source", str(self.source or "—"))
-        table.add_row("agent", self.agent_type.value if self.agent_type else "—")
+        table.add_row("agent", self.agent_type.value) # type: ignore[union-attr]
         table.add_row("full", str(self.full))
-        table.add_row("max_steps", str(self.max_steps or "auto"))
+        table.add_row("max_steps", str(self.max_steps or (100 if self.full else 10)))
         table.add_row("max_concurrent", str(self.max_concurrent))
         if self.group_size > 1:
             table.add_row("group_size", str(self.group_size))
@@ -370,9 +420,9 @@ class EvalConfig(BaseModel):
             for name in config_cls.model_fields:
                 if name in skip:
                     continue
-                # Always show model; other fields only if explicitly set (via CLI or TOML)
-                if name == "model":
-                    value = self.model or overrides.get("model") or getattr(defaults, "model", None)
+                # Always show checkpoint_name; other fields only if explicitly set (via CLI or TOML)
+                if name == "checkpoint_name":
+                    value = self.model or overrides.get("checkpoint_name") or getattr(defaults, "checkpoint_name", None)
                     table.add_row(f"  {name}", str(value) if value else "—")
                 elif name in overrides:
                     table.add_row(f"  {name}", str(overrides[name]))
@@ -445,7 +495,7 @@ def _warn_local_mcp(tasks: list["Task"], source: str) -> None:
 # =============================================================================
 
 
-async def _run_evaluation(cfg: EvalConfig) -> list[Any] | None:
+async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
     """Run evaluation with the given config."""
     from hud.datasets import run_tasks
 
@@ -462,7 +512,7 @@ async def _run_evaluation(cfg: EvalConfig) -> list[Any] | None:
 
     path = Path(cfg.source)
     dataset_name = path.name if path.exists() else cfg.source.split("/")[-1]
-    max_steps = cfg.max_steps or (50 if cfg.full else 10)
+    max_steps = cfg.max_steps or (100 if cfg.full else 10)
 
     # Filter by task IDs if provided
     if cfg.task_ids:
@@ -485,15 +535,15 @@ async def _run_evaluation(cfg: EvalConfig) -> list[Any] | None:
         logging.getLogger("hud.agents.base").setLevel(logging.INFO)
 
         async with hud.async_trace(name=task.prompt):
-            agent = agent_class(**agent_kwargs)
+            agent = agent_class.create(**agent_kwargs)
             hud_console.info(task.prompt)
             result = await agent.run(task, max_steps=max_steps)
             hud_console.success(f"Reward: {result.reward}")
-        return None
+        return [result], tasks
 
     hud_console.info(f"🚀 Running evaluation (max_concurrent: {cfg.max_concurrent}, group_size: {cfg.group_size})…")
 
-    return await run_tasks(
+    results = await run_tasks(
         tasks=tasks,
         agent_class=agent_class,
         agent_config=agent_kwargs,
@@ -504,6 +554,7 @@ async def _run_evaluation(cfg: EvalConfig) -> list[Any] | None:
         auto_respond=True,
         group_size=cfg.group_size,
     )
+    return results, tasks
 
 
 # =============================================================================
@@ -574,6 +625,9 @@ def eval_command(
     if cfg.very_verbose:
         logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(message)s")
         logging.getLogger("hud.agents").setLevel(logging.DEBUG)
+        # Suppress noisy HTTP client logs
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
     elif cfg.verbose:
         logging.getLogger("hud.agents").setLevel(logging.INFO)
 
@@ -589,11 +643,9 @@ def eval_command(
 
     # Run
     start_time = time.time()
-    results = asyncio.run(_run_evaluation(cfg))
+    results, tasks = asyncio.run(_run_evaluation(cfg))
     elapsed = time.time() - start_time
 
-    # Display results for batch runs
-    if results:
-        from hud.datasets import display_results
+    from hud.datasets import display_results
 
-        display_results(results, elapsed=elapsed, show_details=len(results) <= 50)
+    display_results(results, tasks=tasks, elapsed=elapsed, show_details=len(results) <= 50)

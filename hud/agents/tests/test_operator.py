@@ -17,23 +17,6 @@ class TestOperatorAgent:
     """Test OperatorAgent class."""
 
     @pytest.fixture
-    def mock_mcp_client(self):
-        """Create a mock MCP client."""
-        mcp_client = AsyncMock()
-        # Set up the mcp_config attribute as a regular dict, not a coroutine
-        mcp_client.mcp_config = {"test_server": {"url": "http://test"}}
-        # Mock list_tools to return the required openai_computer tool
-        mcp_client.list_tools = AsyncMock(
-            return_value=[
-                types.Tool(
-                    name="openai_computer", description="OpenAI computer use tool", inputSchema={}
-                )
-            ]
-        )
-        mcp_client.initialize = AsyncMock()
-        return mcp_client
-
-    @pytest.fixture
     def mock_openai(self):
         """Create a mock OpenAI client."""
         client = AsyncOpenAI(api_key="test", base_url="http://localhost")
@@ -42,26 +25,26 @@ class TestOperatorAgent:
             yield client
 
     @pytest.mark.asyncio
-    async def test_init(self, mock_mcp_client):
+    async def test_init(self, mock_mcp_client_openai_computer):
         """Test agent initialization."""
         mock_model_client = AsyncOpenAI(api_key="test")
-        agent = OperatorAgent(
-            mcp_client=mock_mcp_client,
+        agent = OperatorAgent.create(
+            mcp_client=mock_mcp_client_openai_computer,
             model_client=mock_model_client,
-            model="gpt-4",
+            checkpoint_name="gpt-4",
             validate_api_key=False,  # Skip validation in tests
         )
 
         assert agent.model_name == "Operator"
-        assert agent.model == "gpt-4"
+        assert agent.config.checkpoint_name == "gpt-4"
         assert agent.openai_client == mock_model_client
 
     @pytest.mark.asyncio
-    async def test_format_blocks(self, mock_mcp_client):
+    async def test_format_blocks(self, mock_mcp_client_openai_computer):
         """Test formatting content blocks."""
         mock_model_client = AsyncOpenAI(api_key="test")
-        agent = OperatorAgent(
-            mcp_client=mock_mcp_client,
+        agent = OperatorAgent.create(
+            mcp_client=mock_mcp_client_openai_computer,
             model_client=mock_model_client,
             validate_api_key=False,  # Skip validation in tests
         )
@@ -100,10 +83,10 @@ class TestOperatorAgent:
         }
 
     @pytest.mark.asyncio
-    async def test_format_tool_results(self, mock_mcp_client, mock_openai):
+    async def test_format_tool_results(self, mock_mcp_client_openai_computer, mock_openai):
         """Test formatting tool results."""
-        agent = OperatorAgent(
-            mcp_client=mock_mcp_client,
+        agent = OperatorAgent.create(
+            mcp_client=mock_mcp_client_openai_computer,
             model_client=mock_openai,
             validate_api_key=False,  # Skip validation in tests
         )
@@ -141,10 +124,10 @@ class TestOperatorAgent:
         assert output1[0]["image_url"] == "data:image/png;base64,base64data"
 
     @pytest.mark.asyncio
-    async def test_format_tool_results_with_error(self, mock_mcp_client, mock_openai):
+    async def test_format_tool_results_with_error(self, mock_mcp_client_openai_computer, mock_openai):
         """Test formatting tool results with errors."""
-        agent = OperatorAgent(
-            mcp_client=mock_mcp_client,
+        agent = OperatorAgent.create(
+            mcp_client=mock_mcp_client_openai_computer,
             model_client=mock_openai,
             validate_api_key=False,  # Skip validation in tests
         )
@@ -173,12 +156,12 @@ class TestOperatorAgent:
         assert output[1]["text"] == "Something went wrong"
 
     @pytest.mark.asyncio
-    async def test_get_model_response(self, mock_mcp_client, mock_openai):
+    async def test_get_model_response(self, mock_mcp_client_openai_computer, mock_openai):
         """Test getting model response from OpenAI API."""
         # Disable telemetry for this test to avoid backend configuration issues
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = OperatorAgent(
-                mcp_client=mock_mcp_client,
+            agent = OperatorAgent.create(
+                mcp_client=mock_mcp_client_openai_computer,
                 model_client=mock_openai,
                 validate_api_key=False,  # Skip validation in tests
             )
@@ -214,10 +197,10 @@ class TestOperatorAgent:
             assert response.tool_calls == []
 
     @pytest.mark.asyncio
-    async def test_handle_empty_response(self, mock_mcp_client, mock_openai):
+    async def test_handle_empty_response(self, mock_mcp_client_openai_computer, mock_openai):
         """Test handling empty response from API."""
-        agent = OperatorAgent(
-            mcp_client=mock_mcp_client,
+        agent = OperatorAgent.create(
+            mcp_client=mock_mcp_client_openai_computer,
             model_client=mock_openai,
             validate_api_key=False,  # Skip validation in tests
         )

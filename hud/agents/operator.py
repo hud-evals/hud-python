@@ -25,7 +25,9 @@ from pydantic import ConfigDict
 
 from hud.tools.computer.settings import computer_settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.utils.types import with_signature
 
+from .base import BaseCreateParams, MCPAgent
 from .openai import OpenAIAgent, OpenAIConfig
 
 if TYPE_CHECKING:
@@ -57,8 +59,13 @@ class OperatorConfig(OpenAIConfig):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    model: str = "computer-use-preview"
+    model_name: str = "Operator"
+    checkpoint_name: str = "computer-use-preview"
     environment: Literal["windows", "mac", "linux", "browser"] = "linux"
+
+
+class OperatorCreateParams(BaseCreateParams, OperatorConfig):
+    pass
 
 
 class OperatorAgent(OpenAIAgent):
@@ -73,34 +80,20 @@ class OperatorAgent(OpenAIAgent):
     required_tools: ClassVar[list[str]] = ["openai_computer"]
     config_cls: ClassVar[type[BaseAgentConfig]] = OperatorConfig
 
-    def __init__(
-        self,
-        *,
-        mcp_client: AgentMCPClient | None = None,
-        auto_trace: bool = True,
-        auto_respond: bool = False,
-        verbose: bool = False,
-        **config_kwargs: Any,
-    ) -> None:
-        super().__init__(
-            mcp_client=mcp_client,
-            auto_trace=auto_trace,
-            auto_respond=auto_respond,
-            verbose=verbose,
-            **config_kwargs,
-        )
-        if not isinstance(self.config, OperatorConfig):
-            raise TypeError(
-                f"{type(self).__name__} expects config of type OperatorConfig, "
-                f"got {type(self.config).__name__}"
-            )
-        operator_config = cast("OperatorConfig", self.config)
+    @with_signature(OperatorCreateParams)
+    @classmethod
+    def create(cls, **kwargs: Any) -> "OperatorAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
+        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
+
+    def __init__(self, params: OperatorCreateParams) -> None:
+        super().__init__(params)  # type: ignore[arg-type]
+        self.config: OperatorConfig  # type: ignore[assignment]
+
         self._operator_computer_tool_name = "openai_computer"
         self._operator_display_width = computer_settings.OPENAI_COMPUTER_WIDTH
         self._operator_display_height = computer_settings.OPENAI_COMPUTER_HEIGHT
-        self._operator_environment = operator_config.environment
-        self.model_name = "Operator"
-        self.environment = operator_config.environment
+        self._operator_environment = self.config.environment
+        self.environment = self.config.environment
 
         if self.system_prompt:
             self.system_prompt = f"{self.system_prompt}\n\n{OPERATOR_INSTRUCTIONS}"

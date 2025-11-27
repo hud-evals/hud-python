@@ -74,10 +74,10 @@ async def test_call_tools_injects_screenshot_and_delegates(monkeypatch: pytest.M
     # Agent with fake OpenAI client and fake MCP client
     grounder_cfg = GrounderConfig(api_base="http://example", model="qwen")
     fake_openai = AsyncOpenAI(api_key="test")
-    agent = GroundedOpenAIChatAgent(
+    agent = GroundedOpenAIChatAgent.create(
         grounder_config=grounder_cfg,
         openai_client=fake_openai,
-        model_name="gpt-4o-mini",
+        checkpoint_name="gpt-4o-mini",
         mcp_client=FakeMCPClient(),
         initial_screenshot=False,
     )

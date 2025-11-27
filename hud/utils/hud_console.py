@@ -21,6 +21,7 @@ import traceback
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 import questionary
+from questionary import Style
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -498,11 +499,19 @@ class HUDConsole:
             else:
                 q_choices.append(choice)
 
+        # Custom style for better visibility of selection
+        custom_style = Style([
+            ("qmark", "fg:cyan bold"),
+            ("question", "bold"),
+            ("pointer", "fg:cyan bold"),
+            ("highlighted", "fg:cyan bold"),
+        ])
+
         result = questionary.select(
             message,
             choices=q_choices,
-            default=q_choices[default] if default is not None else None,
             instruction="(Use ↑/↓ arrows, Enter to select)",
+            style=custom_style,
         ).ask()
 
         # If no selection made (Ctrl+C or ESC), exit

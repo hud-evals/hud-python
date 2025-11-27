@@ -8,11 +8,12 @@ from typing import Any, ClassVar, TYPE_CHECKING, cast
 from hud import instrument
 from hud.tools.grounding import GroundedComputerTool, Grounder, GrounderConfig
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.utils.types import with_signature
 from pydantic import ConfigDict, field_validator
 
 if TYPE_CHECKING:
-    from hud.clients.base import AgentMCPClient
     from hud.types import BaseAgentConfig
+from .base import BaseCreateParams
 from .openai_chat import OpenAIChatAgent, OpenAIChatConfig
 
 
@@ -37,7 +38,7 @@ class GroundedOpenAIConfig(OpenAIChatConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     grounder_config: GrounderConfig
-    model_name: str = "gpt-4o-mini"
+    checkpoint_name: str = "gpt-4o-mini"
     allowed_tools: list[str] | None = ["computer"]
     append_setup_output: bool = False
     system_prompt: str | None = DEFAULT_GROUNDED_PROMPT
@@ -52,33 +53,28 @@ class GroundedOpenAIConfig(OpenAIChatConfig):
         if isinstance(value, dict):
             return GrounderConfig(**value)
 
+class GroundedOpenAICreateParams(BaseCreateParams, GroundedOpenAIConfig):
+    pass
+
+
 class GroundedOpenAIChatAgent(OpenAIChatAgent):
     """OpenAI chat agent that pipes 'computer' tool calls through a vision grounder."""
 
     metadata: ClassVar[dict[str, Any] | None] = None
     config_cls: ClassVar[type[BaseAgentConfig]] = GroundedOpenAIConfig
 
-    def __init__(
-        self,
-        *,
-        mcp_client: AgentMCPClient | None = None,
-        auto_trace: bool = True,
-        auto_respond: bool = False,
-        verbose: bool = False,
-        **config_kwargs: Any,
-    ) -> None:
-        """Initialize the grounded OpenAI agent."""
-        super().__init__(
-            mcp_client=mcp_client,
-            auto_trace=auto_trace,
-            auto_respond=auto_respond,
-            verbose=verbose,
-            **config_kwargs,
-        )
+    @with_signature(GroundedOpenAICreateParams)
+    @classmethod
+    def create(cls, **kwargs: Any) -> "GroundedOpenAIChatAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
+        from .base import MCPAgent
+        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
-        grounded_config = cast("GroundedOpenAIConfig", self.config)
-        self.grounder = Grounder(grounded_config.grounder_config)
-        self.grounded_tool = None
+    def __init__(self, params: GroundedOpenAICreateParams) -> None:
+        super().__init__(params)  # type: ignore[arg-type]
+        self.config: GroundedOpenAIConfig  # type: ignore[assignment]
+
+        self.grounder = Grounder(self.config.grounder_config)
+        self.grounded_tool: GroundedComputerTool | None = None
 
     async def initialize(self, task: Any = None) -> None:
         """Initialize the agent and create the grounded tool with mcp_client."""
@@ -166,7 +162,7 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
         extra = {k: v for k, v in (self.completion_kwargs or {}).items() if k not in protected_keys}
 
         response = await self.oai.chat.completions.create(  # type: ignore
-            model=self.checkpoint_name,
+            model=self.config.checkpoint_name,
             messages=messages,
             tools=tool_schemas,
             parallel_tool_calls=False,
