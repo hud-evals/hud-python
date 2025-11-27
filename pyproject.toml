@@ -41,7 +41,7 @@ dependencies = [
     "pillow>=11.1.0",
     # AI providers
     "anthropic>=0.75",
-    "openai",
+    "openai>=2.8.1",
     "google-genai",
     "tornado>=6.5.2",
 ]
