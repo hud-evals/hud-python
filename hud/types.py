@@ -30,11 +30,30 @@ class AgentType(str, Enum):
     OPENAI_COMPATIBLE = "openai_compatible"
     INTEGRATION_TEST = "integration_test"
 
+    @property
+    def cls(self) -> type:
+        from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OperatorAgent
+        from hud.agents.openai_chat import OpenAIChatAgent
+
+        mapping: dict[AgentType, type] = {
+            AgentType.CLAUDE: ClaudeAgent,
+            AgentType.OPENAI: OpenAIAgent,
+            AgentType.OPERATOR: OperatorAgent,
+            AgentType.GEMINI: GeminiAgent,
+            AgentType.OPENAI_COMPATIBLE: OpenAIChatAgent,
+        }
+        if self == AgentType.INTEGRATION_TEST:
+            from hud.agents.misc.integration_test_agent import IntegrationTestRunner
+            return IntegrationTestRunner
+        if self not in mapping:
+            raise ValueError(f"Unsupported agent type: {self}")
+        return mapping[self]
+
 class BaseAgentConfig(BaseModel):
     """Standard agent configuration that tasks can override.
     Provider-specific configs should not be included here.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
     allowed_tools: list[str] | None = None
     disallowed_tools: list[str] | None = None

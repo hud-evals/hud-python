@@ -221,7 +221,7 @@ class TestRunDatasetExtended:
                 "metadata_run",
                 tasks,
                 mock_agent_class,  # type: ignore
-                {"model": "test-model"},
+                {"verbose": True},
                 metadata=custom_metadata,
             )
 
@@ -230,12 +230,11 @@ class TestRunDatasetExtended:
                 "experiment_id": "exp-123",
                 "tags": ["test", "v2"],
                 "config": {"temperature": 0.7},
-                "agent_class": "MockAgent",
-                "agent_config": {"model": "test-model"},
+                "agent_config": {"verbose": True},
             }
 
             mock_job_func.assert_called_once_with(
-                "metadata_run", metadata=expected_metadata, dataset_link=None
+                "metadata_run", metadata=expected_metadata
             )
 
     @pytest.mark.asyncio
@@ -273,9 +272,9 @@ class TestRunDatasetExtended:
 
             return agent
 
-        # Mock the agent class itself
+        # Mock the agent class itself - runner calls agent_class.create()
         mock_agent_class = MagicMock()
-        mock_agent_class.side_effect = create_mock_agent
+        mock_agent_class.create = MagicMock(side_effect=create_mock_agent)
         mock_agent_class.__name__ = "MockAgent"
 
         tasks = [{"prompt": f"Task {i}", "mcp_config": {"url": f"test{i}"}} for i in range(3)]
@@ -362,6 +361,10 @@ class TestRunDatasetExtended:
     @pytest.mark.asyncio
     async def test_run_dataset_validation_error(self):
         """Test that tasks without required fields cause validation errors."""
+        from pydantic import ValidationError
+
+        from hud.agents import MCPAgent
+
         # Create a task without mcp_config (required field)
         task: dict[str, Any] = {
             "prompt": "Test task",
@@ -372,17 +375,9 @@ class TestRunDatasetExtended:
 
         mock_agent_class = type("MockAgent", (MCPAgent,), {})
 
-        with (
-            patch("hud.job") as mock_job_func,
-            patch("hud.trace") as mock_trace,
-        ):
-            mock_job = MagicMock()
-            mock_job.id = "job-validation"
-            mock_job_func.return_value.__enter__.return_value = mock_job
-            mock_trace.return_value.__enter__.return_value = "trace-id"
-
-            # Run with task that has missing required fields
-            results = await run_dataset(
+        # Validation errors should be raised immediately when Task objects are created
+        with pytest.raises(ValidationError):
+            await run_dataset(
                 "validation_run",
                 [task],  # Pass the task directly
                 mock_agent_class,  # type: ignore

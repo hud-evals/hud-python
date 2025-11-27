@@ -18,9 +18,8 @@ from typing import Any, cast
 
 from datasets import load_dataset
 
-from hud.agents import ClaudeAgent, OperatorAgent
 from hud.datasets import run_tasks, display_results
-from hud.types import Task
+from hud.types import AgentType, Task
 
 
 async def main() -> None:
@@ -44,18 +43,18 @@ async def main() -> None:
         tasks = [t for t in tasks if t.id in args.task_ids]
         print(f"Filtered to {len(tasks)} tasks: {args.task_ids}")
 
-    # Select agent class and config
+    # Select agent type and config
     if args.agent == "operator":
-        agent_class = OperatorAgent
-        agent_config = {"model": args.model or "computer-use-preview", "validate_api_key": False}
+        agent_type = AgentType.OPERATOR
+        agent_config = {"checkpoint_name": args.model or "computer-use-preview", "validate_api_key": False}
     else:
-        agent_class = ClaudeAgent
-        agent_config = {"model": args.model or "claude-sonnet-4-5", "validate_api_key": False}
+        agent_type = AgentType.CLAUDE
+        agent_config = {"checkpoint_name": args.model or "claude-sonnet-4-5", "validate_api_key": False}
 
     # Run evaluation
     results = await run_tasks(
         tasks=tasks,
-        agent_class=agent_class,
+        agent_type=agent_type,
         agent_config=agent_config,
         name=f"Eval: {args.dataset.split('/')[-1]}",
         max_concurrent=args.max_concurrent,
@@ -64,8 +63,7 @@ async def main() -> None:
         auto_respond=True,
     )
 
-    # Display results (works for both single and grouped runs)
-    display_results(results)
+    display_results(results, tasks=tasks)
 
 
 if __name__ == "__main__":

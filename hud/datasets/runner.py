@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 from datasets import Dataset, load_dataset
 
-from hud.types import Task, Trace
+from hud.types import AgentType, Task, Trace
 
 if TYPE_CHECKING:
     from hud.agents import MCPAgent
@@ -22,7 +22,7 @@ logger = logging.getLogger("hud.datasets")
 
 async def run_tasks(
     tasks: list[Task],
-    agent_class: type["MCPAgent"],
+    agent_type: AgentType,
     agent_config: dict[str, Any] | None = None,
     *,
     name: str = "Evaluation",
@@ -39,7 +39,7 @@ async def run_tasks(
 
     Args:
         tasks: List of Task objects
-        agent_class: Agent class to instantiate
+        agent_type: AgentType specifying which agent to use
         agent_config: Configuration kwargs for agent initialization
         name: Name for the job
         max_concurrent: Maximum concurrent tasks
@@ -66,6 +66,7 @@ async def run_tasks(
     # Create job metadata
     job_metadata = metadata or {}
     job_metadata["agent_config"] = agent_config or {}
+    job_metadata["agent_type"] = agent_type.value
     if group_size > 1:
         job_metadata["group_size"] = group_size
         job_metadata["total_episodes"] = len(tasks) * group_size
@@ -140,22 +141,21 @@ async def run_dataset(
     # Convert dicts to Task objects
     tasks = [Task(**d) for d in task_dicts]
 
+    import hud
+
     # Add dataset link to metadata
     job_metadata = metadata or {}
+    job_metadata["agent_config"] = agent_config or {}
     if dataset_link:
         job_metadata["dataset_link"] = dataset_link
+    if group_size > 1:
+        job_metadata["group_size"] = group_size
+        job_metadata["total_episodes"] = len(tasks) * group_size
 
-    return await run_tasks(
-        tasks=tasks,
-        agent_class=agent_class,
-        agent_config=agent_config,
-        name=name,
-        max_concurrent=max_concurrent,
-        metadata=job_metadata,
-        max_steps=max_steps,
-        auto_respond=auto_respond,
-        group_size=group_size,
-    )
+    async with hud.async_job(name, metadata=job_metadata) as job_obj:
+        return await _run_tasks(
+            tasks, agent_class, agent_config, max_concurrent, max_steps, auto_respond, group_size, job_obj
+        )
 
 
 async def _run_tasks(

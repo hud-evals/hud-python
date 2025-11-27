@@ -177,32 +177,6 @@ class EvalConfig(BaseModel):
         if not settings.api_key:
             hud_console.warning("HUD_API_KEY not set. Some features may be limited.")
 
-    def get_agent_class(self) -> type["MCPAgent"]:
-        """Get the agent class for the configured agent type."""
-        if self.agent_type is None:
-            raise ValueError("agent_type must be set before calling get_agent_class()")
-
-        if self.agent_type == AgentType.CLAUDE:
-            from hud.agents import ClaudeAgent
-            return ClaudeAgent
-        if self.agent_type == AgentType.OPENAI:
-            from hud.agents import OpenAIAgent
-            return OpenAIAgent
-        if self.agent_type == AgentType.OPERATOR:
-            from hud.agents import OperatorAgent
-            return OperatorAgent
-        if self.agent_type == AgentType.GEMINI:
-            from hud.agents import GeminiAgent
-            return GeminiAgent
-        if self.agent_type == AgentType.OPENAI_COMPATIBLE:
-            from hud.agents import OpenAIChatAgent
-            return OpenAIChatAgent
-        if self.agent_type == AgentType.INTEGRATION_TEST:
-            from hud.agents.misc.integration_test_agent import IntegrationTestRunner
-            return IntegrationTestRunner
-
-        raise ValueError(f"Unsupported agent type: {self.agent_type}")
-
     def get_agent_kwargs(self) -> dict[str, Any]:
         """Build agent kwargs from config."""
         if self.agent_type is None:
@@ -392,7 +366,7 @@ class EvalConfig(BaseModel):
 
         # Core settings
         table.add_row("source", str(self.source or "—"))
-        table.add_row("agent", self.agent_type.value) # type: ignore[union-attr]
+        table.add_row("agent", self.agent_type.value)  # type: ignore[union-attr]
         table.add_row("full", str(self.full))
         table.add_row("max_steps", str(self.max_steps or (100 if self.full else 10)))
         table.add_row("max_concurrent", str(self.max_concurrent))
@@ -410,7 +384,7 @@ class EvalConfig(BaseModel):
             table.add_row("", "")
             table.add_row(f"[dim]{self.agent_type.value} config[/dim]", "")
 
-            config_cls = self.get_agent_class().config_cls
+            config_cls = self.agent_type.cls.config_cls
             defaults = config_cls()
             overrides = self.agent_config.get(self.agent_type.value, {})
             skip = {"model_client", "validate_api_key", "model_config",
@@ -507,7 +481,6 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
     if cfg.group_size > 1 or cfg.full:
         _warn_local_mcp(tasks, cfg.source)
 
-    agent_class = cfg.get_agent_class()
     agent_kwargs = cfg.get_agent_kwargs()
 
     path = Path(cfg.source)
@@ -534,6 +507,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
         logging.getLogger("hud.agents").setLevel(logging.INFO)
         logging.getLogger("hud.agents.base").setLevel(logging.INFO)
 
+        agent_class = cfg.agent_type.cls
         async with hud.async_trace(name=task.prompt):
             agent = agent_class.create(**agent_kwargs)
             hud_console.info(task.prompt)
@@ -541,11 +515,12 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
             hud_console.success(f"Reward: {result.reward}")
         return [result], tasks
 
+    # Local batch execution
     hud_console.info(f"🚀 Running evaluation (max_concurrent: {cfg.max_concurrent}, group_size: {cfg.group_size})…")
 
     results = await run_tasks(
         tasks=tasks,
-        agent_class=agent_class,
+        agent_type=cfg.agent_type,
         agent_config=agent_kwargs,
         name=f"Evaluation {dataset_name}",
         max_concurrent=cfg.max_concurrent,
