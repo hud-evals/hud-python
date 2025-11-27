@@ -33,15 +33,18 @@
         "groups": [
           {
             "group": "Get Started",
-            "pages": ["index", "quickstart", "llm-quickstart"]
+            "pages": [
+              "index",
+              "quickstart",
+              "llm-quickstart"
+            ]
           },
           {
             "group": "Core Concepts",
             "pages": [
-              "core-concepts/architecture", 
+              "core-concepts/architecture",
               "core-concepts/mcp-protocol",
-              "core-concepts/task-system",
-              "core-concepts/tricks"
+              "core-concepts/task-system"
             ]
           },
           {
@@ -69,7 +72,9 @@
           },
           {
             "group": "HUD Gateway",
-            "pages": ["gateway/index"]
+            "pages": [
+              "gateway/index"
+            ]
           },
           {
             "group": "Beta Features",
