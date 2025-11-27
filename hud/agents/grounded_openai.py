@@ -166,7 +166,7 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
         extra = {k: v for k, v in (self.completion_kwargs or {}).items() if k not in protected_keys}
 
         response = await self.oai.chat.completions.create(  # type: ignore
-            model=self.model_name,
+            model=self.checkpoint_name,
             messages=messages,
             tools=tool_schemas,
             parallel_tool_calls=False,

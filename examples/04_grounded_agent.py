@@ -37,7 +37,7 @@ async def main():
         mcp_config = {
             "local": {
                 "command": "docker",
-                "args": ["run", "--rm", "-i", "-p", "8080:8080", "hudevals/hud-browser:0.1.3"],
+                "args": ["run", "--rm", "-i", "-p", "8080:8080", "hudevals/hud-browser:0.1.6"],
             }
         }
 
