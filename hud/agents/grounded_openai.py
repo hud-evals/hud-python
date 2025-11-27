@@ -13,7 +13,6 @@ from pydantic import ConfigDict, field_validator
 if TYPE_CHECKING:
     from hud.clients.base import AgentMCPClient
     from hud.types import BaseAgentConfig
-    from .misc.response_agent import ResponseAgent
 from .openai_chat import OpenAIChatAgent, OpenAIChatConfig
 
 
@@ -63,18 +62,16 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
         self,
         *,
         mcp_client: AgentMCPClient | None = None,
-        response_agent: ResponseAgent | None = None,
         auto_trace: bool = True,
+        auto_respond: bool = False,
         verbose: bool = False,
         **config_kwargs: Any,
     ) -> None:
         """Initialize the grounded OpenAI agent."""
-
-
         super().__init__(
             mcp_client=mcp_client,
-            response_agent=response_agent,
             auto_trace=auto_trace,
+            auto_respond=auto_respond,
             verbose=verbose,
             **config_kwargs,
         )

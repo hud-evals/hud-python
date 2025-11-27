@@ -11,7 +11,7 @@ from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 
 class DummyAgent(MCPAgent):
     def __init__(self, *, config: BaseAgentConfig | None = None, **kwargs: Any) -> None:
-        base_keys = {"mcp_client", "response_agent", "auto_trace", "verbose"}
+        base_keys = {"mcp_client", "auto_respond", "auto_trace", "verbose"}
         base_kwargs = {key: kwargs[key] for key in base_keys if key in kwargs}
         config = config or BaseAgentConfig(
             **{key: value for key, value in kwargs.items() if key not in base_keys}

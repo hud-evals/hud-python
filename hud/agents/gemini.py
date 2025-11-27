@@ -15,8 +15,6 @@ if TYPE_CHECKING:
     from hud.clients.base import AgentMCPClient
     from hud.datasets import Task
 
-    from .misc.response_agent import ResponseAgent
-
 import mcp.types as types
 
 from hud.settings import settings
@@ -79,8 +77,8 @@ class GeminiAgent(MCPAgent):
         self,
         *,
         mcp_client: AgentMCPClient | None = None,
-        response_agent: ResponseAgent | None = None,
         auto_trace: bool = True,
+        auto_respond: bool = False,
         verbose: bool = False,
         **config_kwargs: Any,
     ) -> None:
@@ -91,8 +89,8 @@ class GeminiAgent(MCPAgent):
         super().__init__(
             config=self.config,
             mcp_client=mcp_client,
-            response_agent=response_agent,
             auto_trace=auto_trace,
+            auto_respond=auto_respond,
             model_name="Gemini",
             checkpoint_name=self.config.model,
             verbose=verbose,

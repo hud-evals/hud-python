@@ -29,8 +29,6 @@ if TYPE_CHECKING:
     from hud.clients.base import AgentMCPClient
     from hud.datasets import Task
 
-    from .misc import ResponseAgent
-
 import mcp.types as types
 
 from pydantic import ConfigDict
@@ -75,8 +73,8 @@ class ClaudeAgent(MCPAgent):
         self,
         *,
         mcp_client: AgentMCPClient | None = None,
-        response_agent: ResponseAgent | None = None,
         auto_trace: bool = True,
+        auto_respond: bool = False,
         verbose: bool = False,
         **config_kwargs: Any,
     ) -> None:
@@ -85,8 +83,8 @@ class ClaudeAgent(MCPAgent):
 
         Args:
             mcp_client: Optional MCP client instance.
-            response_agent: Optional automation to handle tool responses.
             auto_trace: Whether to create traces automatically for runs.
+            auto_respond: Whether to use the model to determine if agent should stop or continue.
             verbose: Enable verbose console logging for development.
             **config_kwargs: Keyword arguments for `ClaudeConfig`
                 (e.g., `model`, `max_tokens`, `use_computer_beta`, `allowed_tools`, etc.).
@@ -96,8 +94,8 @@ class ClaudeAgent(MCPAgent):
         super().__init__(
             config=self.config,
             mcp_client=mcp_client,
-            response_agent=response_agent,
             auto_trace=auto_trace,
+            auto_respond=auto_respond,
             model_name="Claude",
             checkpoint_name=self.config.model,
             verbose=verbose,

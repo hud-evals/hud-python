@@ -20,8 +20,6 @@ if TYPE_CHECKING:
     from hud.clients.base import AgentMCPClient
     from hud.datasets import Task
 
-    from .misc import ResponseAgent
-
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +53,8 @@ class MCPAgent(ABC):
         checkpoint_name: str | None = None,
         config: BaseAgentConfig | None = None,
         mcp_client: AgentMCPClient | None = None,
-        response_agent: ResponseAgent | None = None,
         auto_trace: bool = True,
+        auto_respond: bool = False,
         verbose: bool = False,
     ) -> None:
         """
@@ -68,8 +66,9 @@ class MCPAgent(ABC):
             config: Optional instance of `config_cls`; defaults to `self.config_cls()`.
             mcp_client: Client for connecting to MCP servers. If None, a client
                 is auto-created when `run()` is called with a `Task` that provides `mcp_config`.
-            response_agent: Optional automation to respond to model outputs.
             auto_trace: Whether to automatically create telemetry spans for runs.
+            auto_respond: Whether to use the model to determine if agent should stop or continue
+                when it produces a response without tool calls.
             verbose: Enable verbose console logging for development.
         """
         config = config or self.config_cls()
@@ -94,6 +93,7 @@ class MCPAgent(ABC):
         self.append_setup_output = config.append_setup_output
         self.initial_screenshot = config.initial_screenshot
         self.response_tool_name = config.response_tool_name
+        self.auto_respond = auto_respond
 
         self._available_tools: list[types.Tool] | None = None
 
@@ -103,9 +103,6 @@ class MCPAgent(ABC):
         # Trace
         self._auto_trace = auto_trace
         self._auto_trace_cm: Any | None = None  # Store auto-created trace context manager
-
-        # Response agent to automatically interact with the model
-        self.response_agent = response_agent
 
     async def initialize(self, task: str | Task | None = None) -> None:
         """Initialize the agent with task-specific configuration."""
@@ -406,15 +403,16 @@ class MCPAgent(ABC):
 
                     # Check if we should stop
                     if response.done or not response.tool_calls:
-                        # Optional external ResponseAgent to decide whether to stop
-                        decision = "STOP"
-                        if self.response_agent is not None and response.content:
+                        # Use auto_respond to decide whether to stop
+                        decision: Literal["STOP", "CONTINUE"] = "STOP"
+                        if self.auto_respond and response.content:
                             try:
-                                decision = await self.response_agent.determine_response(
-                                    response.content
-                                )
+                                from hud.agents.misc import ResponseAgent
+
+                                response_agent = ResponseAgent()
+                                decision = await response_agent.determine_response(response.content)
                             except Exception as e:
-                                self.console.warning_log(f"ResponseAgent failed: {e}")
+                                self.console.warning_log(f"Auto-respond failed: {e}")
                         if decision == "STOP":
                             # Try to submit response through lifecycle tool
                             await self._maybe_submit_response(response, messages)

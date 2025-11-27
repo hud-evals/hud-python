@@ -155,16 +155,14 @@ Your `get_response()` receives the full conversation history each time, allowing
 
 ### Advanced Features
 
-**Response Agent Integration**
+**Auto-Respond Mode**
 ```python
-from hud.agents.misc import ResponseAgent
-
 agent = MyAgent(
-    response_agent=ResponseAgent()  # Auto-decides when to stop/continue
+    auto_respond=True  # Uses the agent's model to decide when to stop/continue
 )
 ```
 
-The ResponseAgent can analyze ambiguous LLM responses like "Should I submit?" and decide whether to continue.
+When `auto_respond=True`, the agent will use its model to analyze ambiguous responses like "Should I submit?" and decide whether to continue or stop.
 
 **Telemetry & Tracing**
 ```python

@@ -37,8 +37,6 @@ from .base import MCPAgent
 if TYPE_CHECKING:
     from hud.clients.base import AgentMCPClient
 
-    from .misc.response_agent import ResponseAgent
-
 logger = logging.getLogger(__name__)
 
 
@@ -67,8 +65,8 @@ class OpenAIAgent(MCPAgent):
         self,
         *,
         mcp_client: AgentMCPClient | None = None,
-        response_agent: ResponseAgent | None = None,
         auto_trace: bool = True,
+        auto_respond: bool = False,
         verbose: bool = False,
         **config_kwargs: Any,
     ) -> None:
@@ -83,8 +81,8 @@ class OpenAIAgent(MCPAgent):
         super().__init__(
             config=self.config,
             mcp_client=mcp_client,
-            response_agent=response_agent,
             auto_trace=auto_trace,
+            auto_respond=auto_respond,
             model_name="OpenAI",
             checkpoint_name=self.config.model,
             verbose=verbose,

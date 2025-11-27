@@ -31,8 +31,6 @@ from .openai import OpenAIAgent, OpenAIConfig
 if TYPE_CHECKING:
     from hud.clients.base import AgentMCPClient
 
-    from .misc.response_agent import ResponseAgent
-
 OPERATOR_INSTRUCTIONS = """
 You are an autonomous computer-using agent. Follow these guidelines:
 
@@ -79,15 +77,15 @@ class OperatorAgent(OpenAIAgent):
         self,
         *,
         mcp_client: AgentMCPClient | None = None,
-        response_agent: ResponseAgent | None = None,
         auto_trace: bool = True,
+        auto_respond: bool = False,
         verbose: bool = False,
         **config_kwargs: Any,
     ) -> None:
         super().__init__(
             mcp_client=mcp_client,
-            response_agent=response_agent,
             auto_trace=auto_trace,
+            auto_respond=auto_respond,
             verbose=verbose,
             **config_kwargs,
         )

@@ -35,7 +35,7 @@ class MockMCPAgent(MCPAgent):
             mcp_client.list_tools = AsyncMock(return_value=[])
             mcp_client.mcp_config = {"test_server": {"url": "http://localhost"}}
 
-        base_keys = {"mcp_client", "response_agent", "auto_trace", "verbose"}
+        base_keys = {"mcp_client", "auto_respond", "auto_trace", "verbose"}
         base_kwargs = {key: kwargs[key] for key in base_keys if key in kwargs}
         base_kwargs.setdefault("mcp_client", mcp_client)
 
@@ -388,7 +388,7 @@ class MockAgentExtended(MCPAgent):
     metadata: ClassVar[dict[str, Any] | None] = {}  # Optional metadata for MCP config
 
     def __init__(self, responses=None, **kwargs):
-        base_keys = {"mcp_client", "response_agent", "auto_trace", "verbose"}
+        base_keys = {"mcp_client", "auto_respond", "auto_trace", "verbose"}
         base_kwargs = {key: kwargs[key] for key in base_keys if key in kwargs}
         self.config = BaseAgentConfig(
             **{key: value for key, value in kwargs.items() if key not in base_keys}
