@@ -21,8 +21,8 @@ import traceback
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 import questionary
-from questionary import Style
 import typer
+from questionary import Style
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -500,12 +500,14 @@ class HUDConsole:
                 q_choices.append(choice)
 
         # Custom style for better visibility of selection
-        custom_style = Style([
-            ("qmark", "fg:cyan bold"),
-            ("question", "bold"),
-            ("pointer", "fg:cyan bold"),
-            ("highlighted", "fg:cyan bold"),
-        ])
+        custom_style = Style(
+            [
+                ("qmark", "fg:cyan bold"),
+                ("question", "bold"),
+                ("pointer", "fg:cyan bold"),
+                ("highlighted", "fg:cyan bold"),
+            ]
+        )
 
         result = questionary.select(
             message,

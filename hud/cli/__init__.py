@@ -25,7 +25,6 @@ from .build import build_command
 from .clone import clone_repository, get_clone_message, print_error, print_tutorial
 from .debug import debug_mcp_stdio
 from .dev import run_mcp_dev_server
-
 from .eval import eval_command
 from .init import create_environment
 from .pull import pull_command
@@ -191,7 +190,6 @@ def debug(
         hud debug . --max-phase 3               # Stop after phase 3[/not dim]
     """
     # Import here to avoid circular imports
-    from hud.utils.hud_console import HUDConsole
 
     from .utils.environment import (
         build_environment,
@@ -290,8 +288,6 @@ def debug(
     phases_completed = asyncio.run(debug_mcp_stdio(command, logger, max_phase=max_phase))
 
     # Show summary using design system
-    from hud.utils.hud_console import HUDConsole
-
     hud_console = HUDConsole()
 
     hud_console.info("")  # Empty line
@@ -1007,8 +1003,6 @@ def convert(
     """
     from pathlib import Path
 
-    from hud.utils.hud_console import HUDConsole
-
     hud_console = HUDConsole()
 
     try:
@@ -1050,9 +1044,7 @@ def cancel(
     all_jobs: bool = typer.Option(
         False, "--all", "-a", help="Cancel ALL active jobs for your account (panic button)."
     ),
-    yes: bool = typer.Option(
-        False, "--yes", "-y", help="Skip confirmation prompt."
-    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     """Cancel remote rollouts.
 
@@ -1065,8 +1057,6 @@ def cancel(
 
     import questionary
 
-    from hud.utils.hud_console import HUDConsole
-
     hud_console = HUDConsole()
 
     if not job_id and not all_jobs:
@@ -1078,21 +1068,28 @@ def cancel(
         raise typer.Exit(1)
 
     # Handle confirmations BEFORE entering async context (questionary uses asyncio internally)
-    if all_jobs and not yes:
-        if not questionary.confirm(
+    if (
+        all_jobs
+        and not yes
+        and not questionary.confirm(
             "⚠️  This will cancel ALL your active jobs. Continue?",
             default=False,
-        ).ask():
-            hud_console.info("Cancelled.")
-            raise typer.Exit(0)
+        ).ask()
+    ):
+        hud_console.info("Cancelled.")
+        raise typer.Exit(0)
 
-    if job_id and not task_id and not yes:
-        if not questionary.confirm(
+    if (
+        job_id
+        and not task_id
+        and not yes
+        and not questionary.confirm(
             f"Cancel all tasks in job {job_id}?",
             default=True,
-        ).ask():
-            hud_console.info("Cancelled.")
-            raise typer.Exit(0)
+        ).ask()
+    ):
+        hud_console.info("Cancelled.")
+        raise typer.Exit(0)
 
     async def _cancel() -> None:
         from hud.datasets.utils import cancel_all_jobs, cancel_job, cancel_task
@@ -1165,7 +1162,6 @@ def set(
     Values are stored in ~/.hud/.env and are loaded by hud.settings with
     the lowest precedence (overridden by process env and project .env).[/not dim]
     """
-    from hud.utils.hud_console import HUDConsole
 
     hud_console = HUDConsole()
 

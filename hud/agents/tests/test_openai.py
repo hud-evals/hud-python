@@ -775,6 +775,7 @@ class TestOpenAIAgent:
             model_client=mock_openai,
             validate_api_key=False,
         )
+
     async def test_get_response_raises_on_invalid_json_arguments(
         self, mock_mcp_client, mock_openai
     ):

@@ -44,15 +44,18 @@ class AgentType(str, Enum):
         }
         if self == AgentType.INTEGRATION_TEST:
             from hud.agents.misc.integration_test_agent import IntegrationTestRunner
+
             return IntegrationTestRunner
         if self not in mapping:
             raise ValueError(f"Unsupported agent type: {self}")
         return mapping[self]
 
+
 class BaseAgentConfig(BaseModel):
     """Standard agent configuration that tasks can override.
     Provider-specific configs should not be included here.
     """
+
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
     allowed_tools: list[str] | None = None
@@ -61,6 +64,8 @@ class BaseAgentConfig(BaseModel):
     system_prompt: str | None = None
     append_setup_output: bool = True
     initial_screenshot: bool = True
+
+
 class Task(BaseModel):
     """
     A task configuration that can be used to create a task.
@@ -115,6 +120,7 @@ class Task(BaseModel):
                 v = json.loads(v)
             except json.JSONDecodeError as e:
                 from hud.shared.exceptions import HudConfigError
+
                 raise HudConfigError(f"Invalid JSON string for agent_config: {e}") from e
         if isinstance(v, dict):
             return BaseAgentConfig(**v)

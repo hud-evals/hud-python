@@ -788,7 +788,9 @@ class MCPServer(FastMCP):
                     # Include group_size if > 1
                     if eval_request.group_size > 1:
                         response_data["group_size"] = eval_request.group_size
-                        response_data["total_episodes"] = len(task_objects) * eval_request.group_size
+                        response_data["total_episodes"] = (
+                            len(task_objects) * eval_request.group_size
+                        )
 
                     return JSONResponse(response_data)
 

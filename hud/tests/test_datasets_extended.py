@@ -11,8 +11,8 @@ from hud.datasets import (
     Task,
     run_dataset,
 )
-from hud.utils.tasks import save_tasks
 from hud.types import MCPToolCall
+from hud.utils.tasks import save_tasks
 
 
 class TestTaskExtended:
@@ -233,9 +233,7 @@ class TestRunDatasetExtended:
                 "agent_config": {"verbose": True},
             }
 
-            mock_job_func.assert_called_once_with(
-                "metadata_run", metadata=expected_metadata
-            )
+            mock_job_func.assert_called_once_with("metadata_run", metadata=expected_metadata)
 
     @pytest.mark.asyncio
     async def test_run_dataset_exception_handling(self):

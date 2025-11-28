@@ -26,11 +26,9 @@ from anthropic.types.beta import (
 import hud
 
 if TYPE_CHECKING:
-    from hud.clients.base import AgentMCPClient
     from hud.datasets import Task
 
 import mcp.types as types
-
 from pydantic import ConfigDict
 
 from hud.settings import settings
@@ -75,7 +73,7 @@ class ClaudeAgent(MCPAgent):
 
     @with_signature(ClaudeCreateParams)
     @classmethod
-    def create(cls, **kwargs: Any) -> "ClaudeAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
+    def create(cls, **kwargs: Any) -> ClaudeAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
         return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
     def __init__(self, params: ClaudeCreateParams | None = None, **kwargs: Any) -> None:

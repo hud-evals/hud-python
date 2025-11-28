@@ -46,10 +46,16 @@ async def main() -> None:
     # Select agent type and params
     if args.agent == "operator":
         agent_type = AgentType.OPERATOR
-        agent_params = {"checkpoint_name": args.model or "computer-use-preview", "validate_api_key": False}
+        agent_params = {
+            "checkpoint_name": args.model or "computer-use-preview",
+            "validate_api_key": False,
+        }
     else:
         agent_type = AgentType.CLAUDE
-        agent_params = {"checkpoint_name": args.model or "claude-sonnet-4-5", "validate_api_key": False}
+        agent_params = {
+            "checkpoint_name": args.model or "claude-sonnet-4-5",
+            "validate_api_key": False,
+        }
 
     # Run evaluation
     results = await run_tasks(

@@ -50,8 +50,7 @@ class ResponseAgent:
         api_key = settings.api_key
         if not api_key:
             raise ValueError(
-                "HUD API key is required for auto_respond. "
-                "Set HUD_API_KEY environment variable."
+                "HUD API key is required for auto_respond. Set HUD_API_KEY environment variable."
             )
 
         self.client: AsyncOpenAI = AsyncOpenAI(

@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import json
-from typing import Any, ClassVar, TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, ClassVar
+
+from pydantic import ConfigDict, field_validator
 
 from hud import instrument
 from hud.tools.grounding import GroundedComputerTool, Grounder, GrounderConfig
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 from hud.utils.types import with_signature
-from pydantic import ConfigDict, field_validator
 
 if TYPE_CHECKING:
     from hud.types import BaseAgentConfig
 from .base import BaseCreateParams
 from .openai_chat import OpenAIChatAgent, OpenAIChatConfig
-
 
 DEFAULT_GROUNDED_PROMPT = (
     "You are a helpful AI assistant that can control the computer through visual "
@@ -45,13 +45,12 @@ class GroundedOpenAIConfig(OpenAIChatConfig):
 
     @field_validator("grounder_config", mode="before")
     @classmethod
-    def _coerce_grounder_config(
-        cls, value: GrounderConfig | dict[str, Any]
-    ) -> GrounderConfig:
+    def _coerce_grounder_config(cls, value: GrounderConfig | dict[str, Any]) -> GrounderConfig:
         if isinstance(value, GrounderConfig):
             return value
         if isinstance(value, dict):
             return GrounderConfig(**value)
+
 
 class GroundedOpenAICreateParams(BaseCreateParams, GroundedOpenAIConfig):
     pass
@@ -65,8 +64,9 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
 
     @with_signature(GroundedOpenAICreateParams)
     @classmethod
-    def create(cls, **kwargs: Any) -> "GroundedOpenAIChatAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
+    def create(cls, **kwargs: Any) -> GroundedOpenAIChatAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
         from .base import MCPAgent
+
         return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
     def __init__(self, params: GroundedOpenAICreateParams | None = None, **kwargs: Any) -> None:

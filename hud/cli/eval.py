@@ -19,7 +19,6 @@ from pydantic import BaseModel, Field, field_validator
 from rich import box
 from rich.table import Table
 
-import hud
 from hud.cli.utils.env_check import ensure_built, find_environment_dir
 from hud.settings import settings
 from hud.types import AgentType
@@ -56,12 +55,19 @@ _AGENT_PRESETS: list[AgentPreset] = [
     AgentPreset("Claude Sonnet 4.5", AgentType.CLAUDE, "claude-sonnet-4-5-20250929"),
     AgentPreset("GPT-5", AgentType.OPENAI, "gpt-5"),
     AgentPreset("Operator (OpenAI Computer Use)", AgentType.OPERATOR, "computer-use-preview"),
-    AgentPreset("Gemini 2.5 Computer Use", AgentType.GEMINI, "gemini-2.5-computer-use-preview-10-2025"),
+    AgentPreset(
+        "Gemini 2.5 Computer Use", AgentType.GEMINI, "gemini-2.5-computer-use-preview-10-2025"
+    ),
     # HUD Gateway presets (OpenRouter/open source models via gateway)
-    AgentPreset("Grok 4", AgentType.OPENAI_COMPATIBLE, "grok-4-fast", _gateway_config("openrouter/x-ai/grok-4-fast")),
+    AgentPreset(
+        "Grok 4",
+        AgentType.OPENAI_COMPATIBLE,
+        "grok-4-fast",
+        _gateway_config("openrouter/x-ai/grok-4-fast"),
+    ),
 ]
 
-_DEFAULT_CONFIG_TEMPLATE = '''# HUD Eval Configuration
+_DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # Command-line arguments override these settings
 
 [eval]
@@ -96,7 +102,7 @@ _DEFAULT_CONFIG_TEMPLATE = '''# HUD Eval Configuration
 [openai_compatible]
 # base_url = "http://localhost:8000/v1"
 # model_name = "my-model"
-'''
+"""
 
 # Agent type -> (settings attr, env var name)
 _API_KEY_REQUIREMENTS: dict[AgentType, tuple[str, str]] = {
@@ -115,8 +121,17 @@ class EvalConfig(BaseModel):
 
     # Fields loaded from [eval] section
     _EVAL_FIELDS: ClassVar[set[str]] = {
-        "source", "agent_type", "model", "task_ids", "full",
-        "max_concurrent", "max_steps", "verbose", "very_verbose", "group_size", "remote",
+        "source",
+        "agent_type",
+        "model",
+        "task_ids",
+        "full",
+        "max_concurrent",
+        "max_steps",
+        "verbose",
+        "very_verbose",
+        "group_size",
+        "remote",
         "auto_respond",
     }
     # Fields loaded from [agent] section
@@ -209,7 +224,7 @@ class EvalConfig(BaseModel):
         return kwargs
 
     @classmethod
-    def load(cls, path: str = _CONFIG_PATH) -> "EvalConfig":
+    def load(cls, path: str = _CONFIG_PATH) -> EvalConfig:
         """Load config from TOML file."""
         p = Path(path)
         if not p.exists():
@@ -264,7 +279,7 @@ class EvalConfig(BaseModel):
         disallowed_tools: str | None = None,
         task_ids: str | None = None,
         **cli_args: Any,
-    ) -> "EvalConfig":
+    ) -> EvalConfig:
         """Merge CLI args (non-None values override config)."""
         overrides: dict[str, Any] = {}
 
@@ -275,7 +290,9 @@ class EvalConfig(BaseModel):
         if allowed_tools is not None:
             overrides["allowed_tools"] = [t.strip() for t in allowed_tools.split(",") if t.strip()]
         if disallowed_tools is not None:
-            overrides["disallowed_tools"] = [t.strip() for t in disallowed_tools.split(",") if t.strip()]
+            overrides["disallowed_tools"] = [
+                t.strip() for t in disallowed_tools.split(",") if t.strip()
+            ]
         if task_ids is not None:
             overrides["task_ids"] = [t.strip() for t in task_ids.split(",") if t.strip()]
 
@@ -329,15 +346,14 @@ class EvalConfig(BaseModel):
 
         return self.model_validate({**self.model_dump(), **overrides})
 
-    def resolve_agent_interactive(self) -> "EvalConfig":
+    def resolve_agent_interactive(self) -> EvalConfig:
         """Prompt user to select an agent preset if not set. Returns updated config."""
         if self.agent_type is not None:
             return self
 
         # Build choices from presets
         choices: list[dict[str, Any]] = [
-            {"name": preset.name, "value": preset}
-            for preset in _AGENT_PRESETS
+            {"name": preset.name, "value": preset} for preset in _AGENT_PRESETS
         ]
 
         selected: AgentPreset = hud_console.select("Select an agent:", choices=choices, default=0)  # type: ignore[arg-type]
@@ -368,7 +384,9 @@ class EvalConfig(BaseModel):
         table.add_row("source", str(self.source or "—"))
         table.add_row("agent", self.agent_type.value)  # type: ignore[union-attr]
         if self.task_ids:
-            table.add_row("task_ids", ", ".join(self.task_ids[:5]) + ("..." if len(self.task_ids) > 5 else ""))
+            table.add_row(
+                "task_ids", ", ".join(self.task_ids[:5]) + ("..." if len(self.task_ids) > 5 else "")
+            )
         table.add_row("full", str(self.full))
         table.add_row("max_steps", str(self.max_steps or (100 if self.full else 10)))
         if not self.remote:
@@ -400,16 +418,28 @@ class EvalConfig(BaseModel):
             config_cls = self.agent_type.cls.config_cls
             defaults = config_cls()
             overrides = self.agent_config.get(self.agent_type.value, {})
-            skip = {"model_client", "validate_api_key", "model_config",
-                    "allowed_tools", "disallowed_tools", "system_prompt",
-                    "response_tool_name", "append_setup_output", "initial_screenshot"}
+            skip = {
+                "model_client",
+                "validate_api_key",
+                "model_config",
+                "allowed_tools",
+                "disallowed_tools",
+                "system_prompt",
+                "response_tool_name",
+                "append_setup_output",
+                "initial_screenshot",
+            }
 
             for name in config_cls.model_fields:
                 if name in skip:
                     continue
                 # Always show checkpoint_name; other fields only if explicitly set (via CLI or TOML)
                 if name == "checkpoint_name":
-                    value = self.model or overrides.get("checkpoint_name") or getattr(defaults, "checkpoint_name", None)
+                    value = (
+                        self.model
+                        or overrides.get("checkpoint_name")
+                        or getattr(defaults, "checkpoint_name", None)
+                    )
                     table.add_row(f"  {name}", str(value) if value else "—")
                 elif name in overrides:
                     table.add_row(f"  {name}", str(overrides[name]))
@@ -422,7 +452,7 @@ class EvalConfig(BaseModel):
 # =============================================================================
 
 
-def _load_tasks_from_source(source: str) -> list["Task"]:
+def _load_tasks_from_source(source: str) -> list[Task]:
     """Load tasks from file or HuggingFace dataset."""
     from hud.utils.tasks import load_tasks
 
@@ -447,7 +477,7 @@ def _load_tasks_from_source(source: str) -> list["Task"]:
     return tasks  # type: ignore[return-value]
 
 
-def _warn_local_mcp(tasks: list["Task"], source: str) -> None:
+def _warn_local_mcp(tasks: list[Task], source: str) -> None:
     """Warn user if tasks use local MCP configs."""
     try:
         has_local = any(
@@ -550,7 +580,9 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
         return [result], tasks
 
     # Local batch execution
-    hud_console.info(f"🚀 Running evaluation (max_concurrent: {cfg.max_concurrent}, group_size: {cfg.group_size})…")
+    hud_console.info(
+        f"🚀 Running evaluation (max_concurrent: {cfg.max_concurrent}, group_size: {cfg.group_size})…"
+    )
 
     results = await run_tasks(
         tasks=tasks,
@@ -572,23 +604,37 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
 
 def eval_command(
     source: str = typer.Argument("", help="HuggingFace dataset or task JSON file"),
-    agent: str | None = typer.Argument(None, help="Agent: claude, openai, operator, gemini, openai_compatible, integration_test"),
+    agent: str | None = typer.Argument(
+        None, help="Agent: claude, openai, operator, gemini, openai_compatible, integration_test"
+    ),
     full: bool = typer.Option(False, "--full", help="Run entire dataset"),
     model: str | None = typer.Option(None, "--model", "-m", help="Model name"),
     config: list[str] | None = typer.Option(None, "--config", "-c", help="Agent config: key=value"),
     # Task-overridable settings
-    allowed_tools: str | None = typer.Option(None, "--allowed-tools", help="Comma-separated allowed tools"),
-    disallowed_tools: str | None = typer.Option(None, "--disallowed-tools", help="Comma-separated disallowed tools"),
+    allowed_tools: str | None = typer.Option(
+        None, "--allowed-tools", help="Comma-separated allowed tools"
+    ),
+    disallowed_tools: str | None = typer.Option(
+        None, "--disallowed-tools", help="Comma-separated disallowed tools"
+    ),
     # Eval settings
-    max_concurrent: int | None = typer.Option(None, "--max-concurrent", help="Max concurrent tasks"),
+    max_concurrent: int | None = typer.Option(
+        None, "--max-concurrent", help="Max concurrent tasks"
+    ),
     max_steps: int | None = typer.Option(None, "--max-steps", help="Max steps per task"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     very_verbose: bool = typer.Option(False, "--very-verbose", "-vv", help="Debug logs"),
-    auto_respond: bool | None = typer.Option(None, "--auto-respond", help="Continue without prompting after tool calls (default: True for --full)"),
+    auto_respond: bool | None = typer.Option(
+        None,
+        "--auto-respond",
+        help="Continue without prompting after tool calls (default: True for --full)",
+    ),
     group_size: int | None = typer.Option(None, "--group-size", help="Runs per task"),
     task_ids: str | None = typer.Option(None, "--task-ids", help="Comma-separated task IDs to run"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
-    remote: bool = typer.Option(False, "--remote", help="Submit tasks to platform for remote execution"),
+    remote: bool = typer.Option(
+        False, "--remote", help="Submit tasks to platform for remote execution"
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
 
@@ -625,7 +671,9 @@ def eval_command(
         try:
             from hud.cli.utils.tasks import find_tasks_file
 
-            cfg = cfg.model_copy(update={"source": find_tasks_file(None, msg="Select a tasks file")})
+            cfg = cfg.model_copy(
+                update={"source": find_tasks_file(None, msg="Select a tasks file")}
+            )
             hud_console.success(f"Selected: {cfg.source}")
         except Exception:
             hud_console.error("No source provided and no task files found")

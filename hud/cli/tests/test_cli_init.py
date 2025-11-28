@@ -194,12 +194,13 @@ class TestCLICommands:
     def test_version_command(self) -> None:
         """Test version command."""
         import re
+
         # Strip ANSI escape codes
-        ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+        ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
         with patch("hud.__version__", "1.2.3"):
             result = runner.invoke(app, ["version"])
             assert result.exit_code == 0
-            clean_output = ansi_escape.sub('', result.output)
+            clean_output = ansi_escape.sub("", result.output)
             assert "1.2.3" in clean_output
 
     def test_version_import_error(self) -> None:

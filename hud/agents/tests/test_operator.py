@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp import types
-from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
 from openai import AsyncOpenAI
+from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
 
 from hud.agents.operator import OperatorAgent
 from hud.types import MCPToolCall, MCPToolResult
@@ -126,7 +126,9 @@ class TestOperatorAgent:
         assert output1[0]["image_url"] == "data:image/png;base64,base64data"
 
     @pytest.mark.asyncio
-    async def test_format_tool_results_with_error(self, mock_mcp_client_openai_computer, mock_openai):
+    async def test_format_tool_results_with_error(
+        self, mock_mcp_client_openai_computer, mock_openai
+    ):
         """Test formatting tool results with errors."""
         agent = OperatorAgent.create(
             mcp_client=mock_mcp_client_openai_computer,

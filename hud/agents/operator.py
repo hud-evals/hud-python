@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import mcp.types as types
 from openai.types.responses import (
@@ -17,9 +17,6 @@ from openai.types.responses.response_input_param import (
     ComputerCallOutput,
 )
 from openai.types.shared_params.reasoning import Reasoning
-
-from pydantic import ConfigDict
-
 from pydantic import ConfigDict
 
 from hud.tools.computer.settings import computer_settings
@@ -82,7 +79,7 @@ class OperatorAgent(OpenAIAgent):
 
     @with_signature(OperatorCreateParams)
     @classmethod
-    def create(cls, **kwargs: Any) -> "OperatorAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
+    def create(cls, **kwargs: Any) -> OperatorAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
         return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
     def __init__(self, params: OperatorCreateParams | None = None, **kwargs: Any) -> None:

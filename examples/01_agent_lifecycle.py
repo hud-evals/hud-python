@@ -38,7 +38,10 @@ async def main():
                 }
             },
             "setup_tool": {"name": "launch_app", "arguments": {"app_name": "todo"}},
-            "evaluate_tool": {"name": "evaluate", "arguments": {"name": "todo_exists", "arguments": {"title": "Buy groceries"}}},
+            "evaluate_tool": {
+                "name": "evaluate",
+                "arguments": {"name": "todo_exists", "arguments": {"title": "Buy groceries"}},
+            },
         }
         task = Task(**task_dict)
 

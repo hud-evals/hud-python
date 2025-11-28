@@ -6,7 +6,7 @@ import copy
 import json
 import logging
 from inspect import cleandoc
-from typing import TYPE_CHECKING, TYPE_CHECKING, Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 import mcp.types as types
 from openai import AsyncOpenAI, Omit, OpenAI
@@ -26,20 +26,18 @@ from openai.types.responses import (
     ResponseOutputText,
     ToolParam,
 )
+from openai.types.responses.response_create_params import ToolChoice
 from openai.types.responses.response_input_param import FunctionCallOutput, Message
-
-import hud
+from openai.types.shared_params.reasoning import Reasoning
 from pydantic import ConfigDict
 
+import hud
 from hud.settings import settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
-from hud.utils.types import with_signature
 from hud.utils.strict_schema import ensure_strict_json_schema
+from hud.utils.types import with_signature
 
 from .base import BaseCreateParams, MCPAgent
-
-from openai.types.responses.response_create_params import ToolChoice
-from openai.types.shared_params.reasoning import Reasoning
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +71,7 @@ class OpenAIAgent(MCPAgent):
 
     @with_signature(OpenAICreateParams)
     @classmethod
-    def create(cls, **kwargs: Any) -> "OpenAIAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
+    def create(cls, **kwargs: Any) -> OpenAIAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
         return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
     def __init__(self, params: OpenAICreateParams | None = None, **kwargs: Any) -> None:
@@ -116,7 +114,9 @@ class OpenAIAgent(MCPAgent):
     def _to_openai_tool(
         self,
         tool: types.Tool,
-    ) -> FunctionShellToolParam | ApplyPatchToolParam | FunctionToolParam | ComputerToolParam | None:
+    ) -> (
+        FunctionShellToolParam | ApplyPatchToolParam | FunctionToolParam | ComputerToolParam | None
+    ):
         # Special case: shell tool -> OpenAI native shell
         if tool.name == "shell":
             return FunctionShellToolParam(type="shell")
@@ -286,7 +286,6 @@ class OpenAIAgent(MCPAgent):
 
         agent_response.content = "".join(reasoning_chunks) + "".join(text_chunks)
         return agent_response
-
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]

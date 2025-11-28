@@ -590,11 +590,13 @@ class TestMCPAgentExtended:
     @pytest.mark.asyncio
     async def test_allowed_tools_filtering(self):
         """Test that allowed_tools filters available tools."""
-        mock_client = MockMCPClient(tools=[
-            types.Tool(name="tool1", description="Tool 1", inputSchema={}),
-            types.Tool(name="tool2", description="Tool 2", inputSchema={}),
-            types.Tool(name="tool3", description="Tool 3", inputSchema={}),
-        ])
+        mock_client = MockMCPClient(
+            tools=[
+                types.Tool(name="tool1", description="Tool 1", inputSchema={}),
+                types.Tool(name="tool2", description="Tool 2", inputSchema={}),
+                types.Tool(name="tool3", description="Tool 3", inputSchema={}),
+            ]
+        )
 
         agent = MockAgentExtended(mcp_client=mock_client, allowed_tools=["tool1", "tool3"])
         await agent.initialize("test")
@@ -607,11 +609,13 @@ class TestMCPAgentExtended:
     @pytest.mark.asyncio
     async def test_disallowed_tools_filtering(self):
         """Test that disallowed_tools filters available tools."""
-        mock_client = MockMCPClient(tools=[
-            types.Tool(name="tool1", description="Tool 1", inputSchema={}),
-            types.Tool(name="tool2", description="Tool 2", inputSchema={}),
-            types.Tool(name="tool3", description="Tool 3", inputSchema={}),
-        ])
+        mock_client = MockMCPClient(
+            tools=[
+                types.Tool(name="tool1", description="Tool 1", inputSchema={}),
+                types.Tool(name="tool2", description="Tool 2", inputSchema={}),
+                types.Tool(name="tool3", description="Tool 3", inputSchema={}),
+            ]
+        )
 
         agent = MockAgentExtended(mcp_client=mock_client, disallowed_tools=["tool2"])
         await agent.initialize("test")
@@ -624,9 +628,9 @@ class TestMCPAgentExtended:
     @pytest.mark.asyncio
     async def test_lifecycle_tools(self):
         """Test lifecycle tools are called in run_prompt."""
-        mock_client = MockMCPClient(tools=[
-            types.Tool(name="screenshot", description="Take screenshot", inputSchema={})
-        ])
+        mock_client = MockMCPClient(
+            tools=[types.Tool(name="screenshot", description="Take screenshot", inputSchema={})]
+        )
 
         agent = MockAgentExtended(
             mcp_client=mock_client,

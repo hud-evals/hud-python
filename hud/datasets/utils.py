@@ -1,5 +1,4 @@
-"""Utility functions and schemas for the datasets module.
-"""
+"""Utility functions and schemas for the datasets module."""
 
 from __future__ import annotations
 
@@ -15,6 +14,7 @@ from hud.settings import settings
 from hud.types import AgentType, Task, Trace
 
 logger = logging.getLogger(__name__)
+
 
 class SingleTaskRequest(BaseModel):
     """Request to run a single task remotely - mirrors run_single_task() args."""
@@ -33,9 +33,7 @@ class SingleTaskRequest(BaseModel):
     job_id: str = Field(description="HUD job identifier for telemetry association.")
     task_id: str = Field(description="Task identifier.")
     trace_name: str = Field(description="Trace name.")
-    group_id: str | None = Field(
-        default=None, description="Optional HUD group identifier."
-    )
+    group_id: str | None = Field(default=None, description="Optional HUD group identifier.")
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional metadata to inject into the trace context.",
@@ -147,7 +145,9 @@ async def submit_rollouts(
                 )
 
             except httpx.HTTPStatusError as exc:
-                logger.error("Batch submission failed: %s - %s", exc.response.status_code, exc.response.text)
+                logger.error(
+                    "Batch submission failed: %s - %s", exc.response.status_code, exc.response.text
+                )
                 total_rejected += len(batch)
 
             except Exception as exc:
@@ -259,17 +259,19 @@ def calculate_group_stats(
         task_traces = [t for t in traces[start : start + group_size] if t is not None]
 
         if not task_traces:
-            stats.append({
-                "task_id": task.id or f"task_{task_idx}",
-                "prompt": task.prompt or "",
-                "group_id": group_ids[task_idx],
-                "group_size": group_size,
-                "rewards": [],
-                "mean_reward": 0.0,
-                "std_reward": 0.0,
-                "success_rate": 0.0,
-                "error_rate": 1.0,
-            })
+            stats.append(
+                {
+                    "task_id": task.id or f"task_{task_idx}",
+                    "prompt": task.prompt or "",
+                    "group_id": group_ids[task_idx],
+                    "group_size": group_size,
+                    "rewards": [],
+                    "mean_reward": 0.0,
+                    "std_reward": 0.0,
+                    "success_rate": 0.0,
+                    "error_rate": 1.0,
+                }
+            )
             continue
 
         rewards = np.array([t.reward for t in task_traces])
@@ -292,6 +294,7 @@ def calculate_group_stats(
         stats.append(task_stats)
 
     return stats
+
 
 def display_results(
     results: list[Any],
@@ -332,9 +335,9 @@ def display_results(
         total_episodes = sum(len(s.get("rewards", [])) for s in results)
 
         hud_console.success("\n📊 Evaluation Complete")
-        hud_console.info(f"Tasks: {len(results)} × {group_size} runs = {total_episodes} episodes")
+        hud_console.info(f"Tasks: {len(results)} x {group_size} runs = {total_episodes} episodes")
         if elapsed:
-            hud_console.info(f"Time: {elapsed:.1f}s ({total_episodes/elapsed:.1f} episodes/s)")
+            hud_console.info(f"Time: {elapsed:.1f}s ({total_episodes / elapsed:.1f} episodes/s)")
         hud_console.info(f"Mean reward: {overall_mean:.3f} ± {overall_std:.3f}")
 
         if show_details and len(results) <= 50:
@@ -381,9 +384,9 @@ def display_results(
         hud_console.success("\n📊 Evaluation Complete")
         hud_console.info(f"Tasks: {len(results)}")
         if elapsed:
-            hud_console.info(f"Time: {elapsed:.1f}s ({len(results)/elapsed:.1f} tasks/s)")
+            hud_console.info(f"Time: {elapsed:.1f}s ({len(results) / elapsed:.1f} tasks/s)")
         hud_console.info(f"Mean reward: {mean_reward:.3f}")
-        hud_console.info(f"Success rate: {success_rate*100:.1f}% ({successful}/{len(results)})")
+        hud_console.info(f"Success rate: {success_rate * 100:.1f}% ({successful}/{len(results)})")
 
         if show_details and len(results) <= 50:
             table = Table(title="\nPer-Task Results")
@@ -406,4 +409,3 @@ def display_results(
                     reward = getattr(r, "reward", 0)
                     status = "[green]✓[/green]" if reward > 0.7 else "[yellow]✗[/yellow]"
                     table.add_row(str(i + 1), task_id, prompt, f"{reward:.3f}", status)
-

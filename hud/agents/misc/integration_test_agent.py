@@ -7,7 +7,6 @@ from hud.types import AgentResponse, BaseAgentConfig, Task, Trace
 
 
 class IntegrationTestRunner(MCPAgent):
-
     metadata: ClassVar[dict[str, Any] | None] = {}
     config_cls: ClassVar[type[BaseAgentConfig]] = BaseAgentConfig
 

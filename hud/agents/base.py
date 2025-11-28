@@ -13,11 +13,10 @@ import mcp.types as types
 from pydantic import BaseModel, ConfigDict
 
 from hud.agents.utils import log_agent_metadata_to_status, log_task_config_to_current_trace
+from hud.clients.base import AgentMCPClient
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
 from hud.utils.hud_console import HUDConsole
 from hud.utils.mcp import MCPConfigPatch, patch_mcp_config, setup_hud_telemetry
-
-from hud.clients.base import AgentMCPClient
 
 if TYPE_CHECKING:
     from hud.datasets import Task
@@ -63,6 +62,7 @@ class MCPAgent(ABC):
     def __init__(self, params: BaseCreateParams | None = None, **kwargs: Any) -> None:
         if params is None:
             import warnings
+
             warnings.warn(
                 f"Passing kwargs to {self.__class__.__name__}() is deprecated. "
                 f"Use {self.__class__.__name__}.create(...) instead.",
@@ -75,11 +75,9 @@ class MCPAgent(ABC):
                 {"__module__": self.config_cls.__module__},
             )
             params = CreateParams(**kwargs)
-        
+
         config_kwargs = {
-            k: getattr(params, k)
-            for k in self.config_cls.model_fields.keys()
-            if hasattr(params, k)
+            k: getattr(params, k) for k in self.config_cls.model_fields.keys() if hasattr(params, k)
         }
         self.config = self.config_cls(**config_kwargs)
 
@@ -87,7 +85,7 @@ class MCPAgent(ABC):
         self.model_name: str = getattr(params, "model_name", "MCPAgent")
         self.checkpoint_name: str = getattr(params, "checkpoint_name", "unknown")
         self.auto_respond = params.auto_respond
-        
+
         self.console = HUDConsole(logger=logger)
 
         if params.verbose:
@@ -108,7 +106,7 @@ class MCPAgent(ABC):
         self._auto_trace_cm: Any | None = None
 
     @classmethod
-    def create(cls, **kwargs: Any) -> "MCPAgent":
+    def create(cls, **kwargs: Any) -> MCPAgent:
         """
         Factory method to create an agent with typed parameters.
         """
@@ -168,9 +166,7 @@ class MCPAgent(ABC):
                     # If task allows "*", keep CLI's allowed_tools unchanged
                     if "*" not in agent_cfg.allowed_tools:
                         self.allowed_tools = [
-                            tool
-                            for tool in self.allowed_tools
-                            if tool in agent_cfg.allowed_tools
+                            tool for tool in self.allowed_tools if tool in agent_cfg.allowed_tools
                         ]
                     # else: task allows all tools, so CLI's allowed_tools takes precedence
                 else:  # If allowed_tools is None, we overwrite it
@@ -403,7 +399,7 @@ class MCPAgent(ABC):
         error = None
 
         messages: list[Any] = []
-        
+
         try:
             # Start with system messages
             messages = await self.get_system_messages()

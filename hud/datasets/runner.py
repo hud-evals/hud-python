@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 from datasets import Dataset, load_dataset
 
-from hud.types import AgentType, Task, Trace
-from hud import async_trace, async_job
+from hud import async_job, async_trace
 from hud.datasets.utils import calculate_group_stats, submit_rollouts
+from hud.types import AgentType, Task, Trace
 
 if TYPE_CHECKING:
     from hud.agents import MCPAgent
@@ -113,7 +113,6 @@ async def run_tasks(
         await run_tasks(tasks, AgentType.CLAUDE, remote=True)
     """
     import hud
-
     from hud.utils.hud_console import HUDConsole
 
     job_metadata = metadata or {}
@@ -154,7 +153,7 @@ async def run_tasks(
 async def run_dataset(
     name: str,
     dataset: str | Dataset | list[dict[str, Any]],
-    agent_class: type["MCPAgent"],
+    agent_class: type[MCPAgent],
     agent_config: dict[str, Any] | None = None,
     max_concurrent: int = 30,
     metadata: dict[str, Any] | None = None,
@@ -232,14 +231,13 @@ async def run_dataset(
 
 async def _run_tasks(
     tasks: list[Task],
-    agent_class: type["MCPAgent"],
+    agent_class: type[MCPAgent],
     agent_params: dict[str, Any] | None,
     max_concurrent: int,
     max_steps: int,
     group_size: int,
     job_obj: Any,
 ) -> list[Any]:
-
     sem = asyncio.Semaphore(max_concurrent)
     params = agent_params or {}
 
@@ -266,7 +264,12 @@ async def _run_tasks(
                         traces[flat_idx] = await agent.run(task, max_steps=max_steps)
                 else:
                     task_id_with_run = f"{base_task_id}_{run_idx}"
-                    async with async_trace(trace_name, job_id=job_obj.id, task_id=task_id_with_run, group_id=group_ids[task_idx]):
+                    async with async_trace(
+                        trace_name,
+                        job_id=job_obj.id,
+                        task_id=task_id_with_run,
+                        group_id=group_ids[task_idx],
+                    ):
                         agent = agent_class.create(**params)
                         traces[flat_idx] = await agent.run(task, max_steps=max_steps)
             except Exception as e:

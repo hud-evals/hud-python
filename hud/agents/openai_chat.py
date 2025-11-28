@@ -21,19 +21,18 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import mcp.types as types
 from openai import AsyncOpenAI
-
-from hud import instrument
 from pydantic import ConfigDict, Field
 
+from hud import instrument
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
-from hud.utils.types import with_signature
 from hud.utils.hud_console import HUDConsole
+from hud.utils.types import with_signature
 
 from .base import BaseCreateParams, MCPAgent
 
 if TYPE_CHECKING:
-    from hud.clients.base import AgentMCPClient
     from openai.types.chat import ChatCompletionToolParam
+
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +62,7 @@ class OpenAIChatAgent(MCPAgent):
 
     @with_signature(OpenAIChatCreateParams)
     @classmethod
-    def create(cls, **kwargs: Any) -> "OpenAIChatAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
+    def create(cls, **kwargs: Any) -> OpenAIChatAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
         return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
     def __init__(self, params: OpenAIChatCreateParams | None = None, **kwargs: Any) -> None:

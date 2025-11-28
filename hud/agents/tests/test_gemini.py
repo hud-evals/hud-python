@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import base64
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from google import genai
@@ -150,7 +150,9 @@ class TestGeminiAgent:
         assert response_payload.get("success") is True
 
     @pytest.mark.asyncio
-    async def test_format_tool_results_with_error(self, mock_mcp_client_gemini_computer, mock_gemini_client):
+    async def test_format_tool_results_with_error(
+        self, mock_mcp_client_gemini_computer, mock_gemini_client
+    ):
         """Test formatting tool results with errors."""
         agent = GeminiAgent.create(
             mcp_client=mock_mcp_client_gemini_computer,
@@ -234,7 +236,9 @@ class TestGeminiAgent:
             assert response.done is False
 
     @pytest.mark.asyncio
-    async def test_get_response_text_only(self, mock_mcp_client_gemini_computer, mock_gemini_client):
+    async def test_get_response_text_only(
+        self, mock_mcp_client_gemini_computer, mock_gemini_client
+    ):
         """Test getting text-only response."""
         # Disable telemetry for this test
         with patch("hud.settings.settings.telemetry_enabled", False):
@@ -267,7 +271,9 @@ class TestGeminiAgent:
             assert response.done is True
 
     @pytest.mark.asyncio
-    async def test_convert_tools_for_gemini(self, mock_mcp_client_gemini_computer, mock_gemini_client):
+    async def test_convert_tools_for_gemini(
+        self, mock_mcp_client_gemini_computer, mock_gemini_client
+    ):
         """Test converting MCP tools to Gemini format."""
         agent = GeminiAgent.create(
             mcp_client=mock_mcp_client_gemini_computer,

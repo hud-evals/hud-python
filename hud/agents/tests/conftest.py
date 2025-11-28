@@ -70,46 +70,53 @@ def mock_mcp_client() -> MockMCPClient:
 @pytest.fixture
 def mock_mcp_client_with_tools() -> MockMCPClient:
     """Create a mock MCP client with a test tool."""
-    return MockMCPClient(tools=[
-        types.Tool(
-            name="test_tool",
-            description="A test tool",
-            inputSchema={"type": "object", "properties": {}},
-        )
-    ])
+    return MockMCPClient(
+        tools=[
+            types.Tool(
+                name="test_tool",
+                description="A test tool",
+                inputSchema={"type": "object", "properties": {}},
+            )
+        ]
+    )
 
 
 @pytest.fixture
 def mock_mcp_client_openai_computer() -> MockMCPClient:
     """Create a mock MCP client with openai_computer tool for Operator tests."""
-    return MockMCPClient(tools=[
-        types.Tool(
-            name="openai_computer",
-            description="OpenAI computer use tool",
-            inputSchema={},
-        )
-    ])
+    return MockMCPClient(
+        tools=[
+            types.Tool(
+                name="openai_computer",
+                description="OpenAI computer use tool",
+                inputSchema={},
+            )
+        ]
+    )
 
 
 @pytest.fixture
 def mock_mcp_client_gemini_computer() -> MockMCPClient:
     """Create a mock MCP client with gemini_computer tool for Gemini tests."""
-    return MockMCPClient(tools=[
-        types.Tool(
-            name="gemini_computer",
-            description="Gemini computer use tool",
-            inputSchema={},
-        )
-    ])
+    return MockMCPClient(
+        tools=[
+            types.Tool(
+                name="gemini_computer",
+                description="Gemini computer use tool",
+                inputSchema={},
+            )
+        ]
+    )
 
 
 @pytest.fixture
 def mock_mcp_client_browser_tools() -> MockMCPClient:
     """Create a mock MCP client with browser-like tools for extended tests."""
-    return MockMCPClient(tools=[
-        types.Tool(name="screenshot", description="Take screenshot", inputSchema={}),
-        types.Tool(name="click", description="Click at coordinates", inputSchema={}),
-        types.Tool(name="type", description="Type text", inputSchema={}),
-        types.Tool(name="bad_tool", description="A tool that fails", inputSchema={}),
-    ])
-
+    return MockMCPClient(
+        tools=[
+            types.Tool(name="screenshot", description="Take screenshot", inputSchema={}),
+            types.Tool(name="click", description="Click at coordinates", inputSchema={}),
+            types.Tool(name="type", description="Type text", inputSchema={}),
+            types.Tool(name="bad_tool", description="A tool that fails", inputSchema={}),
+        ]
+    )

@@ -7,12 +7,11 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from google import genai
 from google.genai import types as genai_types
-
-import hud
 from pydantic import ConfigDict, Field
 
+import hud
+
 if TYPE_CHECKING:
-    from hud.clients.base import AgentMCPClient
     from hud.datasets import Task
 
 import mcp.types as types
@@ -20,8 +19,8 @@ import mcp.types as types
 from hud.settings import settings
 from hud.tools.computer.settings import computer_settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
-from hud.utils.types import with_signature
 from hud.utils.hud_console import HUDConsole
+from hud.utils.types import with_signature
 
 from .base import BaseCreateParams, MCPAgent
 
@@ -81,7 +80,7 @@ class GeminiAgent(MCPAgent):
 
     @with_signature(GeminiCreateParams)
     @classmethod
-    def create(cls, **kwargs: Any) -> "GeminiAgent":  # pyright: ignore[reportIncompatibleMethodOverride]
+    def create(cls, **kwargs: Any) -> GeminiAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
         return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
     def __init__(self, params: GeminiCreateParams | None = None, **kwargs: Any) -> None:

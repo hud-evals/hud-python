@@ -10,7 +10,7 @@ from anthropic import AsyncAnthropic
 from mcp import types
 
 from hud.agents.tests.conftest import MockMCPClient
-from hud.types import AgentType, Task, Trace
+from hud.types import Task, Trace
 
 
 class TestToolFiltering:
