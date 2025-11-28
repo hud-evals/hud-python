@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 import warnings
@@ -115,9 +116,8 @@ async def run_tasks(
 
     from hud.utils.hud_console import HUDConsole
 
-    # Create job metadata
     job_metadata = metadata or {}
-    job_metadata["agent_params"] = agent_params or {}
+    job_metadata["agent_params"] = json.dumps(agent_params or {})
     job_metadata["agent_type"] = agent_type.value
     if group_size > 1:
         job_metadata["group_size"] = group_size
