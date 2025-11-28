@@ -18,6 +18,7 @@ def test_task_with_json_strings():
     )
     assert task.mcp_config == {"test": "config"}
     assert task.metadata == {"key": "value"}
+    assert task.agent_config is not None
     assert task.agent_config.system_prompt == "test"
 
 

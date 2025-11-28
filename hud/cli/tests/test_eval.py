@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -33,17 +34,18 @@ class TestToolFiltering:
         mock_mcp_client: MagicMock,
         mock_model_client: MagicMock,
         tools: list[types.Tool],
-        agent_config: dict | None = None,
+        agent_config: dict[str, Any] | None = None,
     ) -> list[types.Tool]:
         """Helper to create agent, initialize with tools and config, return filtered tools."""
         from hud.agents import ClaudeAgent
+        from hud.types import BaseAgentConfig
 
         mock_mcp_client.list_tools = AsyncMock(return_value=tools)
 
         task = Task(
             prompt="Test",
             mcp_config={"local": {"url": "http://localhost"}},
-            agent_config=agent_config or {},
+            agent_config=BaseAgentConfig(**agent_config) if agent_config else None,
         )
 
         agent = ClaudeAgent.create(
