@@ -44,11 +44,6 @@ class AgentPreset:
     agent_config: dict[str, Any] | None = None
 
 
-def _gateway_config(model_name: str) -> dict[str, Any]:
-    """Create agent_config for HUD gateway preset."""
-    return {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": model_name}}
-
-
 # Built-in presets for the interactive picker
 _AGENT_PRESETS: list[AgentPreset] = [
     # Native agents (use provider SDKs directly)
@@ -58,12 +53,12 @@ _AGENT_PRESETS: list[AgentPreset] = [
     AgentPreset(
         "Gemini 2.5 Computer Use", AgentType.GEMINI, "gemini-2.5-computer-use-preview-10-2025"
     ),
-    # HUD Gateway presets (OpenRouter/open source models via gateway)
+    # HUD Gateway presets
     AgentPreset(
-        "Grok 4",
+        "Grok 4.1 Fast",
         AgentType.OPENAI_COMPATIBLE,
-        "grok-4-fast",
-        _gateway_config("openrouter/x-ai/grok-4-fast"),
+        "xai/grok-4-1-fast-reasoning",
+        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "Grok"}},
     ),
 ]
 
@@ -227,7 +222,12 @@ class EvalConfig(BaseModel):
 
         kwargs["verbose"] = self.verbose or self.very_verbose
 
-        if self.agent_type != AgentType.INTEGRATION_TEST:
+        if self.agent_type in (
+            AgentType.CLAUDE,
+            AgentType.OPENAI,
+            AgentType.OPERATOR,
+            AgentType.GEMINI,
+        ):
             kwargs["validate_api_key"] = False
 
         return kwargs
@@ -718,7 +718,6 @@ def eval_command(
     elapsed = time.time() - start_time
 
     if cfg.remote:
-        hud_console.success("Remote submission completed")
         return
 
     from hud.datasets import display_results
