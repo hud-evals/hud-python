@@ -564,7 +564,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
 
 
 def eval_command(
-    source: str | None = typer.Argument(None, help="HuggingFace dataset or task JSON file"),
+    source: str = typer.Argument("", help="HuggingFace dataset or task JSON file"),
     agent: str | None = typer.Argument(None, help="Agent: claude, openai, operator, gemini, openai_compatible, integration_test"),
     full: bool = typer.Option(False, "--full", help="Run entire dataset"),
     model: str | None = typer.Option(None, "--model", "-m", help="Model name"),

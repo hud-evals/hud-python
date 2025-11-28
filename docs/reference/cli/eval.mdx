@@ -28,6 +28,10 @@ hud eval [SOURCE] [AGENT] [OPTIONS]
   Skip confirmation prompt and proceed automatically
 </ParamField>
 
+<ParamField path="--remote" type="boolean" default="false">
+  Run the evaluation remotely on HUD infrastructure (requires HUD_API_KEY)
+</ParamField>
+
 <ParamField path="--full" type="boolean" default="false">
   Run the entire dataset (omit for single-task debug mode)
 </ParamField>
@@ -117,6 +121,12 @@ hud eval tasks.json vllm --model llama3.1 --vllm-base-url http://localhost:8000
 
 # Limit tools and concurrency
 hud eval tasks.json claude --allowed-tools click,type --max-concurrent 10
+
+# Run evaluation remotely on HUD cloud
+hud eval hud-evals/SheetBench-50 --remote
+
+# Remote evaluation with specific model
+hud eval tasks.json --remote --agent openai --model gpt-5
 ```
 
 ## Notes
