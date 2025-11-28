@@ -138,7 +138,7 @@ async def run_tasks(
             metadata=metadata,
         )
         hud_console.success(f"Submitted {len(tasks) * group_size} rollouts for remote execution")
-        hud_console.info(f"Monitor progress at: https://hud.so/jobs/{job.id}")
+        hud_console.info(f"Monitor progress at: https://hud.ai/jobs/{job.id}")
         return []
 
     # Local execution
