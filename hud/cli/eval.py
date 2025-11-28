@@ -188,8 +188,15 @@ class EvalConfig(BaseModel):
             return
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
-            if not self.model:
-                hud_console.error("Model name is required for OpenAI compatible agent (--model)")
+            # Check both CLI --model and config file checkpoint_name
+            config_checkpoint = self.agent_config.get("openai_compatible", {}).get(
+                "checkpoint_name"
+            )
+            if not self.model and not config_checkpoint:
+                hud_console.error(
+                    "Model name is required for OpenAI compatible agent. "
+                    "Use --model or set checkpoint_name in .hud_eval.toml"
+                )
                 raise typer.Exit(1)
         elif self.agent_type in _API_KEY_REQUIREMENTS:
             attr, env_var = _API_KEY_REQUIREMENTS[self.agent_type]
@@ -222,8 +229,12 @@ class EvalConfig(BaseModel):
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
             base_url = kwargs.get("base_url", "")
-            if settings.hud_gateway_url in base_url and "api_key" not in kwargs:
-                kwargs["api_key"] = settings.api_key
+            if "api_key" not in kwargs:
+                # Use HUD API key for gateway, otherwise fall back to OpenAI API key
+                if settings.hud_gateway_url in base_url:
+                    kwargs["api_key"] = settings.api_key
+                elif settings.openai_api_key:
+                    kwargs["api_key"] = settings.openai_api_key
 
         kwargs["verbose"] = self.verbose or self.very_verbose
 

@@ -74,7 +74,10 @@ class OpenAIChatAgent(MCPAgent):
         elif self.config.api_key is not None or self.config.base_url is not None:
             self.oai = AsyncOpenAI(api_key=self.config.api_key, base_url=self.config.base_url)
         else:
-            raise ValueError("Either openai_client or (api_key and base_url) must be provided")
+            raise ValueError(
+                "Either openai_client or api_key must be provided. "
+                "Set OPENAI_API_KEY environment variable or pass api_key explicitly."
+            )
 
         self.completion_kwargs = dict(self.config.completion_kwargs)
         self.mcp_schemas: list[ChatCompletionToolParam] = []
