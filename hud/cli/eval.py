@@ -730,7 +730,11 @@ def eval_command(
 
     # Run
     start_time = time.time()
-    results, tasks = asyncio.run(_run_evaluation(cfg))
+    try:
+        results, tasks = asyncio.run(_run_evaluation(cfg))
+    except ValueError as e:
+        hud_console.error(str(e))
+        raise typer.Exit(1) from None
     elapsed = time.time() - start_time
 
     if cfg.remote:

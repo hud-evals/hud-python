@@ -12,8 +12,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from hud.settings import settings
 from hud.types import AgentType, Task, Trace
+from hud.utils.hud_console import HUDConsole
 
 logger = logging.getLogger(__name__)
+hud_console = HUDConsole()
 
 
 class SingleTaskRequest(BaseModel):
@@ -157,36 +159,30 @@ async def submit_rollouts(
                 # Log individual rejections with reasons
                 for item in result.get("results", []):
                     if isinstance(item, dict) and item.get("status") == "rejected":
-                        logger.warning(
-                            "Task rejected: %s",
-                            item.get("error", "Unknown reason"),
-                        )
+                        hud_console.warning(f"Task rejected: {item.get('error', 'Unknown reason')}")
 
-                logger.info(
-                    "Batch %d/%d: %d/%d accepted",
-                    (i // batch_size) + 1,
-                    (len(requests) + batch_size - 1) // batch_size,
-                    result.get("accepted", 0),
-                    len(batch),
+                hud_console.info(
+                    f"Batch {(i // batch_size) + 1}/{(len(requests) + batch_size - 1) // batch_size}: "
+                    f"{result.get('accepted', 0)}/{len(batch)} accepted"
                 )
 
             except httpx.HTTPStatusError as exc:
-                logger.error(
-                    "Batch submission failed: %s - %s", exc.response.status_code, exc.response.text
-                )
+                # Re-raise 4xx errors (validation failures) - these are not retryable
+                if 400 <= exc.response.status_code < 500:
+                    raise ValueError(
+                        f"Submission failed: {exc.response.text}"
+                    ) from exc
+                hud_console.error(f"Batch submission failed: {exc.response.status_code}")
                 total_rejected += len(batch)
 
             except Exception as exc:
-                logger.exception("Batch submission failed: %s", exc)
-                total_rejected += len(batch)
+                raise ValueError(f"Batch submission failed: {exc}") from exc
 
     # Log final summary
-    logger.info(
-        "Submitted %d/%d requests (%d rejected)",
-        total_accepted,
-        len(requests),
-        total_rejected,
-    )
+    if total_rejected > 0:
+        hud_console.warning(f"Submitted {total_accepted}/{len(requests)} requests ({total_rejected} rejected)")
+    else:
+        hud_console.info(f"Submitted {total_accepted}/{len(requests)} requests")
 
 
 async def cancel_job(job_id: str) -> dict[str, Any]:
