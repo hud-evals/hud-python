@@ -92,7 +92,7 @@ async def main():
     )
     
     # Run agent (auto-creates MCP client)
-    agent = ClaudeAgent()
+    agent = ClaudeAgent.create()
     result = await agent.run(task)
     print(f"Score: {result.reward}")
 
