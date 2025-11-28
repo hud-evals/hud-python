@@ -155,9 +155,9 @@ class MCPAgent(ABC):
                     self.system_prompt = agent_cfg.system_prompt
                 else:
                     self.system_prompt += "\n\n" + agent_cfg.system_prompt
-            if agent_cfg.append_setup_output is not None:
+            if "append_setup_output" in agent_cfg.model_fields_set:
                 self.append_setup_output = agent_cfg.append_setup_output
-            if agent_cfg.initial_screenshot is not None:
+            if "initial_screenshot" in agent_cfg.model_fields_set:
                 self.initial_screenshot = agent_cfg.initial_screenshot
             if agent_cfg.allowed_tools is not None:
                 # If allowed_tools has already been set, we take the intersection of the two
