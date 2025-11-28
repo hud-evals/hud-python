@@ -7,7 +7,7 @@ import logging
 from inspect import cleandoc
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
-from anthropic import Anthropic, AsyncAnthropic, Omit
+from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, Omit
 from anthropic.types import CacheControlEphemeralParam
 from anthropic.types.beta import (
     BetaBase64ImageSourceParam,
@@ -55,8 +55,8 @@ class ClaudeAgent(MCPAgent):
 
     def __init__(
         self,
-        model_client: AsyncAnthropic | None = None,
-        model: str = "claude-sonnet-4-5",
+        model_client: AsyncAnthropic | AsyncAnthropicBedrock | None = None,
+        model: str | None = None,
         max_tokens: int = 16384,
         use_computer_beta: bool = True,
         validate_api_key: bool = True,
@@ -66,10 +66,14 @@ class ClaudeAgent(MCPAgent):
         Initialize Claude MCP agent.
 
         Args:
-            model_client: AsyncAnthropic client (created if not provided)
-            model: Claude model to use
+            model_client: AsyncAnthropic or AsyncAnthropicBedrock client (created if not provided)
+            model: Claude model to use (required for Bedrock, optional for standard Anthropic)
             max_tokens: Maximum tokens for response
             use_computer_beta: Whether to use computer-use beta features
+            validate_api_key: Whether to validate API key on initialization.
+                For standard Anthropic, uses models.list() (non-billable).
+                For Bedrock, validation is skipped to avoid billable API calls
+                (AWS credentials are validated on first real API call).
             **kwargs: Additional arguments passed to BaseMCPAgent (including mcp_client)
         """
         super().__init__(**kwargs)
@@ -81,19 +85,24 @@ class ClaudeAgent(MCPAgent):
                 raise ValueError("Anthropic API key not found. Set ANTHROPIC_API_KEY.")
             model_client = AsyncAnthropic(api_key=api_key)
 
-        # validate api key if requested
-        if validate_api_key:
-            try:
-                Anthropic(api_key=model_client.api_key).models.list()
-            except Exception as e:
-                raise ValueError(f"Anthropic API key is invalid: {e}") from e
-
         self.anthropic_client = model_client
-        self.model = model
+        self.validate_api_key = validate_api_key
         self.max_tokens = max_tokens
         self.use_computer_beta = use_computer_beta
         self.hud_console = HUDConsole(logger=logger)
 
+        if isinstance(self.anthropic_client, AsyncAnthropic):
+            self.model = model or "claude-sonnet-4-5"
+        elif isinstance(self.anthropic_client, AsyncAnthropicBedrock):
+            if model is None:
+                raise ValueError(
+                    "`model` field must be set for Bedrock because it requires "
+                    "an account-specific ARN: find this in the AWS console under "
+                    "Bedrock -> Cross-region inference -> Inference profile ARN column"
+                )
+            self.model = model
+        else:
+            raise ValueError(f"Invalid model client: {type(self.anthropic_client)}")
         self.model_name = "Claude"
         self.checkpoint_name = self.model
 
@@ -104,6 +113,22 @@ class ClaudeAgent(MCPAgent):
 
     async def initialize(self, task: str | Task | None = None) -> None:
         """Initialize the agent and build tool mappings."""
+        # Validate API key if requested (must be done in async context)
+        if self.validate_api_key:
+            try:
+                if isinstance(self.anthropic_client, AsyncAnthropic):
+                    # Test with models.list() for standard Anthropic
+                    await self.anthropic_client.models.list()
+                elif isinstance(self.anthropic_client, AsyncAnthropicBedrock):
+                    # Skip validation for Bedrock - AWS credentials are validated by AWS SDK
+                    # on first API call. Making a test call here would be a billable operation.
+                    logger.debug(
+                        "Skipping API key validation for Bedrock (AWS credentials "
+                        "will be validated on first API call)"
+                    )
+            except Exception as e:
+                raise ValueError(f"API key validation failed: {e}") from e
+
         await super().initialize(task)
         # Build tool mappings after tools are discovered
         self._convert_tools_for_claude()
