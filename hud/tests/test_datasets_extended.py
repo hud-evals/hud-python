@@ -206,8 +206,8 @@ class TestRunDatasetExtended:
 
         with (
             patch("hud.clients.MCPClient") as MockClient,
-            patch("hud.async_job") as mock_job_func,
-            patch("hud.async_trace") as mock_trace,
+            patch("hud.datasets.runner.async_job") as mock_job_func,
+            patch("hud.datasets.runner.async_trace") as mock_trace,
         ):
             mock_job = AsyncMock()
             mock_job.id = "job-meta"

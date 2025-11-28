@@ -6,7 +6,7 @@ import copy
 import json
 import logging
 from inspect import cleandoc
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 import mcp.types as types
 from openai import AsyncOpenAI, Omit, OpenAI
@@ -26,12 +26,10 @@ from openai.types.responses import (
     ResponseOutputText,
     ToolParam,
 )
+from openai.types.responses.response_create_params import ToolChoice  # noqa: TC002
 from openai.types.responses.response_input_param import FunctionCallOutput, Message
+from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 from pydantic import ConfigDict
-
-if TYPE_CHECKING:
-    from openai.types.responses.response_create_params import ToolChoice
-    from openai.types.shared_params.reasoning import Reasoning
 
 import hud
 from hud.settings import settings

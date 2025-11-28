@@ -180,6 +180,13 @@ class EvalConfig(BaseModel):
         if self.agent_type is None:
             return
 
+        if self.remote:
+            if not settings.api_key:
+                hud_console.error("HUD_API_KEY is required for remote execution")
+                hud_console.info("Set it: hud set HUD_API_KEY=your-key-here")
+                raise typer.Exit(1)
+            return
+
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
             if not self.model:
                 hud_console.error("Model name is required for OpenAI compatible agent (--model)")
