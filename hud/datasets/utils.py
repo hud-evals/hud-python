@@ -92,6 +92,24 @@ async def submit_rollouts(
     if not settings.api_key:
         raise ValueError("HUD_API_KEY is required for remote execution")
 
+    # Validate tasks have remote-compatible mcp_config (URL-based, not command-based)
+    local_tasks = []
+    for i, task in enumerate(tasks):
+        if task.mcp_config:
+            for server_name, server_cfg in task.mcp_config.items():
+                if isinstance(server_cfg, dict) and "command" in server_cfg and not server_cfg.get("url"):
+                    local_tasks.append((i, task.id or f"task_{i}", server_name))
+
+    if local_tasks:
+        task_details = ", ".join(f"{tid} ({srv})" for _, tid, srv in local_tasks[:3])
+        if len(local_tasks) > 3:
+            task_details += f", ... and {len(local_tasks) - 3} more"
+        raise ValueError(
+            f"Remote execution requires URL-based mcp_config, but {len(local_tasks)} task(s) use "
+            f"local Docker configs (command-based): {task_details}. "
+            "Convert to remote with: hud convert <tasks_file>"
+        )
+
     # Build single task requests
     requests: list[SingleTaskRequest] = []
     for task_idx, task in enumerate(tasks):
@@ -135,6 +153,14 @@ async def submit_rollouts(
 
                 total_accepted += result.get("accepted", 0)
                 total_rejected += result.get("rejected", 0)
+
+                # Log individual rejections with reasons
+                for item in result.get("results", []):
+                    if isinstance(item, dict) and item.get("status") == "rejected":
+                        logger.warning(
+                            "Task rejected: %s",
+                            item.get("error", "Unknown reason"),
+                        )
 
                 logger.info(
                     "Batch %d/%d: %d/%d accepted",
