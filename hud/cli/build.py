@@ -846,9 +846,10 @@ def build_environment(
     hud_console.command_example("hud dev", "Hot-reload development")
     hud_console.command_example(f"hud run {version_tag}", "Run the built image")
     hud_console.info("")
-    hud_console.info("Publish to registry:")
-    hud_console.command_example("hud push", f"Push as {version_tag}")
-    hud_console.command_example("hud push --tag latest", "Push with custom tag")
+    hud_console.info("Deploy via GitHub (recommended):")
+    hud_console.info("  1. Push your code to GitHub")
+    hud_console.info("  2. Connect your repo at [cyan]https://hud.so/environments/new[/cyan]")
+    hud_console.info("  3. Builds will trigger automatically on each push")
     hud_console.info("")
     hud_console.info("The lock file can be used to reproduce this exact environment.")
 

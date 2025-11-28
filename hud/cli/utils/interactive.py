@@ -439,7 +439,7 @@ class InteractiveMCPTester:
             self.console.info("")
             self.console.info("Then you can:")
             self.console.info("  • Test locally: [cyan]hud run <image>[/cyan]")
-            self.console.info("  • Push to registry: [cyan]hud push --image <registry/name>[/cyan]")
+            self.console.info("  • Deploy via GitHub: Push code and connect at [cyan]hud.so/environments/new[/cyan]")
             self.console.info("  • Use with agents via the lock file")
 
             console.print("\n[dim]Happy testing! 🎉[/dim]")

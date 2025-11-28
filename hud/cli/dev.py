@@ -603,6 +603,7 @@ def run_docker_dev_server(
     # Find environment directory (current or parent with hud.lock.yaml)
     env_dir = cwd
     lock_path = env_dir / "hud.lock.yaml"
+    is_dev_mode = False
 
     if not lock_path.exists():
         # Try parent directory
@@ -610,30 +611,70 @@ def run_docker_dev_server(
             env_dir = cwd.parent
             lock_path = env_dir / "hud.lock.yaml"
         else:
-            hud_console.error("No hud.lock.yaml found")
-            hud_console.info("Run 'hud build' first to create an image")
-            raise typer.Exit(1)
+            # No lock file - check if Dockerfile exists for dev mode
+            dockerfile_path = env_dir / "Dockerfile"
+            if not dockerfile_path.exists():
+                # Also check parent
+                if (cwd.parent / "Dockerfile").exists():
+                    env_dir = cwd.parent
+                    dockerfile_path = env_dir / "Dockerfile"
 
-    # Load lock file to get image name
-    try:
-        with open(lock_path) as f:
-            lock_data = yaml.safe_load(f)
+            if dockerfile_path.exists():
+                # Dev mode: run build first, then continue
+                is_dev_mode = True
+                image_name = f"{env_dir.name}:dev"
 
-        # Get image from new or legacy format
-        images = lock_data.get("images", {})
-        image_name = images.get("local") or lock_data.get("image")
+                hud_console.info("No hud.lock.yaml found, running build first...")
+                hud_console.info("")
 
-        if not image_name:
-            hud_console.error("No image reference found in hud.lock.yaml")
-            raise typer.Exit(1)
+                # Run hud build (blocking)
+                build_cmd = [
+                    sys.executable, "-m", "hud", "build", str(env_dir),
+                    "--tag", image_name,
+                ]
+                result = subprocess.run(build_cmd, check=False)  # noqa: S603
+                if result.returncode != 0:
+                    hud_console.error("Build failed")
+                    raise typer.Exit(1)
 
-        # Strip digest if present
-        if "@" in image_name:
-            image_name = image_name.split("@")[0]
+                hud_console.info("")
 
-    except Exception as e:
-        hud_console.error(f"Failed to read lock file: {e}")
-        raise typer.Exit(1) from e
+                # Mark lock file as dev mode
+                lock_path = env_dir / "hud.lock.yaml"
+                if lock_path.exists():
+                    with open(lock_path) as f:
+                        lock_data = yaml.safe_load(f) or {}
+                    lock_data["mode"] = "dev"
+                    with open(lock_path, "w") as f:
+                        yaml.dump(lock_data, f, default_flow_style=False, sort_keys=False)
+            else:
+                hud_console.error("No hud.lock.yaml or Dockerfile found")
+                hud_console.info(
+                    "Either run 'hud build' first, or ensure you're in an environment directory"
+                )
+                raise typer.Exit(1)
+
+    # Load lock file to get image name (unless we just created it in dev mode)
+    if not is_dev_mode:
+        try:
+            with open(lock_path) as f:
+                lock_data = yaml.safe_load(f)
+
+            # Get image from new or legacy format
+            images = lock_data.get("images", {})
+            image_name = images.get("local") or lock_data.get("image")
+
+            if not image_name:
+                hud_console.error("No image reference found in hud.lock.yaml")
+                raise typer.Exit(1)
+
+            # Strip digest if present
+            if "@" in image_name:
+                image_name = image_name.split("@")[0]
+
+        except Exception as e:
+            hud_console.error(f"Failed to read lock file: {e}")
+            raise typer.Exit(1) from e
 
     # Generate unique container name
     pid = str(os.getpid())[-6:]

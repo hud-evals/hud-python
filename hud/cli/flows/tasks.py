@@ -63,7 +63,10 @@ def _ensure_pushed(
     pushed = bool(lock_data.get("push"))
     if not pushed:
         hud_console.warning("Environment not pushed to a registry yet.")
-        if not hud_console.confirm("Push to a registry now (runs 'hud push')?", default=True):
+        hud_console.info("Recommended: Use GitHub auto-deploy at [cyan]hud.so/environments/new[/cyan]")
+        hud_console.info("")
+        if not hud_console.confirm("Or push manually now (runs 'hud push')?", default=False):
+            hud_console.info("Deploy via GitHub for the best experience, then try again.")
             raise typer.Exit(1)
         # Check Docker availability before attempting a push
         if check_docker:

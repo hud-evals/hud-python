@@ -127,6 +127,21 @@ def push_environment(
     hud_console = HUDConsole()
     hud_console.header("HUD Environment Push")
 
+    # Deprecation warning - GitHub auto-deploy is the new recommended workflow
+    hud_console.warning("hud push is deprecated in favor of GitHub auto-deploy.")
+    hud_console.info("")
+    hud_console.info("Recommended workflow:")
+    hud_console.info("  1. Push your code to GitHub")
+    hud_console.info("  2. Connect your repo at [cyan]https://hud.so/environments/new[/cyan]")
+    hud_console.info("  3. Builds will trigger automatically on each push")
+    hud_console.info("")
+
+    if not yes and not hud_console.confirm("Continue with manual push anyway?", default=False):
+        hud_console.info("Aborted. Use GitHub auto-deploy for the best experience.")
+        raise typer.Exit(0)
+
+    hud_console.info("")
+
     # Import settings lazily after any environment setup
     from hud.settings import settings
 

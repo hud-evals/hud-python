@@ -1217,7 +1217,7 @@ def main() -> None:
             )
             console.print("  2. Develop with hot-reload: [cyan]hud dev --interactive[/cyan]")
             console.print("  3. Build for production: [cyan]hud build[/cyan]")
-            console.print("  4. Share your environment: [cyan]hud push[/cyan]")
+            console.print("  4. Deploy via GitHub: Push code and connect at [cyan]hud.so/environments/new[/cyan]")
             console.print("  5. Get shared environments: [cyan]hud pull <org/name:tag>[/cyan]")
             console.print("  6. Run and test: [cyan]hud run <image>[/cyan]")
             console.print("\n[yellow]Datasets & RL Training:[/yellow]")
