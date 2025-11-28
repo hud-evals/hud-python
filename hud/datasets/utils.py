@@ -1,9 +1,4 @@
 """Utility functions and schemas for the datasets module.
-
-This module provides:
-- Rollout schemas and submission utilities for remote task execution
-- Group statistics calculation for variance estimation
-- Results display utilities
 """
 
 from __future__ import annotations
@@ -166,6 +161,73 @@ async def submit_rollouts(
         len(requests),
         total_rejected,
     )
+
+
+async def cancel_job(job_id: str) -> dict[str, Any]:
+    """Cancel all tasks for a specific job.
+
+    Args:
+        job_id: The job ID to cancel
+
+    Returns:
+        Response with cancellation results including total_found, cancelled counts
+    """
+    api_url = f"{settings.hud_api_url.rstrip('/')}/v1/rollouts/cancel_job"
+    headers = {"Authorization": f"Bearer {settings.api_key}"}
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(
+            api_url,
+            json={"job_id": job_id},
+            headers=headers,
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def cancel_task(job_id: str, task_id: str) -> dict[str, Any]:
+    """Cancel a specific task within a job.
+
+    Args:
+        job_id: The job ID
+        task_id: The specific task ID to cancel
+
+    Returns:
+        Response with cancellation result
+    """
+    api_url = f"{settings.hud_api_url.rstrip('/')}/v1/rollouts/cancel"
+    headers = {"Authorization": f"Bearer {settings.api_key}"}
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(
+            api_url,
+            json={"job_id": job_id, "task_id": task_id},
+            headers=headers,
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def cancel_all_jobs() -> dict[str, Any]:
+    """Cancel ALL active jobs for the authenticated user.
+
+    This is a "panic button" to stop all running rollouts.
+
+    Returns:
+        Response with jobs_cancelled, total_tasks_cancelled, and job_details
+    """
+    api_url = f"{settings.hud_api_url.rstrip('/')}/v1/rollouts/cancel_user_jobs"
+    headers = {"Authorization": f"Bearer {settings.api_key}"}
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(
+            api_url,
+            json={},
+            headers=headers,
+        )
+        response.raise_for_status()
+        return response.json()
+
 
 def calculate_group_stats(
     tasks: list[Task],
