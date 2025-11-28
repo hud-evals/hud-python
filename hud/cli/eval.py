@@ -367,11 +367,22 @@ class EvalConfig(BaseModel):
         # Core settings
         table.add_row("source", str(self.source or "—"))
         table.add_row("agent", self.agent_type.value)  # type: ignore[union-attr]
+        if self.task_ids:
+            table.add_row("task_ids", ", ".join(self.task_ids[:5]) + ("..." if len(self.task_ids) > 5 else ""))
         table.add_row("full", str(self.full))
         table.add_row("max_steps", str(self.max_steps or (100 if self.full else 10)))
-        table.add_row("max_concurrent", str(self.max_concurrent))
+        if not self.remote:
+            table.add_row("max_concurrent", str(self.max_concurrent))
         if self.group_size > 1:
             table.add_row("group_size", str(self.group_size))
+        # Show auto_respond when it will be true (explicit or via --full)
+        effective_auto_respond = self.auto_respond if self.auto_respond is not None else self.full
+        if effective_auto_respond:
+            table.add_row("auto_respond", "[bold green]True[/bold green]")
+        if self.very_verbose:
+            table.add_row("very_verbose", "[bold green]True[/bold green]")
+        elif self.verbose:
+            table.add_row("verbose", "[bold green]True[/bold green]")
         if self.remote:
             table.add_row("remote", "[bold green]True[/bold green] (submitting to platform)")
 
