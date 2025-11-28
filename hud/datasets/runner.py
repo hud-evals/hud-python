@@ -104,7 +104,7 @@ async def run_tasks(
         # Run specific tasks locally
         all_tasks = load_tasks("hud-evals/SheetBench-50")
         selected = [t for t in all_tasks if t.id in ["task_1", "task_5"]]
-        results = await run_tasks(selected, AgentType.CLAUDE, {"checkpoint_name": "claude-sonnet-4-5"})
+        results = await run_tasks(selected, AgentType.CLAUDE, {"checkpoint_name": "..."})
 
         # Run with variance estimation
         stats = await run_tasks(tasks, AgentType.CLAUDE, group_size=3)
@@ -206,7 +206,7 @@ async def run_dataset(
         try:
             general_info = next(iter(dataset.info.__dict__["download_checksums"].keys())).split("/")
             dataset_link = f"{general_info[3]}/{general_info[4].split('@')[0]}"
-        except Exception:
+        except Exception:  # noqa: S110
             pass
     else:
         task_dicts = dataset
@@ -247,7 +247,7 @@ async def _run_tasks(
     # Expand tasks: each task runs group_size times
     expanded: list[tuple[int, int, Task]] = []  # (flat_idx, task_idx, task)
     for task_idx, task in enumerate(tasks):
-        for run_idx in range(group_size):
+        for _ in range(group_size):
             expanded.append((len(expanded), task_idx, task))
 
     traces: list[Trace | None] = [None] * len(expanded)

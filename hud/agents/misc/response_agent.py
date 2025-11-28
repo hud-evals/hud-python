@@ -8,7 +8,8 @@ from hud.settings import settings
 
 ResponseType = Literal["STOP", "CONTINUE"]
 
-DEFAULT_SYSTEM_PROMPT = """You are an assistant that helps determine the appropriate response to an agent's message.
+DEFAULT_SYSTEM_PROMPT = """\
+You are an assistant that helps determine the appropriate response to an agent's message.
 
 You will receive messages from an agent that is performing tasks for a user.
 Your job is to analyze these messages and respond with one of the following:

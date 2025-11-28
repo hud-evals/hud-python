@@ -770,7 +770,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_convert_function_tool_call_invalid_json(self, mock_mcp_client, mock_openai):
         """Test converting function tool call with invalid JSON."""
-        agent = OpenAIAgent.create(
+        _agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,

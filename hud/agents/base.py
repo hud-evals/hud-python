@@ -77,7 +77,7 @@ class MCPAgent(ABC):
             params = CreateParams(**kwargs)
 
         config_kwargs = {
-            k: getattr(params, k) for k in self.config_cls.model_fields.keys() if hasattr(params, k)
+            k: getattr(params, k) for k in self.config_cls.model_fields if hasattr(params, k)
         }
         self.config = self.config_cls(**config_kwargs)
 

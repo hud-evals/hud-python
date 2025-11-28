@@ -170,7 +170,9 @@ class EvalConfig(BaseModel):
                 return AgentType(v)
             except ValueError:
                 valid = [e.value for e in AgentType]
-                raise ValueError(f"Invalid agent: {v}. Must be one of: {', '.join(valid)}")
+                raise ValueError(
+                    f"Invalid agent: {v}. Must be one of: {', '.join(valid)}"
+                ) from None
         return v
 
     def validate_api_keys(self) -> None:
@@ -296,9 +298,7 @@ class EvalConfig(BaseModel):
         if task_ids is not None:
             overrides["task_ids"] = [t.strip() for t in task_ids.split(",") if t.strip()]
 
-        for k, v in cli_args.items():
-            if v is not None and v is not False:
-                overrides[k] = v
+        overrides.update({k: v for k, v in cli_args.items() if v is not None and v is not False})
 
         for k in ("full", "verbose", "very_verbose", "remote"):
             if cli_args.get(k) is True:
@@ -516,8 +516,8 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
     """Run evaluation with the given config."""
     from hud.datasets import run_single_task, run_tasks
 
-    assert cfg.source is not None
-    assert cfg.agent_type is not None
+    if cfg.source is None or cfg.agent_type is None:
+        raise ValueError("source and agent_type must be set")
 
     tasks = _load_tasks_from_source(cfg.source)
 
@@ -581,7 +581,8 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
 
     # Local batch execution
     hud_console.info(
-        f"🚀 Running evaluation (max_concurrent: {cfg.max_concurrent}, group_size: {cfg.group_size})…"
+        f"🚀 Running evaluation (max_concurrent: {cfg.max_concurrent}, "
+        f"group_size: {cfg.group_size})…"
     )
 
     results = await run_tasks(
@@ -609,7 +610,9 @@ def eval_command(
     ),
     full: bool = typer.Option(False, "--full", help="Run entire dataset"),
     model: str | None = typer.Option(None, "--model", "-m", help="Model name"),
-    config: list[str] | None = typer.Option(None, "--config", "-c", help="Agent config: key=value"),
+    config: list[str] | None = typer.Option(  # noqa: B008
+        None, "--config", "-c", help="Agent config: key=value"
+    ),
     # Task-overridable settings
     allowed_tools: str | None = typer.Option(
         None, "--allowed-tools", help="Comma-separated allowed tools"

@@ -39,7 +39,7 @@ class GroundedOpenAIConfig(OpenAIChatConfig):
 
     grounder_config: GrounderConfig
     checkpoint_name: str = "gpt-4o-mini"
-    allowed_tools: list[str] | None = ["computer"]
+    allowed_tools: list[str] | None = None  # Default set in validator
     append_setup_output: bool = False
     system_prompt: str | None = DEFAULT_GROUNDED_PROMPT
 
@@ -50,6 +50,13 @@ class GroundedOpenAIConfig(OpenAIChatConfig):
             return value
         if isinstance(value, dict):
             return GrounderConfig(**value)
+
+    @field_validator("allowed_tools", mode="before")
+    @classmethod
+    def _default_allowed_tools(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return ["computer"]
+        return value
 
 
 class GroundedOpenAICreateParams(BaseCreateParams, GroundedOpenAIConfig):
