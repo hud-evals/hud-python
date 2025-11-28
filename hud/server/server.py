@@ -758,17 +758,16 @@ class MCPServer(FastMCP):
                         task_data["mcp_config"] = docker_config
                         task_objects.append(Task.model_validate(task_data))
 
-                    # Build agent config
-                    agent_config: dict[str, Any] = {}
+                    agent_params: dict[str, Any] = {}
                     if eval_request.model:
-                        agent_config["checkpoint_name"] = eval_request.model
+                        agent_params["checkpoint_name"] = eval_request.model
 
                     # Fire and forget - launch evaluation in background
                     async def run_eval_background() -> None:
                         await run_tasks(
                             task_objects,
                             agent_type=agent_type,
-                            agent_config=agent_config,
+                            agent_params=agent_params,
                             max_steps=eval_request.max_steps,
                             group_size=eval_request.group_size,
                         )

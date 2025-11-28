@@ -43,24 +43,23 @@ async def main() -> None:
         tasks = [t for t in tasks if t.id in args.task_ids]
         print(f"Filtered to {len(tasks)} tasks: {args.task_ids}")
 
-    # Select agent type and config
+    # Select agent type and params
     if args.agent == "operator":
         agent_type = AgentType.OPERATOR
-        agent_config = {"checkpoint_name": args.model or "computer-use-preview", "validate_api_key": False}
+        agent_params = {"checkpoint_name": args.model or "computer-use-preview", "validate_api_key": False}
     else:
         agent_type = AgentType.CLAUDE
-        agent_config = {"checkpoint_name": args.model or "claude-sonnet-4-5", "validate_api_key": False}
+        agent_params = {"checkpoint_name": args.model or "claude-sonnet-4-5", "validate_api_key": False}
 
     # Run evaluation
     results = await run_tasks(
         tasks=tasks,
         agent_type=agent_type,
-        agent_config=agent_config,
+        agent_params=agent_params,
         name=f"Eval: {args.dataset.split('/')[-1]}",
         max_concurrent=args.max_concurrent,
         max_steps=args.max_steps,
         group_size=args.group_size,
-        auto_respond=True,
     )
 
     display_results(results, tasks=tasks)

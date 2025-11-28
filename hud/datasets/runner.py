@@ -6,13 +6,13 @@ import asyncio
 import logging
 import uuid
 import warnings
-from statistics import mean, stdev
 from typing import TYPE_CHECKING, Any, cast
 
-import numpy as np
 from datasets import Dataset, load_dataset
 
 from hud.types import AgentType, Task, Trace
+from hud import async_trace, async_job
+from hud.datasets.utils import calculate_group_stats, submit_rollouts
 
 if TYPE_CHECKING:
     from hud.agents import MCPAgent
@@ -20,17 +20,61 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hud.datasets")
 
 
+async def run_single_task(
+    task: Task,
+    agent_type: AgentType,
+    agent_params: dict[str, Any] | None = None,
+    max_steps: int = 10,
+    job_id: str | None = None,
+    task_id: str | None = None,
+    group_id: str | None = None,
+    trace_name: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> Trace:
+    """Execute a single task with tracing.
+
+    This is the core execution primitive for running a single task.
+
+    Args:
+        task: Task to execute
+        agent_type: Agent type to use
+        agent_params: Parameters passed to agent.create(). Should include fields
+            from BaseCreateParams (auto_trace, auto_respond, verbose) plus
+            agent-specific config fields (e.g., use_computer_beta for ClaudeConfig).
+        max_steps: Maximum steps for agent execution
+        job_id: Job ID for telemetry grouping
+        task_id: Task ID for telemetry
+        group_id: Group ID for variance estimation runs
+        trace_name: Name for the trace (defaults to task prompt)
+        metadata: Additional trace metadata
+
+    Returns:
+        Trace result from agent execution
+    """
+    name = trace_name or task.prompt or task_id or "task"
+
+    async with async_trace(
+        name,
+        job_id=job_id,
+        task_id=task_id,
+        group_id=group_id,
+        attrs=metadata or {},
+    ):
+        agent = agent_type.cls.create(**(agent_params or {}))
+        return await agent.run(task, max_steps=max_steps)
+
+
 async def run_tasks(
     tasks: list[Task],
     agent_type: AgentType,
-    agent_config: dict[str, Any] | None = None,
+    agent_params: dict[str, Any] | None = None,
     *,
     name: str = "Evaluation",
     max_concurrent: int = 30,
     metadata: dict[str, Any] | None = None,
     max_steps: int = 10,
-    auto_respond: bool = False,
     group_size: int = 1,
+    remote: bool = False,
 ) -> list[Any]:
     """Run a list of tasks with automatic job and telemetry tracking.
 
@@ -40,40 +84,70 @@ async def run_tasks(
     Args:
         tasks: List of Task objects
         agent_type: AgentType specifying which agent to use
-        agent_config: Configuration kwargs for agent initialization
+        agent_params: Parameters passed to agent.create(). Should include fields
+            from BaseCreateParams (auto_trace, auto_respond, verbose) plus
+            agent-specific config fields (e.g., checkpoint_name for ClaudeConfig).
         name: Name for the job
         max_concurrent: Maximum concurrent tasks
         metadata: Optional job metadata
         max_steps: Maximum steps per task
-        auto_respond: Whether to use auto-response agent
         group_size: Number of times to run each task (for variance estimation)
+        remote: If True, submit tasks to HUD platform for remote execution
 
     Returns:
+        If remote: Empty list (fire-and-forget submission)
         If group_size == 1: List of Trace results in task order.
         If group_size > 1: List of statistics dicts for each task group.
 
     Example:
-        # Run specific tasks
+        # Run specific tasks locally
         all_tasks = load_tasks("hud-evals/SheetBench-50")
         selected = [t for t in all_tasks if t.id in ["task_1", "task_5"]]
-        results = await run_tasks(selected, ClaudeAgent, {"model": "claude-sonnet-4-5"})
+        results = await run_tasks(selected, AgentType.CLAUDE, {"checkpoint_name": "claude-sonnet-4-5"})
 
         # Run with variance estimation
-        stats = await run_tasks(tasks, ClaudeAgent, group_size=3)
+        stats = await run_tasks(tasks, AgentType.CLAUDE, group_size=3)
+
+        # Submit for remote execution
+        await run_tasks(tasks, AgentType.CLAUDE, remote=True)
     """
     import hud
 
+    from hud.utils.hud_console import HUDConsole
+
     # Create job metadata
     job_metadata = metadata or {}
-    job_metadata["agent_config"] = agent_config or {}
+    job_metadata["agent_params"] = agent_params or {}
     job_metadata["agent_type"] = agent_type.value
     if group_size > 1:
         job_metadata["group_size"] = group_size
         job_metadata["total_episodes"] = len(tasks) * group_size
 
-    async with hud.async_job(name, metadata=job_metadata) as job_obj:
+    if remote:
+        hud_console = HUDConsole()
+
+        job = hud.create_job(name, metadata=job_metadata)
+        job.update_status_sync("created")
+
+        await submit_rollouts(
+            tasks=tasks,
+            job_id=job.id,
+            agent_type=agent_type,
+            agent_params=agent_params,
+            max_steps=max_steps,
+            group_size=group_size,
+            metadata=metadata,
+        )
+        hud_console.success(f"Submitted {len(tasks) * group_size} rollouts for remote execution")
+        hud_console.info(f"Monitor progress at: https://hud.so/jobs/{job.id}")
+        return []
+
+    # Local execution
+    agent_class = agent_type.cls
+
+    async with async_job(name, metadata=job_metadata) as job_obj:
         return await _run_tasks(
-            tasks, agent_class, agent_config, max_concurrent, max_steps, auto_respond, group_size, job_obj
+            tasks, agent_class, agent_params, max_concurrent, max_steps, group_size, job_obj
         )
 
 
@@ -141,8 +215,6 @@ async def run_dataset(
     # Convert dicts to Task objects
     tasks = [Task(**d) for d in task_dicts]
 
-    import hud
-
     # Add dataset link to metadata
     job_metadata = metadata or {}
     job_metadata["agent_config"] = agent_config or {}
@@ -152,27 +224,24 @@ async def run_dataset(
         job_metadata["group_size"] = group_size
         job_metadata["total_episodes"] = len(tasks) * group_size
 
-    async with hud.async_job(name, metadata=job_metadata) as job_obj:
+    async with async_job(name, metadata=job_metadata) as job_obj:
         return await _run_tasks(
-            tasks, agent_class, agent_config, max_concurrent, max_steps, auto_respond, group_size, job_obj
+            tasks, agent_class, agent_config, max_concurrent, max_steps, group_size, job_obj
         )
 
 
 async def _run_tasks(
     tasks: list[Task],
     agent_class: type["MCPAgent"],
-    agent_config: dict[str, Any] | None,
+    agent_params: dict[str, Any] | None,
     max_concurrent: int,
     max_steps: int,
-    auto_respond: bool,
     group_size: int,
     job_obj: Any,
 ) -> list[Any]:
 
-    import hud
-
     sem = asyncio.Semaphore(max_concurrent)
-    config = agent_config or {}
+    params = agent_params or {}
 
     # Generate group IDs for each task (used for telemetry grouping)
     group_ids = {i: str(uuid.uuid4()) for i in range(len(tasks))}
@@ -192,13 +261,13 @@ async def _run_tasks(
                 trace_name = task.prompt or base_task_id
 
                 if group_size == 1:
-                    async with hud.async_trace(trace_name, job_id=job_obj.id, task_id=base_task_id):
-                        agent = _create_agent(agent_class, config, auto_respond)
+                    async with async_trace(trace_name, job_id=job_obj.id, task_id=base_task_id):
+                        agent = agent_class.create(**params)
                         traces[flat_idx] = await agent.run(task, max_steps=max_steps)
                 else:
                     task_id_with_run = f"{base_task_id}_{run_idx}"
-                    async with hud.async_trace(trace_name, job_id=job_obj.id, task_id=task_id_with_run, group_id=group_ids[task_idx]):
-                        agent = _create_agent(agent_class, config, auto_respond)
+                    async with async_trace(trace_name, job_id=job_obj.id, task_id=task_id_with_run, group_id=group_ids[task_idx]):
+                        agent = agent_class.create(**params)
                         traces[flat_idx] = await agent.run(task, max_steps=max_steps)
             except Exception as e:
                 if group_size == 1:
@@ -220,179 +289,4 @@ async def _run_tasks(
     if group_size == 1:
         return list(traces)
     else:
-        return _calculate_group_stats(tasks, traces, group_size, group_ids)
-
-
-def _create_agent(
-    agent_class: type["MCPAgent"],
-    config: dict[str, Any],
-    auto_respond: bool,
-) -> "MCPAgent":
-    """Create an agent instance from config."""
-    payload = dict(config)
-    base_keys = {"mcp_client", "auto_trace", "verbose", "auto_respond"}
-    base_kwargs = {k: payload.pop(k) for k in list(payload.keys()) if k in base_keys}
-
-    # Override auto_respond if specified
-    if auto_respond:
-        base_kwargs["auto_respond"] = True
-
-    return agent_class.create(**base_kwargs, **payload)
-
-
-def _calculate_group_stats(
-    tasks: list[Task],
-    traces: list[Trace | None],
-    group_size: int,
-    group_ids: dict[int, str],
-) -> list[dict[str, Any]]:
-    """Calculate statistics for each task group."""
-    stats = []
-
-    for task_idx, task in enumerate(tasks):
-        # Get traces for this task
-        start = task_idx * group_size
-        task_traces = [t for t in traces[start : start + group_size] if t is not None]
-
-        if not task_traces:
-            stats.append({
-                "task_id": task.id or f"task_{task_idx}",
-                "prompt": task.prompt or "",
-                "group_id": group_ids[task_idx],
-                "group_size": group_size,
-                "rewards": [],
-                "mean_reward": 0.0,
-                "std_reward": 0.0,
-                "success_rate": 0.0,
-                "error_rate": 1.0,
-            })
-            continue
-
-        rewards = np.array([t.reward for t in task_traces])
-        errors = [t for t in task_traces if t.isError]
-
-        task_stats = {
-            "task_id": task.id or f"task_{task_idx}",
-            "prompt": task.prompt or "",
-            "group_id": group_ids[task_idx],
-            "group_size": group_size,
-            "rewards": rewards.tolist(),
-            "mean_reward": float(np.mean(rewards)),
-            "std_reward": float(np.std(rewards)) if len(rewards) > 1 else 0.0,
-            "min_reward": float(np.min(rewards)),
-            "max_reward": float(np.max(rewards)),
-            "success_rate": float(np.sum(rewards > 0) / len(rewards)),
-            "error_rate": len(errors) / len(task_traces),
-            "traces": task_traces,
-        }
-        stats.append(task_stats)
-
-    return stats
-
-
-def display_results(
-    results: list[Any],
-    *,
-    tasks: list["Task"],
-    elapsed: float | None = None,
-    show_details: bool = True,
-) -> None:
-    from rich.console import Console
-    from rich.table import Table
-
-    from hud.utils.hud_console import HUDConsole
-
-    hud_console = HUDConsole()
-    console = Console()
-
-    if not results:
-        hud_console.warning("No results to display")
-        return
-
-    # Detect if this is grouped results (list of dicts with 'mean_reward') or traces
-    is_grouped = isinstance(results[0], dict) and "mean_reward" in results[0]
-
-    if is_grouped:
-        # Grouped evaluation stats
-        all_means = [s["mean_reward"] for s in results]
-        overall_mean = mean(all_means) if all_means else 0.0
-        overall_std = stdev(all_means) if len(all_means) > 1 else 0.0
-        group_size = results[0].get("group_size", 1)
-        total_episodes = sum(len(s.get("rewards", [])) for s in results)
-
-        hud_console.success("\n📊 Evaluation Complete")
-        hud_console.info(f"Tasks: {len(results)} × {group_size} runs = {total_episodes} episodes")
-        if elapsed:
-            hud_console.info(f"Time: {elapsed:.1f}s ({total_episodes/elapsed:.1f} episodes/s)")
-        hud_console.info(f"Mean reward: {overall_mean:.3f} ± {overall_std:.3f}")
-
-        if show_details and len(results) <= 50:
-            table = Table(title="\nPer-Task Performance")
-            table.add_column("#", style="dim", justify="right")
-            table.add_column("Task ID", style="cyan", no_wrap=True)
-            table.add_column("Prompt", style="dim", max_width=40)
-            table.add_column("Mean±Std", justify="right", style="green")
-            table.add_column("Min/Max", justify="right")
-            table.add_column("Success%", justify="right", style="yellow")
-
-            for i, (stat, task) in enumerate(zip(results, tasks, strict=False)):
-                task_id = (task.id or "")[:20]
-                prompt = (task.prompt or "")[:40]
-                if len(task.prompt or "") > 40:
-                    prompt += "..."
-                table.add_row(
-                    str(i + 1),
-                    task_id,
-                    prompt,
-                    f"{stat.get('mean_reward', 0):.3f}±{stat.get('std_reward', 0):.3f}",
-                    f"{stat.get('min_reward', 0):.2f}/{stat.get('max_reward', 0):.2f}",
-                    f"{stat.get('success_rate', 0) * 100:.0f}%",
-                )
-            console.print(table)
-
-        high_var = [s for s in results if s.get("std_reward", 0) > 0.3]
-        if high_var:
-            hud_console.warning(f"\n⚠️  {len(high_var)} tasks show high variance (std > 0.3)")
-
-    else:
-        # Single-run traces
-        valid_results = [r for r in results if r is not None]
-        rewards = [getattr(r, "reward", 0) for r in valid_results]
-
-        if not rewards:
-            hud_console.warning("No valid results")
-            return
-
-        mean_reward = sum(rewards) / len(rewards)
-        successful = sum(1 for r in rewards if r > 0.7)
-        success_rate = successful / len(results)
-
-        hud_console.success("\n📊 Evaluation Complete")
-        hud_console.info(f"Tasks: {len(results)}")
-        if elapsed:
-            hud_console.info(f"Time: {elapsed:.1f}s ({len(results)/elapsed:.1f} tasks/s)")
-        hud_console.info(f"Mean reward: {mean_reward:.3f}")
-        hud_console.info(f"Success rate: {success_rate*100:.1f}% ({successful}/{len(results)})")
-
-        if show_details and len(results) <= 50:
-            table = Table(title="\nPer-Task Results")
-            table.add_column("#", style="dim", justify="right")
-            table.add_column("Task ID", style="cyan", no_wrap=True)
-            table.add_column("Prompt", style="dim", max_width=40)
-            table.add_column("Reward", justify="right", style="green")
-            table.add_column("Status", justify="center")
-
-            for i, r in enumerate(results):
-                task = tasks[i]
-                task_id = (task.id or "")[:20]
-                prompt = (task.prompt or "")[:40]
-                if len(task.prompt or "") > 40:
-                    prompt += "..."
-
-                if r is None:
-                    table.add_row(str(i + 1), task_id, prompt, "—", "[red]Error[/red]")
-                else:
-                    reward = getattr(r, "reward", 0)
-                    status = "[green]✓[/green]" if reward > 0.7 else "[yellow]✗[/yellow]"
-                    table.add_row(str(i + 1), task_id, prompt, f"{reward:.3f}", status)
-            console.print(table)
+        return calculate_group_stats(tasks, traces, group_size, group_ids)

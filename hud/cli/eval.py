@@ -79,6 +79,7 @@ _DEFAULT_CONFIG_TEMPLATE = '''# HUD Eval Configuration
 # task_ids = ["task_1", "task_2"]
 # verbose = true
 # very_verbose = true
+# auto_respond = true
 
 [agent]
 # allowed_tools = ["computer", "playwright"]
@@ -119,7 +120,8 @@ class EvalConfig(BaseModel):
     # Fields loaded from [eval] section
     _EVAL_FIELDS: ClassVar[set[str]] = {
         "source", "agent_type", "model", "task_ids", "full",
-        "max_concurrent", "max_steps", "verbose", "very_verbose", "group_size",
+        "max_concurrent", "max_steps", "verbose", "very_verbose", "group_size", "remote",
+        "auto_respond",
     }
     # Fields loaded from [agent] section
     _AGENT_FIELDS: ClassVar[set[str]] = {"allowed_tools", "disallowed_tools"}
@@ -134,7 +136,9 @@ class EvalConfig(BaseModel):
     max_steps: int | None = None
     verbose: bool = False
     very_verbose: bool = False
+    auto_respond: bool | None = None  # Continue without prompting (default: True for --full)
     group_size: int = 1
+    remote: bool = False
 
     # Base agent config (these merge with task's agent_config)
     allowed_tools: list[str] | None = None
@@ -283,7 +287,7 @@ class EvalConfig(BaseModel):
             if v is not None and v is not False:
                 overrides[k] = v
 
-        for k in ("full", "verbose", "very_verbose"):
+        for k in ("full", "verbose", "very_verbose", "remote"):
             if cli_args.get(k) is True:
                 overrides[k] = True
             elif k in overrides and cli_args.get(k) is False:
@@ -372,6 +376,8 @@ class EvalConfig(BaseModel):
         table.add_row("max_concurrent", str(self.max_concurrent))
         if self.group_size > 1:
             table.add_row("group_size", str(self.group_size))
+        if self.remote:
+            table.add_row("remote", "[bold green]True[/bold green] (submitting to platform)")
 
         # Tool filters (only if set)
         if self.allowed_tools:
@@ -471,14 +477,14 @@ def _warn_local_mcp(tasks: list["Task"], source: str) -> None:
 
 async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
     """Run evaluation with the given config."""
-    from hud.datasets import run_tasks
+    from hud.datasets import run_single_task, run_tasks
 
     assert cfg.source is not None
     assert cfg.agent_type is not None
 
     tasks = _load_tasks_from_source(cfg.source)
 
-    if cfg.group_size > 1 or cfg.full:
+    if not cfg.remote and (cfg.group_size > 1 or cfg.full):
         _warn_local_mcp(tasks, cfg.source)
 
     agent_kwargs = cfg.get_agent_kwargs()
@@ -501,18 +507,39 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
         tasks = [tasks[0]]
         hud_console.info("Using first task (run with --full or --task-ids for more)…")
 
-    # Single task, single run
+    auto_respond = cfg.auto_respond if cfg.auto_respond is not None else cfg.full
+
+    if auto_respond:
+        agent_kwargs = {**agent_kwargs, "auto_respond": True}
+
+    if cfg.remote:
+        hud_console.info(f"🚀 Submitting {len(tasks)} tasks for remote execution…")
+        await run_tasks(
+            tasks=tasks,
+            agent_type=cfg.agent_type,
+            agent_params=agent_kwargs,
+            name=f"Evaluation {dataset_name}",
+            metadata={"dataset": cfg.source},
+            max_steps=max_steps,
+            group_size=cfg.group_size,
+            remote=True,
+        )
+        return [], tasks
+
     if len(tasks) == 1 and cfg.group_size == 1:
         task = tasks[0]
         logging.getLogger("hud.agents").setLevel(logging.INFO)
         logging.getLogger("hud.agents.base").setLevel(logging.INFO)
 
-        agent_class = cfg.agent_type.cls
-        async with hud.async_trace(name=task.prompt):
-            agent = agent_class.create(**agent_kwargs)
-            hud_console.info(task.prompt)
-            result = await agent.run(task, max_steps=max_steps)
-            hud_console.success(f"Reward: {result.reward}")
+        hud_console.info(task.prompt)
+        result = await run_single_task(
+            task=task,
+            agent_type=cfg.agent_type,
+            agent_params=agent_kwargs,
+            max_steps=max_steps,
+            trace_name=task.prompt,
+        )
+        hud_console.success(f"Reward: {result.reward}")
         return [result], tasks
 
     # Local batch execution
@@ -521,12 +548,11 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
     results = await run_tasks(
         tasks=tasks,
         agent_type=cfg.agent_type,
-        agent_config=agent_kwargs,
+        agent_params=agent_kwargs,
         name=f"Evaluation {dataset_name}",
         max_concurrent=cfg.max_concurrent,
         metadata={"dataset": cfg.source},
         max_steps=max_steps,
-        auto_respond=True,
         group_size=cfg.group_size,
     )
     return results, tasks
@@ -551,9 +577,11 @@ def eval_command(
     max_steps: int | None = typer.Option(None, "--max-steps", help="Max steps per task"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     very_verbose: bool = typer.Option(False, "--very-verbose", "-vv", help="Debug logs"),
+    auto_respond: bool | None = typer.Option(None, "--auto-respond", help="Continue without prompting after tool calls (default: True for --full)"),
     group_size: int | None = typer.Option(None, "--group-size", help="Runs per task"),
     task_ids: str | None = typer.Option(None, "--task-ids", help="Comma-separated task IDs to run"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    remote: bool = typer.Option(False, "--remote", help="Submit tasks to platform for remote execution"),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
 
@@ -562,6 +590,7 @@ def eval_command(
         hud eval hud-evals/SheetBench-50 claude --full
         hud eval tasks.json claude --config max_tokens=32768
         hud eval tasks.json openai --config temperature=0.7
+        hud eval tasks.json claude --full --remote  # Remote execution
     """
     hud_console.info("🔧 Initializing evaluation...")
 
@@ -578,8 +607,10 @@ def eval_command(
         task_ids=task_ids,
         verbose=verbose,
         very_verbose=very_verbose,
+        auto_respond=auto_respond,
         group_size=group_size,
         config=config,
+        remote=remote,
     )
 
     # Find source if not provided
@@ -620,6 +651,10 @@ def eval_command(
     start_time = time.time()
     results, tasks = asyncio.run(_run_evaluation(cfg))
     elapsed = time.time() - start_time
+
+    if cfg.remote:
+        hud_console.success("Remote submission completed")
+        return
 
     from hud.datasets import display_results
 

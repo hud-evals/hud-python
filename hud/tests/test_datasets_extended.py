@@ -371,8 +371,6 @@ class TestRunDatasetExtended:
             # No mcp_config - should cause validation error during Task(**task_dict)
         }
 
-        from hud.agents import MCPAgent
-
         mock_agent_class = type("MockAgent", (MCPAgent,), {})
 
         # Validation errors should be raised immediately when Task objects are created
@@ -382,8 +380,3 @@ class TestRunDatasetExtended:
                 [task],  # Pass the task directly
                 mock_agent_class,  # type: ignore
             )
-
-            # Should have one result that's an exception due to validation error
-            assert len(results) == 1
-            # The result should be an exception or None due to the validation error
-            assert results[0] is None or isinstance(results[0], Exception)
