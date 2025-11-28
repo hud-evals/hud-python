@@ -55,7 +55,7 @@ class ResponseAgent:
             )
 
         self.client: AsyncOpenAI = AsyncOpenAI(
-            base_url="https://inference.hud.ai",
+            base_url=settings.hud_gateway_url,
             api_key=api_key,
         )
         self.model = model

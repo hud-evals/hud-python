@@ -45,13 +45,9 @@ class AgentPreset:
     agent_config: dict[str, Any] | None = None
 
 
-# HUD Gateway URL for unified LLM access
-_HUD_GATEWAY_URL = "https://inference.hud.ai"
-
-
 def _gateway_config(model_name: str) -> dict[str, Any]:
     """Create agent_config for HUD gateway preset."""
-    return {"openai_compatible": {"base_url": _HUD_GATEWAY_URL, "model_name": model_name}}
+    return {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": model_name}}
 
 
 # Built-in presets for the interactive picker
@@ -202,7 +198,7 @@ class EvalConfig(BaseModel):
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
             base_url = kwargs.get("base_url", "")
-            if "inference.hud.ai" in base_url and "api_key" not in kwargs:
+            if settings.hud_gateway_url in base_url and "api_key" not in kwargs:
                 kwargs["api_key"] = settings.api_key
 
         kwargs["verbose"] = self.verbose or self.very_verbose
