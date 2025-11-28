@@ -10,12 +10,9 @@ class IntegrationTestRunner(MCPAgent):
     metadata: ClassVar[dict[str, Any] | None] = {}
     config_cls: ClassVar[type[BaseAgentConfig]] = BaseAgentConfig
 
-    def __init__(self, **config_kwargs: Any) -> None:
-        self.config = self.config_cls(**config_kwargs)
-        super().__init__(
-            config=self.config,
-            auto_trace=False,
-        )
+    def __init__(self, **kwargs: Any) -> None:
+        kwargs["auto_trace"] = False
+        super().__init__(**kwargs)
 
     async def run(self, prompt_or_task: str | Task | dict[str, Any], max_steps: int = 10) -> Trace:
         try:

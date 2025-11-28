@@ -94,8 +94,8 @@ async def submit_rollouts(
 
     # Build single task requests
     requests: list[SingleTaskRequest] = []
-    for task in tasks:
-        base_task_id = task.id or "task"
+    for task_idx, task in enumerate(tasks):
+        base_task_id = task.id or f"task_{task_idx}"
         for rollout_idx in range(group_size):
             task_id = f"{base_task_id}_r{rollout_idx}" if group_size > 1 else base_task_id
             requests.append(
