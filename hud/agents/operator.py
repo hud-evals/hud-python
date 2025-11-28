@@ -17,17 +17,17 @@ from openai.types.responses.response_input_param import (
     ComputerCallOutput,
 )
 from openai.types.shared_params.reasoning import Reasoning
+from pydantic import ConfigDict
 
 from hud.tools.computer.settings import computer_settings
-from hud.types import MCPToolCall
+from hud.types import BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.utils.types import with_signature
 
-from .openai import OpenAIAgent
+from .base import BaseCreateParams, MCPAgent
+from .openai import OpenAIAgent, OpenAIConfig
 
 if TYPE_CHECKING:
-    from openai import AsyncOpenAI
     from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
-
-    from hud.types import MCPToolResult
 
 OPERATOR_INSTRUCTIONS = """
 You are an autonomous computer-using agent. Follow these guidelines:
@@ -50,6 +50,20 @@ what they asked.
 """.strip()
 
 
+class OperatorConfig(OpenAIConfig):
+    """Configuration model for `OperatorAgent`."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    model_name: str = "Operator"
+    checkpoint_name: str = "computer-use-preview"
+    environment: Literal["windows", "mac", "linux", "ubuntu", "browser"] = "linux"
+
+
+class OperatorCreateParams(BaseCreateParams, OperatorConfig):
+    pass
+
+
 class OperatorAgent(OpenAIAgent):
     """
     Backwards-compatible Operator agent built on top of OpenAIAgent.
@@ -61,29 +75,24 @@ class OperatorAgent(OpenAIAgent):
     }
     # base class will ensure that the computer tool is available
     required_tools: ClassVar[list[str]] = ["openai_computer"]
+    config_cls: ClassVar[type[BaseAgentConfig]] = OperatorConfig
 
-    def __init__(
-        self,
-        model_client: AsyncOpenAI | None = None,
-        model: str = "computer-use-preview",
-        environment: Literal["windows", "mac", "linux", "ubuntu", "browser"] = "linux",
-        validate_api_key: bool = True,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(
-            model_client=model_client,
-            model=model,
-            validate_api_key=validate_api_key,
-            **kwargs,
-        )
+    @with_signature(OperatorCreateParams)
+    @classmethod
+    def create(cls, **kwargs: Any) -> OperatorAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
+
+    def __init__(self, params: OperatorCreateParams | None = None, **kwargs: Any) -> None:
+        super().__init__(params, **kwargs)  # type: ignore[arg-type]
+        self.config: OperatorConfig  # type: ignore[assignment]
+
         self._operator_computer_tool_name = "openai_computer"
         self._operator_display_width = computer_settings.OPENAI_COMPUTER_WIDTH
         self._operator_display_height = computer_settings.OPENAI_COMPUTER_HEIGHT
         self._operator_environment: Literal["windows", "mac", "linux", "ubuntu", "browser"] = (
-            environment
+            self.config.environment
         )
-        self.model_name = "Operator"
-        self.environment = environment
+        self.environment = self.config.environment
 
         # add pending call id and safety checks to the agent
         self.pending_call_id: str | None = None

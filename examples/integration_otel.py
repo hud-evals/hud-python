@@ -64,7 +64,7 @@ async def main():
     # Create client and agent
     mcp_client = MCPClient(mcp_config=task.mcp_config)
     # Create agent - its methods are already instrumented with @hud.instrument
-    agent = ClaudeAgent(
+    agent = ClaudeAgent.create(
         mcp_client=mcp_client,
     )
 

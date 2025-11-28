@@ -29,15 +29,32 @@ if TYPE_CHECKING:
     from hud.datasets import Task
 
 import mcp.types as types
+from pydantic import ConfigDict
 
 from hud.settings import settings
 from hud.tools.computer.settings import computer_settings
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
+from hud.utils.types import with_signature
 
-from .base import MCPAgent
+from .base import BaseCreateParams, MCPAgent
 
 logger = logging.getLogger(__name__)
+
+
+class ClaudeConfig(BaseAgentConfig):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    model_name: str = "Claude"
+    checkpoint_name: str = "claude-sonnet-4-5"
+    model_client: AsyncAnthropic | None = None
+    max_tokens: int = 16384
+    use_computer_beta: bool = True
+    validate_api_key: bool = True
+
+
+class ClaudeCreateParams(BaseCreateParams, ClaudeConfig):
+    pass
 
 
 class ClaudeAgent(MCPAgent):
@@ -48,54 +65,38 @@ class ClaudeAgent(MCPAgent):
     tools through MCP servers instead of direct implementation.
     """
 
-    metadata: ClassVar[dict[str, Any]] = {
+    metadata: ClassVar[dict[str, Any] | None] = {
         "display_width": computer_settings.ANTHROPIC_COMPUTER_WIDTH,
         "display_height": computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
     }
+    config_cls: ClassVar[type[BaseAgentConfig]] = ClaudeConfig
 
-    def __init__(
-        self,
-        model_client: AsyncAnthropic | None = None,
-        model: str = "claude-sonnet-4-5",
-        max_tokens: int = 16384,
-        use_computer_beta: bool = True,
-        validate_api_key: bool = True,
-        **kwargs: Any,
-    ) -> None:
-        """
-        Initialize Claude MCP agent.
+    @with_signature(ClaudeCreateParams)
+    @classmethod
+    def create(cls, **kwargs: Any) -> ClaudeAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
-        Args:
-            model_client: AsyncAnthropic client (created if not provided)
-            model: Claude model to use
-            max_tokens: Maximum tokens for response
-            use_computer_beta: Whether to use computer-use beta features
-            **kwargs: Additional arguments passed to BaseMCPAgent (including mcp_client)
-        """
-        super().__init__(**kwargs)
+    def __init__(self, params: ClaudeCreateParams | None = None, **kwargs: Any) -> None:
+        super().__init__(params, **kwargs)
+        self.config: ClaudeConfig
 
-        # Initialize client if not provided
+        model_client = self.config.model_client
         if model_client is None:
             api_key = settings.anthropic_api_key
             if not api_key:
                 raise ValueError("Anthropic API key not found. Set ANTHROPIC_API_KEY.")
             model_client = AsyncAnthropic(api_key=api_key)
 
-        # validate api key if requested
-        if validate_api_key:
+        if self.config.validate_api_key:
             try:
                 Anthropic(api_key=model_client.api_key).models.list()
             except Exception as e:
                 raise ValueError(f"Anthropic API key is invalid: {e}") from e
 
         self.anthropic_client = model_client
-        self.model = model
-        self.max_tokens = max_tokens
-        self.use_computer_beta = use_computer_beta
+        self.max_tokens = self.config.max_tokens
+        self.use_computer_beta = self.config.use_computer_beta
         self.hud_console = HUDConsole(logger=logger)
-
-        self.model_name = "Claude"
-        self.checkpoint_name = self.model
 
         # these will be initialized in _convert_tools_for_claude
         self.has_computer_tool = False
@@ -157,7 +158,7 @@ class ClaudeAgent(MCPAgent):
         messages_cached = self._add_prompt_caching(messages)
 
         response = await self.anthropic_client.beta.messages.create(
-            model=self.model,
+            model=self.config.checkpoint_name,
             system=self.system_prompt if self.system_prompt is not None else Omit(),
             max_tokens=self.max_tokens,
             messages=messages_cached,

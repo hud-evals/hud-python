@@ -52,6 +52,7 @@
             "pages": [
               "reference/tools",
               "reference/agents",
+              "reference/types",
               "reference/environments",
               "reference/tasks"
             ]

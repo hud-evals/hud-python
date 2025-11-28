@@ -21,13 +21,14 @@ hud eval hud-evals/SheetBench-50 claude --full
 - SDK
 
 ```python
-from hud.agents import ClaudeAgent
-from hud.datasets import run_dataset
+from hud.datasets import run_tasks
+from hud.types import AgentType
+from hud.utils.tasks import load_tasks
 
-results = await run_dataset(
-    name="SheetBench Eval",
-    dataset="hud-evals/SheetBench-50",
-    agent_class=ClaudeAgent,
+tasks = load_tasks("hud-evals/SheetBench-50")
+results = await run_tasks(
+    tasks=tasks,
+    agent_type=AgentType.CLAUDE,
     max_concurrent=50,
 )
 ```
@@ -67,7 +68,7 @@ web_tasks.append({
 ### Save to HuggingFace
 
 ```python
-from hud.datasets import save_tasks
+from hud.utils.tasks import save_tasks
 
 save_tasks(
   web_tasks,
@@ -82,13 +83,15 @@ save_tasks(
 After running, visit your dataset leaderboard and publish a scorecard:
 
 ```python
-from hud.datasets import run_dataset
-from hud.agents import ClaudeAgent
+from hud.datasets import run_tasks
+from hud.types import AgentType
+from hud.utils.tasks import load_tasks
 
-results = await run_dataset(
+tasks = load_tasks("hud-evals/SheetBench-50")
+results = await run_tasks(
+    tasks=tasks,
+    agent_type=AgentType.CLAUDE,
     name="Claude Sonnet SheetBench",
-    dataset="hud-evals/SheetBench-50",
-    agent_class=ClaudeAgent,
 )
 
 # Open https://hud.ai/leaderboards/hud-evals/SheetBench-50

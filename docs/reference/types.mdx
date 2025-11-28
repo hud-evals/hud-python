@@ -1,0 +1,174 @@
+---
+title: "Types"
+description: "SDK type reference for HUD"
+icon: "code"
+---
+
+Core types used throughout the HUD SDK.
+
+## Trace
+
+Returned by `agent.run()`. Contains the result of an agent execution.
+
+```python
+from hud.types import Trace
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `reward` | `float` | Evaluation score (0.0-1.0) |
+| `done` | `bool` | Whether execution completed |
+| `content` | `str \| None` | Final response content |
+| `isError` | `bool` | Whether an error occurred |
+| `info` | `dict[str, Any]` | Additional metadata |
+| `task` | `Task \| None` | The executed task |
+| `trace` | `list[TraceStep]` | Execution trace steps |
+| `messages` | `list[Any]` | Final conversation state |
+
+## AgentResponse
+
+Returned by agent `get_response()` methods. Represents a single model response.
+
+```python
+from hud.types import AgentResponse
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tool_calls` | `list[MCPToolCall]` | Tools to execute |
+| `done` | `bool` | Whether agent should stop |
+| `content` | `str \| None` | Response text |
+| `reasoning` | `str \| None` | Model reasoning/thinking |
+| `info` | `dict[str, Any]` | Provider-specific metadata |
+| `isError` | `bool` | Error flag |
+
+## MCPToolCall
+
+Represents a tool call to be executed.
+
+```python
+from hud.types import MCPToolCall
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `str` | Unique identifier (auto-generated if not provided) |
+| `name` | `str` | Tool name |
+| `arguments` | `dict[str, Any]` | Tool arguments |
+
+**Example:**
+
+```python
+tool_call = MCPToolCall(
+    name="playwright",
+    arguments={"action": "click", "selector": "#submit"}
+)
+```
+
+## MCPToolResult
+
+Result from executing a tool call.
+
+```python
+from hud.types import MCPToolResult
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `content` | `list[ContentBlock]` | Result content blocks |
+| `structuredContent` | `dict[str, Any] \| None` | Structured result data |
+| `isError` | `bool` | Whether the tool call failed |
+
+## Task
+
+Defines an agent task with prompt, environment config, and lifecycle tools.
+
+```python
+from hud.types import Task
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `prompt` | `str` | Instruction for the agent |
+| `mcp_config` | `dict` | Environment connection config |
+| `id` | `str \| None` | Unique identifier (required for datasets) |
+| `system_prompt` | `str \| None` | Custom system prompt |
+| `setup_tool` | `dict \| list[dict] \| None` | Tool(s) to initialize state |
+| `evaluate_tool` | `dict \| list[dict] \| None` | Tool(s) to score performance |
+| `agent_config` | `BaseAgentConfig \| None` | Task-specific agent config |
+| `metadata` | `dict \| None` | Additional task metadata |
+
+**Example:**
+
+```python
+task = Task(
+    prompt="Navigate to example.com and click login",
+    mcp_config={
+        "hud": {
+            "url": "https://mcp.hud.ai/v3/mcp",
+            "headers": {
+                "Authorization": "Bearer ${HUD_API_KEY}",
+                "Mcp-Image": "hudpython/hud-remote-browser:latest"
+            }
+        }
+    },
+    setup_tool={"name": "playwright", "arguments": {"action": "navigate", "url": "https://example.com"}},
+    evaluate_tool={"name": "evaluate", "arguments": {"name": "url_contains", "substring": "/login"}}
+)
+```
+
+## BaseAgentConfig
+
+Standard agent configuration that tasks can override.
+
+```python
+from hud.types import BaseAgentConfig
+```
+
+| Field | Type | Description | Default |
+|-------|------|-------------|---------|
+| `allowed_tools` | `list[str] \| None` | Tool patterns to expose | `None` (all) |
+| `disallowed_tools` | `list[str] \| None` | Tool patterns to hide | `None` |
+| `system_prompt` | `str \| None` | Custom system prompt | `None` |
+| `append_setup_output` | `bool` | Include setup output in first turn | `True` |
+| `initial_screenshot` | `bool` | Include screenshot in initial context | `True` |
+| `response_tool_name` | `str \| None` | Lifecycle tool for responses | `None` |
+
+## AgentType
+
+Enum of supported agent types.
+
+```python
+from hud.types import AgentType
+```
+
+| Value | Agent Class |
+|-------|-------------|
+| `AgentType.CLAUDE` | `ClaudeAgent` |
+| `AgentType.OPENAI` | `OpenAIAgent` |
+| `AgentType.OPERATOR` | `OperatorAgent` |
+| `AgentType.GEMINI` | `GeminiAgent` |
+| `AgentType.OPENAI_COMPATIBLE` | `OpenAIChatAgent` |
+
+**Example:**
+
+```python
+from hud.types import AgentType
+
+agent_cls = AgentType.CLAUDE.cls  # Returns ClaudeAgent class
+agent = agent_cls.create()
+```
+
+## ContentBlock
+
+MCP content block types (from `mcp.types`):
+
+- `TextContent` - Text content with `text` field
+- `ImageContent` - Image with `data` (base64) and `mimeType`
+- `EmbeddedResource` - Embedded resource reference
+
+## See Also
+
+- [Agents Reference](/reference/agents) - Agent classes and configuration
+- [Tasks Reference](/reference/tasks) - Task configuration details
+

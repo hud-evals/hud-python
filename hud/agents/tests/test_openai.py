@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp import types
+from openai import AsyncOpenAI
 from openai.types.responses import (
     ResponseFunctionToolCall,
     ResponseOutputMessage,
@@ -24,43 +25,28 @@ class TestOpenAIAgent:
     """Test OpenAIAgent class."""
 
     @pytest.fixture
-    def mock_mcp_client(self):
-        """Create a mock MCP client."""
-        mcp_client = AsyncMock()
-        mcp_client.mcp_config = {"test_server": {"url": "http://test"}}
-        mcp_client.list_tools = AsyncMock(
-            return_value=[
-                types.Tool(
-                    name="test_tool",
-                    description="A test tool",
-                    inputSchema={"type": "object", "properties": {}},
-                )
-            ]
-        )
-        mcp_client.initialize = AsyncMock()
-        return mcp_client
-
-    @pytest.fixture
     def mock_openai(self):
-        """Create a mock OpenAI client."""
-        with patch("hud.agents.openai.AsyncOpenAI") as mock:
-            client = AsyncMock()
-            mock.return_value = client
+        """Create a stub OpenAI client."""
+        with patch("hud.agents.openai.AsyncOpenAI") as mock_class:
+            client = AsyncOpenAI(api_key="test", base_url="http://localhost")
+            client.chat.completions.create = AsyncMock()
+            client.responses.create = AsyncMock()
+            mock_class.return_value = client
             yield client
 
     @pytest.mark.asyncio
     async def test_init_with_client(self, mock_mcp_client):
         """Test agent initialization with provided client."""
-        mock_model_client = MagicMock()
-        agent = OpenAIAgent(
+        mock_model_client = AsyncOpenAI(api_key="test", base_url="http://localhost")
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_model_client,
-            model="gpt-4o",
+            checkpoint_name="gpt-4o",
             validate_api_key=False,
         )
 
         assert agent.model_name == "OpenAI"
-        assert agent.model == "gpt-4o"
+        assert agent.config.checkpoint_name == "gpt-4o"
         assert agent.checkpoint_name == "gpt-4o"
         assert agent.openai_client == mock_model_client
         assert agent.max_output_tokens is None
@@ -69,11 +55,11 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_init_with_parameters(self, mock_mcp_client):
         """Test agent initialization with various parameters."""
-        mock_model_client = MagicMock()
-        agent = OpenAIAgent(
+        mock_model_client = AsyncOpenAI(api_key="test", base_url="http://localhost")
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_model_client,
-            model="gpt-4o",
+            checkpoint_name="gpt-4o",
             max_output_tokens=2048,
             temperature=0.7,
             reasoning={"effort": "high"},
@@ -94,12 +80,12 @@ class TestOpenAIAgent:
         with patch("hud.agents.openai.settings") as mock_settings:
             mock_settings.openai_api_key = None
             with pytest.raises(ValueError, match="OpenAI API key not found"):
-                OpenAIAgent(mcp_client=mock_mcp_client)
+                OpenAIAgent.create(mcp_client=mock_mcp_client)
 
     @pytest.mark.asyncio
     async def test_format_blocks_text_only(self, mock_mcp_client, mock_openai):
         """Test formatting text content blocks."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -122,7 +108,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_format_blocks_with_image(self, mock_mcp_client, mock_openai):
         """Test formatting content blocks with images."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -149,7 +135,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_format_blocks_empty(self, mock_mcp_client, mock_openai):
         """Test formatting empty content blocks."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -168,7 +154,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_format_tool_results_text(self, mock_mcp_client, mock_openai):
         """Test formatting tool results with text content."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -199,7 +185,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_format_tool_results_with_image(self, mock_mcp_client, mock_openai):
         """Test formatting tool results with image content."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -232,7 +218,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_format_tool_results_with_error(self, mock_mcp_client, mock_openai):
         """Test formatting tool results with errors."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -265,7 +251,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_format_tool_results_with_structured_content(self, mock_mcp_client, mock_openai):
         """Test formatting tool results with structured content."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -301,7 +287,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_format_tool_results_multiple(self, mock_mcp_client, mock_openai):
         """Test formatting multiple tool results."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -334,7 +320,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_format_tool_results_missing_call_id(self, mock_mcp_client, mock_openai):
         """Test formatting tool results with missing call_id."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -361,7 +347,7 @@ class TestOpenAIAgent:
         """Test getting model response with text output."""
         # Disable telemetry for this test
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = OpenAIAgent(
+            agent = OpenAIAgent.create(
                 mcp_client=mock_mcp_client,
                 model_client=mock_openai,
                 validate_api_key=False,
@@ -404,7 +390,7 @@ class TestOpenAIAgent:
     async def test_get_response_with_tool_call(self, mock_mcp_client, mock_openai):
         """Test getting model response with tool call."""
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = OpenAIAgent(
+            agent = OpenAIAgent.create(
                 mcp_client=mock_mcp_client,
                 model_client=mock_openai,
                 validate_api_key=False,
@@ -444,7 +430,7 @@ class TestOpenAIAgent:
     async def test_get_response_with_reasoning(self, mock_mcp_client, mock_openai):
         """Test getting model response with reasoning."""
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = OpenAIAgent(
+            agent = OpenAIAgent.create(
                 mcp_client=mock_mcp_client,
                 model_client=mock_openai,
                 validate_api_key=False,
@@ -497,7 +483,7 @@ class TestOpenAIAgent:
     async def test_get_response_empty_messages(self, mock_mcp_client, mock_openai):
         """Test getting model response with empty messages."""
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = OpenAIAgent(
+            agent = OpenAIAgent.create(
                 mcp_client=mock_mcp_client,
                 model_client=mock_openai,
                 validate_api_key=False,
@@ -522,7 +508,7 @@ class TestOpenAIAgent:
     ):
         """Test getting model response when no new messages and previous response exists."""
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = OpenAIAgent(
+            agent = OpenAIAgent.create(
                 mcp_client=mock_mcp_client,
                 model_client=mock_openai,
                 validate_api_key=False,
@@ -543,10 +529,10 @@ class TestOpenAIAgent:
     async def test_get_response_passes_correct_payload(self, mock_mcp_client, mock_openai):
         """Test that get_response passes correct parameters to OpenAI API."""
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = OpenAIAgent(
+            agent = OpenAIAgent.create(
                 mcp_client=mock_mcp_client,
                 model_client=mock_openai,
-                model="gpt-4o",
+                checkpoint_name="gpt-4o",
                 max_output_tokens=1024,
                 temperature=0.5,
                 reasoning={"effort": "high"},
@@ -589,7 +575,7 @@ class TestOpenAIAgent:
         from openai import Omit
 
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = OpenAIAgent(
+            agent = OpenAIAgent.create(
                 mcp_client=mock_mcp_client,
                 model_client=mock_openai,
                 validate_api_key=False,
@@ -622,7 +608,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_reset_response_state(self, mock_mcp_client, mock_openai):
         """Test resetting response state."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -641,7 +627,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_get_system_messages(self, mock_mcp_client, mock_openai):
         """Test getting system messages."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -654,7 +640,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_convert_tools_for_openai(self, mock_mcp_client, mock_openai):
         """Test converting MCP tools to OpenAI format."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -698,7 +684,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_convert_tools_raises_on_incomplete(self, mock_mcp_client, mock_openai):
         """Test that converting tools raises error for incomplete tool definitions."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -719,7 +705,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_convert_tools_for_openai_via_initialize(self, mock_mcp_client, mock_openai):
         """Test that initialize properly converts tools."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -747,7 +733,7 @@ class TestOpenAIAgent:
     async def test_get_response_converts_function_tool_call(self, mock_mcp_client, mock_openai):
         """Test that get_response properly converts OpenAI function tool calls to MCP format."""
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = OpenAIAgent(
+            agent = OpenAIAgent.create(
                 mcp_client=mock_mcp_client,
                 model_client=mock_openai,
                 validate_api_key=False,
@@ -782,6 +768,14 @@ class TestOpenAIAgent:
             assert response.tool_calls[0].arguments == {"key": "value", "number": 42}
 
     @pytest.mark.asyncio
+    async def test_convert_function_tool_call_invalid_json(self, mock_mcp_client, mock_openai):
+        """Test converting function tool call with invalid JSON."""
+        _agent = OpenAIAgent.create(
+            mcp_client=mock_mcp_client,
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+
     async def test_get_response_raises_on_invalid_json_arguments(
         self, mock_mcp_client, mock_openai
     ):
@@ -794,7 +788,7 @@ class TestOpenAIAgent:
         import json
 
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = OpenAIAgent(
+            agent = OpenAIAgent.create(
                 mcp_client=mock_mcp_client,
                 model_client=mock_openai,
                 validate_api_key=False,
@@ -828,7 +822,7 @@ class TestOpenAIAgent:
     async def test_get_response_handles_tool_name_mapping(self, mock_mcp_client, mock_openai):
         """Test that get_response correctly maps tool names that aren't in the map."""
         with patch("hud.settings.settings.telemetry_enabled", False):
-            agent = OpenAIAgent(
+            agent = OpenAIAgent.create(
                 mcp_client=mock_mcp_client,
                 model_client=mock_openai,
                 validate_api_key=False,
@@ -863,7 +857,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_convert_tools_for_openai_shell_tool(self, mock_mcp_client, mock_openai):
         """Test that shell tool is converted to OpenAI native shell type."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -886,7 +880,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_convert_tools_for_openai_apply_patch_tool(self, mock_mcp_client, mock_openai):
         """Test that apply_patch tool is converted to OpenAI native apply_patch type."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -911,7 +905,7 @@ class TestOpenAIAgent:
         self, mock_mcp_client, mock_openai
     ):
         """Test that tool conversion raises error when strict schema conversion fails."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -941,7 +935,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_format_tool_results_with_resource_link(self, mock_mcp_client, mock_openai):
         """Test formatting tool results with ResourceLink content."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -979,7 +973,7 @@ class TestOpenAIAgent:
         self, mock_mcp_client, mock_openai
     ):
         """Test formatting tool results with EmbeddedResource containing text."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -1021,7 +1015,7 @@ class TestOpenAIAgent:
         self, mock_mcp_client, mock_openai
     ):
         """Test formatting tool results with EmbeddedResource containing blob."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
@@ -1061,7 +1055,7 @@ class TestOpenAIAgent:
     @pytest.mark.asyncio
     async def test_format_tool_results_empty_content(self, mock_mcp_client, mock_openai):
         """Test formatting tool results with completely empty content."""
-        agent = OpenAIAgent(
+        agent = OpenAIAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,

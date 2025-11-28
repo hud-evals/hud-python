@@ -38,46 +38,38 @@ async def main():
 
         # Create Claude-specific agent
         client = MCPClient(mcp_config=mcp_config)
-        agent = ClaudeAgent(
+        agent = ClaudeAgent.create(
             mcp_client=client,
-            model="claude-3-7-sonnet-20250219",
+            checkpoint_name="claude-sonnet-4-5",
             allowed_tools=["anthropic_computer"],
             initial_screenshot=True,
         )
 
-        await client.initialize()
+        initial_url = "https://httpbin.org/forms/post"
 
-        try:
-            initial_url = "https://httpbin.org/forms/post"
+        prompt = f"""
+        Please help me test a web form:
+        1. Navigate to {initial_url}
+        2. Fill in the customer name as "Claude Test"
+        3. Enter the telephone as "555-0123"
+        4. Type "Testing form submission with Claude" in the comments
+        5. Select a small pizza size
+        6. Choose "bacon" as a topping
+        7. Set delivery time to "20:30"
+        8. Submit the form
+        9. Verify the submission was successful
+        """
 
-            prompt = f"""
-            Please help me test a web form:
-            1. Navigate to {initial_url}
-            2. Fill in the customer name as "Claude Test"
-            3. Enter the telephone as "555-0123"
-            4. Type "Testing form submission with Claude" in the comments
-            5. Select a small pizza size
-            6. Choose "bacon" as a topping
-            7. Set delivery time to "20:30"
-            8. Submit the form
-            9. Verify the submission was successful
-            """
+        print(f"📋 Task: Multi-step form interaction")
+        print(f"🚀 Running Claude agent...\n")
 
-            print(f"📋 Task: Multi-step form interaction")
-            print(f"🚀 Running Claude agent...\n")
+        await client.call_tool(
+            name="setup",
+            arguments={"name": "navigate_to_url", "arguments": {"url": initial_url}},
+        )
 
-            await client.call_tool(
-                name="setup",
-                arguments={"name": "navigate_to_url", "arguments": {"url": initial_url}},
-            )
-
-            # Run the task
-            result = await agent.run(prompt, max_steps=15)
-
-            print(result)
-
-        finally:
-            await client.shutdown()
+        # Run the task
+        await agent.run(prompt, max_steps=15)
 
     print("\n✨ Claude agent demo complete!")
 

@@ -37,7 +37,7 @@ async def main():
         mcp_config = {
             "local": {
                 "command": "docker",
-                "args": ["run", "--rm", "-i", "-p", "8080:8080", "hudevals/hud-browser:0.1.3"],
+                "args": ["run", "--rm", "-i", "-p", "8080:8080", "hudevals/hud-browser:0.1.6"],
             }
         }
 
@@ -46,10 +46,10 @@ async def main():
             api_key=os.getenv("OPENAI_API_KEY", settings.openai_api_key)
         )  # can use any OpenAI-compatible endpoint
 
-        agent = GroundedOpenAIChatAgent(
+        agent = GroundedOpenAIChatAgent.create(
             grounder_config=grounder_config,
             openai_client=openai_client,
-            model_name="gpt-4o-mini",  # Planning model
+            checkpoint_name="gpt-4o-mini",  # Planning model
         )
 
         try:

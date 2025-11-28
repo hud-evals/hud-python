@@ -67,8 +67,8 @@ Agents make decisions and call tools:
 from hud.agents import ClaudeAgent, OperatorAgent
 
 # Built-in agents
-agent = ClaudeAgent()      # Uses Anthropic's Claude
-agent = OperatorAgent()    # Uses OpenAI Operator
+agent = ClaudeAgent.create()      # Uses Anthropic's Claude
+agent = OperatorAgent.create()    # Uses OpenAI Operator
 
 # All agents inherit from MCPAgent
 class MCPAgent:

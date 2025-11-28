@@ -68,21 +68,8 @@ cd sample && hud build
 hud dev . --build --interactive
 
 # Run a task in your environment
-hud eval claude
+hud eval tasks.json claude
 ```
-
-## What just happened?
-
-1. **Task Definition**: We created a `Task` with:
-   - A prompt telling the agent what to do
-   - An `mcp_config` pointing to a remote MCP environment
-   - Setup and evaluation tools to initialize and grade the trajectory
-
-2. **Auto Client**: The agent automatically created an MCP client from `task.mcp_config`
-
-3. **Telemetry**: The `trace` context captured all interactions for debugging
-
-4. **Evaluation**: The `evaluate` tool returns a reward at the end of the agent loop
 
 ## Next Steps
 

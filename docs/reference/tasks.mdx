@@ -15,6 +15,7 @@ from hud.datasets import Task
 Pydantic model that defines an agent's objective, setup, and evaluation criteria.
 
 **Fields:**
+
 | Field | Type | Description | Default |
 |-------|------|-------------|---------|
 | `id` | `str \| None` | Unique identifier (UUID recommended) | `None` |
@@ -22,7 +23,7 @@ Pydantic model that defines an agent's objective, setup, and evaluation criteria
 | `mcp_config` | `dict[str, Any]` | MCP server configuration | Required |
 | `setup_tool` | `MCPToolCall \| list[MCPToolCall] \| None` | Tool(s) to prepare environment | `None` |
 | `evaluate_tool` | `MCPToolCall \| list[MCPToolCall] \| None` | Tool(s) to score performance | `None` |
-| `agent_config` | `dict[str, Any] \| None` | Agent configuration (system_prompt, allowed_tools, etc.) | `None` |
+| `agent_config` | `BaseAgentConfig \| dict[str, Any] \| None` | Agent configuration | `None` |
 | `metadata` | `dict[str, Any]` | Extra task metadata | `{}` |
 
 ### Environment Variable Substitution
@@ -44,168 +45,139 @@ task = Task(
 )
 ```
 
-**Substitution happens automatically when Task is created from a dict** - environment variables are resolved using Python's `Template.substitute()` with a defaultdict that returns empty strings for missing variables.
+Variables are resolved when Task is created from a dict - this is why datasets should store raw dictionaries.
 
-### Field Validators
+## Running Tasks
 
-Task automatically:
+### run_single_task
 
-1. **Parses JSON strings** - `mcp_config` and `metadata` can be JSON strings
-2. **Converts dicts to MCPToolCall** - `setup_tool` and `evaluate_tool` dicts are converted
-3. **Resolves environment variables** - Only when created from dict (preserves templates in model_dump())
+Execute a single task with tracing. This is the core execution primitive.
 
 ```python
-# All of these work:
-task = Task(
-    prompt="Test",
-    mcp_config='{"server": {"url": "..."}}',  # JSON string → dict
-    setup_tool='{"name": "setup"}'            # JSON string → MCPToolCall
-)
+from hud.datasets import run_single_task
+from hud.types import AgentType
 
-task = Task(
-    prompt="Test", 
-    mcp_config={...},
-    setup_tool={"name": "setup", "arguments": {...}}  # dict → MCPToolCall
+result = await run_single_task(
+    task=task,
+    agent_type=AgentType.CLAUDE,
+    agent_params={"checkpoint_name": "claude-sonnet-4-5"},
+    max_steps=20,
+    trace_name="My Task",
 )
-
-task = Task(
-    prompt="Test",
-    mcp_config={...},
-    evaluate_tool=[  # List of tool calls
-        {"name": "check_text", "arguments": {"text": "Success"}},
-        {"name": "check_url", "arguments": {"url": "example.com"}}
-    ]
-)
+print(f"Reward: {result.reward}")
 ```
 
-## Recommended Evaluation Workflow
+**Parameters:**
 
-When developing and testing agents, follow this progression for optimal debugging and performance:
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `task` | `Task` | Task to execute | Required |
+| `agent_type` | `AgentType` | Agent type to use | Required |
+| `agent_params` | `dict` | Parameters for `agent.create()` | `None` |
+| `max_steps` | `int` | Maximum steps | `10` |
+| `job_id` | `str` | Job ID for telemetry | `None` |
+| `task_id` | `str` | Task ID for telemetry | `None` |
+| `group_id` | `str` | Group ID for variance runs | `None` |
+| `trace_name` | `str` | Name for the trace | `None` |
+| `metadata` | `dict` | Additional trace metadata | `None` |
 
-### Step 1: Single Task Development
+### run_tasks
 
-Start with individual tasks to debug your agent and environment setup:
-
-```python
-import hud
-from hud.agents import ClaudeAgent
-from hud.datasets import Task
-
-task = Task(prompt="Click the submit button", mcp_config={...})
-
-async with hud.async_trace(task.prompt):
-    agent = ClaudeAgent()
-    result = await agent.run(task, max_steps=50)
-    print(f"Result: {result.reward}")
-```
-
-**Benefits:**
-- Full error stack traces
-- Clear log output
-- Quick iteration cycle
-- Automatic telemetry tracking
-
-### Step 2: Full Dataset Evaluation
-
-Once single tasks work reliably, scale up to full dataset evaluation:
+Run multiple tasks with automatic job tracking. This is the primary evaluation function.
 
 ```python
-from hud.datasets import run_dataset
-from hud.agents import ClaudeAgent
+from hud.datasets import run_tasks
+from hud.types import AgentType
 
-results = await run_dataset(
+results = await run_tasks(
+    tasks=tasks,
+    agent_type=AgentType.CLAUDE,
+    agent_params={"checkpoint_name": "claude-sonnet-4-5"},
     name="SheetBench Evaluation",
-    dataset="hud-evals/SheetBench-50",
-    agent_class=ClaudeAgent,
-    agent_config={"model": "claude-sonnet-4-5-20250929", "validate_api_key": False},
     max_concurrent=50,
     max_steps=50,
-    auto_respond=True
-)
-```
-
-**Concurrency Guidelines:**
-- Start with `max_concurrent=50` and adjust based on results
-- Increase to 100-200 for faster evaluation (if API limits allow)
-- Decrease to 10-20 if hitting rate limits
-
-### Quick Reference
-
-| Stage | Method | Concurrency | Use Case | Debugging |
-|-------|--------|-------------|----------|-----------|
-| Development | Single task | 1 | Initial debugging | Excellent |
-| Production | `run_dataset` | 50-200 | Full evaluation | Good |
-
-## Dataset Functions
-
-### run_dataset
-
-```python
-from hud.datasets import run_dataset
-from hud.agents import ClaudeAgent
-
-results = await run_dataset(
-    name="SheetBench Evaluation",
-    dataset="hud-evals/SheetBench-50",
-    agent_class=ClaudeAgent,
-    agent_config={"model": "claude-sonnet-4-5-20250929", "validate_api_key": False},
-    max_concurrent=50,
-    max_steps=50,
-    auto_respond=True
 )
 ```
 
 **Parameters:**
+
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
-| `name` | `str` | Job name for tracking | Required |
-| `dataset` | `str \| Dataset \| list[dict]` | HF dataset ID, Dataset object, or task dicts | Required |
-| `agent_class` | `type[MCPAgent]` | Agent class to instantiate | Required |
-| `agent_config` | `dict[str, Any] \| None` | Constructor kwargs for agent | `None` |
-| `max_concurrent` | `int` | Maximum concurrent tasks (recommended: 50-200) | `30` |
+| `tasks` | `list[Task]` | Tasks to execute | Required |
+| `agent_type` | `AgentType` | Agent type to use | Required |
+| `agent_params` | `dict` | Parameters for `agent.create()` | `None` |
+| `name` | `str` | Job name for tracking | `"Evaluation"` |
+| `max_concurrent` | `int` | Maximum concurrent tasks | `30` |
+| `metadata` | `dict` | Job metadata | `None` |
 | `max_steps` | `int` | Max steps per task | `10` |
-| `auto_respond` | `bool` | Use ResponseAgent for continuations | `False` |
-| `metadata` | `dict[str, Any] \| None` | Job metadata | `None` |
-| `split` | `str` | Dataset split when loading by ID | `"train"` |
+| `group_size` | `int` | Runs per task (variance estimation) | `1` |
+| `remote` | `bool` | Submit to HUD platform | `False` |
 
-**Returns:** `list[Any]` - Results in dataset order
+**Returns:**
+- If `remote=True`: Empty list (fire-and-forget)
+- If `group_size=1`: List of `Trace` results
+- If `group_size>1`: List of statistics dicts
 
 **Examples:**
-```python
-from hud.datasets import run_dataset
-from hud.agents import ClaudeAgent, OperatorAgent
 
-# From HuggingFace dataset
-results = await run_dataset(
-    "Eval", "hud-evals/SheetBench-50", ClaudeAgent,
-    {"model": "claude-sonnet-4-5-20250929"}, max_concurrent=50
+```python
+# Run filtered tasks locally
+all_tasks = load_tasks("hud-evals/SheetBench-50")
+selected = [t for t in all_tasks if "login" in t.prompt.lower()]
+results = await run_tasks(selected, AgentType.CLAUDE)
+
+# Run with variance estimation
+stats = await run_tasks(tasks, AgentType.CLAUDE, group_size=3)
+
+# Submit for remote execution
+await run_tasks(tasks, AgentType.CLAUDE, remote=True)
+```
+
+## Remote Execution
+
+Submit tasks to the HUD platform for execution in the cloud:
+
+```python
+from hud.datasets import run_tasks
+from hud.types import AgentType
+
+# Submit and return immediately
+await run_tasks(
+    tasks=tasks,
+    agent_type=AgentType.CLAUDE,
+    agent_params={"checkpoint_name": "claude-sonnet-4-5"},
+    name="Remote Evaluation",
+    remote=True,
 )
-
-# From Dataset object  
-from datasets import load_dataset
-dataset = load_dataset("hud-evals/OSWorld-Verified", split="train")
-results = await run_dataset("Eval", dataset, OperatorAgent)
-
-# From list of dicts
-tasks = [{"prompt": "...", "mcp_config": {...}, "setup_tool": {...}}]
-results = await run_dataset("Eval", tasks, ClaudeAgent)
+# Monitor at https://hud.so/jobs/{job_id}
 ```
 
-### fetch_system_prompt_from_dataset
+### Cancellation
+
+Cancel running remote jobs:
 
 ```python
-from hud.datasets import fetch_system_prompt_from_dataset
+from hud.datasets.utils import cancel_job, cancel_task, cancel_all_jobs
 
-system_prompt = await fetch_system_prompt_from_dataset("hud-evals/SheetBench-50")
+# Cancel specific job
+await cancel_job(job_id)
+
+# Cancel specific task
+await cancel_task(job_id, task_id)
+
+# Cancel ALL your active jobs (panic button)
+await cancel_all_jobs()
 ```
 
-Fetch `system_prompt.txt` from a HuggingFace dataset repository.
+Or use the CLI:
 
-**Returns:** `str | None` - System prompt text if found
+```bash
+hud cancel --job <job_id>
+hud cancel --task <job_id> <task_id>
+hud cancel --all
+```
 
-**Note:** Requires `huggingface_hub` to be installed.
-
-### save_tasks  
+## Saving Tasks
 
 ```python
 from hud.datasets import save_tasks
@@ -216,267 +188,47 @@ save_tasks(
     tasks=task_dicts,
     repo_id="my-org/my-tasks",
     private=False,
-    dataset_name="My Tasks v1.0"
 )
 ```
 
-Save tasks to HuggingFace dataset with JSON string serialization.
+<Warning>
+Always pass dictionaries to preserve environment variable templates. Task objects have already resolved `${VAR}` to actual values!
+</Warning>
 
-**Parameters:**
-| Parameter | Type | Description | Default |
-|-----------|------|-------------|---------|
-| `tasks` | `list[dict[str, Any]]` | Task dictionaries (NOT Task objects) | Required |
-| `repo_id` | `str` | HuggingFace repository ID | Required |
-| `**kwargs` | `Any` | Additional args for `push_to_hub()` | - |
+## Agent Config Options
 
-**Important:** Always pass dictionaries to preserve environment variable templates:
+The `agent_config` field on tasks supports:
 
-```python
-# ✅ GOOD - Preserves ${HUD_API_KEY} in the dataset
-task_dicts = [task.model_dump() for task in tasks]
-save_tasks(task_dicts, "my-dataset")
-
-# ❌ BAD - Would expose resolved API keys!
-# save_tasks(tasks, "my-dataset")  # Don't do this!
-```
-
-**Dataset Schema:**
-The function converts complex fields to JSON strings for clean HuggingFace schema:
-- `mcp_config` → JSON string
-- `setup_tool` → JSON string (if present)
-- `evaluate_tool` → JSON string (if present)
-- `metadata` → JSON string (if present)
-
-## MCPToolCall Type
-
-```python
-from hud.types import MCPToolCall
-```
-
-Defines a tool invocation with arguments.
-
-**Fields:**
-| Field | Type | Description | Default |
-|-------|------|-------------|---------|
-| `name` | `str` | Tool name to call | Required |
-| `arguments` | `dict[str, Any]` | Tool arguments | `{}` |
-
-## Real-World Examples
-
-### Loading Tasks from Datasets
-
-From `examples/run_evaluation.py`:
-
-```python
-# Load dataset
-dataset = load_dataset("hud-evals/SheetBench-50", split="train")
-
-# Get system prompt
-dataset_system_prompt = await fetch_system_prompt_from_dataset("hud-evals/SheetBench-50")
-
-# Run single task
-sample_task = dataset[0]
-task = Task(**sample_task)  # Auto-converts dict to Task
-
-# Or run all tasks
-results = await run_dataset(
-    "Full SheetBench Evaluation",
-    dataset,
-    ClaudeAgent,
-    {"model": "claude-3-5-sonnet-20241022"},
-    max_concurrent=50
-)
-```
-
-### Task Structure in Datasets
-
-From `environments/text_2048/2048_taskconfigs.json`:
-
-```json
-{
-    "id": "2048_target_256",
-    "prompt": "You are playing 2048 and your goal is to reach the 256 tile.",
-    "mcp_config": {
-        "local": {
-            "command": "docker",
-            "args": ["run", "--rm", "-i", "hud-text-2048"]
-        }
-    },
-    "setup_tool": {
-        "name": "setup",
-        "arguments": {
-            "name": "board",
-            "arguments": {"board_size": 4}
-        }
-    },
-    "evaluate_tool": {
-        "name": "evaluate", 
-        "arguments": {
-            "name": "max_number",
-            "arguments": {"target": 256}
-        }
-    },
-    "metadata": {
-        "difficulty": 256,
-        "game": "2048"
-    }
-}
-```
-
-### Creating and Saving Tasks
-
-```python
-import os
-from uuid import uuid4
-
-# Set environment variables
-os.environ["HUD_API_KEY"] = "sk-hud-..."
-os.environ["BROWSER_PROVIDER"] = "anchorbrowser"
-
-# Create tasks with env var templates
-tasks = []
-for url in ["example.com", "test.com"]:
-    task = Task(
-        id=str(uuid4()),
-        prompt=f"Navigate to {url} and find the login button",
-        mcp_config={
-            "browser": {
-                "url": "${HUD_MCP_URL:https://mcp.hud.ai/v3/mcp}",
-                "headers": {
-                    "Authorization": "Bearer ${HUD_API_KEY}",
-                    "X-Provider": "${BROWSER_PROVIDER}"
-                }
-            }
-        },
-        setup_tool=MCPToolCall(
-            name="setup",
-            arguments={"name": "navigate", "arguments": {"url": url}}
-        ),
-        evaluate_tool=MCPToolCall(
-            name="evaluate", 
-            arguments={"name": "element_exists", "arguments": {"selector": "button.login"}}
-        ),
-        metadata={
-            "category": "navigation",
-            "difficulty": "easy"
-        }
-    )
-    tasks.append(task)
-
-# Save to HuggingFace (preserves env var templates)
-task_dicts = [t.model_dump() for t in tasks]
-save_tasks(task_dicts, "my-org/navigation-tasks")
-```
-
-### Agent Integration
-
-Tasks automatically configure agents:
+| Option | Type | Description |
+|--------|------|-------------|
+| `system_prompt` | `str` | Appended to agent's default system prompt |
+| `allowed_tools` | `list[str]` | Tools the agent can use |
+| `disallowed_tools` | `list[str]` | Tools to hide from the agent |
+| `append_setup_output` | `bool` | Include setup output in first message |
+| `initial_screenshot` | `bool` | Take screenshot before first action |
 
 ```python
 task = Task(
     prompt="Complete the form",
     mcp_config={...},
-    setup_tool={...},
-    evaluate_tool={...},
     agent_config={
-        "system_prompt": "Be very careful with form fields",
+        "system_prompt": "Be careful with form fields",
         "allowed_tools": ["computer", "search"],
-        "append_setup_output": True
     }
 )
-
-agent = ClaudeAgent()
-
-# When agent.run(task) is called:
-# 1. If no mcp_client, creates one from task.mcp_config
-# 2. Applies task.agent_config to agent (system_prompt, allowed_tools, etc.)
-# 3. Adds lifecycle tools to agent.lifecycle_tools
-# 4. Runs setup_tool (hidden from agent)
-# 5. Executes task.prompt
-# 6. Runs evaluate_tool (hidden from agent)
-# 7. Returns Trace with evaluation reward
 ```
-
-### Agent Config Options
-
-The `agent_config` field supports the following options:
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `system_prompt` | `str` | Custom system prompt appended to agent's default |
-| `allowed_tools` | `list[str]` | Tools the agent can use (replaces `agent_tools`) |
-| `disallowed_tools` | `list[str]` | Tools to exclude from the agent |
-| `append_setup_output` | `bool` | Include setup output in first message (default: True) |
-| `initial_screenshot` | `bool` | Take screenshot before first action (default: True) |
 
 ## Best Practices
 
 1. **Use UUIDs for task IDs** - Required for HuggingFace datasets
 2. **Save dictionaries, not objects** - Preserves env var templates
-3. **Use agent_config for agent settings** - Centralize agent configuration in one place
-4. **Use metadata for filtering** - Category, difficulty, tags
-5. **Test locally first** - Before uploading to HuggingFace
-6. **Version your datasets** - Use meaningful repo names
-
-## Common Patterns
-
-### Filtering Tasks
-
-```python
-# Load all tasks
-dataset = load_dataset("hud-evals/WebArena-Lite", split="train")
-
-# Filter in Python
-login_tasks = [
-    task for task in dataset
-    if "login" in task["prompt"].lower()
-]
-
-# Convert and run
-results = await run_dataset(
-    "Login Tasks Only",
-    login_tasks,
-    ClaudeAgent
-)
-```
-
-### Custom System Prompts
-
-```python
-# Override dataset system prompt
-results = await run_dataset(
-    "Custom Evaluation",
-    "hud-evals/SheetBench-50",
-    ClaudeAgent,
-    custom_system_prompt="You are an expert spreadsheet user. Be precise."
-)
-```
-
-### Environment Variable Management
-
-```python
-# Tasks preserve templates
-task = Task(
-    prompt="Test",
-    mcp_config={
-        "server": {
-            "api_key": "${API_KEY:default-key}"
-        }
-    }
-)
-
-# model_dump() preserves the template
-data = task.model_dump()
-assert data["mcp_config"]["server"]["api_key"] == "${API_KEY:default-key}"
-
-# But task object has resolved value
-os.environ["API_KEY"] = "real-key"
-task2 = Task(**data)
-# task2.mcp_config["server"]["api_key"] is now "real-key"
-```
+3. **Start with single tasks** - Debug before scaling up
+4. **Use group_size for variance** - Run each task 3-5 times for reliable metrics
+5. **Use remote for large evals** - Better parallelization and monitoring
 
 ## See Also
 
+- [Types Reference](/reference/types) - Task, MCPToolCall, Trace types
 - [Task System](/core-concepts/task-system) - Conceptual overview
-- [Benchmarks](/evaluate-agents/benchmarks) - Building and running datasets
-- [Agents](/reference/agents) - How agents use tasks
+- [Agents Reference](/reference/agents) - How agents use tasks
+- [`hud eval`](/reference/cli/eval) - CLI for running evaluations

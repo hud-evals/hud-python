@@ -65,38 +65,6 @@ task = Task(
 )
 ```
 
-## Field Reference
-
-<ParamField body="prompt" type="string" required>
-  The instruction given to the agent. Be specific and clear about success criteria.
-</ParamField>
-
-<ParamField body="mcp_config" type="object" required>
-  Environment connection configuration. Supports environment variables with `${VAR}` syntax.
-</ParamField>
-
-<ParamField body="id" type="string (UUID)" optional>
-  Unique identifier. Required when creating HuggingFace datasets. Use `str(uuid.uuid4())`.
-</ParamField>
-
-<ParamField body="system_prompt" type="string" optional>
-  Custom system prompt for the agent. Overrides the agent's default system prompt.
-</ParamField>
-
-<ParamField body="setup_tool" type="dict | list[dict]" optional>
-  Tool(s) to initialize environment state with `name` and `arguments`
-</ParamField>
-
-<ParamField body="evaluate_tool" type="dict | list[dict]" optional>
-  Tool(s) to score performance with `name` and `arguments`
-</ParamField>
-
-<ParamField body="metadata" type="object" optional>
-  Additional task information for analysis and filtering
-</ParamField>
-
-
-
 ## Environment Variables
 
 <Important>
@@ -146,17 +114,18 @@ The agent will:
 Tasks integrate with HuggingFace datasets:
 
 ```python
-from datasets import load_dataset
-from hud.datasets import run_dataset
+from hud.datasets import run_tasks
+from hud.types import AgentType
+from hud.utils.tasks import load_tasks
 
-# Load dataset from HuggingFace
-dataset = load_dataset("hud-evals/SheetBench-50", split="train")
+# Load tasks from HuggingFace
+tasks = load_tasks("hud-evals/SheetBench-50")
 
-# Run agent on entire dataset with automatic parallelization
-results = await run_dataset(
-    "SheetBench Run",
-    dataset,  # Pass the dataset object or name (e.g. "hud-evals/SheetBench-50")
-    agent_class=ClaudeAgent
+# Run agent on all tasks with automatic parallelization
+results = await run_tasks(
+    tasks=tasks,
+    agent_type=AgentType.CLAUDE,
+    name="SheetBench Run",
 )
 ```
 

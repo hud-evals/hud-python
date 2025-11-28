@@ -21,51 +21,66 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import mcp.types as types
 from openai import AsyncOpenAI
+from pydantic import ConfigDict, Field
 
 from hud import instrument
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
+from hud.utils.types import with_signature
 
-from .base import MCPAgent
+from .base import BaseCreateParams, MCPAgent
 
 if TYPE_CHECKING:
     from openai.types.chat import ChatCompletionToolParam
 
+
 logger = logging.getLogger(__name__)
+
+
+class OpenAIChatConfig(BaseAgentConfig):
+    """Configuration for `OpenAIChatAgent`."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    model_name: str = "OpenAI"
+    checkpoint_name: str = "gpt-5-mini"
+    openai_client: AsyncOpenAI | None = None
+    api_key: str | None = None
+    base_url: str | None = None
+    completion_kwargs: dict[str, Any] = Field(default_factory=dict)
+
+
+class OpenAIChatCreateParams(BaseCreateParams, OpenAIChatConfig):
+    pass
 
 
 class OpenAIChatAgent(MCPAgent):
     """MCP-enabled agent that speaks the OpenAI *chat.completions* protocol."""
 
-    metadata: ClassVar[dict[str, Any]] = {}
+    metadata: ClassVar[dict[str, Any] | None] = None
+    config_cls: ClassVar[type[BaseAgentConfig]] = OpenAIChatConfig
 
-    def __init__(
-        self,
-        *,
-        openai_client: AsyncOpenAI | None = None,
-        api_key: str | None = None,
-        base_url: str | None = None,
-        model_name: str = "gpt-4o-mini",
-        completion_kwargs: dict[str, Any] | None = None,
-        **agent_kwargs: Any,
-    ) -> None:
-        # Accept base-agent settings via **agent_kwargs (e.g., mcp_client, system_prompt, etc.)
-        super().__init__(**agent_kwargs)
+    @with_signature(OpenAIChatCreateParams)
+    @classmethod
+    def create(cls, **kwargs: Any) -> OpenAIChatAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
-        # Handle client creation - support both patterns
-        if openai_client is not None:
-            # Use provided client (backward compatibility)
-            self.oai = openai_client
-        elif api_key is not None or base_url is not None:
-            # Create client from config (new pattern, consistent with other agents)
-            self.oai = AsyncOpenAI(api_key=api_key, base_url=base_url)
+    def __init__(self, params: OpenAIChatCreateParams | None = None, **kwargs: Any) -> None:
+        super().__init__(params, **kwargs)
+        self.config: OpenAIChatConfig
+
+        if self.config.openai_client is not None:
+            self.oai = self.config.openai_client
+        elif self.config.api_key is not None or self.config.base_url is not None:
+            self.oai = AsyncOpenAI(api_key=self.config.api_key, base_url=self.config.base_url)
         else:
-            raise ValueError("Either openai_client or (api_key and base_url) must be provided")
+            raise ValueError(
+                "Either openai_client or api_key must be provided. "
+                "Set OPENAI_API_KEY environment variable or pass api_key explicitly."
+            )
 
-        self.model_name = "OpenAI"
-        self.checkpoint_name = model_name
-        self.completion_kwargs: dict[str, Any] = completion_kwargs or {}
-        self.mcp_schemas = []
+        self.completion_kwargs = dict(self.config.completion_kwargs)
+        self.mcp_schemas: list[ChatCompletionToolParam] = []
         self.hud_console = HUDConsole(logger=logger)
 
     @staticmethod
@@ -198,7 +213,7 @@ class OpenAIChatAgent(MCPAgent):
             raise ValueError("openai_client is required for OpenAIChatAgent")
         # default transport = OpenAI SDK
         return await self.oai.chat.completions.create(
-            model=self.checkpoint_name,
+            model=self.config.checkpoint_name,
             messages=messages,
             tools=tools,  # type: ignore ready ChatCompletionToolParam-shaped
             **extra,

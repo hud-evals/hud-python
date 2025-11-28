@@ -6,12 +6,13 @@ import copy
 import json
 import logging
 from inspect import cleandoc
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, ClassVar, Literal
 
 import mcp.types as types
 from openai import AsyncOpenAI, Omit, OpenAI
 from openai.types.responses import (
     ApplyPatchToolParam,
+    ComputerToolParam,
     FunctionShellToolParam,
     FunctionToolParam,
     ResponseFunctionCallOutputItemListParam,
@@ -25,70 +26,85 @@ from openai.types.responses import (
     ResponseOutputText,
     ToolParam,
 )
+from openai.types.responses.response_create_params import ToolChoice  # noqa: TC002
 from openai.types.responses.response_input_param import FunctionCallOutput, Message
+from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
+from pydantic import ConfigDict
 
 import hud
 from hud.settings import settings
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Trace
+from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
 from hud.utils.strict_schema import ensure_strict_json_schema
+from hud.utils.types import with_signature
 
-from .base import MCPAgent
-
-if TYPE_CHECKING:
-    from openai.types.responses.response_create_params import ToolChoice
-    from openai.types.shared_params.reasoning import Reasoning
+from .base import BaseCreateParams, MCPAgent
 
 logger = logging.getLogger(__name__)
+
+
+class OpenAIConfig(BaseAgentConfig):
+    """Configuration model for `OpenAIAgent`."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    model_name: str = "OpenAI"
+    checkpoint_name: str = "gpt-5.1"
+    model_client: AsyncOpenAI | None = None
+    max_output_tokens: int | None = None
+    temperature: float | None = None
+    reasoning: Reasoning | None = None
+    tool_choice: ToolChoice | None = None
+    truncation: Literal["auto", "disabled"] | None = None
+    parallel_tool_calls: bool | None = None
+    validate_api_key: bool = True
+
+
+class OpenAICreateParams(BaseCreateParams, OpenAIConfig):
+    pass
 
 
 class OpenAIAgent(MCPAgent):
     """Generic OpenAI agent that can execute MCP tools through the Responses API."""
 
-    metadata: dict[str, Any] | None = None
+    metadata: ClassVar[dict[str, Any] | None] = None
+    config_cls: ClassVar[type[BaseAgentConfig]] = OpenAIConfig
 
-    def __init__(
-        self,
-        model_client: AsyncOpenAI | None = None,
-        model: str = "gpt-5.1",
-        max_output_tokens: int | None = None,
-        temperature: float | None = None,
-        reasoning: Reasoning | None = None,
-        tool_choice: ToolChoice | None = None,
-        truncation: Literal["auto", "disabled"] | None = None,
-        parallel_tool_calls: bool | None = None,
-        validate_api_key: bool = True,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(**kwargs)
+    @with_signature(OpenAICreateParams)
+    @classmethod
+    def create(cls, **kwargs: Any) -> OpenAIAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
+    def __init__(self, params: OpenAICreateParams | None = None, **kwargs: Any) -> None:
+        super().__init__(params, **kwargs)
+        self.config: OpenAIConfig
+
+        model_client = self.config.model_client
         if model_client is None:
             api_key = settings.openai_api_key
             if not api_key:
                 raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY.")
             model_client = AsyncOpenAI(api_key=api_key)
 
-        if validate_api_key:
+        if self.config.validate_api_key:
             try:
                 OpenAI(api_key=model_client.api_key).models.list()
             except Exception as exc:  # pragma: no cover - network validation
                 raise ValueError(f"OpenAI API key is invalid: {exc}") from exc
 
         self.openai_client = model_client
-        self.model = model
-        self.max_output_tokens = max_output_tokens
-        self.temperature = temperature
-        self.reasoning = reasoning
-        self.tool_choice: ToolChoice | None = tool_choice
-        self.parallel_tool_calls = parallel_tool_calls
-        self.truncation: Literal["auto", "disabled"] | None = truncation
+        self.model = self.config.checkpoint_name
+        self.max_output_tokens = self.config.max_output_tokens
+        self.temperature = self.config.temperature
+        self.reasoning = self.config.reasoning
+        self.tool_choice: ToolChoice | None = self.config.tool_choice
+        self.parallel_tool_calls = self.config.parallel_tool_calls
+        self.truncation: Literal["auto", "disabled"] | None = self.config.truncation
+
         self._openai_tools: list[ToolParam] = []
         self._tool_name_map: dict[str, str] = {}
 
         self.last_response_id: str | None = None
         self._message_cursor = 0
-
-        self.model_name = "OpenAI"
-        self.checkpoint_name = self.model
 
     async def initialize(self, task: Any | None = None) -> None:
         """Initialize agent and build tool metadata."""
@@ -98,7 +114,9 @@ class OpenAIAgent(MCPAgent):
     def _to_openai_tool(
         self,
         tool: types.Tool,
-    ) -> FunctionShellToolParam | ApplyPatchToolParam | FunctionToolParam | None:
+    ) -> (
+        FunctionShellToolParam | ApplyPatchToolParam | FunctionToolParam | ComputerToolParam | None
+    ):
         # Special case: shell tool -> OpenAI native shell
         if tool.name == "shell":
             return FunctionShellToolParam(type="shell")

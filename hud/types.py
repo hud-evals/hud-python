@@ -27,9 +27,43 @@ class AgentType(str, Enum):
     OPENAI = "openai"
     OPERATOR = "operator"
     GEMINI = "gemini"
-    VLLM = "vllm"
-    LITELLM = "litellm"
+    OPENAI_COMPATIBLE = "openai_compatible"
     INTEGRATION_TEST = "integration_test"
+
+    @property
+    def cls(self) -> type:
+        from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OperatorAgent
+        from hud.agents.openai_chat import OpenAIChatAgent
+
+        mapping: dict[AgentType, type] = {
+            AgentType.CLAUDE: ClaudeAgent,
+            AgentType.OPENAI: OpenAIAgent,
+            AgentType.OPERATOR: OperatorAgent,
+            AgentType.GEMINI: GeminiAgent,
+            AgentType.OPENAI_COMPATIBLE: OpenAIChatAgent,
+        }
+        if self == AgentType.INTEGRATION_TEST:
+            from hud.agents.misc.integration_test_agent import IntegrationTestRunner
+
+            return IntegrationTestRunner
+        if self not in mapping:
+            raise ValueError(f"Unsupported agent type: {self}")
+        return mapping[self]
+
+
+class BaseAgentConfig(BaseModel):
+    """Standard agent configuration that tasks can override.
+    Provider-specific configs should not be included here.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+    allowed_tools: list[str] | None = None
+    disallowed_tools: list[str] | None = None
+    response_tool_name: str | None = None
+    system_prompt: str | None = None
+    append_setup_output: bool = True
+    initial_screenshot: bool = True
 
 
 class Task(BaseModel):
@@ -57,10 +91,10 @@ class Task(BaseModel):
     setup_tool: MCPToolCall | list[MCPToolCall] | None = None
     evaluate_tool: MCPToolCall | list[MCPToolCall] | None = None
     integration_test_tool: MCPToolCall | list[MCPToolCall] | None = None
-    agent_config: dict[str, Any] | None = None
+    agent_config: BaseAgentConfig | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("mcp_config", "metadata", "agent_config", mode="before")
+    @field_validator("mcp_config", "metadata", mode="before")
     @classmethod
     def parse_json_strings(cls, v: Any) -> Any:
         """Parse JSON strings into dictionaries."""
@@ -71,6 +105,25 @@ class Task(BaseModel):
                 from hud.shared.exceptions import HudConfigError
 
                 raise HudConfigError(f"Invalid JSON string: {e}") from e
+        return v
+
+    @field_validator("agent_config", mode="before")
+    @classmethod
+    def parse_agent_config(cls, v: Any) -> BaseAgentConfig | None:
+        """Parse agent_config into BaseAgentConfig."""
+        if v is None:
+            return None
+        if isinstance(v, BaseAgentConfig):
+            return v
+        if isinstance(v, str):
+            try:
+                v = json.loads(v)
+            except json.JSONDecodeError as e:
+                from hud.shared.exceptions import HudConfigError
+
+                raise HudConfigError(f"Invalid JSON string for agent_config: {e}") from e
+        if isinstance(v, dict):
+            return BaseAgentConfig(**v)
         return v
 
     @field_validator("setup_tool", "evaluate_tool", "integration_test_tool", mode="before")

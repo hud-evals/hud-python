@@ -7,8 +7,8 @@ This directory contains the MCP client implementations for HUD SDK. The architec
 ```
 hud/clients/
 ├── base.py          # Protocol definition and base class
-├── mcp_use.py       # MCP-use based implementation (legacy)
-├── fastmcp.py       # FastMCP based implementation (modern)
+├── mcp_use.py       # MCP-use based implementation (default)
+├── fastmcp.py       # FastMCP based implementation (alternative)
 └── __init__.py      # Exports and default client
 ```
 
@@ -30,15 +30,15 @@ class AgentMCPClient(Protocol):
 
 ## Available Implementations
 
-### 1. MCPUseHUDClient
+### 1. MCPUseHUDClient (Default)
 - Based on the `mcp_use` library
 - Supports multiple concurrent server connections
 - Battle-tested and stable
 - Good for complex multi-server setups
 
-### 2. FastMCPHUDClient (Default)
+### 2. FastMCPHUDClient
 - Based on the `fastmcp` library
-- Modern, clean API with better error handling
+- Alternative implementation with different transport handling
 - Supports various transports (HTTP, WebSocket, stdio, in-memory)
 - Better type safety and structured data support
 
@@ -47,7 +47,7 @@ class AgentMCPClient(Protocol):
 ### Basic Usage
 
 ```python
-from hud.clients import MCPUseHUDClient, FastMCPHUDClient
+from hud.clients import MCPClient, FastMCPHUDClient
 
 # Configuration works for both clients
 mcp_config = {
@@ -57,10 +57,10 @@ mcp_config = {
     }
 }
 
-# Option 1: MCP-use client
-client = MCPUseHUDClient(mcp_config)
+# Default client (MCPUseHUDClient)
+client = MCPClient(mcp_config)
 
-# Option 2: FastMCP client
+# Alternative: FastMCP client
 client = FastMCPHUDClient(mcp_config)
 
 # Both use the same API
@@ -73,13 +73,14 @@ async with client:
 
 ```python
 from hud.agents import ClaudeAgent
+from hud.clients import MCPClient
 
 # Either client works with agents
-client = FastMCPHUDClient(mcp_config)
+client = MCPClient(mcp_config)
 
 agent = ClaudeAgent(
     mcp_client=client,
-    model="claude-3-7-sonnet-20250219"
+    model="claude-sonnet-4-5"
 )
 
 # Agent works identically with either client

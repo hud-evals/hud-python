@@ -33,12 +33,15 @@ async def main():
                     "url": "https://mcp.hud.ai/v3/mcp",
                     "headers": {
                         "Authorization": "Bearer ${HUD_API_KEY}",  # Automatically filled from env
-                        "Mcp-Image": "hudevals/hud-browser:0.1.6",
+                        "Mcp-Image": "hudevals/hud-browser:latest",
                     },
                 }
             },
-            "setup_tool": {"name": "setup", "arguments": {"name": "todo_creation_test"}},
-            "evaluate_tool": {"name": "evaluate", "arguments": {"name": "todo_creation_test"}},
+            "setup_tool": {"name": "launch_app", "arguments": {"app_name": "todo"}},
+            "evaluate_tool": {
+                "name": "evaluate",
+                "arguments": {"name": "todo_exists", "arguments": {"title": "Buy groceries"}},
+            },
         }
         task = Task(**task_dict)
 
@@ -46,9 +49,9 @@ async def main():
         client = MCPClient(mcp_config=task.mcp_config)
 
         # Create agent
-        agent = ClaudeAgent(
+        agent = ClaudeAgent.create(
             mcp_client=client,
-            model="claude-3-7-sonnet-20250219",
+            checkpoint_name="claude-sonnet-4-5",
             allowed_tools=["anthropic_computer"],
             initial_screenshot=True,
         )
