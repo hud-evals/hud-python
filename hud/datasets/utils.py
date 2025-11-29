@@ -113,8 +113,9 @@ async def submit_rollouts(
         if len(local_task_servers) > 3:
             task_details += f", ... and {len(local_task_servers) - 3} more"
         raise ValueError(
-            f"Remote execution requires URL-based mcp_config, but {len(affected_task_indices)} task(s) use "
-            f"local Docker configs (command-based): {task_details}. "
+            f"Remote execution requires URL-based mcp_config, but "
+            f"{len(affected_task_indices)} task(s) use local Docker configs "
+            f"(command-based): {task_details}. "
             "Convert to remote with: hud convert <tasks_file>"
         )
 
@@ -162,7 +163,6 @@ async def submit_rollouts(
                 total_accepted += result.get("accepted", 0)
                 total_rejected += result.get("rejected", 0)
 
-                # Log individual rejections with reasons
                 for item in result.get("results", []):
                     if isinstance(item, dict) and item.get("status") == "rejected":
                         hud_console.warning(f"Task rejected: {item.get('error', 'Unknown reason')}")
@@ -175,14 +175,14 @@ async def submit_rollouts(
                 )
 
             except httpx.HTTPStatusError as exc:
-                # Re-raise 4xx errors (validation failures) - these are not retryable
                 if 400 <= exc.response.status_code < 500:
                     raise ValueError(f"Submission failed: {exc.response.text}") from exc
                 hud_console.error(f"Batch submission failed: {exc.response.status_code}")
                 total_rejected += len(batch)
 
             except Exception as exc:
-                raise ValueError(f"Batch submission failed: {exc}") from exc
+                hud_console.error(f"Batch submission failed: {exc}")
+                total_rejected += len(batch)
 
     # Log final summary
     if total_rejected > 0:
