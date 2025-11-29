@@ -99,7 +99,11 @@ async def submit_rollouts(
     for i, task in enumerate(tasks):
         if task.mcp_config:
             for server_name, server_cfg in task.mcp_config.items():
-                if isinstance(server_cfg, dict) and "command" in server_cfg and not server_cfg.get("url"):
+                if (
+                    isinstance(server_cfg, dict)
+                    and "command" in server_cfg
+                    and not server_cfg.get("url")
+                ):
                     local_tasks.append((i, task.id or f"task_{i}", server_name))
 
     if local_tasks:
@@ -161,17 +165,17 @@ async def submit_rollouts(
                     if isinstance(item, dict) and item.get("status") == "rejected":
                         hud_console.warning(f"Task rejected: {item.get('error', 'Unknown reason')}")
 
+                batch_num = (i // batch_size) + 1
+                total_batches = (len(requests) + batch_size - 1) // batch_size
                 hud_console.info(
-                    f"Batch {(i // batch_size) + 1}/{(len(requests) + batch_size - 1) // batch_size}: "
+                    f"Batch {batch_num}/{total_batches}: "
                     f"{result.get('accepted', 0)}/{len(batch)} accepted"
                 )
 
             except httpx.HTTPStatusError as exc:
                 # Re-raise 4xx errors (validation failures) - these are not retryable
                 if 400 <= exc.response.status_code < 500:
-                    raise ValueError(
-                        f"Submission failed: {exc.response.text}"
-                    ) from exc
+                    raise ValueError(f"Submission failed: {exc.response.text}") from exc
                 hud_console.error(f"Batch submission failed: {exc.response.status_code}")
                 total_rejected += len(batch)
 
@@ -180,7 +184,9 @@ async def submit_rollouts(
 
     # Log final summary
     if total_rejected > 0:
-        hud_console.warning(f"Submitted {total_accepted}/{len(requests)} requests ({total_rejected} rejected)")
+        hud_console.warning(
+            f"Submitted {total_accepted}/{len(requests)} requests ({total_rejected} rejected)"
+        )
     else:
         hud_console.info(f"Submitted {total_accepted}/{len(requests)} requests")
 
