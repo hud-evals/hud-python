@@ -182,17 +182,24 @@ When agent is omitted, an interactive selector shows presets:
 
 ## Remote Execution
 
-With `--remote`, tasks are submitted to the HUD platform:
+With `--remote`, both the **agent** and **environment** run on HUD infrastructure:
 
 ```bash
 hud eval hud-evals/SheetBench-50 claude --full --remote
 ```
 
-- Tasks run on HUD infrastructure (no local compute)
+- **Remote agent**: Runs on HUD workers (no local compute needed)
+- **Remote environment**: Tasks must use URL-based `mcp_config` (not local Docker)
 - Uses [HUD Gateway](/gateway/index) - no model-specific API keys needed
 - Monitor progress at `https://hud.ai/jobs/{job_id}`
-- Results stream to the dashboard
 - Cancel with `hud cancel`
+
+<Note>
+Tasks with local Docker configs (`command`-based `mcp_config`) cannot be run remotely. Convert them first:
+```bash
+hud convert tasks.json
+```
+</Note>
 
 <Note>
 Remote execution requires `HUD_API_KEY`. Gemini and Operator agents are not supported remotely.

@@ -12,8 +12,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from hud.settings import settings
 from hud.types import AgentType, Task, Trace
+from hud.utils.hud_console import HUDConsole
 
 logger = logging.getLogger(__name__)
+hud_console = HUDConsole()
 
 
 class SingleTaskRequest(BaseModel):
@@ -92,6 +94,31 @@ async def submit_rollouts(
     if not settings.api_key:
         raise ValueError("HUD_API_KEY is required for remote execution")
 
+    # Validate tasks have remote-compatible mcp_config (URL-based, not command-based)
+    local_task_servers: list[tuple[int, str, str]] = []  # (task_idx, task_id, server_name)
+    affected_task_indices: set[int] = set()
+    for i, task in enumerate(tasks):
+        if task.mcp_config:
+            for server_name, server_cfg in task.mcp_config.items():
+                if (
+                    isinstance(server_cfg, dict)
+                    and "command" in server_cfg
+                    and not server_cfg.get("url")
+                ):
+                    local_task_servers.append((i, task.id or f"task_{i}", server_name))
+                    affected_task_indices.add(i)
+
+    if local_task_servers:
+        task_details = ", ".join(f"{tid} ({srv})" for _, tid, srv in local_task_servers[:3])
+        if len(local_task_servers) > 3:
+            task_details += f", ... and {len(local_task_servers) - 3} more"
+        raise ValueError(
+            f"Remote execution requires URL-based mcp_config, but "
+            f"{len(affected_task_indices)} task(s) use local Docker configs "
+            f"(command-based): {task_details}. "
+            "Convert to remote with: hud convert <tasks_file>"
+        )
+
     # Build single task requests
     requests: list[SingleTaskRequest] = []
     for task_idx, task in enumerate(tasks):
@@ -136,31 +163,34 @@ async def submit_rollouts(
                 total_accepted += result.get("accepted", 0)
                 total_rejected += result.get("rejected", 0)
 
-                logger.info(
-                    "Batch %d/%d: %d/%d accepted",
-                    (i // batch_size) + 1,
-                    (len(requests) + batch_size - 1) // batch_size,
-                    result.get("accepted", 0),
-                    len(batch),
+                for item in result.get("results", []):
+                    if isinstance(item, dict) and item.get("status") == "rejected":
+                        hud_console.warning(f"Task rejected: {item.get('error', 'Unknown reason')}")
+
+                batch_num = (i // batch_size) + 1
+                total_batches = (len(requests) + batch_size - 1) // batch_size
+                hud_console.info(
+                    f"Batch {batch_num}/{total_batches}: "
+                    f"{result.get('accepted', 0)}/{len(batch)} accepted"
                 )
 
             except httpx.HTTPStatusError as exc:
-                logger.error(
-                    "Batch submission failed: %s - %s", exc.response.status_code, exc.response.text
-                )
+                if 400 <= exc.response.status_code < 500:
+                    raise ValueError(f"Submission failed: {exc.response.text}") from exc
+                hud_console.error(f"Batch submission failed: {exc.response.status_code}")
                 total_rejected += len(batch)
 
             except Exception as exc:
-                logger.exception("Batch submission failed: %s", exc)
+                hud_console.error(f"Batch submission failed: {exc}")
                 total_rejected += len(batch)
 
     # Log final summary
-    logger.info(
-        "Submitted %d/%d requests (%d rejected)",
-        total_accepted,
-        len(requests),
-        total_rejected,
-    )
+    if total_rejected > 0:
+        hud_console.warning(
+            f"Submitted {total_accepted}/{len(requests)} requests ({total_rejected} rejected)"
+        )
+    else:
+        hud_console.info(f"Submitted {total_accepted}/{len(requests)} requests")
 
 
 async def cancel_job(job_id: str) -> dict[str, Any]:
