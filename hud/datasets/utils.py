@@ -95,7 +95,8 @@ async def submit_rollouts(
         raise ValueError("HUD_API_KEY is required for remote execution")
 
     # Validate tasks have remote-compatible mcp_config (URL-based, not command-based)
-    local_tasks = []
+    local_task_servers: list[tuple[int, str, str]] = []  # (task_idx, task_id, server_name)
+    affected_task_indices: set[int] = set()
     for i, task in enumerate(tasks):
         if task.mcp_config:
             for server_name, server_cfg in task.mcp_config.items():
@@ -104,14 +105,15 @@ async def submit_rollouts(
                     and "command" in server_cfg
                     and not server_cfg.get("url")
                 ):
-                    local_tasks.append((i, task.id or f"task_{i}", server_name))
+                    local_task_servers.append((i, task.id or f"task_{i}", server_name))
+                    affected_task_indices.add(i)
 
-    if local_tasks:
-        task_details = ", ".join(f"{tid} ({srv})" for _, tid, srv in local_tasks[:3])
-        if len(local_tasks) > 3:
-            task_details += f", ... and {len(local_tasks) - 3} more"
+    if local_task_servers:
+        task_details = ", ".join(f"{tid} ({srv})" for _, tid, srv in local_task_servers[:3])
+        if len(local_task_servers) > 3:
+            task_details += f", ... and {len(local_task_servers) - 3} more"
         raise ValueError(
-            f"Remote execution requires URL-based mcp_config, but {len(local_tasks)} task(s) use "
+            f"Remote execution requires URL-based mcp_config, but {len(affected_task_indices)} task(s) use "
             f"local Docker configs (command-based): {task_details}. "
             "Convert to remote with: hud convert <tasks_file>"
         )
