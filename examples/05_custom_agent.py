@@ -60,10 +60,10 @@ class MyAgent(MCPAgent):
             api_key=settings.api_key,
         )
 
-    async def get_system_messages(self) -> list[types.ContentBlock]:
-        """Return system prompt as content blocks."""
+    async def get_system_messages(self) -> list[dict[str, Any]]:
+        """Return system prompt formatted for OpenAI chat API."""
         system_text = self.system_prompt or "You are a helpful assistant."
-        return [types.TextContent(type="text", text=system_text)]
+        return [{"role": "system", "content": system_text}]
 
     def get_tool_schemas(self) -> list[dict[str, Any]]:
         """Convert MCP tools to OpenAI function format."""
