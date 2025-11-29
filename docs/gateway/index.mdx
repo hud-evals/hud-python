@@ -108,3 +108,14 @@ response = await client.chat.completions.create(
 ## Rate Limits
 HUD Gateway automatically handles key rotation and rate limiting across our pool of enterprise keys. If you hit rate limits with your own keys (BYOK), you will receive a 429 error directly from the provider.
 
+## Building Custom Agents with Tracing
+
+For a complete example of building a custom agent that uses HUD Gateway with full tracing support, see the [custom agent example](https://github.com/hud-evals/hud-python/blob/main/examples/05_custom_agent.py).
+
+This example demonstrates:
+- Using the `@instrument` decorator to capture inference traces
+- Building a custom `MCPAgent` with HUD Gateway
+- Automatic token usage and latency tracking
+
+View your traces on the [HUD Dashboard](https://hud.ai/home).
+
