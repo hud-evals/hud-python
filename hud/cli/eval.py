@@ -272,6 +272,7 @@ async def run_single_task(
     vllm_base_url: str | None = None,
     group_size: int = 1,
     task_id: str | None = None,
+    trace_id: str | None = None,
 ) -> None:
     """Load one task and execute it, or detect if JSON contains a list and run as dataset."""
 
@@ -451,7 +452,7 @@ async def run_single_task(
         logging.getLogger("hud.agents").setLevel(logging.INFO)
         logging.getLogger("hud.agents.base").setLevel(logging.INFO)
 
-        async with hud.async_trace(name=task_prompt):
+        async with hud.async_trace(name=task_prompt, trace_id=trace_id):
             agent = build_agent(
                 agent_type,
                 model=model,
