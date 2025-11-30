@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import uuid
 from typing import Any
 
 from mcp.types import ContentBlock, TextContent
@@ -150,7 +151,7 @@ class QdrantBackend:
         payload = {"text": text, "metadata": metadata or {}}
         self.client.upsert(
             collection_name=self.collection,
-            points=[{"vector": vec, "payload": payload}],
+            points=[{"id": uuid.uuid4().hex, "vector": vec, "payload": payload}],
         )
 
     def query(self, query: str, top_k: int = 5) -> list[MemoryEntry]:
