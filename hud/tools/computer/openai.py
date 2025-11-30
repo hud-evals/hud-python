@@ -105,12 +105,24 @@ class OpenAIComputerTool(HudComputerTool):
 
     async def __call__(  # type: ignore[override]
         self,
-        type: str = Field(..., description="The action type to perform"),
+        type: Literal[
+            "screenshot",
+            "click",
+            "double_click",
+            "scroll",
+            "type",
+            "wait",
+            "move",
+            "keypress",
+            "drag",
+            "response",
+            "custom",
+        ] = Field(..., description="The action type to perform"),
         # Coordinate parameters
         x: int | None = Field(None, description="X coordinate for click/move/scroll actions"),
         y: int | None = Field(None, description="Y coordinate for click/move/scroll actions"),
         # Button parameter
-        button: str | None = Field(
+        button: Literal["left", "right", "middle", "back", "forward"] | None = Field(
             None, description="Mouse button for click actions (left, right, middle, wheel)"
         ),
         # Text parameter
@@ -138,11 +150,6 @@ class OpenAIComputerTool(HudComputerTool):
             List of MCP content blocks
         """
         logger.info("OpenAIComputerTool received type: %s", type)
-
-        # Map button names
-        button_map = {"wheel": "middle"}
-        if button:
-            button = button_map.get(button, button)
 
         # Process based on action type
         if type == "screenshot":

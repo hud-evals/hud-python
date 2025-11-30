@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from google import genai
 from google.genai import types as genai_types
+from pydantic import ConfigDict, Field
 
 import hud
 
@@ -17,10 +18,11 @@ import mcp.types as types
 
 from hud.settings import settings
 from hud.tools.computer.settings import computer_settings
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
+from hud.utils.types import with_signature
 
-from .base import MCPAgent
+from .base import BaseCreateParams, MCPAgent
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,26 @@ PREDEFINED_COMPUTER_USE_FUNCTIONS = [
 ]
 
 
+class GeminiConfig(BaseAgentConfig):
+    """Configuration for `GeminiAgent`."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    model_name: str = "Gemini"
+    checkpoint_name: str = "gemini-2.5-computer-use-preview-10-2025"
+    model_client: genai.Client | None = None
+    temperature: float = 1.0
+    top_p: float = 0.95
+    top_k: int = 40
+    max_output_tokens: int = 8192
+    validate_api_key: bool = True
+    excluded_predefined_functions: list[str] = Field(default_factory=list)
+
+
+class GeminiCreateParams(BaseCreateParams, GeminiConfig):
+    pass
+
+
 class GeminiAgent(MCPAgent):
     """
     Gemini agent that uses MCP servers for tool execution.
@@ -50,61 +72,40 @@ class GeminiAgent(MCPAgent):
     tools through MCP servers instead of direct implementation.
     """
 
-    metadata: ClassVar[dict[str, Any]] = {
+    metadata: ClassVar[dict[str, Any] | None] = {
         "display_width": computer_settings.GEMINI_COMPUTER_WIDTH,
         "display_height": computer_settings.GEMINI_COMPUTER_HEIGHT,
     }
+    config_cls: ClassVar[type[BaseAgentConfig]] = GeminiConfig
 
-    def __init__(
-        self,
-        model_client: genai.Client | None = None,
-        model: str = "gemini-2.5-computer-use-preview-10-2025",
-        temperature: float = 1.0,
-        top_p: float = 0.95,
-        top_k: int = 40,
-        max_output_tokens: int = 8192,
-        validate_api_key: bool = True,
-        excluded_predefined_functions: list[str] | None = None,
-        **kwargs: Any,
-    ) -> None:
-        """
-        Initialize Gemini MCP agent.
+    @with_signature(GeminiCreateParams)
+    @classmethod
+    def create(cls, **kwargs: Any) -> GeminiAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
-        Args:
-            model_client: Gemini client (created if not provided)
-            model: Gemini model to use
-            temperature: Temperature for response generation
-            top_p: Top-p sampling parameter
-            top_k: Top-k sampling parameter
-            max_output_tokens: Maximum tokens for response
-            validate_api_key: Whether to validate API key on initialization
-            excluded_predefined_functions: List of predefined functions to exclude
-            **kwargs: Additional arguments passed to BaseMCPAgent (including mcp_client)
-        """
-        super().__init__(**kwargs)
+    def __init__(self, params: GeminiCreateParams | None = None, **kwargs: Any) -> None:
+        super().__init__(params, **kwargs)
+        self.config: GeminiConfig
 
-        # Initialize client if not provided
+        model_client = self.config.model_client
         if model_client is None:
             api_key = settings.gemini_api_key
             if not api_key:
                 raise ValueError("Gemini API key not found. Set GEMINI_API_KEY.")
             model_client = genai.Client(api_key=api_key)
 
-        # Validate API key if requested
-        if validate_api_key:
+        if self.config.validate_api_key:
             try:
-                # Simple validation - try to list models
                 list(model_client.models.list(config=genai_types.ListModelsConfig(page_size=1)))
             except Exception as e:
                 raise ValueError(f"Gemini API key is invalid: {e}") from e
 
         self.gemini_client = model_client
-        self.model = model
-        self.temperature = temperature
-        self.top_p = top_p
-        self.top_k = top_k
-        self.max_output_tokens = max_output_tokens
-        self.excluded_predefined_functions = excluded_predefined_functions or []
+        self.temperature = self.config.temperature
+        self.top_p = self.config.top_p
+        self.top_k = self.config.top_k
+        self.max_output_tokens = self.config.max_output_tokens
+        self.excluded_predefined_functions = list(self.config.excluded_predefined_functions)
         self.hud_console = HUDConsole(logger=logger)
 
         # Context management: Maximum number of recent turns to keep screenshots for
@@ -112,8 +113,6 @@ class GeminiAgent(MCPAgent):
         self.max_recent_turn_with_screenshots = (
             computer_settings.GEMINI_MAX_RECENT_TURN_WITH_SCREENSHOTS
         )
-
-        self.model_name = self.model
 
         # Track mapping from Gemini tool names to MCP tool names
         self._gemini_to_mcp_tool_map: dict[str, str] = {}
@@ -200,7 +199,7 @@ class GeminiAgent(MCPAgent):
 
         # Make API call - using a simpler call pattern
         response = self.gemini_client.models.generate_content(
-            model=self.model,
+            model=self.config.checkpoint_name,
             contents=cast("Any", messages),
             config=generate_config,
         )

@@ -121,24 +121,24 @@ async def run_example(mode: Literal["text", "browser"], target: int) -> None:
     task = _task_for_mode(mode, target)
     system_prompt = _system_prompt(mode)
 
-    model_name = "gpt-5-mini"  # Replace with your model name
+    checkpoint = "gpt-5-mini"  # Replace with your model checkpoint
 
     # Allowed tools differ by mode
     allowed_tools = ["computer"] if mode == "browser" else ["move"]
 
     # Create OpenAI-compatible agent
-    agent = OpenAIChatAgent(
+    agent = OpenAIChatAgent.create(
         openai_client=openai_client,
-        model_name=model_name,
+        checkpoint_name=checkpoint,
         allowed_tools=allowed_tools,
         append_setup_output=False,
         system_prompt=system_prompt,
     )
 
     title = "OpenAI 2048 Game (Browser)" if mode == "browser" else "OpenAI 2048 Game (Text)"
-    async with hud.async_job(title, metadata={"model": model_name, "mode": mode}) as job:
+    async with hud.async_job(title, metadata={"model": checkpoint, "mode": mode}) as job:
         print("🎮 Starting 2048 game with OpenAI-compatible agent...")
-        print(f"🤖 Model: {agent.model_name}")
+        print(f"🤖 Model: {agent.config.checkpoint_name}")
         print(f"🧩 Mode: {mode}")
         print("=" * 50)
 

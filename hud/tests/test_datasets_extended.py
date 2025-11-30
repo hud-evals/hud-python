@@ -10,9 +10,9 @@ import pytest
 from hud.datasets import (
     Task,
     run_dataset,
-    save_tasks,
 )
 from hud.types import MCPToolCall
+from hud.utils.tasks import save_tasks
 
 
 class TestTaskExtended:
@@ -128,7 +128,7 @@ class TestDatasetOperations:
 
     def test_save_taskconfigs_empty_list(self):
         """Test saving empty task list."""
-        with patch("hud.datasets.utils.Dataset") as MockDataset:
+        with patch("hud.utils.tasks.Dataset") as MockDataset:
             mock_instance = MagicMock()
             MockDataset.from_list.return_value = mock_instance
             mock_instance.push_to_hub.return_value = None
@@ -157,12 +157,12 @@ class TestRunDatasetExtended:
         """Test running empty dataset."""
         with (
             patch("hud.clients.MCPClient"),
-            patch("hud.job") as mock_job_func,
-            patch("hud.trace") as mock_trace,
+            patch("hud.async_job") as mock_job_func,
+            patch("hud.async_trace") as mock_trace,
         ):
             mock_job_obj = MagicMock()
             mock_job_obj.id = "job-empty"
-            mock_job_func.return_value.__enter__.return_value = mock_job_obj
+            mock_job_func.return_value.__aenter__.return_value = mock_job_obj
 
             # Create a mock agent class with proper type
             from hud.agents import MCPAgent
@@ -206,13 +206,13 @@ class TestRunDatasetExtended:
 
         with (
             patch("hud.clients.MCPClient") as MockClient,
-            patch("hud.async_job") as mock_job_func,
-            patch("hud.trace") as mock_trace,
+            patch("hud.datasets.runner.async_job") as mock_job_func,
+            patch("hud.datasets.runner.async_trace") as mock_trace,
         ):
             mock_job = AsyncMock()
             mock_job.id = "job-meta"
             mock_job_func.return_value.__aenter__.return_value = mock_job
-            mock_trace.return_value.__enter__.return_value = "trace-id"
+            mock_trace.return_value.__aenter__.return_value = "trace-id"
 
             mock_client = AsyncMock()
             MockClient.return_value = mock_client
@@ -221,7 +221,7 @@ class TestRunDatasetExtended:
                 "metadata_run",
                 tasks,
                 mock_agent_class,  # type: ignore
-                {"model": "test-model"},
+                {"verbose": True},
                 metadata=custom_metadata,
             )
 
@@ -230,13 +230,10 @@ class TestRunDatasetExtended:
                 "experiment_id": "exp-123",
                 "tags": ["test", "v2"],
                 "config": {"temperature": 0.7},
-                "agent_class": "MockAgent",
-                "agent_config": {"model": "test-model"},
+                "agent_config": {"verbose": True},
             }
 
-            mock_job_func.assert_called_once_with(
-                "metadata_run", metadata=expected_metadata, dataset_link=None
-            )
+            mock_job_func.assert_called_once_with("metadata_run", metadata=expected_metadata)
 
     @pytest.mark.asyncio
     async def test_run_dataset_exception_handling(self):
@@ -260,22 +257,22 @@ class TestRunDatasetExtended:
             agent.run = mock_run
             return agent
 
-        # Mock the agent class itself
+        # Mock the agent class itself - runner calls agent_class.create()
         mock_agent_class = MagicMock()
-        mock_agent_class.side_effect = create_mock_agent
+        mock_agent_class.create = MagicMock(side_effect=create_mock_agent)
         mock_agent_class.__name__ = "MockAgent"
 
         tasks = [{"prompt": f"Task {i}", "mcp_config": {"url": f"test{i}"}} for i in range(3)]
 
         with (
             patch("hud.clients.MCPClient") as MockClient,
-            patch("hud.job") as mock_job_func,
-            patch("hud.trace") as mock_trace,
+            patch("hud.async_job") as mock_job_func,
+            patch("hud.async_trace") as mock_trace,
         ):
             mock_job = MagicMock()
             mock_job.id = "job-error"
-            mock_job_func.return_value.__enter__.return_value = mock_job
-            mock_trace.return_value.__enter__.return_value = "trace-id"
+            mock_job_func.return_value.__aenter__.return_value = mock_job
+            mock_trace.return_value.__aenter__.return_value = "trace-id"
 
             mock_client = AsyncMock()
             MockClient.return_value = mock_client
@@ -349,33 +346,22 @@ class TestRunDatasetExtended:
     @pytest.mark.asyncio
     async def test_run_dataset_validation_error(self):
         """Test that tasks without required fields cause validation errors."""
+        from pydantic import ValidationError
+
+        from hud.agents import MCPAgent
+
         # Create a task without mcp_config (required field)
         task: dict[str, Any] = {
             "prompt": "Test task",
             # No mcp_config - should cause validation error during Task(**task_dict)
         }
 
-        from hud.agents import MCPAgent
-
         mock_agent_class = type("MockAgent", (MCPAgent,), {})
 
-        with (
-            patch("hud.job") as mock_job_func,
-            patch("hud.trace") as mock_trace,
-        ):
-            mock_job = MagicMock()
-            mock_job.id = "job-validation"
-            mock_job_func.return_value.__enter__.return_value = mock_job
-            mock_trace.return_value.__enter__.return_value = "trace-id"
-
-            # Run with task that has missing required fields
-            results = await run_dataset(
+        # Validation errors should be raised immediately when Task objects are created
+        with pytest.raises(ValidationError):
+            await run_dataset(
                 "validation_run",
                 [task],  # Pass the task directly
                 mock_agent_class,  # type: ignore
             )
-
-            # Should have one result that's an exception due to validation error
-            assert len(results) == 1
-            # The result should be an exception or None due to the validation error
-            assert results[0] is None or isinstance(results[0], Exception)

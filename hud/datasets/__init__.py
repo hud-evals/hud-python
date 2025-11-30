@@ -8,26 +8,26 @@ Provides data models, utilities, and execution functions for working with HUD da
 from __future__ import annotations
 
 from hud.types import Task
+from hud.utils.tasks import save_tasks
 
-from .parallel import (
-    calculate_optimal_workers,
-    run_dataset_parallel,
-    run_dataset_parallel_manual,
+from .runner import run_dataset, run_single_task, run_tasks
+from .utils import (
+    BatchRequest,
+    SingleTaskRequest,
+    calculate_group_stats,
+    display_results,
+    submit_rollouts,
 )
-from .runner import run_dataset
-
-# Utilities
-from .utils import fetch_system_prompt_from_dataset, save_tasks
 
 __all__ = [
-    # Core data model
+    "BatchRequest",
+    "SingleTaskRequest",
     "Task",
-    "calculate_optimal_workers",
-    # Utilities
-    "fetch_system_prompt_from_dataset",
-    # Execution
+    "calculate_group_stats",
+    "display_results",
     "run_dataset",
-    "run_dataset_parallel",
-    "run_dataset_parallel_manual",
+    "run_single_task",
+    "run_tasks",
     "save_tasks",
+    "submit_rollouts",
 ]

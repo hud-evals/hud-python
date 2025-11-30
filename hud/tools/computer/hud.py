@@ -231,7 +231,23 @@ class HudComputerTool(BaseTool):
 
     async def __call__(
         self,
-        action: str = Field(..., description="The action name (click, press, write, move, etc.)"),
+        action: Literal[
+            "click",
+            "press",
+            "keydown",
+            "keyup",
+            "write",
+            "scroll",
+            "move",
+            "wait",
+            "drag",
+            "response",
+            "screenshot",
+            "position",
+            "hold_key",
+            "mouse_down",
+            "mouse_up",
+        ] = Field(..., description="The action name (click, press, write, move, etc.)"),
         # Click parameters
         x: int | None = Field(None, description="X coordinate for click/move/scroll actions"),
         y: int | None = Field(None, description="Y coordinate for click/move/scroll actions"),

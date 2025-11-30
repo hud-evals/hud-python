@@ -76,6 +76,12 @@ class Settings(BaseSettings):
         validation_alias="HUD_API_URL",
     )
 
+    hud_gateway_url: str = Field(
+        default="https://inference.hud.ai",
+        description="Base URL for the HUD inference gateway",
+        validation_alias="HUD_GATEWAY_URL",
+    )
+
     api_key: str | None = Field(
         default=None,
         description="API key for authentication with the HUD API",

@@ -3,86 +3,85 @@
 from __future__ import annotations
 
 import json
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
+
+from pydantic import ConfigDict, field_validator
 
 from hud import instrument
 from hud.tools.grounding import GroundedComputerTool, Grounder, GrounderConfig
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.utils.types import with_signature
 
-from .openai_chat import OpenAIChatAgent
+if TYPE_CHECKING:
+    from hud.types import BaseAgentConfig
+from .base import BaseCreateParams
+from .openai_chat import OpenAIChatAgent, OpenAIChatConfig
+
+DEFAULT_GROUNDED_PROMPT = (
+    "You are a helpful AI assistant that can control the computer through visual "
+    "interaction.\n\n"
+    "IMPORTANT: Always explain your reasoning and observations before taking actions:\n"
+    "1. First, describe what you see on the screen.\n"
+    "2. Explain what you plan to do and why.\n"
+    "3. Then use the computer tool with natural language descriptions.\n\n"
+    "Use descriptive element descriptions:\n"
+    '- Colors ("red button", "blue link")\n'
+    '- Position ("top right corner", "left sidebar")\n'
+    '- Text content ("Submit button", "Login link")\n'
+    '- Element type ("text field", "dropdown")'
+)
+
+
+class GroundedOpenAIConfig(OpenAIChatConfig):
+    """Configuration for grounded OpenAI chat agent."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    grounder_config: GrounderConfig
+    checkpoint_name: str = "gpt-4o-mini"
+    allowed_tools: list[str] | None = None  # Default set in validator
+    append_setup_output: bool = False
+    system_prompt: str | None = DEFAULT_GROUNDED_PROMPT
+
+    @field_validator("grounder_config", mode="before")
+    @classmethod
+    def _coerce_grounder_config(cls, value: GrounderConfig | dict[str, Any]) -> GrounderConfig:
+        if isinstance(value, GrounderConfig):
+            return value
+        if isinstance(value, dict):
+            return GrounderConfig(**value)
+
+    @field_validator("allowed_tools", mode="before")
+    @classmethod
+    def _default_allowed_tools(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return ["computer"]
+        return value
+
+
+class GroundedOpenAICreateParams(BaseCreateParams, GroundedOpenAIConfig):
+    pass
 
 
 class GroundedOpenAIChatAgent(OpenAIChatAgent):
-    """OpenAI agent that uses a separate grounding model for element detection.
+    """OpenAI chat agent that pipes 'computer' tool calls through a vision grounder."""
 
-    This agent:
-    - Exposes only a synthetic "computer" tool to the planning model
-    - Intercepts tool calls to ground element descriptions to coordinates
-    - Converts grounded results to real computer tool calls
-    - Maintains screenshot state for grounding operations
+    metadata: ClassVar[dict[str, Any] | None] = None
+    config_cls: ClassVar[type[BaseAgentConfig]] = GroundedOpenAIConfig
 
-    The architecture separates concerns:
-    - Planning model (GPT-4o etc) focuses on high-level reasoning
-    - Grounding model (Qwen2-VL etc) handles visual element detection
-    """
+    @with_signature(GroundedOpenAICreateParams)
+    @classmethod
+    def create(cls, **kwargs: Any) -> GroundedOpenAIChatAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
+        from .base import MCPAgent
 
-    metadata: ClassVar[dict[str, Any]] = {}
+        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
-    def __init__(
-        self,
-        *,
-        grounder_config: GrounderConfig,
-        model_name: str = "gpt-4o-mini",
-        allowed_tools: list[str] | None = None,
-        append_setup_output: bool = False,
-        system_prompt: str | None = None,
-        **kwargs: Any,
-    ) -> None:
-        """Initialize the grounded OpenAI agent.
+    def __init__(self, params: GroundedOpenAICreateParams | None = None, **kwargs: Any) -> None:
+        super().__init__(params, **kwargs)  # type: ignore[arg-type]
+        self.config: GroundedOpenAIConfig  # type: ignore[assignment]
 
-        Args:
-            grounder_config: Configuration for the grounding model
-            openai_client: OpenAI client for the planning model
-            model: Name of the OpenAI model to use for planning (e.g., "gpt-4o", "gpt-4o-mini")
-            real_computer_tool_name: Name of the actual computer tool to execute
-            **kwargs: Additional arguments passed to OpenAIChatAgent
-        """
-        # Set defaults for grounded agent
-        if allowed_tools is None:
-            allowed_tools = ["computer"]
-
-        if system_prompt is None:
-            system_prompt = (
-                "You are a helpful AI assistant that can control the computer "
-                "through visual interaction.\n\n"
-                "IMPORTANT: Always explain your reasoning and observations before taking actions:\n"
-                "1. First, describe what you see on the screen\n"
-                "2. Explain what you plan to do and why\n"
-                "3. Then use the computer tool with natural language descriptions\n\n"
-                "For example:\n"
-                "- 'I can see a login form with username and password fields. "
-                "I need to click on the username field first.'\n"
-                "- 'There's a blue submit button at the bottom. "
-                "I'll click on it to submit the form.'\n"
-                "- 'I notice a red close button in the top right corner. "
-                "I'll click it to close this dialog.'\n\n"
-                "Use descriptive element descriptions like:\n"
-                "- Colors: 'red button', 'blue link', 'green checkmark'\n"
-                "- Position: 'top right corner', 'bottom of the page', 'left sidebar'\n"
-                "- Text content: 'Submit button', 'Login link', 'Cancel option'\n"
-                "- Element type: 'text field', 'dropdown menu', 'checkbox'"
-            )
-
-        super().__init__(
-            model_name=model_name,
-            allowed_tools=allowed_tools,
-            append_setup_output=append_setup_output,
-            system_prompt=system_prompt,
-            **kwargs,
-        )
-
-        self.grounder = Grounder(grounder_config)
-        self.grounded_tool = None
+        self.grounder = Grounder(self.config.grounder_config)
+        self.grounded_tool: GroundedComputerTool | None = None
 
     async def initialize(self, task: Any = None) -> None:
         """Initialize the agent and create the grounded tool with mcp_client."""
@@ -170,7 +169,7 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
         extra = {k: v for k, v in (self.completion_kwargs or {}).items() if k not in protected_keys}
 
         response = await self.oai.chat.completions.create(  # type: ignore
-            model=self.model_name,
+            model=self.config.checkpoint_name,
             messages=messages,
             tools=tool_schemas,
             parallel_tool_calls=False,

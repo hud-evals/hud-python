@@ -29,19 +29,22 @@
   "navigation": {
     "versions": [
       {
-        "version": "0.4.67",
+        "version": "0.4.68",
         "groups": [
           {
             "group": "Get Started",
-            "pages": ["index", "quickstart", "llm-quickstart"]
+            "pages": [
+              "index",
+              "quickstart",
+              "llm-quickstart"
+            ]
           },
           {
             "group": "Core Concepts",
             "pages": [
-              "core-concepts/architecture", 
+              "core-concepts/architecture",
               "core-concepts/mcp-protocol",
-              "core-concepts/task-system",
-              "core-concepts/tricks"
+              "core-concepts/task-system"
             ]
           },
           {
@@ -49,6 +52,7 @@
             "pages": [
               "reference/tools",
               "reference/agents",
+              "reference/types",
               "reference/environments",
               "reference/tasks"
             ]
@@ -65,6 +69,12 @@
             "pages": [
               "train-agents/quickstart",
               "train-agents/tasks"
+            ]
+          },
+          {
+            "group": "HUD Gateway",
+            "pages": [
+              "gateway/index"
             ]
           },
           {

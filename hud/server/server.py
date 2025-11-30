@@ -16,7 +16,7 @@ from fastmcp.server.server import FastMCP, Transport
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from hud.cli.eval import run_full_dataset
+from hud.datasets import run_tasks
 from hud.server.low_level import LowLevelServerWithInit
 from hud.types import Task
 
@@ -753,39 +753,24 @@ class MCPServer(FastMCP):
                         )
 
                     # Add MCP config to each task and validate basic structure
-                    tasks = []
+                    task_objects: list[Task] = []
                     for task_data in eval_request.tasks:
                         task_data["mcp_config"] = docker_config
-                        tasks.append(Task.model_validate(task_data).model_dump())
+                        task_objects.append(Task.model_validate(task_data))
 
-                    # Save tasks to temporary file
-                    import tempfile
-
-                    with tempfile.NamedTemporaryFile(
-                        mode="w", prefix="hud-eval-", suffix=".json", delete=False
-                    ) as f:
-                        json.dump(tasks, f)
-                        task_file = f.name
+                    agent_params: dict[str, Any] = {}
+                    if eval_request.model:
+                        agent_params["checkpoint_name"] = eval_request.model
 
                     # Fire and forget - launch evaluation in background
                     async def run_eval_background() -> None:
-                        try:
-                            await run_full_dataset(
-                                task_file,
-                                agent_type=agent_type,
-                                model=eval_request.model,
-                                max_steps=eval_request.max_steps,
-                                verbose=eval_request.verbose,
-                                group_size=eval_request.group_size,
-                            )
-                        except Exception as e:
-                            raise e
-                        finally:
-                            # Clean up temp file
-                            import os
-
-                            if os.path.exists(task_file):
-                                os.unlink(task_file)
+                        await run_tasks(
+                            task_objects,
+                            agent_type=agent_type,
+                            agent_params=agent_params,
+                            max_steps=eval_request.max_steps,
+                            group_size=eval_request.group_size,
+                        )
 
                     # Start the evaluation in the background (fire and forget)
                     asyncio.create_task(run_eval_background())  # noqa: RUF006
@@ -793,7 +778,7 @@ class MCPServer(FastMCP):
                     # Return immediately
                     response_data = {
                         "status": "started",
-                        "message": f"Evaluation launched with {len(tasks)} task(s)",
+                        "message": f"Evaluation launched with {len(task_objects)} task(s)",
                         "agent": eval_request.agent,
                         "model": eval_request.model,
                         "max_steps": eval_request.max_steps,
@@ -803,7 +788,9 @@ class MCPServer(FastMCP):
                     # Include group_size if > 1
                     if eval_request.group_size > 1:
                         response_data["group_size"] = eval_request.group_size
-                        response_data["total_episodes"] = len(tasks) * eval_request.group_size
+                        response_data["total_episodes"] = (
+                            len(task_objects) * eval_request.group_size
+                        )
 
                     return JSONResponse(response_data)
 

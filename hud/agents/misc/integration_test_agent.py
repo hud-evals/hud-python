@@ -1,20 +1,28 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from hud.agents.base import MCPAgent, find_reward
-from hud.types import AgentResponse, Task, Trace
+from hud.types import AgentResponse, BaseAgentConfig, Task, Trace
 
 
 class IntegrationTestRunner(MCPAgent):
+    metadata: ClassVar[dict[str, Any] | None] = {}
+    config_cls: ClassVar[type[BaseAgentConfig]] = BaseAgentConfig
+
     def __init__(self, **kwargs: Any) -> None:
         kwargs["auto_trace"] = False
         super().__init__(**kwargs)
-        self.metadata = {}
 
-    async def run(self, task: Task, max_steps: int = 10) -> Trace:
+    async def run(self, prompt_or_task: str | Task | dict[str, Any], max_steps: int = 10) -> Trace:
         try:
             # Initialize using base to set up client and telemetry correctly
+            if isinstance(prompt_or_task, str):
+                task = Task(prompt=prompt_or_task, mcp_config={})
+            elif isinstance(prompt_or_task, dict):
+                task = Task(**prompt_or_task)
+            else:
+                task = prompt_or_task
             await self.initialize(task)
 
             self.console.info(f"Full system prompt: {self.system_prompt}")

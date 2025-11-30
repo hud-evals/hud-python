@@ -14,11 +14,12 @@ def test_task_with_json_strings():
         prompt="test",
         mcp_config='{"test": "config"}',  # type: ignore
         metadata='{"key": "value"}',  # type: ignore
-        agent_config='{"model": "test"}',  # type: ignore
+        agent_config='{"system_prompt": "test"}',  # type: ignore
     )
     assert task.mcp_config == {"test": "config"}
     assert task.metadata == {"key": "value"}
-    assert task.agent_config == {"model": "test"}
+    assert task.agent_config is not None
+    assert task.agent_config.system_prompt == "test"
 
 
 def test_task_json_parse_error():
@@ -27,6 +28,18 @@ def test_task_json_parse_error():
 
     with pytest.raises(HudConfigError, match="Invalid JSON string"):
         Task(prompt="test", mcp_config="{invalid json}")  # type: ignore
+
+
+def test_task_agent_config_rejects_extra_fields():
+    """Test Task agent_config rejects unknown fields."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Task(
+            prompt="test",
+            mcp_config={},
+            agent_config={"model": "test", "unknown_field": "value"},  # type: ignore
+        )
 
 
 def test_task_setup_tool_from_json_string():

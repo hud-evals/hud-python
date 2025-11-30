@@ -1,17 +1,38 @@
 from __future__ import annotations
 
+from typing import Any
 from unittest import mock
 
 import mcp.types as types
 import pytest
 
-from hud.agents.base import MCPAgent, find_content, find_reward, text_to_blocks
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.agents.base import BaseCreateParams, MCPAgent, find_content, find_reward, text_to_blocks
+from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
+
+from .conftest import MockMCPClient
+
+
+class DummyConfig(BaseAgentConfig):
+    model_name: str = "DummyAgent"
+    checkpoint_name: str = "dummy-model"
+
+
+class DummyCreateParams(BaseCreateParams, DummyConfig):
+    pass
 
 
 class DummyAgent(MCPAgent):
-    async def get_system_messages(self):
-        return [types.TextContent(text="sys", type="text")]
+    config_cls = DummyConfig
+
+    def __init__(self, **kwargs: Any) -> None:
+        # Only create MockMCPClient if mcp_client not specified at all
+        if "mcp_client" not in kwargs:
+            kwargs["mcp_client"] = MockMCPClient()
+        params = DummyCreateParams(**kwargs)
+        super().__init__(params)
+
+    async def get_system_messages(self) -> list[types.ContentBlock]:
+        return [types.TextContent(type="text", text="sys")]
 
     async def get_response(self, messages):
         # Single step: no tool calls -> done
@@ -27,11 +48,7 @@ class DummyAgent(MCPAgent):
 
 @pytest.mark.asyncio
 async def test_run_with_string_prompt_auto_client(monkeypatch):
-    # Fake MCPClient with required methods
-    fake_client = mock.AsyncMock()
-    fake_client.initialize.return_value = None
-    fake_client.list_tools.return_value = []
-    fake_client.shutdown.return_value = None
+    fake_client = MockMCPClient()
 
     # Patch MCPClient construction inside initialize()
     with mock.patch("hud.clients.MCPClient", return_value=fake_client):
@@ -55,10 +72,16 @@ def test_find_reward_and_content_extractors():
 
 @pytest.mark.asyncio
 async def test_call_tools_error_paths():
-    fake_client = mock.AsyncMock()
-    # First call succeeds
+    call_count = [0]
     ok_result = MCPToolResult(content=text_to_blocks("ok"), isError=False)
-    fake_client.call_tool.side_effect = [ok_result, RuntimeError("boom")]
+
+    def handler(tool_call: MCPToolCall) -> MCPToolResult:
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return ok_result
+        raise RuntimeError("boom")
+
+    fake_client = MockMCPClient(call_tool_handler=handler)
     agent = DummyAgent(mcp_client=fake_client, auto_trace=False)
     results = await agent.call_tools(
         [MCPToolCall(name="a", arguments={}), MCPToolCall(name="b", arguments={})]
@@ -75,27 +98,28 @@ async def test_initialize_without_client_raises_valueerror():
 
 
 def test_get_available_tools_before_initialize_raises():
-    agent = DummyAgent(mcp_client=mock.AsyncMock(), auto_trace=False)
+    agent = DummyAgent(mcp_client=MockMCPClient(), auto_trace=False)
     with pytest.raises(RuntimeError):
         agent.get_available_tools()
 
 
 @pytest.mark.asyncio
 async def test_format_message_invalid_type_raises():
-    agent = DummyAgent(mcp_client=mock.AsyncMock(), auto_trace=False)
+    agent = DummyAgent(mcp_client=MockMCPClient(), auto_trace=False)
     with pytest.raises(ValueError):
         await agent.format_message({"oops": 1})  # type: ignore
 
 
 @pytest.mark.asyncio
 async def test_call_tools_timeout_error_shutdown_called():
-    fake_client = mock.AsyncMock()
-    fake_client.call_tool.side_effect = TimeoutError("timeout")
-    fake_client.shutdown.return_value = None
+    def handler(tool_call: MCPToolCall) -> MCPToolResult:
+        raise TimeoutError("timeout")
+
+    fake_client = MockMCPClient(call_tool_handler=handler)
     agent = DummyAgent(mcp_client=fake_client, auto_trace=False)
     with pytest.raises(TimeoutError):
         await agent.call_tools(MCPToolCall(name="x", arguments={}))
-    fake_client.shutdown.assert_awaited_once()
+    assert fake_client.shutdown_called
 
 
 def test_text_to_blocks_shapes():
@@ -105,11 +129,9 @@ def test_text_to_blocks_shapes():
 
 @pytest.mark.asyncio
 async def test_run_returns_connection_error_trace(monkeypatch):
-    fake_client = mock.AsyncMock()
-    fake_client.mcp_config = {}
-    fake_client.initialize.side_effect = RuntimeError("Connection refused http://localhost:1234")
-    fake_client.list_tools.return_value = []
-    fake_client.shutdown.return_value = None
+    fake_client = MockMCPClient(
+        initialize_error=RuntimeError("Connection refused http://localhost:1234")
+    )
 
     class DummyCM:
         def __exit__(self, *args, **kwargs):
@@ -125,13 +147,8 @@ async def test_run_returns_connection_error_trace(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_run_calls_response_tool_when_configured(monkeypatch):
-    fake_client = mock.AsyncMock()
-    fake_client.mcp_config = {}
-    fake_client.initialize.return_value = None
-    fake_client.list_tools.return_value = []
-    fake_client.shutdown.return_value = None
     ok = MCPToolResult(content=text_to_blocks("ok"), isError=False)
-    fake_client.call_tool.return_value = ok
+    fake_client = MockMCPClient(call_tool_handler=lambda _: ok)
 
     class DummyCM:
         def __exit__(self, *args, **kwargs):
@@ -142,16 +159,12 @@ async def test_run_calls_response_tool_when_configured(monkeypatch):
     agent = DummyAgent(mcp_client=fake_client, auto_trace=False, response_tool_name="submit")
     result = await agent.run("hello", max_steps=1)
     assert result.isError is False
-    fake_client.call_tool.assert_awaited()
+    assert len(fake_client.call_tool_calls) > 0
 
 
 @pytest.mark.asyncio
 async def test_get_available_tools_after_initialize(monkeypatch):
-    fake_client = mock.AsyncMock()
-    fake_client.mcp_config = {}
-    fake_client.initialize.return_value = None
-    fake_client.list_tools.return_value = []
-    fake_client.shutdown.return_value = None
+    fake_client = MockMCPClient()
 
     class DummyCM:
         def __exit__(self, *args, **kwargs):

@@ -1,58 +1,14 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import mcp.types as types
 import pytest
+from openai import AsyncOpenAI
 
 from hud.agents.grounded_openai import GroundedOpenAIChatAgent
 from hud.tools.grounding import GrounderConfig
 from hud.types import MCPToolCall, MCPToolResult
-
-
-class DummyOpenAI:
-    class chat:  # type: ignore[no-redef]
-        class completions:
-            @staticmethod
-            async def create(**kwargs: Any) -> Any:
-                # Return a minimal object mimicking OpenAI response
-                class Msg:
-                    def __init__(self) -> None:
-                        self.content = "Thinking..."
-                        self.tool_calls = [
-                            type(
-                                "ToolCall",
-                                (),
-                                {
-                                    "id": "call_1",
-                                    "function": type(
-                                        "Fn",
-                                        (),
-                                        {
-                                            "name": "computer",
-                                            "arguments": json.dumps(
-                                                {
-                                                    "action": "click",
-                                                    "element_description": "blue button",
-                                                }
-                                            ),
-                                        },
-                                    ),
-                                },
-                            )()
-                        ]
-
-                class Choice:
-                    def __init__(self) -> None:
-                        self.message = Msg()
-                        self.finish_reason = "tool_calls"
-
-                class Resp:
-                    def __init__(self) -> None:
-                        self.choices = [Choice()]
-
-                return Resp()
 
 
 class FakeMCPClient:
@@ -62,6 +18,7 @@ class FakeMCPClient:
             types.Tool(name="setup", description="internal functions", inputSchema={}),
         ]
         self.called: list[MCPToolCall] = []
+        self._initialized = True
 
     async def initialize(self, mcp_config: dict[str, dict[str, Any]] | None = None) -> None:
         return None
@@ -76,6 +33,10 @@ class FakeMCPClient:
     @property
     def mcp_config(self) -> dict[str, dict[str, Any]]:
         return {"local": {"command": "echo", "args": ["ok"]}}
+
+    @property
+    def is_connected(self) -> bool:
+        return self._initialized
 
     async def shutdown(self) -> None:
         return None
@@ -111,10 +72,11 @@ class DummyGroundedTool:
 async def test_call_tools_injects_screenshot_and_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
     # Agent with fake OpenAI client and fake MCP client
     grounder_cfg = GrounderConfig(api_base="http://example", model="qwen")
-    agent = GroundedOpenAIChatAgent(
+    fake_openai = AsyncOpenAI(api_key="test")
+    agent = GroundedOpenAIChatAgent.create(
         grounder_config=grounder_cfg,
-        openai_client=DummyOpenAI(),
-        model_name="gpt-4o-mini",
+        openai_client=fake_openai,
+        checkpoint_name="gpt-4o-mini",
         mcp_client=FakeMCPClient(),
         initial_screenshot=False,
     )

@@ -273,14 +273,6 @@ class TestHudComputerToolExtended:
         assert result
 
     @pytest.mark.asyncio
-    async def test_invalid_action(self, base_executor):
-        """Test invalid action returns error."""
-        tool = HudComputerTool(executor=base_executor)
-
-        with pytest.raises(Exception):  # Will raise McpError
-            await tool(action="invalid_action")
-
-    @pytest.mark.asyncio
     async def test_screenshot_action(self, base_executor):
         """Test screenshot action."""
         tool = HudComputerTool(executor=base_executor)

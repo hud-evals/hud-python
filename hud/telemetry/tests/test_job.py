@@ -412,7 +412,6 @@ def test_job_context_manager():
     """Test job context manager."""
     with (
         patch("hud.telemetry.job.settings") as mock_settings,
-        patch("hud.utils.async_utils.fire_and_forget"),
         patch("builtins.print"),
     ):
         mock_settings.telemetry_enabled = True
@@ -431,7 +430,6 @@ def test_job_context_manager_with_job_id():
     """Test job context manager with explicit job_id."""
     with (
         patch("hud.telemetry.job.settings") as mock_settings,
-        patch("hud.utils.async_utils.fire_and_forget"),
         patch("builtins.print"),
     ):
         mock_settings.telemetry_enabled = True
@@ -445,7 +443,6 @@ def test_job_context_manager_with_dataset_link():
     """Test job context manager with dataset link."""
     with (
         patch("hud.telemetry.job.settings") as mock_settings,
-        patch("hud.utils.async_utils.fire_and_forget"),
         patch("builtins.print"),
     ):
         mock_settings.telemetry_enabled = True
@@ -459,7 +456,6 @@ def test_job_context_manager_exception():
     """Test job context manager handles exceptions."""
     with (
         patch("hud.telemetry.job.settings") as mock_settings,
-        patch("hud.utils.async_utils.fire_and_forget"),
         patch("builtins.print"),
     ):
         mock_settings.telemetry_enabled = True
@@ -494,7 +490,6 @@ async def test_job_decorator_async():
     """Test job_decorator on async function."""
     with (
         patch("hud.telemetry.job.settings") as mock_settings,
-        patch("hud.utils.async_utils.fire_and_forget"),
         patch("builtins.print"),
     ):
         mock_settings.telemetry_enabled = True
@@ -512,7 +507,6 @@ def test_job_decorator_sync():
     """Test job_decorator on sync function."""
     with (
         patch("hud.telemetry.job.settings") as mock_settings,
-        patch("hud.utils.async_utils.fire_and_forget"),
         patch("builtins.print"),
     ):
         mock_settings.telemetry_enabled = True
@@ -531,7 +525,6 @@ async def test_job_decorator_async_default_name():
     """Test job_decorator uses function name as default."""
     with (
         patch("hud.telemetry.job.settings") as mock_settings,
-        patch("hud.utils.async_utils.fire_and_forget"),
         patch("builtins.print"),
     ):
         mock_settings.telemetry_enabled = True
@@ -549,7 +542,6 @@ def test_job_decorator_sync_default_name():
     """Test job_decorator sync uses function name as default."""
     with (
         patch("hud.telemetry.job.settings") as mock_settings,
-        patch("hud.utils.async_utils.fire_and_forget"),
         patch("builtins.print"),
     ):
         mock_settings.telemetry_enabled = True

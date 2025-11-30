@@ -2,30 +2,32 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import mcp.types as types
-from openai import AsyncOpenAI  # noqa: TC002
 from openai.types.responses import (
-    ResponseComputerToolCall,
-    ResponseFunctionToolCall,
+    ApplyPatchToolParam,
+    ComputerToolParam,
+    FunctionShellToolParam,
+    FunctionToolParam,
+    ResponseComputerToolCallOutputScreenshotParam,
     ResponseInputParam,
-    ResponseInputTextParam,
-    ResponseOutputMessage,
-    ResponseOutputText,
-    ResponseReasoningItem,
-    ToolParam,
 )
 from openai.types.responses.response_input_param import (
-    ComputerCallOutput,  # noqa: TC002
-    Message,  # noqa: TC002
+    ComputerCallOutput,
 )
+from openai.types.shared_params.reasoning import Reasoning
+from pydantic import ConfigDict
 
-import hud
 from hud.tools.computer.settings import computer_settings
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.types import BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.utils.types import with_signature
 
-from .openai import OpenAIAgent
+from .base import BaseCreateParams, MCPAgent
+from .openai import OpenAIAgent, OpenAIConfig
+
+if TYPE_CHECKING:
+    from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
 
 OPERATOR_INSTRUCTIONS = """
 You are an autonomous computer-using agent. Follow these guidelines:
@@ -48,6 +50,20 @@ what they asked.
 """.strip()
 
 
+class OperatorConfig(OpenAIConfig):
+    """Configuration model for `OperatorAgent`."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    model_name: str = "Operator"
+    checkpoint_name: str = "computer-use-preview"
+    environment: Literal["windows", "mac", "linux", "ubuntu", "browser"] = "linux"
+
+
+class OperatorCreateParams(BaseCreateParams, OperatorConfig):
+    pass
+
+
 class OperatorAgent(OpenAIAgent):
     """
     Backwards-compatible Operator agent built on top of OpenAIAgent.
@@ -57,129 +73,74 @@ class OperatorAgent(OpenAIAgent):
         "display_width": computer_settings.OPENAI_COMPUTER_WIDTH,
         "display_height": computer_settings.OPENAI_COMPUTER_HEIGHT,
     }
+    # base class will ensure that the computer tool is available
     required_tools: ClassVar[list[str]] = ["openai_computer"]
+    config_cls: ClassVar[type[BaseAgentConfig]] = OperatorConfig
 
-    def __init__(
-        self,
-        model_client: AsyncOpenAI | None = None,
-        model: str = "computer-use-preview",
-        environment: Literal["windows", "mac", "linux", "browser"] = "linux",
-        validate_api_key: bool = True,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(
-            model_client=model_client,
-            model=model,
-            validate_api_key=validate_api_key,
-            **kwargs,
-        )
+    @with_signature(OperatorCreateParams)
+    @classmethod
+    def create(cls, **kwargs: Any) -> OperatorAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
+
+    def __init__(self, params: OperatorCreateParams | None = None, **kwargs: Any) -> None:
+        super().__init__(params, **kwargs)  # type: ignore[arg-type]
+        self.config: OperatorConfig  # type: ignore[assignment]
+
         self._operator_computer_tool_name = "openai_computer"
         self._operator_display_width = computer_settings.OPENAI_COMPUTER_WIDTH
         self._operator_display_height = computer_settings.OPENAI_COMPUTER_HEIGHT
-        self._operator_environment = environment
-        self.model_name = "Operator"
-        self.environment = environment
+        self._operator_environment: Literal["windows", "mac", "linux", "ubuntu", "browser"] = (
+            self.config.environment
+        )
+        self.environment = self.config.environment
+
+        # add pending call id and safety checks to the agent
+        self.pending_call_id: str | None = None
+        self.pending_safety_checks: list[PendingSafetyCheck] = []
+
+        # override reasoning to "summary": "auto"
+        if self.reasoning is None:
+            self.reasoning = Reasoning(summary="auto")
+        else:
+            self.reasoning["summary"] = "auto"
+
+        # override truncation to "auto"
+        self.truncation = "auto"
 
         if self.system_prompt:
             self.system_prompt = f"{self.system_prompt}\n\n{OPERATOR_INSTRUCTIONS}"
         else:
             self.system_prompt = OPERATOR_INSTRUCTIONS
 
-    def _build_openai_tools(self) -> None:
-        super()._build_openai_tools()
-        if not any(
-            tool.name == self._operator_computer_tool_name for tool in self.get_available_tools()
-        ):
-            raise ValueError(
-                f"MCP computer tool '{self._operator_computer_tool_name}' is required "
-                "but not available."
-            )
-        self._openai_tools.append(
-            cast(
-                "ToolParam",
-                {
-                    "type": "computer_use_preview",
-                    "display_width": self._operator_display_width,
-                    "display_height": self._operator_display_height,
-                    "environment": self._operator_environment,
-                },
-            )
-        )
-
-    def _build_request_payload(self, new_items: ResponseInputParam) -> dict[str, Any]:
-        payload = super()._build_request_payload(new_items)
-        payload["truncation"] = "auto"
-        payload["reasoning"] = {"summary": "auto"}
-        return payload
-
-    @hud.instrument(
-        span_type="agent",
-        record_args=False,
-        record_result=True,
-    )
-    async def get_response(self, messages: ResponseInputParam) -> AgentResponse:
-        new_items = cast("ResponseInputParam", messages[self._message_cursor :])
-        if not new_items:
-            if self.last_response_id is None:
-                new_items = cast(
-                    "ResponseInputParam",
-                    [
-                        cast(
-                            "Message",
-                            {
-                                "role": "user",
-                                "content": [
-                                    cast(
-                                        "ResponseInputTextParam",
-                                        {"type": "input_text", "text": ""},
-                                    )
-                                ],
-                            },
-                        )
-                    ],
-                )
-            else:
-                self.console.debug("No new messages to send to OpenAI.")
-                return AgentResponse(content="", tool_calls=[], done=True)
-
-        payload = self._build_request_payload(new_items)
-        response = await self.openai_client.responses.create(**payload)
-
-        self.last_response_id = response.id
-        self._message_cursor = len(messages)
+    def _reset_response_state(self) -> None:
+        super()._reset_response_state()
         self.pending_call_id = None
+        self.pending_safety_checks = []
 
-        agent_response = AgentResponse(content="", tool_calls=[], done=True)
-        text_chunks: list[str] = []
-        reasoning_chunks: list[str] = []
+    def _to_openai_tool(
+        self, tool: types.Tool
+    ) -> (
+        FunctionShellToolParam | ApplyPatchToolParam | FunctionToolParam | ComputerToolParam | None
+    ):
+        if tool.name == self._operator_computer_tool_name:
+            return ComputerToolParam(
+                type="computer_use_preview",
+                display_width=self._operator_display_width,
+                display_height=self._operator_display_height,
+                environment=self._operator_environment,
+            )
+        return super()._to_openai_tool(tool)
 
-        for item in response.output:
-            if isinstance(item, ResponseComputerToolCall):
-                tool_call = self._convert_computer_tool_call(item)
-                if tool_call:
-                    agent_response.tool_calls.append(tool_call)
-            elif isinstance(item, ResponseFunctionToolCall):
-                tool_call = self._convert_function_tool_call(item)
-                if tool_call:
-                    agent_response.tool_calls.append(tool_call)
-            elif isinstance(item, ResponseOutputMessage) and item.type == "message":
-                text = "".join(
-                    content.text
-                    for content in item.content
-                    if isinstance(content, ResponseOutputText)
-                )
-                if text:
-                    text_chunks.append(text)
-            elif isinstance(item, ResponseReasoningItem) and item.summary:
-                reasoning_chunks.append(
-                    "".join(f"Thinking: {summary.text}\n" for summary in item.summary)
-                )
-
-        if agent_response.tool_calls:
-            agent_response.done = False
-
-        agent_response.content = "".join(reasoning_chunks) + "".join(text_chunks)
-        return agent_response
+    def _extract_tool_call(self, item: Any) -> MCPToolCall | None:
+        """Route computer_call to the OpenAI-specific computer tool."""
+        if item.type == "computer_call":
+            self.pending_safety_checks = item.pending_safety_checks
+            return MCPToolCall(
+                name=self._operator_computer_tool_name,
+                arguments=item.action.to_dict(),
+                id=item.call_id,
+            )
+        return super()._extract_tool_call(item)
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
@@ -207,17 +168,16 @@ class OperatorAgent(OpenAIAgent):
                         acknowledged_checks.append(check.model_dump())
                     elif isinstance(check, dict):
                         acknowledged_checks.append(check)
-                output_payload: dict[str, Any] = {
-                    "type": "computer_call_output",
-                    "call_id": call_id,
-                    "output": {
-                        "type": "input_image",
-                        "image_url": f"data:image/png;base64,{screenshot}",
-                    },
-                }
-                if acknowledged_checks:
-                    output_payload["acknowledged_safety_checks"] = acknowledged_checks
-                computer_outputs.append(cast("ComputerCallOutput", output_payload))
+                output_payload = ComputerCallOutput(
+                    type="computer_call_output",
+                    call_id=call_id,
+                    output=ResponseComputerToolCallOutputScreenshotParam(
+                        type="computer_screenshot",
+                        image_url=f"data:image/png;base64,{screenshot}",
+                    ),
+                    acknowledged_safety_checks=acknowledged_checks if acknowledged_checks else None,
+                )
+                computer_outputs.append(output_payload)
                 self.pending_call_id = None
                 self.pending_safety_checks = []
                 ordering.append(("computer", len(computer_outputs) - 1))
@@ -249,16 +209,3 @@ class OperatorAgent(OpenAIAgent):
             if isinstance(content, types.TextContent) and result.isError:
                 self.console.error_log(f"Computer tool error: {content.text}")
         return None
-
-    def _convert_computer_tool_call(
-        self, tool_call: ResponseComputerToolCall
-    ) -> MCPToolCall | None:
-        self.pending_call_id = tool_call.call_id
-        self.pending_safety_checks = tool_call.pending_safety_checks
-        call = MCPToolCall(
-            name=self._operator_computer_tool_name,
-            arguments=tool_call.action.model_dump(),
-            id=tool_call.call_id,
-        )
-        call.pending_safety_checks = tool_call.pending_safety_checks  # type: ignore[attr-defined]
-        return call
