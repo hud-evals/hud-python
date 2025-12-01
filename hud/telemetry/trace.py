@@ -96,10 +96,11 @@ def trace(
     job_id: str | None = None,
     task_id: str | None = None,
     group_id: str | None = None,
+    trace_id: str | None = None,
 ) -> Generator[Trace, None, None]:
     """Start a HUD trace context for telemetry tracking.
 
-    A unique task_run_id is automatically generated for each trace.
+    A unique task_run_id is automatically generated for each trace unless provided.
 
     Args:
         name: Descriptive name for this trace/task
@@ -108,6 +109,7 @@ def trace(
         job_id: Optional job ID to associate with this trace
         task_id: Optional task ID (for custom task identifiers)
         group_id: Optional group ID to associate with this trace
+        trace_id: Optional trace ID (auto-generated if not provided)
 
     Yields:
         Trace: The trace object with logging capabilities
@@ -129,20 +131,24 @@ def trace(
     # Ensure telemetry is configured
     configure_telemetry()
 
-    # Only generate task_run_id if using HUD backend
-    # For custom OTLP backends, we don't need it
-    from hud.settings import get_settings
-
-    settings = get_settings()
-
-    if settings.telemetry_enabled and settings.api_key:
-        task_run_id = str(uuid.uuid4())
+    # Use provided trace_id or generate one
+    if trace_id:
+        task_run_id = trace_id
     else:
-        # Use a placeholder for custom backends
-        logger.warning(
-            "HUD API key is not set, using a placeholder for the task run ID. If this looks wrong, check your API key."  # noqa: E501
-        )
-        task_run_id = str(uuid.uuid4())
+        # Only generate task_run_id if using HUD backend
+        # For custom OTLP backends, we don't need it
+        from hud.settings import get_settings
+
+        settings = get_settings()
+
+        if settings.telemetry_enabled and settings.api_key:
+            task_run_id = str(uuid.uuid4())
+        else:
+            # Use a placeholder for custom backends
+            logger.warning(
+                "HUD API key is not set, using a placeholder for the task run ID. If this looks wrong, check your API key."  # noqa: E501
+            )
+            task_run_id = str(uuid.uuid4())
 
     # Create trace object
     trace_obj = Trace(task_run_id, name, job_id, task_id, group_id)

@@ -70,6 +70,7 @@ class AsyncTrace:
         job_id: str | None = None,
         task_id: str | None = None,
         group_id: str | None = None,
+        trace_id: str | None = None,
     ) -> None:
         self.name = name
         self.root = root
@@ -77,7 +78,7 @@ class AsyncTrace:
         self.job_id = job_id
         self.task_id = task_id
         self.group_id = group_id
-        self.task_run_id = str(uuid.uuid4())
+        self.task_run_id = trace_id if trace_id else str(uuid.uuid4())
         self.trace_obj = Trace(self.task_run_id, name, job_id, task_id, group_id)
         self._otel_trace = None
 
@@ -260,6 +261,7 @@ def async_trace(
     job_id: str | None = None,
     task_id: str | None = None,
     group_id: str | None = None,
+    trace_id: str | None = None,
 ) -> AsyncTrace:
     """Create an async trace context for telemetry tracking.
 
@@ -274,6 +276,7 @@ def async_trace(
         job_id: Optional job ID to associate with this trace
         task_id: Optional task ID for custom task identifiers
         group_id: Optional group ID to associate with this trace
+        trace_id: Optional trace ID (auto-generated if not provided)
 
     Returns:
         AsyncTrace context manager
@@ -302,6 +305,7 @@ def async_trace(
         job_id=job_id,
         task_id=task_id,
         group_id=group_id,
+        trace_id=trace_id,
     )
 
 
