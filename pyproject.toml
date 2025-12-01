@@ -192,6 +192,7 @@ lint.ignore = [
     "ANN401", # Allow Any.
     "W293",   # Ignore blank line contains whitespace
     "PLC0415", # Allow function-local imports.
+    "S101", # Allow assert statements.
 ]
 
 [tool.ruff.lint.extend-per-file-ignores]
