@@ -403,8 +403,8 @@ Thanks to all our contributors!
 
 ```bibtex
 @software{hud2025agentevalplatform,
-  author = {HUD and Jay Ram and Lorenss Martinsons and Parth Patel and Oskars Putans and Govind Pimpale and Mayank Singamreddy and Nguyen Nhat Minh},
-  title  = {HUD: An Evaluation Platform for Agents},
+  author = {HUD and Jay Ram and Lorenss Martinsons and Parth Patel and Govind Pimpale and Dylan Bowman and Jaideep and Nguyen Nhat Minh},
+  title  = {HUD: An Evaluation and RL Envrionments Platform for Agents},
   date   = {2025-04},
   url    = {https://github.com/hud-evals/hud-python},
   langid = {en}
