@@ -22,7 +22,7 @@ client = AsyncOpenAI(
 )
 
 response = await client.chat.completions.create(
-    model="anthropic/claude-sonnet-4-5-20250929",
+    model="claude-sonnet-4-5-20250929",
     messages=[{"role": "user", "content": "Hello!"}]
 )
 print(response.choices[0].message.content)
@@ -35,78 +35,44 @@ curl -X POST https://inference.hud.ai/chat/completions \
   -H "Authorization: Bearer <HUD_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "anthropic/claude-sonnet-4-5-20250929",
+    "model": "claude-sonnet-4-5-20250929",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
 
 ## Supported Models
 
-HUD Gateway supports models from major providers using a `provider/model-name` format. We support the latest state-of-the-art models:
-
-### Anthropic
-- `anthropic/claude-sonnet-4-5-20250929`
-- `anthropic/claude-haiku-4-5-20251001`
-- `anthropic/claude-opus-4-5-20251101`
-- `anthropic/claude-opus-4-1-20250805`
-
-### Gemini
-- `gemini/gemini-3-pro-preview`
-- `gemini/gemini-2.5-pro`
-- `gemini/gemini-2.5-flash`
+HUD Gateway supports models from major providers.
 
 ### OpenAI
-- `openai/gpt-5-2025-08-07`
-- `openai/gpt-5.1-2025-11-13`
-- `openai/gpt-5-pro`
-- `openai/computer-use-preview-2025-03-11`
+- `gpt-5-2025-08-07`
+- `gpt-5.1-2025-11-13`
+- `computer-use-preview` (Operator)
 
-### Open Source / OpenRouter
-- `openrouter/x-ai/grok-4`
-- `deepseek/deepseek-reasoner` (DeepSeek R1)
-- `moonshot/kimi-k2`
-- `openrouter/openai/gpt-oss-20b`
-- `openrouter/openai/gpt-oss-120b`
-- `openrouter/bytedance/ui-tars-1.5-7b`
-- `openrouter/z-ai/glm-4.6`
+### Anthropic
+- `claude-sonnet-4-5-20250929`
+- `claude-haiku-4-5-20251001`
+- `claude-opus-4-5-20251101`
+- `claude-opus-4-1-20250805`
+
+### xAI
+- `grok-4-1-fast`
+
+### Google
+- `gemini-3-pro-preview`
+- `gemini-2.5-pro`
+- `gemini-2.5-flash`
+
+### Via OpenRouter
+- `glm-4.5v`
 
 ## Features
 
 ### Unified Billing
 When using HUD Gateway with your HUD API key, usage is automatically deducted from your HUD credits. This simplifies billing by consolidating multiple provider invoices into one.
 
-### Bring Your Own Key (BYOK)
-If you prefer to use your own API keys (e.g., to use your own rate limits or negotiated pricing), you can pass them via headers. When using BYOK, **no HUD credits are deducted**.
-
-Supported headers:
-- `X-Anthropic-Key`
-- `X-OpenAI-Key`
-- `X-Gemini-Key`
-- `X-OpenRouter-Key`
-
-Example with BYOK:
-
-```python
-from openai import AsyncOpenAI
-import os
-
-client = AsyncOpenAI(
-    base_url="https://inference.hud.ai",
-    api_key=os.environ["HUD_API_KEY"],
-    default_headers={
-        "X-Anthropic-Key": os.environ["ANTHROPIC_API_KEY"]
-    }
-)
-
-# This request uses your Anthropic key directly
-response = await client.chat.completions.create(
-    model="anthropic/claude-sonnet-4-5-20250929",
-    messages=[{"role": "user", "content": "Hello!"}]
-)
-```
-
-## Rate Limits
-HUD Gateway automatically handles key rotation and rate limiting across our pool of enterprise keys. If you hit rate limits with your own keys (BYOK), you will receive a 429 error directly from the provider.
+### Rate Limits
+HUD Gateway automatically handles key rotation and rate limiting across our pool of enterprise keys.
 
 ## Building Custom Agents with Tracing
 
