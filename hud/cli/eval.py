@@ -53,12 +53,18 @@ _AGENT_PRESETS: list[AgentPreset] = [
     AgentPreset(
         "Gemini 2.5 Computer Use", AgentType.GEMINI, "gemini-2.5-computer-use-preview-10-2025"
     ),
-    # HUD Gateway presets
+    # HUD Gateway presets (models via HUD Inference API)
     AgentPreset(
-        "Grok 4.1 Fast",
+        "Grok 4-1 Fast (xAI)",
         AgentType.OPENAI_COMPATIBLE,
-        "xai/grok-4-1-fast-reasoning",
+        "grok-4-1-fast",
         {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "Grok"}},
+    ),
+    AgentPreset(
+        "GLM-4.5V (Z-AI)",
+        AgentType.OPENAI_COMPATIBLE,
+        "glm-4.5v",
+        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "GLM"}},
     ),
 ]
 
@@ -180,7 +186,7 @@ class EvalConfig(BaseModel):
                 hud_console.error("HUD_API_KEY is required for remote execution")
                 hud_console.info("Set it: hud set HUD_API_KEY=your-key-here")
                 raise typer.Exit(1)
-            if self.agent_type in (AgentType.GEMINI, AgentType.OPERATOR):
+            if self.agent_type == AgentType.GEMINI:
                 hud_console.error(
                     f"Remote execution is not supported for {self.agent_type.value} agent"
                 )
@@ -229,6 +235,12 @@ class EvalConfig(BaseModel):
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
             base_url = kwargs.get("base_url", "")
+            model_name = kwargs.get("model_name", "")
+            if model_name:
+                kwargs["model_name"] = model_name
+            else:
+                kwargs["model_name"] = "OpenAI Compatible"
+
             if "api_key" not in kwargs:
                 # Use HUD API key for gateway, otherwise fall back to OpenAI API key
                 if settings.hud_gateway_url in base_url:
