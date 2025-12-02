@@ -162,7 +162,6 @@ class ClaudeAgent(MCPAgent):
         if self.has_computer_tool:
             betas.append("computer-use-2025-01-24")
 
-
         async with self.anthropic_client.beta.messages.stream(
             model=self.config.checkpoint_name,
             system=self.system_prompt if self.system_prompt is not None else Omit(),

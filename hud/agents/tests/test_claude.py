@@ -22,6 +22,29 @@ if TYPE_CHECKING:
     from anthropic.types.beta import BetaImageBlockParam, BetaMessageParam, BetaTextBlockParam
 
 
+class MockStreamContextManager:
+    """Mock for Claude's streaming context manager."""
+
+    def __init__(self, response: MagicMock):
+        self.response = response
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        # No events to yield, end iteration immediately
+        raise StopAsyncIteration
+
+    async def get_final_message(self):
+        return self.response
+
+
 class TestClaudeHelperFunctions:
     """Test helper functions for Claude message formatting."""
 
@@ -195,7 +218,10 @@ class TestClaudeAgent:
 
             mock_response.content = [text_block, tool_block]
             mock_response.usage = MagicMock(input_tokens=10, output_tokens=20)
-            mock_anthropic.beta.messages.create = AsyncMock(return_value=mock_response)
+
+            # Mock the streaming context manager
+            mock_stream = MockStreamContextManager(mock_response)
+            mock_anthropic.beta.messages.stream = MagicMock(return_value=mock_stream)
 
             messages = [
                 cast(
@@ -213,7 +239,7 @@ class TestClaudeAgent:
             # These would need to be accessed from the original Claude response if needed
 
             # Verify API was called correctly
-            mock_anthropic.beta.messages.create.assert_called_once()
+            mock_anthropic.beta.messages.stream.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_get_model_response_text_only(self, mock_mcp_client, mock_anthropic):
@@ -233,7 +259,10 @@ class TestClaudeAgent:
             text_block.text = "Just text"
             mock_response.content = [text_block]
             mock_response.usage = MagicMock(input_tokens=5, output_tokens=10)
-            mock_anthropic.beta.messages.create = AsyncMock(return_value=mock_response)
+
+            # Mock the streaming context manager
+            mock_stream = MockStreamContextManager(mock_response)
+            mock_anthropic.beta.messages.stream = MagicMock(return_value=mock_stream)
 
             messages = [
                 cast(
@@ -257,13 +286,24 @@ class TestClaudeAgent:
                 validate_api_key=False,  # Skip validation in tests
             )
 
-            # Mock API error
-            mock_anthropic.beta.messages.create = AsyncMock(
-                side_effect=BadRequestError(
-                    message="Invalid request",
-                    response=MagicMock(status_code=400),
-                    body={"error": {"message": "Invalid request"}},
-                )
+            # Mock API error - stream() raises when entering context
+            error = BadRequestError(
+                message="Invalid request",
+                response=MagicMock(status_code=400),
+                body={"error": {"message": "Invalid request"}},
+            )
+
+            class MockErrorStreamContextManager:
+                """Mock stream that raises error on enter."""
+
+                async def __aenter__(self):
+                    raise error
+
+                async def __aexit__(self, exc_type, exc_val, exc_tb):
+                    return False
+
+            mock_anthropic.beta.messages.stream = MagicMock(
+                return_value=MockErrorStreamContextManager()
             )
 
             messages = [{"role": "user", "content": [{"type": "text", "text": "Hi"}]}]
