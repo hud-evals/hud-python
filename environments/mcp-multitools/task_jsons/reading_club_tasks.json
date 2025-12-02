@@ -1,7 +1,7 @@
 [
   {
     "id": "task-rc-next-chapter-content",
-    "prompt": "Find Isabella Graham's highest-rated favorite chapter. Then return the first complete paragraph of the NEXT chapter in that same book.\n\nSTEPS:\n1. Find Isabella Graham in member directory to get ID\n2. Look up preferences to find highest-rated chapter (if tied: alphabetically first book)\n3. Identify which book and chapter number\n4. Go to that book document and find the NEXT chapter (if fav is Ch 2, find Ch 3)\n5. Return the first complete paragraph of that next chapter\n\nFORMAT: Return only the paragraph text, no chapter heading.\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the paragraph as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find Isabella Graham's highest-rated favorite chapter. Then return the first complete paragraph of the NEXT chapter in that same book.\n\nSTEPS:\n1. Find Isabella Graham in member directory to get ID\n2. Look up preferences to find highest-rated chapter (if tied: alphabetically first book)\n3. Identify which book and chapter number\n4. Go to that book document and find the NEXT chapter (if fav is Ch 2, find Ch 3)\n5. Return the first complete paragraph of that next chapter\n\nNOTE: When extracting text from book documents, return ONLY the actual prose text. Exclude chapter headings, [Illustration] tags, and any other markup.\n\nFORMAT: The source file has line breaks due to text wrapping. Replace all line breaks with single spaces to create one continuous string. No newlines in your answer.\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the paragraph as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -23,7 +23,7 @@
       "name": "evaluate",
       "arguments": {
         "exact_values": {
-          "answer": "Not all that Mrs. Bennet, however, with the assistance of her five daughters, could ask on the subject, was sufficient to draw from her husband any satisfactory description of Mr. Bingley."
+          "answer": "Not all that Mrs. Bennet, however, with the assistance of her five daughters, could ask on the subject, was sufficient to draw from her husband any satisfactory description of Mr. Bingley. They attacked him in various ways, with barefaced questions, ingenious suppositions, and distant surmises; but he eluded the skill of them all; and they were at last obliged to accept the second-hand intelligence of their neighbour, Lady Lucas. Her report was highly favourable. Sir William had been delighted with him. He was quite young, wonderfully handsome, extremely agreeable, and, to crown the whole, he meant to be at the next assembly with a large party. Nothing could be more delightful! To be fond of dancing was a certain step towards falling in love; and very lively hopes of Mr. Bingley\u2019s heart were entertained."
         }
       }
     },
@@ -75,7 +75,7 @@
   },
   {
     "id": "task-rc-and-criteria-chapters",
-    "prompt": "Find members who are BOTH Bronze tier AND have Philosophy as favorite genre. Return the first 3 (by member ID) and their highest-rated chapter.\n\nFORMAT: \"Name: Book ChX; Name: Book ChY; Name: Book ChZ\"\n- Entries separated by \"; \" (semicolon space)\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find members who are BOTH Bronze tier AND have Philosophy as favorite genre. Return the first 3 (by member ID) and their highest-rated chapter.\n\nIf a member has multiple chapters with the same rating, use alphabetically first book title. If still tied, use lowest chapter number.\n\nFORMAT: \"Name: Book ChX; Name: Book ChY; Name: Book ChZ\"\n- Entries separated by \"; \" (semicolon space)\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -97,7 +97,7 @@
       "name": "evaluate",
       "arguments": {
         "exact_values": {
-          "answer": "Sophia O'Connor: Moby Dick Ch36; Xena Thompson: Pride and Prejudice Ch20; Daniel Ingram: The Art of War Ch11"
+          "answer": "Sophia O'Connor: Pride and Prejudice Ch1; Xena Thompson: Pride and Prejudice Ch20; Daniel Ingram: The Art of War Ch11"
         }
       }
     },
@@ -149,7 +149,7 @@
   },
   {
     "id": "task-rc-cross-constitution",
-    "prompt": "Find the study circle called \"THE STRATEGISTS\" in the study_circles document. Note what day they meet.\n\nThen, from the us_constitution document, return the complete text of Article 1 Section 1.\n\nFORMAT: \"Meeting day: [DAY]. Constitution text: [EXACT TEXT]\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the formatted answer as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find the study circle called \"THE STRATEGISTS\" in the study_circles document. Note what day they meet.\n\nThen, from the us_constitution document, return the complete text of Article 1 Section 1.\n\nFORMAT: \"Meeting day: [DAY]. Constitution text: [EXACT TEXT]\"\n- For meeting day, use just the day name (e.g., \"Tuesday\" not \"Every Tuesday\")\n- For Constitution text, join all lines into a single string with spaces (no line breaks)\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the formatted answer as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -260,7 +260,7 @@
   },
   {
     "id": "task-rc-override-correction",
-    "prompt": "IMPORTANT CORRECTION: There is a data entry error in the reading_club_preferences document.\n\nMember RC-1000 (Penelope Harrison) is incorrectly listed with certain chapter preferences. \nThe CORRECT preferences for RC-1000 are:\n- Pride and Prejudice, Chapter 1: Rating 10/10\n- Moby Dick, Chapter 42: Rating 8/10\n\nUsing this CORRECTED information (not what the document says), find Penelope Harrison's highest-rated chapter and return the first sentence of that chapter from the corresponding book.\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the first sentence as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "IMPORTANT CORRECTION: There is a data entry error in the reading_club_preferences document.\n\nMember RC-1000 (Penelope Harrison) is incorrectly listed with certain chapter preferences. \nThe CORRECT preferences for RC-1000 are:\n- Pride and Prejudice, Chapter 1: Rating 10/10\n- Moby Dick, Chapter 42: Rating 8/10\n\nUsing this CORRECTED information (not what the document says), find Penelope Harrison's highest-rated chapter and return the first sentence of that chapter from the corresponding book.\n\nNOTE: When extracting text from book documents, return ONLY the actual prose text. Exclude chapter headings, [Illustration] tags, and any other markup.\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the first sentence as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",

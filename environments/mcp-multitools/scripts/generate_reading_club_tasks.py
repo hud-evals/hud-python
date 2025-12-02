@@ -3,22 +3,12 @@
 Generate 10 diverse tasks for the reading club documents.
 Each task has a unique "niche" - different challenge patterns.
 
-NICHES:
-1. Cross-ref + NEXT chapter's content
-2. 5 people indirectly referenced by attributes  
-3. AND statement + return content for matched people
-4. Count requiring full file view
-5. Cross-reference to UNRELATED file (US Constitution)
-6. Return whole section EXACTLY (character-perfect)
-7. OR then NOT statement with extra description info
-8. Override/correction in description (doc has "error")
-9. Multi-step chain reference
-10. Original hard task
-
-All formats explicit, tiebreakers specified, minimal hints.
+IMPORTANT: Expected answers are EXTRACTED from source files, not hardcoded.
+This ensures 100% accuracy.
 """
 
 import json
+import re
 
 # Load the ground truth data
 with open('scripts/reading_club_data.json', 'r') as f:
@@ -31,19 +21,96 @@ meetings = data['meetings']
 
 member_lookup = {m['id']: m for m in members}
 
-# Standard document hint (minimal - only lists the 3 club docs)
+# Load actual document contents for extracting expected answers
+with open('documents/pride_and_prejudice.txt', 'r') as f:
+    pride_text = f.read()
+
+with open('documents/us_constitution.txt', 'r') as f:
+    constitution_text = f.read()
+
+with open('documents/study_circles.txt', 'r') as f:
+    study_circles_text = f.read()
+
+# Standard document hint
 DOC_HINT = """DOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning."""
+
+# Standard text extraction note
+TEXT_EXTRACTION_NOTE = """NOTE: When extracting text from book documents, return ONLY the actual prose text. Exclude chapter headings, [Illustration] tags, and any other markup."""
+
+# =============================================================================
+# HELPER: Extract first paragraph of a chapter from Pride and Prejudice
+# =============================================================================
+def extract_pp_chapter_first_para(chapter_num):
+    """Extract first paragraph of given chapter from Pride and Prejudice."""
+    # Convert to Roman numeral
+    roman_map = {1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V', 6: 'VI', 7: 'VII', 8: 'VIII', 9: 'IX', 10: 'X'}
+    roman = roman_map.get(chapter_num, str(chapter_num))
+    
+    # Try multiple patterns - P&P uses both "Chapter I.]" and "CHAPTER III."
+    patterns = [
+        # Pattern for "Chapter I.]" format (early chapters)
+        rf'Chapter {roman}\.\]\s*\n+(.+?)(?=\n\n)',
+        # Pattern for "CHAPTER III." format (later chapters)
+        rf'CHAPTER {roman}\.\s*\n+(?:\[Illustration[^\]]*\]\s*\n+)*(.+?)(?=\n\n)',
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, pride_text, re.DOTALL)
+        if match:
+            para = match.group(1).strip()
+            # Normalize whitespace (join lines)
+            return ' '.join(para.split())
+    return None
+
+# =============================================================================
+# HELPER: Extract first sentence of a chapter from Pride and Prejudice
+# =============================================================================
+def extract_pp_chapter_first_sentence(chapter_num):
+    """Extract first sentence of given chapter from Pride and Prejudice."""
+    para = extract_pp_chapter_first_para(chapter_num)
+    if para:
+        # First sentence ends with period followed by space and capital letter
+        match = re.match(r'^(.+?[.!?])\s+[A-Z]', para)
+        if match:
+            return match.group(1)
+        # Fallback: just take up to first period
+        match = re.match(r'^(.+?\.)', para)
+        if match:
+            return match.group(1)
+    return para
+
+# =============================================================================
+# HELPER: Extract Constitution Section
+# =============================================================================
+def extract_constitution_section(article, section):
+    """Extract a specific section from the Constitution."""
+    pattern = rf'Section {section}\.\s+(.+?)(?=\n\nSection|\n\nARTICLE|\Z)'
+    match = re.search(pattern, constitution_text, re.DOTALL)
+    if match:
+        text = match.group(1).strip()
+        return ' '.join(text.split())
+    return None
+
+# =============================================================================
+# HELPER: Extract Constitution Preamble
+# =============================================================================
+def extract_preamble():
+    """Extract exact Preamble including line breaks."""
+    match = re.search(r'(We the people of the United States.*?United States of America\.)', 
+                      constitution_text, re.DOTALL)
+    if match:
+        return match.group(1)
+    return None
 
 # =============================================================================
 # NICHE 1: Cross-ref + NEXT chapter's first paragraph
 # =============================================================================
 def task_1():
-    """Find member's fav chapter, then return the NEXT chapter's opening from the book"""
+    """Find member's fav chapter, then return the NEXT chapter's first paragraph from the book"""
     # RC-1001 (Isabella Graham) has Pride and Prejudice Ch 2 rated 10/10
-    # So we ask for Chapter 3's first paragraph (the NEXT chapter)
+    # So we ask for Chapter 3's first paragraph
     
-    # Chapter 3 first paragraph from Pride and Prejudice:
-    # Need to verify this from the actual file
+    expected = extract_pp_chapter_first_para(3)
     
     return {
         "id": "task-rc-next-chapter-content",
@@ -56,12 +123,14 @@ STEPS:
 4. Go to that book document and find the NEXT chapter (if fav is Ch 2, find Ch 3)
 5. Return the first complete paragraph of that next chapter
 
-FORMAT: Return only the paragraph text, no chapter heading.
+{TEXT_EXTRACTION_NOTE}
+
+FORMAT: The source file has line breaks due to text wrapping. Replace all line breaks with single spaces to create one continuous string. No newlines in your answer.
 
 {DOC_HINT}
 
 Store the paragraph as 'answer'. Say 'Task completed.' when done.""",
-        "expected": "Not all that Mrs. Bennet, however, with the assistance of her five daughters, could ask on the subject, was sufficient to draw from her husband any satisfactory description of Mr. Bingley."
+        "expected": expected
     }
 
 # =============================================================================
@@ -69,12 +138,10 @@ Store the paragraph as 'answer'. Say 'Task completed.' when done.""",
 # =============================================================================
 def task_2():
     """Find 4 people matching criteria, return their favorite chapter names"""
-    # Find Bronze tier members who like Classic Fiction
     bronze_classic = [m for m in members 
                       if m['tier'] == 'Bronze' and m['favorite_genre'] == 'Classic Fiction']
     bronze_classic.sort(key=lambda x: x['id'])
     
-    # Get their favorite chapters (highest rated for each)
     results = []
     for m in bronze_classic:
         prefs = preferences.get(m['id'], [])
@@ -103,7 +170,7 @@ Store the list as 'answer'. Say 'Task completed.' when done.""",
 # NICHE 3: AND statement + content for ~3 people
 # =============================================================================
 def task_3():
-    """Bronze AND Philosophy lovers → return first line of their fav book chapter"""
+    """Bronze AND Philosophy lovers → return their highest-rated chapters"""
     bronze_philosophy = [m for m in members 
                          if m['tier'] == 'Bronze' and m['favorite_genre'] == 'Philosophy']
     bronze_philosophy.sort(key=lambda x: x['id'])
@@ -113,12 +180,15 @@ def task_3():
     for m in first_three:
         prefs = preferences.get(m['id'], [])
         if prefs:
-            best = max(prefs, key=lambda p: p['rating'])
+            # Tiebreaker: highest rating, then alphabetically first book, then lowest chapter
+            best = max(prefs, key=lambda p: (p['rating'], p['book'], -p['chapter']))
             results.append(f"{m['full_name']}: {best['book']} Ch{best['chapter']}")
     
     return {
         "id": "task-rc-and-criteria-chapters",
         "prompt": f"""Find members who are BOTH Bronze tier AND have Philosophy as favorite genre. Return the first 3 (by member ID) and their highest-rated chapter.
+
+If a member has multiple chapters with the same rating, use alphabetically first book title. If still tied, use lowest chapter number.
 
 FORMAT: "Name: Book ChX; Name: Book ChY; Name: Book ChZ"
 - Entries separated by "; " (semicolon space)
@@ -158,8 +228,14 @@ Store the count as 'answer'. Say 'Task completed.' when done.""",
 # =============================================================================
 def task_5():
     """Use study_circles to find a group, then get Constitution content"""
-    # The Strategists study circle reads Art of War
-    # Task: Find the circle, then return Article 1 Section 1 from Constitution
+    # Extract meeting day from study_circles
+    match = re.search(r'CIRCLE 1: THE STRATEGISTS.*?Meeting: Every (\w+)', study_circles_text, re.DOTALL)
+    meeting_day = match.group(1) if match else "Tuesday"
+    
+    # Extract Constitution Section 1
+    section_text = extract_constitution_section(1, 1)
+    
+    expected = f"Meeting day: {meeting_day}. Constitution text: {section_text}"
     
     return {
         "id": "task-rc-cross-constitution",
@@ -168,11 +244,13 @@ def task_5():
 Then, from the us_constitution document, return the complete text of Article 1 Section 1.
 
 FORMAT: "Meeting day: [DAY]. Constitution text: [EXACT TEXT]"
+- For meeting day, use just the day name (e.g., "Tuesday" not "Every Tuesday")
+- For Constitution text, join all lines into a single string with spaces (no line breaks)
 
 {DOC_HINT}
 
 Store the formatted answer as 'answer'. Say 'Task completed.' when done.""",
-        "expected": "Meeting day: Tuesday. Constitution text: All legislative Powers herein granted shall be vested in a Congress of the United States, which shall consist of a Senate and House of Representatives."
+        "expected": expected
     }
 
 # =============================================================================
@@ -180,11 +258,7 @@ Store the formatted answer as 'answer'. Say 'Task completed.' when done.""",
 # =============================================================================
 def task_6():
     """Return the Preamble of the Constitution exactly"""
-    preamble = """We the people of the United States, in Order to form a more perfect Union,
-establish Justice, insure domestic Tranquility, provide for the common defence,
-promote the general Welfare, and secure the Blessings of Liberty to ourselves
-and our Posterity, do ordain and establish this Constitution for the
-United States of America."""
+    preamble = extract_preamble()
     
     return {
         "id": "task-rc-exact-preamble",
@@ -244,8 +318,10 @@ Store the list as 'answer'. Say 'Task completed.' when done.""",
 # =============================================================================
 def task_8():
     """Tell them there's an "error" in the document, use corrected info instead"""
-    # Pick a member and say their chapter preference is "wrong" in the doc
-    # RC-1000: Penelope Harrison actually has Art of War Ch 3 rated 9/10
+    # The corrected info says P&P Chapter 1 is rated 10/10
+    # So we need first sentence of Pride and Prejudice Chapter 1
+    
+    expected = extract_pp_chapter_first_sentence(1)
     
     return {
         "id": "task-rc-override-correction",
@@ -258,17 +334,19 @@ The CORRECT preferences for RC-1000 are:
 
 Using this CORRECTED information (not what the document says), find Penelope Harrison's highest-rated chapter and return the first sentence of that chapter from the corresponding book.
 
+{TEXT_EXTRACTION_NOTE}
+
 {DOC_HINT}
 
 Store the first sentence as 'answer'. Say 'Task completed.' when done.""",
-        "expected": "It is a truth universally acknowledged, that a single man in possession of a good fortune must be in want of a wife."
+        "expected": expected
     }
 
 # =============================================================================
 # NICHE 9: Multi-step chain reference
 # =============================================================================
 def task_9():
-    """Chain: Find Tuesday group → get members → find who likes Art of War → count them"""
+    """Chain: Find Tuesday group → get members → find who likes Art of War → list them"""
     tuesday_groups = [g for g in groups if g['meeting_day'] == 'Tuesday']
     tuesday_members = set()
     for g in tuesday_groups:
@@ -413,7 +491,7 @@ def main():
     print("\nTask Niches:")
     niches = [
         "Cross-ref + NEXT chapter content",
-        "5 people by attributes → chapters",
+        "4 people by attributes → chapters",
         "AND criteria + chapters",
         "Count requiring FULL file view",
         "Cross-ref to Constitution (unrelated)",
