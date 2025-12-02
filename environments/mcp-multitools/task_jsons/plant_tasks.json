@@ -1,7 +1,7 @@
 [
   {
     "id": "task-plant-w1-five-monstera",
-    "prompt": "Find all Monstera Deliciosa plants in the greenhouse.\n\nUsing formula W1 from care_formulas (Temperature Adjustment), calculate the water amount for each Monstera at T = 24\u00b0C.\n\nReturn the SUM of water amounts for all Monstera plants.\n\nFORMAT: Just the number in ml, rounded to nearest integer (e.g., \"1120\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the sum as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find all Monstera Deliciosa plants and calculate the water amount for each using formula W1 at T = 24°C.\n\nReturn the SUM of water amounts for all Monstera plants.\n\nFORMAT: Just the number in ml, rounded to nearest integer (e.g., \"1120\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the sum as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -38,7 +38,7 @@
   },
   {
     "id": "task-plant-w3-indirect-reference",
-    "prompt": "Find the Pothos Golden plant that is:\n- In Zone-C\n- Assigned to Elena Kowalski\n\nUsing formula W3 from care_formulas, calculate the recommended water amount.\nUse these values: T = 23\u00b0C, M = 35% (soil moisture before watering).\nGet the pot size (P) from the plant registry.\n\nReturn the calculated water amount.\n\nFORMAT: Number in ml, rounded to nearest integer (e.g., \"187\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the water amount as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find the Pothos Golden plant in Zone-C assigned to Elena Kowalski.\n\nUsing formula W3, calculate the water amount with T = 23°C and M = 35%.\n\nFORMAT: Number in ml, rounded to nearest integer (e.g., \"187\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the water amount as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -75,7 +75,7 @@
   },
   {
     "id": "task-plant-modified-coefficient",
-    "prompt": "IMPORTANT: Due to recent calibration, the temperature coefficient in formula W1 should be increased by 0.02 (making it 0.05 instead of the documented 0.03).\n\nFind plant PLT-FIC-002 (Ficus Lyrata).\n\nUsing the MODIFIED formula W1 (with coefficient 0.05), calculate the water amount at T = 26\u00b0C.\n\nShow your calculation and return the final water amount.\n\nFORMAT: Just the number in ml, rounded to nearest integer (e.g., \"360\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the water amount as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "CORRECTION: The temperature coefficient in formula W1 should be 0.05 (not the documented 0.03).\n\nFor plant PLT-FIC-002, calculate the water amount using the CORRECTED formula W1 at T = 26°C.\n\nFORMAT: Number in ml, rounded to nearest integer (e.g., \"360\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the water amount as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -112,7 +112,7 @@
   },
   {
     "id": "task-plant-n1-nutrition",
-    "prompt": "Find the current height (Week 12) of plant PLT-MON-013 from plant_growth_logs.\n\nUsing formula N1 from care_formulas, calculate the recommended liquid fertilizer amount.\nUse the pot size from plant_registry and the Week 12 height as Ht.\n\nReturn the calculated fertilizer amount.\n\nFORMAT: Number in ml, rounded to 1 decimal place (e.g., \"8.5\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the fertilizer amount as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "For plant PLT-MON-013, calculate the recommended liquid fertilizer amount using formula N1.\n\nUse the plant's Week 12 height as Ht.\n\nFORMAT: Number in ml, rounded to 1 decimal place (e.g., \"8.5\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the fertilizer amount as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -149,7 +149,7 @@
   },
   {
     "id": "task-plant-growth-comparison",
-    "prompt": "For plant PLT-FIC-008 (Ficus Lyrata):\n\n1. Find its Week 1 and Week 12 heights from plant_growth_logs\n2. Calculate the ACTUAL average weekly growth: (Week12 - Week1) / 11\n3. Find the EXPECTED weekly growth rate from species_reference\n4. Calculate: (Actual / Expected) \u00d7 100 to get percentage of expected growth\n\nReturn the percentage.\n\nFORMAT: Number rounded to nearest integer with % sign (e.g., \"95%\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the percentage as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "For plant PLT-FIC-008, compare its actual average weekly growth (Week 1 to Week 12) against the expected growth rate for its species.\n\nReturn the actual growth as a percentage of expected growth.\n\nFORMAT: Number rounded to nearest integer with % sign (e.g., \"95%\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the percentage as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -186,7 +186,7 @@
   },
   {
     "id": "task-plant-zone-a-heights",
-    "prompt": "Find all plants in Zone-A from plant_registry.\n\nFor each Zone-A plant, find its Week 12 height from plant_growth_logs.\n\nReturn the plant IDs and their Week 12 heights.\n\nFORMAT: \"PLT-XXX-NNN: HH.H cm; PLT-XXX-NNN: HH.H cm; ...\"\n- Entries separated by \"; \" (semicolon space)\n- Sorted by Plant ID ascending\n- Heights to 1 decimal place\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find all plants in Zone-A and their Week 12 heights.\n\nFORMAT: \"PLT-XXX-NNN: HH.H cm; PLT-XXX-NNN: HH.H cm; ...\"\n- Entries separated by \"; \" (semicolon space)\n- Sorted by Plant ID ascending\n- Heights to 1 decimal place with \"cm\" unit\n\nEXAMPLE (not the real answer): \"PLT-FIC-001: 45.2 cm; PLT-MON-003: 38.7 cm\"\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -223,7 +223,7 @@
   },
   {
     "id": "task-plant-caretaker-watering-count",
-    "prompt": "Count how many times Maria Santos (CT-01) performed watering across ALL plants.\n\nLook through plant_watering_logs and count every watering entry where Maria Santos is listed as the person who watered.\n\nReturn the total count.\n\nFORMAT: Just the number (e.g., \"42\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Count how many times Maria Santos (CT-01) performed watering across all plants.\n\nFORMAT: Just the number (e.g., \"42\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -260,7 +260,7 @@
   },
   {
     "id": "task-plant-complex-filter",
-    "prompt": "Find plants that match ALL of these criteria:\n1. (Zone-A OR Zone-B)\n2. AND pot size >= 25 cm\n3. AND NOT status \"Needs Attention\"\n\nReturn the plant IDs that match.\n\nFORMAT: \"PLT-XXX-NNN; PLT-XXX-NNN; ...\"\n- Separated by \"; \" (semicolon space)\n- Sorted alphabetically by Plant ID\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find plants matching ALL criteria:\n- (Zone-A OR Zone-B)\n- AND pot size >= 25 cm\n- AND NOT status \"Needs Attention\"\n\nFORMAT: \"PLT-XXX-NNN; PLT-XXX-NNN; ...\"\n- Separated by \"; \" (semicolon space)\n- Sorted alphabetically by Plant ID\n\nEXAMPLE (not the real answer): \"PLT-FIC-002; PLT-MON-005; PLT-SNK-012\"\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -297,7 +297,7 @@
   },
   {
     "id": "task-plant-low-health-week8",
-    "prompt": "Find all plants that had a health score of 7 or below during Week 8.\n\nReturn the plant IDs and their Week 8 health scores.\n\nFORMAT: \"PLT-XXX-NNN: N; PLT-XXX-NNN: N; ...\"\n- Separated by \"; \" (semicolon space)\n- Sorted by Plant ID ascending\n- N is the health score (integer)\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find all plants with health score 7 or below during Week 8.\n\nFORMAT: \"PLT-XXX-NNN: N; PLT-XXX-NNN: N; ...\"\n- Separated by \"; \" (semicolon space)\n- Sorted by Plant ID ascending\n- N is the health score (integer, no decimals)\n\nEXAMPLE (not the real answer): \"PLT-FIC-003: 6; PLT-MON-007: 7\"\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -334,7 +334,7 @@
   },
   {
     "id": "task-plant-caretaker-performance",
-    "prompt": "Evaluate James Chen's (CT-02) plant care performance:\n\n1. Find all plants assigned to James Chen from plant_registry\n2. For each plant, calculate actual weekly growth: (Week12 height - Week1 height) / 11\n3. Get the expected growth rate for each plant's species from species_reference\n4. Calculate: average of (actual / expected) across all his plants\n5. Return the average as a percentage\n\nFORMAT: Number rounded to nearest integer with % sign (e.g., \"105%\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the percentage as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Evaluate James Chen's (CT-02) plant care performance by comparing his plants' actual weekly growth against expected species growth rates.\n\nReturn the average performance as a percentage (actual/expected).\n\nFORMAT: Number rounded to nearest integer with % sign (e.g., \"105%\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the percentage as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",

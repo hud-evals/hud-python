@@ -1853,5 +1853,1671 @@
         "supabase_list_tables"
       ]
     }
+  },
+  {
+    "id": "task-library-club-digital-no-overdue",
+    "prompt": "Find all library members who meet these criteria:\n- \"Attends book clubs\" AND \"Uses digital library\" BUT NOT \"Has overdue books\"\n\nFor each matching member, return their ID and full name.\n\nFORMAT: \"{member_id}: {name}\" separated by \"; \"\nSort alphabetically by member ID (A-Z).\nExample: \"LIB-1005: Alice Smith; LIB-1023: Bob Jones\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "LIB-1000: Oliver Harris; LIB-1004: Yusuf Garcia; LIB-1011: Priscilla Diaz; LIB-1016: George Taylor; LIB-1019: Ivan Edwards; LIB-1040: Charlie Anderson; LIB-1068: Priscilla Brown; LIB-1083: Rupert Lee; LIB-1094: Oscar Smith; LIB-1109: Samuel Taylor; LIB-1116: Oscar Fischer; LIB-1117: Bob Chen; LIB-1147: Vincent Garcia; LIB-1161: Edward Zhang; LIB-1162: Keith Zhang; LIB-1168: Julia Clark; LIB-1170: Natalie Moore; LIB-1177: Fiona Brown; LIB-1178: Michael O'Brien; LIB-1182: Michael Xu; LIB-1188: Xavier Edwards; LIB-1189: Jasmine Moore"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-platinum-author-talks",
+    "prompt": "How many Platinum tier members have attended at least one \"Author Talk\" event?\n\nCross-reference:\n1. Find all Platinum tier members from the member directory\n2. Check the activity log for \"Author Talk\" events\n3. Count unique Platinum members who attended any Author Talk\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.\n\n",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "2"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-mystery-punctual-gold",
+    "prompt": "Find members matching ALL of these:\n- \"Prefers Mystery\" (from member directory)\n- \"Never late on returns\" (from member directory)  \n- \"Gold tier\" (from member directory)\n\nReturn only the member IDs, sorted alphabetically.\n\nFORMAT: Member IDs separated by \"; \"\nExample: \"LIB-1002; LIB-1015; LIB-1089\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "LIB-1109; LIB-1157; LIB-1184"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-volunteer-fines",
+    "prompt": "Calculate the total outstanding fines for members who \"Volunteers at library\".\n\nSteps:\n1. Find all volunteer member IDs from the member directory\n2. Check the activity log for their borrowing records\n3. Sum up all fines for these members\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore the total as 'answer' (2 decimal places, round half up: 1.505 becomes 1.51).\nExample format: \"25.50\"\n\nSay 'Task completed.' when done.\n\n",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "2157.75"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-scifi-pre1990",
+    "prompt": "How many Science Fiction books in the catalog were published before 1990?\n\nCheck the book catalog for:\n- Genre: Science Fiction\n- Year: before 1990 (strictly less than 1990)\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.\n\n",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "9"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-frequent-event-attendees",
+    "prompt": "Find all members who have attended 3 or more library events.\n\nFor each, return their ID, name, and event count.\n\nFORMAT: \"{member_id}: {name}, {count} events\" separated by \"; \"\nSort alphabetically by member ID (A-Z).\nExample: \"LIB-1012: Alice Chen, 4 events; LIB-1089: Bob Smith, 3 events\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "LIB-1002: Jasmine Martinez, 3 events; LIB-1007: Yusuf Rodriguez, 4 events; LIB-1008: Theodore Evans, 3 events; LIB-1009: Rachel Jackson, 4 events; LIB-1013: Julia Kim, 4 events; LIB-1016: George Taylor, 3 events; LIB-1021: Paula O'Brien, 3 events; LIB-1022: Edward Davis, 5 events; LIB-1023: Nina Irving, 3 events; LIB-1026: Michael Irving, 3 events; LIB-1029: Yusuf Quinn, 5 events; LIB-1032: Edward Moore, 4 events; LIB-1033: Natalie Fischer, 3 events; LIB-1035: Alice Diaz, 3 events; LIB-1036: Walter Evans, 5 events; LIB-1037: Natalie Hill, 3 events; LIB-1038: Quinn Harris, 3 events; LIB-1042: Charlie Taylor, 3 events; LIB-1044: Laura Adams, 3 events; LIB-1046: Walter Taylor, 3 events; LIB-1051: Natalie Underwood, 3 events; LIB-1053: Natalie King, 5 events; LIB-1060: Natalie Green, 5 events; LIB-1071: Paula Martinez, 3 events; LIB-1073: Tina Garcia, 3 events; LIB-1074: Edward Lee, 3 events; LIB-1076: Alice Adams, 3 events; LIB-1078: Delia Brown, 3 events; LIB-1079: Paula Diaz, 4 events; LIB-1081: Helena Martinez, 3 events; LIB-1084: Walter Diaz, 3 events; LIB-1085: Xavier Lopez, 3 events; LIB-1087: Ivan Rodriguez, 5 events; LIB-1089: Ernest Harris, 3 events; LIB-1090: Julia King, 3 events; LIB-1094: Oscar Smith, 3 events; LIB-1098: Beatrice Underwood, 4 events; LIB-1099: Xavier Rodriguez, 4 events; LIB-1100: Laura Lee, 3 events; LIB-1103: Gordon Anderson, 3 events; LIB-1105: Hannah Baker, 4 events; LIB-1111: Keith Young, 4 events; LIB-1113: Conrad Garcia, 3 events; LIB-1115: Yusuf Underwood, 3 events; LIB-1119: Felicia Lee, 5 events; LIB-1120: Delia Smith, 3 events; LIB-1121: Theodore Quinn, 4 events; LIB-1123: Alice King, 3 events; LIB-1124: Martin Williams, 4 events; LIB-1129: Zara Anderson, 3 events; LIB-1130: Lydia Young, 3 events; LIB-1133: Yusuf Diaz, 4 events; LIB-1136: Michael Harris, 5 events; LIB-1138: Oscar Vargas, 3 events; LIB-1140: Lydia Underwood, 4 events; LIB-1142: Oscar Nguyen, 3 events; LIB-1143: Diana Edwards, 3 events; LIB-1145: Yusuf Moore, 5 events; LIB-1146: Priscilla Jackson, 4 events; LIB-1147: Vincent Garcia, 7 events; LIB-1148: Edward Fischer, 4 events; LIB-1151: Rupert Edwards, 4 events; LIB-1152: Beatrice Jackson, 5 events; LIB-1154: Rupert Zhang, 3 events; LIB-1156: Diana Jensen, 4 events; LIB-1157: Felicia Moore, 4 events; LIB-1159: Alice Nelson, 3 events; LIB-1163: Theodore Xu, 3 events; LIB-1164: Fiona Zhang, 3 events; LIB-1168: Julia Clark, 4 events; LIB-1169: Walter Green, 4 events; LIB-1171: Keith Martinez, 4 events; LIB-1175: Lydia Jensen, 4 events; LIB-1178: Michael O'Brien, 3 events; LIB-1180: Laura Nguyen, 5 events; LIB-1182: Michael Xu, 6 events; LIB-1185: Julia Brown, 3 events; LIB-1187: Ursula Vargas, 3 events; LIB-1188: Xavier Edwards, 3 events; LIB-1196: Charlie Smith, 3 events; LIB-1199: Yusuf Vargas, 3 events"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-multi-genre-lovers",
+    "prompt": "How many members appear in 3 or more different \"Prefers X\" genre sections?\n\nThe preference sections are:\n- \"Prefers Fiction\"\n- \"Prefers Non-Fiction\"\n- \"Prefers Mystery\"\n- \"Prefers Science Fiction\"\n- \"Prefers Fantasy\"\n\nCount members who are listed in at least 3 of these sections.\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.\n\n",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "26"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-top-borrower",
+    "prompt": "Find the member with the most borrowing records in the activity log.\n\nReturn their ID, name, and borrowing count.\n\nFORMAT: \"{member_id}: {name}, {count} borrowings\"\nExample: \"LIB-1050: Alice Brown, 15 borrowings\"\n\nIf there's a tie, pick the one with the alphabetically first member ID.\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "LIB-1095: Beatrice Harris, 8 borrowings"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-generous-silver",
+    "prompt": "Find Silver tier members who have both:\n- \"Donated books\" (from member directory)\n- Attended a \"Book Sale\" event (from activity log)\n\nReturn their ID and name.\n\nFORMAT: \"{member_id}: {name}\" separated by \"; \"\nSort alphabetically by member ID (A-Z).\nExample: \"LIB-1010: Alice Wong; LIB-1045: Bob Chen\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "LIB-1035: Alice Diaz; LIB-1042: Charlie Taylor; LIB-1054: Delia Clark; LIB-1055: Samuel Green; LIB-1089: Ernest Harris; LIB-1097: Theodore Taylor"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-avg-late-fine",
+    "prompt": "Calculate the average fine amount per late borrowing.\n\nFrom the activity log:\n1. Find all borrowing records marked as late with a fine > 0\n2. Calculate the average fine (sum of fines / number of late borrowings)\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore the average (round to 2 decimal places, round half up) as 'answer'.\nExample format: \"3.75\"\n\nSay 'Task completed.' when done.\n\n",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "71.18"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-overbooked-sessions",
+    "prompt": "Find all sessions where registrations exceed capacity (registered > capacity).\n\nFor each overbooked session, return the session ID and the ratio.\n\nFORMAT: \"{session_id}: {registered}/{capacity}\" separated by \"; \"\nSort alphabetically by session ID.\nExample: \"SESS-205: 85/60; SESS-218: 42/30\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "SESS-200: 159/152; SESS-210: 52/32; SESS-220: 219/199; SESS-230: 162/153; SESS-240: 124/109; SESS-250: 186/178; SESS-260: 86/75; SESS-270: 166/157"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-multi-interest-count",
+    "prompt": "How many attendees appear in 5 or more different interest sections?\n\nCheck the attendee registry for all sections and count how many unique attendees are listed in at least 5 different sections.\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "151"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-top-workshop-speakers",
+    "prompt": "Find speakers who have a Workshop session AND have a rating of 4.5 or higher.\n\nFor each, return their ID, name, and rating.\n\nFORMAT: \"{speaker_id}: {name}, {rating}\" separated by \"; \"\nSort by rating DESCENDING. For ties, sort by speaker ID (A-Z).\nExample: \"SPK-115: Alex Chen, 4.9; SPK-108: Jordan Kim, 4.7\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "SPK-113: Sydney Mueller, 4.7; SPK-115: Avery Johansson, 4.6; SPK-131: Jamie Fernandez, 4.6; SPK-137: Casey Andersen, 4.6; SPK-123: Jamie Johansson, 4.5; SPK-139: Finley Rossi, 4.5"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-hackathon-job-seekers",
+    "prompt": "Find attendees who are both \"Hackathon Participants\" AND \"Job Seekers\".\n\nReturn their ID and name.\n\nFORMAT: \"{attendee_id}: {name}\" separated by \"; \"\nSort alphabetically by attendee ID.\nExample: \"ATT-1023: Alex Chen; ATT-1089: Jordan Kim\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "ATT-1000: Reese Williams; ATT-1008: Taylor Miller; ATT-1104: Taylor Williams; ATT-1149: Harper Brown; ATT-1178: Logan Patel; ATT-1202: Cameron Wilson; ATT-1215: Avery Kim; ATT-1241: Drew Mueller"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-avg-registration-by-type",
+    "prompt": "Calculate the average number of registrations per session type.\n\nFor each session type (Keynote, Workshop, Panel, etc.), compute the average registrations across all sessions of that type.\n\nFORMAT: \"{session_type}: {average}\" separated by \"; \"\nRound to 1 decimal place (round half up: 45.55 becomes 45.6).\nSort alphabetically by session type.\nExample: \"Keynote: 85.3; Panel: 42.7; Workshop: 55.0\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Deep Dive: 48.7; Keynote: 39.1; Lightning Talk: 40.6; Panel: 50.3; Tutorial: 43.8; Workshop: 46.4"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-vip-feedback-count",
+    "prompt": "How many VIP attendees (in \"VIP Lounge Access\" section) have also \"Submitted Feedback\"?\n\nCount the unique attendees who appear in BOTH sections.\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "21"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-day2-main-hall",
+    "prompt": "List all sessions on Day 2 (2024-03-16) in the Main Hall.\n\nReturn only the session IDs, sorted by time (earliest first).\n\nFORMAT: Session IDs separated by \"; \"\nExample: \"SESS-205; SESS-218; SESS-234\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "SESS-233; SESS-273"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-aiml-network-returning",
+    "prompt": "Find attendees who match ALL of these:\n- \"AI/ML Enthusiasts\" AND \"Networking Event RSVP\" BUT NOT \"First-time Attendees\"\n\nReturn only the attendee IDs, sorted alphabetically.\n\nFORMAT: Attendee IDs separated by \"; \"\nExample: \"ATT-1015; ATT-1023; ATT-1089\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "ATT-1002; ATT-1008; ATT-1012; ATT-1019; ATT-1036; ATT-1038; ATT-1044; ATT-1050; ATT-1051; ATT-1057; ATT-1061; ATT-1069; ATT-1080; ATT-1085; ATT-1089; ATT-1105; ATT-1111; ATT-1118; ATT-1126; ATT-1128; ATT-1131; ATT-1139; ATT-1141; ATT-1146; ATT-1147; ATT-1159; ATT-1171; ATT-1177; ATT-1185; ATT-1186; ATT-1201; ATT-1204; ATT-1225; ATT-1226; ATT-1231; ATT-1234; ATT-1244; ATT-1258; ATT-1271; ATT-1274; ATT-1280; ATT-1296"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-busiest-speaker",
+    "prompt": "Find the speaker with the most sessions scheduled.\n\nReturn their ID, name, and session count.\n\nFORMAT: \"{speaker_id}: {name}, {count} sessions\"\nExample: \"SPK-115: Alex Chen, 4 sessions\"\n\nIf there's a tie, pick the one with alphabetically first speaker ID.\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "SPK-126: Mackenzie Andersen, 5 sessions"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-keynote-total-capacity",
+    "prompt": "What is the total capacity across all Keynote sessions?\n\nSum the capacity of every session where Type = \"Keynote\".\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore the total as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "2061"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-next-chapter-content",
+    "prompt": "Find Isabella Graham's highest-rated favorite chapter. Then return the first complete paragraph of the NEXT chapter in that same book (e.g., if favorite is Chapter 5, return content from Chapter 6).\n\nIf tied ratings, use alphabetically first book title.\n\nEXTRACTION: Return ONLY actual prose text. Exclude chapter headings, [Illustration] tags, and any markup. Replace line breaks with single spaces to create one continuous string.\n\nEXAMPLE (not the real answer): \"The morning sun rose over the hills and cast long shadows across the valley. Birds sang in the trees as the travelers made their way along the dusty road.\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the paragraph as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Not all that Mrs. Bennet, however, with the assistance of her five daughters, could ask on the subject, was sufficient to draw from her husband any satisfactory description of Mr. Bingley. They attacked him in various ways, with barefaced questions, ingenious suppositions, and distant surmises; but he eluded the skill of them all; and they were at last obliged to accept the second-hand intelligence of their neighbour, Lady Lucas. Her report was highly favourable. Sir William had been delighted with him. He was quite young, wonderfully handsome, extremely agreeable, and, to crown the whole, he meant to be at the next assembly with a large party. Nothing could be more delightful! To be fond of dancing was a certain step towards falling in love; and very lively hopes of Mr. Bingley's heart were entertained."
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-four-people-chapters",
+    "prompt": "Find ALL Bronze tier members whose favorite genre is \"Classic Fiction\". For each, report their highest-rated favorite chapter.\n\nIf a member has multiple favorites with the same rating, use lowest chapter number.\n\nORDERING: Sort results by member ID (RC-1001 before RC-1050), ascending.\n\nFORMAT:\n- Pattern: \"Full Name: Book Title Chapter N\"\n- Use book title exactly as shown in preferences (e.g., \"Pride and Prejudice\", \"The Art of War\", \"Moby Dick\")\n- Use \"Chapter N\" with capital C and the number (not roman numerals)\n- Entries separated by \"; \" (semicolon space)\n\nEXAMPLE (not the real answer): \"Alice Smith: Pride and Prejudice Chapter 5; Bob Jones: Moby Dick Chapter 12\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Olivia Lawson: Pride and Prejudice Chapter 1; Penelope Davidson: The Art of War Chapter 7; Bernard Abbott: Pride and Prejudice Chapter 10; Douglas Newman: Moby Dick Chapter 10"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-and-criteria-chapters",
+    "prompt": "Find members who are BOTH Bronze tier AND have Philosophy as favorite genre. Return the first 3 and their highest-rated chapter.\n\nORDERING: \n- \"First 3\" means the 3 members with the lowest member IDs (e.g., RC-1010 before RC-1028)\n- Sort final output by member ID ascending\n\nTIEBREAKER for chapters: If a member has multiple chapters with the same rating, use alphabetically first book title (\"Moby Dick\" before \"Pride and Prejudice\"). If still tied, use lowest chapter number.\n\nFORMAT:\n- Pattern: \"Full Name: Book Title ChN\"\n- Use abbreviated \"Ch\" (not \"Chapter\")\n- Book title exactly as in preferences\n- Entries separated by \"; \" (semicolon space)\n\nEXAMPLE (not the real answer): \"Alice Smith: Moby Dick Ch5; Bob Jones: The Art of War Ch3; Carol White: Pride and Prejudice Ch12\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Sophia O'Connor: Moby Dick Ch36; Xena Thompson: Pride and Prejudice Ch20; Daniel Ingram: The Art of War Ch11"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-count-all-group-members",
+    "prompt": "Count the total number of UNIQUE members who belong to at least one discussion group.\n\nA member may belong to multiple groups but should only be counted once.\nYou must examine ALL discussion groups in the document to get an accurate count.\n\nFORMAT: Just the number as a string (no units, no text)\n\nEXAMPLE (not the real answer): \"25\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "41"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-cross-constitution",
+    "prompt": "Find the study circle called \"THE STRATEGISTS\" in the study_circles document. Note what day they meet.\n\nThen, from the us_constitution document, return the complete text of Article 1 Section 1.\n\nFORMAT:\n- Pattern: \"Meeting day: [DAY]. Constitution text: [EXACT TEXT]\"\n- For meeting day, use just the day name with capital first letter (e.g., \"Tuesday\" not \"Every Tuesday\" or \"tuesday\")\n- For Constitution text, join all lines into a single string with spaces (no line breaks)\n\nEXAMPLE (not the real answer): \"Meeting day: Monday. Constitution text: The first section of article one states that all powers shall be granted to the people.\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the formatted answer as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Meeting day: Tuesday. Constitution text: All legislative Powers herein granted shall be vested in a Congress of the United States, which shall consist of a Senate and House of Representatives."
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-exact-preamble",
+    "prompt": "Return the complete Preamble of the US Constitution EXACTLY as it appears in the document.\n\nThe Preamble starts with \"We the people\" and ends with \"United States of America.\"\n\nIMPORTANT: Return the exact text including all line breaks, punctuation, and spacing. Character-perfect extraction is required. Preserve newline characters (\\n) exactly as they appear in the source.\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the exact preamble as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "We the people of the United States, in Order to form a more perfect Union,\nestablish Justice, insure domestic Tranquility, provide for the common defence,\npromote the general Welfare, and secure the Blessings of Liberty to ourselves\nand our Posterity, do ordain and establish this Constitution for the\nUnited States of America."
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-or-not-criteria",
+    "prompt": "Find members who meet ALL of these criteria:\n1. Either Gold OR Silver tier\n2. NOT a member of the \"Literary Lions\" discussion group\n3. Have read more than 20 books (according to member directory)\n\nReturn the first 5 such members.\n\nORDERING: \n- \"First 5\" means the 5 members with the lowest member IDs (e.g., RC-1007 before RC-1011)\n- Sort final output by member ID ascending\n\nFORMAT:\n- Pattern: \"Full Name; Full Name; Full Name; Full Name; Full Name\"\n- Use full names exactly as they appear in documents\n- Entries separated by \"; \" (semicolon space)\n\nEXAMPLE (not the real answer): \"Alice Smith; Bob Jones; Carol White; David Brown; Eve Green\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "William Whitfield; Yasmine Richardson; William Nelson; Penelope Knight; Henry Jenkins"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-override-correction",
+    "prompt": "IMPORTANT CORRECTION: There is a data entry error in the reading_club_preferences document.\n\nMember RC-1000 (Penelope Harrison) is incorrectly listed with certain chapter preferences. \nThe CORRECT preferences for RC-1000 are:\n- Pride and Prejudice, Chapter 1: Rating 10/10\n- Moby Dick, Chapter 42: Rating 8/10\n\nUsing this CORRECTED information (not what the document says), find Penelope Harrison's highest-rated chapter and return the first sentence of that chapter from the corresponding book.\n\nNOTE: When extracting text from book documents, return ONLY the actual prose text. Exclude chapter headings, [Illustration] tags, and any other markup. A sentence ends at the first period followed by a space.\n\nFORMAT: Return only the sentence text as a single continuous string with no line breaks.\n\nEXAMPLE (not the real answer): \"The captain stood on the deck and surveyed the horizon with a keen eye.\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the first sentence as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "It is a truth universally acknowledged, that a single man in possession of a good fortune must be in want of a wife."
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-chain-tuesday-art-war",
+    "prompt": "Multi-step task:\n\n1. Find ALL discussion groups that meet on Tuesday\n2. Collect all unique members from those Tuesday groups\n3. For each of those members, check their reading preferences\n4. Identify which ones have The Art of War as ANY of their favorites\n5. List those members' names\n\nORDERING: Sort names alphabetically A-Z by full name.\n\nFORMAT:\n- Pattern: \"Full Name; Full Name; Full Name\"\n- Use full names exactly as they appear in documents\n- Entries separated by \"; \" (semicolon space)\n\nEXAMPLE (not the real answer): \"Alice Smith; Bob Jones; Carol White\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Daniel Ingram; Irene Quincy; Margaret Jenkins; Olivia Lawson; Samuel Nelson; Xena Thompson; Zelda Irving"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-platinum-avg-rating",
+    "prompt": "Calculate which book has the highest AVERAGE rating among Platinum tier members only.\n\nConsider all chapter ratings from all Platinum members, grouped by book title. If tied average, use alphabetically first book title.\n\nFORMAT:\n- Pattern: \"Book Title: X.XX average\"\n- Use book title exactly as in preferences (e.g., \"Moby Dick\" not \"moby dick\")\n- Average rounded to exactly 2 decimal places\n- Include the word \"average\" after the number\n\nEXAMPLE (not the real answer): \"Pride and Prejudice: 8.75 average\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the formatted answer as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Moby Dick: 9.18 average"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-second-paragraph-moby",
+    "prompt": "Find Olivia Crawford (RC-1004) in reading_club_preferences and identify her highest-rated chapter.\nIf tied ratings, use alphabetically first book title (\"Moby Dick\" before \"Pride and Prejudice\").\n\nGo to that book and extract the SECOND paragraph of that chapter.\n\nPARAGRAPH DEFINITION:\n- A paragraph is a block of continuous prose text separated by blank lines\n- The book files have line breaks within paragraphs due to text wrapping\n- Replace ALL line breaks within the paragraph with single spaces\n- Return one continuous string with no line breaks\n\nWHAT TO SKIP:\n- Chapter headings (e.g., \"CHAPTER 1. Loomings.\")\n- [Illustration] markers and their captions\n- Any blank lines\n\nFORMAT: Return only the paragraph text as a single continuous string.\n\nEXAMPLE (not the real answer): \"The waves crashed against the shore as the sun began to set. Colors of orange and pink painted the sky in brilliant streaks.\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the paragraph as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "There now is your insular city of the Manhattoes, belted round by wharves as Indian isles by coral reefs—commerce surrounds it with her surf. Right and left, the streets take you waterward. Its extreme downtown is the battery, where that noble mole is washed by waves, and cooled by breezes, which a few hours previous were out of sight of land. Look at the crowds of water-gazers there."
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-three-first-sentences",
+    "prompt": "Find the first 3 Silver tier members who have \"Fantasy\" as their favorite genre.\n\nORDERING: \"First 3\" means the 3 members with the lowest member IDs (e.g., RC-1003 before RC-1026).\n\nFor each, find their highest-rated chapter. Then extract ONLY THE FIRST SENTENCE of that chapter from the corresponding book.\n\nFIRST SENTENCE RULES:\n- Start reading after the chapter heading (skip \"CHAPTER X. Title\")\n- Skip any [Illustration] markers or blank lines\n- A sentence ends at the first period followed by a space or end of line\n- Replace line breaks within the sentence with single spaces\n- If tied ratings, use alphabetically first book, then lowest chapter number\n\nFORMAT: Return JSON object with keys \"member1\", \"member2\", \"member3\".\n\nEXAMPLE (not the real answer):\n{\"member1\": \"The storm clouds gathered on the horizon.\", \"member2\": \"Captain Ahab stood at the helm.\", \"member3\": \"War is a matter of vital importance.\"}\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the JSON object as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "{\"member1\": \"Mr. Bennet was among the earliest of those who waited on Mr. Bingley.\", \"member2\": \"Returning to the Spouter-Inn from the Chapel, I found Queequeg there quite alone; he having left the Chapel before the benediction some time.\", \"member3\": \"In war, the general receives his commands from the sovereign, collects his army and concentrates his forces.\"}"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-art-of-war-sections",
+    "prompt": "Find Uma Bennett (RC-1005) in reading_club_preferences. Get her Art of War chapter preference.\n\nGo to art_of_war and extract sections 1, 2, and 3 (the numbered points) from that chapter.\n\nEXTRACTION RULES:\n- Include the section numbers (1., 2., 3.)\n- Include ONLY the main numbered text\n- SKIP all bracketed commentary like [Ts'ao Kung...] or [That is...]\n- Replace line breaks within each section with single spaces\n- Separate sections with \" | \" (space-pipe-space)\n\nFORMAT: \"1. First section text | 2. Second section text | 3. Third section text\"\n\nEXAMPLE (not the real answer): \"1. The art of war is of vital importance. | 2. It is a matter of life and death. | 3. Hence it is a subject of inquiry.\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the formatted sections as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "1. Sun Tzŭ said: The good fighters of old first put themselves beyond the possibility of defeat, and then waited for an opportunity of defeating the enemy. | 2. To secure ourselves against defeat lies in our own hands, but the opportunity of defeating the enemy is provided by the enemy himself. | 3. Thus the good fighter is able to secure himself against defeat, but cannot make certain of defeating the enemy."
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-group-moby-sentences",
+    "prompt": "Find all members of the \"Chapter Chasers\" discussion group (DG-04).\n\nFor each member who has a Moby Dick chapter in their preferences:\n1. Find their highest-rated Moby Dick chapter\n2. Extract the first sentence of that chapter\n\nFIRST SENTENCE RULES:\n- Start after chapter heading \"CHAPTER X. Title.\"\n- Skip blank lines\n- Sentence ends at first period followed by space or newline\n- Replace line breaks within sentence with single spaces\n\nORDERING: Sort alphabetically by member name (A-Z).\n\nFORMAT:\n- Pattern: \"Full Name: First sentence text\"\n- Entries separated by \"; \" (semicolon space)\n- Only include members who have Moby Dick in their preferences\n\nEXAMPLE (not the real answer): \"Alice Smith: Call me Ishmael.; Bob Jones: The voyage had begun.\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Douglas Newman: Returning to the Spouter-Inn from the Chapel, I found Queequeg there quite alone; he having left the Chapel before the benediction some time.; Nora Baker: The morning of the third day dawned fair and fresh, and once more the solitary night-man at the fore-mast-head was relieved by crowds of the daylight look-outs, who dotted every mast and almost every spar.; Penelope Newman: Returning to the Spouter-Inn from the Chapel, I found Queequeg there quite alone; he having left the Chapel before the benediction some time."
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-full-pp-opening",
+    "prompt": "Find Olivia Lawson (RC-1035) in reading_club_preferences. Get her highest-rated Pride and Prejudice chapter.\n\nExtract the COMPLETE FIRST TWO PARAGRAPHS of that chapter from pride_and_prejudice.\n\nPARAGRAPH RULES:\n- A paragraph is continuous prose text separated by blank lines\n- Skip the chapter heading \"CHAPTER I.\" and any [Illustration] markers\n- Include only actual prose content\n- Replace line breaks WITHIN each paragraph with single spaces\n- Separate the two paragraphs with \" || \" (space-double-pipe-space)\n\nFORMAT: \"First paragraph text || Second paragraph text\"\n\nEXAMPLE (not the real answer): \"The morning dawned bright and clear over the estate. || Mr. Darcy walked through the gardens contemplating his future.\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the two paragraphs as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "It is a truth universally acknowledged, that a single man in possession of a good fortune must be in want of a wife. || However little known the feelings or views of such a man may be on his first entering a neighbourhood, this truth is so well fixed in the minds of the surrounding families, that he is considered as the rightful property of some one or other of their daughters."
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-w1-five-monstera",
+    "prompt": "Find all Monstera Deliciosa plants and calculate the water amount for each using formula W1 at T = 24°C.\n\nReturn the SUM of water amounts for all Monstera plants.\n\nFORMAT: Just the number in ml, rounded to nearest integer (e.g., \"1120\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the sum as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "1060"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-w3-indirect-reference",
+    "prompt": "Find the Pothos Golden plant in Zone-C assigned to Elena Kowalski.\n\nUsing formula W3, calculate the water amount with T = 23°C and M = 35%.\n\nFORMAT: Number in ml, rounded to nearest integer (e.g., \"187\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the water amount as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "203"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-modified-coefficient",
+    "prompt": "CORRECTION: The temperature coefficient in formula W1 should be 0.05 (not the documented 0.03).\n\nFor plant PLT-FIC-002, calculate the water amount using the CORRECTED formula W1 at T = 26°C.\n\nFORMAT: Number in ml, rounded to nearest integer (e.g., \"360\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the water amount as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "360"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-n1-nutrition",
+    "prompt": "For plant PLT-MON-013, calculate the recommended liquid fertilizer amount using formula N1.\n\nUse the plant's Week 12 height as Ht.\n\nFORMAT: Number in ml, rounded to 1 decimal place (e.g., \"8.5\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the fertilizer amount as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "23.3"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-growth-comparison",
+    "prompt": "For plant PLT-FIC-008, compare its actual average weekly growth (Week 1 to Week 12) against the expected growth rate for its species.\n\nReturn the actual growth as a percentage of expected growth.\n\nFORMAT: Number rounded to nearest integer with % sign (e.g., \"95%\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the percentage as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "95%"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-zone-a-heights",
+    "prompt": "Find all plants in Zone-A and their Week 12 heights.\n\nFORMAT: \"PLT-XXX-NNN: HH.H cm; PLT-XXX-NNN: HH.H cm; ...\"\n- Entries separated by \"; \" (semicolon space)\n- Sorted by Plant ID ascending\n- Heights to 1 decimal place with \"cm\" unit\n\nEXAMPLE (not the real answer): \"PLT-FIC-001: 45.2 cm; PLT-MON-003: 38.7 cm\"\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "PLT-MON-001: 46.1 cm; PLT-MON-013: 58.2 cm; PLT-PLY-005: 28.2 cm; PLT-PLY-017: 37.0 cm; PLT-POT-009: 62.7 cm"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-caretaker-watering-count",
+    "prompt": "Count how many times Maria Santos (CT-01) performed watering across all plants.\n\nFORMAT: Just the number (e.g., \"42\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "100"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-complex-filter",
+    "prompt": "Find plants matching ALL criteria:\n- (Zone-A OR Zone-B)\n- AND pot size >= 25 cm\n- AND NOT status \"Needs Attention\"\n\nFORMAT: \"PLT-XXX-NNN; PLT-XXX-NNN; ...\"\n- Separated by \"; \" (semicolon space)\n- Sorted alphabetically by Plant ID\n\nEXAMPLE (not the real answer): \"PLT-FIC-002; PLT-MON-005; PLT-SNK-012\"\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "PLT-FIC-014; PLT-MON-001; PLT-MON-013; PLT-PLY-005; PLT-PLY-017; PLT-POT-009; PLT-RUB-018; PLT-SNK-010"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-low-health-week8",
+    "prompt": "Find all plants with health score 7 or below during Week 8.\n\nFORMAT: \"PLT-XXX-NNN: N; PLT-XXX-NNN: N; ...\"\n- Separated by \"; \" (semicolon space)\n- Sorted by Plant ID ascending\n- N is the health score (integer, no decimals)\n\nEXAMPLE (not the real answer): \"PLT-FIC-003: 6; PLT-MON-007: 7\"\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "PLT-FIC-008: 7; PLT-MON-001: 7; PLT-MON-019: 7; PLT-POT-009: 7; PLT-RUB-006: 7; PLT-RUB-012: 7; PLT-SNK-004: 7"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-caretaker-performance",
+    "prompt": "Evaluate James Chen's (CT-02) plant care performance by comparing his plants' actual weekly growth against expected species growth rates.\n\nReturn the average performance as a percentage (actual/expected).\n\nFORMAT: Number rounded to nearest integer with % sign (e.g., \"105%\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the percentage as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "105%"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
   }
+
 ]
