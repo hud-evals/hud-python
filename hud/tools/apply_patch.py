@@ -439,7 +439,9 @@ class ApplyPatchTool:
         full_path = os.path.normpath(os.path.join(self.base_path, path))
 
         # Check for directory traversal
-        if not full_path.startswith(self.base_path):
+        # Use base_path + os.sep to prevent sibling directory prefix bypass
+        # e.g., /tmp/myapp_sibling shouldn't match base_path /tmp/myapp
+        if full_path != self.base_path and not full_path.startswith(self.base_path + os.sep):
             raise DiffError(f"Path traversal detected: {path}")
 
         return full_path
