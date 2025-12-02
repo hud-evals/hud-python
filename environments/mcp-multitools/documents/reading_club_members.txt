@@ -1,0 +1,393 @@
+======================================================================
+RIVERSIDE READING CLUB - MEMBER DIRECTORY
+======================================================================
+
+DOCUMENT STRUCTURE
+----------------------------------------
+This directory lists all active club members organized by membership tier.
+Each member entry includes: ID, Name, Join Date, Favorite Genre, Books Read.
+Member IDs follow format: RC-XXXX
+
+SECTIONS:
+  Bronze Members: 17 members
+  Silver Members: 12 members
+  Gold Members: 17 members
+  Platinum Members: 14 members
+
+======================================================================
+
+SECTION: BRONZE MEMBERS
+--------------------------------------------------
+
+  RC-1001
+    Name: Isabella Graham
+    Joined: 2023-10-17
+    Favorite Genre: Fantasy
+    Books Read: 32
+
+  RC-1006
+    Name: Yvonne Vaughn
+    Joined: 2020-07-28
+    Favorite Genre: Gothic
+    Books Read: 11
+
+  RC-1008
+    Name: Irene Harrison
+    Joined: 2022-02-14
+    Favorite Genre: Fantasy
+    Books Read: 23
+
+  RC-1010
+    Name: Sophia O'Connor
+    Joined: 2021-08-15
+    Favorite Genre: Philosophy
+    Books Read: 11
+
+  RC-1022
+    Name: Jonathan Anderson
+    Joined: 2023-10-25
+    Favorite Genre: Fantasy
+    Books Read: 22
+
+  RC-1028
+    Name: Xena Thompson
+    Joined: 2021-05-05
+    Favorite Genre: Philosophy
+    Books Read: 41
+
+  RC-1034
+    Name: Olivia Edwards
+    Joined: 2021-11-23
+    Favorite Genre: Fantasy
+    Books Read: 40
+
+  RC-1035
+    Name: Olivia Lawson
+    Joined: 2021-03-27
+    Favorite Genre: Classic Fiction
+    Books Read: 50
+
+  RC-1036
+    Name: Penelope Davidson
+    Joined: 2021-04-13
+    Favorite Genre: Classic Fiction
+    Books Read: 26
+
+  RC-1039
+    Name: Abigail Morrison
+    Joined: 2020-07-12
+    Favorite Genre: Gothic
+    Books Read: 27
+
+  RC-1040
+    Name: Bernard Abbott
+    Joined: 2022-08-14
+    Favorite Genre: Classic Fiction
+    Books Read: 8
+
+  RC-1044
+    Name: Daniel Ingram
+    Joined: 2020-01-31
+    Favorite Genre: Philosophy
+    Books Read: 15
+
+  RC-1048
+    Name: Samuel Nelson
+    Joined: 2020-04-29
+    Favorite Genre: Adventure
+    Books Read: 8
+
+  RC-1050
+    Name: Frederick Lambert
+    Joined: 2020-05-20
+    Favorite Genre: Philosophy
+    Books Read: 30
+
+  RC-1051
+    Name: Henry Keller
+    Joined: 2021-05-19
+    Favorite Genre: Fantasy
+    Books Read: 10
+
+  RC-1055
+    Name: Douglas Newman
+    Joined: 2023-02-27
+    Favorite Genre: Classic Fiction
+    Books Read: 39
+
+  RC-1058
+    Name: Vincent Thompson
+    Joined: 2023-06-06
+    Favorite Genre: Fantasy
+    Books Read: 24
+
+
+SECTION: SILVER MEMBERS
+--------------------------------------------------
+
+  RC-1002
+    Name: Charlotte Baker
+    Joined: 2020-07-10
+    Favorite Genre: Philosophy
+    Books Read: 37
+
+  RC-1003
+    Name: Nora Baker
+    Joined: 2023-02-23
+    Favorite Genre: Fantasy
+    Books Read: 31
+
+  RC-1009
+    Name: Penelope Newman
+    Joined: 2022-01-10
+    Favorite Genre: Classic Fiction
+    Books Read: 7
+
+  RC-1013
+    Name: Penelope Knight
+    Joined: 2022-12-29
+    Favorite Genre: Philosophy
+    Books Read: 34
+
+  RC-1017
+    Name: Douglas Jenkins
+    Joined: 2021-06-26
+    Favorite Genre: Philosophy
+    Books Read: 40
+
+  RC-1020
+    Name: Henry Jenkins
+    Joined: 2023-07-09
+    Favorite Genre: Gothic
+    Books Read: 43
+
+  RC-1026
+    Name: Margaret Jenkins
+    Joined: 2022-02-04
+    Favorite Genre: Fantasy
+    Books Read: 38
+
+  RC-1041
+    Name: Zachary Vaughn
+    Joined: 2020-08-11
+    Favorite Genre: Philosophy
+    Books Read: 17
+
+  RC-1045
+    Name: Abigail Foster
+    Joined: 2022-09-12
+    Favorite Genre: Gothic
+    Books Read: 8
+
+  RC-1049
+    Name: Daniel Lawson
+    Joined: 2022-09-03
+    Favorite Genre: Classic Fiction
+    Books Read: 37
+
+  RC-1056
+    Name: Nathan Griffith
+    Joined: 2021-06-27
+    Favorite Genre: Adventure
+    Books Read: 9
+
+  RC-1057
+    Name: Patrick Xander
+    Joined: 2021-08-06
+    Favorite Genre: Gothic
+    Books Read: 39
+
+
+SECTION: GOLD MEMBERS
+--------------------------------------------------
+
+  RC-1000
+    Name: Penelope Harrison
+    Joined: 2020-02-21
+    Favorite Genre: Philosophy
+    Books Read: 19
+
+  RC-1004
+    Name: Olivia Crawford
+    Joined: 2023-04-21
+    Favorite Genre: Classic Fiction
+    Books Read: 15
+
+  RC-1005
+    Name: Uma Bennett
+    Joined: 2021-11-27
+    Favorite Genre: Philosophy
+    Books Read: 18
+
+  RC-1007
+    Name: William Whitfield
+    Joined: 2023-05-21
+    Favorite Genre: Classic Fiction
+    Books Read: 34
+
+  RC-1011
+    Name: Yasmine Richardson
+    Joined: 2022-07-17
+    Favorite Genre: Philosophy
+    Books Read: 28
+
+  RC-1012
+    Name: William Nelson
+    Joined: 2023-10-04
+    Favorite Genre: Classic Fiction
+    Books Read: 43
+
+  RC-1014
+    Name: Penelope Jacobs
+    Joined: 2021-03-25
+    Favorite Genre: Classic Fiction
+    Books Read: 19
+
+  RC-1015
+    Name: Charlotte Underwood
+    Joined: 2022-04-01
+    Favorite Genre: Classic Fiction
+    Books Read: 18
+
+  RC-1023
+    Name: Zelda Vaughn
+    Joined: 2020-08-16
+    Favorite Genre: Gothic
+    Books Read: 15
+
+  RC-1024
+    Name: Douglas Anderson
+    Joined: 2024-01-18
+    Favorite Genre: Fantasy
+    Books Read: 16
+
+  RC-1025
+    Name: Gertrude Graham
+    Joined: 2023-07-04
+    Favorite Genre: Fantasy
+    Books Read: 43
+
+  RC-1032
+    Name: Yvonne Morrison
+    Joined: 2023-12-31
+    Favorite Genre: Gothic
+    Books Read: 47
+
+  RC-1037
+    Name: Eleanor Griffith
+    Joined: 2021-05-02
+    Favorite Genre: Gothic
+    Books Read: 18
+
+  RC-1052
+    Name: Abigail Lawson
+    Joined: 2023-03-03
+    Favorite Genre: Adventure
+    Books Read: 18
+
+  RC-1053
+    Name: Sophia Underwood
+    Joined: 2021-05-03
+    Favorite Genre: Gothic
+    Books Read: 13
+
+  RC-1054
+    Name: Sophia Thompson
+    Joined: 2022-07-25
+    Favorite Genre: Classic Fiction
+    Books Read: 5
+
+  RC-1059
+    Name: Sophia Graham
+    Joined: 2020-10-02
+    Favorite Genre: Classic Fiction
+    Books Read: 11
+
+
+SECTION: PLATINUM MEMBERS
+--------------------------------------------------
+
+  RC-1016
+    Name: Lillian Underwood
+    Joined: 2021-03-11
+    Favorite Genre: Gothic
+    Books Read: 46
+
+  RC-1018
+    Name: Irene Quincy
+    Joined: 2023-04-12
+    Favorite Genre: Fantasy
+    Books Read: 30
+
+  RC-1019
+    Name: Xena O'Connor
+    Joined: 2020-10-10
+    Favorite Genre: Classic Fiction
+    Books Read: 8
+
+  RC-1021
+    Name: Eleanor Young
+    Joined: 2022-02-20
+    Favorite Genre: Fantasy
+    Books Read: 21
+
+  RC-1027
+    Name: Alice Mitchell
+    Joined: 2021-10-25
+    Favorite Genre: Classic Fiction
+    Books Read: 12
+
+  RC-1029
+    Name: Frederick Fletcher
+    Joined: 2024-02-07
+    Favorite Genre: Classic Fiction
+    Books Read: 39
+
+  RC-1030
+    Name: Zelda Irving
+    Joined: 2020-09-19
+    Favorite Genre: Fantasy
+    Books Read: 15
+
+  RC-1031
+    Name: Quinn Hawkins
+    Joined: 2023-05-27
+    Favorite Genre: Philosophy
+    Books Read: 39
+
+  RC-1033
+    Name: Raymond Xander
+    Joined: 2022-06-16
+    Favorite Genre: Classic Fiction
+    Books Read: 20
+
+  RC-1038
+    Name: Irene Irving
+    Joined: 2024-01-21
+    Favorite Genre: Philosophy
+    Books Read: 35
+
+  RC-1042
+    Name: Irene Crawford
+    Joined: 2020-10-14
+    Favorite Genre: Philosophy
+    Books Read: 22
+
+  RC-1043
+    Name: Douglas Patterson
+    Joined: 2020-06-03
+    Favorite Genre: Fantasy
+    Books Read: 11
+
+  RC-1046
+    Name: Katherine Young
+    Joined: 2020-01-05
+    Favorite Genre: Adventure
+    Books Read: 34
+
+  RC-1047
+    Name: Samuel Bennett
+    Joined: 2023-11-27
+    Favorite Genre: Philosophy
+    Books Read: 17
+

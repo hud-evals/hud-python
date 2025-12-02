@@ -1,0 +1,404 @@
+[
+  {
+    "id": "task-supabase-mcp-test",
+    "prompt": "You have access to a Supabase database via the official Supabase MCP. The project_id is 'qgubrffqclddzehyyvbt'. Use the supabase_execute_sql tool to run: SELECT COUNT(*) as cnt FROM employees WHERE manager_id IS NULL AND is_active = true. Store the count in the scratchpad with key 'count' using local_scratchpad_write. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"count": "9"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-manager-chain",
+    "prompt": "You have access to a Supabase database (project_id: 'qgubrffqclddzehyyvbt') with tables: departments, employees, suppliers, products, customers, orders, order_items, shifts, meetings, meeting_attendees. Use supabase_execute_sql to query. Find the top-level manager for Florence Garcia by following the management chain:\n1. Find Florence Garcia's manager\n2. Then find that person's manager\n3. Continue until you reach someone with no manager (manager_id is null). Store the full name (first_name + space + last_name) of the top-level manager using local_scratchpad_write with key 'top_manager'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"top_manager": "Benjamin Blackwood"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-youngest-phones",
+    "prompt": "You have access to a Supabase database (project_id: 'qgubrffqclddzehyyvbt') with tables: departments, employees, suppliers, products, customers, orders, order_items, shifts, meetings, meeting_attendees. Use supabase_execute_sql to query. Find the 3 youngest active employees (based on birth_date - most recent birth = youngest). Store their phone numbers using local_scratchpad_write with keys 'youngest_1', 'youngest_2', 'youngest_3' (1 being the youngest). When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "youngest_1": "+1-333-395-5354",
+          "youngest_2": "+1-763-748-7450",
+          "youngest_3": "+1-436-886-2008"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-first-level-managers",
+    "prompt": "You have access to a Supabase database (project_id: 'qgubrffqclddzehyyvbt') with tables: departments, employees, suppliers, products, customers, orders, order_items, shifts, meetings, meeting_attendees. Use supabase_execute_sql to query. Count how many first-level managers there are (employees who have no manager above them, i.e., manager_id is null) and are currently active. Store the count as a number using local_scratchpad_write with key 'manager_count'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"manager_count": "9"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-supplier-id",
+    "prompt": "You have access to a Supabase database (project_id: 'qgubrffqclddzehyyvbt') with tables: departments, employees, suppliers, products, customers, orders, order_items, shifts, meetings, meeting_attendees. Use supabase_execute_sql to query. Find the supplier ID for the company named 'EuroDistributors GmbH'. Store the ID using local_scratchpad_write with key 'supplier_id'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"supplier_id": "SUP-05016Y"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-meeting-organizer-phone",
+    "prompt": "You have access to a Supabase database (project_id: 'qgubrffqclddzehyyvbt') with tables: departments, employees, suppliers, products, customers, orders, order_items, shifts, meetings, meeting_attendees. Use supabase_execute_sql to query. Find the phone number of the organizer for the meeting scheduled on 2024-11-25 from 14:00 to 15:00. Store the phone number using local_scratchpad_write with key 'organizer_phone'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"organizer_phone": "+1-754-535-3989"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-meeting-accepted-count",
+    "prompt": "You have access to a Supabase database (project_id: 'qgubrffqclddzehyyvbt') with tables: departments, employees, suppliers, products, customers, orders, order_items, shifts, meetings, meeting_attendees. Use supabase_execute_sql to query. Find how many employees accepted the meeting scheduled on 2024-11-09 from 08:00 to 10:00. Store the count as a number using local_scratchpad_write with key 'accepted_count'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"accepted_count": "9"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-employee-linear-issue",
+    "prompt": "You have access to a Supabase database (project_id: 'qgubrffqclddzehyyvbt') with tables: departments, employees, suppliers, products, customers, orders, order_items, shifts, meetings, meeting_attendees. Use supabase_execute_sql to query. You also have access to Linear issue tracking via local_linear_list_issues.\n\nFind the employee with phone number +1-596-689-3064. Then find the Linear issue assigned to this person. Extract the first sentence from that issue's description and store it using local_scratchpad_write with key 'first_sentence'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"first_sentence": "They gave us a 6 (passive) on the last NPS survey."}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql", "local_linear_list_issues"]
+    }
+  },
+  {
+    "id": "task-stripe-case-orders",
+    "prompt": "You have access to Linear issue tracking via local_linear_list_issues. Find all Linear issues that mention Stripe support case #STR-2024-8834. Extract the order ID from each issue's description. Store all order IDs sorted alphabetically as a comma-separated string (no spaces) using local_scratchpad_write with key 'orders'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"orders": "ORD-100001F,ORD-100004I,ORD-100008M"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "local_linear_list_issues"]
+    }
+  },
+  {
+    "id": "task-linear-simple-assignee",
+    "prompt": "You have access to Linear issue tracking via local_linear_list_issues. Find the Linear issue that contains the text 'Current policy is outdated - written pre-COVID'. Who is this issue assigned to? Store the person's full name using local_scratchpad_write with key 'assignee'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"assignee": "Daniel Dimitrov"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "local_linear_list_issues"]
+    }
+  },
+  {
+    "id": "task-top5-product-prices",
+    "prompt": "You have access to a Supabase database (project_id: 'qgubrffqclddzehyyvbt') with a 'products' table. Use supabase_execute_sql to query. Find the 5 highest priced products. For each one, use local_scratchpad_write to store its price (with exactly 2 decimal places) using the product's ID as the key. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "PRD-23466O": "3979.36",
+          "PRD-21068I": "3886.68",
+          "PRD-22966I": "3809.73",
+          "PRD-23471T": "3725.55",
+          "PRD-20592A": "3721.54"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-customer-manager-phone",
+    "prompt": "You have access to a Supabase database (project_id: 'qgubrffqclddzehyyvbt') with tables: customers, employees. Use supabase_execute_sql to query. Find the phone number of the account manager for the customer 'BlueSky Partners'. Store the phone number using local_scratchpad_write with key 'phone'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"phone": "+1-651-844-2049"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-shift-count-multi",
+    "prompt": "You have access to a Supabase database (project_id: 'qgubrffqclddzehyyvbt') with tables: shifts, employees. Use supabase_execute_sql to query. Find the TOTAL number of shifts scheduled for these 5 employees combined: Alexander Yamamoto, Natalie Xiao, Yolanda Brown, Eleanor Edwards, and Sebastian Ishikawa. Store the total count as a number using local_scratchpad_write with key 'total_shifts'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"total_shifts": "151"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-category-count",
+    "prompt": "You have access to a Supabase database (project_id: 'qgubrffqclddzehyyvbt') with a 'products' table. Use supabase_execute_sql to query. Count how many products are in the 'Electronics' category. Store the count as a number using local_scratchpad_write with key 'count'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"count": "189"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql"]
+    }
+  }
+]

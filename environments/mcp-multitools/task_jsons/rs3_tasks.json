@@ -1,0 +1,59 @@
+[
+  {
+    "id": "task-bulk-profit-50",
+    "prompt": "Calculate the TOTAL PROFIT from all order_items for the following 50 products. Return the sum with exactly 2 decimal places.\n\n**FORMULA:** profit = quantity × (unit_price × (1 - discount_percent/100) - cost)\n\n**PRODUCT SKUs:**\nSKU-100415, SKU-100823, SKU-100138, SKU-100541, SKU-100387, SKU-100520, SKU-100269, SKU-100248, SKU-100286, SKU-100505,\nSKU-100589, SKU-100598, SKU-100713, SKU-100180, SKU-100694, SKU-100368, SKU-100614, SKU-100500, SKU-100637, SKU-100501,\nSKU-100181, SKU-100340, SKU-100543, SKU-100603, SKU-100342, SKU-100611, SKU-100709, SKU-100370, SKU-100524, SKU-100572,\nSKU-100084, SKU-100300, SKU-100216, SKU-100151, SKU-100066, SKU-100383, SKU-100310, SKU-100337, SKU-100203, SKU-100316,\nSKU-100099, SKU-100741, SKU-100336, SKU-100021, SKU-100127, SKU-100771, SKU-100016, SKU-100760, SKU-100705, SKU-100292\n\nYou have access to a Supabase database via supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Available tables: products, order_items.\n\nStore the total profit as a number with exactly 2 decimal places using local_scratchpad_write with key 'answer'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"answer": "62772.65"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql", "supabase_list_tables"]
+    }
+  },
+  {
+    "id": "task-bulk-profit-30",
+    "prompt": "Calculate the TOTAL PROFIT from all order_items for the following 30 products. Return the sum with exactly 2 decimal places.\n\n**FORMULA:** profit = quantity × (unit_price × (1 - discount_percent/100) - cost)\n\n**PRODUCT SKUs:**\nSKU-100361, SKU-100016, SKU-100254, SKU-100734, SKU-100559, SKU-100716, SKU-100062, SKU-100712, SKU-100404, SKU-100286,\nSKU-100488, SKU-100823, SKU-100820, SKU-100687, SKU-100802, SKU-100127, SKU-100755, SKU-100083, SKU-100596, SKU-100667,\nSKU-100507, SKU-100314, SKU-100648, SKU-100358, SKU-100156, SKU-100409, SKU-100399, SKU-100504, SKU-100685, SKU-100500\n\nYou have access to a Supabase database via supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Available tables: products, order_items.\n\nStore the total profit as a number with exactly 2 decimal places using local_scratchpad_write with key 'answer'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"answer": "20836.70"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql", "supabase_list_tables"]
+    }
+  }
+]
+

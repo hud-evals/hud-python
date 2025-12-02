@@ -1,0 +1,836 @@
+======================================================================
+RIVERSIDE PUBLIC LIBRARY - BOOK CATALOG
+======================================================================
+
+CATALOG INDEX
+----------------------------------------
+  Chapter 1: Art (10 titles)
+  Chapter 2: Biography (8 titles)
+  Chapter 3: Fantasy (6 titles)
+  Chapter 4: Fiction (12 titles)
+  Chapter 5: History (7 titles)
+  Chapter 6: Horror (9 titles)
+  Chapter 7: Mystery (12 titles)
+  Chapter 8: Non-Fiction (6 titles)
+  Chapter 9: Philosophy (2 titles)
+  Chapter 10: Poetry (17 titles)
+  Chapter 11: Romance (10 titles)
+  Chapter 12: Science (17 titles)
+  Chapter 13: Science Fiction (13 titles)
+  Chapter 14: Self-Help (13 titles)
+  Chapter 15: Thriller (8 titles)
+
+Book IDs follow format: BOOK-XXXX
+Availability: X of Y copies available
+
+======================================================================
+
+CHAPTER 1: ART
+==================================================
+
+  [BOOK-5010] "A Forest"
+    Author: Ursula K. Le Guin
+    Year: 1965
+    Availability: 1 of 3 copies
+
+  [BOOK-5060] "A House"
+    Author: Haruki Murakami
+    Year: 1994
+    Availability: 1 of 2 copies
+
+  [BOOK-5133] "A House"
+    Author: Robert Frost
+    Year: 2022
+    Availability: 0 of 4 copies
+
+  [BOOK-5017] "A Ocean"
+    Author: Agatha Christie
+    Year: 1958
+    Availability: 3 of 3 copies
+
+  [BOOK-5074] "A River"
+    Author: Haruki Murakami
+    Year: 2004
+    Availability: 3 of 5 copies
+
+  [BOOK-5092] "A River"
+    Author: Haruki Murakami
+    Year: 2007
+    Availability: 4 of 4 copies
+
+  [BOOK-5071] "A Shadow"
+    Author: Jane Austen
+    Year: 2014
+    Availability: 0 of 4 copies
+
+  [BOOK-5025] "The Garden"
+    Author: Terry Pratchett
+    Year: 1993
+    Availability: 0 of 5 copies
+
+  [BOOK-5068] "The House"
+    Author: Walt Whitman
+    Year: 1972
+    Availability: 3 of 4 copies
+
+  [BOOK-5135] "The Village"
+    Author: Robert Frost
+    Year: 1990
+    Availability: 0 of 1 copies
+
+
+CHAPTER 2: BIOGRAPHY
+==================================================
+
+  [BOOK-5049] "Journey of Garden"
+    Author: John Grisham
+    Year: 1964
+    Availability: 4 of 4 copies
+
+  [BOOK-5059] "Life of Village"
+    Author: Ursula K. Le Guin
+    Year: 1985
+    Availability: 3 of 3 copies
+
+  [BOOK-5041] "Rise of Island"
+    Author: Ursula K. Le Guin
+    Year: 1986
+    Availability: 1 of 1 copies
+
+  [BOOK-5067] "Story of Castle"
+    Author: Charles Dickens
+    Year: 1957
+    Availability: 0 of 1 copies
+
+  [BOOK-5072] "Story of Garden"
+    Author: Mark Twain
+    Year: 2008
+    Availability: 2 of 3 copies
+
+  [BOOK-5031] "Story of Stone"
+    Author: Robin Cook
+    Year: 1994
+    Availability: 4 of 4 copies
+
+  [BOOK-5053] "Story of Tower"
+    Author: Toni Morrison
+    Year: 1969
+    Availability: 4 of 4 copies
+
+  [BOOK-5141] "Story of Village"
+    Author: Ursula K. Le Guin
+    Year: 1998
+    Availability: 3 of 4 copies
+
+
+CHAPTER 3: FANTASY
+==================================================
+
+  [BOOK-5001] "Kingdom Fire"
+    Author: Leo Tolstoy
+    Year: 1963
+    Availability: 1 of 1 copies
+
+  [BOOK-5077] "Kingdom Stone"
+    Author: Neil Gaiman
+    Year: 2023
+    Availability: 0 of 1 copies
+
+  [BOOK-5103] "Magic Tower"
+    Author: Stephen King
+    Year: 2021
+    Availability: 4 of 5 copies
+
+  [BOOK-5101] "Quest Road"
+    Author: Virginia Woolf
+    Year: 2023
+    Availability: 2 of 3 copies
+
+  [BOOK-5117] "Sword Fire"
+    Author: Ursula K. Le Guin
+    Year: 2024
+    Availability: 1 of 5 copies
+
+  [BOOK-5143] "Sword Wind"
+    Author: Jane Austen
+    Year: 1998
+    Availability: 1 of 2 copies
+
+
+CHAPTER 4: FICTION
+==================================================
+
+  [BOOK-5005] "A River"
+    Author: Jane Austen
+    Year: 2006
+    Availability: 0 of 1 copies
+
+  [BOOK-5039] "A Storm"
+    Author: Robert Frost
+    Year: 1963
+    Availability: 2 of 4 copies
+
+  [BOOK-5091] "A Tower"
+    Author: Charles Dickens
+    Year: 2002
+    Availability: 1 of 2 copies
+
+  [BOOK-5026] "A Village"
+    Author: Dan Brown
+    Year: 2023
+    Availability: 3 of 3 copies
+
+  [BOOK-5084] "A Village"
+    Author: Sylvia Plath
+    Year: 2020
+    Availability: 4 of 5 copies
+
+  [BOOK-5038] "Last Fire"
+    Author: Charles Dickens
+    Year: 2013
+    Availability: 4 of 5 copies
+
+  [BOOK-5076] "Last Storm"
+    Author: F. Scott Fitzgerald
+    Year: 1999
+    Availability: 1 of 2 copies
+
+  [BOOK-5131] "Last Tower"
+    Author: Michael Crichton
+    Year: 1971
+    Availability: 1 of 1 copies
+
+  [BOOK-5078] "One Dream"
+    Author: John Grisham
+    Year: 1965
+    Availability: 3 of 4 copies
+
+  [BOOK-5045] "One Ocean"
+    Author: Stephen King
+    Year: 1954
+    Availability: 2 of 2 copies
+
+  [BOOK-5124] "The Garden"
+    Author: Terry Pratchett
+    Year: 2011
+    Availability: 4 of 4 copies
+
+  [BOOK-5126] "The Mountain"
+    Author: Arthur C. Clarke
+    Year: 2005
+    Availability: 2 of 2 copies
+
+
+CHAPTER 5: HISTORY
+==================================================
+
+  [BOOK-5130] "A House"
+    Author: Haruki Murakami
+    Year: 1998
+    Availability: 5 of 5 copies
+
+  [BOOK-5116] "One City"
+    Author: Stephen King
+    Year: 2022
+    Availability: 0 of 2 copies
+
+  [BOOK-5089] "One River"
+    Author: F. Scott Fitzgerald
+    Year: 1950
+    Availability: 0 of 2 copies
+
+  [BOOK-5139] "One Road"
+    Author: Virginia Woolf
+    Year: 1959
+    Availability: 3 of 3 copies
+
+  [BOOK-5105] "The Castle"
+    Author: Jane Austen
+    Year: 1988
+    Availability: 3 of 4 copies
+
+  [BOOK-5090] "The River"
+    Author: Gabriel Garcia Marquez
+    Year: 1958
+    Availability: 3 of 5 copies
+
+  [BOOK-5148] "The Village"
+    Author: James Patterson
+    Year: 1960
+    Availability: 4 of 5 copies
+
+
+CHAPTER 6: HORROR
+==================================================
+
+  [BOOK-5013] "A Fire"
+    Author: Agatha Christie
+    Year: 2020
+    Availability: 1 of 5 copies
+
+  [BOOK-5035] "A Island"
+    Author: Leo Tolstoy
+    Year: 1974
+    Availability: 1 of 2 copies
+
+  [BOOK-5081] "One Castle"
+    Author: Terry Pratchett
+    Year: 1997
+    Availability: 3 of 4 copies
+
+  [BOOK-5000] "One Dream"
+    Author: Toni Morrison
+    Year: 1960
+    Availability: 4 of 4 copies
+
+  [BOOK-5123] "One Forest"
+    Author: Jane Austen
+    Year: 1951
+    Availability: 1 of 2 copies
+
+  [BOOK-5129] "One House"
+    Author: Virginia Woolf
+    Year: 1988
+    Availability: 0 of 1 copies
+
+  [BOOK-5014] "One Light"
+    Author: Michael Crichton
+    Year: 1972
+    Availability: 0 of 3 copies
+
+  [BOOK-5112] "One Road"
+    Author: George Orwell
+    Year: 2011
+    Availability: 2 of 2 copies
+
+  [BOOK-5061] "One Storm"
+    Author: Agatha Christie
+    Year: 1994
+    Availability: 3 of 4 copies
+
+
+CHAPTER 7: MYSTERY
+==================================================
+
+  [BOOK-5093] "Case of the Castle"
+    Author: Dan Brown
+    Year: 1994
+    Availability: 1 of 1 copies
+
+  [BOOK-5120] "Case of the Castle"
+    Author: Robin Cook
+    Year: 1995
+    Availability: 1 of 2 copies
+
+  [BOOK-5024] "Case of the Road"
+    Author: Neil Gaiman
+    Year: 2024
+    Availability: 2 of 2 copies
+
+  [BOOK-5149] "Case of the Storm"
+    Author: John Grisham
+    Year: 1998
+    Availability: 1 of 2 copies
+
+  [BOOK-5043] "Murder at Castle"
+    Author: George Orwell
+    Year: 2000
+    Availability: 2 of 3 copies
+
+  [BOOK-5138] "Murder at House"
+    Author: Maya Angelou
+    Year: 1960
+    Availability: 0 of 5 copies
+
+  [BOOK-5047] "Murder at Island"
+    Author: Haruki Murakami
+    Year: 1988
+    Availability: 4 of 5 copies
+
+  [BOOK-5021] "Murder at Light"
+    Author: Charles Dickens
+    Year: 1971
+    Availability: 1 of 2 copies
+
+  [BOOK-5127] "Murder at Stone"
+    Author: Virginia Woolf
+    Year: 1974
+    Availability: 2 of 5 copies
+
+  [BOOK-5085] "Secret of Mountain"
+    Author: Mark Twain
+    Year: 1991
+    Availability: 5 of 5 copies
+
+  [BOOK-5023] "The Island"
+    Author: Dan Brown
+    Year: 1988
+    Availability: 5 of 5 copies
+
+  [BOOK-5121] "The River"
+    Author: Walt Whitman
+    Year: 2019
+    Availability: 0 of 1 copies
+
+
+CHAPTER 8: NON-FICTION
+==================================================
+
+  [BOOK-5109] "A Bridge"
+    Author: Ursula K. Le Guin
+    Year: 1974
+    Availability: 0 of 1 copies
+
+  [BOOK-5145] "A Forest"
+    Author: Jane Austen
+    Year: 1961
+    Availability: 2 of 2 copies
+
+  [BOOK-5144] "A Stone"
+    Author: Agatha Christie
+    Year: 1950
+    Availability: 2 of 3 copies
+
+  [BOOK-5065] "One Dream"
+    Author: John Grisham
+    Year: 1967
+    Availability: 1 of 1 copies
+
+  [BOOK-5142] "One River"
+    Author: James Patterson
+    Year: 1987
+    Availability: 0 of 2 copies
+
+  [BOOK-5063] "The Island"
+    Author: Terry Pratchett
+    Year: 1980
+    Availability: 0 of 2 copies
+
+
+CHAPTER 9: PHILOSOPHY
+==================================================
+
+  [BOOK-5110] "One Castle"
+    Author: Agatha Christie
+    Year: 1974
+    Availability: 1 of 5 copies
+
+  [BOOK-5034] "The Wind"
+    Author: Terry Pratchett
+    Year: 2003
+    Availability: 2 of 2 copies
+
+
+CHAPTER 10: POETRY
+==================================================
+
+  [BOOK-5136] "A Dream"
+    Author: Sylvia Plath
+    Year: 2000
+    Availability: 0 of 1 copies
+
+  [BOOK-5128] "A Forest"
+    Author: Haruki Murakami
+    Year: 1960
+    Availability: 1 of 3 copies
+
+  [BOOK-5040] "A House"
+    Author: Haruki Murakami
+    Year: 1996
+    Availability: 0 of 1 copies
+
+  [BOOK-5004] "A Island"
+    Author: Stephen King
+    Year: 1959
+    Availability: 1 of 4 copies
+
+  [BOOK-5140] "A Ocean"
+    Author: Leo Tolstoy
+    Year: 1953
+    Availability: 1 of 3 copies
+
+  [BOOK-5006] "A Village"
+    Author: Dan Brown
+    Year: 1996
+    Availability: 0 of 3 copies
+
+  [BOOK-5044] "One Bridge"
+    Author: Jane Austen
+    Year: 1975
+    Availability: 4 of 5 copies
+
+  [BOOK-5054] "One City"
+    Author: Terry Pratchett
+    Year: 2010
+    Availability: 0 of 1 copies
+
+  [BOOK-5097] "One Garden"
+    Author: George Orwell
+    Year: 1954
+    Availability: 1 of 4 copies
+
+  [BOOK-5122] "One Light"
+    Author: J.K. Rowling
+    Year: 2002
+    Availability: 0 of 2 copies
+
+  [BOOK-5042] "One Road"
+    Author: Ursula K. Le Guin
+    Year: 1985
+    Availability: 0 of 5 copies
+
+  [BOOK-5082] "One Road"
+    Author: Ursula K. Le Guin
+    Year: 1977
+    Availability: 0 of 2 copies
+
+  [BOOK-5087] "One Tower"
+    Author: Stephen King
+    Year: 2008
+    Availability: 1 of 2 copies
+
+  [BOOK-5069] "The Garden"
+    Author: Isaac Asimov
+    Year: 1973
+    Availability: 2 of 3 copies
+
+  [BOOK-5020] "The Mountain"
+    Author: Jane Austen
+    Year: 2005
+    Availability: 4 of 5 copies
+
+  [BOOK-5073] "The Road"
+    Author: Charles Dickens
+    Year: 2022
+    Availability: 2 of 2 copies
+
+  [BOOK-5018] "The Wind"
+    Author: Toni Morrison
+    Year: 2023
+    Availability: 0 of 1 copies
+
+
+CHAPTER 11: ROMANCE
+==================================================
+
+  [BOOK-5137] "A Bridge"
+    Author: Sylvia Plath
+    Year: 1999
+    Availability: 5 of 5 copies
+
+  [BOOK-5057] "A Castle"
+    Author: Isaac Asimov
+    Year: 1974
+    Availability: 1 of 2 copies
+
+  [BOOK-5080] "A City"
+    Author: Virginia Woolf
+    Year: 1978
+    Availability: 1 of 2 copies
+
+  [BOOK-5007] "A Forest"
+    Author: Jane Austen
+    Year: 2007
+    Availability: 0 of 3 copies
+
+  [BOOK-5070] "A Forest"
+    Author: Terry Pratchett
+    Year: 1963
+    Availability: 3 of 3 copies
+
+  [BOOK-5008] "A Wind"
+    Author: Jane Austen
+    Year: 2017
+    Availability: 2 of 3 copies
+
+  [BOOK-5027] "One Castle"
+    Author: Dan Brown
+    Year: 1953
+    Availability: 2 of 4 copies
+
+  [BOOK-5088] "One Fire"
+    Author: Stephen King
+    Year: 2021
+    Availability: 0 of 4 copies
+
+  [BOOK-5011] "The City"
+    Author: Charles Dickens
+    Year: 2012
+    Availability: 0 of 2 copies
+
+  [BOOK-5132] "The Light"
+    Author: Robert Frost
+    Year: 1962
+    Availability: 1 of 5 copies
+
+
+CHAPTER 12: SCIENCE
+==================================================
+
+  [BOOK-5051] "A City"
+    Author: Mark Twain
+    Year: 2017
+    Availability: 5 of 5 copies
+
+  [BOOK-5046] "A Road"
+    Author: Jane Austen
+    Year: 2015
+    Availability: 1 of 2 copies
+
+  [BOOK-5114] "A Stone"
+    Author: Ursula K. Le Guin
+    Year: 1995
+    Availability: 3 of 3 copies
+
+  [BOOK-5003] "A Storm"
+    Author: Stephen King
+    Year: 1995
+    Availability: 5 of 5 copies
+
+  [BOOK-5029] "A Tower"
+    Author: Agatha Christie
+    Year: 1957
+    Availability: 1 of 2 copies
+
+  [BOOK-5002] "One Forest"
+    Author: Terry Pratchett
+    Year: 2004
+    Availability: 1 of 2 copies
+
+  [BOOK-5056] "One Stone"
+    Author: Walt Whitman
+    Year: 2018
+    Availability: 2 of 3 copies
+
+  [BOOK-5012] "One Wind"
+    Author: Mark Twain
+    Year: 2006
+    Availability: 1 of 1 copies
+
+  [BOOK-5104] "One Wind"
+    Author: Stephen King
+    Year: 1994
+    Availability: 3 of 4 copies
+
+  [BOOK-5019] "The Castle"
+    Author: Margaret Atwood
+    Year: 2016
+    Availability: 1 of 3 copies
+
+  [BOOK-5100] "The City"
+    Author: Virginia Woolf
+    Year: 2019
+    Availability: 2 of 2 copies
+
+  [BOOK-5033] "The Fire"
+    Author: Virginia Woolf
+    Year: 1968
+    Availability: 1 of 1 copies
+
+  [BOOK-5050] "The House"
+    Author: F. Scott Fitzgerald
+    Year: 2024
+    Availability: 4 of 5 copies
+
+  [BOOK-5036] "The River"
+    Author: Emily Dickinson
+    Year: 1989
+    Availability: 3 of 4 copies
+
+  [BOOK-5111] "The Shadow"
+    Author: Ernest Hemingway
+    Year: 1992
+    Availability: 1 of 3 copies
+
+  [BOOK-5115] "The Stone"
+    Author: George Orwell
+    Year: 2010
+    Availability: 2 of 3 copies
+
+  [BOOK-5030] "The Wind"
+    Author: Ernest Hemingway
+    Year: 1993
+    Availability: 5 of 5 copies
+
+
+CHAPTER 13: SCIENCE FICTION
+==================================================
+
+  [BOOK-5113] "Future Fire"
+    Author: Haruki Murakami
+    Year: 1980
+    Availability: 3 of 5 copies
+
+  [BOOK-5096] "Future Shadow"
+    Author: Margaret Atwood
+    Year: 1994
+    Availability: 2 of 2 copies
+
+  [BOOK-5106] "Galaxy Forest"
+    Author: Robert Frost
+    Year: 1978
+    Availability: 0 of 3 copies
+
+  [BOOK-5052] "Galaxy Garden"
+    Author: Stephen King
+    Year: 2023
+    Availability: 1 of 1 copies
+
+  [BOOK-5102] "Galaxy Tower"
+    Author: Charles Dickens
+    Year: 1968
+    Availability: 2 of 5 copies
+
+  [BOOK-5015] "Robot Garden"
+    Author: Maya Angelou
+    Year: 1967
+    Availability: 1 of 2 copies
+
+  [BOOK-5009] "Robot Island"
+    Author: George Orwell
+    Year: 1953
+    Availability: 1 of 2 copies
+
+  [BOOK-5058] "Robot Wind"
+    Author: Charles Dickens
+    Year: 1986
+    Availability: 1 of 2 copies
+
+  [BOOK-5118] "Space Light"
+    Author: Leo Tolstoy
+    Year: 1979
+    Availability: 3 of 4 copies
+
+  [BOOK-5062] "Space Storm"
+    Author: Ernest Hemingway
+    Year: 2018
+    Availability: 1 of 3 copies
+
+  [BOOK-5098] "Star Forest"
+    Author: Agatha Christie
+    Year: 1962
+    Availability: 4 of 5 copies
+
+  [BOOK-5108] "Star Forest"
+    Author: F. Scott Fitzgerald
+    Year: 1976
+    Availability: 2 of 3 copies
+
+  [BOOK-5086] "Star Island"
+    Author: Michael Crichton
+    Year: 2024
+    Availability: 3 of 4 copies
+
+
+CHAPTER 14: SELF-HELP
+==================================================
+
+  [BOOK-5048] "A Garden"
+    Author: Isaac Asimov
+    Year: 2022
+    Availability: 2 of 3 copies
+
+  [BOOK-5032] "A Mountain"
+    Author: George Orwell
+    Year: 1990
+    Availability: 1 of 2 copies
+
+  [BOOK-5119] "A Ocean"
+    Author: Dan Brown
+    Year: 1993
+    Availability: 3 of 3 copies
+
+  [BOOK-5022] "A Shadow"
+    Author: Emily Dickinson
+    Year: 1986
+    Availability: 1 of 1 copies
+
+  [BOOK-5055] "A Wind"
+    Author: Leo Tolstoy
+    Year: 2011
+    Availability: 1 of 5 copies
+
+  [BOOK-5016] "One City"
+    Author: Neil Gaiman
+    Year: 1997
+    Availability: 4 of 4 copies
+
+  [BOOK-5107] "One City"
+    Author: Toni Morrison
+    Year: 2003
+    Availability: 3 of 5 copies
+
+  [BOOK-5037] "One Stone"
+    Author: Margaret Atwood
+    Year: 1980
+    Availability: 0 of 2 copies
+
+  [BOOK-5125] "One Storm"
+    Author: Toni Morrison
+    Year: 1951
+    Availability: 1 of 1 copies
+
+  [BOOK-5094] "The Fire"
+    Author: Jane Austen
+    Year: 1978
+    Availability: 1 of 1 copies
+
+  [BOOK-5147] "The Fire"
+    Author: Agatha Christie
+    Year: 1991
+    Availability: 3 of 4 copies
+
+  [BOOK-5146] "The River"
+    Author: Arthur C. Clarke
+    Year: 2002
+    Availability: 1 of 1 copies
+
+  [BOOK-5083] "The Village"
+    Author: Margaret Atwood
+    Year: 2017
+    Availability: 0 of 3 copies
+
+
+CHAPTER 15: THRILLER
+==================================================
+
+  [BOOK-5064] "A Wind"
+    Author: Virginia Woolf
+    Year: 1956
+    Availability: 1 of 1 copies
+
+  [BOOK-5075] "A Wind"
+    Author: George Orwell
+    Year: 1973
+    Availability: 0 of 2 copies
+
+  [BOOK-5028] "One Bridge"
+    Author: Charles Dickens
+    Year: 2011
+    Availability: 1 of 2 copies
+
+  [BOOK-5095] "One Bridge"
+    Author: Robin Cook
+    Year: 2019
+    Availability: 1 of 4 copies
+
+  [BOOK-5079] "One Fire"
+    Author: Arthur C. Clarke
+    Year: 1989
+    Availability: 1 of 1 copies
+
+  [BOOK-5099] "One House"
+    Author: Michael Crichton
+    Year: 1956
+    Availability: 1 of 2 copies
+
+  [BOOK-5134] "One House"
+    Author: Walt Whitman
+    Year: 1985
+    Availability: 1 of 5 copies
+
+  [BOOK-5066] "One Shadow"
+    Author: Walt Whitman
+    Year: 2010
+    Availability: 2 of 4 copies
+

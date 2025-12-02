@@ -1,0 +1,337 @@
+======================================================================
+WESTBROOK LITERARY SOCIETY - READING CURRICULUM
+======================================================================
+
+ABOUT THIS DOCUMENT
+----------------------------------------
+This document contains the current reading assignments for society
+members. Each assignment references specific texts from our Classic
+Literature Collection. Members should retrieve the specified chapters
+or passages from the corresponding classic text documents.
+
+CLASSIC TEXT DOCUMENTS AVAILABLE:
+  - classic_art_of_war (The Art of War by Sun Tzu)
+  - classic_pride_and_prejudice (Pride and Prejudice by Jane Austen)
+  - classic_moby_dick (Moby-Dick by Herman Melville)
+  - classic_frankenstein (Frankenstein by Mary Shelley)
+
+======================================================================
+
+CURRENT ASSIGNMENTS - THE STRATEGISTS
+--------------------------------------------------
+
+Member: LS-1010 (Alexander Bennett)
+  Assignment: Master the foundational concepts
+  Text: classic_art_of_war
+  Required Reading: Chapter I (Laying Plans) and Chapter II (Waging War)
+  Due Date: 2024-12-15
+  Notes: Prepare presentation on strategic assessment
+
+Member: LS-1016 (Robert Irving)
+  Assignment: Study tactical positioning
+  Text: classic_art_of_war
+  Required Reading: Chapter VI (Weak Points and Strong)
+  Due Date: 2024-12-15
+  Notes: Focus on exploiting enemy weaknesses
+
+Member: LS-1024 (Stephen Roberts)
+  Assignment: Understand terrain analysis
+  Text: classic_art_of_war
+  Required Reading: Chapter X (Terrain)
+  Due Date: 2024-12-15
+  Notes: Map modern applications of terrain concepts
+
+Member: LS-1032 (Nathan Brooks)
+  Assignment: Fire tactics and special operations
+  Text: classic_art_of_war
+  Required Reading: Chapter XII (The Attack by Fire)
+  Due Date: 2024-12-15
+  Notes: Research historical fire warfare examples
+
+Member: LS-1036 (Kevin Foster)
+  Assignment: Intelligence and espionage
+  Text: classic_art_of_war
+  Required Reading: Chapter XIII (The Use of Spies)
+  Due Date: 2024-12-15
+  Notes: Compare with modern intelligence practices
+
+Member: LS-1050 (Adam Richardson)
+  Assignment: Introduction to strategic thinking
+  Text: classic_art_of_war
+  Required Reading: Chapter I (Laying Plans)
+  Due Date: 2024-12-20
+  Notes: New member orientation assignment
+
+Member: LS-1064 (Oscar Fernandez)
+  Assignment: Leadership in military contexts
+  Text: classic_art_of_war
+  Required Reading: Chapter III (Attack by Stratagem)
+  Due Date: 2024-12-20
+  Notes: Focus on the passage about knowing enemy and self
+
+
+CURRENT ASSIGNMENTS - THE ROMANTICS
+--------------------------------------------------
+
+Member: LS-1011 (Sophia Carrington)
+  Assignment: Lead discussion on opening themes
+  Text: classic_pride_and_prejudice
+  Required Reading: Chapter 1 through Chapter 3
+  Due Date: 2024-12-10
+  Notes: Analyze the famous opening line and initial character introductions
+
+Member: LS-1023 (Diana Quinn)
+  Assignment: Character study - Mr. Darcy's first appearance
+  Text: classic_pride_and_prejudice
+  Required Reading: Chapter 3
+  Due Date: 2024-12-10
+  Notes: Focus on the assembly ball scene
+
+Member: LS-1033 (Sarah Collins)
+  Assignment: Social dynamics analysis
+  Text: classic_pride_and_prejudice
+  Required Reading: Chapter 5 and Chapter 6
+  Due Date: 2024-12-10
+  Notes: Examine the Bennet-Lucas family interactions
+
+Member: LS-1051 (Brittany Scott)
+  Assignment: Mr. Collins introduction
+  Text: classic_pride_and_prejudice
+  Required Reading: Chapter 13 and Chapter 14
+  Due Date: 2024-12-10
+  Notes: Character comedy analysis
+
+Member: LS-1065 (Patricia Green)
+  Assignment: Beginning reader orientation
+  Text: classic_pride_and_prejudice
+  Required Reading: Chapter 1
+  Due Date: 2024-12-15
+  Notes: First assignment for new member
+
+
+CURRENT ASSIGNMENTS - THE MARINERS
+--------------------------------------------------
+
+Member: LS-1012 (David Eastwood)
+  Assignment: Opening and atmosphere
+  Text: classic_moby_dick
+  Required Reading: Chapter 1 (Loomings)
+  Due Date: 2024-12-12
+  Notes: Analyze Ishmael's introduction and sea-longing
+
+Member: LS-1025 (Amanda Stevens)
+  Assignment: The Spouter-Inn sequence
+  Text: classic_moby_dick
+  Required Reading: Chapter 2 (The Carpet-Bag) and Chapter 3 (The Spouter-Inn)
+  Due Date: 2024-12-12
+  Notes: Setting and atmosphere before the voyage
+
+Member: LS-1035 (Laura Edwards)
+  Assignment: Queequeg's introduction
+  Text: classic_moby_dick
+  Required Reading: Chapter 3 (The Spouter-Inn)
+  Due Date: 2024-12-12
+  Notes: Focus on the friendship development
+
+Member: LS-1052 (Carlos Thompson)
+  Assignment: The sermon and foreshadowing
+  Text: classic_moby_dick
+  Required Reading: Chapter 9 (The Sermon)
+  Due Date: 2024-12-12
+  Notes: Analyze Father Mapple's sermon symbolism
+
+Member: LS-1062 (Marcus Davidson)
+  Assignment: New reader introduction
+  Text: classic_moby_dick
+  Required Reading: Chapter 1 (Loomings) and Chapter 2 (The Carpet-Bag)
+  Due Date: 2024-12-18
+  Notes: Basic orientation to Melville's style
+
+
+CURRENT ASSIGNMENTS - THE PHILOSOPHERS
+--------------------------------------------------
+
+Member: LS-1003 (Margaret Chen)
+  Assignment: Philosophical foundations
+  Text: classic_art_of_war
+  Required Reading: Chapter I (Laying Plans)
+  Due Date: 2024-12-08
+  Notes: Focus on the five constant factors
+
+Member: LS-1021 (Rachel Nguyen)
+  Assignment: Economy of force
+  Text: classic_art_of_war
+  Required Reading: Chapter II (Waging War)
+  Due Date: 2024-12-08
+  Notes: Explore efficiency as philosophical principle
+
+Member: LS-1030 (Daniel Zhang)
+  Assignment: Victory without battle
+  Text: classic_art_of_war
+  Required Reading: Chapter III (Attack by Stratagem)
+  Due Date: 2024-12-08
+  Notes: The highest excellence concept
+
+Member: LS-1040 (Joshua Kim)
+  Assignment: Natural patterns in strategy
+  Text: classic_art_of_war
+  Required Reading: Chapter IV (Tactical Dispositions)
+  Due Date: 2024-12-08
+  Notes: Compare with Taoist philosophy
+
+Member: LS-1055 (Fiona Walsh)
+  Assignment: Energy and momentum
+  Text: classic_art_of_war
+  Required Reading: Chapter V (Energy)
+  Due Date: 2024-12-08
+  Notes: Explore chi/qi concepts in strategy
+
+Member: LS-1067 (Rebecca Irwin)
+  Assignment: Introductory assignment
+  Text: classic_art_of_war
+  Required Reading: Chapter I (Laying Plans) and Chapter II (Waging War)
+  Due Date: 2024-12-15
+  Notes: New member - foundational reading
+
+
+CURRENT ASSIGNMENTS - THE GOTHIC SOCIETY
+--------------------------------------------------
+
+Member: LS-1005 (Helena Graves)
+  Assignment: Frame narrative analysis
+  Text: classic_frankenstein
+  Required Reading: Letter I through Letter IV
+  Due Date: 2024-12-14
+  Notes: Robert Walton's arctic expedition letters
+
+Member: LS-1022 (Christopher Palmer)
+  Assignment: Victor's early life
+  Text: classic_frankenstein
+  Required Reading: Chapter 1 and Chapter 2
+  Due Date: 2024-12-14
+  Notes: Childhood influences on the scientist
+
+Member: LS-1031 (Emily Adams)
+  Assignment: The creation scene
+  Text: classic_frankenstein
+  Required Reading: Chapter 5
+  Due Date: 2024-12-14
+  Notes: The pivotal moment of animation
+
+Member: LS-1043 (Nicole Nelson)
+  Assignment: The creature's perspective
+  Text: classic_frankenstein
+  Required Reading: Chapter 11 and Chapter 12
+  Due Date: 2024-12-14
+  Notes: Beginning of the creature's narrative
+
+Member: LS-1058 (Ian Zhang)
+  Assignment: First reading orientation
+  Text: classic_frankenstein
+  Required Reading: Letter I and Letter II
+  Due Date: 2024-12-20
+  Notes: New member introduction to frame narrative
+
+Member: LS-1070 (Ulysses Lambert)
+  Assignment: Complete beginner
+  Text: classic_frankenstein
+  Required Reading: Letter I
+  Due Date: 2024-12-22
+  Notes: Very new member, minimal assignment
+
+
+CURRENT ASSIGNMENTS - THE REGENCY READERS
+--------------------------------------------------
+
+Member: LS-1013 (Olivia Fairfax)
+  Assignment: Complete first volume
+  Text: classic_pride_and_prejudice
+  Required Reading: Chapter 1 through Chapter 23
+  Due Date: 2024-12-11
+  Notes: Prepare volume summary
+
+Member: LS-1019 (Elizabeth Lancaster)
+  Assignment: The Netherfield Ball
+  Text: classic_pride_and_prejudice
+  Required Reading: Chapter 18
+  Due Date: 2024-12-11
+  Notes: Detailed dance scene analysis
+
+Member: LS-1029 (Katherine Young)
+  Assignment: Mr. Collins's proposal
+  Text: classic_pride_and_prejudice
+  Required Reading: Chapter 19
+  Due Date: 2024-12-11
+  Notes: Comic timing and social commentary
+
+Member: LS-1045 (Samantha Parker)
+  Assignment: Wickham's introduction
+  Text: classic_pride_and_prejudice
+  Required Reading: Chapter 15 and Chapter 16
+  Due Date: 2024-12-11
+  Notes: First impressions vs. reality theme
+
+Member: LS-1063 (Nancy Evans)
+  Assignment: New member reading
+  Text: classic_pride_and_prejudice
+  Required Reading: Chapter 1 and Chapter 2
+  Due Date: 2024-12-16
+  Notes: Introduction to Austen's style
+
+
+======================================================================
+SPECIAL READING PROJECTS
+======================================================================
+
+PROJECT: Comparative Study of Opening Lines
+  Coordinator: LS-1001 (Eleanor Ashworth)
+  
+  Participating Members and Their Texts:
+    - LS-1004 William Fitzgerald: classic_moby_dick, Chapter 1
+    - LS-1011 Sophia Carrington: classic_pride_and_prejudice, Chapter 1
+    - LS-1005 Helena Graves: classic_frankenstein, Letter I
+    - LS-1010 Alexander Bennett: classic_art_of_war, Chapter I
+  
+  Objective: Compare opening techniques across genres
+  Presentation Date: 2024-12-30
+
+
+PROJECT: Antagonist Analysis
+  Coordinator: LS-1002 (Theodore Blackwood)
+  
+  Participating Members and Their Texts:
+    - LS-1012 David Eastwood: classic_moby_dick (Captain Ahab)
+    - LS-1022 Christopher Palmer: classic_frankenstein (The Creature)
+    - LS-1023 Diana Quinn: classic_pride_and_prejudice (Mr. Wickham)
+  
+  Objective: Study complex antagonist characterization
+  Presentation Date: 2025-01-15
+
+
+======================================================================
+HIGHLIGHTED PASSAGES FOR MEMORIZATION
+======================================================================
+
+The following passages have been selected for the Annual Recitation:
+
+Member: LS-1004 (William Fitzgerald)
+  Text: classic_moby_dick
+  Passage: Chapter 1, Opening paragraph ("Call me Ishmael...")
+  
+Member: LS-1011 (Sophia Carrington)
+  Text: classic_pride_and_prejudice
+  Passage: Chapter 1, Opening line and first paragraph
+
+Member: LS-1003 (Margaret Chen)
+  Text: classic_art_of_war
+  Passage: Chapter I, The five constant factors
+
+Member: LS-1005 (Helena Graves)
+  Text: classic_frankenstein
+  Passage: Chapter 5, The moment of creation ("It was on a dreary night...")
+
+
+======================================================================
+END OF READING CURRICULUM
+======================================================================
+

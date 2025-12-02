@@ -23,6 +23,7 @@ _missing_api_key_error_logged: bool = False
 
 
 class AgentType(str, Enum):
+    BYTEDANCE = "bytedance"
     CLAUDE = "claude"
     OPENAI = "openai"
     OPERATOR = "operator"
@@ -32,10 +33,17 @@ class AgentType(str, Enum):
 
     @property
     def cls(self) -> type:
-        from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OperatorAgent
+        from hud.agents import (
+            ByteDanceAgent,
+            ClaudeAgent,
+            GeminiAgent,
+            OpenAIAgent,
+            OperatorAgent,
+        )
         from hud.agents.openai_chat import OpenAIChatAgent
 
         mapping: dict[AgentType, type] = {
+            AgentType.BYTEDANCE: ByteDanceAgent,
             AgentType.CLAUDE: ClaudeAgent,
             AgentType.OPENAI: OpenAIAgent,
             AgentType.OPERATOR: OperatorAgent,

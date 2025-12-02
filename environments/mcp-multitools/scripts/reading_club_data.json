@@ -1,0 +1,2189 @@
+{
+  "members": [
+    {
+      "id": "RC-1000",
+      "first_name": "Penelope",
+      "last_name": "Harrison",
+      "full_name": "Penelope Harrison",
+      "join_date": "2020-02-21",
+      "tier": "Gold",
+      "favorite_genre": "Philosophy",
+      "books_read": 19
+    },
+    {
+      "id": "RC-1001",
+      "first_name": "Isabella",
+      "last_name": "Graham",
+      "full_name": "Isabella Graham",
+      "join_date": "2023-10-17",
+      "tier": "Bronze",
+      "favorite_genre": "Fantasy",
+      "books_read": 32
+    },
+    {
+      "id": "RC-1002",
+      "first_name": "Charlotte",
+      "last_name": "Baker",
+      "full_name": "Charlotte Baker",
+      "join_date": "2020-07-10",
+      "tier": "Silver",
+      "favorite_genre": "Philosophy",
+      "books_read": 37
+    },
+    {
+      "id": "RC-1003",
+      "first_name": "Nora",
+      "last_name": "Baker",
+      "full_name": "Nora Baker",
+      "join_date": "2023-02-23",
+      "tier": "Silver",
+      "favorite_genre": "Fantasy",
+      "books_read": 31
+    },
+    {
+      "id": "RC-1004",
+      "first_name": "Olivia",
+      "last_name": "Crawford",
+      "full_name": "Olivia Crawford",
+      "join_date": "2023-04-21",
+      "tier": "Gold",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 15
+    },
+    {
+      "id": "RC-1005",
+      "first_name": "Uma",
+      "last_name": "Bennett",
+      "full_name": "Uma Bennett",
+      "join_date": "2021-11-27",
+      "tier": "Gold",
+      "favorite_genre": "Philosophy",
+      "books_read": 18
+    },
+    {
+      "id": "RC-1006",
+      "first_name": "Yvonne",
+      "last_name": "Vaughn",
+      "full_name": "Yvonne Vaughn",
+      "join_date": "2020-07-28",
+      "tier": "Bronze",
+      "favorite_genre": "Gothic",
+      "books_read": 11
+    },
+    {
+      "id": "RC-1007",
+      "first_name": "William",
+      "last_name": "Whitfield",
+      "full_name": "William Whitfield",
+      "join_date": "2023-05-21",
+      "tier": "Gold",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 34
+    },
+    {
+      "id": "RC-1008",
+      "first_name": "Irene",
+      "last_name": "Harrison",
+      "full_name": "Irene Harrison",
+      "join_date": "2022-02-14",
+      "tier": "Bronze",
+      "favorite_genre": "Fantasy",
+      "books_read": 23
+    },
+    {
+      "id": "RC-1009",
+      "first_name": "Penelope",
+      "last_name": "Newman",
+      "full_name": "Penelope Newman",
+      "join_date": "2022-01-10",
+      "tier": "Silver",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 7
+    },
+    {
+      "id": "RC-1010",
+      "first_name": "Sophia",
+      "last_name": "O'Connor",
+      "full_name": "Sophia O'Connor",
+      "join_date": "2021-08-15",
+      "tier": "Bronze",
+      "favorite_genre": "Philosophy",
+      "books_read": 11
+    },
+    {
+      "id": "RC-1011",
+      "first_name": "Yasmine",
+      "last_name": "Richardson",
+      "full_name": "Yasmine Richardson",
+      "join_date": "2022-07-17",
+      "tier": "Gold",
+      "favorite_genre": "Philosophy",
+      "books_read": 28
+    },
+    {
+      "id": "RC-1012",
+      "first_name": "William",
+      "last_name": "Nelson",
+      "full_name": "William Nelson",
+      "join_date": "2023-10-04",
+      "tier": "Gold",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 43
+    },
+    {
+      "id": "RC-1013",
+      "first_name": "Penelope",
+      "last_name": "Knight",
+      "full_name": "Penelope Knight",
+      "join_date": "2022-12-29",
+      "tier": "Silver",
+      "favorite_genre": "Philosophy",
+      "books_read": 34
+    },
+    {
+      "id": "RC-1014",
+      "first_name": "Penelope",
+      "last_name": "Jacobs",
+      "full_name": "Penelope Jacobs",
+      "join_date": "2021-03-25",
+      "tier": "Gold",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 19
+    },
+    {
+      "id": "RC-1015",
+      "first_name": "Charlotte",
+      "last_name": "Underwood",
+      "full_name": "Charlotte Underwood",
+      "join_date": "2022-04-01",
+      "tier": "Gold",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 18
+    },
+    {
+      "id": "RC-1016",
+      "first_name": "Lillian",
+      "last_name": "Underwood",
+      "full_name": "Lillian Underwood",
+      "join_date": "2021-03-11",
+      "tier": "Platinum",
+      "favorite_genre": "Gothic",
+      "books_read": 46
+    },
+    {
+      "id": "RC-1017",
+      "first_name": "Douglas",
+      "last_name": "Jenkins",
+      "full_name": "Douglas Jenkins",
+      "join_date": "2021-06-26",
+      "tier": "Silver",
+      "favorite_genre": "Philosophy",
+      "books_read": 40
+    },
+    {
+      "id": "RC-1018",
+      "first_name": "Irene",
+      "last_name": "Quincy",
+      "full_name": "Irene Quincy",
+      "join_date": "2023-04-12",
+      "tier": "Platinum",
+      "favorite_genre": "Fantasy",
+      "books_read": 30
+    },
+    {
+      "id": "RC-1019",
+      "first_name": "Xena",
+      "last_name": "O'Connor",
+      "full_name": "Xena O'Connor",
+      "join_date": "2020-10-10",
+      "tier": "Platinum",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 8
+    },
+    {
+      "id": "RC-1020",
+      "first_name": "Henry",
+      "last_name": "Jenkins",
+      "full_name": "Henry Jenkins",
+      "join_date": "2023-07-09",
+      "tier": "Silver",
+      "favorite_genre": "Gothic",
+      "books_read": 43
+    },
+    {
+      "id": "RC-1021",
+      "first_name": "Eleanor",
+      "last_name": "Young",
+      "full_name": "Eleanor Young",
+      "join_date": "2022-02-20",
+      "tier": "Platinum",
+      "favorite_genre": "Fantasy",
+      "books_read": 21
+    },
+    {
+      "id": "RC-1022",
+      "first_name": "Jonathan",
+      "last_name": "Anderson",
+      "full_name": "Jonathan Anderson",
+      "join_date": "2023-10-25",
+      "tier": "Bronze",
+      "favorite_genre": "Fantasy",
+      "books_read": 22
+    },
+    {
+      "id": "RC-1023",
+      "first_name": "Zelda",
+      "last_name": "Vaughn",
+      "full_name": "Zelda Vaughn",
+      "join_date": "2020-08-16",
+      "tier": "Gold",
+      "favorite_genre": "Gothic",
+      "books_read": 15
+    },
+    {
+      "id": "RC-1024",
+      "first_name": "Douglas",
+      "last_name": "Anderson",
+      "full_name": "Douglas Anderson",
+      "join_date": "2024-01-18",
+      "tier": "Gold",
+      "favorite_genre": "Fantasy",
+      "books_read": 16
+    },
+    {
+      "id": "RC-1025",
+      "first_name": "Gertrude",
+      "last_name": "Graham",
+      "full_name": "Gertrude Graham",
+      "join_date": "2023-07-04",
+      "tier": "Gold",
+      "favorite_genre": "Fantasy",
+      "books_read": 43
+    },
+    {
+      "id": "RC-1026",
+      "first_name": "Margaret",
+      "last_name": "Jenkins",
+      "full_name": "Margaret Jenkins",
+      "join_date": "2022-02-04",
+      "tier": "Silver",
+      "favorite_genre": "Fantasy",
+      "books_read": 38
+    },
+    {
+      "id": "RC-1027",
+      "first_name": "Alice",
+      "last_name": "Mitchell",
+      "full_name": "Alice Mitchell",
+      "join_date": "2021-10-25",
+      "tier": "Platinum",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 12
+    },
+    {
+      "id": "RC-1028",
+      "first_name": "Xena",
+      "last_name": "Thompson",
+      "full_name": "Xena Thompson",
+      "join_date": "2021-05-05",
+      "tier": "Bronze",
+      "favorite_genre": "Philosophy",
+      "books_read": 41
+    },
+    {
+      "id": "RC-1029",
+      "first_name": "Frederick",
+      "last_name": "Fletcher",
+      "full_name": "Frederick Fletcher",
+      "join_date": "2024-02-07",
+      "tier": "Platinum",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 39
+    },
+    {
+      "id": "RC-1030",
+      "first_name": "Zelda",
+      "last_name": "Irving",
+      "full_name": "Zelda Irving",
+      "join_date": "2020-09-19",
+      "tier": "Platinum",
+      "favorite_genre": "Fantasy",
+      "books_read": 15
+    },
+    {
+      "id": "RC-1031",
+      "first_name": "Quinn",
+      "last_name": "Hawkins",
+      "full_name": "Quinn Hawkins",
+      "join_date": "2023-05-27",
+      "tier": "Platinum",
+      "favorite_genre": "Philosophy",
+      "books_read": 39
+    },
+    {
+      "id": "RC-1032",
+      "first_name": "Yvonne",
+      "last_name": "Morrison",
+      "full_name": "Yvonne Morrison",
+      "join_date": "2023-12-31",
+      "tier": "Gold",
+      "favorite_genre": "Gothic",
+      "books_read": 47
+    },
+    {
+      "id": "RC-1033",
+      "first_name": "Raymond",
+      "last_name": "Xander",
+      "full_name": "Raymond Xander",
+      "join_date": "2022-06-16",
+      "tier": "Platinum",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 20
+    },
+    {
+      "id": "RC-1034",
+      "first_name": "Olivia",
+      "last_name": "Edwards",
+      "full_name": "Olivia Edwards",
+      "join_date": "2021-11-23",
+      "tier": "Bronze",
+      "favorite_genre": "Fantasy",
+      "books_read": 40
+    },
+    {
+      "id": "RC-1035",
+      "first_name": "Olivia",
+      "last_name": "Lawson",
+      "full_name": "Olivia Lawson",
+      "join_date": "2021-03-27",
+      "tier": "Bronze",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 50
+    },
+    {
+      "id": "RC-1036",
+      "first_name": "Penelope",
+      "last_name": "Davidson",
+      "full_name": "Penelope Davidson",
+      "join_date": "2021-04-13",
+      "tier": "Bronze",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 26
+    },
+    {
+      "id": "RC-1037",
+      "first_name": "Eleanor",
+      "last_name": "Griffith",
+      "full_name": "Eleanor Griffith",
+      "join_date": "2021-05-02",
+      "tier": "Gold",
+      "favorite_genre": "Gothic",
+      "books_read": 18
+    },
+    {
+      "id": "RC-1038",
+      "first_name": "Irene",
+      "last_name": "Irving",
+      "full_name": "Irene Irving",
+      "join_date": "2024-01-21",
+      "tier": "Platinum",
+      "favorite_genre": "Philosophy",
+      "books_read": 35
+    },
+    {
+      "id": "RC-1039",
+      "first_name": "Abigail",
+      "last_name": "Morrison",
+      "full_name": "Abigail Morrison",
+      "join_date": "2020-07-12",
+      "tier": "Bronze",
+      "favorite_genre": "Gothic",
+      "books_read": 27
+    },
+    {
+      "id": "RC-1040",
+      "first_name": "Bernard",
+      "last_name": "Abbott",
+      "full_name": "Bernard Abbott",
+      "join_date": "2022-08-14",
+      "tier": "Bronze",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 8
+    },
+    {
+      "id": "RC-1041",
+      "first_name": "Zachary",
+      "last_name": "Vaughn",
+      "full_name": "Zachary Vaughn",
+      "join_date": "2020-08-11",
+      "tier": "Silver",
+      "favorite_genre": "Philosophy",
+      "books_read": 17
+    },
+    {
+      "id": "RC-1042",
+      "first_name": "Irene",
+      "last_name": "Crawford",
+      "full_name": "Irene Crawford",
+      "join_date": "2020-10-14",
+      "tier": "Platinum",
+      "favorite_genre": "Philosophy",
+      "books_read": 22
+    },
+    {
+      "id": "RC-1043",
+      "first_name": "Douglas",
+      "last_name": "Patterson",
+      "full_name": "Douglas Patterson",
+      "join_date": "2020-06-03",
+      "tier": "Platinum",
+      "favorite_genre": "Fantasy",
+      "books_read": 11
+    },
+    {
+      "id": "RC-1044",
+      "first_name": "Daniel",
+      "last_name": "Ingram",
+      "full_name": "Daniel Ingram",
+      "join_date": "2020-01-31",
+      "tier": "Bronze",
+      "favorite_genre": "Philosophy",
+      "books_read": 15
+    },
+    {
+      "id": "RC-1045",
+      "first_name": "Abigail",
+      "last_name": "Foster",
+      "full_name": "Abigail Foster",
+      "join_date": "2022-09-12",
+      "tier": "Silver",
+      "favorite_genre": "Gothic",
+      "books_read": 8
+    },
+    {
+      "id": "RC-1046",
+      "first_name": "Katherine",
+      "last_name": "Young",
+      "full_name": "Katherine Young",
+      "join_date": "2020-01-05",
+      "tier": "Platinum",
+      "favorite_genre": "Adventure",
+      "books_read": 34
+    },
+    {
+      "id": "RC-1047",
+      "first_name": "Samuel",
+      "last_name": "Bennett",
+      "full_name": "Samuel Bennett",
+      "join_date": "2023-11-27",
+      "tier": "Platinum",
+      "favorite_genre": "Philosophy",
+      "books_read": 17
+    },
+    {
+      "id": "RC-1048",
+      "first_name": "Samuel",
+      "last_name": "Nelson",
+      "full_name": "Samuel Nelson",
+      "join_date": "2020-04-29",
+      "tier": "Bronze",
+      "favorite_genre": "Adventure",
+      "books_read": 8
+    },
+    {
+      "id": "RC-1049",
+      "first_name": "Daniel",
+      "last_name": "Lawson",
+      "full_name": "Daniel Lawson",
+      "join_date": "2022-09-03",
+      "tier": "Silver",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 37
+    },
+    {
+      "id": "RC-1050",
+      "first_name": "Frederick",
+      "last_name": "Lambert",
+      "full_name": "Frederick Lambert",
+      "join_date": "2020-05-20",
+      "tier": "Bronze",
+      "favorite_genre": "Philosophy",
+      "books_read": 30
+    },
+    {
+      "id": "RC-1051",
+      "first_name": "Henry",
+      "last_name": "Keller",
+      "full_name": "Henry Keller",
+      "join_date": "2021-05-19",
+      "tier": "Bronze",
+      "favorite_genre": "Fantasy",
+      "books_read": 10
+    },
+    {
+      "id": "RC-1052",
+      "first_name": "Abigail",
+      "last_name": "Lawson",
+      "full_name": "Abigail Lawson",
+      "join_date": "2023-03-03",
+      "tier": "Gold",
+      "favorite_genre": "Adventure",
+      "books_read": 18
+    },
+    {
+      "id": "RC-1053",
+      "first_name": "Sophia",
+      "last_name": "Underwood",
+      "full_name": "Sophia Underwood",
+      "join_date": "2021-05-03",
+      "tier": "Gold",
+      "favorite_genre": "Gothic",
+      "books_read": 13
+    },
+    {
+      "id": "RC-1054",
+      "first_name": "Sophia",
+      "last_name": "Thompson",
+      "full_name": "Sophia Thompson",
+      "join_date": "2022-07-25",
+      "tier": "Gold",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 5
+    },
+    {
+      "id": "RC-1055",
+      "first_name": "Douglas",
+      "last_name": "Newman",
+      "full_name": "Douglas Newman",
+      "join_date": "2023-02-27",
+      "tier": "Bronze",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 39
+    },
+    {
+      "id": "RC-1056",
+      "first_name": "Nathan",
+      "last_name": "Griffith",
+      "full_name": "Nathan Griffith",
+      "join_date": "2021-06-27",
+      "tier": "Silver",
+      "favorite_genre": "Adventure",
+      "books_read": 9
+    },
+    {
+      "id": "RC-1057",
+      "first_name": "Patrick",
+      "last_name": "Xander",
+      "full_name": "Patrick Xander",
+      "join_date": "2021-08-06",
+      "tier": "Silver",
+      "favorite_genre": "Gothic",
+      "books_read": 39
+    },
+    {
+      "id": "RC-1058",
+      "first_name": "Vincent",
+      "last_name": "Thompson",
+      "full_name": "Vincent Thompson",
+      "join_date": "2023-06-06",
+      "tier": "Bronze",
+      "favorite_genre": "Fantasy",
+      "books_read": 24
+    },
+    {
+      "id": "RC-1059",
+      "first_name": "Sophia",
+      "last_name": "Graham",
+      "full_name": "Sophia Graham",
+      "join_date": "2020-10-02",
+      "tier": "Gold",
+      "favorite_genre": "Classic Fiction",
+      "books_read": 11
+    }
+  ],
+  "preferences": {
+    "RC-1000": [
+      {
+        "book": "The Art of War",
+        "chapter": 3,
+        "rating": 9
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 10,
+        "rating": 9
+      },
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 20,
+        "rating": 10
+      }
+    ],
+    "RC-1001": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 2,
+        "rating": 10
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 1,
+        "rating": 7
+      }
+    ],
+    "RC-1002": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 20,
+        "rating": 8
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 8,
+        "rating": 10
+      }
+    ],
+    "RC-1003": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 2,
+        "rating": 7
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 3,
+        "rating": 7
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 135,
+        "rating": 8
+      }
+    ],
+    "RC-1004": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 1,
+        "rating": 9
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 1,
+        "rating": 9
+      }
+    ],
+    "RC-1005": [
+      {
+        "book": "The Art of War",
+        "chapter": 4,
+        "rating": 7
+      }
+    ],
+    "RC-1006": [
+      {
+        "book": "The Art of War",
+        "chapter": 7,
+        "rating": 8
+      },
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 3,
+        "rating": 8
+      }
+    ],
+    "RC-1007": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 3,
+        "rating": 9
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 10,
+        "rating": 9
+      }
+    ],
+    "RC-1008": [
+      {
+        "book": "The Art of War",
+        "chapter": 2,
+        "rating": 10
+      }
+    ],
+    "RC-1009": [
+      {
+        "book": "Moby Dick",
+        "chapter": 10,
+        "rating": 8
+      }
+    ],
+    "RC-1010": [
+      {
+        "book": "Moby Dick",
+        "chapter": 36,
+        "rating": 8
+      },
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 1,
+        "rating": 8
+      }
+    ],
+    "RC-1011": [
+      {
+        "book": "Moby Dick",
+        "chapter": 36,
+        "rating": 7
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 42,
+        "rating": 10
+      }
+    ],
+    "RC-1012": [
+      {
+        "book": "The Art of War",
+        "chapter": 6,
+        "rating": 7
+      },
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 20,
+        "rating": 8
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 5,
+        "rating": 7
+      }
+    ],
+    "RC-1013": [
+      {
+        "book": "The Art of War",
+        "chapter": 7,
+        "rating": 9
+      }
+    ],
+    "RC-1014": [
+      {
+        "book": "Moby Dick",
+        "chapter": 87,
+        "rating": 7
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 10,
+        "rating": 9
+      },
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 45,
+        "rating": 7
+      }
+    ],
+    "RC-1015": [
+      {
+        "book": "The Art of War",
+        "chapter": 11,
+        "rating": 8
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 87,
+        "rating": 7
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 6,
+        "rating": 9
+      }
+    ],
+    "RC-1016": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 20,
+        "rating": 9
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 7,
+        "rating": 9
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 36,
+        "rating": 8
+      }
+    ],
+    "RC-1017": [
+      {
+        "book": "Moby Dick",
+        "chapter": 87,
+        "rating": 8
+      }
+    ],
+    "RC-1018": [
+      {
+        "book": "The Art of War",
+        "chapter": 5,
+        "rating": 10
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 1,
+        "rating": 9
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 10,
+        "rating": 10
+      }
+    ],
+    "RC-1019": [
+      {
+        "book": "The Art of War",
+        "chapter": 11,
+        "rating": 9
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 133,
+        "rating": 10
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 4,
+        "rating": 10
+      }
+    ],
+    "RC-1020": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 2,
+        "rating": 9
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 11,
+        "rating": 9
+      },
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 10,
+        "rating": 9
+      }
+    ],
+    "RC-1021": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 3,
+        "rating": 7
+      }
+    ],
+    "RC-1022": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 58,
+        "rating": 7
+      }
+    ],
+    "RC-1023": [
+      {
+        "book": "Moby Dick",
+        "chapter": 10,
+        "rating": 10
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 87,
+        "rating": 8
+      }
+    ],
+    "RC-1024": [
+      {
+        "book": "The Art of War",
+        "chapter": 12,
+        "rating": 7
+      }
+    ],
+    "RC-1025": [
+      {
+        "book": "Moby Dick",
+        "chapter": 10,
+        "rating": 8
+      }
+    ],
+    "RC-1026": [
+      {
+        "book": "The Art of War",
+        "chapter": 8,
+        "rating": 7
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 4,
+        "rating": 7
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 3,
+        "rating": 10
+      }
+    ],
+    "RC-1027": [
+      {
+        "book": "The Art of War",
+        "chapter": 9,
+        "rating": 9
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 135,
+        "rating": 10
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 8,
+        "rating": 8
+      }
+    ],
+    "RC-1028": [
+      {
+        "book": "Moby Dick",
+        "chapter": 133,
+        "rating": 9
+      },
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 20,
+        "rating": 10
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 4,
+        "rating": 9
+      }
+    ],
+    "RC-1029": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 20,
+        "rating": 8
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 42,
+        "rating": 9
+      }
+    ],
+    "RC-1030": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 3,
+        "rating": 8
+      },
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 45,
+        "rating": 8
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 4,
+        "rating": 7
+      }
+    ],
+    "RC-1031": [
+      {
+        "book": "Moby Dick",
+        "chapter": 42,
+        "rating": 10
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 1,
+        "rating": 8
+      }
+    ],
+    "RC-1032": [
+      {
+        "book": "Moby Dick",
+        "chapter": 1,
+        "rating": 10
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 36,
+        "rating": 10
+      }
+    ],
+    "RC-1033": [
+      {
+        "book": "The Art of War",
+        "chapter": 12,
+        "rating": 8
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 10,
+        "rating": 9
+      }
+    ],
+    "RC-1034": [
+      {
+        "book": "Moby Dick",
+        "chapter": 1,
+        "rating": 10
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 87,
+        "rating": 8
+      }
+    ],
+    "RC-1035": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 1,
+        "rating": 10
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 10,
+        "rating": 7
+      }
+    ],
+    "RC-1036": [
+      {
+        "book": "The Art of War",
+        "chapter": 7,
+        "rating": 8
+      }
+    ],
+    "RC-1037": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 1,
+        "rating": 9
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 42,
+        "rating": 8
+      }
+    ],
+    "RC-1038": [
+      {
+        "book": "Moby Dick",
+        "chapter": 42,
+        "rating": 10
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 87,
+        "rating": 9
+      }
+    ],
+    "RC-1039": [
+      {
+        "book": "Moby Dick",
+        "chapter": 1,
+        "rating": 7
+      }
+    ],
+    "RC-1040": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 2,
+        "rating": 7
+      },
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 10,
+        "rating": 8
+      }
+    ],
+    "RC-1041": [
+      {
+        "book": "The Art of War",
+        "chapter": 3,
+        "rating": 8
+      }
+    ],
+    "RC-1042": [
+      {
+        "book": "Moby Dick",
+        "chapter": 2,
+        "rating": 8
+      }
+    ],
+    "RC-1043": [
+      {
+        "book": "The Art of War",
+        "chapter": 5,
+        "rating": 9
+      },
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 2,
+        "rating": 8
+      }
+    ],
+    "RC-1044": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 1,
+        "rating": 9
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 11,
+        "rating": 10
+      }
+    ],
+    "RC-1045": [
+      {
+        "book": "The Art of War",
+        "chapter": 4,
+        "rating": 7
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 12,
+        "rating": 8
+      }
+    ],
+    "RC-1046": [
+      {
+        "book": "The Art of War",
+        "chapter": 13,
+        "rating": 9
+      }
+    ],
+    "RC-1047": [
+      {
+        "book": "The Art of War",
+        "chapter": 13,
+        "rating": 7
+      },
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 34,
+        "rating": 10
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 6,
+        "rating": 7
+      }
+    ],
+    "RC-1048": [
+      {
+        "book": "The Art of War",
+        "chapter": 6,
+        "rating": 7
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 133,
+        "rating": 7
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 42,
+        "rating": 10
+      }
+    ],
+    "RC-1049": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 45,
+        "rating": 8
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 9,
+        "rating": 9
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 13,
+        "rating": 10
+      }
+    ],
+    "RC-1050": [
+      {
+        "book": "Moby Dick",
+        "chapter": 36,
+        "rating": 9
+      },
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 2,
+        "rating": 9
+      }
+    ],
+    "RC-1051": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 58,
+        "rating": 10
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 1,
+        "rating": 10
+      }
+    ],
+    "RC-1052": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 58,
+        "rating": 8
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 36,
+        "rating": 9
+      }
+    ],
+    "RC-1053": [
+      {
+        "book": "The Art of War",
+        "chapter": 12,
+        "rating": 9
+      },
+      {
+        "book": "The Art of War",
+        "chapter": 1,
+        "rating": 8
+      }
+    ],
+    "RC-1054": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 45,
+        "rating": 10
+      }
+    ],
+    "RC-1055": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 58,
+        "rating": 10
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 1,
+        "rating": 7
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 10,
+        "rating": 10
+      }
+    ],
+    "RC-1056": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 20,
+        "rating": 9
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 135,
+        "rating": 9
+      },
+      {
+        "book": "Moby Dick",
+        "chapter": 42,
+        "rating": 10
+      }
+    ],
+    "RC-1057": [
+      {
+        "book": "Moby Dick",
+        "chapter": 36,
+        "rating": 8
+      },
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 10,
+        "rating": 9
+      }
+    ],
+    "RC-1058": [
+      {
+        "book": "The Art of War",
+        "chapter": 9,
+        "rating": 8
+      }
+    ],
+    "RC-1059": [
+      {
+        "book": "Pride and Prejudice",
+        "chapter": 58,
+        "rating": 9
+      }
+    ]
+  },
+  "groups": [
+    {
+      "group_id": "DG-01",
+      "name": "The Page Turners",
+      "focus_book": "Pride and Prejudice",
+      "members": [
+        "RC-1037",
+        "RC-1048",
+        "RC-1033",
+        "RC-1038",
+        "RC-1018",
+        "RC-1006",
+        "RC-1053",
+        "RC-1012",
+        "RC-1055",
+        "RC-1014",
+        "RC-1023"
+      ],
+      "meeting_day": "Wednesday",
+      "discussion_topic": "Character Development"
+    },
+    {
+      "group_id": "DG-02",
+      "name": "Literary Lions",
+      "focus_book": "Moby Dick",
+      "members": [
+        "RC-1034",
+        "RC-1008",
+        "RC-1017",
+        "RC-1002",
+        "RC-1003",
+        "RC-1035",
+        "RC-1018",
+        "RC-1044",
+        "RC-1058",
+        "RC-1040",
+        "RC-1048"
+      ],
+      "meeting_day": "Monday",
+      "discussion_topic": "Character Development"
+    },
+    {
+      "group_id": "DG-03",
+      "name": "Bookworm Brigade",
+      "focus_book": "Pride and Prejudice",
+      "members": [
+        "RC-1018",
+        "RC-1030",
+        "RC-1058",
+        "RC-1028",
+        "RC-1021",
+        "RC-1011",
+        "RC-1003",
+        "RC-1016",
+        "RC-1057",
+        "RC-1007"
+      ],
+      "meeting_day": "Thursday",
+      "discussion_topic": "Moral Dilemmas"
+    },
+    {
+      "group_id": "DG-04",
+      "name": "Chapter Chasers",
+      "focus_book": "The Art of War",
+      "members": [
+        "RC-1036",
+        "RC-1040",
+        "RC-1043",
+        "RC-1003",
+        "RC-1009",
+        "RC-1055"
+      ],
+      "meeting_day": "Wednesday",
+      "discussion_topic": "Themes of Mortality"
+    },
+    {
+      "group_id": "DG-05",
+      "name": "Novel Navigators",
+      "focus_book": "The Art of War",
+      "members": [
+        "RC-1007",
+        "RC-1035",
+        "RC-1048",
+        "RC-1026",
+        "RC-1038",
+        "RC-1055",
+        "RC-1050"
+      ],
+      "meeting_day": "Tuesday",
+      "discussion_topic": "Literary Techniques"
+    },
+    {
+      "group_id": "DG-06",
+      "name": "Prose Pioneers",
+      "focus_book": "The Art of War",
+      "members": [
+        "RC-1028",
+        "RC-1058",
+        "RC-1059",
+        "RC-1019",
+        "RC-1055",
+        "RC-1037",
+        "RC-1027",
+        "RC-1056",
+        "RC-1036"
+      ],
+      "meeting_day": "Monday",
+      "discussion_topic": "Comparative Analysis"
+    },
+    {
+      "group_id": "DG-07",
+      "name": "Fiction Fanatics",
+      "focus_book": "The Art of War",
+      "members": [
+        "RC-1006",
+        "RC-1048",
+        "RC-1013",
+        "RC-1040",
+        "RC-1057",
+        "RC-1016",
+        "RC-1042",
+        "RC-1005",
+        "RC-1010",
+        "RC-1015",
+        "RC-1011"
+      ],
+      "meeting_day": "Monday",
+      "discussion_topic": "Social Commentary"
+    },
+    {
+      "group_id": "DG-08",
+      "name": "Classic Crusaders",
+      "focus_book": "Pride and Prejudice",
+      "members": [
+        "RC-1026",
+        "RC-1028",
+        "RC-1044",
+        "RC-1038",
+        "RC-1030",
+        "RC-1018"
+      ],
+      "meeting_day": "Tuesday",
+      "discussion_topic": "Symbolism"
+    }
+  ],
+  "meetings": [
+    {
+      "meeting_id": "MTG-DG-01-01",
+      "group_id": "DG-01",
+      "group_name": "The Page Turners",
+      "date": "2024-01-15",
+      "book_discussed": "Pride and Prejudice",
+      "chapters_discussed": [
+        20,
+        45
+      ],
+      "attendees": [
+        "RC-1048",
+        "RC-1033",
+        "RC-1038",
+        "RC-1006",
+        "RC-1012",
+        "RC-1055",
+        "RC-1014",
+        "RC-1023"
+      ],
+      "topic": "Character Development"
+    },
+    {
+      "meeting_id": "MTG-DG-01-02",
+      "group_id": "DG-01",
+      "group_name": "The Page Turners",
+      "date": "2024-01-29",
+      "book_discussed": "Pride and Prejudice",
+      "chapters_discussed": [
+        58,
+        1
+      ],
+      "attendees": [
+        "RC-1037",
+        "RC-1033",
+        "RC-1006",
+        "RC-1053",
+        "RC-1012",
+        "RC-1055",
+        "RC-1014",
+        "RC-1023"
+      ],
+      "topic": "Character Development"
+    },
+    {
+      "meeting_id": "MTG-DG-01-03",
+      "group_id": "DG-01",
+      "group_name": "The Page Turners",
+      "date": "2024-02-12",
+      "book_discussed": "Pride and Prejudice",
+      "chapters_discussed": [
+        1,
+        45
+      ],
+      "attendees": [
+        "RC-1048",
+        "RC-1033",
+        "RC-1038",
+        "RC-1018",
+        "RC-1006",
+        "RC-1012",
+        "RC-1055",
+        "RC-1014"
+      ],
+      "topic": "Character Development"
+    },
+    {
+      "meeting_id": "MTG-DG-01-04",
+      "group_id": "DG-01",
+      "group_name": "The Page Turners",
+      "date": "2024-02-26",
+      "book_discussed": "Pride and Prejudice",
+      "chapters_discussed": [
+        3,
+        58
+      ],
+      "attendees": [
+        "RC-1037",
+        "RC-1048",
+        "RC-1038",
+        "RC-1018",
+        "RC-1006",
+        "RC-1053",
+        "RC-1012",
+        "RC-1055",
+        "RC-1014",
+        "RC-1023"
+      ],
+      "topic": "Character Development"
+    },
+    {
+      "meeting_id": "MTG-DG-01-05",
+      "group_id": "DG-01",
+      "group_name": "The Page Turners",
+      "date": "2024-03-11",
+      "book_discussed": "Pride and Prejudice",
+      "chapters_discussed": [
+        1,
+        34
+      ],
+      "attendees": [
+        "RC-1037",
+        "RC-1048",
+        "RC-1033",
+        "RC-1018",
+        "RC-1006",
+        "RC-1053",
+        "RC-1012"
+      ],
+      "topic": "Character Development"
+    },
+    {
+      "meeting_id": "MTG-DG-02-01",
+      "group_id": "DG-02",
+      "group_name": "Literary Lions",
+      "date": "2024-01-15",
+      "book_discussed": "Moby Dick",
+      "chapters_discussed": [
+        1,
+        10
+      ],
+      "attendees": [
+        "RC-1034",
+        "RC-1008",
+        "RC-1017",
+        "RC-1002",
+        "RC-1003",
+        "RC-1035",
+        "RC-1018",
+        "RC-1044",
+        "RC-1058",
+        "RC-1048"
+      ],
+      "topic": "Character Development"
+    },
+    {
+      "meeting_id": "MTG-DG-02-02",
+      "group_id": "DG-02",
+      "group_name": "Literary Lions",
+      "date": "2024-01-29",
+      "book_discussed": "Moby Dick",
+      "chapters_discussed": [
+        36,
+        87
+      ],
+      "attendees": [
+        "RC-1034",
+        "RC-1008",
+        "RC-1017",
+        "RC-1002",
+        "RC-1003",
+        "RC-1035",
+        "RC-1044",
+        "RC-1058",
+        "RC-1048"
+      ],
+      "topic": "Character Development"
+    },
+    {
+      "meeting_id": "MTG-DG-02-03",
+      "group_id": "DG-02",
+      "group_name": "Literary Lions",
+      "date": "2024-02-12",
+      "book_discussed": "Moby Dick",
+      "chapters_discussed": [
+        135,
+        36
+      ],
+      "attendees": [
+        "RC-1008",
+        "RC-1017",
+        "RC-1002",
+        "RC-1035",
+        "RC-1018",
+        "RC-1044",
+        "RC-1058",
+        "RC-1040",
+        "RC-1048"
+      ],
+      "topic": "Character Development"
+    },
+    {
+      "meeting_id": "MTG-DG-02-04",
+      "group_id": "DG-02",
+      "group_name": "Literary Lions",
+      "date": "2024-02-26",
+      "book_discussed": "Moby Dick",
+      "chapters_discussed": [
+        42,
+        10
+      ],
+      "attendees": [
+        "RC-1034",
+        "RC-1008",
+        "RC-1017",
+        "RC-1003",
+        "RC-1035",
+        "RC-1018",
+        "RC-1044",
+        "RC-1058",
+        "RC-1040",
+        "RC-1048"
+      ],
+      "topic": "Character Development"
+    },
+    {
+      "meeting_id": "MTG-DG-02-05",
+      "group_id": "DG-02",
+      "group_name": "Literary Lions",
+      "date": "2024-03-11",
+      "book_discussed": "Moby Dick",
+      "chapters_discussed": [
+        3,
+        133
+      ],
+      "attendees": [
+        "RC-1034",
+        "RC-1008",
+        "RC-1017",
+        "RC-1002",
+        "RC-1003",
+        "RC-1035",
+        "RC-1018",
+        "RC-1044",
+        "RC-1040",
+        "RC-1048"
+      ],
+      "topic": "Character Development"
+    },
+    {
+      "meeting_id": "MTG-DG-03-01",
+      "group_id": "DG-03",
+      "group_name": "Bookworm Brigade",
+      "date": "2024-01-15",
+      "book_discussed": "Pride and Prejudice",
+      "chapters_discussed": [
+        2,
+        10
+      ],
+      "attendees": [
+        "RC-1030",
+        "RC-1058",
+        "RC-1021",
+        "RC-1003",
+        "RC-1016"
+      ],
+      "topic": "Moral Dilemmas"
+    },
+    {
+      "meeting_id": "MTG-DG-03-02",
+      "group_id": "DG-03",
+      "group_name": "Bookworm Brigade",
+      "date": "2024-01-29",
+      "book_discussed": "Pride and Prejudice",
+      "chapters_discussed": [
+        58,
+        45
+      ],
+      "attendees": [
+        "RC-1018",
+        "RC-1030",
+        "RC-1058",
+        "RC-1028",
+        "RC-1021",
+        "RC-1011",
+        "RC-1003",
+        "RC-1057"
+      ],
+      "topic": "Moral Dilemmas"
+    },
+    {
+      "meeting_id": "MTG-DG-03-03",
+      "group_id": "DG-03",
+      "group_name": "Bookworm Brigade",
+      "date": "2024-02-12",
+      "book_discussed": "Pride and Prejudice",
+      "chapters_discussed": [
+        3,
+        34
+      ],
+      "attendees": [
+        "RC-1018",
+        "RC-1030",
+        "RC-1058",
+        "RC-1028",
+        "RC-1021",
+        "RC-1011",
+        "RC-1016",
+        "RC-1057",
+        "RC-1007"
+      ],
+      "topic": "Moral Dilemmas"
+    },
+    {
+      "meeting_id": "MTG-DG-04-01",
+      "group_id": "DG-04",
+      "group_name": "Chapter Chasers",
+      "date": "2024-01-15",
+      "book_discussed": "The Art of War",
+      "chapters_discussed": [
+        10,
+        11
+      ],
+      "attendees": [
+        "RC-1036",
+        "RC-1040",
+        "RC-1043",
+        "RC-1003",
+        "RC-1009",
+        "RC-1055"
+      ],
+      "topic": "Themes of Mortality"
+    },
+    {
+      "meeting_id": "MTG-DG-04-02",
+      "group_id": "DG-04",
+      "group_name": "Chapter Chasers",
+      "date": "2024-01-29",
+      "book_discussed": "The Art of War",
+      "chapters_discussed": [
+        3,
+        4
+      ],
+      "attendees": [
+        "RC-1036",
+        "RC-1040",
+        "RC-1043",
+        "RC-1003",
+        "RC-1009"
+      ],
+      "topic": "Themes of Mortality"
+    },
+    {
+      "meeting_id": "MTG-DG-04-03",
+      "group_id": "DG-04",
+      "group_name": "Chapter Chasers",
+      "date": "2024-02-12",
+      "book_discussed": "The Art of War",
+      "chapters_discussed": [
+        3,
+        2
+      ],
+      "attendees": [
+        "RC-1036",
+        "RC-1040",
+        "RC-1043",
+        "RC-1055"
+      ],
+      "topic": "Themes of Mortality"
+    },
+    {
+      "meeting_id": "MTG-DG-04-04",
+      "group_id": "DG-04",
+      "group_name": "Chapter Chasers",
+      "date": "2024-02-26",
+      "book_discussed": "The Art of War",
+      "chapters_discussed": [
+        4,
+        7
+      ],
+      "attendees": [
+        "RC-1036",
+        "RC-1040",
+        "RC-1043",
+        "RC-1003",
+        "RC-1009"
+      ],
+      "topic": "Themes of Mortality"
+    },
+    {
+      "meeting_id": "MTG-DG-05-01",
+      "group_id": "DG-05",
+      "group_name": "Novel Navigators",
+      "date": "2024-01-15",
+      "book_discussed": "The Art of War",
+      "chapters_discussed": [
+        1,
+        10
+      ],
+      "attendees": [
+        "RC-1007",
+        "RC-1035",
+        "RC-1048",
+        "RC-1038",
+        "RC-1050"
+      ],
+      "topic": "Literary Techniques"
+    },
+    {
+      "meeting_id": "MTG-DG-05-02",
+      "group_id": "DG-05",
+      "group_name": "Novel Navigators",
+      "date": "2024-01-29",
+      "book_discussed": "The Art of War",
+      "chapters_discussed": [
+        4,
+        10
+      ],
+      "attendees": [
+        "RC-1007",
+        "RC-1026",
+        "RC-1038",
+        "RC-1050"
+      ],
+      "topic": "Literary Techniques"
+    },
+    {
+      "meeting_id": "MTG-DG-05-03",
+      "group_id": "DG-05",
+      "group_name": "Novel Navigators",
+      "date": "2024-02-12",
+      "book_discussed": "The Art of War",
+      "chapters_discussed": [
+        2,
+        11
+      ],
+      "attendees": [
+        "RC-1007",
+        "RC-1035",
+        "RC-1048",
+        "RC-1026",
+        "RC-1038",
+        "RC-1055",
+        "RC-1050"
+      ],
+      "topic": "Literary Techniques"
+    },
+    {
+      "meeting_id": "MTG-DG-05-04",
+      "group_id": "DG-05",
+      "group_name": "Novel Navigators",
+      "date": "2024-02-26",
+      "book_discussed": "The Art of War",
+      "chapters_discussed": [
+        3,
+        4
+      ],
+      "attendees": [
+        "RC-1007",
+        "RC-1035",
+        "RC-1048",
+        "RC-1026",
+        "RC-1038",
+        "RC-1055",
+        "RC-1050"
+      ],
+      "topic": "Literary Techniques"
+    },
+    {
+      "meeting_id": "MTG-DG-06-01",
+      "group_id": "DG-06",
+      "group_name": "Prose Pioneers",
+      "date": "2024-01-15",
+      "book_discussed": "The Art of War",
+      "chapters_discussed": [
+        6,
+        2
+      ],
+      "attendees": [
+        "RC-1058",
+        "RC-1059",
+        "RC-1019",
+        "RC-1055",
+        "RC-1036"
+      ],
+      "topic": "Comparative Analysis"
+    },
+    {
+      "meeting_id": "MTG-DG-06-02",
+      "group_id": "DG-06",
+      "group_name": "Prose Pioneers",
+      "date": "2024-01-29",
+      "book_discussed": "The Art of War",
+      "chapters_discussed": [
+        7,
+        1
+      ],
+      "attendees": [
+        "RC-1028",
+        "RC-1058",
+        "RC-1059",
+        "RC-1019",
+        "RC-1055",
+        "RC-1037",
+        "RC-1056",
+        "RC-1036"
+      ],
+      "topic": "Comparative Analysis"
+    },
+    {
+      "meeting_id": "MTG-DG-06-03",
+      "group_id": "DG-06",
+      "group_name": "Prose Pioneers",
+      "date": "2024-02-12",
+      "book_discussed": "The Art of War",
+      "chapters_discussed": [
+        10,
+        9
+      ],
+      "attendees": [
+        "RC-1028",
+        "RC-1058",
+        "RC-1019",
+        "RC-1055",
+        "RC-1037",
+        "RC-1027",
+        "RC-1056",
+        "RC-1036"
+      ],
+      "topic": "Comparative Analysis"
+    },
+    {
+      "meeting_id": "MTG-DG-07-01",
+      "group_id": "DG-07",
+      "group_name": "Fiction Fanatics",
+      "date": "2024-01-15",
+      "book_discussed": "The Art of War",
+      "chapters_discussed": [
+        9,
+        3
+      ],
+      "attendees": [
+        "RC-1006",
+        "RC-1048",
+        "RC-1013",
+        "RC-1040",
+        "RC-1057",
+        "RC-1016",
+        "RC-1042",
+        "RC-1010",
+        "RC-1015",
+        "RC-1011"
+      ],
+      "topic": "Social Commentary"
+    },
+    {
+      "meeting_id": "MTG-DG-07-02",
+      "group_id": "DG-07",
+      "group_name": "Fiction Fanatics",
+      "date": "2024-01-29",
+      "book_discussed": "The Art of War",
+      "chapters_discussed": [
+        5,
+        1
+      ],
+      "attendees": [
+        "RC-1006",
+        "RC-1013",
+        "RC-1040",
+        "RC-1057",
+        "RC-1016",
+        "RC-1005",
+        "RC-1015"
+      ],
+      "topic": "Social Commentary"
+    },
+    {
+      "meeting_id": "MTG-DG-07-03",
+      "group_id": "DG-07",
+      "group_name": "Fiction Fanatics",
+      "date": "2024-02-12",
+      "book_discussed": "The Art of War",
+      "chapters_discussed": [
+        8,
+        2
+      ],
+      "attendees": [
+        "RC-1006",
+        "RC-1048",
+        "RC-1013",
+        "RC-1040",
+        "RC-1016",
+        "RC-1005",
+        "RC-1010",
+        "RC-1015"
+      ],
+      "topic": "Social Commentary"
+    },
+    {
+      "meeting_id": "MTG-DG-07-04",
+      "group_id": "DG-07",
+      "group_name": "Fiction Fanatics",
+      "date": "2024-02-26",
+      "book_discussed": "The Art of War",
+      "chapters_discussed": [
+        4,
+        6
+      ],
+      "attendees": [
+        "RC-1006",
+        "RC-1048",
+        "RC-1013",
+        "RC-1040",
+        "RC-1057",
+        "RC-1016",
+        "RC-1042",
+        "RC-1005",
+        "RC-1010",
+        "RC-1015",
+        "RC-1011"
+      ],
+      "topic": "Social Commentary"
+    },
+    {
+      "meeting_id": "MTG-DG-08-01",
+      "group_id": "DG-08",
+      "group_name": "Classic Crusaders",
+      "date": "2024-01-15",
+      "book_discussed": "Pride and Prejudice",
+      "chapters_discussed": [
+        2,
+        34
+      ],
+      "attendees": [
+        "RC-1026",
+        "RC-1028",
+        "RC-1030",
+        "RC-1018"
+      ],
+      "topic": "Symbolism"
+    },
+    {
+      "meeting_id": "MTG-DG-08-02",
+      "group_id": "DG-08",
+      "group_name": "Classic Crusaders",
+      "date": "2024-01-29",
+      "book_discussed": "Pride and Prejudice",
+      "chapters_discussed": [
+        3,
+        34
+      ],
+      "attendees": [
+        "RC-1026",
+        "RC-1028",
+        "RC-1044",
+        "RC-1038",
+        "RC-1030",
+        "RC-1018"
+      ],
+      "topic": "Symbolism"
+    },
+    {
+      "meeting_id": "MTG-DG-08-03",
+      "group_id": "DG-08",
+      "group_name": "Classic Crusaders",
+      "date": "2024-02-12",
+      "book_discussed": "Pride and Prejudice",
+      "chapters_discussed": [
+        10,
+        20
+      ],
+      "attendees": [
+        "RC-1026",
+        "RC-1028",
+        "RC-1044",
+        "RC-1038",
+        "RC-1030",
+        "RC-1018"
+      ],
+      "topic": "Symbolism"
+    }
+  ],
+  "books": {
+    "Pride and Prejudice": {
+      "author": "Jane Austen",
+      "doc_id": "pride_and_prejudice",
+      "chapters": [
+        1,
+        2,
+        3,
+        10,
+        20,
+        34,
+        45,
+        58
+      ]
+    },
+    "Moby Dick": {
+      "author": "Herman Melville",
+      "doc_id": "moby_dick",
+      "chapters": [
+        1,
+        2,
+        3,
+        10,
+        36,
+        42,
+        87,
+        133,
+        135
+      ]
+    },
+    "The Art of War": {
+      "author": "Sun Tzu",
+      "doc_id": "art_of_war",
+      "chapters": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13
+      ]
+    }
+  }
+}

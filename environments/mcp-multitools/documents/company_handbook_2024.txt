@@ -1,0 +1,578 @@
+STELLAR DYNAMICS INC.
+EMPLOYEE HANDBOOK 2024
+========================
+
+Version 3.2 | Effective Date: January 1, 2024
+Document ID: HD-2024-001
+
+TABLE OF CONTENTS
+-----------------
+1. Welcome & Company Overview
+2. Employment Policies
+3. Work Hours & Remote Work
+4. Compensation & Benefits
+5. Leave Policies
+6. Code of Conduct
+7. IT & Security Policies
+8. Travel & Expenses
+9. Performance Management
+10. Termination Procedures
+
+============================================
+CHAPTER 1: WELCOME & COMPANY OVERVIEW
+============================================
+
+Welcome to Stellar Dynamics Inc. Founded in 2015 in San Francisco, California, we have grown to become a leading provider of enterprise software solutions with offices in 12 countries and over 2,400 employees worldwide.
+
+MISSION STATEMENT
+Our mission is to empower businesses through innovative technology solutions that drive efficiency, growth, and sustainable success.
+
+CORE VALUES
+- Innovation: We embrace creativity and continuous improvement
+- Integrity: We conduct business with honesty and transparency
+- Collaboration: We believe in the power of teamwork
+- Excellence: We strive for the highest quality in everything we do
+- Respect: We value diversity and treat everyone with dignity
+
+COMPANY HISTORY
+2015 - Founded by Dr. Sarah Chen and Marcus Williams
+2016 - First product launch: StellarCRM
+2017 - Series A funding: $12 million
+2018 - Expanded to European markets
+2019 - Series B funding: $45 million
+2020 - Launched StellarCloud platform
+2021 - Acquired DataSync Technologies
+2022 - IPO on NASDAQ (ticker: STLD)
+2023 - Reached 2,000 employees globally
+2024 - Celebrating our innovation milestone
+
+ORGANIZATIONAL STRUCTURE
+- CEO: Dr. Sarah Chen
+- CFO: Robert Martinez
+- CTO: David Kim
+- COO: Jennifer Walsh
+- CHRO: Amanda Foster
+
+============================================
+CHAPTER 2: EMPLOYMENT POLICIES
+============================================
+
+EQUAL EMPLOYMENT OPPORTUNITY
+Stellar Dynamics is committed to equal employment opportunity. We do not discriminate based on race, color, religion, sex, national origin, age, disability, genetic information, veteran status, sexual orientation, gender identity, or any other protected characteristic.
+
+HIRING PROCESS
+All positions require:
+1. Initial screening by HR
+2. Technical assessment (where applicable)
+3. Panel interview with hiring manager
+4. Final interview with department head
+5. Background check and reference verification
+6. Offer letter and onboarding
+
+EMPLOYMENT CLASSIFICATION
+- Full-time: 40+ hours per week, benefits eligible
+- Part-time: 20-39 hours per week, prorated benefits
+- Contractor: Project-based, no benefits
+- Intern: Temporary educational assignment
+
+PROBATIONARY PERIOD
+All new employees undergo a 90-day probationary period during which:
+- Performance is closely monitored
+- Regular feedback sessions occur (weekly)
+- Employment may be terminated without notice
+- Benefits enrollment begins on day 31
+
+AT-WILL EMPLOYMENT
+Employment with Stellar Dynamics is at-will. Either party may terminate the employment relationship at any time, with or without cause or notice, subject to applicable laws.
+
+============================================
+CHAPTER 3: WORK HOURS & REMOTE WORK
+============================================
+
+STANDARD WORK HOURS
+Core business hours: 10:00 AM - 4:00 PM (local time)
+Standard workday: 8 hours
+Standard workweek: 40 hours (Monday-Friday)
+
+FLEXIBLE SCHEDULING
+Employees may adjust their start and end times provided they:
+- Are available during core hours (10 AM - 4 PM)
+- Complete their required hours
+- Coordinate with their team
+- Obtain manager approval
+
+REMOTE WORK POLICY
+Effective January 2024, Stellar Dynamics operates under a hybrid work model.
+
+REMOTE WORK ELIGIBILITY
+Employees may work remotely if they:
+- Have completed their probationary period
+- Have manager approval
+- Have a suitable home office environment
+- Meet performance expectations
+- Have reliable internet (minimum 50 Mbps)
+
+REMOTE WORK SCHEDULE
+- Engineering teams: Up to 4 days remote per week
+- Sales teams: Up to 3 days remote per week
+- Customer support: Up to 2 days remote per week
+- Executive staff: As needed with board approval
+- Maximum consecutive remote days: 10 without manager approval
+
+IN-OFFICE REQUIREMENTS
+All employees must be in-office:
+- For quarterly all-hands meetings
+- During annual planning week (first week of December)
+- For client-facing meetings when requested
+- Minimum 1 day per week for collaboration
+
+HOME OFFICE STIPEND
+Remote-eligible employees receive:
+- One-time setup allowance: $1,500
+- Monthly internet reimbursement: $75
+- Annual equipment refresh: $500
+
+INTERNATIONAL REMOTE WORK
+Working from outside your home country requires:
+- Written approval from HR
+- Maximum duration: 30 days per calendar year
+- Compliance with local tax and labor laws
+- VPN usage at all times
+- Notification to IT Security
+
+============================================
+CHAPTER 4: COMPENSATION & BENEFITS
+============================================
+
+PAY SCHEDULE
+- Salaried employees: Semi-monthly (15th and last day)
+- Hourly employees: Bi-weekly (every other Friday)
+- Commission: Monthly, following month-end close
+
+SALARY BANDS
+Level 1 (Entry): $55,000 - $75,000
+Level 2 (Intermediate): $70,000 - $95,000
+Level 3 (Senior): $90,000 - $130,000
+Level 4 (Lead/Manager): $120,000 - $175,000
+Level 5 (Director): $160,000 - $225,000
+Level 6 (VP): $200,000 - $325,000
+Level 7 (C-Suite): $300,000+
+
+EQUITY COMPENSATION
+Stock options vest over 4 years with a 1-year cliff:
+- Year 1: 25% vests at 12-month anniversary
+- Years 2-4: Monthly vesting (2.083% per month)
+
+HEALTH INSURANCE
+Coverage begins on the first day of the month following hire date.
+
+Plans offered:
+- PPO Premium: $0 employee / $450 family monthly
+- PPO Standard: $0 employee / $300 family monthly
+- HMO: $0 employee / $200 family monthly
+- HSA-eligible HDHP: Company contributes $1,500 annually
+
+DENTAL & VISION
+- Dental: 100% preventive, 80% basic, 50% major
+- Vision: Annual exam covered, $200 frame allowance
+
+RETIREMENT
+401(k) plan with company match:
+- 100% match on first 3% of salary
+- 50% match on next 2% of salary
+- Maximum company match: 4% of salary
+- Immediate vesting
+
+ADDITIONAL BENEFITS
+- Life insurance: 2x annual salary (up to $500,000)
+- Short-term disability: 60% of salary, 26 weeks max
+- Long-term disability: 60% of salary
+- Employee Assistance Program (EAP)
+- Commuter benefits (pre-tax)
+- Gym membership: $50/month reimbursement
+- Professional development: $2,500 annual budget
+- Tuition reimbursement: Up to $10,000/year
+
+============================================
+CHAPTER 5: LEAVE POLICIES
+============================================
+
+PAID TIME OFF (PTO)
+PTO accrual based on tenure:
+- Years 0-2: 15 days per year (1.25 days/month)
+- Years 3-5: 20 days per year (1.67 days/month)
+- Years 6-10: 25 days per year (2.08 days/month)
+- Years 11+: 30 days per year (2.5 days/month)
+
+Maximum PTO carryover: 5 days per year
+PTO request notice: 2 weeks for 3+ consecutive days
+
+SICK LEAVE
+- 10 paid sick days per year
+- No carryover; resets January 1
+- May be used for self or family member care
+- Doctor's note required after 3 consecutive days
+
+COMPANY HOLIDAYS (2024)
+1. New Year's Day - January 1
+2. Martin Luther King Jr. Day - January 15
+3. Presidents' Day - February 19
+4. Memorial Day - May 27
+5. Independence Day - July 4
+6. Labor Day - September 2
+7. Thanksgiving - November 28
+8. Day after Thanksgiving - November 29
+9. Christmas Eve - December 24
+10. Christmas Day - December 25
+11. New Year's Eve - December 31
+
+PARENTAL LEAVE
+Birth parent: 16 weeks paid leave
+Non-birth parent: 8 weeks paid leave
+Adoption/Foster: 12 weeks paid leave
+
+Leave must be taken within 12 months of birth/placement.
+May be taken consecutively or intermittently with manager approval.
+
+BEREAVEMENT LEAVE
+- Immediate family: 5 paid days
+- Extended family: 3 paid days
+- Close friend: 1 paid day
+
+JURY DUTY
+Full pay for up to 10 days of jury service per year.
+Must provide court documentation.
+
+VOTING LEAVE
+Up to 2 hours paid time off to vote if polls are not open outside of work hours.
+
+MILITARY LEAVE
+In accordance with USERRA. Differential pay for up to 12 months.
+
+============================================
+CHAPTER 6: CODE OF CONDUCT
+============================================
+
+PROFESSIONAL BEHAVIOR
+All employees are expected to:
+- Treat colleagues with respect and dignity
+- Maintain professional communication
+- Avoid conflicts of interest
+- Protect company assets and information
+- Report violations promptly
+
+HARASSMENT & DISCRIMINATION
+Stellar Dynamics has zero tolerance for:
+- Sexual harassment
+- Discriminatory behavior
+- Bullying or intimidation
+- Retaliation against reporters
+
+Report concerns to HR or use the anonymous hotline: 1-888-555-ETHC
+
+SUBSTANCE ABUSE
+- Drug-free workplace policy applies
+- Alcohol permitted only at company-sanctioned events
+- Marijuana use prohibited regardless of local laws
+- Prescription medications with manager/HR awareness if affecting work
+
+CONFLICTS OF INTEREST
+Employees must disclose:
+- Outside employment
+- Financial interests in competitors/vendors
+- Family relationships with business contacts
+- Board positions or consulting arrangements
+
+GIFTS & ENTERTAINMENT
+- May accept gifts under $100 in value
+- Must report gifts over $100 to Compliance
+- Never accept cash or cash equivalents
+- Entertainment must be reasonable and business-related
+
+SOCIAL MEDIA POLICY
+When discussing company matters on social media:
+- Clearly identify opinions as your own
+- Never share confidential information
+- Do not disparage competitors
+- Follow SEC guidelines regarding stock discussion
+
+============================================
+CHAPTER 7: IT & SECURITY POLICIES
+============================================
+
+ACCEPTABLE USE
+Company technology is provided for business purposes.
+Limited personal use is permitted if it:
+- Does not interfere with work
+- Does not violate any policies
+- Does not consume excessive resources
+- Does not expose the company to risk
+
+PASSWORDS
+Requirements:
+- Minimum 12 characters
+- Must include: uppercase, lowercase, number, symbol
+- Changed every 90 days
+- No password reuse (last 12 passwords)
+- Multi-factor authentication required for all systems
+
+DATA CLASSIFICATION
+- Public: Marketing materials, press releases
+- Internal: Policies, procedures, org charts
+- Confidential: Financial data, employee records
+- Restricted: Customer data, source code, trade secrets
+
+DATA HANDLING
+Restricted data must be:
+- Encrypted at rest and in transit
+- Accessed only on approved devices
+- Never stored on personal devices
+- Deleted according to retention schedule
+
+SECURITY INCIDENTS
+Report immediately to security@stellardynamics.com:
+- Suspicious emails or phishing attempts
+- Lost or stolen devices
+- Unauthorized access attempts
+- Malware or virus detection
+
+REMOTE ACCESS
+VPN required for:
+- Accessing internal systems remotely
+- Using public WiFi
+- International travel
+- Home network connections to work systems
+
+BYOD (BRING YOUR OWN DEVICE)
+Personal devices may access company resources if:
+- Enrolled in MDM (Mobile Device Management)
+- Running approved operating system version
+- Using company-approved security software
+- Capable of remote wipe if lost/stolen
+
+============================================
+CHAPTER 8: TRAVEL & EXPENSES
+============================================
+
+TRAVEL APPROVAL
+- Domestic travel: Manager approval
+- International travel: VP approval
+- Travel during blackout periods: C-suite approval
+
+BOOKING PROCEDURES
+All travel must be booked through Concur Travel.
+Book at least 14 days in advance for best rates.
+
+AIRFARE
+- Domestic: Economy class
+- International (under 6 hours): Economy Plus
+- International (6+ hours): Business class
+- Upgrades at employee expense unless approved
+
+LODGING
+Maximum nightly rates (before tax):
+- Tier 1 cities (NYC, SF, London): $350
+- Tier 2 cities (Chicago, Seattle, Paris): $275
+- Tier 3 cities (all others): $200
+- Extended stay (5+ nights): Use corporate housing
+
+GROUND TRANSPORTATION
+- Rental cars: Compact class unless business need
+- Ride-share: Permitted for business travel
+- Personal vehicle: $0.67 per mile (2024 IRS rate)
+
+MEALS & INCIDENTALS
+Daily limits (domestic):
+- Breakfast: $20
+- Lunch: $30
+- Dinner: $60
+- Incidentals: $25
+
+International rates vary by location - see Appendix C.
+
+EXPENSE REPORTING
+- Submit within 30 days of travel completion
+- Original receipts required for amounts over $25
+- Itemized receipts required for all meals
+- Manager approval required before reimbursement
+- Reimbursement processed within 10 business days
+
+NON-REIMBURSABLE EXPENSES
+- Personal entertainment
+- Mini-bar charges
+- In-room movies
+- Gym access fees
+- First-class upgrades (unless pre-approved)
+- Childcare or pet-sitting
+- Traffic tickets or parking violations
+
+============================================
+CHAPTER 9: PERFORMANCE MANAGEMENT
+============================================
+
+PERFORMANCE REVIEW CYCLE
+Annual reviews conducted in Q1 (January-March)
+Mid-year check-ins in July
+
+RATING SCALE
+5 - Exceptional: Consistently exceeds expectations
+4 - Exceeds: Regularly exceeds expectations
+3 - Meets: Consistently meets expectations
+2 - Developing: Sometimes meets expectations
+1 - Below: Does not meet expectations
+
+GOAL SETTING
+Employees must have:
+- 3-5 performance goals
+- At least 1 development goal
+- SMART criteria (Specific, Measurable, Achievable, Relevant, Time-bound)
+- Alignment with team and company objectives
+
+MERIT INCREASES
+Based on performance rating:
+- Rating 5: 8-12% increase
+- Rating 4: 5-7% increase
+- Rating 3: 2-4% increase
+- Rating 2: 0-1% increase
+- Rating 1: No increase; PIP required
+
+PROMOTIONS
+Eligibility requirements:
+- Minimum 12 months in current role
+- Rating of 4+ in most recent review
+- Manager recommendation
+- Budget availability
+- Skills assessment completion
+
+PERFORMANCE IMPROVEMENT PLAN (PIP)
+Triggered by:
+- Rating of 1 or 2
+- Consistent performance issues
+- Behavioral concerns
+
+PIP duration: 30-90 days
+Review frequency: Weekly
+Outcomes: Improvement, extended PIP, or termination
+
+============================================
+CHAPTER 10: TERMINATION PROCEDURES
+============================================
+
+VOLUNTARY RESIGNATION
+- 2 weeks notice required (4 weeks for managers)
+- Submit resignation in writing to manager and HR
+- Exit interview scheduled by HR
+- Final paycheck within applicable state timeframe
+
+INVOLUNTARY TERMINATION
+May result from:
+- Performance issues
+- Policy violations
+- Position elimination
+- Business restructuring
+
+SEVERANCE
+Standard severance (involuntary, non-cause):
+- 1 week per year of service
+- Minimum: 2 weeks
+- Maximum: 26 weeks
+- COBRA subsidy: 3 months
+
+No severance for:
+- Voluntary resignation
+- Termination for cause
+- Probationary period terminations
+
+RETURN OF COMPANY PROPERTY
+On last day, return:
+- Laptop and peripherals
+- ID badge and access cards
+- Company credit cards
+- Keys and parking passes
+- Documents and files
+
+FINAL PAY
+Includes:
+- Salary through last day worked
+- Accrued, unused PTO
+- Any unpaid bonuses or commissions
+- Expense reimbursements
+
+REFERENCES
+HR will confirm:
+- Dates of employment
+- Job title
+- Salary (with written authorization)
+
+Performance details not disclosed without legal requirement.
+
+============================================
+APPENDIX A: KEY CONTACTS
+============================================
+
+Human Resources: hr@stellardynamics.com
+Benefits: benefits@stellardynamics.com
+IT Support: helpdesk@stellardynamics.com
+Security: security@stellardynamics.com
+Ethics Hotline: 1-888-555-ETHC
+Legal: legal@stellardynamics.com
+Facilities: facilities@stellardynamics.com
+
+============================================
+APPENDIX B: OFFICE LOCATIONS
+============================================
+
+HEADQUARTERS
+Stellar Dynamics Inc.
+500 Innovation Way, Suite 100
+San Francisco, CA 94105
+Phone: (415) 555-0100
+
+NEW YORK OFFICE
+350 Park Avenue, 15th Floor
+New York, NY 10022
+Phone: (212) 555-0200
+
+LONDON OFFICE
+25 Finsbury Square
+London EC2A 1DX, UK
+Phone: +44 20 7555 0300
+
+SINGAPORE OFFICE
+One Raffles Place, Tower 1
+Level 30
+Singapore 048616
+Phone: +65 6555 0400
+
+============================================
+APPENDIX C: INTERNATIONAL MEAL RATES
+============================================
+
+Daily meal allowances by location:
+- London: £95
+- Paris: €110
+- Tokyo: ¥15,000
+- Singapore: S$150
+- Sydney: A$160
+- Frankfurt: €100
+
+============================================
+ACKNOWLEDGMENT
+============================================
+
+I acknowledge that I have received and read the Stellar Dynamics Employee Handbook. I understand that I am responsible for complying with all policies contained herein.
+
+Employee Name: _______________________
+Employee ID: _________________________
+Date: _______________________________
+Signature: ___________________________
+
+============================================
+Document Control
+Version: 3.2
+Last Updated: December 15, 2023
+Next Review: December 2024
+Owner: Human Resources
+Approved by: Amanda Foster, CHRO
+============================================
+

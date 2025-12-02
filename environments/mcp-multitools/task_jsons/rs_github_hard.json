@@ -1,0 +1,114 @@
+[
+  {
+    "id": "task-github-react-18-date",
+    "prompt": "Find the exact release date of React 18.0.0.\n\nUse the GitHub tools to read the CHANGELOG.md file from the facebook/react repository. The file is very long (~2700 lines), so you may need to search or read specific sections.\n\nStore the date in format 'Month DD, YYYY' (e.g., 'March 29, 2022') with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "March 29, 2022"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "github_read_file",
+        "github_list_files"
+      ]
+    }
+  },
+  {
+    "id": "task-github-react-hooks-date",
+    "prompt": "Find the exact release date of React 16.8.0, the version that introduced React Hooks.\n\nUse the GitHub tools to read the CHANGELOG.md file from the facebook/react repository.\n\nStore the date in format 'Month DD, YYYY' (e.g., 'February 6, 2019') with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "February 6, 2019"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "github_read_file",
+        "github_list_files"
+      ]
+    }
+  },
+  {
+    "id": "task-github-react-17-date",
+    "prompt": "Find the exact release date of React 17.0.0.\n\nUse the GitHub tools to read the CHANGELOG.md file from the facebook/react repository.\n\nStore the date in format 'Month DD, YYYY' (e.g., 'October 20, 2020') with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "October 20, 2020"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "github_read_file",
+        "github_list_files"
+      ]
+    }
+  }
+]
+

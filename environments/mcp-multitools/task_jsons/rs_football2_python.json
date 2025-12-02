@@ -1,0 +1,278 @@
+[
+  {
+    "id": "task-redcard-jersey-weight",
+    "prompt": "In the match Manchester United vs Bournemouth on 2023-10-29, a player received a red card at minute 85.\n\nFind this player and retrieve their weight on 2024-11-15.\n\nUse Python with the Supabase client to query the database.\nTables have 'football_' prefix.\n\nStore the weight rounded to 2 decimal places with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "74.64"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "execute_python"
+      ]
+    }
+  },
+  {
+    "id": "task-goal-jersey-calories",
+    "prompt": "In the match Liverpool vs Crystal Palace on 2024-10-21, a goal was scored at minute 31.\n\nFind the player who scored and retrieve their total calorie intake on that same day (2024-10-21).\n\nUse Python with the Supabase client to query the database.\nTables have 'football_' prefix.\n\nStore the calorie value as an integer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "3487"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "execute_python"
+      ]
+    }
+  },
+  {
+    "id": "task-yellowcard-jersey-games",
+    "prompt": "In the match Tottenham Hotspur vs Fulham on 2024-08-19, a yellow card was given at minute 45.\n\nFind the player who received the yellow card, then count how many total matches this player has appeared in across all seasons.\n\nUse Python with the Supabase client to query the database.\nTables have 'football_' prefix.\n\nStore the total number of matches with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "60"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "execute_python"
+      ]
+    }
+  },
+  {
+    "id": "task-unique-interceptions-birthyear",
+    "prompt": "In the match Tottenham Hotspur vs Manchester City on 2023-09-27, exactly one player made 5 interceptions (no other player in that match had exactly 5 interceptions).\n\nFind this player and return their birth year.\n\nUse Python with the Supabase client to query the database.\nTables have 'football_' prefix.\n\nStore the birth year (4 digits) with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "1990"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "execute_python"
+      ]
+    }
+  },
+  {
+    "id": "task-scratchpad-weights-3dates",
+    "prompt": "The scratchpad contains:\n- 'player_identifier': describes how to find a specific player (by unique stat in a specific match)\n- 'dates': 3 dates to look up weights for\n\nFind the player described in player_identifier. Then retrieve their weight (in kg) on each of the 3 dates.\n\nUse Python with the Supabase client to query the database.\nTables have 'football_' prefix.\n\nStore results in scratchpad as:\n- 'weight_1': weight on first date (2 decimal places)\n- 'weight_2': weight on second date (2 decimal places)\n- 'weight_3': weight on third date (2 decimal places)\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "initial_data": {
+          "player_identifier": "The only player with exactly 5 interceptions in the match Tottenham Hotspur vs Manchester City on 2023-09-27",
+          "dates": "2024-10-01, 2024-10-15, 2024-11-01"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "weight_1": "70.68",
+          "weight_2": "70.16",
+          "weight_3": "70.76"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "execute_python"
+      ]
+    }
+  },
+  {
+    "id": "task-scratchpad-3players-10dates-avgweight",
+    "prompt": "The scratchpad contains:\n- 'dates': 10 dates to calculate average weights from\n- 'player_1': how to identify the first player (unique stat in match)\n- 'player_2': how to identify the second player (unique stat in match)\n- 'player_3': how to identify the third player (unique stat in match)\n\nFor EACH of the 3 players:\n1. Find the player based on the unique stat description\n2. Get their weight records on all 10 dates provided\n3. Calculate the average weight across those 10 dates\n\nUse Python with the Supabase client to query the database.\nTables have 'football_' prefix.\n\nStore results in scratchpad as:\n- 'avg_weight_1': first player's average weight (2 decimal places)\n- 'avg_weight_2': second player's average weight (2 decimal places)\n- 'avg_weight_3': third player's average weight (2 decimal places)\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "initial_data": {
+          "dates": "2024-10-01, 2024-10-05, 2024-10-10, 2024-10-15, 2024-10-20, 2024-10-25, 2024-11-01, 2024-11-05, 2024-11-10, 2024-11-15",
+          "player_1": "The only player with exactly 5 interceptions in Tottenham Hotspur vs Manchester City on 2023-09-27",
+          "player_2": "The only player with exactly 5 interceptions in Chelsea vs Leicester City on 2024-02-02",
+          "player_3": "The only player with exactly 5 interceptions in Manchester United vs Brentford on 2023-12-03"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "avg_weight_1": "70.89",
+          "avg_weight_2": "84.64",
+          "avg_weight_3": "75.03"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "execute_python"
+      ]
+    }
+  },
+  {
+    "id": "task-scratchpad-3players-totalprotein",
+    "prompt": "The scratchpad contains:\n- 'target_date': the date to look up protein intake\n- 'player_1': how to identify the first player (unique stat in match)\n- 'player_2': how to identify the second player (unique stat in match)\n- 'player_3': how to identify the third player (unique stat in match)\n\nFor EACH of the 3 players:\n1. Find the player based on the unique stat description\n2. Get their protein intake (in grams) on the target_date\n\nThen calculate the TOTAL protein intake for all 3 players combined.\n\nUse Python with the Supabase client to query the database.\nTables have 'football_' prefix.\n\nStore the total protein (integer, in grams) with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "initial_data": {
+          "target_date": "2024-10-15",
+          "player_1": "The only player with exactly 5 interceptions in Tottenham Hotspur vs Manchester City on 2023-09-27",
+          "player_2": "The only player with exactly 5 interceptions in Chelsea vs Leicester City on 2024-02-02",
+          "player_3": "The only player with exactly 5 interceptions in Manchester United vs Brentford on 2023-12-03"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "580"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "execute_python"
+      ]
+    }
+  }
+]
+

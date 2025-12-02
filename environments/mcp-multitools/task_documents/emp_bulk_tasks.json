@@ -1,0 +1,131 @@
+[
+  {
+    "id": "task-emp-bulk-50-simple",
+    "prompt": "You are given a list of 50 employee names. For EACH employee, retrieve:\n1. Department name\n2. Position (job title)\n3. Phone number\n\nEmployee names (semicolon-separated): Aaron Valdez; Alexander Franklin; Alexander Yamamoto; Arthur Reyes; Benjamin Anderson; Bianca Torres; Bridget Yang; Charlotte Chen (EMP-10028S); Christian Vargas; Daniel Edwards; Daniel Morrison; Danielle Xiao; Delilah Diaz; Eleanor Edwards; Eleanor Gonzalez; Ethan Eriksson; Felix Fischer; Fiona Anderson; Gabriel Ishikawa; George Davis; Hannah Edwards; Harrison Harrison; Helena Kowalski; Ignacio Harris; Isaac Mueller; Ivan Gonzalez; James Jensen; Kevin Martinez; Kyle Kim; Linda Ortiz; Marcus Vargas; Nicole Quinn; Oscar Zhang; Patricia Underwood; Peter Valdez; Quentin Wagner; Quinn Castillo; Raymond Davis; Rebecca Morrison; Rosa Yamamoto; Teresa Diaz; Tiffany Castillo; Ulrich Olsen; Uma King; Ursula Eriksson; Victor Garcia; Wendy Ortiz; Ximena Kowalski; Yolanda Brown; Yusuf Mueller\n\nNote: Names with employee ID in parentheses (e.g., \"John Smith (EMP-12345X)\") indicate disambiguation - use that specific employee ID.\n\nSORTING: Sort alphabetically by employee name (A-Z).\n\nOUTPUT FORMAT: \"EmployeeName: Department, Position, Phone\" entries separated by \"; \" (semicolon followed by space).\nExample: \"Alice Brown: Engineering, Senior Developer, +1-555-1234; Bob Smith: Sales, Account Manager, +1-555-5678\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments.\n\nStore complete answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Aaron Valdez: Engineering, Junior Software Engineer, +1-756-566-1892; Alexander Franklin: Finance, Junior Accountant, +1-950-856-1167; Alexander Yamamoto: Research & Development, Principal Scientist, +1-558-624-5895; Arthur Reyes: Customer Support, Support Team Lead, +1-845-539-1942; Benjamin Anderson: Operations, Operations Manager, +1-881-744-4227; Bianca Torres: Research & Development, Principal Scientist, +1-217-715-5076; Bridget Yang: Sales, Account Executive, +1-827-456-1976; Charlotte Chen (EMP-10028S): Marketing, Director of Marketing, +1-242-214-4541; Christian Vargas: Legal, Paralegal, +1-562-689-9746; Daniel Edwards: Research & Development, Principal Scientist, +1-272-838-5420; Daniel Morrison: Human Resources, HR Manager, +1-528-357-9326; Danielle Xiao: Product Management, Product Manager, +1-885-201-3258; Delilah Diaz: Human Resources, HR Manager, +1-446-392-3077; Eleanor Edwards: Finance, Controller, +1-924-824-1996; Eleanor Gonzalez: Legal, Senior Counsel, +1-419-457-7873; Ethan Eriksson: Engineering, Junior Software Engineer, +1-891-693-8823; Felix Fischer: Operations, Director of Operations, +1-282-381-9829; Fiona Anderson: Operations, Operations Analyst, +1-847-420-5916; Gabriel Ishikawa: Marketing, Senior Marketing Manager, +1-501-984-3504; George Davis: Marketing, Marketing Specialist, +1-364-748-2286; Hannah Edwards: Research & Development, Principal Scientist, +1-357-807-8661; Harrison Harrison: Research & Development, R&D Director, +1-400-584-8303; Helena Kowalski: Human Resources, HR Coordinator, +1-243-761-2062; Ignacio Harris: Finance, Senior Accountant, +1-900-648-4320; Isaac Mueller: Finance, Junior Accountant, +1-218-637-4873; Ivan Gonzalez: Legal, Associate Counsel, +1-355-289-4573; James Jensen: Product Management, Director of Product, +1-455-793-4429; Kevin Martinez: Customer Support, Support Specialist, +1-900-261-5344; Kyle Kim: Engineering, Junior Software Engineer, +1-637-615-4316; Linda Ortiz: Research & Development, Research Scientist, +1-580-821-2608; Marcus Vargas: Legal, Senior Counsel, +1-806-734-3818; Nicole Quinn: Human Resources, HR Coordinator, +1-605-935-4995; Oscar Zhang: Engineering, Junior Software Engineer, +1-333-395-5354; Patricia Underwood: Operations, Operations Manager, +1-311-511-8987; Peter Valdez: Engineering, Junior Software Engineer, +1-913-458-3340; Quentin Wagner: Customer Support, Support Specialist, +1-434-712-2013; Quinn Castillo: Customer Support, Support Team Lead, +1-489-644-5475; Raymond Davis: Marketing, Marketing Coordinator, +1-984-866-4704; Rebecca Morrison: Finance, Finance Manager, +1-630-852-7384; Rosa Yamamoto: Research & Development, Research Scientist, +1-443-470-3724; Teresa Diaz: Human Resources, HR Coordinator, +1-945-852-4872; Tiffany Castillo: Product Management, Associate Product Manager, +1-944-412-3736; Ulrich Olsen: Engineering, Engineering Manager, +1-422-566-3671; Uma King: Operations, Operations Coordinator, +1-387-631-6581; Ursula Eriksson: Engineering, Junior Software Engineer, +1-313-965-3712; Victor Garcia: Sales, Account Executive, +1-436-886-2008; Wendy Ortiz: Research & Development, Research Scientist, +1-863-692-3618; Ximena Kowalski: Human Resources, HR Specialist, +1-749-231-3454; Yolanda Brown: Finance, Finance Manager, +1-455-834-2441; Yusuf Mueller: Finance, Junior Accountant, +1-252-730-4033"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "supabase_execute_sql",
+        "supabase_list_tables"
+      ]
+    }
+  },
+  {
+    "id": "task-emp-bulk-40-calc",
+    "prompt": "You are given a list of 40 employee names. For EACH employee, retrieve and calculate:\n1. Department name\n2. Hire date (YYYY-MM-DD format)\n3. Salary (integer)\n4. Total meeting count (from meeting_attendees table)\n5. CALCULATED: Meetings per year = (total meetings) / (years employed)\n   - Years employed = 2024 - hire_year (minimum 1 year)\n   - Round to 2 decimal places (round half up: 2.555 becomes 2.56)\n\nEmployee names (semicolon-separated): Isabella Ivanovic; Harrison Harrison; Alexander Yamamoto; James Jensen; James Chen (EMP-10110W); Eleanor Edwards; Josephine Ivanovic; Ulrich Olsen; Eleanor Gonzalez; Lydia Morrison; James Chen (EMP-10124K); Rebecca Fernandez; Victoria Schmidt; Yolanda Brown; Yasmine Thompson; Penelope Brown; Ivan Gonzalez; Daniel Dimitrov; Rosa Yamamoto; Gabriel Ishikawa; Heather Foster; Oliver Svensson; Thomas Harris; Aaron Valdez; Fiona Anderson; Quinn Castillo; Bridget Yang; Felix Ivanovic; Charlotte Chen (EMP-10775L); Florence Garcia; Alexander Petrov; Raymond Davis; Christian Vargas; Yusuf Mueller; Helena Kowalski; Teresa Diaz; Emmanuel Franklin; Alexander Franklin; Quentin Wagner; Kevin Martinez\n\nNote: Names with employee ID in parentheses indicate disambiguation.\n\nSORTING: Sort by salary DESCENDING (highest first). For equal salaries, sort alphabetically by name (A-Z).\n\nOUTPUT FORMAT: \"EmployeeName: Department, HireDate, Salary, MeetingCount, MeetingsPerYear\" separated by \"; \" (semicolon space).\nExample: \"Alice Brown: Engineering, 2020-03-15, 125000, 48, 12.00; Bob Smith: Sales, 2022-06-01, 98000, 15, 7.50\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, meeting_attendees.\n\nStore complete answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Isabella Ivanovic: Legal, 2018-01-28, 245206, 2, 0.33; Harrison Harrison: Research & Development, 2016-12-23, 240281, 5, 0.63; Alexander Yamamoto: Research & Development, 2023-05-02, 202108, 5, 5.00; James Jensen: Product Management, 2015-05-03, 196937, 11, 1.22; James Chen (EMP-10110W): Engineering, 2020-05-23, 186782, 2, 0.50; Eleanor Edwards: Finance, 2017-09-20, 181663, 8, 1.14; Josephine Ivanovic: Product Management, 2021-11-14, 171711, 11, 3.67; Ulrich Olsen: Engineering, 2020-05-07, 166781, 5, 1.25; Eleanor Gonzalez: Legal, 2024-01-10, 165547, 3, 3.00; Lydia Morrison: Sales, 2024-09-04, 158099, 6, 6.00; James Chen (EMP-10124K): Sales, 2021-08-15, 154181, 6, 2.00; Rebecca Fernandez: Research & Development, 2019-04-27, 144587, 5, 1.00; Victoria Schmidt: Sales, 2018-11-21, 144229, 6, 1.00; Yolanda Brown: Finance, 2020-11-01, 135696, 9, 2.25; Yasmine Thompson: Product Management, 2023-07-08, 132418, 8, 8.00; Penelope Brown: Sales, 2022-10-09, 126368, 11, 5.50; Ivan Gonzalez: Legal, 2022-07-13, 122965, 4, 2.00; Daniel Dimitrov: Human Resources, 2015-07-05, 116017, 6, 0.67; Rosa Yamamoto: Research & Development, 2022-02-13, 104836, 3, 1.50; Gabriel Ishikawa: Marketing, 2023-08-28, 103308, 6, 6.00; Heather Foster: Human Resources, 2022-01-09, 99538, 7, 3.50; Oliver Svensson: Finance, 2023-06-12, 98538, 10, 10.00; Thomas Harris: Finance, 2022-04-06, 97673, 3, 1.50; Aaron Valdez: Engineering, 2023-06-16, 88979, 3, 3.00; Fiona Anderson: Operations, 2023-02-01, 84677, 7, 7.00; Quinn Castillo: Customer Support, 2020-01-21, 84305, 6, 1.50; Bridget Yang: Sales, 2023-06-15, 83801, 7, 7.00; Felix Ivanovic: Product Management, 2023-12-06, 83645, 10, 10.00; Charlotte Chen (EMP-10775L): Customer Support, 2024-03-11, 78100, 6, 6.00; Florence Garcia: Sales, 2023-02-02, 77098, 7, 7.00; Alexander Petrov: Customer Support, 2023-02-12, 75715, 4, 4.00; Raymond Davis: Marketing, 2024-02-25, 67573, 5, 5.00; Christian Vargas: Legal, 2024-08-12, 67343, 5, 5.00; Yusuf Mueller: Finance, 2023-03-27, 62082, 7, 7.00; Helena Kowalski: Human Resources, 2024-08-08, 61702, 5, 5.00; Teresa Diaz: Human Resources, 2023-08-15, 60936, 6, 6.00; Emmanuel Franklin: Finance, 2023-06-08, 58452, 4, 4.00; Alexander Franklin: Finance, 2024-06-11, 57055, 4, 4.00; Quentin Wagner: Customer Support, 2022-12-05, 51132, 6, 3.00; Kevin Martinez: Customer Support, 2023-08-02, 46387, 9, 9.00"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "supabase_execute_sql",
+        "supabase_list_tables"
+      ]
+    }
+  },
+  {
+    "id": "task-emp-bulk-60-calcs",
+    "prompt": "You are given a list of 60 employee names. For EACH employee, calculate:\n1. Shift count (count rows in shifts table for this employee)\n2. Meeting count (count rows in meeting_attendees table for this employee)\n3. CALCULATED: Workload score = (shift_count * 2) + meeting_count\n\nEmployee names (semicolon-separated): Alexander Yamamoto; Yolanda Brown; Eleanor Edwards; Gabriel Ishikawa; Bridget Yang; Rebecca Fernandez; Daniel Morrison; James Chen (EMP-10110W); Helena Kowalski; James Chen (EMP-10134U); Aaron Valdez; Thomas Harris; Oscar Zhang; James Chen (EMP-10124K); Uma King; Xavier Yoshida; Quinn Castillo; Raymond Davis; Isaac Mueller; Wendy Ortiz; Alexander Petrov; Ulrich Olsen; Connor Baker; William Vargas; Xander Richardson; Tiffany Castillo; Georgia Gonzalez; James Jensen; Nicole Quinn; Oliver Svensson; Benjamin Blackwood; Danielle Xiao; Kevin Martinez; Victor Garcia; Fiona Anderson; Gregory Chen; Jennifer King; Zoe Olsen; Charlotte Chen (EMP-10775L); Daniel Dimitrov; George Davis; Hannah Edwards; Lydia Morrison; Quentin Wagner; Rachel Yang; Teresa Diaz; Benjamin Anderson; Christian Vargas; Harrison Harrison; Linda Ortiz; Samuel Adler; Edward Zhang; Ursula Eriksson; Daniel Edwards; Eleanor Gonzalez; Rosa Yamamoto; Bianca Torres; Isabella Ivanovic; Martin Richardson; Walter Ishikawa\n\nNote: Names with employee ID in parentheses indicate disambiguation.\n\nSORTING: Sort by workload score DESCENDING (highest first). For equal scores, sort alphabetically by name (A-Z).\n\nOUTPUT FORMAT: \"EmployeeName: ShiftCount, MeetingCount, WorkloadScore\" separated by \"; \" (semicolon space).\nExample: \"Alice Brown: 15, 20, 50; Bob Smith: 10, 25, 45\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, shifts, meeting_attendees.\n\nStore complete answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Alexander Yamamoto: 33, 5, 71; Yolanda Brown: 30, 9, 69; Eleanor Edwards: 29, 8, 66; Gabriel Ishikawa: 30, 6, 66; Bridget Yang: 29, 7, 65; Rebecca Fernandez: 29, 5, 63; Daniel Morrison: 27, 8, 62; James Chen (EMP-10110W): 29, 2, 60; Helena Kowalski: 27, 5, 59; James Chen (EMP-10134U): 25, 8, 58; Aaron Valdez: 27, 3, 57; Thomas Harris: 27, 3, 57; Oscar Zhang: 26, 3, 55; James Chen (EMP-10124K): 24, 6, 54; Uma King: 25, 3, 53; Xavier Yoshida: 21, 11, 53; Quinn Castillo: 23, 6, 52; Raymond Davis: 23, 5, 51; Isaac Mueller: 24, 2, 50; Wendy Ortiz: 24, 2, 50; Alexander Petrov: 21, 4, 46; Ulrich Olsen: 20, 5, 45; Connor Baker: 19, 6, 44; William Vargas: 19, 6, 44; Xander Richardson: 19, 3, 41; Tiffany Castillo: 0, 12, 12; Georgia Gonzalez: 0, 11, 11; James Jensen: 0, 11, 11; Nicole Quinn: 0, 10, 10; Oliver Svensson: 0, 10, 10; Benjamin Blackwood: 0, 9, 9; Danielle Xiao: 0, 9, 9; Kevin Martinez: 0, 9, 9; Victor Garcia: 0, 9, 9; Fiona Anderson: 0, 7, 7; Gregory Chen: 0, 7, 7; Jennifer King: 0, 7, 7; Zoe Olsen: 0, 7, 7; Charlotte Chen (EMP-10775L): 0, 6, 6; Daniel Dimitrov: 0, 6, 6; George Davis: 0, 6, 6; Hannah Edwards: 1, 4, 6; Lydia Morrison: 0, 6, 6; Quentin Wagner: 0, 6, 6; Rachel Yang: 0, 6, 6; Teresa Diaz: 0, 6, 6; Benjamin Anderson: 0, 5, 5; Christian Vargas: 0, 5, 5; Harrison Harrison: 0, 5, 5; Linda Ortiz: 0, 5, 5; Samuel Adler: 0, 5, 5; Edward Zhang: 0, 4, 4; Ursula Eriksson: 0, 4, 4; Daniel Edwards: 0, 3, 3; Eleanor Gonzalez: 0, 3, 3; Rosa Yamamoto: 0, 3, 3; Bianca Torres: 0, 2, 2; Isabella Ivanovic: 0, 2, 2; Martin Richardson: 0, 2, 2; Walter Ishikawa: 0, 2, 2"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "supabase_execute_sql",
+        "supabase_list_tables"
+      ]
+    }
+  }
+]

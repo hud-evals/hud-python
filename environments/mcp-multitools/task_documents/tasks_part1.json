@@ -1,0 +1,264 @@
+[
+  {
+    "id": "task-count-sections",
+    "prompt": "Your task is to count employees in specific attribute sections.\n\nUsing the employee_attributes document (read_document with doc_id='employee_attributes'), count how many employee IDs appear in each of these sections:\n\"Cloud certified\", \"Remote work approved\", \"First aid certified\", \"Speaks Spanish\", \"Has PhD\", \"Does bouldering\", \"Has pilot license\"\n\nFORMAT: \"SectionName: count\" entries separated by \"; \" (in the same order as listed above)\n\nExample: \"Cloud certified: 34; Remote work approved: 45; ...\"\n\nStore your answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Cloud certified: 34; Remote work approved: 46; First aid certified: 59; Speaks Spanish: 33; Has PhD: 7; Does bouldering: 12; Has pilot license: 5"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "read_document"
+      ]
+    }
+  },
+  {
+    "id": "task-or-languages-salary",
+    "prompt": "Locate employees who speak any of these languages: Spanish, French, or German.\n\nCheck the employee_attributes document for sections \"Speaks Spanish\", \"Speaks French\", \"Speaks German\".\nCombine all employee IDs from these three sections (union - no duplicates).\nThen query Supabase to get each employee's salary.\n\nDOCUMENT: read_document with doc_id='employee_attributes'\nDATABASE: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\n\nFORMAT: \"{employee_id}: {salary}\" separated by \"; \"\nSort alphabetically by employee ID.\n\nStore result with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "EMP-10043H: 116017; EMP-10053R: 181663; EMP-10067F: 133964; EMP-10073L: 135714; EMP-10091D: 245206; EMP-10124K: 154181; EMP-10134U: 104167; EMP-10200I: 144587; EMP-10215X: 159177; EMP-10252I: 144229; EMP-10269Z: 129351; EMP-10283N: 135696; EMP-10292W: 79384; EMP-10303H: 77098; EMP-10317V: 61702; EMP-10329H: 60942; EMP-10337P: 99581; EMP-10349B: 75715; EMP-10357J: 202108; EMP-10366S: 136435; EMP-10388O: 82965; EMP-10400A: 67573; EMP-10412M: 97673; EMP-10432G: 59332; EMP-10442Q: 132418; EMP-10448W: 88979; EMP-10453B: 83801; EMP-10469R: 58452; EMP-10482E: 75956; EMP-10485H: 165710; EMP-10497T: 122965; EMP-10513J: 158099; EMP-10528Y: 55140; EMP-10549T: 88476; EMP-10552W: 51132; EMP-10555Z: 104836; EMP-10567L: 163757; EMP-10571P: 97073; EMP-10593L: 60585; EMP-10608A: 62082; EMP-10620M: 64589; EMP-10632Y: 82278; EMP-10654U: 67343; EMP-10668I: 85667; EMP-10696K: 112716; EMP-10702Q: 69084; EMP-10722K: 170360; EMP-10726O: 78159; EMP-10741D: 123308; EMP-10745H: 60936; EMP-10765B: 95501; EMP-10775L: 78100; EMP-10779P: 171998; EMP-10792C: 83645; EMP-10802M: 134162"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "read_document",
+        "supabase_execute_sql",
+        "supabase_list_tables"
+      ]
+    }
+  },
+  {
+    "id": "task-sorted-by-birthdate",
+    "prompt": "Identify employees who are both \"Mentors junior employees\" AND have \"Completed leadership training\".\n\nFrom employee_attributes document, find the intersection of these two sections.\nQuery Supabase for their names and birth dates.\n\nIMPORTANT: Sort the results by birth date (OLDEST first, i.e., earliest date first).\n\nDOCUMENT: read_document with doc_id='employee_attributes'\nDATABASE: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\n\nFORMAT: \"{employee_id}: {full_name}, {birth_date}\" separated by \"; \"\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "EMP-10357J: Alexander Yamamoto, 1982-04-17; EMP-10779P: Daniel Edwards, 1986-07-11; EMP-10657X: Danielle Xiao, 1988-02-01; EMP-10427B: Wendy Ortiz, 1988-07-02; EMP-10598Q: Ximena Kowalski, 1989-03-23; EMP-10513J: Lydia Morrison, 1990-04-04; EMP-10571P: Tiffany Castillo, 1996-09-11; EMP-10485H: Hannah Edwards, 1997-05-11; EMP-10716E: Linda Ortiz, 1998-02-01"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "read_document",
+        "supabase_execute_sql",
+        "supabase_list_tables"
+      ]
+    }
+  },
+  {
+    "id": "task-complex-logic",
+    "prompt": "Execute this complex filter on the employee_attributes document:\n\nFind employees who:\n  (\"Has PhD\" OR \"Holds patents\" OR \"Has published research papers\")\n  AND \"Data privacy trained\"\n  BUT NOT \"Prefers morning meetings\"\n\nThen retrieve from Supabase: name, department, position, salary, hire_date.\n\nDOCUMENT: read_document with doc_id='employee_attributes'\nDATABASE: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\n\nFORMAT: \"{id}: {name}, {department}, {position}, {salary}, {hire_date}\" separated by \"; \"\nSort by employee ID alphabetically.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "EMP-10593L: Walter Ishikawa, Marketing, Marketing Coordinator, 60585, 2023-07-30; EMP-10598Q: Ximena Kowalski, Human Resources, HR Specialist, 72511, 2023-08-14; EMP-10719H: Martin Richardson, Legal, Associate Counsel, 98823, 2023-01-19"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "read_document",
+        "supabase_execute_sql",
+        "supabase_list_tables"
+      ]
+    }
+  },
+  {
+    "id": "task-pool-filter",
+    "prompt": "From ONLY these employee IDs, find which ones are \"Emergency response trained\":\n\nEMP-10020K, EMP-10043H, EMP-10067F, EMP-10073L, EMP-10083V, EMP-10103P, EMP-10110W, EMP-10124K, EMP-10152M, EMP-10177L, EMP-10243Z, EMP-10276G, EMP-10376C, EMP-10400A, EMP-10442Q, EMP-10453B, EMP-10456E, EMP-10485H, EMP-10513J, EMP-10549T, EMP-10555Z, EMP-10598Q, EMP-10632Y, EMP-10654U, EMP-10668I, EMP-10683X, EMP-10696K, EMP-10719H, EMP-10722K, EMP-10726O, EMP-10729R, EMP-10741D, EMP-10754Q, EMP-10792C, EMP-10802M\n\nCheck the employee_attributes document section \"Emergency response trained\".\nReturn only those IDs from the list above that appear in that section.\nQuery Supabase for their names.\n\nFORMAT: \"{employee_id}: {name}\" separated by \"; \"\nSort by employee ID.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "EMP-10067F: Felix Fischer; EMP-10073L: Georgia Gonzalez; EMP-10083V: Harrison Harrison; EMP-10103P: James Jensen; EMP-10124K: James Chen; EMP-10243Z: Ulrich Olsen; EMP-10400A: Raymond Davis; EMP-10485H: Hannah Edwards; EMP-10549T: Patricia Underwood; EMP-10555Z: Rosa Yamamoto; EMP-10598Q: Ximena Kowalski; EMP-10668I: Edward Zhang; EMP-10696K: Ignacio Harris; EMP-10719H: Martin Richardson; EMP-10722K: Naomi Thompson; EMP-10741D: Stephen Baker; EMP-10792C: Felix Ivanovic; EMP-10802M: Harrison Morrison"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "read_document",
+        "supabase_execute_sql",
+        "supabase_list_tables"
+      ]
+    }
+  },
+  {
+    "id": "task-names-only",
+    "prompt": "Determine which employees use the gym AND participate in wellness BUT do NOT have a standing desk.\n\nFrom employee_attributes, find:\n  \"Uses company gym\" AND \"Participates in wellness program\" BUT NOT \"Has standing desk\"\n\nQuery Supabase for just their full names.\n\nFORMAT: Names only, separated by \"; \", sorted alphabetically by name.\nExample: \"Alice Brown; Bob Smith; Carol White\"\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Benjamin Blackwood; Bianca Torres; Charlotte Chen; Connor Baker; Ivan Gonzalez; Patricia Underwood; Walter Ishikawa; Ximena Kowalski; Yasmine Thompson"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "read_document",
+        "supabase_execute_sql",
+        "supabase_list_tables"
+      ]
+    }
+  }
+]

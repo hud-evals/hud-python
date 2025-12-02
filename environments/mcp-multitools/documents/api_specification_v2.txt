@@ -1,0 +1,766 @@
+STELLAR DYNAMICS API SPECIFICATION
+Version 2.0 | Document ID: API-SPEC-2024-002
+Last Updated: November 2024
+
+============================================
+1. OVERVIEW
+============================================
+
+This document specifies the Stellar Dynamics REST API for the StellarCloud platform.
+The API provides programmatic access to all platform features.
+
+BASE URL
+Production: https://api.stellardynamics.com/v2
+Staging: https://api-staging.stellardynamics.com/v2
+Sandbox: https://api-sandbox.stellardynamics.com/v2
+
+API VERSION
+Current: v2.0.3
+Minimum supported: v2.0.0
+Deprecated: v1.x (sunset date: March 31, 2025)
+
+RATE LIMITS
+- Free tier: 100 requests per minute
+- Professional: 1,000 requests per minute
+- Enterprise: 10,000 requests per minute
+- Burst allowance: 2x limit for 10 seconds
+
+============================================
+2. AUTHENTICATION
+============================================
+
+All API requests require authentication via API key or OAuth 2.0.
+
+API KEY AUTHENTICATION
+Include the API key in the header:
+Authorization: Bearer sk_live_xxxxxxxxxxxxx
+
+API keys are prefixed:
+- sk_live_* : Production keys
+- sk_test_* : Test/sandbox keys
+- sk_dev_* : Development keys
+
+OAUTH 2.0
+Supported flows:
+- Authorization Code (recommended for user-facing apps)
+- Client Credentials (for server-to-server)
+- PKCE (for mobile/SPA applications)
+
+Token endpoint: POST /oauth/token
+Authorization endpoint: GET /oauth/authorize
+
+Access token lifetime: 3600 seconds (1 hour)
+Refresh token lifetime: 2592000 seconds (30 days)
+
+SCOPES
+- read:users - Read user information
+- write:users - Create/update users
+- read:projects - Read project data
+- write:projects - Create/update projects
+- read:analytics - Access analytics data
+- admin - Full administrative access
+
+============================================
+3. REQUEST FORMAT
+============================================
+
+CONTENT TYPE
+All requests must include:
+Content-Type: application/json
+Accept: application/json
+
+REQUEST BODY
+JSON format with UTF-8 encoding.
+Maximum request body size: 10 MB
+
+Example:
+{
+  "name": "Project Alpha",
+  "description": "A new project",
+  "settings": {
+    "visibility": "private",
+    "notifications": true
+  }
+}
+
+QUERY PARAMETERS
+Pagination:
+- page: Page number (default: 1)
+- per_page: Items per page (default: 20, max: 100)
+- cursor: Cursor-based pagination token
+
+Filtering:
+- filter[field]: Filter by field value
+- filter[field][op]: Filter with operator (eq, ne, gt, lt, gte, lte, contains)
+
+Sorting:
+- sort: Field to sort by (prefix with - for descending)
+
+Example:
+GET /v2/projects?page=2&per_page=50&filter[status]=active&sort=-created_at
+
+============================================
+4. RESPONSE FORMAT
+============================================
+
+SUCCESS RESPONSE
+HTTP 200/201/204 with JSON body:
+
+{
+  "data": {
+    "id": "proj_abc123",
+    "type": "project",
+    "attributes": {
+      "name": "Project Alpha",
+      "created_at": "2024-01-15T10:30:00Z"
+    }
+  },
+  "meta": {
+    "request_id": "req_xyz789"
+  }
+}
+
+COLLECTION RESPONSE
+{
+  "data": [
+    { "id": "proj_abc123", ... },
+    { "id": "proj_def456", ... }
+  ],
+  "meta": {
+    "total_count": 150,
+    "page": 1,
+    "per_page": 20,
+    "total_pages": 8
+  },
+  "links": {
+    "self": "/v2/projects?page=1",
+    "next": "/v2/projects?page=2",
+    "last": "/v2/projects?page=8"
+  }
+}
+
+ERROR RESPONSE
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid request parameters",
+    "details": [
+      {
+        "field": "email",
+        "code": "INVALID_FORMAT",
+        "message": "Email format is invalid"
+      }
+    ]
+  },
+  "meta": {
+    "request_id": "req_xyz789"
+  }
+}
+
+HTTP STATUS CODES
+- 200 OK: Successful request
+- 201 Created: Resource created
+- 204 No Content: Successful deletion
+- 400 Bad Request: Invalid parameters
+- 401 Unauthorized: Authentication failed
+- 403 Forbidden: Insufficient permissions
+- 404 Not Found: Resource not found
+- 409 Conflict: Resource conflict
+- 422 Unprocessable Entity: Validation error
+- 429 Too Many Requests: Rate limit exceeded
+- 500 Internal Server Error: Server error
+- 503 Service Unavailable: Maintenance mode
+
+============================================
+5. ENDPOINTS - USERS
+============================================
+
+LIST USERS
+GET /v2/users
+
+Query Parameters:
+- status: Filter by status (active, inactive, pending)
+- role: Filter by role (admin, member, viewer)
+- created_after: ISO 8601 date
+- created_before: ISO 8601 date
+
+Response: Array of user objects
+
+---
+
+GET USER
+GET /v2/users/{user_id}
+
+Path Parameters:
+- user_id: User ID (format: usr_xxxxxxxxx)
+
+Response: User object
+
+---
+
+CREATE USER
+POST /v2/users
+
+Request Body:
+{
+  "email": "user@example.com",
+  "first_name": "John",
+  "last_name": "Doe",
+  "role": "member",
+  "send_invite": true
+}
+
+Required fields: email, first_name, last_name
+Optional fields: role (default: member), send_invite (default: true)
+
+Response: Created user object (HTTP 201)
+
+---
+
+UPDATE USER
+PATCH /v2/users/{user_id}
+
+Request Body:
+{
+  "first_name": "Jane",
+  "role": "admin"
+}
+
+Response: Updated user object
+
+---
+
+DELETE USER
+DELETE /v2/users/{user_id}
+
+Query Parameters:
+- transfer_to: User ID to transfer ownership to
+
+Response: HTTP 204 No Content
+
+---
+
+GET CURRENT USER
+GET /v2/users/me
+
+Response: Current authenticated user object
+
+============================================
+6. ENDPOINTS - PROJECTS
+============================================
+
+LIST PROJECTS
+GET /v2/projects
+
+Query Parameters:
+- owner_id: Filter by owner
+- status: Filter by status (active, archived, deleted)
+- visibility: Filter by visibility (public, private, team)
+- tag: Filter by tag
+
+Response: Array of project objects
+
+---
+
+GET PROJECT
+GET /v2/projects/{project_id}
+
+Path Parameters:
+- project_id: Project ID (format: proj_xxxxxxxxx)
+
+Response: Project object with relationships
+
+---
+
+CREATE PROJECT
+POST /v2/projects
+
+Request Body:
+{
+  "name": "New Project",
+  "description": "Project description",
+  "visibility": "private",
+  "settings": {
+    "notifications": {
+      "email": true,
+      "slack": false
+    },
+    "retention_days": 90
+  },
+  "tags": ["production", "critical"]
+}
+
+Required fields: name
+Optional fields: description, visibility, settings, tags
+
+Response: Created project object (HTTP 201)
+
+---
+
+UPDATE PROJECT
+PATCH /v2/projects/{project_id}
+
+Request Body: Partial project object
+
+Response: Updated project object
+
+---
+
+DELETE PROJECT
+DELETE /v2/projects/{project_id}
+
+Query Parameters:
+- permanent: Boolean (default: false, moves to trash)
+
+Response: HTTP 204 No Content
+
+---
+
+ARCHIVE PROJECT
+POST /v2/projects/{project_id}/archive
+
+Response: Archived project object
+
+---
+
+RESTORE PROJECT
+POST /v2/projects/{project_id}/restore
+
+Response: Restored project object
+
+============================================
+7. ENDPOINTS - ANALYTICS
+============================================
+
+GET PROJECT ANALYTICS
+GET /v2/projects/{project_id}/analytics
+
+Query Parameters:
+- period: Time period (day, week, month, quarter, year)
+- start_date: Start date (ISO 8601)
+- end_date: End date (ISO 8601)
+- metrics: Comma-separated list of metrics
+- group_by: Grouping dimension (day, week, month)
+
+Available Metrics:
+- page_views: Total page views
+- unique_visitors: Unique visitor count
+- sessions: Session count
+- avg_session_duration: Average session duration (seconds)
+- bounce_rate: Bounce rate percentage
+- conversion_rate: Conversion rate percentage
+- revenue: Total revenue (if e-commerce enabled)
+
+Response:
+{
+  "data": {
+    "period": "2024-01-01/2024-01-31",
+    "metrics": {
+      "page_views": 125000,
+      "unique_visitors": 45000,
+      "sessions": 67500,
+      "avg_session_duration": 245,
+      "bounce_rate": 35.2,
+      "conversion_rate": 3.8
+    },
+    "time_series": [
+      {
+        "date": "2024-01-01",
+        "page_views": 4200,
+        "unique_visitors": 1500
+      },
+      ...
+    ]
+  }
+}
+
+---
+
+GET REAL-TIME ANALYTICS
+GET /v2/projects/{project_id}/analytics/realtime
+
+Response:
+{
+  "data": {
+    "active_users": 234,
+    "active_pages": [
+      { "path": "/dashboard", "users": 45 },
+      { "path": "/products", "users": 32 }
+    ],
+    "events_per_minute": 156,
+    "top_referrers": [
+      { "source": "google.com", "users": 89 },
+      { "source": "direct", "users": 67 }
+    ]
+  }
+}
+
+---
+
+EXPORT ANALYTICS
+POST /v2/projects/{project_id}/analytics/export
+
+Request Body:
+{
+  "format": "csv",
+  "start_date": "2024-01-01",
+  "end_date": "2024-01-31",
+  "metrics": ["page_views", "unique_visitors"],
+  "email_to": "user@example.com"
+}
+
+Response:
+{
+  "data": {
+    "export_id": "exp_abc123",
+    "status": "processing",
+    "estimated_completion": "2024-02-01T12:00:00Z"
+  }
+}
+
+============================================
+8. ENDPOINTS - WEBHOOKS
+============================================
+
+LIST WEBHOOKS
+GET /v2/webhooks
+
+Response: Array of webhook configurations
+
+---
+
+CREATE WEBHOOK
+POST /v2/webhooks
+
+Request Body:
+{
+  "url": "https://example.com/webhook",
+  "events": ["project.created", "project.updated", "user.invited"],
+  "secret": "whsec_xxxxxxxx",
+  "active": true
+}
+
+Available Events:
+- project.created
+- project.updated
+- project.deleted
+- project.archived
+- user.created
+- user.updated
+- user.deleted
+- user.invited
+- analytics.threshold_exceeded
+- billing.invoice_created
+- billing.payment_failed
+
+Response: Created webhook object
+
+---
+
+WEBHOOK PAYLOAD FORMAT
+{
+  "id": "evt_abc123",
+  "type": "project.created",
+  "created_at": "2024-01-15T10:30:00Z",
+  "data": {
+    "object": {
+      "id": "proj_xyz789",
+      "name": "New Project",
+      ...
+    }
+  }
+}
+
+WEBHOOK SIGNATURE
+Verify webhook authenticity using HMAC-SHA256:
+1. Concatenate timestamp and payload: {timestamp}.{payload}
+2. Compute HMAC-SHA256 with webhook secret
+3. Compare with Stellar-Signature header
+
+Header format:
+Stellar-Signature: t=1642000000,v1=abc123...
+
+============================================
+9. ENDPOINTS - BILLING
+============================================
+
+GET SUBSCRIPTION
+GET /v2/billing/subscription
+
+Response:
+{
+  "data": {
+    "plan": "professional",
+    "status": "active",
+    "current_period_start": "2024-01-01T00:00:00Z",
+    "current_period_end": "2024-02-01T00:00:00Z",
+    "cancel_at_period_end": false,
+    "seats": {
+      "included": 10,
+      "used": 7,
+      "additional": 0
+    },
+    "features": {
+      "api_requests": 1000,
+      "storage_gb": 100,
+      "projects": "unlimited",
+      "analytics_retention_days": 365
+    }
+  }
+}
+
+---
+
+GET USAGE
+GET /v2/billing/usage
+
+Query Parameters:
+- period: Current billing period (default) or specific month (YYYY-MM)
+
+Response:
+{
+  "data": {
+    "period": "2024-01",
+    "api_requests": {
+      "used": 45000,
+      "limit": 1000000,
+      "overage": 0
+    },
+    "storage_gb": {
+      "used": 45.7,
+      "limit": 100,
+      "overage": 0
+    },
+    "bandwidth_gb": {
+      "used": 234.5,
+      "limit": 1000,
+      "overage": 0
+    }
+  }
+}
+
+---
+
+LIST INVOICES
+GET /v2/billing/invoices
+
+Response: Array of invoice objects
+
+---
+
+GET INVOICE
+GET /v2/billing/invoices/{invoice_id}
+
+Response:
+{
+  "data": {
+    "id": "inv_abc123",
+    "number": "INV-2024-0042",
+    "status": "paid",
+    "amount": 9900,
+    "currency": "usd",
+    "period_start": "2024-01-01",
+    "period_end": "2024-01-31",
+    "line_items": [
+      {
+        "description": "Professional Plan",
+        "quantity": 1,
+        "unit_amount": 7900,
+        "amount": 7900
+      },
+      {
+        "description": "Additional Seats (2)",
+        "quantity": 2,
+        "unit_amount": 1000,
+        "amount": 2000
+      }
+    ],
+    "pdf_url": "https://..."
+  }
+}
+
+============================================
+10. ENDPOINTS - FILE UPLOADS
+============================================
+
+CREATE UPLOAD URL
+POST /v2/uploads
+
+Request Body:
+{
+  "filename": "report.pdf",
+  "content_type": "application/pdf",
+  "size": 1048576,
+  "purpose": "project_attachment"
+}
+
+Response:
+{
+  "data": {
+    "upload_id": "upl_abc123",
+    "upload_url": "https://uploads.stellardynamics.com/...",
+    "expires_at": "2024-01-15T11:00:00Z",
+    "fields": {
+      "key": "uploads/abc123/report.pdf",
+      "policy": "...",
+      "signature": "..."
+    }
+  }
+}
+
+Maximum file sizes:
+- Images: 10 MB
+- Documents: 50 MB
+- Videos: 500 MB
+- Archives: 100 MB
+
+Supported file types:
+- Images: jpg, png, gif, webp, svg
+- Documents: pdf, doc, docx, xls, xlsx, ppt, pptx, txt, csv
+- Videos: mp4, mov, avi, webm
+- Archives: zip, tar, gz
+
+---
+
+CONFIRM UPLOAD
+POST /v2/uploads/{upload_id}/confirm
+
+Response:
+{
+  "data": {
+    "file_id": "file_xyz789",
+    "url": "https://files.stellardynamics.com/...",
+    "size": 1048576,
+    "content_type": "application/pdf"
+  }
+}
+
+============================================
+11. ERROR CODES
+============================================
+
+AUTHENTICATION ERRORS
+- AUTH_INVALID_KEY: API key is invalid or expired
+- AUTH_MISSING_KEY: No API key provided
+- AUTH_INSUFFICIENT_SCOPE: Token lacks required scope
+- AUTH_TOKEN_EXPIRED: OAuth token has expired
+
+VALIDATION ERRORS
+- VALIDATION_REQUIRED: Required field missing
+- VALIDATION_FORMAT: Invalid format
+- VALIDATION_LENGTH: Value too long or too short
+- VALIDATION_RANGE: Value outside allowed range
+- VALIDATION_UNIQUE: Value must be unique
+
+RESOURCE ERRORS
+- RESOURCE_NOT_FOUND: Resource does not exist
+- RESOURCE_DELETED: Resource has been deleted
+- RESOURCE_CONFLICT: Resource state conflict
+- RESOURCE_LOCKED: Resource is locked
+
+RATE LIMIT ERRORS
+- RATE_LIMIT_EXCEEDED: Too many requests
+- RATE_LIMIT_DAILY: Daily limit exceeded
+
+BILLING ERRORS
+- BILLING_PAYMENT_REQUIRED: Payment required
+- BILLING_QUOTA_EXCEEDED: Usage quota exceeded
+- BILLING_SUBSCRIPTION_INACTIVE: Subscription not active
+
+============================================
+12. SDK LIBRARIES
+============================================
+
+Official SDKs:
+- JavaScript/TypeScript: npm install @stellardynamics/sdk
+- Python: pip install stellardynamics
+- Ruby: gem install stellardynamics
+- PHP: composer require stellardynamics/sdk
+- Go: go get github.com/stellardynamics/sdk-go
+- Java: Maven/Gradle (com.stellardynamics:sdk)
+- .NET: NuGet (StellarDynamics.SDK)
+
+Example (JavaScript):
+const Stellar = require('@stellardynamics/sdk');
+const client = new Stellar.Client('sk_live_xxx');
+
+const project = await client.projects.create({
+  name: 'My Project',
+  visibility: 'private'
+});
+
+Example (Python):
+import stellardynamics
+client = stellardynamics.Client('sk_live_xxx')
+
+project = client.projects.create(
+    name='My Project',
+    visibility='private'
+)
+
+============================================
+13. CHANGELOG
+============================================
+
+VERSION 2.0.3 (November 2024)
+- Added real-time analytics endpoint
+- Improved webhook retry logic
+- Fixed pagination cursor encoding issue
+
+VERSION 2.0.2 (September 2024)
+- Added bulk operations for users
+- New analytics export functionality
+- Enhanced error messages
+
+VERSION 2.0.1 (July 2024)
+- Added PKCE support for OAuth
+- New file upload confirmation flow
+- Performance improvements
+
+VERSION 2.0.0 (May 2024)
+- Complete API redesign
+- New authentication system
+- JSON:API-compliant response format
+- Breaking changes from v1.x
+
+============================================
+APPENDIX A: DATA TYPES
+============================================
+
+IDENTIFIERS
+All resource IDs use prefixed format:
+- usr_: User IDs
+- proj_: Project IDs
+- team_: Team IDs
+- inv_: Invoice IDs
+- evt_: Event IDs
+- upl_: Upload IDs
+- file_: File IDs
+
+TIMESTAMPS
+All timestamps are in ISO 8601 format with UTC timezone:
+2024-01-15T10:30:00Z
+
+MONEY
+All monetary amounts are in cents (integer):
+- $99.00 = 9900
+- $0.50 = 50
+
+Currency codes follow ISO 4217.
+
+============================================
+APPENDIX B: RATE LIMIT HEADERS
+============================================
+
+Response headers include:
+X-RateLimit-Limit: 1000
+X-RateLimit-Remaining: 999
+X-RateLimit-Reset: 1642000060
+
+When rate limited (HTTP 429):
+Retry-After: 30
+
+============================================
+END OF DOCUMENT
+============================================
+

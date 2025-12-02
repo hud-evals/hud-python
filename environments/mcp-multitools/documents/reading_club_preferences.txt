@@ -1,0 +1,681 @@
+======================================================================
+RIVERSIDE READING CLUB - MEMBER READING PREFERENCES
+======================================================================
+
+DOCUMENT STRUCTURE
+----------------------------------------
+This document records each member's favorite book chapters and ratings.
+Preferences are organized by member ID.
+
+IMPORTANT: Full book texts are available in separate documents:
+  - 'pride_and_prejudice' (Pride and Prejudice by Jane Austen)
+  - 'moby_dick' (Moby Dick by Herman Melville)
+  - 'art_of_war' (The Art of War by Sun Tzu)
+
+To read a favorite chapter, look up the referenced book and chapter
+in the corresponding document listed above.
+
+======================================================================
+
+MEMBER: Penelope Harrison (RC-1000)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - The Art of War, Chapter 3
+      Rating: 9/10
+      (Full text in document: 'art_of_war')
+    - Moby Dick, Chapter 10
+      Rating: 9/10
+      (Full text in document: 'moby_dick')
+    - Pride and Prejudice, Chapter 20
+      Rating: 10/10
+      (Full text in document: 'pride_and_prejudice')
+
+MEMBER: Isabella Graham (RC-1001)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 2
+      Rating: 10/10
+      (Full text in document: 'pride_and_prejudice')
+    - Moby Dick, Chapter 1
+      Rating: 7/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Charlotte Baker (RC-1002)
+----------------------------------------
+  Tier: Silver
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 20
+      Rating: 8/10
+      (Full text in document: 'pride_and_prejudice')
+    - The Art of War, Chapter 8
+      Rating: 10/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Nora Baker (RC-1003)
+----------------------------------------
+  Tier: Silver
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 2
+      Rating: 7/10
+      (Full text in document: 'pride_and_prejudice')
+    - The Art of War, Chapter 3
+      Rating: 7/10
+      (Full text in document: 'art_of_war')
+    - Moby Dick, Chapter 135
+      Rating: 8/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Olivia Crawford (RC-1004)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 1
+      Rating: 9/10
+      (Full text in document: 'pride_and_prejudice')
+    - Moby Dick, Chapter 1
+      Rating: 9/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Uma Bennett (RC-1005)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - The Art of War, Chapter 4
+      Rating: 7/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Yvonne Vaughn (RC-1006)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - The Art of War, Chapter 7
+      Rating: 8/10
+      (Full text in document: 'art_of_war')
+    - Pride and Prejudice, Chapter 3
+      Rating: 8/10
+      (Full text in document: 'pride_and_prejudice')
+
+MEMBER: William Whitfield (RC-1007)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 3
+      Rating: 9/10
+      (Full text in document: 'pride_and_prejudice')
+    - Moby Dick, Chapter 10
+      Rating: 9/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Irene Harrison (RC-1008)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - The Art of War, Chapter 2
+      Rating: 10/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Penelope Newman (RC-1009)
+----------------------------------------
+  Tier: Silver
+  Favorite Chapters:
+    - Moby Dick, Chapter 10
+      Rating: 8/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Sophia O'Connor (RC-1010)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - Moby Dick, Chapter 36
+      Rating: 8/10
+      (Full text in document: 'moby_dick')
+    - Pride and Prejudice, Chapter 1
+      Rating: 8/10
+      (Full text in document: 'pride_and_prejudice')
+
+MEMBER: Yasmine Richardson (RC-1011)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - Moby Dick, Chapter 36
+      Rating: 7/10
+      (Full text in document: 'moby_dick')
+    - Moby Dick, Chapter 42
+      Rating: 10/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: William Nelson (RC-1012)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - The Art of War, Chapter 6
+      Rating: 7/10
+      (Full text in document: 'art_of_war')
+    - Pride and Prejudice, Chapter 20
+      Rating: 8/10
+      (Full text in document: 'pride_and_prejudice')
+    - The Art of War, Chapter 5
+      Rating: 7/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Penelope Knight (RC-1013)
+----------------------------------------
+  Tier: Silver
+  Favorite Chapters:
+    - The Art of War, Chapter 7
+      Rating: 9/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Penelope Jacobs (RC-1014)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - Moby Dick, Chapter 87
+      Rating: 7/10
+      (Full text in document: 'moby_dick')
+    - Moby Dick, Chapter 10
+      Rating: 9/10
+      (Full text in document: 'moby_dick')
+    - Pride and Prejudice, Chapter 45
+      Rating: 7/10
+      (Full text in document: 'pride_and_prejudice')
+
+MEMBER: Charlotte Underwood (RC-1015)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - The Art of War, Chapter 11
+      Rating: 8/10
+      (Full text in document: 'art_of_war')
+    - Moby Dick, Chapter 87
+      Rating: 7/10
+      (Full text in document: 'moby_dick')
+    - The Art of War, Chapter 6
+      Rating: 9/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Lillian Underwood (RC-1016)
+----------------------------------------
+  Tier: Platinum
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 20
+      Rating: 9/10
+      (Full text in document: 'pride_and_prejudice')
+    - The Art of War, Chapter 7
+      Rating: 9/10
+      (Full text in document: 'art_of_war')
+    - Moby Dick, Chapter 36
+      Rating: 8/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Douglas Jenkins (RC-1017)
+----------------------------------------
+  Tier: Silver
+  Favorite Chapters:
+    - Moby Dick, Chapter 87
+      Rating: 8/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Irene Quincy (RC-1018)
+----------------------------------------
+  Tier: Platinum
+  Favorite Chapters:
+    - The Art of War, Chapter 5
+      Rating: 10/10
+      (Full text in document: 'art_of_war')
+    - The Art of War, Chapter 1
+      Rating: 9/10
+      (Full text in document: 'art_of_war')
+    - Moby Dick, Chapter 10
+      Rating: 10/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Xena O'Connor (RC-1019)
+----------------------------------------
+  Tier: Platinum
+  Favorite Chapters:
+    - The Art of War, Chapter 11
+      Rating: 9/10
+      (Full text in document: 'art_of_war')
+    - Moby Dick, Chapter 133
+      Rating: 10/10
+      (Full text in document: 'moby_dick')
+    - The Art of War, Chapter 4
+      Rating: 10/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Henry Jenkins (RC-1020)
+----------------------------------------
+  Tier: Silver
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 2
+      Rating: 9/10
+      (Full text in document: 'pride_and_prejudice')
+    - The Art of War, Chapter 11
+      Rating: 9/10
+      (Full text in document: 'art_of_war')
+    - Pride and Prejudice, Chapter 10
+      Rating: 9/10
+      (Full text in document: 'pride_and_prejudice')
+
+MEMBER: Eleanor Young (RC-1021)
+----------------------------------------
+  Tier: Platinum
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 3
+      Rating: 7/10
+      (Full text in document: 'pride_and_prejudice')
+
+MEMBER: Jonathan Anderson (RC-1022)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 58
+      Rating: 7/10
+      (Full text in document: 'pride_and_prejudice')
+
+MEMBER: Zelda Vaughn (RC-1023)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - Moby Dick, Chapter 10
+      Rating: 10/10
+      (Full text in document: 'moby_dick')
+    - Moby Dick, Chapter 87
+      Rating: 8/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Douglas Anderson (RC-1024)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - The Art of War, Chapter 12
+      Rating: 7/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Gertrude Graham (RC-1025)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - Moby Dick, Chapter 10
+      Rating: 8/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Margaret Jenkins (RC-1026)
+----------------------------------------
+  Tier: Silver
+  Favorite Chapters:
+    - The Art of War, Chapter 8
+      Rating: 7/10
+      (Full text in document: 'art_of_war')
+    - The Art of War, Chapter 4
+      Rating: 7/10
+      (Full text in document: 'art_of_war')
+    - Moby Dick, Chapter 3
+      Rating: 10/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Alice Mitchell (RC-1027)
+----------------------------------------
+  Tier: Platinum
+  Favorite Chapters:
+    - The Art of War, Chapter 9
+      Rating: 9/10
+      (Full text in document: 'art_of_war')
+    - Moby Dick, Chapter 135
+      Rating: 10/10
+      (Full text in document: 'moby_dick')
+    - The Art of War, Chapter 8
+      Rating: 8/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Xena Thompson (RC-1028)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - Moby Dick, Chapter 133
+      Rating: 9/10
+      (Full text in document: 'moby_dick')
+    - Pride and Prejudice, Chapter 20
+      Rating: 10/10
+      (Full text in document: 'pride_and_prejudice')
+    - The Art of War, Chapter 4
+      Rating: 9/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Frederick Fletcher (RC-1029)
+----------------------------------------
+  Tier: Platinum
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 20
+      Rating: 8/10
+      (Full text in document: 'pride_and_prejudice')
+    - Moby Dick, Chapter 42
+      Rating: 9/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Zelda Irving (RC-1030)
+----------------------------------------
+  Tier: Platinum
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 3
+      Rating: 8/10
+      (Full text in document: 'pride_and_prejudice')
+    - Pride and Prejudice, Chapter 45
+      Rating: 8/10
+      (Full text in document: 'pride_and_prejudice')
+    - The Art of War, Chapter 4
+      Rating: 7/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Quinn Hawkins (RC-1031)
+----------------------------------------
+  Tier: Platinum
+  Favorite Chapters:
+    - Moby Dick, Chapter 42
+      Rating: 10/10
+      (Full text in document: 'moby_dick')
+    - Moby Dick, Chapter 1
+      Rating: 8/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Yvonne Morrison (RC-1032)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - Moby Dick, Chapter 1
+      Rating: 10/10
+      (Full text in document: 'moby_dick')
+    - Moby Dick, Chapter 36
+      Rating: 10/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Raymond Xander (RC-1033)
+----------------------------------------
+  Tier: Platinum
+  Favorite Chapters:
+    - The Art of War, Chapter 12
+      Rating: 8/10
+      (Full text in document: 'art_of_war')
+    - Moby Dick, Chapter 10
+      Rating: 9/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Olivia Edwards (RC-1034)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - Moby Dick, Chapter 1
+      Rating: 10/10
+      (Full text in document: 'moby_dick')
+    - Moby Dick, Chapter 87
+      Rating: 8/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Olivia Lawson (RC-1035)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 1
+      Rating: 10/10
+      (Full text in document: 'pride_and_prejudice')
+    - The Art of War, Chapter 10
+      Rating: 7/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Penelope Davidson (RC-1036)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - The Art of War, Chapter 7
+      Rating: 8/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Eleanor Griffith (RC-1037)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 1
+      Rating: 9/10
+      (Full text in document: 'pride_and_prejudice')
+    - Moby Dick, Chapter 42
+      Rating: 8/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Irene Irving (RC-1038)
+----------------------------------------
+  Tier: Platinum
+  Favorite Chapters:
+    - Moby Dick, Chapter 42
+      Rating: 10/10
+      (Full text in document: 'moby_dick')
+    - Moby Dick, Chapter 87
+      Rating: 9/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Abigail Morrison (RC-1039)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - Moby Dick, Chapter 1
+      Rating: 7/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Bernard Abbott (RC-1040)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 2
+      Rating: 7/10
+      (Full text in document: 'pride_and_prejudice')
+    - Pride and Prejudice, Chapter 10
+      Rating: 8/10
+      (Full text in document: 'pride_and_prejudice')
+
+MEMBER: Zachary Vaughn (RC-1041)
+----------------------------------------
+  Tier: Silver
+  Favorite Chapters:
+    - The Art of War, Chapter 3
+      Rating: 8/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Irene Crawford (RC-1042)
+----------------------------------------
+  Tier: Platinum
+  Favorite Chapters:
+    - Moby Dick, Chapter 2
+      Rating: 8/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Douglas Patterson (RC-1043)
+----------------------------------------
+  Tier: Platinum
+  Favorite Chapters:
+    - The Art of War, Chapter 5
+      Rating: 9/10
+      (Full text in document: 'art_of_war')
+    - Pride and Prejudice, Chapter 2
+      Rating: 8/10
+      (Full text in document: 'pride_and_prejudice')
+
+MEMBER: Daniel Ingram (RC-1044)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 1
+      Rating: 9/10
+      (Full text in document: 'pride_and_prejudice')
+    - The Art of War, Chapter 11
+      Rating: 10/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Abigail Foster (RC-1045)
+----------------------------------------
+  Tier: Silver
+  Favorite Chapters:
+    - The Art of War, Chapter 4
+      Rating: 7/10
+      (Full text in document: 'art_of_war')
+    - The Art of War, Chapter 12
+      Rating: 8/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Katherine Young (RC-1046)
+----------------------------------------
+  Tier: Platinum
+  Favorite Chapters:
+    - The Art of War, Chapter 13
+      Rating: 9/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Samuel Bennett (RC-1047)
+----------------------------------------
+  Tier: Platinum
+  Favorite Chapters:
+    - The Art of War, Chapter 13
+      Rating: 7/10
+      (Full text in document: 'art_of_war')
+    - Pride and Prejudice, Chapter 34
+      Rating: 10/10
+      (Full text in document: 'pride_and_prejudice')
+    - The Art of War, Chapter 6
+      Rating: 7/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Samuel Nelson (RC-1048)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - The Art of War, Chapter 6
+      Rating: 7/10
+      (Full text in document: 'art_of_war')
+    - Moby Dick, Chapter 133
+      Rating: 7/10
+      (Full text in document: 'moby_dick')
+    - Moby Dick, Chapter 42
+      Rating: 10/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Daniel Lawson (RC-1049)
+----------------------------------------
+  Tier: Silver
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 45
+      Rating: 8/10
+      (Full text in document: 'pride_and_prejudice')
+    - The Art of War, Chapter 9
+      Rating: 9/10
+      (Full text in document: 'art_of_war')
+    - The Art of War, Chapter 13
+      Rating: 10/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Frederick Lambert (RC-1050)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - Moby Dick, Chapter 36
+      Rating: 9/10
+      (Full text in document: 'moby_dick')
+    - Pride and Prejudice, Chapter 2
+      Rating: 9/10
+      (Full text in document: 'pride_and_prejudice')
+
+MEMBER: Henry Keller (RC-1051)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 58
+      Rating: 10/10
+      (Full text in document: 'pride_and_prejudice')
+    - Moby Dick, Chapter 1
+      Rating: 10/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Abigail Lawson (RC-1052)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 58
+      Rating: 8/10
+      (Full text in document: 'pride_and_prejudice')
+    - Moby Dick, Chapter 36
+      Rating: 9/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Sophia Underwood (RC-1053)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - The Art of War, Chapter 12
+      Rating: 9/10
+      (Full text in document: 'art_of_war')
+    - The Art of War, Chapter 1
+      Rating: 8/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Sophia Thompson (RC-1054)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 45
+      Rating: 10/10
+      (Full text in document: 'pride_and_prejudice')
+
+MEMBER: Douglas Newman (RC-1055)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 58
+      Rating: 10/10
+      (Full text in document: 'pride_and_prejudice')
+    - Moby Dick, Chapter 1
+      Rating: 7/10
+      (Full text in document: 'moby_dick')
+    - Moby Dick, Chapter 10
+      Rating: 10/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Nathan Griffith (RC-1056)
+----------------------------------------
+  Tier: Silver
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 20
+      Rating: 9/10
+      (Full text in document: 'pride_and_prejudice')
+    - Moby Dick, Chapter 135
+      Rating: 9/10
+      (Full text in document: 'moby_dick')
+    - Moby Dick, Chapter 42
+      Rating: 10/10
+      (Full text in document: 'moby_dick')
+
+MEMBER: Patrick Xander (RC-1057)
+----------------------------------------
+  Tier: Silver
+  Favorite Chapters:
+    - Moby Dick, Chapter 36
+      Rating: 8/10
+      (Full text in document: 'moby_dick')
+    - Pride and Prejudice, Chapter 10
+      Rating: 9/10
+      (Full text in document: 'pride_and_prejudice')
+
+MEMBER: Vincent Thompson (RC-1058)
+----------------------------------------
+  Tier: Bronze
+  Favorite Chapters:
+    - The Art of War, Chapter 9
+      Rating: 8/10
+      (Full text in document: 'art_of_war')
+
+MEMBER: Sophia Graham (RC-1059)
+----------------------------------------
+  Tier: Gold
+  Favorite Chapters:
+    - Pride and Prejudice, Chapter 58
+      Rating: 9/10
+      (Full text in document: 'pride_and_prejudice')

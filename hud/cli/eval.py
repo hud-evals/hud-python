@@ -47,6 +47,7 @@ class AgentPreset:
 # Built-in presets for the interactive picker
 _AGENT_PRESETS: list[AgentPreset] = [
     # Native agents (use provider SDKs directly)
+    AgentPreset("ByteDance Agentic", AgentType.BYTEDANCE, "ep-20251106141738-cn2tk"),
     AgentPreset("Claude Sonnet 4.5", AgentType.CLAUDE, "claude-sonnet-4-5-20250929"),
     AgentPreset("GPT-5", AgentType.OPENAI, "gpt-5"),
     AgentPreset("Operator (OpenAI Computer Use)", AgentType.OPERATOR, "computer-use-preview"),
@@ -97,10 +98,15 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 [openai_compatible]
 # base_url = "http://localhost:8000/v1"
 # model_name = "my-model"
+
+[bytedance]
+# think_mode = "efficient"  # no_think, efficient, budgeted, unrestricted
+# max_tokens = 16384
 """
 
 # Agent type -> (settings attr, env var name)
 _API_KEY_REQUIREMENTS: dict[AgentType, tuple[str, str]] = {
+    AgentType.BYTEDANCE: ("ark_api_key", "ARK_API_KEY"),
     AgentType.CLAUDE: ("anthropic_api_key", "ANTHROPIC_API_KEY"),
     AgentType.GEMINI: ("gemini_api_key", "GEMINI_API_KEY"),
     AgentType.OPENAI: ("openai_api_key", "OPENAI_API_KEY"),

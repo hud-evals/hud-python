@@ -1,0 +1,98 @@
+[
+  {
+    "id": "task-department-summary",
+    "prompt": "For EACH of the 10 departments in the database, calculate:\n1. Number of employees\n2. Total salary (sum of all employee salaries in that department)\n3. Total revenue generated (sum of order revenue where sales_rep_id belongs to that department)\n\nRevenue = product revenue + shipping cost\nProduct revenue formula: quantity \u00d7 unit_price \u00d7 (1 - discount_percent/100)\nThen add orders.shipping_cost to get total revenue per order.\n\nIMPORTANT: Exclude cancelled orders (status = 'cancelled') from revenue calculation.\n\nFormat your answer as a single string with departments sorted ALPHABETICALLY by name:\n`DeptName1: emp_count, total_salary, total_revenue; DeptName2: emp_count, total_salary, total_revenue; ...`\n\nRevenue must have exactly 2 decimal places (e.g., 0.00, 22525.34).\n\nExample format: `Engineering: 15, 1500000, 250000.50; Marketing: 12, 1200000, 0.00`\n\nYou have access to a Supabase database via supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Available tables: departments, employees, orders, order_items.\n\nStore the formatted answer using local_scratchpad_write with key 'answer'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Customer Support: 9, 683435, 0.00; Engineering: 11, 1222803, 0.00; Finance: 10, 985764, 0.00; Human Resources: 10, 808739, 0.00; Legal: 9, 1218585, 0.00; Marketing: 10, 988876, 0.00; Operations: 9, 790065, 0.00; Product Management: 9, 1236463, 0.00; Research & Development: 9, 1447542, 0.00; Sales: 11, 1340737, 2827914.86"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "supabase_execute_sql",
+        "supabase_list_tables"
+      ]
+    }
+  },
+  {
+    "id": "task-batched-profit-300",
+    "prompt": "The scratchpad contains 6 batches of product SKUs (batch_1 through batch_6), with 50 SKUs in each batch (300 total). There is also a 'formula' key with the profit calculation formula.\n\nYour task: Calculate the TOTAL PROFIT for all 300 products across all batches.\n\nSteps:\n1. Read each batch from the scratchpad (batch_1, batch_2, ..., batch_6)\n2. Read the formula from scratchpad\n3. Query the database for the required data\n4. Calculate total profit\n\nNOTE: The SQL query with 300 SKUs may be very long. You may need to run multiple queries (e.g., one per batch) and sum the results.\n\nYou have access to a Supabase database via supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: products, order_items.\n\nStore the total profit (rounded to 2 decimal places) using local_scratchpad_write with key 'answer'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {
+        "initial_data": {
+          "batch_1": "SKU-100655, SKU-100114, SKU-100026, SKU-100760, SKU-100281, SKU-100250, SKU-100228, SKU-100142, SKU-100755, SKU-100104, SKU-100693, SKU-100759, SKU-100559, SKU-100089, SKU-100605, SKU-100432, SKU-100033, SKU-100031, SKU-100095, SKU-100223, SKU-100238, SKU-100517, SKU-100617, SKU-100028, SKU-100575, SKU-100203, SKU-100734, SKU-100666, SKU-100719, SKU-100811, SKU-100429, SKU-100225, SKU-100459, SKU-100604, SKU-100284, SKU-100007, SKU-100778, SKU-100163, SKU-100715, SKU-100808, SKU-100348, SKU-100789, SKU-100159, SKU-100220, SKU-100344, SKU-100814, SKU-100094, SKU-100389, SKU-100099, SKU-100367",
+          "batch_2": "SKU-100352, SKU-100619, SKU-100270, SKU-100045, SKU-100748, SKU-100470, SKU-100550, SKU-100127, SKU-100387, SKU-100081, SKU-100566, SKU-100300, SKU-100644, SKU-100634, SKU-100370, SKU-100592, SKU-100196, SKU-100722, SKU-100072, SKU-100047, SKU-100678, SKU-100233, SKU-100296, SKU-100537, SKU-100803, SKU-100103, SKU-100776, SKU-100782, SKU-100464, SKU-100651, SKU-100373, SKU-100166, SKU-100379, SKU-100363, SKU-100214, SKU-100687, SKU-100273, SKU-100795, SKU-100700, SKU-100664, SKU-100074, SKU-100624, SKU-100744, SKU-100175, SKU-100547, SKU-100818, SKU-100167, SKU-100473, SKU-100388, SKU-100276",
+          "batch_3": "SKU-100656, SKU-100705, SKU-100571, SKU-100224, SKU-100702, SKU-100332, SKU-100058, SKU-100234, SKU-100807, SKU-100323, SKU-100410, SKU-100274, SKU-100068, SKU-100216, SKU-100581, SKU-100322, SKU-100217, SKU-100672, SKU-100511, SKU-100405, SKU-100659, SKU-100469, SKU-100146, SKU-100271, SKU-100816, SKU-100252, SKU-100799, SKU-100552, SKU-100269, SKU-100599, SKU-100438, SKU-100598, SKU-100408, SKU-100812, SKU-100720, SKU-100141, SKU-100521, SKU-100505, SKU-100093, SKU-100049, SKU-100112, SKU-100156, SKU-100643, SKU-100786, SKU-100784, SKU-100611, SKU-100066, SKU-100394, SKU-100390, SKU-100753",
+          "batch_4": "SKU-100479, SKU-100542, SKU-100257, SKU-100567, SKU-100012, SKU-100117, SKU-100767, SKU-100737, SKU-100657, SKU-100783, SKU-100822, SKU-100762, SKU-100445, SKU-100161, SKU-100745, SKU-100004, SKU-100695, SKU-100512, SKU-100182, SKU-100519, SKU-100108, SKU-100641, SKU-100305, SKU-100654, SKU-100732, SKU-100798, SKU-100682, SKU-100382, SKU-100165, SKU-100553, SKU-100544, SKU-100001, SKU-100614, SKU-100331, SKU-100500, SKU-100020, SKU-100663, SKU-100371, SKU-100314, SKU-100245, SKU-100060, SKU-100246, SKU-100709, SKU-100764, SKU-100087, SKU-100497, SKU-100071, SKU-100546, SKU-100128, SKU-100131",
+          "batch_5": "SKU-100486, SKU-100563, SKU-100169, SKU-100735, SKU-100541, SKU-100433, SKU-100710, SKU-100761, SKU-100205, SKU-100319, SKU-100691, SKU-100646, SKU-100448, SKU-100529, SKU-100462, SKU-100123, SKU-100253, SKU-100230, SKU-100677, SKU-100346, SKU-100022, SKU-100568, SKU-100235, SKU-100792, SKU-100008, SKU-100073, SKU-100061, SKU-100716, SKU-100070, SKU-100785, SKU-100338, SKU-100692, SKU-100526, SKU-100243, SKU-100285, SKU-100628, SKU-100219, SKU-100616, SKU-100135, SKU-100484, SKU-100248, SKU-100584, SKU-100416, SKU-100194, SKU-100096, SKU-100775, SKU-100441, SKU-100362, SKU-100618, SKU-100420",
+          "batch_6": "SKU-100478, SKU-100056, SKU-100100, SKU-100063, SKU-100412, SKU-100347, SKU-100111, SKU-100254, SKU-100757, SKU-100580, SKU-100667, SKU-100791, SKU-100143, SKU-100679, SKU-100187, SKU-100589, SKU-100726, SKU-100255, SKU-100078, SKU-100453, SKU-100721, SKU-100052, SKU-100016, SKU-100805, SKU-100242, SKU-100170, SKU-100631, SKU-100588, SKU-100492, SKU-100218, SKU-100713, SKU-100597, SKU-100168, SKU-100725, SKU-100003, SKU-100399, SKU-100620, SKU-100465, SKU-100292, SKU-100697, SKU-100498, SKU-100158, SKU-100564, SKU-100303, SKU-100222, SKU-100633, SKU-100570, SKU-100321, SKU-100059, SKU-100696",
+          "formula": "profit = quantity \u00d7 (unit_price \u00d7 (1 - discount_percent/100) - cost)"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "298790.13"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "supabase_execute_sql",
+        "supabase_list_tables"
+      ]
+    }
+  }
+]

@@ -1,0 +1,372 @@
+[
+  {
+    "id": "task-library-club-digital-no-overdue",
+    "prompt": "Find all library members who meet these criteria:\n- \"Attends book clubs\" AND \"Uses digital library\" BUT NOT \"Has overdue books\"\n\nFor each matching member, return their ID and full name.\n\nFORMAT: \"{member_id}: {name}\" separated by \"; \"\nSort alphabetically by member ID (A-Z).\nExample: \"LIB-1005: Alice Smith; LIB-1023: Bob Jones\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "LIB-1000: Oliver Harris; LIB-1004: Yusuf Garcia; LIB-1011: Priscilla Diaz; LIB-1016: George Taylor; LIB-1019: Ivan Edwards; LIB-1040: Charlie Anderson; LIB-1068: Priscilla Brown; LIB-1083: Rupert Lee; LIB-1094: Oscar Smith; LIB-1109: Samuel Taylor; LIB-1116: Oscar Fischer; LIB-1117: Bob Chen; LIB-1147: Vincent Garcia; LIB-1161: Edward Zhang; LIB-1162: Keith Zhang; LIB-1168: Julia Clark; LIB-1170: Natalie Moore; LIB-1177: Fiona Brown; LIB-1178: Michael O'Brien; LIB-1182: Michael Xu; LIB-1188: Xavier Edwards; LIB-1189: Jasmine Moore"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-platinum-author-talks",
+    "prompt": "How many Platinum tier members have attended at least one \"Author Talk\" event?\n\nCross-reference:\n1. Find all Platinum tier members from the member directory\n2. Check the activity log for \"Author Talk\" events\n3. Count unique Platinum members who attended any Author Talk\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.\n\n",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "2"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-mystery-punctual-gold",
+    "prompt": "Find members matching ALL of these:\n- \"Prefers Mystery\" (from member directory)\n- \"Never late on returns\" (from member directory)  \n- \"Gold tier\" (from member directory)\n\nReturn only the member IDs, sorted alphabetically.\n\nFORMAT: Member IDs separated by \"; \"\nExample: \"LIB-1002; LIB-1015; LIB-1089\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "LIB-1109; LIB-1157; LIB-1184"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-volunteer-fines",
+    "prompt": "Calculate the total outstanding fines for members who \"Volunteers at library\".\n\nSteps:\n1. Find all volunteer member IDs from the member directory\n2. Check the activity log for their borrowing records\n3. Sum up all fines for these members\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore the total as 'answer' (2 decimal places, round half up: 1.505 becomes 1.51).\nExample format: \"25.50\"\n\nSay 'Task completed.' when done.\n\n",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "2157.75"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-scifi-pre1990",
+    "prompt": "How many Science Fiction books in the catalog were published before 1990?\n\nCheck the book catalog for:\n- Genre: Science Fiction\n- Year: before 1990 (strictly less than 1990)\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.\n\n",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "9"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-frequent-event-attendees",
+    "prompt": "Find all members who have attended 3 or more library events.\n\nFor each, return their ID, name, and event count.\n\nFORMAT: \"{member_id}: {name}, {count} events\" separated by \"; \"\nSort alphabetically by member ID (A-Z).\nExample: \"LIB-1012: Alice Chen, 4 events; LIB-1089: Bob Smith, 3 events\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "LIB-1002: Jasmine Martinez, 3 events; LIB-1007: Yusuf Rodriguez, 4 events; LIB-1008: Theodore Evans, 3 events; LIB-1009: Rachel Jackson, 4 events; LIB-1013: Julia Kim, 4 events; LIB-1016: George Taylor, 3 events; LIB-1021: Paula O'Brien, 3 events; LIB-1022: Edward Davis, 5 events; LIB-1023: Nina Irving, 3 events; LIB-1026: Michael Irving, 3 events; LIB-1029: Yusuf Quinn, 5 events; LIB-1032: Edward Moore, 4 events; LIB-1033: Natalie Fischer, 3 events; LIB-1035: Alice Diaz, 3 events; LIB-1036: Walter Evans, 5 events; LIB-1037: Natalie Hill, 3 events; LIB-1038: Quinn Harris, 3 events; LIB-1042: Charlie Taylor, 3 events; LIB-1044: Laura Adams, 3 events; LIB-1046: Walter Taylor, 3 events; LIB-1051: Natalie Underwood, 3 events; LIB-1053: Natalie King, 5 events; LIB-1060: Natalie Green, 5 events; LIB-1071: Paula Martinez, 3 events; LIB-1073: Tina Garcia, 3 events; LIB-1074: Edward Lee, 3 events; LIB-1076: Alice Adams, 3 events; LIB-1078: Delia Brown, 3 events; LIB-1079: Paula Diaz, 4 events; LIB-1081: Helena Martinez, 3 events; LIB-1084: Walter Diaz, 3 events; LIB-1085: Xavier Lopez, 3 events; LIB-1087: Ivan Rodriguez, 5 events; LIB-1089: Ernest Harris, 3 events; LIB-1090: Julia King, 3 events; LIB-1094: Oscar Smith, 3 events; LIB-1098: Beatrice Underwood, 4 events; LIB-1099: Xavier Rodriguez, 4 events; LIB-1100: Laura Lee, 3 events; LIB-1103: Gordon Anderson, 3 events; LIB-1105: Hannah Baker, 4 events; LIB-1111: Keith Young, 4 events; LIB-1113: Conrad Garcia, 3 events; LIB-1115: Yusuf Underwood, 3 events; LIB-1119: Felicia Lee, 5 events; LIB-1120: Delia Smith, 3 events; LIB-1121: Theodore Quinn, 4 events; LIB-1123: Alice King, 3 events; LIB-1124: Martin Williams, 4 events; LIB-1129: Zara Anderson, 3 events; LIB-1130: Lydia Young, 3 events; LIB-1133: Yusuf Diaz, 4 events; LIB-1136: Michael Harris, 5 events; LIB-1138: Oscar Vargas, 3 events; LIB-1140: Lydia Underwood, 4 events; LIB-1142: Oscar Nguyen, 3 events; LIB-1143: Diana Edwards, 3 events; LIB-1145: Yusuf Moore, 5 events; LIB-1146: Priscilla Jackson, 4 events; LIB-1147: Vincent Garcia, 7 events; LIB-1148: Edward Fischer, 4 events; LIB-1151: Rupert Edwards, 4 events; LIB-1152: Beatrice Jackson, 5 events; LIB-1154: Rupert Zhang, 3 events; LIB-1156: Diana Jensen, 4 events; LIB-1157: Felicia Moore, 4 events; LIB-1159: Alice Nelson, 3 events; LIB-1163: Theodore Xu, 3 events; LIB-1164: Fiona Zhang, 3 events; LIB-1168: Julia Clark, 4 events; LIB-1169: Walter Green, 4 events; LIB-1171: Keith Martinez, 4 events; LIB-1175: Lydia Jensen, 4 events; LIB-1178: Michael O'Brien, 3 events; LIB-1180: Laura Nguyen, 5 events; LIB-1182: Michael Xu, 6 events; LIB-1185: Julia Brown, 3 events; LIB-1187: Ursula Vargas, 3 events; LIB-1188: Xavier Edwards, 3 events; LIB-1196: Charlie Smith, 3 events; LIB-1199: Yusuf Vargas, 3 events"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-multi-genre-lovers",
+    "prompt": "How many members appear in 3 or more different \"Prefers X\" genre sections?\n\nThe preference sections are:\n- \"Prefers Fiction\"\n- \"Prefers Non-Fiction\"\n- \"Prefers Mystery\"\n- \"Prefers Science Fiction\"\n- \"Prefers Fantasy\"\n\nCount members who are listed in at least 3 of these sections.\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.\n\n",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "26"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-top-borrower",
+    "prompt": "Find the member with the most borrowing records in the activity log.\n\nReturn their ID, name, and borrowing count.\n\nFORMAT: \"{member_id}: {name}, {count} borrowings\"\nExample: \"LIB-1050: Alice Brown, 15 borrowings\"\n\nIf there's a tie, pick the one with the alphabetically first member ID.\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "LIB-1095: Beatrice Harris, 8 borrowings"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-generous-silver",
+    "prompt": "Find Silver tier members who have both:\n- \"Donated books\" (from member directory)\n- Attended a \"Book Sale\" event (from activity log)\n\nReturn their ID and name.\n\nFORMAT: \"{member_id}: {name}\" separated by \"; \"\nSort alphabetically by member ID (A-Z).\nExample: \"LIB-1010: Alice Wong; LIB-1045: Bob Chen\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "LIB-1035: Alice Diaz; LIB-1042: Charlie Taylor; LIB-1054: Delia Clark; LIB-1055: Samuel Green; LIB-1089: Ernest Harris; LIB-1097: Theodore Taylor"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-library-avg-late-fine",
+    "prompt": "Calculate the average fine amount per late borrowing.\n\nFrom the activity log:\n1. Find all borrowing records marked as late with a fine > 0\n2. Calculate the average fine (sum of fines / number of late borrowings)\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore the average (round to 2 decimal places, round half up) as 'answer'.\nExample format: \"3.75\"\n\nSay 'Task completed.' when done.\n\n",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "71.18"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  }
+]

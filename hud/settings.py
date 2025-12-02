@@ -124,6 +124,12 @@ class Settings(BaseSettings):
         validation_alias="PRIME_API_KEY",
     )
 
+    ark_api_key: str | None = Field(
+        default=None,
+        description="API key for ByteDance Ark models",
+        validation_alias="ARK_API_KEY",
+    )
+
     telemetry_enabled: bool = Field(
         default=True,
         description="Enable telemetry for the HUD SDK",

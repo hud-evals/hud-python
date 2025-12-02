@@ -1,0 +1,372 @@
+[
+  {
+    "id": "task-rc-next-chapter-content",
+    "prompt": "Find Isabella Graham's highest-rated favorite chapter. Then return the first complete paragraph of the NEXT chapter in that same book.\n\nSTEPS:\n1. Find Isabella Graham in member directory to get ID\n2. Look up preferences to find highest-rated chapter (if tied: alphabetically first book)\n3. Identify which book and chapter number\n4. Go to that book document and find the NEXT chapter (if fav is Ch 2, find Ch 3)\n5. Return the first complete paragraph of that next chapter\n\nFORMAT: Return only the paragraph text, no chapter heading.\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the paragraph as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Not all that Mrs. Bennet, however, with the assistance of her five daughters, could ask on the subject, was sufficient to draw from her husband any satisfactory description of Mr. Bingley."
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-four-people-chapters",
+    "prompt": "Find ALL Bronze tier members whose favorite genre is \"Classic Fiction\". For each, report their highest-rated favorite chapter.\n\nIf a member has multiple favorites with the same rating, use lowest chapter number.\n\nFORMAT: \n\"Name1: BookTitle Chapter X; Name2: BookTitle Chapter Y; ...\"\n- Entries separated by \"; \" (semicolon space)\n- In order of member ID (ascending)\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Olivia Lawson: Pride and Prejudice Chapter 1; Penelope Davidson: The Art of War Chapter 7; Bernard Abbott: Pride and Prejudice Chapter 10; Douglas Newman: Moby Dick Chapter 10"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-and-criteria-chapters",
+    "prompt": "Find members who are BOTH Bronze tier AND have Philosophy as favorite genre. Return the first 3 (by member ID) and their highest-rated chapter.\n\nFORMAT: \"Name: Book ChX; Name: Book ChY; Name: Book ChZ\"\n- Entries separated by \"; \" (semicolon space)\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Sophia O'Connor: Moby Dick Ch36; Xena Thompson: Pride and Prejudice Ch20; Daniel Ingram: The Art of War Ch11"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-count-all-group-members",
+    "prompt": "Count the total number of UNIQUE members who belong to at least one discussion group.\n\nA member may belong to multiple groups but should only be counted once.\nYou must examine ALL discussion groups in the document to get an accurate count.\n\nFORMAT: Just the number (e.g., \"42\")\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "41"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-cross-constitution",
+    "prompt": "Find the study circle called \"THE STRATEGISTS\" in the study_circles document. Note what day they meet.\n\nThen, from the us_constitution document, return the complete text of Article 1 Section 1.\n\nFORMAT: \"Meeting day: [DAY]. Constitution text: [EXACT TEXT]\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the formatted answer as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Meeting day: Tuesday. Constitution text: All legislative Powers herein granted shall be vested in a Congress of the United States, which shall consist of a Senate and House of Representatives."
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-exact-preamble",
+    "prompt": "Return the complete Preamble of the US Constitution EXACTLY as it appears in the document.\n\nThe Preamble starts with \"We the people\" and ends with \"United States of America.\"\n\nIMPORTANT: Return the exact text including all line breaks, punctuation, and spacing. Character-perfect extraction is required.\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the exact preamble as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "We the people of the United States, in Order to form a more perfect Union,\nestablish Justice, insure domestic Tranquility, provide for the common defence,\npromote the general Welfare, and secure the Blessings of Liberty to ourselves\nand our Posterity, do ordain and establish this Constitution for the\nUnited States of America."
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-or-not-criteria",
+    "prompt": "Find members who meet ALL of these criteria:\n1. Either Gold OR Silver tier\n2. NOT a member of the \"Literary Lions\" discussion group\n3. Have read more than 20 books (according to member directory)\n\nADDITIONAL CONTEXT (this is relevant but not directly used in the query):\n- The Literary Lions group focuses on challenging literary analysis\n- Members who haven't joined this group often prefer lighter reading\n- This is for a recruitment email campaign\n\nReturn the first 5 such members by member ID (ascending).\n\nFORMAT: \"Name1; Name2; Name3; Name4; Name5\"\n- Names separated by \"; \" (semicolon space)\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "William Whitfield; Yasmine Richardson; William Nelson; Penelope Knight; Henry Jenkins"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-override-correction",
+    "prompt": "IMPORTANT CORRECTION: There is a data entry error in the reading_club_preferences document.\n\nMember RC-1000 (Penelope Harrison) is incorrectly listed with certain chapter preferences. \nThe CORRECT preferences for RC-1000 are:\n- Pride and Prejudice, Chapter 1: Rating 10/10\n- Moby Dick, Chapter 42: Rating 8/10\n\nUsing this CORRECTED information (not what the document says), find Penelope Harrison's highest-rated chapter and return the first sentence of that chapter from the corresponding book.\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the first sentence as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "It is a truth universally acknowledged, that a single man in possession of a good fortune must be in want of a wife."
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-chain-tuesday-art-war",
+    "prompt": "Multi-step task:\n\n1. Find ALL discussion groups that meet on Tuesday\n2. Collect all unique members from those Tuesday groups\n3. For each of those members, check their reading preferences\n4. Identify which ones have The Art of War as ANY of their favorites\n5. List those members' names\n\nFORMAT: \"Name1; Name2; Name3\"\n- Names separated by \"; \" (semicolon space)\n- Sorted alphabetically A-Z\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Daniel Ingram; Irene Quincy; Margaret Jenkins; Olivia Lawson; Samuel Nelson; Xena Thompson; Zelda Irving"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rc-platinum-avg-rating",
+    "prompt": "Calculate which book has the highest AVERAGE rating among Platinum tier members only.\n\n1. Find all Platinum tier members from the member directory\n2. For each, look up ALL their chapter preferences in the preferences document\n3. Group ratings by book title\n4. Calculate average rating for each book (across all Platinum member preferences)\n5. Return the book with highest average (if tied, alphabetically first book title)\n\nFORMAT: \"BookTitle: X.XX average\"\n- Average rounded to 2 decimal places\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the formatted answer as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Moby Dick: 9.18 average"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  }
+]

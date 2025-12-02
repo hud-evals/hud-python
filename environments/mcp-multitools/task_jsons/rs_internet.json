@@ -1,0 +1,116 @@
+[
+  {
+    "id": "task-inchikey-tetrodotoxin",
+    "prompt": "Find the InChIKey for tetrodotoxin (TTX), the neurotoxin found in puffer fish.\n\nInChIKey is a 27-character chemical identifier (format: XXXXXXXXXXXXXX-XXXXXXXXXX-X).\n\nStore ONLY the InChIKey with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "CFMYXEVWODSLAX-QOZOJKKESA-N"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "search",
+        "fetch"
+      ]
+    }
+  },
+  {
+    "id": "task-inchikey-triple",
+    "prompt": "Find the InChIKey for each of these three compounds:\n\n1. Capsaicin (the compound that makes chili peppers hot)\n2. Strychnine (a toxic alkaloid from the Strychnos nux-vomica tree)\n3. Muscarine (a toxin found in certain mushrooms)\n\nInChIKey is a 27-character chemical identifier (format: XXXXXXXXXXXXXX-XXXXXXXXXX-X).\n\nStore each InChIKey with keys 'capsaicin', 'strychnine', and 'muscarine'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "capsaicin": "YKPUWZUDDOIDPM-SOFGYWHQSA-N",
+          "strychnine": "QMGVPVSNSZLJIA-FVWCLLPLSA-N",
+          "muscarine": "UQOFGTXDASPNLL-XHNCKOQMSA-N"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "search",
+        "fetch"
+      ]
+    }
+  },
+  {
+    "id": "task-uniprot-taq-polymerase",
+    "prompt": "Find the UniProt accession ID for Taq DNA polymerase, the heat-stable enzyme from the bacterium Thermus aquaticus that is widely used in PCR (polymerase chain reaction).\n\nUniProt accession IDs typically have the format: one letter + five alphanumeric characters (e.g., P12345).\n\nStore ONLY the UniProt accession ID with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "P19821"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "search",
+        "fetch"
+      ]
+    }
+  }
+]
+

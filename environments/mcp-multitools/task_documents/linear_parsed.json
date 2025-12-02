@@ -1,0 +1,417 @@
+{
+  "issues": [
+    {
+      "title": "Quarterly business review deck",
+      "id": "ccc7ca26-0a49-4728-9c18-616a01449b0f",
+      "state": "Todo",
+      "assignee_text": "Eleanor Edwards, Benjamin Blackwood",
+      "emp_ids": [
+        "EMP-10053R",
+        "EMP-10020K"
+      ],
+      "description": "QBR with exec team next Wednesday. Need slides covering:\n\n* Revenue vs target\n* Customer growth metrics\n* Top deals closed\n* Churn analysis\n\nDeadline: Monday EOD so leadership can review.\n\n**Assigned to:** Eleanor Edwards, Benjamin Blackwood"
+    },
+    {
+      "title": "Set up staging environment",
+      "id": "f3cf823b-3e42-4746-935c-04d214ef1ecd",
+      "state": "Todo",
+      "assignee_text": "James Chen (EMP-10110W)",
+      "emp_ids": [
+        "EMP-10110W"
+      ],
+      "description": "We've been deploying straight to prod which is risky. Need a proper staging setup.\n\nAWS estimate: \\~$400/month for staging infra. Submitted budget request to finance.\n\nOnce approved, James can provision in about 2 days.\n\n**Assigned to:** James Chen (EMP-10110W)"
+    },
+    {
+      "title": "Delivery confirmation: Gamma Technologies",
+      "id": "90c45a1c-ae11-4286-b73c-cb1c35ccb42d",
+      "state": "Todo",
+      "assignee_text": "James Chen (EMP-10124K)",
+      "emp_ids": [
+        "EMP-10124K",
+        "EMP-10110W"
+      ],
+      "description": "Order ORD-100035N shows delivered but customer hasn't confirmed receipt.\n\nMight just be busy. Send a quick email checking if everything arrived OK. If no response in 3 days, call them.\n\nTemplate at templates.internal/delivery-followup.html\n\n**Assigned to:** James Chen (EMP-10124K)"
+    },
+    {
+      "title": "Broken link on pricing page",
+      "id": "ff8e3e8b-5b59-4fa2-b034-5cb8ef4f320c",
+      "state": "Todo",
+      "assignee_text": "James Chen (EMP-10110W)",
+      "emp_ids": [
+        "EMP-10110W"
+      ],
+      "description": "Customer reported that \"Contact Sales\" button leads to 404. Probably from the last deploy.\n\nQuick fix - just need to update the href in the React component. File is probably src/pages/Pricing.tsx.\n\nLow priority but looks unprofessional.\n\n**Assigned to:** James Chen (EMP-10110W)"
+    },
+    {
+      "title": "Competitive analysis: new market entrant",
+      "id": "3a9c0ffc-d147-4f51-bf88-1ae06463d6b4",
+      "state": "Todo",
+      "assignee_text": "Product Team",
+      "emp_ids": [],
+      "description": "Heard that NovaTech Solutions launched a competing product. Pricing seems aggressive.\n\nNeed someone to:\n\n* Sign up for their trial\n* Document features vs ours\n* Check their reviews on G2 and Capterra\n\nSummary deck due for strategy meeting on the 20th.\n\n**Assigned to:** Product Team"
+    },
+    {
+      "title": "NPS survey follow-up: Alpha Dynamics Corp",
+      "id": "668ed2c3-a6cb-4a04-a2ac-d11719e733df",
+      "state": "Todo",
+      "assignee_text": "Gregory Chen",
+      "emp_ids": [
+        "EMP-10482E"
+      ],
+      "description": "They gave us a 6 (passive) on the last NPS survey. Left comment about slow response times.\n\nWorth a personal call to understand better. If we can move them to promoter, they'd be good reference account.\n\nSurvey data at surveys.internal/nps/2024-q3/\n\n**Assigned to:** Gregory Chen"
+    },
+    {
+      "title": "Code review backlog",
+      "id": "2d652fdd-5d4f-4b64-81c7-47c05d6863e1",
+      "state": "Todo",
+      "assignee_text": "James Chen (EMP-10110W), Ulrich Olsen",
+      "emp_ids": [
+        "EMP-10110W",
+        "EMP-10243Z"
+      ],
+      "description": "12 PRs waiting for review, some over a week old. Slowing down the team.\n\nProposal: rotate review duty weekly. This week: James Chen (EMP-10110W). Next week: Ulrich Olsen.\n\nSet up GitHub action to ping on Slack if PR is open >48 hours.\n\n**Assigned to:** James Chen (EMP-10110W), Ulrich Olsen"
+    },
+    {
+      "title": "Sales playbook for enterprise deals",
+      "id": "ba3bd6b9-2fd6-41ac-ad99-183474026db6",
+      "state": "Todo",
+      "assignee_text": "Benjamin Blackwood",
+      "emp_ids": [
+        "EMP-10020K"
+      ],
+      "description": "Need documented process for deals over $50K. Currently everyone does their own thing.\n\nBenjamin Blackwood closed our biggest deal last quarter - have them write up their approach. Include objection handling, pricing flexibility, legal approval workflow.\n\nTarget: 10-page PDF at sales.internal/playbooks/enterprise.pdf\n\n**Assigned to:** Benjamin Blackwood"
+    },
+    {
+      "title": "Photo update: Surface Pro 9",
+      "id": "19be5fcd-32f0-46a6-b7db-45dc95effa7c",
+      "state": "Todo",
+      "assignee_text": "Marketing Team",
+      "emp_ids": [],
+      "description": "Product photos are outdated - using stock imagery. Need fresh shots for the website refresh.\n\nPhotography vendor (Aperture Studios, contact: [mike@aperturestudios.com](mailto:mike@aperturestudios.com)) quoted $200 per product. Maybe batch this with other items needing updates.\n\nCurrent images at cdn.internal/products/SKU-100011/\n\n**Assigned to:** Marketing Team"
+    },
+    {
+      "title": "Book room for Sprint Retrospective",
+      "id": "9f70c174-9c00-46dc-ac2a-4f4837c6dcd4",
+      "state": "Todo",
+      "assignee_text": "Office Admin",
+      "emp_ids": [],
+      "description": "Meeting on 2024-11-30 needs a conference room. Preferably one with video setup since Daniel mentioned some folks dialing in.\n\nCheck availability at rooms.internal/booking. Backup option: use Zoom if no rooms free.\n\n**Assigned to:** Office Admin"
+    },
+    {
+      "title": "Q4 budget variance report",
+      "id": "a9e3569d-5690-4464-9146-33f7ad1e3f2f",
+      "state": "Todo",
+      "assignee_text": "Eleanor Edwards",
+      "emp_ids": [
+        "EMP-10053R"
+      ],
+      "description": "We're 8% over on marketing spend. Need to explain this to leadership.\n\nThe overage is mostly from the trade show in October - wasn't in original budget but generated good leads. Pull ROI data from HubSpot to justify.\n\nReport template at finance.internal/templates/variance-q4.xlsx.\n\n**Assigned to:** Eleanor Edwards"
+    },
+    {
+      "title": "Update employee handbook for remote work",
+      "id": "3d409cee-52cf-44db-a2ba-6705e1e1d07d",
+      "state": "Todo",
+      "assignee_text": "Daniel Dimitrov",
+      "emp_ids": [
+        "EMP-10043H"
+      ],
+      "description": "Current policy is outdated - written pre-COVID. Need to formalize the hybrid arrangement.\n\nLegal reviewed and approved the draft. See comments in [docs.google.com/handbook-v3-draft](http://docs.google.com/handbook-v3-draft).\n\nTarget rollout: January 1st. Announce in December all-hands.\n\n**Assigned to:** Daniel Dimitrov"
+    },
+    {
+      "title": "Customer portal login issues",
+      "id": "d0c57f0b-95e5-4e63-9449-d53f3c5d1876",
+      "state": "Todo",
+      "assignee_text": "James Chen (EMP-10110W), Georgia Gonzalez",
+      "emp_ids": [
+        "EMP-10110W",
+        "EMP-10073L"
+      ],
+      "description": "Got 4 tickets this week about customers unable to reset passwords. The reset email goes to spam for Gmail users.\n\nNeed to:\n\n* Check SPF/DKIM records at [cloudflare.com](http://cloudflare.com) dashboard\n* Maybe switch to SendGrid for transactional emails\n* Add \"check spam folder\" note to the login page for now\n\n**Assigned to:** James Chen (EMP-10110W), Georgia Gonzalez"
+    },
+    {
+      "title": "Backup supplier needed for Germany",
+      "id": "4d6210b4-bf9b-4d00-9777-71eca50a1674",
+      "state": "Todo",
+      "assignee_text": "Felix Fischer",
+      "emp_ids": [
+        "EMP-10067F"
+      ],
+      "description": "We're too dependent on EuroDistributors GmbH for that market. If they have supply issues, we're stuck.\n\nFind 2-3 alternatives on [thomasnet.com](http://thomasnet.com) or [alibaba.com](http://alibaba.com). Get quotes and samples before December.\n\nQuality is key - don't want to compromise on that.\n\n**Assigned to:** Felix Fischer"
+    },
+    {
+      "title": "Annual review: InnovateCo Industries",
+      "id": "db466d37-2338-4cf2-8f56-1b01a49722df",
+      "state": "Todo",
+      "assignee_text": "Florence Garcia",
+      "emp_ids": [
+        "EMP-10303H"
+      ],
+      "description": "Account is up for renewal next month. Currently on standard terms.\n\nPull their order history and see if volume justifies better pricing. Also check if they've had any support tickets - don't want surprises in the renewal call.\n\nTemplate for renewal proposals is at templates.internal/renewals/enterprise.docx.\n\n**Assigned to:** Florence Garcia"
+    },
+    {
+      "title": "Win-back: Aurora Industries cancelled",
+      "id": "61310c13-709e-4b89-9e68-ba1137e345cf",
+      "state": "Todo",
+      "assignee_text": "Benjamin Blackwood",
+      "emp_ids": [
+        "EMP-10020K"
+      ],
+      "description": "Order ORD-100122W was cancelled. Don't know why yet.\n\nWorth a call to understand - if it's pricing, we have room to negotiate. If it's delivery time, we can offer expedited.\n\nCheck CRM notes first to see if there's history. Good accounts are worth fighting for.\n\n**Assigned to:** Benjamin Blackwood"
+    },
+    {
+      "title": "Win-back: Neptune Trading Co cancelled",
+      "id": "4aecdcc9-a1d4-436f-aaed-faf1c1cb270f",
+      "state": "Todo",
+      "assignee_text": "Victor Garcia",
+      "emp_ids": [
+        "EMP-10588G"
+      ],
+      "description": "Order ORD-100113N was cancelled. Don't know why yet.\n\nWorth a call to understand - if it's pricing, we have room to negotiate. If it's delivery time, we can offer expedited.\n\nCheck CRM notes first to see if there's history. Good accounts are worth fighting for.\n\n**Assigned to:** Victor Garcia"
+    },
+    {
+      "title": "Reorder soon: Bose QC45 (19 left)",
+      "id": "c06e4019-e47e-4705-9c76-778ad59babbd",
+      "state": "Todo",
+      "assignee_text": "Felix Fischer",
+      "emp_ids": [
+        "EMP-10067F"
+      ],
+      "description": "Getting low on SKU-100014. Usually takes 2 weeks to restock from Continental Distributors.\n\nCheck last order quantity in PO system and adjust for holiday demand - probably need 20% more than usual.\n\n**Assigned to:** Felix Fischer"
+    },
+    {
+      "title": "Reorder soon: Sony WH-1000XM5 (13 left)",
+      "id": "48e5c5dd-cffd-4fb7-afc7-b532463e99fb",
+      "state": "Todo",
+      "assignee_text": "Felix Fischer",
+      "emp_ids": [
+        "EMP-10067F"
+      ],
+      "description": "Getting low on SKU-100013. Usually takes 2 weeks to restock from Southern Cross Supply.\n\nCheck last order quantity in PO system and adjust for holiday demand - probably need 20% more than usual.\n\n**Assigned to:** Felix Fischer"
+    },
+    {
+      "title": "Reorder soon: AirPods Pro 2 (7 left)",
+      "id": "a8f92a02-f842-420e-80f7-4d9160232330",
+      "state": "Todo",
+      "assignee_text": "Felix Fischer",
+      "emp_ids": [
+        "EMP-10067F"
+      ],
+      "description": "Getting low on SKU-100012. Usually takes 2 weeks to restock from Eastern Imports.\n\nCheck last order quantity in PO system and adjust for holiday demand - probably need 20% more than usual.\n\n**Assigned to:** Felix Fischer"
+    },
+    {
+      "title": "Prep deck for Weekly Team Standup",
+      "id": "7c720e35-1e2f-4e13-b24a-941e5159348e",
+      "state": "In Progress",
+      "assignee_text": "Eleanor Edwards",
+      "emp_ids": [
+        "EMP-10053R"
+      ],
+      "description": "Meeting is on 2024-12-01. Need to prepare slides covering Q4 progress.\n\nPull numbers from the dashboard at analytics.internal/q4-summary. Include the chart showing month-over-month growth.\n\nBenjamin Blackwood will present but needs the deck by day before.\n\n**Assigned to:** Eleanor Edwards"
+    },
+    {
+      "title": "Territory conflict in APAC region",
+      "id": "fa7b59be-f758-428d-8267-48a63a022bf0",
+      "state": "In Progress",
+      "assignee_text": "Benjamin Blackwood, James Chen (EMP-10124K)",
+      "emp_ids": [
+        "EMP-10124K",
+        "EMP-10020K",
+        "EMP-10110W"
+      ],
+      "description": "Benjamin Blackwood and James Chen (EMP-10124K) are both working the same accounts in Singapore.\n\nHad a call with both of them - agreeing to split by industry vertical instead of geography. Tech companies go to Benjamin, manufacturing to James.\n\nDrawing up new territory map in Salesforce. Target completion: Friday.\n\n**Assigned to:** Benjamin Blackwood, James Chen (EMP-10124K)"
+    },
+    {
+      "title": "Tracking issue: Quantum Labs Inc can't see updates",
+      "id": "6a9aed8a-e771-4365-ad45-46cc83376f8a",
+      "state": "In Progress",
+      "assignee_text": "Georgia Gonzalez",
+      "emp_ids": [
+        "EMP-10073L"
+      ],
+      "description": "Order ORD-100024C shipped on 2024-11-12 but tracking hasn't updated since leaving our warehouse.\n\nFedEx says it's a scan issue - package is actually in transit. I've escalated to their support (ticket #FDX-445892).\n\nNeed to call customer and explain, maybe offer free shipping on next order as goodwill.\n\n**Assigned to:** Georgia Gonzalez"
+    },
+    {
+      "title": "Custom packaging for NextGen Digital",
+      "id": "1d0e09f6-41cf-426c-91fb-52b36e7908e6",
+      "state": "In Progress",
+      "assignee_text": "Lydia Morrison, James Chen (EMP-10110W)",
+      "emp_ids": [
+        "EMP-10110W",
+        "EMP-10513J"
+      ],
+      "description": "Order ORD-100020Y needs special handling - they requested eco-friendly packaging for a sustainability campaign.\n\nWe don't normally stock biodegradable packing peanuts but found a supplier on Alibaba. Lead time is 3 days.\n\nWorth adding to our standard options? Getting quotes for bulk purchase.\n\n**Assigned to:** Lydia Morrison, James Chen (EMP-10110W)"
+    },
+    {
+      "title": "Urgent restock: iPhone 15 Pro",
+      "id": "4772d652-66bd-43ac-8422-0570003d20c0",
+      "state": "In Progress",
+      "assignee_text": "Felix Fischer",
+      "emp_ids": [
+        "EMP-10067F"
+      ],
+      "description": "We've had 3 customers ask about SKU-100001 this week and it's showing out of stock.\n\nCalled TechSource Global - they can ship 50 units by Friday if we order today. Cost is $2 higher per unit due to rush shipping but worth it.\n\nPO draft saved at [drive.google.com/purchasing/po-drafts/2024-nov](http://drive.google.com/purchasing/po-drafts/2024-nov).\n\n**Assigned to:** Felix Fischer"
+    },
+    {
+      "title": "Waiting on payment: DataFlow Systems",
+      "id": "f748e974-4d19-49d5-b979-5ffb375887c5",
+      "state": "In Progress",
+      "assignee_text": "Victoria Schmidt",
+      "emp_ids": [
+        "EMP-10252I"
+      ],
+      "description": "Order ORD-100008M stuck in pending since 2024-11-13.\n\nStripe shows the charge as \"pending verification\" - might be a fraud flag. Called the customer and they said the payment should have gone through.\n\nNext steps:\n\n* Check with Stripe support (case #STR-2024-8834)\n* If not resolved by EOD, offer bank transfer as alternative\n* Keep customer updated\n\n**Assigned to:** Victoria Schmidt"
+    },
+    {
+      "title": "Waiting on payment: Global Solutions Ltd",
+      "id": "e50c652d-1cd8-488b-a0e5-5294cb05d7fb",
+      "state": "In Progress",
+      "assignee_text": "James Chen (EMP-10124K)",
+      "emp_ids": [
+        "EMP-10124K",
+        "EMP-10110W"
+      ],
+      "description": "Order ORD-100004I stuck in pending since 2024-11-14.\n\nStripe shows the charge as \"pending verification\" - might be a fraud flag. Called the customer and they said the payment should have gone through.\n\nNext steps:\n\n* Check with Stripe support (case #STR-2024-8834)\n* If not resolved by EOD, offer bank transfer as alternative\n* Keep customer updated\n\n**Assigned to:** James Chen (EMP-10124K)"
+    },
+    {
+      "title": "Waiting on payment: TechStart Innovations",
+      "id": "a2488130-a098-4c4c-a36b-fb78e5362e23",
+      "state": "In Progress",
+      "assignee_text": "Benjamin Blackwood",
+      "emp_ids": [
+        "EMP-10020K"
+      ],
+      "description": "Order ORD-100001F stuck in pending since 2024-11-15.\n\nStripe shows the charge as \"pending verification\" - might be a fraud flag. Called the customer and they said the payment should have gone through.\n\nNext steps:\n\n* Check with Stripe support (case #STR-2024-8834)\n* If not resolved by EOD, offer bank transfer as alternative\n* Keep customer updated\n\n**Assigned to:** Benjamin Blackwood"
+    },
+    {
+      "title": "Lambda Corporation reorder processed",
+      "id": "ffaeb63e-800f-400a-9ec3-e2aeeec3f21a",
+      "state": "Done",
+      "assignee_text": "Rachel Yang",
+      "emp_ids": [
+        "EMP-10729R"
+      ],
+      "description": "They liked the first order so much they placed another one right away (order ORD-100054G).\n\nGave them a 5% loyalty discount - cleared it with management first. Good candidate for our annual contract program.\n\n**Assigned to:** Rachel Yang"
+    },
+    {
+      "title": "Fixed the checkout timeout bug",
+      "id": "cc8bc22c-0547-4fef-b026-62218d04df24",
+      "state": "Done",
+      "assignee_text": "James Chen (EMP-10110W)",
+      "emp_ids": [
+        "EMP-10110W"
+      ],
+      "description": "The 504 errors on checkout were caused by the payment gateway taking too long. Added a retry mechanism with exponential backoff.\n\nDeployed to prod yesterday, monitoring looks clean. Error rate down from 2.3% to 0.1%.\n\nDocs updated at docs.internal/checkout-flow#retry-logic.\n\n**Assigned to:** James Chen (EMP-10110W)"
+    },
+    {
+      "title": "Updated billing address for Acme Corporation",
+      "id": "fb652cd4-33d0-41e6-b699-e61c09b090f9",
+      "state": "Done",
+      "assignee_text": "Georgia Gonzalez",
+      "emp_ids": [
+        "EMP-10073L"
+      ],
+      "description": "They moved offices last month. New address is in the system.\n\nAlso updated their primary contact to Harrison Larsson since Janet left.\n\nLet Benjamin Blackwood know so they can send a housewarming gift.\n\n**Assigned to:** Georgia Gonzalez"
+    },
+    {
+      "title": "Completed sales training for Q4",
+      "id": "6d2b3f1e-fe11-49df-8b86-fb85fafed730",
+      "state": "Done",
+      "assignee_text": "Daniel Dimitrov",
+      "emp_ids": [
+        "EMP-10043H"
+      ],
+      "description": "All sales reps completed the new CRM training module on [learn.salesforce.com/advanced-pipeline](http://learn.salesforce.com/advanced-pipeline).\n\nBenjamin Blackwood scored highest (94%) - maybe have them run a refresher for the team next month.\n\nTraining certificates uploaded to HR portal.\n\n**Assigned to:** Daniel Dimitrov"
+    },
+    {
+      "title": "Negotiated better terms with TechSource Global",
+      "id": "10a82e73-0e57-41e3-a195-73173fe704b0",
+      "state": "Done",
+      "assignee_text": "Felix Fischer",
+      "emp_ids": [
+        "EMP-10067F"
+      ],
+      "description": "Extended payment terms from Net 30 to Net 45. They agreed because of our order volume.\n\nShould save us about $12K in cash flow improvements this quarter. Updated the supplier record in the system.\n\nMight want to try the same approach with other suppliers rated above 4.0.\n\n**Assigned to:** Felix Fischer"
+    },
+    {
+      "title": "Ship confirmation sent to Theta Systems Inc",
+      "id": "b1ffbf79-b514-4e90-a34f-24be9e8dbb95",
+      "state": "Done",
+      "assignee_text": "Bridget Yang",
+      "emp_ids": [
+        "EMP-10453B"
+      ],
+      "description": "Sent tracking details for order ORD-100047Z.\n\nCustomer confirmed receipt via email. Left a positive review on Trustpilot - might be worth featuring on our testimonials page.\n\n**Assigned to:** Bridget Yang"
+    }
+  ],
+  "emp_to_issues": {
+    "EMP-10053R": [
+      "Quarterly business review deck",
+      "Q4 budget variance report",
+      "Prep deck for Weekly Team Standup"
+    ],
+    "EMP-10020K": [
+      "Quarterly business review deck",
+      "Sales playbook for enterprise deals",
+      "Win-back: Aurora Industries cancelled",
+      "Territory conflict in APAC region",
+      "Waiting on payment: TechStart Innovations"
+    ],
+    "EMP-10110W": [
+      "Set up staging environment",
+      "Delivery confirmation: Gamma Technologies",
+      "Broken link on pricing page",
+      "Code review backlog",
+      "Customer portal login issues",
+      "Territory conflict in APAC region",
+      "Custom packaging for NextGen Digital",
+      "Waiting on payment: Global Solutions Ltd",
+      "Fixed the checkout timeout bug"
+    ],
+    "EMP-10124K": [
+      "Delivery confirmation: Gamma Technologies",
+      "Territory conflict in APAC region",
+      "Waiting on payment: Global Solutions Ltd"
+    ],
+    "EMP-10482E": [
+      "NPS survey follow-up: Alpha Dynamics Corp"
+    ],
+    "EMP-10243Z": [
+      "Code review backlog"
+    ],
+    "EMP-10043H": [
+      "Update employee handbook for remote work",
+      "Completed sales training for Q4"
+    ],
+    "EMP-10073L": [
+      "Customer portal login issues",
+      "Tracking issue: Quantum Labs Inc can't see updates",
+      "Updated billing address for Acme Corporation"
+    ],
+    "EMP-10067F": [
+      "Backup supplier needed for Germany",
+      "Reorder soon: Bose QC45 (19 left)",
+      "Reorder soon: Sony WH-1000XM5 (13 left)",
+      "Reorder soon: AirPods Pro 2 (7 left)",
+      "Urgent restock: iPhone 15 Pro",
+      "Negotiated better terms with TechSource Global"
+    ],
+    "EMP-10303H": [
+      "Annual review: InnovateCo Industries"
+    ],
+    "EMP-10588G": [
+      "Win-back: Neptune Trading Co cancelled"
+    ],
+    "EMP-10513J": [
+      "Custom packaging for NextGen Digital"
+    ],
+    "EMP-10252I": [
+      "Waiting on payment: DataFlow Systems"
+    ],
+    "EMP-10729R": [
+      "Lambda Corporation reorder processed"
+    ],
+    "EMP-10453B": [
+      "Ship confirmation sent to Theta Systems Inc"
+    ]
+  }
+}

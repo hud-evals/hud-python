@@ -1,0 +1,130 @@
+================================================================================
+TECH SUMMIT 2024 - CONFERENCE SCHEDULE
+================================================================================
+
+DOCUMENT STRUCTURE
+----------------------------------------
+  1. Conference Overview
+  2. Day 1 Schedule (2024-03-15) - Sessions in table format
+  3. Day 2 Schedule (2024-03-16) - Sessions in table format
+  4. Day 3 Schedule (2024-03-17) - Sessions in table format
+
+TABLE FORMAT:
+  | Session ID | Time | Room | Type | Title | Speaker | Capacity | Registered |
+
+ID FORMATS:
+  - Sessions: SESS-XXX
+  - Speakers: SPK-XXX
+  - Attendees: ATT-XXXX
+
+================================================================================
+
+1. CONFERENCE OVERVIEW
+----------------------------------------
+  Total Sessions: 80
+  Total Speakers: 50
+  Total Attendees: 300
+  Dates: March 15-17, 2024
+  Venue: Tech Convention Center
+
+
+2. DAY 1 (FRIDAY) - 2024-03-15
+================================================================================
+
+| Session ID | Time  | Room            | Type          | Title                                  | Speaker          | Cap | Reg |
+|------------|-------|-----------------|---------------|----------------------------------------|------------------|-----|-----|
+| SESS-239  | 09:00 | Main Hall       | Panel         | Web Development: Case Study              | Peyton Nakamura  | 130 |  65 |
+| SESS-269  | 09:00 | Room A          | Panel         | IoT: Deep Dive                           | Peyton O'Brien   |  62 |  21 |
+| SESS-232  | 09:00 | Room B          | Workshop      | Blockchain: Introduction                 | Dakota Nakamura  | 184 |  51 |
+| SESS-217  | 09:00 | Room C          | Workshop      | DevOps: Best Practices                   | Alex Kim         |  54 |  18 |
+| SESS-211  | 10:30 | Main Hall       | Deep Dive     | IoT: Best Practices                      | Mackenzie Anders | 104 |  33 |
+| SESS-248  | 10:30 | Main Hall       | Keynote       | Mobile Dev: Deep Dive                    | Jamie Martinez   | 199 |  20 |
+| SESS-219  | 10:30 | Room A          | Lightning Talk | IoT: Introduction                        | Mackenzie Anders | 114 |  21 |
+| SESS-277  | 10:30 | Room B          | Deep Dive     | Mobile Dev: Case Study                   | Cameron Chen     | 110 |  51 |
+| SESS-222  | 10:30 | Room C          | Panel         | Mobile Dev: Deep Dive                    | Jamie Martinez   | 140 |  59 |
+| SESS-279  | 10:30 | Room C          | Deep Dive     | DevOps: Deep Dive                        | Taylor Santos    |  91 |  70 |
+| SESS-201  | 13:00 | Innovation Lab  | Lightning Talk | DevOps: Deep Dive                        | Taylor Santos    |  86 |  25 |
+| SESS-254  | 13:00 | Room A          | Workshop      | Mobile Dev: Best Practices               | Casey Andersen   | 179 |  54 |
+| SESS-271  | 13:00 | Room B          | Workshop      | Mobile Dev: Introduction                 | Taylor Chen      | 155 |  75 |
+| SESS-203  | 13:00 | Workshop Space  | Workshop      | Cloud Computing: Case Study              | Taylor Fernandez |  73 |  50 |
+| SESS-223  | 13:00 | Workshop Space  | Keynote       | Web Development: Introduction            | Harper Johansson | 132 |  14 |
+| SESS-264  | 13:00 | Workshop Space  | Lightning Talk | Cloud Computing: Case Study              | Riley Chen       | 148 |  42 |
+| SESS-268  | 13:00 | Workshop Space  | Panel         | Cybersecurity: Deep Dive                 | Jamie Fernandez  | 169 |  77 |
+| SESS-214  | 14:30 | Innovation Lab  | Lightning Talk | Mobile Dev: Case Study                   | Jamie Martinez   | 157 |  52 |
+| SESS-216  | 14:30 | Innovation Lab  | Deep Dive     | Data Science: Best Practices             | Dakota Dubois    | 120 |  20 |
+| SESS-236  | 14:30 | Innovation Lab  | Keynote       | IoT: Deep Dive                           | Jordan O'Brien   | 121 |  13 |
+| SESS-210  | 14:30 | Room A          | Workshop      | Web Development: Deep Dive               | Avery Johansson  |  32 |  52 |
+| SESS-221  | 14:30 | Room A          | Keynote       | IoT: Deep Dive                           | Mackenzie Chen   |  64 |  31 |
+| SESS-267  | 14:30 | Room A          | Keynote       | Mobile Dev: Introduction                 | Jamie Martinez   | 150 |  21 |
+| SESS-228  | 14:30 | Room B          | Tutorial      | Blockchain: Deep Dive                    | Dakota Nakamura  | 186 |  58 |
+| SESS-213  | 14:30 | Room C          | Workshop      | Blockchain: Best Practices               | Blake Fernandez  | 160 |  74 |
+| SESS-237  | 14:30 | Room C          | Workshop      | IoT: Introduction                        | Riley Johansson  |  91 |  57 |
+| SESS-205  | 16:00 | Innovation Lab  | Panel         | Blockchain: Deep Dive                    | Parker Kim       | 107 |  20 |
+| SESS-225  | 16:00 | Innovation Lab  | Workshop      | DevOps: Introduction                     | Alex Kim         |  97 |  35 |
+| SESS-208  | 16:00 | Main Hall       | Lightning Talk | IoT: Case Study                          | Mackenzie Chen   | 197 |  26 |
+| SESS-238  | 16:00 | Main Hall       | Workshop      | IoT: Case Study                          | Jordan O'Brien   | 137 |  46 |
+| SESS-207  | 16:00 | Room B          | Deep Dive     | UX Design: Future Trends                 | Finley Rossi     | 192 |  58 |
+| SESS-245  | 16:00 | Room C          | Keynote       | Mobile Dev: Introduction                 | Taylor Chen      |  37 |  14 |
+
+
+3. DAY 2 (SATURDAY) - 2024-03-16
+================================================================================
+
+| Session ID | Time  | Room            | Type          | Title                                  | Speaker          | Cap | Reg |
+|------------|-------|-----------------|---------------|----------------------------------------|------------------|-----|-----|
+| SESS-252  | 09:00 | Innovation Lab  | Tutorial      | Blockchain: Introduction                 | Sage Dubois      | 105 |  49 |
+| SESS-233  | 09:00 | Main Hall       | Keynote       | UX Design: Best Practices                | Drew Rossi       | 122 |  73 |
+| SESS-231  | 09:00 | Room A          | Deep Dive     | DevOps: Future Trends                    | Alex Kim         |  37 |  13 |
+| SESS-242  | 09:00 | Room A          | Lightning Talk | DevOps: Introduction                     | Alex Kim         |  46 |  11 |
+| SESS-241  | 09:00 | Workshop Space  | Deep Dive     | IoT: Future Trends                       | Peyton O'Brien   | 108 |  44 |
+| SESS-256  | 10:30 | Innovation Lab  | Workshop      | UX Design: Deep Dive                     | Finley Rossi     |  55 |  40 |
+| SESS-273  | 10:30 | Main Hall       | Tutorial      | DevOps: Deep Dive                        | Mackenzie O'Brie |  51 |  32 |
+| SESS-209  | 10:30 | Room A          | Panel         | Cybersecurity: Future Trends             | Jamie Fernandez  |  84 |  70 |
+| SESS-247  | 10:30 | Room C          | Deep Dive     | UX Design: Case Study                    | Jordan Johansson | 139 |  38 |
+| SESS-249  | 13:00 | Innovation Lab  | Panel         | Mobile Dev: Best Practices               | Casey Andersen   | 135 |  28 |
+| SESS-262  | 13:00 | Room A          | Lightning Talk | Mobile Dev: Deep Dive                    | Jamie Martinez   | 193 |  77 |
+| SESS-235  | 13:00 | Room B          | Keynote       | Blockchain: Future Trends                | Jordan Andersen  |  90 |  66 |
+| SESS-265  | 13:00 | Workshop Space  | Keynote       | IoT: Deep Dive                           | Jordan O'Brien   |  91 |  73 |
+| SESS-220  | 14:30 | Room A          | Workshop      | Web Development: Deep Dive               | Riley Kim        | 199 | 219 |
+| SESS-274  | 14:30 | Workshop Space  | Tutorial      | Mobile Dev: Case Study                   | Taylor Chen      |  40 |  24 |
+
+
+4. DAY 3 (SUNDAY) - 2024-03-17
+================================================================================
+
+| Session ID | Time  | Room            | Type          | Title                                  | Speaker          | Cap | Reg |
+|------------|-------|-----------------|---------------|----------------------------------------|------------------|-----|-----|
+| SESS-204  | 09:00 | Main Hall       | Lightning Talk | IoT: Best Practices                      | Mackenzie Anders |  72 |  30 |
+| SESS-224  | 09:00 | Main Hall       | Keynote       | Mobile Dev: Introduction                 | Alex Martinez    |  93 |  52 |
+| SESS-206  | 09:00 | Room B          | Workshop      | Web Development: Case Study              | Jamie Fernandez  | 143 |  56 |
+| SESS-227  | 09:00 | Room B          | Panel         | Mobile Dev: Best Practices               | Parker Petrov    | 159 |  79 |
+| SESS-215  | 09:00 | Room C          | Workshop      | Web Development: Best Practices          | Riley Kim        |  61 |  35 |
+| SESS-246  | 09:00 | Workshop Space  | Workshop      | UX Design: Deep Dive                     | Sydney Mueller   | 135 |  37 |
+| SESS-250  | 09:00 | Workshop Space  | Deep Dive     | Cloud Computing: Future Trends           | Finley Chen      | 178 | 186 |
+| SESS-259  | 09:00 | Workshop Space  | Keynote       | Cloud Computing: Introduction            | Finley Chen      |  66 |  16 |
+| SESS-261  | 10:30 | Innovation Lab  | Workshop      | Data Science: Future Trends              | Dakota Fernandez | 158 |  51 |
+| SESS-218  | 10:30 | Main Hall       | Tutorial      | Mobile Dev: Best Practices               | Casey Andersen   |  76 |  26 |
+| SESS-243  | 10:30 | Main Hall       | Tutorial      | IoT: Introduction                        | Alex Johansson   | 144 |  29 |
+| SESS-260  | 10:30 | Room A          | Workshop      | AI/ML: Deep Dive                         | Jamie Johansson  |  75 |  86 |
+| SESS-226  | 10:30 | Room B          | Panel         | IoT: Future Trends                       | Mackenzie Anders |  38 |  27 |
+| SESS-276  | 10:30 | Room B          | Keynote       | AI/ML: Best Practices                    | Jamie Johansson  |  36 |  27 |
+| SESS-255  | 10:30 | Room C          | Panel         | UX Design: Case Study                    | Drew Rossi       | 198 |  64 |
+| SESS-202  | 13:00 | Innovation Lab  | Lightning Talk | Mobile Dev: Deep Dive                    | Parker Petrov    |  33 |  14 |
+| SESS-234  | 13:00 | Main Hall       | Lightning Talk | Web Development: Best Practices          | Quinn Dubois     | 171 |  77 |
+| SESS-230  | 13:00 | Room A          | Workshop      | UX Design: Deep Dive                     | Logan Mueller    | 153 | 162 |
+| SESS-212  | 13:00 | Room B          | Keynote       | Cloud Computing: Best Practices          | Finley Chen      | 161 |  31 |
+| SESS-258  | 13:00 | Room C          | Tutorial      | Cloud Computing: Future Trends           | Taylor Fernandez | 153 |  60 |
+| SESS-253  | 13:00 | Workshop Space  | Panel         | Blockchain: Case Study                   | Dakota Nakamura  | 174 |  43 |
+| SESS-244  | 14:30 | Innovation Lab  | Lightning Talk | Mobile Dev: Introduction                 | Casey Andersen   | 123 |  72 |
+| SESS-272  | 14:30 | Room B          | Keynote       | Blockchain: Case Study                   | Jordan Andersen  |  80 |  64 |
+| SESS-275  | 14:30 | Room B          | Keynote       | IoT: Deep Dive                           | Mackenzie Anders | 115 |  62 |
+| SESS-278  | 14:30 | Room B          | Workshop      | IoT: Best Practices                      | Riley Dubois     |  87 |  53 |
+| SESS-200  | 14:30 | Room C          | Keynote       | Cloud Computing: Deep Dive               | Finley Chen      | 152 | 159 |
+| SESS-263  | 14:30 | Room C          | Keynote       | Mobile Dev: Introduction                 | Cameron Chen     | 111 |  32 |
+| SESS-270  | 14:30 | Room C          | Deep Dive     | Data Science: Deep Dive                  | Quinn Rossi      | 157 | 166 |
+| SESS-266  | 14:30 | Workshop Space  | Tutorial      | IoT: Future Trends                       | Riley Dubois     | 117 |  72 |
+| SESS-251  | 16:00 | Innovation Lab  | Deep Dive     | Mobile Dev: Introduction                 | Parker Petrov    | 146 |  76 |
+| SESS-257  | 16:00 | Room A          | Deep Dive     | Blockchain: Case Study                   | Dakota Nakamura  | 115 |  70 |
+| SESS-229  | 16:00 | Workshop Space  | Keynote       | Cloud Computing: Case Study              | Taylor Fernandez | 132 |  31 |
+| SESS-240  | 16:00 | Workshop Space  | Keynote       | IoT: Future Trends                       | Casey Fernandez  | 109 | 124 |
+

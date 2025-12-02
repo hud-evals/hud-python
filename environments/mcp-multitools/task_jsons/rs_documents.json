@@ -1,0 +1,118 @@
+[
+  {
+    "id": "task-doc-handbook-hotline",
+    "prompt": "Find the Ethics Hotline phone number in the company handbook.\n\nUse the document tools to search the 'company_handbook_2024' document.\n\nStore the phone number EXACTLY as it appears in the document with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "1-888-555-ETHC"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "list_documents",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-doc-meeting-revenue",
+    "prompt": "Find the Q4 2024 revenue target from the quarterly meeting notes.\n\nUse the document tools to search the 'q4_meeting_notes' document.\n\nStore the revenue target amount (just the number with dollar sign, e.g., '$XX million') with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "$52 million"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "list_documents",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-doc-combined-budget",
+    "prompt": "Using the company documents, find these two pieces of information:\n\n1. From 'company_handbook_2024': What is the annual professional development budget per employee?\n2. From 'q4_meeting_notes': What is the Q4 budget allocated to the R&D Innovation department?\n\nStore the professional development budget with key 'prof_dev' (just the dollar amount, e.g., '$2,500').\nStore the R&D Innovation budget with key 'rd_innovation' (e.g., '$1.8 million').\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "prof_dev": "$2,500",
+          "rd_innovation": "$1.8 million"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "list_documents",
+        "read_document",
+        "search_document"
+      ]
+    }
+  }
+]
+

@@ -1,0 +1,655 @@
+======================================================================
+RIVERSIDE READING CLUB - DISCUSSION GROUPS & MEETINGS
+======================================================================
+
+DOCUMENT STRUCTURE
+----------------------------------------
+This document contains discussion group information and meeting records.
+Part 1: Discussion group definitions with assigned members
+Part 2: Meeting attendance records with chapters discussed
+
+CONTENTS:
+  Discussion Groups: 8
+  Meeting Records: 31
+
+======================================================================
+
+PART 1: DISCUSSION GROUPS
+==================================================
+
+GROUP: The Page Turners (DG-01)
+----------------------------------------
+  Focus Book: Pride and Prejudice
+  Meeting Day: Wednesday
+  Current Topic: Character Development
+  Members (11):
+    - RC-1037: Eleanor Griffith
+    - RC-1048: Samuel Nelson
+    - RC-1033: Raymond Xander
+    - RC-1038: Irene Irving
+    - RC-1018: Irene Quincy
+    - RC-1006: Yvonne Vaughn
+    - RC-1053: Sophia Underwood
+    - RC-1012: William Nelson
+    - RC-1055: Douglas Newman
+    - RC-1014: Penelope Jacobs
+    - RC-1023: Zelda Vaughn
+
+GROUP: Literary Lions (DG-02)
+----------------------------------------
+  Focus Book: Moby Dick
+  Meeting Day: Monday
+  Current Topic: Character Development
+  Members (11):
+    - RC-1034: Olivia Edwards
+    - RC-1008: Irene Harrison
+    - RC-1017: Douglas Jenkins
+    - RC-1002: Charlotte Baker
+    - RC-1003: Nora Baker
+    - RC-1035: Olivia Lawson
+    - RC-1018: Irene Quincy
+    - RC-1044: Daniel Ingram
+    - RC-1058: Vincent Thompson
+    - RC-1040: Bernard Abbott
+    - RC-1048: Samuel Nelson
+
+GROUP: Bookworm Brigade (DG-03)
+----------------------------------------
+  Focus Book: Pride and Prejudice
+  Meeting Day: Thursday
+  Current Topic: Moral Dilemmas
+  Members (10):
+    - RC-1018: Irene Quincy
+    - RC-1030: Zelda Irving
+    - RC-1058: Vincent Thompson
+    - RC-1028: Xena Thompson
+    - RC-1021: Eleanor Young
+    - RC-1011: Yasmine Richardson
+    - RC-1003: Nora Baker
+    - RC-1016: Lillian Underwood
+    - RC-1057: Patrick Xander
+    - RC-1007: William Whitfield
+
+GROUP: Chapter Chasers (DG-04)
+----------------------------------------
+  Focus Book: The Art of War
+  Meeting Day: Wednesday
+  Current Topic: Themes of Mortality
+  Members (6):
+    - RC-1036: Penelope Davidson
+    - RC-1040: Bernard Abbott
+    - RC-1043: Douglas Patterson
+    - RC-1003: Nora Baker
+    - RC-1009: Penelope Newman
+    - RC-1055: Douglas Newman
+
+GROUP: Novel Navigators (DG-05)
+----------------------------------------
+  Focus Book: The Art of War
+  Meeting Day: Tuesday
+  Current Topic: Literary Techniques
+  Members (7):
+    - RC-1007: William Whitfield
+    - RC-1035: Olivia Lawson
+    - RC-1048: Samuel Nelson
+    - RC-1026: Margaret Jenkins
+    - RC-1038: Irene Irving
+    - RC-1055: Douglas Newman
+    - RC-1050: Frederick Lambert
+
+GROUP: Prose Pioneers (DG-06)
+----------------------------------------
+  Focus Book: The Art of War
+  Meeting Day: Monday
+  Current Topic: Comparative Analysis
+  Members (9):
+    - RC-1028: Xena Thompson
+    - RC-1058: Vincent Thompson
+    - RC-1059: Sophia Graham
+    - RC-1019: Xena O'Connor
+    - RC-1055: Douglas Newman
+    - RC-1037: Eleanor Griffith
+    - RC-1027: Alice Mitchell
+    - RC-1056: Nathan Griffith
+    - RC-1036: Penelope Davidson
+
+GROUP: Fiction Fanatics (DG-07)
+----------------------------------------
+  Focus Book: The Art of War
+  Meeting Day: Monday
+  Current Topic: Social Commentary
+  Members (11):
+    - RC-1006: Yvonne Vaughn
+    - RC-1048: Samuel Nelson
+    - RC-1013: Penelope Knight
+    - RC-1040: Bernard Abbott
+    - RC-1057: Patrick Xander
+    - RC-1016: Lillian Underwood
+    - RC-1042: Irene Crawford
+    - RC-1005: Uma Bennett
+    - RC-1010: Sophia O'Connor
+    - RC-1015: Charlotte Underwood
+    - RC-1011: Yasmine Richardson
+
+GROUP: Classic Crusaders (DG-08)
+----------------------------------------
+  Focus Book: Pride and Prejudice
+  Meeting Day: Tuesday
+  Current Topic: Symbolism
+  Members (6):
+    - RC-1026: Margaret Jenkins
+    - RC-1028: Xena Thompson
+    - RC-1044: Daniel Ingram
+    - RC-1038: Irene Irving
+    - RC-1030: Zelda Irving
+    - RC-1018: Irene Quincy
+
+
+PART 2: MEETING RECORDS
+==================================================
+
+MEETING: MTG-DG-01-01
+----------------------------------------
+  Group: The Page Turners
+  Date: 2024-01-15
+  Book: Pride and Prejudice
+  Chapters Discussed: 20, 45
+  Topic: Character Development
+  Attendees (8):
+    - Samuel Nelson (RC-1048)
+    - Raymond Xander (RC-1033)
+    - Irene Irving (RC-1038)
+    - Yvonne Vaughn (RC-1006)
+    - William Nelson (RC-1012)
+    - Douglas Newman (RC-1055)
+    - Penelope Jacobs (RC-1014)
+    - Zelda Vaughn (RC-1023)
+
+MEETING: MTG-DG-01-02
+----------------------------------------
+  Group: The Page Turners
+  Date: 2024-01-29
+  Book: Pride and Prejudice
+  Chapters Discussed: 58, 1
+  Topic: Character Development
+  Attendees (8):
+    - Eleanor Griffith (RC-1037)
+    - Raymond Xander (RC-1033)
+    - Yvonne Vaughn (RC-1006)
+    - Sophia Underwood (RC-1053)
+    - William Nelson (RC-1012)
+    - Douglas Newman (RC-1055)
+    - Penelope Jacobs (RC-1014)
+    - Zelda Vaughn (RC-1023)
+
+MEETING: MTG-DG-01-03
+----------------------------------------
+  Group: The Page Turners
+  Date: 2024-02-12
+  Book: Pride and Prejudice
+  Chapters Discussed: 1, 45
+  Topic: Character Development
+  Attendees (8):
+    - Samuel Nelson (RC-1048)
+    - Raymond Xander (RC-1033)
+    - Irene Irving (RC-1038)
+    - Irene Quincy (RC-1018)
+    - Yvonne Vaughn (RC-1006)
+    - William Nelson (RC-1012)
+    - Douglas Newman (RC-1055)
+    - Penelope Jacobs (RC-1014)
+
+MEETING: MTG-DG-01-04
+----------------------------------------
+  Group: The Page Turners
+  Date: 2024-02-26
+  Book: Pride and Prejudice
+  Chapters Discussed: 3, 58
+  Topic: Character Development
+  Attendees (10):
+    - Eleanor Griffith (RC-1037)
+    - Samuel Nelson (RC-1048)
+    - Irene Irving (RC-1038)
+    - Irene Quincy (RC-1018)
+    - Yvonne Vaughn (RC-1006)
+    - Sophia Underwood (RC-1053)
+    - William Nelson (RC-1012)
+    - Douglas Newman (RC-1055)
+    - Penelope Jacobs (RC-1014)
+    - Zelda Vaughn (RC-1023)
+
+MEETING: MTG-DG-01-05
+----------------------------------------
+  Group: The Page Turners
+  Date: 2024-03-11
+  Book: Pride and Prejudice
+  Chapters Discussed: 1, 34
+  Topic: Character Development
+  Attendees (7):
+    - Eleanor Griffith (RC-1037)
+    - Samuel Nelson (RC-1048)
+    - Raymond Xander (RC-1033)
+    - Irene Quincy (RC-1018)
+    - Yvonne Vaughn (RC-1006)
+    - Sophia Underwood (RC-1053)
+    - William Nelson (RC-1012)
+
+MEETING: MTG-DG-02-01
+----------------------------------------
+  Group: Literary Lions
+  Date: 2024-01-15
+  Book: Moby Dick
+  Chapters Discussed: 1, 10
+  Topic: Character Development
+  Attendees (10):
+    - Olivia Edwards (RC-1034)
+    - Irene Harrison (RC-1008)
+    - Douglas Jenkins (RC-1017)
+    - Charlotte Baker (RC-1002)
+    - Nora Baker (RC-1003)
+    - Olivia Lawson (RC-1035)
+    - Irene Quincy (RC-1018)
+    - Daniel Ingram (RC-1044)
+    - Vincent Thompson (RC-1058)
+    - Samuel Nelson (RC-1048)
+
+MEETING: MTG-DG-02-02
+----------------------------------------
+  Group: Literary Lions
+  Date: 2024-01-29
+  Book: Moby Dick
+  Chapters Discussed: 36, 87
+  Topic: Character Development
+  Attendees (9):
+    - Olivia Edwards (RC-1034)
+    - Irene Harrison (RC-1008)
+    - Douglas Jenkins (RC-1017)
+    - Charlotte Baker (RC-1002)
+    - Nora Baker (RC-1003)
+    - Olivia Lawson (RC-1035)
+    - Daniel Ingram (RC-1044)
+    - Vincent Thompson (RC-1058)
+    - Samuel Nelson (RC-1048)
+
+MEETING: MTG-DG-02-03
+----------------------------------------
+  Group: Literary Lions
+  Date: 2024-02-12
+  Book: Moby Dick
+  Chapters Discussed: 135, 36
+  Topic: Character Development
+  Attendees (9):
+    - Irene Harrison (RC-1008)
+    - Douglas Jenkins (RC-1017)
+    - Charlotte Baker (RC-1002)
+    - Olivia Lawson (RC-1035)
+    - Irene Quincy (RC-1018)
+    - Daniel Ingram (RC-1044)
+    - Vincent Thompson (RC-1058)
+    - Bernard Abbott (RC-1040)
+    - Samuel Nelson (RC-1048)
+
+MEETING: MTG-DG-02-04
+----------------------------------------
+  Group: Literary Lions
+  Date: 2024-02-26
+  Book: Moby Dick
+  Chapters Discussed: 42, 10
+  Topic: Character Development
+  Attendees (10):
+    - Olivia Edwards (RC-1034)
+    - Irene Harrison (RC-1008)
+    - Douglas Jenkins (RC-1017)
+    - Nora Baker (RC-1003)
+    - Olivia Lawson (RC-1035)
+    - Irene Quincy (RC-1018)
+    - Daniel Ingram (RC-1044)
+    - Vincent Thompson (RC-1058)
+    - Bernard Abbott (RC-1040)
+    - Samuel Nelson (RC-1048)
+
+MEETING: MTG-DG-02-05
+----------------------------------------
+  Group: Literary Lions
+  Date: 2024-03-11
+  Book: Moby Dick
+  Chapters Discussed: 3, 133
+  Topic: Character Development
+  Attendees (10):
+    - Olivia Edwards (RC-1034)
+    - Irene Harrison (RC-1008)
+    - Douglas Jenkins (RC-1017)
+    - Charlotte Baker (RC-1002)
+    - Nora Baker (RC-1003)
+    - Olivia Lawson (RC-1035)
+    - Irene Quincy (RC-1018)
+    - Daniel Ingram (RC-1044)
+    - Bernard Abbott (RC-1040)
+    - Samuel Nelson (RC-1048)
+
+MEETING: MTG-DG-03-01
+----------------------------------------
+  Group: Bookworm Brigade
+  Date: 2024-01-15
+  Book: Pride and Prejudice
+  Chapters Discussed: 2, 10
+  Topic: Moral Dilemmas
+  Attendees (5):
+    - Zelda Irving (RC-1030)
+    - Vincent Thompson (RC-1058)
+    - Eleanor Young (RC-1021)
+    - Nora Baker (RC-1003)
+    - Lillian Underwood (RC-1016)
+
+MEETING: MTG-DG-03-02
+----------------------------------------
+  Group: Bookworm Brigade
+  Date: 2024-01-29
+  Book: Pride and Prejudice
+  Chapters Discussed: 58, 45
+  Topic: Moral Dilemmas
+  Attendees (8):
+    - Irene Quincy (RC-1018)
+    - Zelda Irving (RC-1030)
+    - Vincent Thompson (RC-1058)
+    - Xena Thompson (RC-1028)
+    - Eleanor Young (RC-1021)
+    - Yasmine Richardson (RC-1011)
+    - Nora Baker (RC-1003)
+    - Patrick Xander (RC-1057)
+
+MEETING: MTG-DG-03-03
+----------------------------------------
+  Group: Bookworm Brigade
+  Date: 2024-02-12
+  Book: Pride and Prejudice
+  Chapters Discussed: 3, 34
+  Topic: Moral Dilemmas
+  Attendees (9):
+    - Irene Quincy (RC-1018)
+    - Zelda Irving (RC-1030)
+    - Vincent Thompson (RC-1058)
+    - Xena Thompson (RC-1028)
+    - Eleanor Young (RC-1021)
+    - Yasmine Richardson (RC-1011)
+    - Lillian Underwood (RC-1016)
+    - Patrick Xander (RC-1057)
+    - William Whitfield (RC-1007)
+
+MEETING: MTG-DG-04-01
+----------------------------------------
+  Group: Chapter Chasers
+  Date: 2024-01-15
+  Book: The Art of War
+  Chapters Discussed: 10, 11
+  Topic: Themes of Mortality
+  Attendees (6):
+    - Penelope Davidson (RC-1036)
+    - Bernard Abbott (RC-1040)
+    - Douglas Patterson (RC-1043)
+    - Nora Baker (RC-1003)
+    - Penelope Newman (RC-1009)
+    - Douglas Newman (RC-1055)
+
+MEETING: MTG-DG-04-02
+----------------------------------------
+  Group: Chapter Chasers
+  Date: 2024-01-29
+  Book: The Art of War
+  Chapters Discussed: 3, 4
+  Topic: Themes of Mortality
+  Attendees (5):
+    - Penelope Davidson (RC-1036)
+    - Bernard Abbott (RC-1040)
+    - Douglas Patterson (RC-1043)
+    - Nora Baker (RC-1003)
+    - Penelope Newman (RC-1009)
+
+MEETING: MTG-DG-04-03
+----------------------------------------
+  Group: Chapter Chasers
+  Date: 2024-02-12
+  Book: The Art of War
+  Chapters Discussed: 3, 2
+  Topic: Themes of Mortality
+  Attendees (4):
+    - Penelope Davidson (RC-1036)
+    - Bernard Abbott (RC-1040)
+    - Douglas Patterson (RC-1043)
+    - Douglas Newman (RC-1055)
+
+MEETING: MTG-DG-04-04
+----------------------------------------
+  Group: Chapter Chasers
+  Date: 2024-02-26
+  Book: The Art of War
+  Chapters Discussed: 4, 7
+  Topic: Themes of Mortality
+  Attendees (5):
+    - Penelope Davidson (RC-1036)
+    - Bernard Abbott (RC-1040)
+    - Douglas Patterson (RC-1043)
+    - Nora Baker (RC-1003)
+    - Penelope Newman (RC-1009)
+
+MEETING: MTG-DG-05-01
+----------------------------------------
+  Group: Novel Navigators
+  Date: 2024-01-15
+  Book: The Art of War
+  Chapters Discussed: 1, 10
+  Topic: Literary Techniques
+  Attendees (5):
+    - William Whitfield (RC-1007)
+    - Olivia Lawson (RC-1035)
+    - Samuel Nelson (RC-1048)
+    - Irene Irving (RC-1038)
+    - Frederick Lambert (RC-1050)
+
+MEETING: MTG-DG-05-02
+----------------------------------------
+  Group: Novel Navigators
+  Date: 2024-01-29
+  Book: The Art of War
+  Chapters Discussed: 4, 10
+  Topic: Literary Techniques
+  Attendees (4):
+    - William Whitfield (RC-1007)
+    - Margaret Jenkins (RC-1026)
+    - Irene Irving (RC-1038)
+    - Frederick Lambert (RC-1050)
+
+MEETING: MTG-DG-05-03
+----------------------------------------
+  Group: Novel Navigators
+  Date: 2024-02-12
+  Book: The Art of War
+  Chapters Discussed: 2, 11
+  Topic: Literary Techniques
+  Attendees (7):
+    - William Whitfield (RC-1007)
+    - Olivia Lawson (RC-1035)
+    - Samuel Nelson (RC-1048)
+    - Margaret Jenkins (RC-1026)
+    - Irene Irving (RC-1038)
+    - Douglas Newman (RC-1055)
+    - Frederick Lambert (RC-1050)
+
+MEETING: MTG-DG-05-04
+----------------------------------------
+  Group: Novel Navigators
+  Date: 2024-02-26
+  Book: The Art of War
+  Chapters Discussed: 3, 4
+  Topic: Literary Techniques
+  Attendees (7):
+    - William Whitfield (RC-1007)
+    - Olivia Lawson (RC-1035)
+    - Samuel Nelson (RC-1048)
+    - Margaret Jenkins (RC-1026)
+    - Irene Irving (RC-1038)
+    - Douglas Newman (RC-1055)
+    - Frederick Lambert (RC-1050)
+
+MEETING: MTG-DG-06-01
+----------------------------------------
+  Group: Prose Pioneers
+  Date: 2024-01-15
+  Book: The Art of War
+  Chapters Discussed: 6, 2
+  Topic: Comparative Analysis
+  Attendees (5):
+    - Vincent Thompson (RC-1058)
+    - Sophia Graham (RC-1059)
+    - Xena O'Connor (RC-1019)
+    - Douglas Newman (RC-1055)
+    - Penelope Davidson (RC-1036)
+
+MEETING: MTG-DG-06-02
+----------------------------------------
+  Group: Prose Pioneers
+  Date: 2024-01-29
+  Book: The Art of War
+  Chapters Discussed: 7, 1
+  Topic: Comparative Analysis
+  Attendees (8):
+    - Xena Thompson (RC-1028)
+    - Vincent Thompson (RC-1058)
+    - Sophia Graham (RC-1059)
+    - Xena O'Connor (RC-1019)
+    - Douglas Newman (RC-1055)
+    - Eleanor Griffith (RC-1037)
+    - Nathan Griffith (RC-1056)
+    - Penelope Davidson (RC-1036)
+
+MEETING: MTG-DG-06-03
+----------------------------------------
+  Group: Prose Pioneers
+  Date: 2024-02-12
+  Book: The Art of War
+  Chapters Discussed: 10, 9
+  Topic: Comparative Analysis
+  Attendees (8):
+    - Xena Thompson (RC-1028)
+    - Vincent Thompson (RC-1058)
+    - Xena O'Connor (RC-1019)
+    - Douglas Newman (RC-1055)
+    - Eleanor Griffith (RC-1037)
+    - Alice Mitchell (RC-1027)
+    - Nathan Griffith (RC-1056)
+    - Penelope Davidson (RC-1036)
+
+MEETING: MTG-DG-07-01
+----------------------------------------
+  Group: Fiction Fanatics
+  Date: 2024-01-15
+  Book: The Art of War
+  Chapters Discussed: 9, 3
+  Topic: Social Commentary
+  Attendees (10):
+    - Yvonne Vaughn (RC-1006)
+    - Samuel Nelson (RC-1048)
+    - Penelope Knight (RC-1013)
+    - Bernard Abbott (RC-1040)
+    - Patrick Xander (RC-1057)
+    - Lillian Underwood (RC-1016)
+    - Irene Crawford (RC-1042)
+    - Sophia O'Connor (RC-1010)
+    - Charlotte Underwood (RC-1015)
+    - Yasmine Richardson (RC-1011)
+
+MEETING: MTG-DG-07-02
+----------------------------------------
+  Group: Fiction Fanatics
+  Date: 2024-01-29
+  Book: The Art of War
+  Chapters Discussed: 5, 1
+  Topic: Social Commentary
+  Attendees (7):
+    - Yvonne Vaughn (RC-1006)
+    - Penelope Knight (RC-1013)
+    - Bernard Abbott (RC-1040)
+    - Patrick Xander (RC-1057)
+    - Lillian Underwood (RC-1016)
+    - Uma Bennett (RC-1005)
+    - Charlotte Underwood (RC-1015)
+
+MEETING: MTG-DG-07-03
+----------------------------------------
+  Group: Fiction Fanatics
+  Date: 2024-02-12
+  Book: The Art of War
+  Chapters Discussed: 8, 2
+  Topic: Social Commentary
+  Attendees (8):
+    - Yvonne Vaughn (RC-1006)
+    - Samuel Nelson (RC-1048)
+    - Penelope Knight (RC-1013)
+    - Bernard Abbott (RC-1040)
+    - Lillian Underwood (RC-1016)
+    - Uma Bennett (RC-1005)
+    - Sophia O'Connor (RC-1010)
+    - Charlotte Underwood (RC-1015)
+
+MEETING: MTG-DG-07-04
+----------------------------------------
+  Group: Fiction Fanatics
+  Date: 2024-02-26
+  Book: The Art of War
+  Chapters Discussed: 4, 6
+  Topic: Social Commentary
+  Attendees (11):
+    - Yvonne Vaughn (RC-1006)
+    - Samuel Nelson (RC-1048)
+    - Penelope Knight (RC-1013)
+    - Bernard Abbott (RC-1040)
+    - Patrick Xander (RC-1057)
+    - Lillian Underwood (RC-1016)
+    - Irene Crawford (RC-1042)
+    - Uma Bennett (RC-1005)
+    - Sophia O'Connor (RC-1010)
+    - Charlotte Underwood (RC-1015)
+    - Yasmine Richardson (RC-1011)
+
+MEETING: MTG-DG-08-01
+----------------------------------------
+  Group: Classic Crusaders
+  Date: 2024-01-15
+  Book: Pride and Prejudice
+  Chapters Discussed: 2, 34
+  Topic: Symbolism
+  Attendees (4):
+    - Margaret Jenkins (RC-1026)
+    - Xena Thompson (RC-1028)
+    - Zelda Irving (RC-1030)
+    - Irene Quincy (RC-1018)
+
+MEETING: MTG-DG-08-02
+----------------------------------------
+  Group: Classic Crusaders
+  Date: 2024-01-29
+  Book: Pride and Prejudice
+  Chapters Discussed: 3, 34
+  Topic: Symbolism
+  Attendees (6):
+    - Margaret Jenkins (RC-1026)
+    - Xena Thompson (RC-1028)
+    - Daniel Ingram (RC-1044)
+    - Irene Irving (RC-1038)
+    - Zelda Irving (RC-1030)
+    - Irene Quincy (RC-1018)
+
+MEETING: MTG-DG-08-03
+----------------------------------------
+  Group: Classic Crusaders
+  Date: 2024-02-12
+  Book: Pride and Prejudice
+  Chapters Discussed: 10, 20
+  Topic: Symbolism
+  Attendees (6):
+    - Margaret Jenkins (RC-1026)
+    - Xena Thompson (RC-1028)
+    - Daniel Ingram (RC-1044)
+    - Irene Irving (RC-1038)
+    - Zelda Irving (RC-1030)
+    - Irene Quincy (RC-1018)

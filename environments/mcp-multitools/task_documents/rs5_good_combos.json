@@ -1,0 +1,399 @@
+[
+  {
+    "combo": {
+      "name": "Multi-language + Remote",
+      "or": [
+        "Speaks Spanish",
+        "Speaks French",
+        "Speaks German",
+        "Speaks Mandarin"
+      ],
+      "and": [
+        "Remote work approved"
+      ],
+      "not": []
+    },
+    "result": [
+      "EMP-10053R",
+      "EMP-10067F",
+      "EMP-10073L",
+      "EMP-10091D",
+      "EMP-10134U",
+      "EMP-10170E",
+      "EMP-10200I",
+      "EMP-10252I",
+      "EMP-10283N",
+      "EMP-10303H",
+      "EMP-10329H",
+      "EMP-10357J",
+      "EMP-10366S",
+      "EMP-10388O",
+      "EMP-10400A",
+      "EMP-10412M",
+      "EMP-10432G",
+      "EMP-10469R",
+      "EMP-10482E",
+      "EMP-10513J",
+      "EMP-10567L",
+      "EMP-10571P",
+      "EMP-10579X",
+      "EMP-10593L",
+      "EMP-10608A",
+      "EMP-10642I",
+      "EMP-10716E",
+      "EMP-10726O",
+      "EMP-10741D",
+      "EMP-10745H",
+      "EMP-10775L",
+      "EMP-10792C",
+      "EMP-10802M"
+    ],
+    "count": 33
+  },
+  {
+    "combo": {
+      "name": "Multi-hobby + Wellness",
+      "or": [
+        "Does bouldering",
+        "Runs marathons",
+        "Does yoga",
+        "Plays guitar",
+        "Plays piano"
+      ],
+      "and": [
+        "Participates in wellness program"
+      ],
+      "not": []
+    },
+    "result": [
+      "EMP-10020K",
+      "EMP-10028S",
+      "EMP-10073L",
+      "EMP-10170E",
+      "EMP-10215X",
+      "EMP-10306K",
+      "EMP-10317V",
+      "EMP-10357J",
+      "EMP-10366S",
+      "EMP-10416Q",
+      "EMP-10442Q",
+      "EMP-10448W",
+      "EMP-10456E",
+      "EMP-10497T",
+      "EMP-10549T",
+      "EMP-10567L",
+      "EMP-10593L",
+      "EMP-10608A",
+      "EMP-10632Y",
+      "EMP-10642I",
+      "EMP-10668I",
+      "EMP-10687B",
+      "EMP-10716E",
+      "EMP-10726O",
+      "EMP-10792C"
+    ],
+    "count": 25
+  },
+  {
+    "combo": {
+      "name": "Tech + Remote",
+      "or": [],
+      "and": [
+        "Cloud certified",
+        "Remote work approved"
+      ],
+      "not": []
+    },
+    "result": [
+      "EMP-10053R",
+      "EMP-10067F",
+      "EMP-10134U",
+      "EMP-10170E",
+      "EMP-10283N",
+      "EMP-10303H",
+      "EMP-10400A",
+      "EMP-10482E",
+      "EMP-10513J",
+      "EMP-10567L",
+      "EMP-10579X",
+      "EMP-10588G",
+      "EMP-10593L",
+      "EMP-10642I",
+      "EMP-10726O",
+      "EMP-10729R",
+      "EMP-10745H"
+    ],
+    "count": 17
+  },
+  {
+    "combo": {
+      "name": "Safety combo",
+      "or": [],
+      "and": [
+        "First aid certified",
+        "Emergency response trained"
+      ],
+      "not": []
+    },
+    "result": [
+      "EMP-10053R",
+      "EMP-10067F",
+      "EMP-10091D",
+      "EMP-10103P",
+      "EMP-10124K",
+      "EMP-10170E",
+      "EMP-10200I",
+      "EMP-10243Z",
+      "EMP-10283N",
+      "EMP-10292W",
+      "EMP-10349B",
+      "EMP-10397X",
+      "EMP-10400A",
+      "EMP-10448W",
+      "EMP-10469R",
+      "EMP-10485H",
+      "EMP-10549T",
+      "EMP-10567L",
+      "EMP-10598Q",
+      "EMP-10642I",
+      "EMP-10668I",
+      "EMP-10696K",
+      "EMP-10702Q",
+      "EMP-10722K",
+      "EMP-10765B",
+      "EMP-10775L"
+    ],
+    "count": 26
+  },
+  {
+    "combo": {
+      "name": "Certified professionals",
+      "or": [
+        "Certified Scrum Master",
+        "Certified PMP",
+        "Cloud certified"
+      ],
+      "and": [
+        "Data privacy trained"
+      ],
+      "not": []
+    },
+    "result": [
+      "EMP-10020K",
+      "EMP-10028S",
+      "EMP-10053R",
+      "EMP-10067F",
+      "EMP-10073L",
+      "EMP-10134U",
+      "EMP-10177L",
+      "EMP-10243Z",
+      "EMP-10269Z",
+      "EMP-10276G",
+      "EMP-10283N",
+      "EMP-10292W",
+      "EMP-10303H",
+      "EMP-10317V",
+      "EMP-10329H",
+      "EMP-10337P",
+      "EMP-10376C",
+      "EMP-10388O",
+      "EMP-10400A",
+      "EMP-10416Q",
+      "EMP-10432G",
+      "EMP-10448W",
+      "EMP-10453B",
+      "EMP-10456E",
+      "EMP-10463L",
+      "EMP-10475X",
+      "EMP-10482E",
+      "EMP-10485H",
+      "EMP-10497T",
+      "EMP-10505B",
+      "EMP-10567L",
+      "EMP-10571P",
+      "EMP-10579X",
+      "EMP-10588G",
+      "EMP-10593L",
+      "EMP-10608A",
+      "EMP-10620M",
+      "EMP-10632Y",
+      "EMP-10642I",
+      "EMP-10657X",
+      "EMP-10668I",
+      "EMP-10683X",
+      "EMP-10705T",
+      "EMP-10719H",
+      "EMP-10726O",
+      "EMP-10765B",
+      "EMP-10775L"
+    ],
+    "count": 47
+  },
+  {
+    "combo": {
+      "name": "Community oriented",
+      "or": [
+        "Coaches youth sports",
+        "Volunteers at food bank",
+        "Member of Toastmasters"
+      ],
+      "and": [
+        "Completed diversity training"
+      ],
+      "not": []
+    },
+    "result": [
+      "EMP-10043H",
+      "EMP-10067F",
+      "EMP-10083V",
+      "EMP-10170E",
+      "EMP-10184S",
+      "EMP-10200I",
+      "EMP-10269Z",
+      "EMP-10303H",
+      "EMP-10306K",
+      "EMP-10337P",
+      "EMP-10397X",
+      "EMP-10416Q",
+      "EMP-10424Y",
+      "EMP-10427B",
+      "EMP-10448W",
+      "EMP-10463L",
+      "EMP-10528Y",
+      "EMP-10549T",
+      "EMP-10555Z",
+      "EMP-10588G",
+      "EMP-10642I",
+      "EMP-10654U",
+      "EMP-10683X",
+      "EMP-10696K",
+      "EMP-10702Q",
+      "EMP-10729R",
+      "EMP-10754Q",
+      "EMP-10765B",
+      "EMP-10775L",
+      "EMP-10792C"
+    ],
+    "count": 30
+  },
+  {
+    "combo": {
+      "name": "Tech innovators",
+      "or": [
+        "Participates in hackathons",
+        "Innovation lab participant",
+        "Beta tester for new tools"
+      ],
+      "and": [
+        "Cloud certified"
+      ],
+      "not": []
+    },
+    "result": [
+      "EMP-10020K",
+      "EMP-10283N",
+      "EMP-10303H",
+      "EMP-10453B",
+      "EMP-10475X",
+      "EMP-10513J",
+      "EMP-10579X",
+      "EMP-10632Y",
+      "EMP-10654U",
+      "EMP-10668I",
+      "EMP-10683X",
+      "EMP-10729R"
+    ],
+    "count": 12
+  },
+  {
+    "combo": {
+      "name": "Multi-skilled",
+      "or": [],
+      "and": [
+        "First aid certified",
+        "CPR certified"
+      ],
+      "not": []
+    },
+    "result": [
+      "EMP-10053R",
+      "EMP-10067F",
+      "EMP-10134U",
+      "EMP-10170E",
+      "EMP-10200I",
+      "EMP-10243Z",
+      "EMP-10269Z",
+      "EMP-10337P",
+      "EMP-10349B",
+      "EMP-10357J",
+      "EMP-10388O",
+      "EMP-10412M",
+      "EMP-10469R",
+      "EMP-10475X",
+      "EMP-10500W",
+      "EMP-10593L",
+      "EMP-10632Y",
+      "EMP-10657X",
+      "EMP-10668I",
+      "EMP-10722K",
+      "EMP-10775L"
+    ],
+    "count": 21
+  },
+  {
+    "combo": {
+      "name": "Remote certified team",
+      "or": [
+        "Speaks Spanish",
+        "Speaks French"
+      ],
+      "and": [
+        "Remote work approved",
+        "Cloud certified"
+      ],
+      "not": []
+    },
+    "result": [
+      "EMP-10067F",
+      "EMP-10134U",
+      "EMP-10283N",
+      "EMP-10303H",
+      "EMP-10400A",
+      "EMP-10482E",
+      "EMP-10513J",
+      "EMP-10567L",
+      "EMP-10593L",
+      "EMP-10726O",
+      "EMP-10745H"
+    ],
+    "count": 11
+  },
+  {
+    "combo": {
+      "name": "Wellness + Standing desk",
+      "or": [],
+      "and": [
+        "Participates in wellness program",
+        "Has standing desk"
+      ],
+      "not": []
+    },
+    "result": [
+      "EMP-10043H",
+      "EMP-10053R",
+      "EMP-10091D",
+      "EMP-10170E",
+      "EMP-10366S",
+      "EMP-10388O",
+      "EMP-10397X",
+      "EMP-10400A",
+      "EMP-10416Q",
+      "EMP-10448W",
+      "EMP-10567L",
+      "EMP-10608A",
+      "EMP-10632Y",
+      "EMP-10802M"
+    ],
+    "count": 14
+  }
+]

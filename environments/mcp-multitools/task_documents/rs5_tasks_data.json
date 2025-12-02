@@ -1,0 +1,55 @@
+[
+  {
+    "and_attrs": [
+      "Speaks Spanish",
+      "Cloud certified"
+    ],
+    "not_attrs": [
+      "Prefers morning meetings"
+    ],
+    "result": [
+      "EMP-10134U",
+      "EMP-10269Z",
+      "EMP-10448W",
+      "EMP-10453B",
+      "EMP-10593L",
+      "EMP-10632Y",
+      "EMP-10726O",
+      "EMP-10745H"
+    ],
+    "count": 8
+  },
+  {
+    "and_attrs": [
+      "First aid certified",
+      "CPR certified",
+      "Available for weekend oncall"
+    ],
+    "not_attrs": [],
+    "result": [
+      "EMP-10053R",
+      "EMP-10067F",
+      "EMP-10500W",
+      "EMP-10668I"
+    ],
+    "count": 4
+  },
+  {
+    "and_attrs": [
+      "Mentors junior employees",
+      "Certified Scrum Master"
+    ],
+    "not_attrs": [
+      "Uses company gym"
+    ],
+    "result": [
+      "EMP-10043H",
+      "EMP-10243Z",
+      "EMP-10329H",
+      "EMP-10528Y",
+      "EMP-10571P",
+      "EMP-10705T"
+    ],
+    "count": 6
+  }
+]

@@ -1,0 +1,336 @@
+[
+  {
+    "id": "task-hard-students-multi-club-same-type",
+    "prompt": "Find students who are ACTIVE members of 2 or more clubs of the SAME type.\n\nFor example, if a student is active in 2 different 'sports' clubs, they count.\n\nPath: school_club_memberships (is_active = true) → school_clubs (club_type)\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore the count of such students with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {"exact_values": {"answer": "86"}}
+    }
+  },
+  {
+    "id": "task-hard-schools-above-city-avg-salary",
+    "prompt": "Find schools where the average teacher salary is ABOVE their city's average teacher salary.\n\nSteps:\n1. Calculate average salary for each school (from teacher assignments)\n2. Calculate average salary for each city (average of school averages)\n3. Count schools where school_avg > city_avg\n\nPath: school_teachers → school_teacher_school_assignments → school_schools → school_city_school_assignments → school_cities\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore the count with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {"exact_values": {"answer": "6"}}
+    }
+  },
+  {
+    "id": "task-hard-city-highest-avg-score",
+    "prompt": "Find the city with the highest average student test score.\n\nPath: school_cities → school_city_school_assignments → school_student_enrollments → school_student_scores\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore results:\n- 'city_name': name of the city\n- 'avg_score': average score rounded to 2 decimal places\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {"exact_values": {"city_name": "Cambridge", "avg_score": "92.57"}}
+    }
+  },
+  {
+    "id": "task-hard-student-pairs-shared-clubs",
+    "prompt": "Find pairs of students who are BOTH active members of at least 2 of the same clubs.\n\nCount unique pairs (order doesn't matter - Alice & Bob = Bob & Alice).\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore the count with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {"exact_values": {"answer": "1025"}}
+    }
+  },
+  {
+    "id": "task-hard-club-advisor-total-salary",
+    "prompt": "Calculate the total salary of all teachers who are club advisors.\n\nCount each teacher only once, even if they advise multiple clubs.\n\nPath: school_club_advisors → school_teachers (salary)\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore the total salary as an integer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {"exact_values": {"answer": "3176366"}}
+    }
+  },
+  {
+    "id": "task-hard-gpa-academic-vs-sports",
+    "prompt": "Compare the average GPA of students in 'academic' clubs vs 'sports' clubs.\n\nCount each student only once per category (even if in multiple clubs of same type).\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore results:\n- 'academic_avg_gpa': average GPA of academic club members (2 decimal places)\n- 'sports_avg_gpa': average GPA of sports club members (2 decimal places)\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {"exact_values": {"academic_avg_gpa": "3.03", "sports_avg_gpa": "2.99"}}
+    }
+  },
+  {
+    "id": "task-hard-department-heads-salary",
+    "prompt": "Calculate the total salary of all teachers who are department heads.\n\nA teacher is a department head if is_department_head = true in school_teacher_school_assignments.\n\nCount each teacher only once, even if they are head of multiple departments.\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore the total salary as an integer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {"exact_values": {"answer": "4653536"}}
+    }
+  },
+  {
+    "id": "task-hard-students-three-club-types",
+    "prompt": "Find students who are ACTIVE members of clubs in at least 3 different club types.\n\nClub types are: academic, sports, arts, social.\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore the count with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {"exact_values": {"answer": "25"}}
+    }
+  },
+  {
+    "id": "task-hard-event-budgets-by-type",
+    "prompt": "Calculate the total budget for each event type.\n\nStore results (as numbers, no $ sign, 2 decimal places):\n- 'competition_budget'\n- 'conference_budget'\n- 'fundraiser_budget'\n- 'meeting_budget'\n- 'performance_budget'\n- 'workshop_budget'\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "competition_budget": "76296.16",
+          "conference_budget": "60607.53",
+          "fundraiser_budget": "74165.99",
+          "meeting_budget": "44595.18",
+          "performance_budget": "77738.72",
+          "workshop_budget": "56850.68"
+        }
+      }
+    }
+  },
+  {
+    "id": "task-hard-students-per-city",
+    "prompt": "Count the number of enrolled students in each city.\n\nPath: school_cities → school_city_school_assignments → school_student_enrollments\n\nNote: A student should be counted once per city even if enrolled in multiple schools in that city.\n\nStore results:\n- 'quincy_students'\n- 'brookline_students'\n- 'somerville_students'\n- 'malden_students'\n- 'cambridge_students'\n- 'medford_students'\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "quincy_students": "281",
+          "brookline_students": "272",
+          "somerville_students": "189",
+          "malden_students": "140",
+          "cambridge_students": "63",
+          "medford_students": "55"
+        }
+      }
+    }
+  },
+  {
+    "id": "task-hard-top-teacher-per-subject",
+    "prompt": "Find the highest-paid teacher for each subject.\n\nStore results as 'subject_salary' (salary only, as integer):\n- 'mathematics_salary'\n- 'science_salary'\n- 'english_salary'\n- 'history_salary'\n- 'art_salary'\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "mathematics_salary": "94811",
+          "science_salary": "94264",
+          "english_salary": "93161",
+          "history_salary": "93872",
+          "art_salary": "93534"
+        }
+      }
+    }
+  },
+  {
+    "id": "task-hard-avg-score-by-subject",
+    "prompt": "Calculate the average test score for each subject.\n\nStore results (2 decimal places):\n- 'mathematics_avg'\n- 'science_avg'\n- 'english_avg'\n- 'history_avg'\n- 'music_avg'\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix. Scores are in school_student_scores.\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "mathematics_avg": "84.60",
+          "science_avg": "78.75",
+          "english_avg": "92.49",
+          "history_avg": "78.27",
+          "music_avg": "99.32"
+        }
+      }
+    }
+  }
+]

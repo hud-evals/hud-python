@@ -1,0 +1,341 @@
+[
+  {
+    "id": "task-school-sum-club-members",
+    "prompt": "The scratchpad contains a 'clubs' key with 5 club names. Find the total number of ACTIVE members across all these clubs combined.\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore the total count as an integer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {
+        "initial_data": {
+          "clubs": "Drama Club, Chess Club, Soccer Club, Debate Team, Art Club"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {"exact_values": {"answer": "434"}}
+    }
+  },
+  {
+    "id": "task-school-dedup-schools-students",
+    "prompt": "The scratchpad contains a 'school_list' key with school names that include DUPLICATES. First deduplicate the list, then count the total number of enrolled students across all unique schools.\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore the student count with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {
+        "initial_data": {
+          "school_list": "Jefferson Prep, Hamilton High, Jefferson Prep, Lincoln High School, Hamilton High"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {"exact_values": {"answer": "1055"}}
+    }
+  },
+  {
+    "id": "task-school-teachers-in-cities",
+    "prompt": "The scratchpad contains 'target_cities' with 4 city names. Find the total number of teachers working at schools in these cities combined.\n\nNote: A teacher is at a school if they have an assignment in school_teacher_school_assignments. You need to go through city_school_assignments to find which schools are in which city.\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore the count with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {
+        "initial_data": {
+          "target_cities": "Boston, Cambridge, Brookline, Somerville"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {"exact_values": {"answer": "211"}}
+    }
+  },
+  {
+    "id": "task-school-event-participants-by-type",
+    "prompt": "The scratchpad contains 'event_types' with 3 types. For EACH type, count the total participants and store in the scratchpad:\n- 'competition_count': participants in competition events\n- 'performance_count': participants in performance events  \n- 'workshop_count': participants in workshop events\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore all 3 counts in scratchpad. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {
+        "initial_data": {
+          "event_types": "competition, performance, workshop"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "competition_count": "487",
+          "performance_count": "529",
+          "workshop_count": "335"
+        }
+      }
+    }
+  },
+  {
+    "id": "task-school-high-gpa-per-school",
+    "prompt": "The scratchpad contains 'schools' with 4 school names and 'gpa_threshold' with a GPA value. For each school, count how many students have GPA strictly greater than the threshold.\n\nStore results:\n- 'school_1': count for first school (Jefferson Prep)\n- 'school_2': count for second school (Washington Academy)\n- 'school_3': count for third school (Lincoln High School)\n- 'school_4': count for fourth school (Roosevelt Secondary)\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {
+        "initial_data": {
+          "schools": "Jefferson Prep, Washington Academy, Lincoln High School, Roosevelt Secondary",
+          "gpa_threshold": "3.5"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "school_1": "88",
+          "school_2": "73",
+          "school_3": "90",
+          "school_4": "88"
+        }
+      }
+    }
+  },
+  {
+    "id": "task-school-top-salary-by-subject",
+    "prompt": "The scratchpad contains 'subjects' with 5 teaching subjects. For each subject, find the highest-paid teacher and store their salary.\n\nStore results:\n- 'math_salary': highest salary in Mathematics\n- 'science_salary': highest salary in Science\n- 'english_salary': highest salary in English\n- 'history_salary': highest salary in History\n- 'art_salary': highest salary in Art\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore salaries as integers (no $ sign). Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {
+        "initial_data": {
+          "subjects": "Mathematics, Science, English, History, Art"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "math_salary": "94811",
+          "science_salary": "94264",
+          "english_salary": "93161",
+          "history_salary": "93872",
+          "art_salary": "93534"
+        }
+      }
+    }
+  },
+  {
+    "id": "task-school-advisors-per-city",
+    "prompt": "Find the number of UNIQUE club advisors for each city. Store results for these 5 cities:\n- 'cambridge_advisors'\n- 'brookline_advisors'\n- 'somerville_advisors'\n- 'quincy_advisors'\n- 'malden_advisors'\n\nPath: cities → city_school_assignments → schools → club_school_assignments → clubs → club_advisors (count unique teachers)\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "cambridge_advisors": "5",
+          "brookline_advisors": "16",
+          "somerville_advisors": "10",
+          "quincy_advisors": "8",
+          "malden_advisors": "5"
+        }
+      }
+    }
+  },
+  {
+    "id": "task-school-attendance-dates",
+    "prompt": "The scratchpad contains 'dates' with 6 attendance dates. For each date, count how many students were marked as 'present'.\n\nStore results:\n- 'date_1': count for 2024-09-01\n- 'date_2': count for 2024-09-08\n- 'date_3': count for 2024-09-15\n- 'date_4': count for 2024-10-01\n- 'date_5': count for 2024-10-08\n- 'date_6': count for 2024-11-01\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {
+        "initial_data": {
+          "dates": "2024-09-01, 2024-09-08, 2024-09-15, 2024-10-01, 2024-10-08, 2024-11-01"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "date_1": "1758",
+          "date_2": "1754",
+          "date_3": "1764",
+          "date_4": "1769",
+          "date_5": "1732",
+          "date_6": "1764"
+        }
+      }
+    }
+  },
+  {
+    "id": "task-school-absences-by-club-type",
+    "prompt": "The scratchpad contains 'club_types' with 3 types (sports, academic, arts). For each club type:\n1. Find all active members of clubs of that type\n2. Count how many absence records those students have\n\nStore results:\n- 'sports_absences'\n- 'academic_absences'\n- 'arts_absences'\n\nPath: clubs (by type) → memberships → students → attendance (status='absent')\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {
+        "initial_data": {
+          "club_types": "sports, academic, arts"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "sports_absences": "146",
+          "academic_absences": "153",
+          "arts_absences": "154"
+        }
+      }
+    }
+  },
+  {
+    "id": "task-school-top-scores-by-subject",
+    "prompt": "The scratchpad contains 'subjects' with 3 subjects. For each subject, find the highest test score ever recorded.\n\nStore results:\n- 'math_top': highest score in Mathematics\n- 'science_top': highest score in Science\n- 'history_top': highest score in History\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore scores with 2 decimal places. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_read", "local_scratchpad_write", "supabase_list_tables", "supabase_execute_sql"]
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {
+        "initial_data": {
+          "subjects": "Mathematics, Science, History"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "math_top": "199.99",
+          "science_top": "199.99",
+          "history_top": "199.97"
+        }
+      }
+    }
+  }
+]
+
+

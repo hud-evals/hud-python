@@ -1,0 +1,1000 @@
+======================================================================
+RIVERSIDE PUBLIC LIBRARY - MEMBER DIRECTORY
+======================================================================
+
+TABLE OF CONTENTS
+----------------------------------------
+  Section 1: Prefers Fiction (80 members)
+  Section 2: Prefers Non-Fiction (60 members)
+  Section 3: Prefers Mystery (45 members)
+  Section 4: Prefers Science Fiction (35 members)
+  Section 5: Prefers Fantasy (40 members)
+  Section 6: Has overdue books (25 members)
+  Section 7: Never late on returns (70 members)
+  Section 8: Attends book clubs (55 members)
+  Section 9: Volunteers at library (20 members)
+  Section 10: Has children's card (30 members)
+  Section 11: Senior discount eligible (2 members)
+  Section 12: Student member (34 members)
+  Section 13: Donated books (45 members)
+  Section 14: Requested new titles (60 members)
+  Section 15: Uses digital library (85 members)
+  Section 16: Platinum tier (23 members)
+  Section 17: Gold tier (36 members)
+  Section 18: Silver tier (58 members)
+  Section 19: Bronze tier (83 members)
+  Section 20: Joined before 2020 (97 members)
+  Section 21: Joined 2020 or later (103 members)
+  Section 22: Participates in reading challenges (50 members)
+  Section 23: Has audiobook subscription (40 members)
+  Section 24: Borrows more than 10 books/month (15 members)
+  Section 25: First-time borrower this year (25 members)
+
+Note: Members may appear in multiple sections.
+Member IDs follow format: LIB-XXXX
+
+======================================================================
+
+SECTION 1: PREFERS FICTION
+--------------------------------------------------
+
+  LIB-1001
+  LIB-1006
+  LIB-1009
+  LIB-1016
+  LIB-1017
+  LIB-1019
+  LIB-1027
+  LIB-1029
+  LIB-1034
+  LIB-1035
+  LIB-1037
+  LIB-1039
+  LIB-1042
+  LIB-1045
+  LIB-1046
+  LIB-1048
+  LIB-1050
+  LIB-1051
+  LIB-1053
+  LIB-1054
+  LIB-1057
+  LIB-1061
+  LIB-1062
+  LIB-1063
+  LIB-1064
+  LIB-1068
+  LIB-1070
+  LIB-1071
+  LIB-1074
+  LIB-1076
+  LIB-1077
+  LIB-1080
+  LIB-1081
+  LIB-1082
+  LIB-1083
+  LIB-1084
+  LIB-1085
+  LIB-1091
+  LIB-1092
+  LIB-1093
+  LIB-1096
+  LIB-1097
+  LIB-1100
+  LIB-1101
+  LIB-1104
+  LIB-1107
+  LIB-1110
+  LIB-1111
+  LIB-1112
+  LIB-1117
+  LIB-1118
+  LIB-1122
+  LIB-1123
+  LIB-1125
+  LIB-1126
+  LIB-1127
+  LIB-1139
+  LIB-1140
+  LIB-1144
+  LIB-1147
+  LIB-1152
+  LIB-1154
+  LIB-1156
+  LIB-1157
+  LIB-1158
+  LIB-1160
+  LIB-1161
+  LIB-1163
+  LIB-1166
+  LIB-1169
+  LIB-1173
+  LIB-1174
+  LIB-1176
+  LIB-1177
+  LIB-1182
+  LIB-1184
+  LIB-1185
+  LIB-1187
+  LIB-1191
+  LIB-1198
+
+
+SECTION 2: PREFERS NON-FICTION
+--------------------------------------------------
+
+  Jasmine Martinez (LIB-1002)
+  Ursula Evans (LIB-1006)
+  Rachel Jackson (LIB-1009)
+  Priscilla Diaz (LIB-1011)
+  Paula O'Brien (LIB-1021)
+  Sylvia Garcia (LIB-1025)
+  Michael Irving (LIB-1026)
+  Conrad Jackson (LIB-1027)
+  Yusuf Quinn (LIB-1029)
+  Walter Evans (LIB-1036)
+  Quinn Harris (LIB-1038)
+  Charlie Taylor (LIB-1042)
+  Julia Baker (LIB-1056)
+  Ursula Nelson (LIB-1063)
+  Rachel Brown (LIB-1066)
+  Keith Chen (LIB-1075)
+  Paula Diaz (LIB-1079)
+  Walter Diaz (LIB-1084)
+  George Anderson (LIB-1088)
+  Ernest Harris (LIB-1089)
+  Julia King (LIB-1090)
+  Natalie Garcia (LIB-1092)
+  Beatrice Harris (LIB-1095)
+  Laura Lee (LIB-1100)
+  Xavier Jackson (LIB-1102)
+  Fiona O'Brien (LIB-1106)
+  Gordon Rodriguez (LIB-1107)
+  Walter Vargas (LIB-1110)
+  Ernest Quinn (LIB-1114)
+  Adrian King (LIB-1118)
+  Keith Williams (LIB-1122)
+  Alice King (LIB-1123)
+  Edward Jensen (LIB-1128)
+  Zara Anderson (LIB-1129)
+  Lydia Young (LIB-1130)
+  Hannah Ishikawa (LIB-1132)
+  Michael Harris (LIB-1136)
+  Victoria Park (LIB-1137)
+  Quinn Lopez (LIB-1139)
+  Oscar Nguyen (LIB-1142)
+  Ulrich Moore (LIB-1144)
+  Vincent Garcia (LIB-1147)
+  Edward Fischer (LIB-1148)
+  Jasmine Davis (LIB-1149)
+  Vincent Davis (LIB-1150)
+  Beatrice Jackson (LIB-1152)
+  Diana Jensen (LIB-1156)
+  Theodore Xu (LIB-1163)
+  Fiona Zhang (LIB-1164)
+  Michael Williams (LIB-1165)
+  Julia Clark (LIB-1168)
+  Natalie Moore (LIB-1170)
+  Helena Nguyen (LIB-1173)
+  Oliver Vargas (LIB-1174)
+  Fiona Brown (LIB-1177)
+  Michael O'Brien (LIB-1178)
+  Wendy Hill (LIB-1179)
+  Jasmine Garcia (LIB-1184)
+  Julia Brown (LIB-1185)
+  Zara Irving (LIB-1197)
+
+
+SECTION 3: PREFERS MYSTERY
+--------------------------------------------------
+
+LIB-1005, LIB-1007, LIB-1011, LIB-1017, LIB-1024, LIB-1027, LIB-1029, LIB-1040, LIB-1042, LIB-1044, LIB-1047, LIB-1050, LIB-1052, LIB-1059, LIB-1062, LIB-1076, LIB-1081, LIB-1084, LIB-1087, LIB-1089, LIB-1101, LIB-1103, LIB-1109, LIB-1110, LIB-1112, LIB-1115, LIB-1116, LIB-1118, LIB-1121, LIB-1123, LIB-1132, LIB-1133, LIB-1141, LIB-1143, LIB-1151, LIB-1157, LIB-1161, LIB-1163, LIB-1165, LIB-1173, LIB-1178, LIB-1181, LIB-1184, LIB-1188, LIB-1199
+
+
+SECTION 4: PREFERS SCIENCE FICTION
+--------------------------------------------------
+
+  LIB-1001
+  LIB-1016
+  LIB-1026
+  LIB-1029
+  LIB-1047
+  LIB-1050
+  LIB-1052
+  LIB-1054
+  LIB-1067
+  LIB-1071
+  LIB-1080
+  LIB-1083
+  LIB-1089
+  LIB-1090
+  LIB-1093
+  LIB-1099
+  LIB-1100
+  LIB-1109
+  LIB-1117
+  LIB-1125
+  LIB-1135
+  LIB-1137
+  LIB-1147
+  LIB-1150
+  LIB-1152
+  LIB-1156
+  LIB-1158
+  LIB-1163
+  LIB-1171
+  LIB-1180
+  LIB-1181
+  LIB-1182
+  LIB-1192
+  LIB-1196
+  LIB-1198
+
+
+SECTION 5: PREFERS FANTASY
+--------------------------------------------------
+
+  Paula O'Brien (LIB-1021)
+  Yusuf Quinn (LIB-1029)
+  Julia Martinez (LIB-1030)
+  Paula Quinn (LIB-1034)
+  Alice Diaz (LIB-1035)
+  Walter Evans (LIB-1036)
+  Charlie Taylor (LIB-1042)
+  Laura Adams (LIB-1044)
+  Walter Taylor (LIB-1046)
+  Yvonne Rodriguez (LIB-1047)
+  Xavier Park (LIB-1061)
+  Tina Garcia (LIB-1073)
+  Alice Adams (LIB-1076)
+  Delia Brown (LIB-1078)
+  Laura Foster (LIB-1080)
+  Beatrice Harris (LIB-1095)
+  Beatrice Underwood (LIB-1098)
+  Xavier Rodriguez (LIB-1099)
+  Gordon Rodriguez (LIB-1107)
+  Martin Green (LIB-1108)
+  Yusuf Underwood (LIB-1115)
+  Martin Williams (LIB-1124)
+  Oliver Garcia (LIB-1125)
+  Lydia Young (LIB-1130)
+  Victoria Park (LIB-1137)
+  Oscar Nguyen (LIB-1142)
+  Vincent Garcia (LIB-1147)
+  Rupert Edwards (LIB-1151)
+  Beatrice Jackson (LIB-1152)
+  Felicia Moore (LIB-1157)
+  Keith Zhang (LIB-1162)
+  Michael Williams (LIB-1165)
+  Victoria Fischer (LIB-1172)
+  Helena Nguyen (LIB-1173)
+  Fiona Brown (LIB-1177)
+  Laura Nguyen (LIB-1180)
+  Kevin Martinez (LIB-1183)
+  Adrian Nguyen (LIB-1190)
+  Priscilla Vargas (LIB-1198)
+  Yusuf Vargas (LIB-1199)
+
+
+SECTION 6: HAS OVERDUE BOOKS
+--------------------------------------------------
+
+LIB-1002, LIB-1007, LIB-1013, LIB-1021, LIB-1034, LIB-1042, LIB-1049, LIB-1056, LIB-1074, LIB-1091, LIB-1098, LIB-1104, LIB-1106, LIB-1113, LIB-1124, LIB-1125, LIB-1126, LIB-1129, LIB-1143, LIB-1144, LIB-1158, LIB-1167, LIB-1175, LIB-1181, LIB-1185
+
+
+SECTION 7: NEVER LATE ON RETURNS
+--------------------------------------------------
+
+  LIB-1008
+  LIB-1010
+  LIB-1015
+  LIB-1022
+  LIB-1024
+  LIB-1026
+  LIB-1028
+  LIB-1029
+  LIB-1030
+  LIB-1032
+  LIB-1033
+  LIB-1034
+  LIB-1035
+  LIB-1037
+  LIB-1042
+  LIB-1043
+  LIB-1052
+  LIB-1053
+  LIB-1055
+  LIB-1057
+  LIB-1060
+  LIB-1063
+  LIB-1067
+  LIB-1068
+  LIB-1070
+  LIB-1071
+  LIB-1073
+  LIB-1074
+  LIB-1076
+  LIB-1082
+  LIB-1089
+  LIB-1093
+  LIB-1100
+  LIB-1105
+  LIB-1108
+  LIB-1109
+  LIB-1112
+  LIB-1115
+  LIB-1117
+  LIB-1126
+  LIB-1130
+  LIB-1131
+  LIB-1134
+  LIB-1136
+  LIB-1137
+  LIB-1138
+  LIB-1139
+  LIB-1140
+  LIB-1144
+  LIB-1145
+  LIB-1146
+  LIB-1150
+  LIB-1152
+  LIB-1153
+  LIB-1155
+  LIB-1156
+  LIB-1157
+  LIB-1161
+  LIB-1167
+  LIB-1168
+  LIB-1173
+  LIB-1179
+  LIB-1183
+  LIB-1184
+  LIB-1186
+  LIB-1190
+  LIB-1194
+  LIB-1196
+  LIB-1198
+  LIB-1199
+
+
+SECTION 8: ATTENDS BOOK CLUBS
+--------------------------------------------------
+
+  Oliver Harris (LIB-1000)
+  Yusuf Garcia (LIB-1004)
+  Priscilla Diaz (LIB-1011)
+  Lydia Zhang (LIB-1012)
+  George Taylor (LIB-1016)
+  Ivan Edwards (LIB-1019)
+  Nina Irving (LIB-1023)
+  Sylvia Garcia (LIB-1025)
+  Diana Davis (LIB-1031)
+  Natalie Fischer (LIB-1033)
+  Walter Evans (LIB-1036)
+  Charlie Anderson (LIB-1040)
+  Delia Clark (LIB-1054)
+  Samuel Green (LIB-1055)
+  Priscilla Brown (LIB-1068)
+  Paula Martinez (LIB-1071)
+  Delia Quinn (LIB-1072)
+  Priscilla Foster (LIB-1082)
+  Rupert Lee (LIB-1083)
+  Martin Smith (LIB-1086)
+  Ivan Rodriguez (LIB-1087)
+  Yvonne Hill (LIB-1091)
+  Oscar Smith (LIB-1094)
+  Kevin Taylor (LIB-1096)
+  Victoria Underwood (LIB-1101)
+  Gordon Anderson (LIB-1103)
+  Fiona O'Brien (LIB-1106)
+  Samuel Taylor (LIB-1109)
+  Yusuf Jensen (LIB-1112)
+  Yusuf Underwood (LIB-1115)
+  Oscar Fischer (LIB-1116)
+  Bob Chen (LIB-1117)
+  Martin Williams (LIB-1124)
+  Oliver Garcia (LIB-1125)
+  Fiona Smith (LIB-1126)
+  Natalie O'Brien (LIB-1131)
+  Michael Harris (LIB-1136)
+  Lydia Underwood (LIB-1140)
+  Ulrich Moore (LIB-1144)
+  Vincent Garcia (LIB-1147)
+  Edward Fischer (LIB-1148)
+  Alice Foster (LIB-1160)
+  Edward Zhang (LIB-1161)
+  Keith Zhang (LIB-1162)
+  Julia Clark (LIB-1168)
+  Natalie Moore (LIB-1170)
+  Tina Jackson (LIB-1176)
+  Fiona Brown (LIB-1177)
+  Michael O'Brien (LIB-1178)
+  Conrad Nguyen (LIB-1181)
+  Michael Xu (LIB-1182)
+  Xavier Edwards (LIB-1188)
+  Jasmine Moore (LIB-1189)
+  Priscilla Lopez (LIB-1195)
+  Zara Irving (LIB-1197)
+
+
+SECTION 9: VOLUNTEERS AT LIBRARY
+--------------------------------------------------
+
+LIB-1013, LIB-1021, LIB-1023, LIB-1033, LIB-1040, LIB-1042, LIB-1051, LIB-1064, LIB-1070, LIB-1077, LIB-1078, LIB-1092, LIB-1095, LIB-1101, LIB-1160, LIB-1166, LIB-1167, LIB-1170, LIB-1176, LIB-1185
+
+
+SECTION 10: HAS CHILDREN'S CARD
+--------------------------------------------------
+
+  LIB-1000
+  LIB-1002
+  LIB-1018
+  LIB-1019
+  LIB-1022
+  LIB-1023
+  LIB-1024
+  LIB-1030
+  LIB-1033
+  LIB-1054
+  LIB-1057
+  LIB-1058
+  LIB-1059
+  LIB-1087
+  LIB-1098
+  LIB-1108
+  LIB-1109
+  LIB-1113
+  LIB-1122
+  LIB-1132
+  LIB-1151
+  LIB-1167
+  LIB-1174
+  LIB-1178
+  LIB-1179
+  LIB-1180
+  LIB-1181
+  LIB-1187
+  LIB-1189
+  LIB-1193
+
+
+SECTION 11: SENIOR DISCOUNT ELIGIBLE
+--------------------------------------------------
+
+  Natalie King (LIB-1053)
+  Keith Park (LIB-1191)
+
+
+SECTION 12: STUDENT MEMBER
+--------------------------------------------------
+
+LIB-1005, LIB-1010, LIB-1020, LIB-1029, LIB-1034, LIB-1046, LIB-1050, LIB-1056, LIB-1058, LIB-1061, LIB-1070, LIB-1072, LIB-1075, LIB-1077, LIB-1106, LIB-1115, LIB-1116, LIB-1119, LIB-1124, LIB-1128, LIB-1133, LIB-1142, LIB-1147, LIB-1152, LIB-1154, LIB-1156, LIB-1158, LIB-1165, LIB-1166, LIB-1168, LIB-1175, LIB-1179, LIB-1195, LIB-1197
+
+
+SECTION 13: DONATED BOOKS
+--------------------------------------------------
+
+  LIB-1002
+  LIB-1017
+  LIB-1021
+  LIB-1022
+  LIB-1025
+  LIB-1026
+  LIB-1031
+  LIB-1034
+  LIB-1035
+  LIB-1036
+  LIB-1038
+  LIB-1042
+  LIB-1054
+  LIB-1055
+  LIB-1063
+  LIB-1070
+  LIB-1076
+  LIB-1080
+  LIB-1089
+  LIB-1094
+  LIB-1097
+  LIB-1098
+  LIB-1105
+  LIB-1109
+  LIB-1112
+  LIB-1113
+  LIB-1135
+  LIB-1141
+  LIB-1144
+  LIB-1150
+  LIB-1153
+  LIB-1156
+  LIB-1157
+  LIB-1160
+  LIB-1161
+  LIB-1164
+  LIB-1166
+  LIB-1169
+  LIB-1173
+  LIB-1179
+  LIB-1183
+  LIB-1187
+  LIB-1193
+  LIB-1196
+  LIB-1198
+
+
+SECTION 14: REQUESTED NEW TITLES
+--------------------------------------------------
+
+  Theodore Brown (LIB-1003)
+  Yusuf Garcia (LIB-1004)
+  Ursula Evans (LIB-1006)
+  Zara Rodriguez (LIB-1010)
+  Julia Kim (LIB-1013)
+  Beatrice Kim (LIB-1015)
+  Alice Moore (LIB-1017)
+  Paula King (LIB-1018)
+  Paula O'Brien (LIB-1021)
+  Kevin Adams (LIB-1028)
+  Natalie Fischer (LIB-1033)
+  Nina Quinn (LIB-1039)
+  Laura Adams (LIB-1044)
+  Hannah Quinn (LIB-1048)
+  Theodore Smith (LIB-1052)
+  Samuel Green (LIB-1055)
+  Xavier Park (LIB-1061)
+  Delia Ishikawa (LIB-1067)
+  Paula Martinez (LIB-1071)
+  Delia Quinn (LIB-1072)
+  Tina Garcia (LIB-1073)
+  Keith Chen (LIB-1075)
+  Beatrice Lopez (LIB-1077)
+  Paula Diaz (LIB-1079)
+  Helena Martinez (LIB-1081)
+  Natalie Garcia (LIB-1092)
+  Jasmine Evans (LIB-1093)
+  Beatrice Underwood (LIB-1098)
+  Xavier Rodriguez (LIB-1099)
+  Laura Lee (LIB-1100)
+  Victoria Underwood (LIB-1101)
+  Xavier Jackson (LIB-1102)
+  Fiona O'Brien (LIB-1106)
+  Gordon Rodriguez (LIB-1107)
+  Martin Green (LIB-1108)
+  Delia Smith (LIB-1120)
+  Fiona Smith (LIB-1126)
+  Helena Green (LIB-1127)
+  Edward Jensen (LIB-1128)
+  Zara Anderson (LIB-1129)
+  Lydia Young (LIB-1130)
+  Hannah Ishikawa (LIB-1132)
+  Conrad Park (LIB-1135)
+  Victoria Park (LIB-1137)
+  Quinn Lopez (LIB-1139)
+  Yusuf Moore (LIB-1145)
+  Priscilla Jackson (LIB-1146)
+  Vincent Davis (LIB-1150)
+  Beatrice Jackson (LIB-1152)
+  Nina Young (LIB-1155)
+  Theodore Xu (LIB-1163)
+  Michael Williams (LIB-1165)
+  Julia Clark (LIB-1168)
+  Helena Nguyen (LIB-1173)
+  Lydia Jensen (LIB-1175)
+  Tina Jackson (LIB-1176)
+  Kevin Martinez (LIB-1183)
+  Jasmine Garcia (LIB-1184)
+  Walter Park (LIB-1194)
+  Priscilla Vargas (LIB-1198)
+
+
+SECTION 15: USES DIGITAL LIBRARY
+--------------------------------------------------
+
+LIB-1000, LIB-1002, LIB-1003, LIB-1004, LIB-1007, LIB-1011, LIB-1014, LIB-1016, LIB-1019, LIB-1020, LIB-1022, LIB-1026, LIB-1029, LIB-1030, LIB-1032, LIB-1035, LIB-1039, LIB-1040, LIB-1041, LIB-1042, LIB-1044, LIB-1046, LIB-1049, LIB-1052, LIB-1058, LIB-1060, LIB-1061, LIB-1062, LIB-1065, LIB-1066, LIB-1067, LIB-1068, LIB-1069, LIB-1070, LIB-1079, LIB-1083, LIB-1085, LIB-1088, LIB-1091, LIB-1092, LIB-1094, LIB-1095, LIB-1100, LIB-1102, LIB-1109, LIB-1111, LIB-1116, LIB-1117, LIB-1119, LIB-1127, LIB-1130, LIB-1132, LIB-1133, LIB-1134, LIB-1137, LIB-1143, LIB-1145, LIB-1146, LIB-1147, LIB-1150, LIB-1152, LIB-1155, LIB-1156, LIB-1159, LIB-1161, LIB-1162, LIB-1164, LIB-1166, LIB-1168, LIB-1169, LIB-1170, LIB-1171, LIB-1174, LIB-1177, LIB-1178, LIB-1180, LIB-1181, LIB-1182, LIB-1184, LIB-1185, LIB-1186, LIB-1187, LIB-1188, LIB-1189, LIB-1198
+
+
+SECTION 16: PLATINUM TIER
+--------------------------------------------------
+
+  LIB-1003
+  LIB-1006
+  LIB-1015
+  LIB-1017
+  LIB-1028
+  LIB-1029
+  LIB-1043
+  LIB-1059
+  LIB-1072
+  LIB-1095
+  LIB-1096
+  LIB-1100
+  LIB-1110
+  LIB-1112
+  LIB-1120
+  LIB-1127
+  LIB-1128
+  LIB-1131
+  LIB-1133
+  LIB-1153
+  LIB-1154
+  LIB-1161
+  LIB-1187
+
+
+SECTION 17: GOLD TIER
+--------------------------------------------------
+
+  Yusuf Garcia (LIB-1004)
+  Theodore Evans (LIB-1008)
+  Priscilla Diaz (LIB-1011)
+  Jasmine Anderson (LIB-1014)
+  Paula King (LIB-1018)
+  Ivan Edwards (LIB-1019)
+  Sylvia Garcia (LIB-1025)
+  Conrad Jackson (LIB-1027)
+  Julia Martinez (LIB-1030)
+  Laura Adams (LIB-1044)
+  Rachel Kim (LIB-1045)
+  Julia Baker (LIB-1056)
+  Natalie Green (LIB-1060)
+  Xavier Young (LIB-1065)
+  Edward Lee (LIB-1074)
+  Beatrice Lopez (LIB-1077)
+  Delia Brown (LIB-1078)
+  Yvonne Hill (LIB-1091)
+  Fiona O'Brien (LIB-1106)
+  Samuel Taylor (LIB-1109)
+  Keith Young (LIB-1111)
+  Oscar Fischer (LIB-1116)
+  Theodore Quinn (LIB-1121)
+  Alice King (LIB-1123)
+  Victoria Park (LIB-1137)
+  Oscar Vargas (LIB-1138)
+  Edward Fischer (LIB-1148)
+  Felicia Moore (LIB-1157)
+  Alice Nelson (LIB-1159)
+  Michael Williams (LIB-1165)
+  Tina Jackson (LIB-1176)
+  Michael O'Brien (LIB-1178)
+  Michael Xu (LIB-1182)
+  Jasmine Garcia (LIB-1184)
+  Julia Brown (LIB-1185)
+  Charlie Smith (LIB-1196)
+
+
+SECTION 18: SILVER TIER
+--------------------------------------------------
+
+LIB-1002, LIB-1005, LIB-1012, LIB-1021, LIB-1023, LIB-1024, LIB-1032, LIB-1033, LIB-1035, LIB-1036, LIB-1041, LIB-1042, LIB-1047, LIB-1052, LIB-1054, LIB-1055, LIB-1057, LIB-1058, LIB-1063, LIB-1066, LIB-1067, LIB-1073, LIB-1076, LIB-1081, LIB-1087, LIB-1088, LIB-1089, LIB-1090, LIB-1092, LIB-1093, LIB-1097, LIB-1099, LIB-1101, LIB-1107, LIB-1113, LIB-1114, LIB-1118, LIB-1130, LIB-1135, LIB-1136, LIB-1141, LIB-1142, LIB-1143, LIB-1144, LIB-1145, LIB-1146, LIB-1149, LIB-1152, LIB-1160, LIB-1167, LIB-1170, LIB-1174, LIB-1175, LIB-1180, LIB-1190, LIB-1191, LIB-1192, LIB-1198
+
+
+SECTION 19: BRONZE TIER
+--------------------------------------------------
+
+  LIB-1000
+  LIB-1001
+  LIB-1007
+  LIB-1009
+  LIB-1010
+  LIB-1013
+  LIB-1016
+  LIB-1020
+  LIB-1022
+  LIB-1026
+  LIB-1031
+  LIB-1034
+  LIB-1037
+  LIB-1038
+  LIB-1039
+  LIB-1040
+  LIB-1046
+  LIB-1048
+  LIB-1049
+  LIB-1050
+  LIB-1051
+  LIB-1053
+  LIB-1061
+  LIB-1062
+  LIB-1064
+  LIB-1068
+  LIB-1069
+  LIB-1070
+  LIB-1071
+  LIB-1075
+  LIB-1079
+  LIB-1080
+  LIB-1082
+  LIB-1083
+  LIB-1084
+  LIB-1085
+  LIB-1086
+  LIB-1094
+  LIB-1098
+  LIB-1102
+  LIB-1103
+  LIB-1104
+  LIB-1105
+  LIB-1108
+  LIB-1115
+  LIB-1117
+  LIB-1119
+  LIB-1122
+  LIB-1124
+  LIB-1125
+  LIB-1126
+  LIB-1129
+  LIB-1132
+  LIB-1134
+  LIB-1139
+  LIB-1140
+  LIB-1147
+  LIB-1150
+  LIB-1151
+  LIB-1155
+  LIB-1156
+  LIB-1158
+  LIB-1162
+  LIB-1163
+  LIB-1164
+  LIB-1166
+  LIB-1168
+  LIB-1169
+  LIB-1171
+  LIB-1172
+  LIB-1173
+  LIB-1177
+  LIB-1179
+  LIB-1181
+  LIB-1183
+  LIB-1186
+  LIB-1188
+  LIB-1189
+  LIB-1193
+  LIB-1194
+  LIB-1195
+  LIB-1197
+  LIB-1199
+
+
+SECTION 20: JOINED BEFORE 2020
+--------------------------------------------------
+
+  Oliver Harris (LIB-1000)
+  Hannah Young (LIB-1005)
+  Ursula Evans (LIB-1006)
+  Rachel Jackson (LIB-1009)
+  Zara Rodriguez (LIB-1010)
+  Priscilla Diaz (LIB-1011)
+  Jasmine Anderson (LIB-1014)
+  Paula King (LIB-1018)
+  Xavier Martinez (LIB-1020)
+  Paula O'Brien (LIB-1021)
+  Edward Davis (LIB-1022)
+  Nina Irving (LIB-1023)
+  Michael Garcia (LIB-1024)
+  Sylvia Garcia (LIB-1025)
+  Conrad Jackson (LIB-1027)
+  Julia Martinez (LIB-1030)
+  Edward Moore (LIB-1032)
+  Walter Evans (LIB-1036)
+  Natalie Hill (LIB-1037)
+  Quinn Harris (LIB-1038)
+  Hannah Evans (LIB-1041)
+  Laura Adams (LIB-1044)
+  Rachel Kim (LIB-1045)
+  Walter Taylor (LIB-1046)
+  Hannah Quinn (LIB-1048)
+  Natalie Underwood (LIB-1051)
+  Natalie King (LIB-1053)
+  Julia Baker (LIB-1056)
+  Oliver King (LIB-1057)
+  Hannah Diaz (LIB-1059)
+  Xavier Park (LIB-1061)
+  Ursula Nelson (LIB-1063)
+  Priscilla Brown (LIB-1068)
+  Wendy Irving (LIB-1070)
+  Paula Martinez (LIB-1071)
+  Edward Lee (LIB-1074)
+  Laura Foster (LIB-1080)
+  Helena Martinez (LIB-1081)
+  Walter Diaz (LIB-1084)
+  Xavier Lopez (LIB-1085)
+  Martin Smith (LIB-1086)
+  Ivan Rodriguez (LIB-1087)
+  Ernest Harris (LIB-1089)
+  Julia King (LIB-1090)
+  Natalie Garcia (LIB-1092)
+  Jasmine Evans (LIB-1093)
+  Oscar Smith (LIB-1094)
+  Victoria Underwood (LIB-1101)
+  Xavier Jackson (LIB-1102)
+  Oliver Clark (LIB-1104)
+  Fiona O'Brien (LIB-1106)
+  Martin Green (LIB-1108)
+  Keith Young (LIB-1111)
+  Adrian King (LIB-1118)
+  Felicia Lee (LIB-1119)
+  Alice King (LIB-1123)
+  Martin Williams (LIB-1124)
+  Oliver Garcia (LIB-1125)
+  Helena Green (LIB-1127)
+  Edward Jensen (LIB-1128)
+  Zara Anderson (LIB-1129)
+  Natalie O'Brien (LIB-1131)
+  Hannah Ishikawa (LIB-1132)
+  Victoria Park (LIB-1137)
+  Oscar Vargas (LIB-1138)
+  Quinn Lopez (LIB-1139)
+  Lydia Underwood (LIB-1140)
+  Oscar Nguyen (LIB-1142)
+  Ulrich Moore (LIB-1144)
+  Priscilla Jackson (LIB-1146)
+  Edward Fischer (LIB-1148)
+  Vincent Davis (LIB-1150)
+  Rupert Edwards (LIB-1151)
+  Bob Lopez (LIB-1153)
+  Rupert Zhang (LIB-1154)
+  Diana Jensen (LIB-1156)
+  Alice Nelson (LIB-1159)
+  Edward Zhang (LIB-1161)
+  Theodore Xu (LIB-1163)
+  Fiona Zhang (LIB-1164)
+  Quinn Martinez (LIB-1166)
+  Julia Clark (LIB-1168)
+  Walter Green (LIB-1169)
+  Helena Nguyen (LIB-1173)
+  Oliver Vargas (LIB-1174)
+  Michael O'Brien (LIB-1178)
+  Wendy Hill (LIB-1179)
+  Laura Nguyen (LIB-1180)
+  Conrad Nguyen (LIB-1181)
+  Julia Brown (LIB-1185)
+  Ursula Vargas (LIB-1187)
+  Keith Park (LIB-1191)
+  Yusuf Edwards (LIB-1193)
+  Walter Park (LIB-1194)
+  Charlie Smith (LIB-1196)
+  Priscilla Vargas (LIB-1198)
+  Yusuf Vargas (LIB-1199)
+
+
+SECTION 21: JOINED 2020 OR LATER
+--------------------------------------------------
+
+LIB-1001, LIB-1002, LIB-1003, LIB-1004, LIB-1007, LIB-1008, LIB-1012, LIB-1013, LIB-1015, LIB-1016, LIB-1017, LIB-1019, LIB-1026, LIB-1028, LIB-1029, LIB-1031, LIB-1033, LIB-1034, LIB-1035, LIB-1039, LIB-1040, LIB-1042, LIB-1043, LIB-1047, LIB-1049, LIB-1050, LIB-1052, LIB-1054, LIB-1055, LIB-1058, LIB-1060, LIB-1062, LIB-1064, LIB-1065, LIB-1066, LIB-1067, LIB-1069, LIB-1072, LIB-1073, LIB-1075, LIB-1076, LIB-1077, LIB-1078, LIB-1079, LIB-1082, LIB-1083, LIB-1088, LIB-1091, LIB-1095, LIB-1096, LIB-1097, LIB-1098, LIB-1099, LIB-1100, LIB-1103, LIB-1105, LIB-1107, LIB-1109, LIB-1110, LIB-1112, LIB-1113, LIB-1114, LIB-1115, LIB-1116, LIB-1117, LIB-1120, LIB-1121, LIB-1122, LIB-1126, LIB-1130, LIB-1133, LIB-1134, LIB-1135, LIB-1136, LIB-1141, LIB-1143, LIB-1145, LIB-1147, LIB-1149, LIB-1152, LIB-1155, LIB-1157, LIB-1158, LIB-1160, LIB-1162, LIB-1165, LIB-1167, LIB-1170, LIB-1171, LIB-1172, LIB-1175, LIB-1176, LIB-1177, LIB-1182, LIB-1183, LIB-1184, LIB-1186, LIB-1188, LIB-1189, LIB-1190, LIB-1192, LIB-1195, LIB-1197
+
+
+SECTION 22: PARTICIPATES IN READING CHALLENGES
+--------------------------------------------------
+
+  LIB-1001
+  LIB-1002
+  LIB-1006
+  LIB-1011
+  LIB-1013
+  LIB-1017
+  LIB-1019
+  LIB-1022
+  LIB-1030
+  LIB-1038
+  LIB-1045
+  LIB-1050
+  LIB-1051
+  LIB-1057
+  LIB-1059
+  LIB-1062
+  LIB-1063
+  LIB-1069
+  LIB-1072
+  LIB-1074
+  LIB-1077
+  LIB-1079
+  LIB-1081
+  LIB-1082
+  LIB-1083
+  LIB-1094
+  LIB-1095
+  LIB-1102
+  LIB-1104
+  LIB-1106
+  LIB-1107
+  LIB-1116
+  LIB-1118
+  LIB-1119
+  LIB-1126
+  LIB-1128
+  LIB-1132
+  LIB-1139
+  LIB-1141
+  LIB-1144
+  LIB-1146
+  LIB-1151
+  LIB-1159
+  LIB-1162
+  LIB-1167
+  LIB-1168
+  LIB-1172
+  LIB-1184
+  LIB-1189
+  LIB-1196
+
+
+SECTION 23: HAS AUDIOBOOK SUBSCRIPTION
+--------------------------------------------------
+
+  Oliver Harris (LIB-1000)
+  Jasmine Martinez (LIB-1002)
+  Priscilla Diaz (LIB-1011)
+  Beatrice Kim (LIB-1015)
+  Ivan Edwards (LIB-1019)
+  Paula O'Brien (LIB-1021)
+  Nina Irving (LIB-1023)
+  Michael Garcia (LIB-1024)
+  Michael Irving (LIB-1026)
+  Paula Quinn (LIB-1034)
+  Walter Evans (LIB-1036)
+  Theodore Smith (LIB-1052)
+  Hannah Diaz (LIB-1059)
+  Natalie Green (LIB-1060)
+  Paula Martinez (LIB-1071)
+  Delia Brown (LIB-1078)
+  Xavier Lopez (LIB-1085)
+  George Anderson (LIB-1088)
+  Beatrice Harris (LIB-1095)
+  Kevin Taylor (LIB-1096)
+  Laura Lee (LIB-1100)
+  Hannah Baker (LIB-1105)
+  Gordon Rodriguez (LIB-1107)
+  Keith Young (LIB-1111)
+  Bob Chen (LIB-1117)
+  Oliver Garcia (LIB-1125)
+  Zara Anderson (LIB-1129)
+  Yusuf Diaz (LIB-1133)
+  Conrad Park (LIB-1135)
+  Oscar Vargas (LIB-1138)
+  Yusuf Moore (LIB-1145)
+  Edward Fischer (LIB-1148)
+  Rupert Edwards (LIB-1151)
+  Keith Zhang (LIB-1162)
+  Theodore Xu (LIB-1163)
+  Julia Clark (LIB-1168)
+  Fiona Brown (LIB-1177)
+  Conrad Nguyen (LIB-1181)
+  Zara Green (LIB-1186)
+  Xavier Edwards (LIB-1188)
+
+
+SECTION 24: BORROWS MORE THAN 10 BOOKS/MONTH
+--------------------------------------------------
+
+LIB-1019, LIB-1033, LIB-1059, LIB-1060, LIB-1066, LIB-1069, LIB-1074, LIB-1080, LIB-1081, LIB-1083, LIB-1100, LIB-1115, LIB-1169, LIB-1179, LIB-1188
+
+
+SECTION 25: FIRST-TIME BORROWER THIS YEAR
+--------------------------------------------------
+
+  LIB-1023
+  LIB-1027
+  LIB-1030
+  LIB-1034
+  LIB-1039
+  LIB-1040
+  LIB-1042
+  LIB-1051
+  LIB-1053
+  LIB-1067
+  LIB-1077
+  LIB-1078
+  LIB-1080
+  LIB-1091
+  LIB-1104
+  LIB-1115
+  LIB-1118
+  LIB-1119
+  LIB-1137
+  LIB-1149
+  LIB-1175
+  LIB-1187
+  LIB-1191
+  LIB-1195
+  LIB-1197
+

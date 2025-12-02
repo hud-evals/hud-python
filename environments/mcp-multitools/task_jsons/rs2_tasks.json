@@ -1,0 +1,142 @@
+[
+  {
+    "id": "task-discount-impact",
+    "prompt": "Find the product that has the HIGHEST AVERAGE discount percentage across all order_items, but ONLY considering products that have been ordered at least 5 times. Return the product's SKU.\n\nHint: Join order_items with products, group by product, filter to products with COUNT >= 5, then find the one with highest AVG(discount_percent).\n\nYou have access to a Supabase database via supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Available tables: departments, employees, suppliers, products, customers, orders, order_items, shifts, meetings, meeting_attendees.\n\nStore the SKU using local_scratchpad_write with key 'answer'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"answer": "SKU-100241"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql", "supabase_list_tables"]
+    }
+  },
+  {
+    "id": "task-revenue-chain",
+    "prompt": "Find the top-level manager (employee with manager_id IS NULL) whose ENTIRE reporting chain (including themselves and ALL direct/indirect reports at any level) has generated the most total revenue. Return the manager's full name.\n\nHint: Revenue per order_item = quantity * unit_price * (1 - discount_percent/100). You need to:\n1. Find all top-level managers (manager_id IS NULL)\n2. For each, recursively find ALL employees who report to them (direct + indirect)\n3. Sum all revenue from orders where sales_rep_id is any of those employees\n4. Return the name of the top-level manager with highest total\n\nYou have access to a Supabase database via supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Available tables: departments, employees, suppliers, products, customers, orders, order_items, shifts, meetings, meeting_attendees.\n\nStore the full name (first_name + space + last_name) using local_scratchpad_write with key 'answer'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"answer": "Benjamin Blackwood"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql", "supabase_list_tables"]
+    }
+  },
+  {
+    "id": "task-cross-schedule",
+    "prompt": "Find the employee who has the most total ACCEPTED meeting hours, but ONLY counting meetings that fall in calendar weeks where that employee ALSO had at least one shift scheduled. Return the employee's full name.\n\nHint:\n1. For each shift, determine its ISO week (year, week_number) based on shift_date\n2. For each meeting, determine its ISO week based on scheduled_date\n3. For each employee, find weeks where they had shifts\n4. Sum meeting hours (end_time - start_time) only for meetings where the employee's response_status = 'accepted' AND the meeting's week matches a week where that employee had a shift\n5. Return the employee with the highest total\n\nYou have access to a Supabase database via supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Available tables: departments, employees, suppliers, products, customers, orders, order_items, shifts, meetings, meeting_attendees.\n\nStore the full name (first_name + space + last_name) using local_scratchpad_write with key 'answer'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"answer": "Natalie Xiao"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql", "supabase_list_tables"]
+    }
+  },
+  {
+    "id": "task-restock-revenue",
+    "prompt": "Calculate the TOTAL REVENUE generated by products that are mentioned in Linear issues about restocking. Return the sum with exactly 2 decimal places.\n\nHint:\n1. Use local_linear_list_issues to get all Linear issues (use limit=100)\n2. Find issues where the title contains 'restock' or 'reorder' (case-insensitive)\n3. Extract ALL SKU numbers (format: SKU-XXXXXX) from those issues' descriptions\n4. Find those products in Supabase by their SKU\n5. Calculate total revenue from order_items: quantity * unit_price * (1 - discount_percent/100)\n6. Sum all revenue across all matching products\n\nYou have access to a Supabase database via supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt') AND Linear issue tracking via local_linear_list_issues. Available Supabase tables: departments, employees, suppliers, products, customers, orders, order_items, shifts, meetings, meeting_attendees.\n\nStore the total as a number with exactly 2 decimal places (e.g., '4886.85') using local_scratchpad_write with key 'answer'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"answer": "6725.73"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql", "supabase_list_tables", "local_linear_list_issues"]
+    }
+  },
+  {
+    "id": "task-winback-lost-revenue",
+    "prompt": "Calculate the TOTAL LOST REVENUE from cancelled orders that are being tracked in Linear 'win-back' issues. Return the sum with exactly 2 decimal places.\n\nHint:\n1. Use local_linear_list_issues to get all Linear issues (use limit=100)\n2. Find issues where the title contains 'win-back' or 'cancelled' (case-insensitive)\n3. Extract ALL order IDs (format: ORD-XXXXXXX) from those issues' descriptions\n4. For each order ID, calculate the order's total value from order_items: quantity * unit_price * (1 - discount_percent/100)\n5. Sum all values across all matching orders\n\nYou have access to a Supabase database via supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt') AND Linear issue tracking via local_linear_list_issues. Available Supabase tables: departments, employees, suppliers, products, customers, orders, order_items, shifts, meetings, meeting_attendees.\n\nStore the total as a number with exactly 2 decimal places (e.g., '5880.42') using local_scratchpad_write with key 'answer'. When finished, say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", 
+          "--env-file", "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {"answer": "5880.42"}
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "supabase_execute_sql", "supabase_list_tables", "local_linear_list_issues"]
+    }
+  }
+]

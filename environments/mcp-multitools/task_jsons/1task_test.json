@@ -1,0 +1,46 @@
+[
+  {
+    "id": "task-or-languages-salary",
+    "prompt": "Find everyone who speaks Spanish OR French OR German OR Mandarin.\n\nCheck employee_attributes for all four language sections. Union all IDs.\nQuery Supabase for salaries only.\n\nUse \"; \" (semicolon followed by space) to separate entries.\nSort by employee ID.\n\nFORMAT: \"{employee_id}: {salary}\" - entries separated by \"; \" (semicolon space).\nSort alphabetically by employee ID (A-Z).\nExample: \"EMP-10001A: 85000; EMP-10002B: 92500\"\n\nData sources:\n- Document: Use local_read_document with doc_id 'employee_attributes' for certification/attribute sections.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "EMP-10043H: 116017; EMP-10053R: 181663; EMP-10067F: 133964; EMP-10073L: 135714; EMP-10083V: 240281; EMP-10091D: 245206; EMP-10124K: 154181; EMP-10134U: 104167; EMP-10170E: 120947; EMP-10200I: 144587; EMP-10215X: 159177; EMP-10243Z: 166781; EMP-10252I: 144229; EMP-10269Z: 129351; EMP-10283N: 135696; EMP-10292W: 79384; EMP-10303H: 77098; EMP-10317V: 61702; EMP-10329H: 60942; EMP-10337P: 99581; EMP-10349B: 75715; EMP-10357J: 202108; EMP-10366S: 136435; EMP-10388O: 82965; EMP-10397X: 126368; EMP-10400A: 67573; EMP-10412M: 97673; EMP-10432G: 59332; EMP-10442Q: 132418; EMP-10448W: 88979; EMP-10453B: 83801; EMP-10469R: 58452; EMP-10475X: 84677; EMP-10482E: 75956; EMP-10485H: 165710; EMP-10497T: 122965; EMP-10513J: 158099; EMP-10528Y: 55140; EMP-10549T: 88476; EMP-10552W: 51132; EMP-10555Z: 104836; EMP-10567L: 163757; EMP-10571P: 97073; EMP-10579X: 92844; EMP-10593L: 60585; EMP-10608A: 62082; EMP-10620M: 64589; EMP-10632Y: 82278; EMP-10642I: 208556; EMP-10654U: 67343; EMP-10657X: 117678; EMP-10668I: 85667; EMP-10696K: 112716; EMP-10702Q: 69084; EMP-10716E: 97180; EMP-10722K: 170360; EMP-10726O: 78159; EMP-10741D: 123308; EMP-10745H: 60936; EMP-10765B: 95501; EMP-10775L: 78100; EMP-10779P: 171998; EMP-10792C: 83645; EMP-10802M: 134162"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "local_read_document",
+        "supabase_execute_sql",
+        "supabase_list_tables"
+      ]
+    }
+  }
+]

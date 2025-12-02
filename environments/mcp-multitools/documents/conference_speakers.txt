@@ -1,0 +1,365 @@
+======================================================================
+TECH SUMMIT 2024 - SPEAKER DIRECTORY
+======================================================================
+
+CONTENTS
+----------------------------------------
+  Section 1: AI/ML (1 speakers)
+  Section 2: Blockchain (7 speakers)
+  Section 3: Cloud Computing (3 speakers)
+  Section 4: Cybersecurity (2 speakers)
+  Section 5: Data Science (4 speakers)
+  Section 6: DevOps (5 speakers)
+  Section 7: IoT (8 speakers)
+  Section 8: Mobile Dev (6 speakers)
+  Section 9: UX Design (5 speakers)
+  Section 10: Web Development (9 speakers)
+
+SPEAKER PROFILE FORMAT:
+  [ID] Name
+  Company: ...
+  Experience: X years
+  Rating: X.X / 5.0
+  Sessions: list of session IDs
+
+======================================================================
+
+SECTION 1: AI/ML
+==================================================
+
+  [SPK-123] Jamie Johansson
+    Company: FutureStack
+    Experience: 8 years
+    Rating: 4.5 / 5.0
+    Sessions: SESS-260, SESS-276
+
+
+SECTION 2: BLOCKCHAIN
+==================================================
+
+  [SPK-101] Blake Fernandez
+    Company: CodeCraft
+    Experience: 4 years
+    Rating: 4.0 / 5.0
+    Sessions: SESS-213
+
+  [SPK-124] Cameron Patel
+    Company: CloudFirst
+    Experience: 5 years
+    Rating: 4.5 / 5.0
+    Sessions: None
+
+  [SPK-148] Dakota Nakamura
+    Company: DigitalPulse
+    Experience: 25 years
+    Rating: 3.9 / 5.0
+    Sessions: SESS-228, SESS-232, SESS-253, SESS-257
+
+  [SPK-107] Jordan Andersen
+    Company: InnovateLabs
+    Experience: 18 years
+    Rating: 4.3 / 5.0
+    Sessions: SESS-235, SESS-272
+
+  [SPK-112] Parker Kim
+    Company: FutureStack
+    Experience: 5 years
+    Rating: 4.3 / 5.0
+    Sessions: SESS-205
+
+  [SPK-114] Quinn Nakamura
+    Company: DataFlow Inc
+    Experience: 14 years
+    Rating: 3.5 / 5.0
+    Sessions: None
+
+  [SPK-141] Sage Dubois
+    Company: NexGen Systems
+    Experience: 16 years
+    Rating: 4.9 / 5.0
+    Sessions: SESS-252
+
+
+SECTION 3: CLOUD COMPUTING
+==================================================
+
+  [SPK-111] Finley Chen
+    Company: CloudFirst
+    Experience: 24 years
+    Rating: 4.9 / 5.0
+    Sessions: SESS-200, SESS-212, SESS-250, SESS-259
+
+  [SPK-103] Riley Chen
+    Company: QuantumBits
+    Experience: 15 years
+    Rating: 4.8 / 5.0
+    Sessions: SESS-264
+
+  [SPK-120] Taylor Fernandez
+    Company: FutureStack
+    Experience: 3 years
+    Rating: 3.6 / 5.0
+    Sessions: SESS-203, SESS-229, SESS-258
+
+
+SECTION 4: CYBERSECURITY
+==================================================
+
+  [SPK-127] Jamie Fernandez
+    Company: DataFlow Inc
+    Experience: 15 years
+    Rating: 4.7 / 5.0
+    Sessions: SESS-209, SESS-268
+
+  [SPK-105] Taylor Okonkwo
+    Company: CloudFirst
+    Experience: 3 years
+    Rating: 4.7 / 5.0
+    Sessions: None
+
+
+SECTION 5: DATA SCIENCE
+==================================================
+
+  [SPK-129] Dakota Dubois
+    Company: NexGen Systems
+    Experience: 3 years
+    Rating: 4.1 / 5.0
+    Sessions: SESS-216
+
+  [SPK-149] Dakota Fernandez
+    Company: DigitalPulse
+    Experience: 4 years
+    Rating: 4.0 / 5.0
+    Sessions: SESS-261
+
+  [SPK-132] Kendall Martinez
+    Company: DataFlow Inc
+    Experience: 10 years
+    Rating: 4.9 / 5.0
+    Sessions: None
+
+  [SPK-133] Quinn Rossi
+    Company: FutureStack
+    Experience: 19 years
+    Rating: 4.1 / 5.0
+    Sessions: SESS-270
+
+
+SECTION 6: DEVOPS
+==================================================
+
+  [SPK-118] Alex Kim
+    Company: NexGen Systems
+    Experience: 14 years
+    Rating: 3.5 / 5.0
+    Sessions: SESS-217, SESS-225, SESS-231, SESS-242
+
+  [SPK-147] Dakota Nakamura
+    Company: FutureStack
+    Experience: 11 years
+    Rating: 4.5 / 5.0
+    Sessions: None
+
+  [SPK-116] Mackenzie O'Brien
+    Company: NexGen Systems
+    Experience: 8 years
+    Rating: 4.3 / 5.0
+    Sessions: SESS-273
+
+  [SPK-135] Quinn O'Brien
+    Company: DigitalPulse
+    Experience: 13 years
+    Rating: 3.6 / 5.0
+    Sessions: None
+
+  [SPK-134] Taylor Santos
+    Company: CodeCraft
+    Experience: 3 years
+    Rating: 4.6 / 5.0
+    Sessions: SESS-201, SESS-279
+
+
+SECTION 7: IOT
+==================================================
+
+  [SPK-109] Alex Johansson
+    Company: CodeCraft
+    Experience: 23 years
+    Rating: 4.5 / 5.0
+    Sessions: SESS-243
+
+  [SPK-117] Casey Fernandez
+    Company: NexGen Systems
+    Experience: 4 years
+    Rating: 4.6 / 5.0
+    Sessions: SESS-240
+
+  [SPK-100] Jordan O'Brien
+    Company: DataFlow Inc
+    Experience: 4 years
+    Rating: 3.9 / 5.0
+    Sessions: SESS-236, SESS-238, SESS-265
+
+  [SPK-126] Mackenzie Andersen
+    Company: InnovateLabs
+    Experience: 20 years
+    Rating: 4.1 / 5.0
+    Sessions: SESS-204, SESS-211, SESS-219, SESS-226, SESS-275
+
+  [SPK-125] Mackenzie Chen
+    Company: CodeCraft
+    Experience: 7 years
+    Rating: 4.3 / 5.0
+    Sessions: SESS-208, SESS-221
+
+  [SPK-119] Peyton O'Brien
+    Company: QuantumBits
+    Experience: 22 years
+    Rating: 3.5 / 5.0
+    Sessions: SESS-241, SESS-269
+
+  [SPK-144] Riley Dubois
+    Company: CodeCraft
+    Experience: 12 years
+    Rating: 4.1 / 5.0
+    Sessions: SESS-266, SESS-278
+
+  [SPK-143] Riley Johansson
+    Company: TechCorp
+    Experience: 11 years
+    Rating: 4.1 / 5.0
+    Sessions: SESS-237
+
+
+SECTION 8: MOBILE DEV
+==================================================
+
+  [SPK-122] Alex Martinez
+    Company: InnovateLabs
+    Experience: 20 years
+    Rating: 3.5 / 5.0
+    Sessions: SESS-224
+
+  [SPK-128] Cameron Chen
+    Company: CloudFirst
+    Experience: 14 years
+    Rating: 4.5 / 5.0
+    Sessions: SESS-263, SESS-277
+
+  [SPK-137] Casey Andersen
+    Company: NexGen Systems
+    Experience: 3 years
+    Rating: 4.6 / 5.0
+    Sessions: SESS-218, SESS-244, SESS-249, SESS-254
+
+  [SPK-142] Jamie Martinez
+    Company: SecureNet
+    Experience: 9 years
+    Rating: 4.0 / 5.0
+    Sessions: SESS-214, SESS-222, SESS-248, SESS-262, SESS-267
+
+  [SPK-138] Parker Petrov
+    Company: DigitalPulse
+    Experience: 10 years
+    Rating: 4.0 / 5.0
+    Sessions: SESS-202, SESS-227, SESS-251
+
+  [SPK-104] Taylor Chen
+    Company: FutureStack
+    Experience: 4 years
+    Rating: 3.7 / 5.0
+    Sessions: SESS-245, SESS-271, SESS-274
+
+
+SECTION 9: UX DESIGN
+==================================================
+
+  [SPK-106] Drew Rossi
+    Company: QuantumBits
+    Experience: 18 years
+    Rating: 4.2 / 5.0
+    Sessions: SESS-233, SESS-255
+
+  [SPK-139] Finley Rossi
+    Company: CloudFirst
+    Experience: 22 years
+    Rating: 4.5 / 5.0
+    Sessions: SESS-207, SESS-256
+
+  [SPK-146] Jordan Johansson
+    Company: TechCorp
+    Experience: 6 years
+    Rating: 4.1 / 5.0
+    Sessions: SESS-247
+
+  [SPK-140] Logan Mueller
+    Company: FutureStack
+    Experience: 4 years
+    Rating: 3.7 / 5.0
+    Sessions: SESS-230
+
+  [SPK-113] Sydney Mueller
+    Company: QuantumBits
+    Experience: 3 years
+    Rating: 4.7 / 5.0
+    Sessions: SESS-246
+
+
+SECTION 10: WEB DEVELOPMENT
+==================================================
+
+  [SPK-115] Avery Johansson
+    Company: CodeCraft
+    Experience: 4 years
+    Rating: 4.6 / 5.0
+    Sessions: SESS-210
+
+  [SPK-121] Harper Johansson
+    Company: DataFlow Inc
+    Experience: 15 years
+    Rating: 4.5 / 5.0
+    Sessions: SESS-223
+
+  [SPK-131] Jamie Fernandez
+    Company: DataFlow Inc
+    Experience: 10 years
+    Rating: 4.6 / 5.0
+    Sessions: SESS-206
+
+  [SPK-145] Morgan Rossi
+    Company: InnovateLabs
+    Experience: 13 years
+    Rating: 4.7 / 5.0
+    Sessions: None
+
+  [SPK-110] Peyton Nakamura
+    Company: NexGen Systems
+    Experience: 14 years
+    Rating: 4.5 / 5.0
+    Sessions: SESS-239
+
+  [SPK-108] Quinn Dubois
+    Company: DigitalPulse
+    Experience: 13 years
+    Rating: 4.3 / 5.0
+    Sessions: SESS-234
+
+  [SPK-130] Riley Fernandez
+    Company: FutureStack
+    Experience: 7 years
+    Rating: 4.3 / 5.0
+    Sessions: None
+
+  [SPK-102] Riley Kim
+    Company: FutureStack
+    Experience: 10 years
+    Rating: 4.0 / 5.0
+    Sessions: SESS-215, SESS-220
+
+  [SPK-136] Taylor Martinez
+    Company: CodeCraft
+    Experience: 20 years
+    Rating: 3.7 / 5.0
+    Sessions: None
+

@@ -1,0 +1,174 @@
+[
+  {
+    "id": "task-bulk-retrieval-50-math",
+    "prompt": "You are given a list of 50 student names. For EACH student, retrieve:\n1. Their school name\n2. Their average Mathematics test score\n3. Their GPA\n\nROUNDING: Round all numeric values to 2 decimal places using standard rounding (round half up: 1.505 becomes 1.51, but 1.5049 becomes 1.50). Format with exactly 2 decimal places (e.g., 3.00 not 3).\n\nStudent names (semicolon-separated): Chloe Nguyen (from Taylor High); Lucas Baker (from Jackson High School | born 2006-12-20); Evelyn Smith (from Adams Institute); Isabella Lee (from Kennedy High); Owen Taylor (from Jefferson Prep); Henry Hernandez (from Washington Academy); Emily Rivera (from Taylor High); Michael Perez (from Lincoln High School | born 2006-02-15); Olivia Robinson (from Lincoln High School); Daniel King (from Monroe Secondary); Elizabeth Nguyen (from Kennedy High); Carter Flores; Isabella Wright (from Franklin Academy); Sofia Miller (from Taylor High); Ethan Davis (from Taylor High); Elizabeth Adams (from Tyler Institute); Matthew Scott (from Jackson High School | born 2005-10-09); Mason Campbell (from Jefferson Prep); Aiden Mitchell (from Polk Prep); Elizabeth Lewis (from Lincoln High School); Scarlett Flores; Luke Baker (from Taylor High); Luke Clark (from Jefferson Prep); Henry Brown; Aubrey Martinez (from Hamilton High); Charlotte Lopez (from Lincoln High School); Liam Thomas (from Roosevelt Secondary); Riley White (from Tyler Institute); Aubrey Robinson; Riley Lee (from Jackson High School | born 2012-10-15); Lily Green (from Kennedy High); Owen Harris; Owen Williams (from Monroe Secondary); Elizabeth Williams (from Washington Academy); Mia Lopez (from Harrison Academy); Hannah Rodriguez (from Lincoln High School); Alexander Lopez (from Taylor High); Jacob Young (from Jackson High School); Evelyn Flores (from Roosevelt Secondary); Evelyn Walker (from Jackson High School); Logan Torres (from Tyler Institute); Scarlett Green (from Roosevelt Secondary); Matthew Sanchez (from Madison Prep); Abigail White (from Kennedy High); Logan Jackson (from Monroe Secondary); Matthew Mitchell; Amelia Sanchez; Aubrey Nelson; Abigail Rivera (from Washington Academy); Logan Garcia\n\nSORTING: Sort by Math score (HIGHEST first). If tied, alphabetically by last name, then first name.\n\nOUTPUT FORMAT: \"FirstName LastName: SchoolName, MathScore, GPA\" entries separated by \"; \"\nExample: \"Alice Smith: Lincoln High, 95.50, 3.80; Bob Jones: Jefferson Prep, 92.30, 3.50\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables have 'school_' prefix.\n\nStore complete answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Elizabeth Nguyen: Kennedy High, 194.85, 3.04; Daniel King: Monroe Secondary, 186.39, 2.12; Carter Flores: Harrison Academy, 175.88, 2.31; Alexander Lopez: Taylor High, 171.37, 2.10; Amelia Sanchez: Tyler Institute, 156.40, 2.05; Scarlett Green: Roosevelt Secondary, 138.54, 3.12; Riley Lee: Jackson High School, 137.03, 2.38; Jacob Young: Jackson High School, 134.44, 2.42; Lily Green: Kennedy High, 123.79, 2.51; Elizabeth Williams: Washington Academy, 122.50, 3.93; Logan Torres: Tyler Institute, 120.90, 2.99; Emily Rivera: Taylor High, 119.91, 3.71; Liam Thomas: Roosevelt Secondary, 119.44, 2.85; Chloe Nguyen: Taylor High, 115.91, 2.19; Mia Lopez: Harrison Academy, 111.51, 2.82; Evelyn Smith: Adams Institute, 106.25, 3.34; Owen Taylor: Jefferson Prep, 92.85, 3.13; Logan Jackson: Monroe Secondary, 92.44, 3.63; Luke Baker: Taylor High, 87.91, 2.04; Evelyn Walker: Jackson High School, 84.92, 2.98; Michael Perez: Lincoln High School, 84.03, 3.80; Elizabeth Lewis: Lincoln High School, 82.66, 2.08; Hannah Rodriguez: Lincoln High School, 81.40, 3.28; Isabella Lee: Kennedy High, 77.78, 2.48; Olivia Robinson: Lincoln High School, 77.26, 3.05; Matthew Sanchez: Madison Prep, 73.70, 3.19; Scarlett Flores: Franklin Academy, 71.01, 3.98; Lucas Baker: Jackson High School, 68.78, 3.59; Mason Campbell: Jefferson Prep, 60.64, 4.00; Owen Harris: Lincoln High School, 58.86, 3.50; Matthew Scott: Jackson High School, 58.68, 2.24; Evelyn Flores: Roosevelt Secondary, 58.49, 2.39; Owen Williams: Monroe Secondary, 57.33, 3.19; Aubrey Martinez: Hamilton High, 55.04, 2.55; Isabella Wright: Franklin Academy, 53.32, 3.27; Abigail Rivera: Washington Academy, 49.89, 3.77; Henry Brown: Kennedy High, 46.93, 3.78; Matthew Mitchell: Polk Prep, 45.63, 2.36; Henry Hernandez: Washington Academy, 44.73, 3.99; Aiden Mitchell: Polk Prep, 42.44, 3.66; Logan Garcia: Lincoln High School, 38.67, 2.49; Aubrey Nelson: Roosevelt Secondary, 38.67, 2.35; Elizabeth Adams: Tyler Institute, 37.50, 2.62; Abigail White: Kennedy High, 36.12, 2.28; Sofia Miller: Taylor High, 33.68, 2.72; Ethan Davis: Taylor High, 33.63, 3.36; Riley White: Tyler Institute, 27.96, 2.99; Charlotte Lopez: Lincoln High School, 27.74, 2.88; Aubrey Robinson: Kennedy High, 27.64, 2.96; Luke Clark: Jefferson Prep, 26.55, 3.67"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "supabase_execute_sql",
+        "supabase_list_tables"
+      ]
+    }
+  },
+  {
+    "id": "task-bulk-retrieval-100-birthsort",
+    "prompt": "You are given a list of 100 student names. For EACH student, retrieve:\n1. Their school name\n2. Their GPA\n3. Number of clubs they are ACTIVE members of\n\nROUNDING: Round GPA to 2 decimal places using standard rounding (round half up: 1.505 becomes 1.51, but 1.5049 becomes 1.50). Format with exactly 2 decimal places (e.g., 3.00 not 3).\n\nStudent names (semicolon-separated): Sophia Scott (from Jackson High School); Emma Nelson (from Taylor High); Mia Rodriguez (from Kennedy High); Owen Harris; Liam Jackson (from Polk Prep); Mia Thomas (from Kennedy High); Amelia Smith (from Roosevelt Secondary | born 2008-05-13); Emma Baker (from Harrison Academy); Riley Martinez (from Tyler Institute); Jack Hall; Daniel Brown (from Jackson High School); Elizabeth Robinson (from Polk Prep); Joseph White (from Kennedy High | born 2006-06-02); Jackson Wright; Lillian Brown (from Roosevelt Secondary); Olivia Lee (from Hamilton High | born 2010-02-03); Aria Walker (from Monroe Secondary); Charlotte Taylor (from Taylor High); Noah Martin (from Jefferson Prep); Carter Perez (from Jackson High School); Hannah Flores (from Polk Prep); Daniel Harris (from Madison Prep); Abigail Martin (from Taylor High); Daniel White (from Harrison Academy); Avery Clark (from Tyler Institute); Olivia Miller (from Washington Academy); Ava Scott (from Polk Prep); Scarlett Martinez (from Jackson High School | born 2008-03-28); Grace Davis (from Polk Prep); Jackson Anderson (from Kennedy High | born 2005-06-13); William Mitchell (from Hamilton High); Lily Martinez (from Roosevelt Secondary); Zoey Brown (from Kennedy High); Benjamin Johnson; Carter Rodriguez; Alexander Gonzalez (from Washington Academy); Aria King (from Kennedy High); Owen Johnson (from Jefferson Prep); Aiden Davis; William Nelson (from Harrison Academy); Charlotte White (from Washington Academy); Carter Clark (from Kennedy High); Owen Sanchez (from Hamilton High); John Harris; Harper Perez (from Polk Prep | born 2006-10-13); Avery Hernandez (from Monroe Secondary); Lucas Jones (from Hamilton High); Matthew Adams (from Hamilton High); Scarlett Young (from Jefferson Prep | born 2006-11-28); Evelyn Lewis (from Washington Academy); Benjamin Wright (from Hamilton High); Wyatt Robinson (from Kennedy High); Olivia Lopez (from Tyler Institute); Joseph Walker (from Jefferson Prep); Matthew King (from Roosevelt Secondary); Logan Martinez (from Tyler Institute); Lillian Wilson (from Jefferson Prep | born 2007-12-25); Ethan Ramirez (from Franklin Academy); Ava Thomas (from Franklin Academy); Liam Jackson (from Monroe Secondary); Sebastian Johnson; William Miller; Henry Hernandez (from Washington Academy); Harper Torres (from Jefferson Prep); Ava Lee (from Hamilton High); Alexander Brown (from Harrison Academy); Charlotte Williams (from Washington Academy); Ethan King (from Washington Academy); James King (from Washington Academy); Aubrey Baker; Lillian Martinez (from Harrison Academy); Luke Flores (from Jefferson Prep); Grace Young (from Roosevelt Secondary); Ava Young (from Kennedy High); Lucas Hall (from Monroe Secondary); William Williams (from Jackson High School); Matthew Brown (from Polk Prep | born 2005-09-11); Matthew Walker (from Jackson High School); Aubrey Allen (from Jackson High School); Michael Miller; Evelyn Allen (from Hamilton High | born 2011-09-12); Harper Miller (from Polk Prep | born 2012-07-16); Isabella White (from Adams Institute); David Lewis (from Washington Academy); Hannah Davis (from Monroe Secondary); Jacob Ramirez (from Jefferson Prep); Alexander Miller (from Hamilton High | born 2012-05-24); Mason Davis (from Franklin Academy); William Clark (from Monroe Secondary); Henry Williams (from Roosevelt Secondary); Charlotte Allen (from Lincoln High School); Riley Perez (from Washington Academy); Hannah Lee; Samuel Robinson; Daniel Miller (from Polk Prep); Lily Flores (from Taylor High); Isabella Perez (from Jackson High School); Aria Rodriguez (from Taylor High | born 2007-05-17); Avery White (from Washington Academy); Wyatt Mitchell (from Franklin Academy)\n\nSORTING: Sort by birth date (OLDEST/earliest first). If tied, alphabetically by last name, then first name.\nNote: Birth date is for sorting only - do NOT include in output.\n\nOUTPUT FORMAT: \"FirstName LastName: SchoolName, GPA, ClubCount\" entries separated by \"; \"\nExample: \"Alice Smith: Lincoln High, 3.80, 2; Bob Jones: Jefferson Prep, 3.50, 1\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables have 'school_' prefix.\n\nStore complete answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Lily Flores: Taylor High, 2.12, 1; Emma Nelson: Taylor High, 3.48, 0; Hannah Davis: Monroe Secondary, 3.87, 0; Charlotte Taylor: Taylor High, 2.06, 2; Jackson Anderson: Kennedy High, 2.86, 0; Lillian Martinez: Harrison Academy, 2.80, 1; Matthew Brown: Polk Prep, 3.65, 1; Matthew Adams: Hamilton High, 2.83, 0; Henry Hernandez: Washington Academy, 3.99, 2; Benjamin Wright: Hamilton High, 3.54, 0; Jack Hall: Harrison Academy, 3.35, 1; Ava Scott: Polk Prep, 2.57, 0; Owen Sanchez: Hamilton High, 2.60, 0; Mason Davis: Franklin Academy, 2.54, 0; Liam Jackson: Monroe Secondary, 3.89, 0; Sophia Scott: Jackson High School, 2.02, 0; Joseph White: Kennedy High, 2.20, 0; Daniel White: Harrison Academy, 2.10, 0; Owen Johnson: Jefferson Prep, 2.34, 2; Luke Flores: Jefferson Prep, 3.36, 0; Liam Jackson: Polk Prep, 3.57, 1; William Nelson: Harrison Academy, 2.55, 2; Harper Perez: Polk Prep, 3.30, 1; Carter Clark: Kennedy High, 2.83, 0; Mia Thomas: Kennedy High, 3.04, 0; Scarlett Young: Jefferson Prep, 2.42, 2; Owen Harris: Lincoln High School, 3.50, 1; William Williams: Jackson High School, 2.57, 0; Benjamin Johnson: Hamilton High, 2.20, 0; Isabella White: Adams Institute, 2.26, 1; Grace Young: Roosevelt Secondary, 2.49, 0; Jackson Wright: Franklin Academy, 2.31, 1; Alexander Brown: Harrison Academy, 2.10, 1; Aria Rodriguez: Taylor High, 2.45, 0; Olivia Miller: Washington Academy, 3.31, 0; Carter Perez: Jackson High School, 2.52, 0; Matthew King: Roosevelt Secondary, 3.99, 1; Lucas Jones: Hamilton High, 3.79, 0; Riley Martinez: Tyler Institute, 3.07, 0; Charlotte White: Washington Academy, 3.69, 1; Lillian Wilson: Jefferson Prep, 3.04, 1; Joseph Walker: Jefferson Prep, 3.88, 2; Scarlett Martinez: Jackson High School, 2.08, 0; Elizabeth Robinson: Polk Prep, 3.20, 1; Logan Martinez: Tyler Institute, 3.19, 0; Amelia Smith: Roosevelt Secondary, 3.67, 0; Hannah Flores: Polk Prep, 2.51, 0; Lily Martinez: Roosevelt Secondary, 3.44, 1; Michael Miller: Hamilton High, 2.73, 0; William Clark: Monroe Secondary, 3.91, 1; Carter Rodriguez: Roosevelt Secondary, 2.36, 0; Matthew Walker: Jackson High School, 2.03, 1; Henry Williams: Roosevelt Secondary, 3.70, 0; Wyatt Mitchell: Franklin Academy, 3.60, 2; Lucas Hall: Monroe Secondary, 3.06, 3; Aubrey Allen: Jackson High School, 3.94, 1; William Mitchell: Hamilton High, 3.36, 1; Samuel Robinson: Hamilton High, 3.32, 2; Charlotte Allen: Lincoln High School, 3.02, 0; Avery Hernandez: Monroe Secondary, 2.89, 0; Zoey Brown: Kennedy High, 3.22, 2; Wyatt Robinson: Kennedy High, 3.65, 0; Ava Thomas: Franklin Academy, 2.37, 0; James King: Washington Academy, 3.19, 1; Avery White: Washington Academy, 2.09, 1; Aiden Davis: Tyler Institute, 2.35, 0; Charlotte Williams: Washington Academy, 3.51, 1; Ava Young: Kennedy High, 3.26, 1; Olivia Lee: Hamilton High, 2.33, 0; Noah Martin: Jefferson Prep, 3.20, 0; Aria King: Kennedy High, 3.21, 0; Ethan King: Washington Academy, 3.33, 1; Aria Walker: Monroe Secondary, 2.04, 0; Aubrey Baker: Washington Academy, 3.18, 0; Harper Torres: Jefferson Prep, 2.93, 3; Hannah Lee: Lincoln High School, 2.40, 0; Lillian Brown: Roosevelt Secondary, 3.37, 1; William Miller: Franklin Academy, 3.14, 0; Daniel Harris: Madison Prep, 3.08, 0; Ava Lee: Hamilton High, 2.56, 0; Olivia Lopez: Tyler Institute, 2.86, 0; Sebastian Johnson: Roosevelt Secondary, 2.23, 0; Jacob Ramirez: Jefferson Prep, 2.87, 2; Abigail Martin: Taylor High, 3.19, 0; Alexander Gonzalez: Washington Academy, 2.64, 2; Evelyn Allen: Hamilton High, 2.13, 0; Ethan Ramirez: Franklin Academy, 3.59, 0; Isabella Perez: Jackson High School, 2.65, 0; Daniel Miller: Polk Prep, 3.77, 2; David Lewis: Washington Academy, 3.21, 0; John Harris: Adams Institute, 2.92, 0; Mia Rodriguez: Kennedy High, 3.53, 1; Avery Clark: Tyler Institute, 2.55, 0; Alexander Miller: Hamilton High, 2.16, 0; Evelyn Lewis: Washington Academy, 2.08, 0; Daniel Brown: Jackson High School, 2.86, 0; Riley Perez: Washington Academy, 3.67, 0; Harper Miller: Polk Prep, 2.74, 0; Emma Baker: Harrison Academy, 2.67, 0; Grace Davis: Polk Prep, 3.17, 0"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "supabase_execute_sql",
+        "supabase_list_tables"
+      ]
+    }
+  },
+  {
+    "id": "task-bulk-retrieval-25-highest",
+    "prompt": "You are given a list of 25 student names. For EACH student, retrieve:\n1. Their school name\n2. Total number of test scores they have (count ALL subjects, not just one)\n3. Their HIGHEST individual test score (the maximum score across all their tests)\n\nFORMATTING: \n- Test count is an integer (no decimals)\n- Highest score: round to 2 decimal places using standard rounding (1.505 becomes 1.51, but 1.5049 becomes 1.50)\n- Always show exactly 2 decimal places for scores (e.g., 95.00 not 95)\n\nStudent names (semicolon-separated): Joseph Lopez (from Madison Prep); Lillian Gonzalez (from Hamilton High); Carter Hernandez (from Monroe Secondary); Sophia Torres; Hannah Scott (from Madison Prep); Joseph Williams (from Washington Academy); Lily Campbell (from Jackson High School); Chloe Rivera (from Madison Prep); Carter Brown (from Monroe Secondary); Michael Gonzalez (from Adams Institute | born 2008-08-25); John Allen (from Jackson High School); Ethan King (from Taylor High); Sophia Young (from Monroe Secondary); Daniel Lewis (from Taylor High); Carter Clark (from Jefferson Prep); Abigail Johnson (from Taylor High); Victoria Hall (from Jefferson Prep); Emily Torres (from Kennedy High); Evelyn Anderson (from Monroe Secondary | born 2009-09-10); Jack Lee (from Monroe Secondary); Lily Clark (from Kennedy High); Ava Williams (from Monroe Secondary | born 2005-03-19); Ethan Ramirez (from Franklin Academy); Sebastian Torres (from Jefferson Prep | born 2012-07-14); Ella Nguyen (from Adams Institute)\n\nSORTING: Sort by highest score (HIGHEST first). If tied, alphabetically by last name, then first name.\n\nOUTPUT FORMAT: \"FirstName LastName: SchoolName, TestCount, HighestScore\" entries separated by \"; \"\nExample: \"Alice Smith: Lincoln High, 12, 98.50; Bob Jones: Jefferson Prep, 8, 95.00\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables have 'school_' prefix.\n\nStore complete answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Carter Clark: Jefferson Prep, 8, 199.83; Emily Torres: Kennedy High, 8, 199.65; Lily Clark: Kennedy High, 8, 197.29; Sebastian Torres: Jefferson Prep, 7, 196.81; Joseph Williams: Washington Academy, 6, 183.56; Michael Gonzalez: Adams Institute, 3, 171.89; Lillian Gonzalez: Hamilton High, 6, 171.52; Ava Williams: Monroe Secondary, 7, 171.07; Ella Nguyen: Adams Institute, 8, 168.90; Joseph Lopez: Madison Prep, 8, 168.45; Sophia Young: Monroe Secondary, 4, 167.47; Chloe Rivera: Madison Prep, 8, 167.11; Sophia Torres: Franklin Academy, 4, 161.79; Ethan King: Taylor High, 8, 159.68; Ethan Ramirez: Franklin Academy, 5, 159.34; Carter Hernandez: Monroe Secondary, 5, 158.95; Abigail Johnson: Taylor High, 3, 150.57; Hannah Scott: Madison Prep, 7, 127.20; Evelyn Anderson: Monroe Secondary, 6, 117.37; Lily Campbell: Jackson High School, 5, 109.49; Jack Lee: Monroe Secondary, 3, 107.76; Victoria Hall: Jefferson Prep, 6, 95.80; Daniel Lewis: Taylor High, 5, 94.45; Carter Brown: Monroe Secondary, 4, 91.19; John Allen: Jackson High School, 3, 72.77"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "supabase_execute_sql",
+        "supabase_list_tables"
+      ]
+    }
+  },
+  {
+    "id": "task-bulk-retrieval-10-math",
+    "prompt": "You are given a list of 10 student names. For EACH student, retrieve:\n1. Their school name\n2. Their average Mathematics test score\n3. Their GPA\n\nROUNDING: Round all numeric values to 2 decimal places using standard rounding (round half up: 1.505 becomes 1.51, but 1.5049 becomes 1.50). Format with exactly 2 decimal places (e.g., 3.00 not 3).\n\nStudent names (semicolon-separated): Emma Williams (from Hamilton High); John Garcia; Lucas Ramirez (from Franklin Academy); Benjamin Martin (from Polk Prep); Aiden Clark (from Jefferson Prep); Aria Scott (from Washington Academy); Luke Sanchez (from Monroe Secondary); Lucas Jackson (from Washington Academy); Abigail Baker (from Tyler Institute); Daniel White (from Harrison Academy)\n\nSORTING: Sort by Math score (HIGHEST first). If tied, alphabetically by last name, then first name.\n\nOUTPUT FORMAT: \"FirstName LastName: SchoolName, MathScore, GPA\" entries separated by \"; \"\nExample: \"Alice Smith: Lincoln High, 95.50, 3.80; Bob Jones: Jefferson Prep, 92.30, 3.50\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables have 'school_' prefix.\n\nStore complete answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Luke Sanchez: Monroe Secondary, 185.73, 2.87; Lucas Ramirez: Franklin Academy, 182.56, 3.43; John Garcia: Franklin Academy, 160.61, 3.35; Abigail Baker: Tyler Institute, 102.82, 3.22; Aria Scott: Washington Academy, 101.70, 2.95; Daniel White: Harrison Academy, 97.88, 2.10; Lucas Jackson: Washington Academy, 59.96, 2.59; Emma Williams: Hamilton High, 58.29, 3.51; Aiden Clark: Jefferson Prep, 52.01, 3.27; Benjamin Martin: Polk Prep, 48.09, 3.67"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "supabase_execute_sql",
+        "supabase_list_tables"
+      ]
+    }
+  }
+]

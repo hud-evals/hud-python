@@ -1,0 +1,114 @@
+[
+  {
+    "id": "task-github-flask-license",
+    "prompt": "Find the license type for the Flask web framework.\n\nUse the GitHub tools to read the pyproject.toml file from the pallets/flask repository.\n\nStore ONLY the license identifier (e.g., 'MIT' or 'BSD-3-Clause') with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "BSD-3-Clause"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "github_read_file",
+        "github_list_files"
+      ]
+    }
+  },
+  {
+    "id": "task-github-flask-python",
+    "prompt": "Find the minimum Python version required by Flask.\n\nUse the GitHub tools to read the pyproject.toml file from the pallets/flask repository and find the 'requires-python' field.\n\nStore the value exactly as it appears (e.g., '>=3.10') with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": ">=3.10"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "github_read_file",
+        "github_list_files"
+      ]
+    }
+  },
+  {
+    "id": "task-github-requests-python",
+    "prompt": "Find the minimum Python version required by the 'requests' library.\n\nUse the GitHub tools to read the setup.py file from the psf/requests repository. Look for the REQUIRED_PYTHON tuple that defines the minimum version.\n\nStore the version as 'X.Y' format (e.g., '3.9') with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "3.9"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "github_read_file",
+        "github_list_files"
+      ]
+    }
+  }
+]
+

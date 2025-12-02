@@ -1,0 +1,26 @@
+[
+  {
+    "id": "blank-counter-test",
+    "prompt": "Use the 'act' tool to increment the counter 3 times. Call the act tool three separate times.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "blank:latest"]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "target": 3
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["act"]
+    }
+  }
+]
+

@@ -1,0 +1,372 @@
+[
+  {
+    "id": "task-conf-overbooked-sessions",
+    "prompt": "Find all sessions where registrations exceed capacity (registered > capacity).\n\nFor each overbooked session, return the session ID and the ratio.\n\nFORMAT: \"{session_id}: {registered}/{capacity}\" separated by \"; \"\nSort alphabetically by session ID.\nExample: \"SESS-205: 85/60; SESS-218: 42/30\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "SESS-200: 159/152; SESS-210: 52/32; SESS-220: 219/199; SESS-230: 162/153; SESS-240: 124/109; SESS-250: 186/178; SESS-260: 86/75; SESS-270: 166/157"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-multi-interest-count",
+    "prompt": "How many attendees appear in 5 or more different interest sections?\n\nCheck the attendee registry for all sections and count how many unique attendees are listed in at least 5 different sections.\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "151"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-top-workshop-speakers",
+    "prompt": "Find speakers who have a Workshop session AND have a rating of 4.5 or higher.\n\nFor each, return their ID, name, and rating.\n\nFORMAT: \"{speaker_id}: {name}, {rating}\" separated by \"; \"\nSort by rating DESCENDING. For ties, sort by speaker ID (A-Z).\nExample: \"SPK-115: Alex Chen, 4.9; SPK-108: Jordan Kim, 4.7\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "SPK-113: Sydney Mueller, 4.7; SPK-115: Avery Johansson, 4.6; SPK-131: Jamie Fernandez, 4.6; SPK-137: Casey Andersen, 4.6; SPK-123: Jamie Johansson, 4.5; SPK-139: Finley Rossi, 4.5"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-hackathon-job-seekers",
+    "prompt": "Find attendees who are both \"Hackathon Participants\" AND \"Job Seekers\".\n\nReturn their ID and name.\n\nFORMAT: \"{attendee_id}: {name}\" separated by \"; \"\nSort alphabetically by attendee ID.\nExample: \"ATT-1023: Alex Chen; ATT-1089: Jordan Kim\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "ATT-1000: Reese Williams; ATT-1008: Taylor Miller; ATT-1104: Taylor Williams; ATT-1149: Harper Brown; ATT-1178: Logan Patel; ATT-1202: Cameron Wilson; ATT-1215: Avery Kim; ATT-1241: Drew Mueller"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-avg-registration-by-type",
+    "prompt": "Calculate the average number of registrations per session type.\n\nFor each session type (Keynote, Workshop, Panel, etc.), compute the average registrations across all sessions of that type.\n\nFORMAT: \"{session_type}: {average}\" separated by \"; \"\nRound to 1 decimal place (round half up: 45.55 becomes 45.6).\nSort alphabetically by session type.\nExample: \"Keynote: 85.3; Panel: 42.7; Workshop: 55.0\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Deep Dive: 48.7; Keynote: 39.1; Lightning Talk: 40.6; Panel: 50.3; Tutorial: 43.8; Workshop: 46.4"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-vip-feedback-count",
+    "prompt": "How many VIP attendees (in \"VIP Lounge Access\" section) have also \"Submitted Feedback\"?\n\nCount the unique attendees who appear in BOTH sections.\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "21"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-day2-main-hall",
+    "prompt": "List all sessions on Day 2 (2024-03-16) in the Main Hall.\n\nReturn only the session IDs, sorted by time (earliest first).\n\nFORMAT: Session IDs separated by \"; \"\nExample: \"SESS-205; SESS-218; SESS-234\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "SESS-233; SESS-273"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-aiml-network-returning",
+    "prompt": "Find attendees who match ALL of these:\n- \"AI/ML Enthusiasts\" AND \"Networking Event RSVP\" BUT NOT \"First-time Attendees\"\n\nReturn only the attendee IDs, sorted alphabetically.\n\nFORMAT: Attendee IDs separated by \"; \"\nExample: \"ATT-1015; ATT-1023; ATT-1089\"\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "ATT-1002; ATT-1008; ATT-1012; ATT-1019; ATT-1036; ATT-1038; ATT-1044; ATT-1050; ATT-1051; ATT-1057; ATT-1061; ATT-1069; ATT-1080; ATT-1085; ATT-1089; ATT-1105; ATT-1111; ATT-1118; ATT-1126; ATT-1128; ATT-1131; ATT-1139; ATT-1141; ATT-1146; ATT-1147; ATT-1159; ATT-1171; ATT-1177; ATT-1185; ATT-1186; ATT-1201; ATT-1204; ATT-1225; ATT-1226; ATT-1231; ATT-1234; ATT-1244; ATT-1258; ATT-1271; ATT-1274; ATT-1280; ATT-1296"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-busiest-speaker",
+    "prompt": "Find the speaker with the most sessions scheduled.\n\nReturn their ID, name, and session count.\n\nFORMAT: \"{speaker_id}: {name}, {count} sessions\"\nExample: \"SPK-115: Alex Chen, 4 sessions\"\n\nIf there's a tie, pick the one with alphabetically first speaker ID.\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "SPK-126: Mackenzie Andersen, 5 sessions"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-conf-keynote-total-capacity",
+    "prompt": "What is the total capacity across all Keynote sessions?\n\nSum the capacity of every session where Type = \"Keynote\".\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore the total as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "2061"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  }
+]

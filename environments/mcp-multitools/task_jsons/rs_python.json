@@ -1,0 +1,75 @@
+[
+  {
+    "id": "task-python-supabase-count",
+    "prompt": "Use Python code to query the Supabase database and count how many products have a price greater than $500.\n\nWrite and execute Python code using the execute_python tool. The Supabase credentials are available as SUPABASE_URL and SUPABASE_KEY variables.\n\nExample code structure:\n```python\nfrom supabase import create_client\nclient = create_client(SUPABASE_URL, SUPABASE_KEY)\nresult = client.table('products').select('*').execute()\n# ... process result.data ...\nprint(count)\n```\n\nStore the count (just the number) with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "263"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "execute_python"
+      ]
+    }
+  },
+  {
+    "id": "task-python-avg-salary",
+    "prompt": "Use Python code to calculate the average salary of all employees in the Engineering department.\n\nWrite and execute Python code using the execute_python tool to:\n1. Query the employees table from Supabase\n2. Filter to only Engineering department\n3. Calculate the average salary\n4. Round to 2 decimal places\n\nThe Supabase credentials are available as SUPABASE_URL and SUPABASE_KEY variables.\n\nStore the average salary (just the number, e.g., '85000.00') with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "111163.91"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "execute_python"
+      ]
+    }
+  }
+]
+

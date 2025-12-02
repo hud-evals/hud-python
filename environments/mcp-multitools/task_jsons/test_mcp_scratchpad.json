@@ -1,0 +1,24 @@
+[
+  {
+    "prompt": "Use the scratchpad to store exactly 100 ones (the digit '1' repeated 100 times) under the key 'ones'. The value should be '1111111111...' with exactly 100 digits. Then read it back to verify you stored it correctly.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "ones": "1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+        }
+      }
+    },
+    "system_prompt": "You are an AI assistant. Use scratchpad tools to store and retrieve data. Be precise with the exact values requested."
+  }
+]

@@ -1,0 +1,349 @@
+======================================================================
+WESTBROOK LITERARY SOCIETY - MEMBER DIRECTORY
+======================================================================
+
+ABOUT THIS DOCUMENT
+----------------------------------------
+This document contains the member registry for the Westbrook Literary
+Society. Members are organized alphabetically by last name within their
+membership tier. Each entry includes member ID, name, join date, books
+read count, and their primary study focus.
+
+Member IDs follow format: LS-XXXX
+Membership Tiers: Founding, Platinum, Gold, Silver, Bronze
+
+======================================================================
+
+FOUNDING MEMBERS
+--------------------------------------------------
+
+  LS-1001 | Eleanor Ashworth
+  Joined: 2015-03-12 | Books Read: 287
+  Primary Focus: Victorian Literature
+  Email: e.ashworth@westbrook.org
+
+  LS-1002 | Theodore Blackwood
+  Joined: 2015-03-12 | Books Read: 312
+  Primary Focus: Classical Philosophy
+  Email: t.blackwood@westbrook.org
+
+  LS-1003 | Margaret Chen
+  Joined: 2015-03-15 | Books Read: 256
+  Primary Focus: Eastern Philosophy
+  Email: m.chen@westbrook.org
+
+  LS-1004 | William Fitzgerald
+  Joined: 2015-03-18 | Books Read: 298
+  Primary Focus: American Classics
+  Email: w.fitzgerald@westbrook.org
+
+  LS-1005 | Helena Graves
+  Joined: 2015-03-20 | Books Read: 341
+  Primary Focus: Gothic Literature
+  Email: h.graves@westbrook.org
+
+
+PLATINUM MEMBERS
+--------------------------------------------------
+
+  LS-1010 | Alexander Bennett
+  Joined: 2016-05-14 | Books Read: 198
+  Primary Focus: Military Strategy
+  Email: a.bennett@westbrook.org
+
+  LS-1011 | Sophia Carrington
+  Joined: 2016-06-22 | Books Read: 176
+  Primary Focus: Romantic Era Literature
+  Email: s.carrington@westbrook.org
+
+  LS-1012 | David Eastwood
+  Joined: 2016-08-03 | Books Read: 203
+  Primary Focus: Maritime Literature
+  Email: d.eastwood@westbrook.org
+
+  LS-1013 | Olivia Fairfax
+  Joined: 2016-09-17 | Books Read: 189
+  Primary Focus: Regency Fiction
+  Email: o.fairfax@westbrook.org
+
+  LS-1014 | James Greenwood
+  Joined: 2016-11-28 | Books Read: 167
+  Primary Focus: Classical Philosophy
+  Email: j.greenwood@westbrook.org
+
+  LS-1015 | Charlotte Hamilton
+  Joined: 2017-01-05 | Books Read: 154
+  Primary Focus: Science Fiction Classics
+  Email: c.hamilton@westbrook.org
+
+  LS-1016 | Robert Irving
+  Joined: 2017-02-19 | Books Read: 182
+  Primary Focus: War Literature
+  Email: r.irving@westbrook.org
+
+  LS-1017 | Victoria Jensen
+  Joined: 2017-04-08 | Books Read: 171
+  Primary Focus: Victorian Literature
+  Email: v.jensen@westbrook.org
+
+  LS-1018 | Michael Kingsley
+  Joined: 2017-05-23 | Books Read: 195
+  Primary Focus: American Transcendentalism
+  Email: m.kingsley@westbrook.org
+
+  LS-1019 | Elizabeth Lancaster
+  Joined: 2017-07-11 | Books Read: 208
+  Primary Focus: British Classics
+  Email: e.lancaster@westbrook.org
+
+
+GOLD MEMBERS
+--------------------------------------------------
+
+  LS-1020 | Andrew Morrison
+  Joined: 2018-02-14 | Books Read: 134
+  Primary Focus: Historical Fiction
+  Email: a.morrison@westbrook.org
+
+  LS-1021 | Rachel Nguyen
+  Joined: 2018-03-28 | Books Read: 142
+  Primary Focus: Eastern Philosophy
+  Email: r.nguyen@westbrook.org
+
+  LS-1022 | Christopher Palmer
+  Joined: 2018-05-09 | Books Read: 128
+  Primary Focus: Gothic Literature
+  Email: c.palmer@westbrook.org
+
+  LS-1023 | Diana Quinn
+  Joined: 2018-06-21 | Books Read: 156
+  Primary Focus: Romantic Era Literature
+  Email: d.quinn@westbrook.org
+
+  LS-1024 | Stephen Roberts
+  Joined: 2018-08-15 | Books Read: 119
+  Primary Focus: Military Strategy
+  Email: s.roberts@westbrook.org
+
+  LS-1025 | Amanda Stevens
+  Joined: 2018-09-30 | Books Read: 147
+  Primary Focus: Maritime Literature
+  Email: a.stevens@westbrook.org
+
+  LS-1026 | Thomas Turner
+  Joined: 2018-11-12 | Books Read: 138
+  Primary Focus: American Classics
+  Email: t.turner@westbrook.org
+
+  LS-1027 | Jennifer Walsh
+  Joined: 2019-01-07 | Books Read: 125
+  Primary Focus: Victorian Literature
+  Email: j.walsh@westbrook.org
+
+  LS-1028 | Benjamin Xavier
+  Joined: 2019-02-19 | Books Read: 132
+  Primary Focus: Classical Philosophy
+  Email: b.xavier@westbrook.org
+
+  LS-1029 | Katherine Young
+  Joined: 2019-04-03 | Books Read: 151
+  Primary Focus: Regency Fiction
+  Email: k.young@westbrook.org
+
+  LS-1030 | Daniel Zhang
+  Joined: 2019-05-17 | Books Read: 144
+  Primary Focus: Eastern Philosophy
+  Email: d.zhang@westbrook.org
+
+
+SILVER MEMBERS
+--------------------------------------------------
+
+  LS-1031 | Emily Adams
+  Joined: 2020-01-22 | Books Read: 87
+  Primary Focus: Gothic Literature
+  Email: e.adams@westbrook.org
+
+  LS-1032 | Nathan Brooks
+  Joined: 2020-02-14 | Books Read: 92
+  Primary Focus: War Literature
+  Email: n.brooks@westbrook.org
+
+  LS-1033 | Sarah Collins
+  Joined: 2020-03-28 | Books Read: 78
+  Primary Focus: Romantic Era Literature
+  Email: s.collins@westbrook.org
+
+  LS-1034 | Matthew Davis
+  Joined: 2020-05-09 | Books Read: 103
+  Primary Focus: American Classics
+  Email: m.davis@westbrook.org
+
+  LS-1035 | Laura Edwards
+  Joined: 2020-06-21 | Books Read: 95
+  Primary Focus: Maritime Literature
+  Email: l.edwards@westbrook.org
+
+  LS-1036 | Kevin Foster
+  Joined: 2020-08-03 | Books Read: 81
+  Primary Focus: Military Strategy
+  Email: k.foster@westbrook.org
+
+  LS-1037 | Jessica Garcia
+  Joined: 2020-09-17 | Books Read: 88
+  Primary Focus: Victorian Literature
+  Email: j.garcia@westbrook.org
+
+  LS-1038 | Ryan Harris
+  Joined: 2020-11-02 | Books Read: 76
+  Primary Focus: Classical Philosophy
+  Email: r.harris@westbrook.org
+
+  LS-1039 | Michelle Jackson
+  Joined: 2021-01-14 | Books Read: 99
+  Primary Focus: Science Fiction Classics
+  Email: m.jackson@westbrook.org
+
+  LS-1040 | Joshua Kim
+  Joined: 2021-02-26 | Books Read: 84
+  Primary Focus: Eastern Philosophy
+  Email: j.kim@westbrook.org
+
+  LS-1041 | Angela Lewis
+  Joined: 2021-04-08 | Books Read: 91
+  Primary Focus: Regency Fiction
+  Email: a.lewis@westbrook.org
+
+  LS-1042 | Brian Martinez
+  Joined: 2021-05-21 | Books Read: 72
+  Primary Focus: Historical Fiction
+  Email: b.martinez@westbrook.org
+
+  LS-1043 | Nicole Nelson
+  Joined: 2021-07-03 | Books Read: 86
+  Primary Focus: Gothic Literature
+  Email: n.nelson@westbrook.org
+
+  LS-1044 | Patrick O'Brien
+  Joined: 2021-08-15 | Books Read: 94
+  Primary Focus: War Literature
+  Email: p.obrien@westbrook.org
+
+  LS-1045 | Samantha Parker
+  Joined: 2021-09-28 | Books Read: 79
+  Primary Focus: British Classics
+  Email: s.parker@westbrook.org
+
+
+BRONZE MEMBERS
+--------------------------------------------------
+
+  LS-1050 | Adam Richardson
+  Joined: 2022-01-10 | Books Read: 45
+  Primary Focus: Military Strategy
+  Email: a.richardson@westbrook.org
+
+  LS-1051 | Brittany Scott
+  Joined: 2022-02-22 | Books Read: 52
+  Primary Focus: Romantic Era Literature
+  Email: b.scott@westbrook.org
+
+  LS-1052 | Carlos Thompson
+  Joined: 2022-04-05 | Books Read: 38
+  Primary Focus: Maritime Literature
+  Email: c.thompson@westbrook.org
+
+  LS-1053 | Diana Underwood
+  Joined: 2022-05-18 | Books Read: 61
+  Primary Focus: Victorian Literature
+  Email: d.underwood@westbrook.org
+
+  LS-1054 | Eric Valdez
+  Joined: 2022-07-01 | Books Read: 47
+  Primary Focus: American Classics
+  Email: e.valdez@westbrook.org
+
+  LS-1055 | Fiona Walsh
+  Joined: 2022-08-14 | Books Read: 55
+  Primary Focus: Eastern Philosophy
+  Email: f.walsh@westbrook.org
+
+  LS-1056 | George Xavier
+  Joined: 2022-09-27 | Books Read: 42
+  Primary Focus: Classical Philosophy
+  Email: g.xavier@westbrook.org
+
+  LS-1057 | Hannah Young
+  Joined: 2022-11-09 | Books Read: 58
+  Primary Focus: Regency Fiction
+  Email: h.young@westbrook.org
+
+  LS-1058 | Ian Zhang
+  Joined: 2023-01-02 | Books Read: 36
+  Primary Focus: Gothic Literature
+  Email: i.zhang@westbrook.org
+
+  LS-1059 | Julia Anderson
+  Joined: 2023-02-15 | Books Read: 49
+  Primary Focus: War Literature
+  Email: j.anderson@westbrook.org
+
+  LS-1060 | Kyle Bennett
+  Joined: 2023-04-01 | Books Read: 33
+  Primary Focus: Science Fiction Classics
+  Email: k.bennett@westbrook.org
+
+  LS-1061 | Lisa Chen
+  Joined: 2023-05-14 | Books Read: 41
+  Primary Focus: Historical Fiction
+  Email: l.chen@westbrook.org
+
+  LS-1062 | Marcus Davidson
+  Joined: 2023-06-27 | Books Read: 28
+  Primary Focus: Maritime Literature
+  Email: m.davidson@westbrook.org
+
+  LS-1063 | Nancy Evans
+  Joined: 2023-08-10 | Books Read: 35
+  Primary Focus: British Classics
+  Email: n.evans@westbrook.org
+
+  LS-1064 | Oscar Fernandez
+  Joined: 2023-09-23 | Books Read: 22
+  Primary Focus: Military Strategy
+  Email: o.fernandez@westbrook.org
+
+  LS-1065 | Patricia Green
+  Joined: 2023-11-06 | Books Read: 19
+  Primary Focus: Romantic Era Literature
+  Email: p.green@westbrook.org
+
+  LS-1066 | Quincy Harper
+  Joined: 2024-01-08 | Books Read: 15
+  Primary Focus: American Classics
+  Email: q.harper@westbrook.org
+
+  LS-1067 | Rebecca Irwin
+  Joined: 2024-02-20 | Books Read: 12
+  Primary Focus: Eastern Philosophy
+  Email: r.irwin@westbrook.org
+
+  LS-1068 | Steven James
+  Joined: 2024-04-03 | Books Read: 8
+  Primary Focus: Victorian Literature
+  Email: s.james@westbrook.org
+
+  LS-1069 | Teresa King
+  Joined: 2024-05-16 | Books Read: 6
+  Primary Focus: Classical Philosophy
+  Email: t.king@westbrook.org
+
+  LS-1070 | Ulysses Lambert
+  Joined: 2024-06-29 | Books Read: 4
+  Primary Focus: Gothic Literature
+  Email: u.lambert@westbrook.org
+
+======================================================================
+END OF MEMBER DIRECTORY
+======================================================================
+

@@ -1,0 +1,134 @@
+[
+  {
+    "id": "task-football-weight-by-tackles",
+    "prompt": "In the football match between Manchester United and Aston Villa on 2024-10-11, exactly one player made 6 tackles. What was this player's average weight (in kg) during October 2024?\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'football_' prefix.\n\nStore the answer rounded to 2 decimal places with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "74.55"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_read",
+        "local_scratchpad_write",
+        "local_scratchpad_clear",
+        "supabase_list_tables",
+        "supabase_execute_sql"
+      ]
+    }
+  },
+  {
+    "id": "task-football-total-games",
+    "prompt": "The player who made exactly 6 tackles in Manchester United vs Aston Villa on 2024-10-11 - how many total matches has this player appeared in across all seasons?\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'football_' prefix.\n\nStore the answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "76"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_read",
+        "local_scratchpad_write",
+        "local_scratchpad_clear",
+        "supabase_list_tables",
+        "supabase_execute_sql"
+      ]
+    }
+  },
+  {
+    "id": "task-football-team-protein",
+    "prompt": "What was the average daily protein intake (in grams) for Manchester United players on 2024-11-15?\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'football_' prefix.\n\nStore the answer rounded to 1 decimal place with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "184.5"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_read",
+        "local_scratchpad_write",
+        "local_scratchpad_clear",
+        "supabase_list_tables",
+        "supabase_execute_sql"
+      ]
+    }
+  }
+]

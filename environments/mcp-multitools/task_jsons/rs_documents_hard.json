@@ -1,0 +1,193 @@
+[
+  {
+    "id": "task-rfc-status-402",
+    "prompt": "In the HTTP/1.1 specification (RFC 2616), find what the status code 402 'Payment Required' actually means according to the spec.\n\nThe document 'rfc2616_http' is available (~10,000 lines). Use list_documents to see available docs, then search strategically.\n\nStore the EXACT description text (the sentence after '402 Payment Required') with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "This code is reserved for future use."
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "list_documents",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-moby-chapter-42",
+    "prompt": "Find the title of Chapter 42 in Moby Dick.\n\nThe document 'moby_dick' is available (~22,000 lines). Use the document tools to search through this very long book.\n\nStore ONLY the chapter title (without 'CHAPTER 42.' prefix, just the title itself, without the period at the end) with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "The Whiteness of the Whale"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "list_documents",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rfc-host-section",
+    "prompt": "In RFC 2616 (HTTP/1.1 specification), find which section number defines the 'Host' header field.\n\nThe document 'rfc2616_http' is available. Section numbers are formatted like '14.XX'.\n\nStore ONLY the section number (e.g., '14.23') with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "14.23"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "list_documents",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-moby-chapter-count",
+    "prompt": "Count the total number of chapters in Moby Dick.\n\nThe document 'moby_dick' is available (~22,000 lines). The book has a table of contents AND the actual chapters. You need to determine how many chapters exist total.\n\nStore ONLY the number (e.g., '135') with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "135"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "list_documents",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-rfc-content-type-section",
+    "prompt": "In RFC 2616 (HTTP/1.1 specification), find which section number defines the 'Content-Type' header field, AND what page number it starts on according to the table of contents.\n\nThe document 'rfc2616_http' is available.\n\nStore the section number with key 'section' (e.g., '14.17') and the page number with key 'page' (e.g., '124'). Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "section": "14.17",
+          "page": "124"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "list_documents",
+        "read_document",
+        "search_document"
+      ]
+    }
+  }
+]
