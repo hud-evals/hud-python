@@ -90,7 +90,7 @@ class MCPUseHUDClient(BaseHUDClient):
             raise ImportError("MCPUseClient is not available")
         self._client = MCPUseClient.from_dict(config, http_options=self._http_options)
         try:
-            assert self._client is not None  # noqa: S101
+            assert self._client is not None
             self._sessions = await self._client.create_all_sessions()
             session_count = len(self._sessions)
             session_text = "session" if session_count == 1 else "sessions"

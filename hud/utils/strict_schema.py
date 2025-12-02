@@ -144,7 +144,7 @@ def _resolve_ref(*, root: dict[str, Any], ref: str) -> object:
     path = ref[2:].split("/")
     resolved: object = root
     for key in path:
-        assert _is_dict(resolved), f"Encountered non-dictionary entry while resolving {ref}"  # noqa: S101
+        assert _is_dict(resolved), f"Encountered non-dictionary entry while resolving {ref}"
         resolved = resolved[key]
 
     return resolved
