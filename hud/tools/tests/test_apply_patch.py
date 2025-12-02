@@ -464,7 +464,7 @@ class TestApplyPatchTool:
             assert "Created" in result.output
 
             # Verify file was created
-            with open(os.path.join(tmpdir, "new.txt")) as f: # noqa: ASYNC230
+            with open(os.path.join(tmpdir, "new.txt")) as f:  # noqa: ASYNC230
                 content = f.read()
             assert content == "line 1\nline 2"
 
@@ -544,7 +544,7 @@ class TestApplyPatchTool:
             assert "Updated" in result.output
 
             # Verify file was updated
-            with open(file_path) as f: # noqa: ASYNC230
+            with open(file_path) as f:  # noqa: ASYNC230
                 content = f.read()
             assert content == "line1\nnew line2\nline3"
 
@@ -592,7 +592,7 @@ class TestApplyPatchTool:
             # Verify file was created in subdirectory
             file_path = os.path.join(tmpdir, "subdir/nested/file.txt")
             assert os.path.exists(file_path)
-            with open(file_path) as f: # noqa: ASYNC230
+            with open(file_path) as f:  # noqa: ASYNC230
                 assert f.read() == "content"
 
     def test_parse_create_diff(self):
