@@ -251,13 +251,13 @@ class TestGeminiAgent:
         assert len(gemini_tools) == 2
 
         # Both should be function declarations
-        assert gemini_tools[0].function_declarations is not None
-        assert len(gemini_tools[0].function_declarations) == 1
-        assert gemini_tools[0].function_declarations[0].name == "calculator"
+        assert gemini_tools[0].function_declarations is not None  # type: ignore[reportAttributeAccessIssue]
+        assert len(gemini_tools[0].function_declarations) == 1  # type: ignore[reportAttributeAccessIssue]
+        assert gemini_tools[0].function_declarations[0].name == "calculator"  # type: ignore[reportAttributeAccessIssue]
 
-        assert gemini_tools[1].function_declarations is not None
-        assert len(gemini_tools[1].function_declarations) == 1
-        assert gemini_tools[1].function_declarations[0].name == "weather"
+        assert gemini_tools[1].function_declarations is not None  # type: ignore[reportAttributeAccessIssue]
+        assert len(gemini_tools[1].function_declarations) == 1  # type: ignore[reportAttributeAccessIssue]
+        assert gemini_tools[1].function_declarations[0].name == "weather"  # type: ignore[reportAttributeAccessIssue]
 
     @pytest.mark.asyncio
     async def test_create_user_message(self, mock_mcp_client, mock_gemini_client):
@@ -496,15 +496,15 @@ class TestGeminiCUAAgent:
         assert len(gemini_tools) == 2
 
         # First should be computer use tool
-        assert gemini_tools[0].computer_use is not None
+        assert gemini_tools[0].computer_use is not None  # type: ignore[reportAttributeAccessIssue]
         assert (
-            gemini_tools[0].computer_use.environment == genai_types.Environment.ENVIRONMENT_BROWSER
+            gemini_tools[0].computer_use.environment == genai_types.Environment.ENVIRONMENT_BROWSER  # type: ignore[reportAttributeAccessIssue]
         )
 
         # Second should be calculator as function declaration
-        assert gemini_tools[1].function_declarations is not None
-        assert len(gemini_tools[1].function_declarations) == 1
-        assert gemini_tools[1].function_declarations[0].name == "calculator"
+        assert gemini_tools[1].function_declarations is not None  # type: ignore[reportAttributeAccessIssue]
+        assert len(gemini_tools[1].function_declarations) == 1  # type: ignore[reportAttributeAccessIssue]
+        assert gemini_tools[1].function_declarations[0].name == "calculator"  # type: ignore[reportAttributeAccessIssue]
 
     @pytest.mark.asyncio
     async def test_extract_tool_call_normalizes_coordinates(
@@ -530,9 +530,9 @@ class TestGeminiCUAAgent:
 
         assert tool_call is not None
         assert tool_call.name == "gemini_computer"
-        assert tool_call.arguments["action"] == "click_at"
-        assert tool_call.arguments["x"] == 150
-        assert tool_call.arguments["y"] == 250
+        assert tool_call.arguments["action"] == "click_at"  # type: ignore[reportAttributeAccessIssue]
+        assert tool_call.arguments["x"] == 150  # type: ignore[reportAttributeAccessIssue]
+        assert tool_call.arguments["y"] == 250  # type: ignore[reportAttributeAccessIssue]
 
     @pytest.mark.asyncio
     async def test_extract_tool_call_preserves_non_computer_args(
