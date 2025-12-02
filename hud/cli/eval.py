@@ -47,12 +47,10 @@ class AgentPreset:
 # Built-in presets for the interactive picker
 _AGENT_PRESETS: list[AgentPreset] = [
     # Native agents (use provider SDKs directly)
-    AgentPreset("Claude Sonnet 4.5", AgentType.CLAUDE, "claude-sonnet-4-5-20250929"),
+    AgentPreset("Claude Sonnet 4.5", AgentType.CLAUDE, "claude-sonnet-4-5"),
     AgentPreset("GPT-5", AgentType.OPENAI, "gpt-5"),
     AgentPreset("Operator (OpenAI Computer Use)", AgentType.OPERATOR, "computer-use-preview"),
-    AgentPreset(
-        "Gemini 2.5 Computer Use", AgentType.GEMINI, "gemini-2.5-computer-use-preview-10-2025"
-    ),
+    AgentPreset("Gemini 3 Pro Preview", AgentType.GEMINI, "gemini-3-pro-preview"),
     # HUD Gateway presets (models via HUD Inference API)
     AgentPreset(
         "Grok 4-1 Fast (xAI)",
