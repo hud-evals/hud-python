@@ -1,0 +1,208 @@
+======================================================================
+GREENHOUSE ENVIRONMENTAL DATA
+======================================================================
+
+DOCUMENT STRUCTURE
+----------------------------------------
+Daily environmental readings by zone.
+Includes temperature, humidity, light hours, and soil pH.
+
+ZONES: Zone-A, Zone-B, Zone-C, Zone-D
+  Zone-A: Cooler, lower humidity (tropical understory)
+  Zone-B: Moderate temperature and humidity
+  Zone-C: Warmer, higher humidity (tropical)
+  Zone-D: Warmest, highest humidity
+
+======================================================================
+
+ZONE: Zone-A
+--------------------------------------------------
+  Week 2024-W01
+    Avg Temp: 17.9°C | Humidity: 53.0%
+    Light: 8.2 hrs/day | Soil pH: 6.27
+  Week 2024-W02
+    Avg Temp: 19.1°C | Humidity: 53.6%
+    Light: 8.9 hrs/day | Soil pH: 6.27
+  Week 2024-W03
+    Avg Temp: 19.0°C | Humidity: 55.7%
+    Light: 9.3 hrs/day | Soil pH: 6.09
+  Week 2024-W04
+    Avg Temp: 20.0°C | Humidity: 54.6%
+    Light: 9.5 hrs/day | Soil pH: 6.09
+  Week 2024-W05
+    Avg Temp: 19.0°C | Humidity: 56.5%
+    Light: 10.0 hrs/day | Soil pH: 6.10
+  Week 2024-W06
+    Avg Temp: 19.6°C | Humidity: 56.3%
+    Light: 10.6 hrs/day | Soil pH: 6.16
+  Week 2024-W07
+    Avg Temp: 20.1°C | Humidity: 57.2%
+    Light: 10.7 hrs/day | Soil pH: 6.12
+  Week 2024-W08
+    Avg Temp: 20.6°C | Humidity: 56.3%
+    Light: 10.7 hrs/day | Soil pH: 6.14
+  Week 2024-W09
+    Avg Temp: 19.6°C | Humidity: 58.0%
+    Light: 10.1 hrs/day | Soil pH: 6.20
+  Week 2024-W10
+    Avg Temp: 19.0°C | Humidity: 54.7%
+    Light: 9.2 hrs/day | Soil pH: 6.26
+  Week 2024-W11
+    Avg Temp: 19.1°C | Humidity: 54.9%
+    Light: 9.4 hrs/day | Soil pH: 6.11
+  Week 2024-W12
+    Avg Temp: 17.7°C | Humidity: 57.4%
+    Light: 8.8 hrs/day | Soil pH: 6.14
+
+  DAILY DETAILS (Last 7 days):
+    2024-03-18: 15.3-19.3°C, 63% humidity, 7.9h light
+    2024-03-19: 16.3-20.5°C, 62% humidity, 9.7h light
+    2024-03-20: 15.9-19.4°C, 62% humidity, 8.3h light
+    2024-03-21: 14.6-19.4°C, 54% humidity, 9.2h light
+    2024-03-22: 16.0-20.1°C, 53% humidity, 8.5h light
+    2024-03-23: 13.9-19.3°C, 54% humidity, 8.4h light
+    2024-03-24: 16.9-21.0°C, 54% humidity, 9.4h light
+
+ZONE: Zone-B
+--------------------------------------------------
+  Week 2024-W01
+    Avg Temp: 20.0°C | Humidity: 62.8%
+    Light: 8.3 hrs/day | Soil pH: 6.24
+  Week 2024-W02
+    Avg Temp: 20.6°C | Humidity: 63.0%
+    Light: 8.8 hrs/day | Soil pH: 6.16
+  Week 2024-W03
+    Avg Temp: 20.6°C | Humidity: 62.4%
+    Light: 9.1 hrs/day | Soil pH: 6.22
+  Week 2024-W04
+    Avg Temp: 22.1°C | Humidity: 62.5%
+    Light: 9.1 hrs/day | Soil pH: 6.26
+  Week 2024-W05
+    Avg Temp: 22.3°C | Humidity: 61.4%
+    Light: 10.0 hrs/day | Soil pH: 6.14
+  Week 2024-W06
+    Avg Temp: 22.8°C | Humidity: 58.9%
+    Light: 10.7 hrs/day | Soil pH: 6.22
+  Week 2024-W07
+    Avg Temp: 22.6°C | Humidity: 59.4%
+    Light: 10.7 hrs/day | Soil pH: 6.20
+  Week 2024-W08
+    Avg Temp: 22.7°C | Humidity: 55.2%
+    Light: 10.8 hrs/day | Soil pH: 6.23
+  Week 2024-W09
+    Avg Temp: 21.7°C | Humidity: 64.5%
+    Light: 10.0 hrs/day | Soil pH: 6.28
+  Week 2024-W10
+    Avg Temp: 21.4°C | Humidity: 60.9%
+    Light: 9.4 hrs/day | Soil pH: 6.27
+  Week 2024-W11
+    Avg Temp: 20.1°C | Humidity: 58.9%
+    Light: 9.3 hrs/day | Soil pH: 6.16
+  Week 2024-W12
+    Avg Temp: 20.1°C | Humidity: 61.3%
+    Light: 8.5 hrs/day | Soil pH: 6.29
+
+  DAILY DETAILS (Last 7 days):
+    2024-03-18: 18.4-22.9°C, 60% humidity, 9.0h light
+    2024-03-19: 18.8-22.0°C, 61% humidity, 7.9h light
+    2024-03-20: 18.1-21.7°C, 67% humidity, 8.1h light
+    2024-03-21: 18.2-23.8°C, 65% humidity, 9.4h light
+    2024-03-22: 17.2-22.4°C, 70% humidity, 8.2h light
+    2024-03-23: 17.5-23.1°C, 56% humidity, 8.5h light
+    2024-03-24: 16.6-21.2°C, 51% humidity, 8.2h light
+
+ZONE: Zone-C
+--------------------------------------------------
+  Week 2024-W01
+    Avg Temp: 22.0°C | Humidity: 64.2%
+    Light: 8.5 hrs/day | Soil pH: 6.13
+  Week 2024-W02
+    Avg Temp: 22.8°C | Humidity: 68.1%
+    Light: 8.6 hrs/day | Soil pH: 6.22
+  Week 2024-W03
+    Avg Temp: 22.5°C | Humidity: 63.2%
+    Light: 9.2 hrs/day | Soil pH: 6.29
+  Week 2024-W04
+    Avg Temp: 23.1°C | Humidity: 65.2%
+    Light: 10.0 hrs/day | Soil pH: 6.22
+  Week 2024-W05
+    Avg Temp: 23.3°C | Humidity: 65.4%
+    Light: 10.1 hrs/day | Soil pH: 6.30
+  Week 2024-W06
+    Avg Temp: 24.0°C | Humidity: 67.6%
+    Light: 10.3 hrs/day | Soil pH: 6.13
+  Week 2024-W07
+    Avg Temp: 25.1°C | Humidity: 58.8%
+    Light: 11.0 hrs/day | Soil pH: 6.39
+  Week 2024-W08
+    Avg Temp: 24.1°C | Humidity: 63.0%
+    Light: 10.6 hrs/day | Soil pH: 6.18
+  Week 2024-W09
+    Avg Temp: 23.1°C | Humidity: 65.2%
+    Light: 10.2 hrs/day | Soil pH: 6.29
+  Week 2024-W10
+    Avg Temp: 23.6°C | Humidity: 65.0%
+    Light: 9.9 hrs/day | Soil pH: 6.32
+  Week 2024-W11
+    Avg Temp: 23.2°C | Humidity: 66.9%
+    Light: 8.9 hrs/day | Soil pH: 6.18
+  Week 2024-W12
+    Avg Temp: 22.4°C | Humidity: 64.4%
+    Light: 8.7 hrs/day | Soil pH: 6.18
+
+  DAILY DETAILS (Last 7 days):
+    2024-03-18: 20.8-25.4°C, 69% humidity, 8.2h light
+    2024-03-19: 17.6-23.3°C, 62% humidity, 9.1h light
+    2024-03-20: 23.0-26.3°C, 62% humidity, 9.7h light
+    2024-03-21: 20.6-25.0°C, 65% humidity, 9.3h light
+    2024-03-22: 19.9-24.4°C, 65% humidity, 7.9h light
+    2024-03-23: 21.0-25.3°C, 67% humidity, 8.9h light
+    2024-03-24: 17.6-22.7°C, 61% humidity, 7.5h light
+
+ZONE: Zone-D
+--------------------------------------------------
+  Week 2024-W01
+    Avg Temp: 23.7°C | Humidity: 71.8%
+    Light: 8.2 hrs/day | Soil pH: 6.27
+  Week 2024-W02
+    Avg Temp: 25.0°C | Humidity: 68.6%
+    Light: 8.6 hrs/day | Soil pH: 6.26
+  Week 2024-W03
+    Avg Temp: 24.9°C | Humidity: 71.3%
+    Light: 9.0 hrs/day | Soil pH: 6.22
+  Week 2024-W04
+    Avg Temp: 25.2°C | Humidity: 67.4%
+    Light: 9.9 hrs/day | Soil pH: 6.25
+  Week 2024-W05
+    Avg Temp: 25.9°C | Humidity: 69.0%
+    Light: 10.0 hrs/day | Soil pH: 6.14
+  Week 2024-W06
+    Avg Temp: 26.4°C | Humidity: 70.2%
+    Light: 10.9 hrs/day | Soil pH: 6.31
+  Week 2024-W07
+    Avg Temp: 26.7°C | Humidity: 71.0%
+    Light: 10.8 hrs/day | Soil pH: 6.17
+  Week 2024-W08
+    Avg Temp: 26.1°C | Humidity: 72.0%
+    Light: 10.5 hrs/day | Soil pH: 6.15
+  Week 2024-W09
+    Avg Temp: 25.6°C | Humidity: 68.6%
+    Light: 9.9 hrs/day | Soil pH: 6.23
+  Week 2024-W10
+    Avg Temp: 25.3°C | Humidity: 68.4%
+    Light: 9.2 hrs/day | Soil pH: 6.19
+  Week 2024-W11
+    Avg Temp: 24.4°C | Humidity: 72.8%
+    Light: 9.2 hrs/day | Soil pH: 6.20
+  Week 2024-W12
+    Avg Temp: 24.7°C | Humidity: 69.1%
+    Light: 8.9 hrs/day | Soil pH: 6.14
+
+  DAILY DETAILS (Last 7 days):
+    2024-03-18: 22.5-26.1°C, 68% humidity, 9.4h light
+    2024-03-19: 23.5-27.1°C, 73% humidity, 9.0h light
+    2024-03-20: 24.0-27.0°C, 68% humidity, 8.6h light
+    2024-03-21: 20.5-25.9°C, 78% humidity, 8.9h light
+    2024-03-22: 22.8-28.1°C, 70% humidity, 9.1h light
+    2024-03-23: 21.4-26.0°C, 61% humidity, 8.5h light
+    2024-03-24: 22.9-27.7°C, 65% humidity, 9.1h light

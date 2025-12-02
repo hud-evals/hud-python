@@ -1,0 +1,996 @@
+======================================================================
+PLANT GROWTH MEASUREMENT LOGS
+======================================================================
+
+DOCUMENT STRUCTURE & ORDERING
+----------------------------------------
+Weekly growth measurements for all 20 plants over 12 weeks.
+
+ORGANIZATION:
+  - Plants listed alphabetically by Plant ID
+  - Each plant has 12 weekly entries (Week 1-12)
+  - Weeks ordered chronologically within each plant
+
+MEASUREMENT FIELDS:
+  - Height (cm): Current plant height
+  - Width (cm): Current plant spread
+  - Leaves: Number of leaves
+  - Health: Score 1-10 (10 = excellent)
+  - Notes: Optional observations
+
+SCHEDULE: Measurements taken every Monday
+
+======================================================================
+
+PLANT: PLT-FIC-002
+--------------------------------------------------
+  Week  1 (2024-01-07)
+    Height:   28.5 cm | Width:  13.2 cm
+    Leaves:   5 | Health: 7/10
+  Week  2 (2024-01-14)
+    Height:   29.8 cm | Width:  13.6 cm
+    Leaves:   5 | Health: 9/10
+    Notes: Strong new growth
+  Week  3 (2024-01-21)
+    Height:   32.0 cm | Width:  14.3 cm
+    Leaves:   6 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week  4 (2024-01-28)
+    Height:   33.4 cm | Width:  14.7 cm
+    Leaves:   8 | Health: 7/10
+  Week  5 (2024-02-04)
+    Height:   34.9 cm | Width:  15.1 cm
+    Leaves:   8 | Health: 10/10
+    Notes: Normal growth
+  Week  6 (2024-02-11)
+    Height:   36.9 cm | Width:  15.7 cm
+    Leaves:   8 | Health: 7/10
+    Notes: Slight yellowing on lower leaves
+  Week  7 (2024-02-18)
+    Height:   38.7 cm | Width:  16.3 cm
+    Leaves:  10 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week  8 (2024-02-25)
+    Height:   40.4 cm | Width:  16.8 cm
+    Leaves:  10 | Health: 9/10
+    Notes: Healthy development
+  Week  9 (2024-03-03)
+    Height:   42.2 cm | Width:  17.3 cm
+    Leaves:  10 | Health: 7/10
+    Notes: Healthy development
+  Week 10 (2024-03-10)
+    Height:   44.3 cm | Width:  17.9 cm
+    Leaves:  10 | Health: 9/10
+    Notes: Normal growth
+  Week 11 (2024-03-17)
+    Height:   45.8 cm | Width:  18.4 cm
+    Leaves:  10 | Health: 8/10
+    Notes: Slight yellowing on lower leaves
+  Week 12 (2024-03-24)
+    Height:   47.4 cm | Width:  18.9 cm
+    Leaves:  10 | Health: 7/10
+    Notes: Strong new growth
+
+PLANT: PLT-FIC-008
+--------------------------------------------------
+  Week  1 (2024-01-06)
+    Height:   25.2 cm | Width:   9.3 cm
+    Leaves:   5 | Health: 7/10
+  Week  2 (2024-01-13)
+    Height:   27.1 cm | Width:   9.9 cm
+    Leaves:   5 | Health: 10/10
+  Week  3 (2024-01-20)
+    Height:   29.1 cm | Width:  10.5 cm
+    Leaves:   5 | Health: 9/10
+    Notes: New leaf unfurling
+  Week  4 (2024-01-27)
+    Height:   31.2 cm | Width:  11.1 cm
+    Leaves:   5 | Health: 8/10
+    Notes: New leaf unfurling
+  Week  5 (2024-02-03)
+    Height:   32.5 cm | Width:  11.5 cm
+    Leaves:   7 | Health: 8/10
+    Notes: Strong new growth
+  Week  6 (2024-02-10)
+    Height:   34.2 cm | Width:  12.0 cm
+    Leaves:   7 | Health: 7/10
+    Notes: Slight yellowing on lower leaves
+  Week  7 (2024-02-17)
+    Height:   35.6 cm | Width:  12.4 cm
+    Leaves:   8 | Health: 7/10
+    Notes: Slight yellowing on lower leaves
+  Week  8 (2024-02-24)
+    Height:   37.2 cm | Width:  12.9 cm
+    Leaves:   8 | Health: 7/10
+    Notes: Healthy development
+  Week  9 (2024-03-02)
+    Height:   38.7 cm | Width:  13.4 cm
+    Leaves:   8 | Health: 7/10
+    Notes: Slight yellowing on lower leaves
+  Week 10 (2024-03-09)
+    Height:   40.3 cm | Width:  13.9 cm
+    Leaves:  10 | Health: 9/10
+    Notes: New leaf unfurling
+  Week 11 (2024-03-16)
+    Height:   42.6 cm | Width:  14.5 cm
+    Leaves:  10 | Health: 7/10
+    Notes: Healthy development
+  Week 12 (2024-03-23)
+    Height:   44.0 cm | Width:  15.0 cm
+    Leaves:  11 | Health: 9/10
+
+PLANT: PLT-FIC-014
+--------------------------------------------------
+  Week  1 (2024-02-10)
+    Height:   27.4 cm | Width:  10.7 cm
+    Leaves:   5 | Health: 10/10
+    Notes: Healthy development
+  Week  2 (2024-02-17)
+    Height:   28.9 cm | Width:  11.1 cm
+    Leaves:   5 | Health: 8/10
+    Notes: Strong new growth
+  Week  3 (2024-02-24)
+    Height:   30.6 cm | Width:  11.6 cm
+    Leaves:   6 | Health: 10/10
+    Notes: New leaf unfurling
+  Week  4 (2024-03-02)
+    Height:   32.8 cm | Width:  12.3 cm
+    Leaves:   6 | Health: 9/10
+    Notes: Normal growth
+  Week  5 (2024-03-09)
+    Height:   34.7 cm | Width:  12.9 cm
+    Leaves:   6 | Health: 9/10
+    Notes: New leaf unfurling
+  Week  6 (2024-03-16)
+    Height:   36.6 cm | Width:  13.4 cm
+    Leaves:   6 | Health: 8/10
+    Notes: Strong new growth
+  Week  7 (2024-03-23)
+    Height:   38.7 cm | Width:  14.1 cm
+    Leaves:   6 | Health: 10/10
+    Notes: Healthy development
+  Week  8 (2024-03-30)
+    Height:   40.4 cm | Width:  14.6 cm
+    Leaves:   6 | Health: 8/10
+    Notes: Slight yellowing on lower leaves
+  Week  9 (2024-04-06)
+    Height:   41.9 cm | Width:  15.0 cm
+    Leaves:   6 | Health: 10/10
+  Week 10 (2024-04-13)
+    Height:   44.2 cm | Width:  15.7 cm
+    Leaves:   6 | Health: 7/10
+    Notes: Slight yellowing on lower leaves
+  Week 11 (2024-04-20)
+    Height:   46.0 cm | Width:  16.2 cm
+    Leaves:   6 | Health: 8/10
+    Notes: Strong new growth
+  Week 12 (2024-04-27)
+    Height:   47.6 cm | Width:  16.7 cm
+    Leaves:   6 | Health: 8/10
+    Notes: Slight yellowing on lower leaves
+
+PLANT: PLT-FIC-020
+--------------------------------------------------
+  Week  1 (2024-02-27)
+    Height:   19.3 cm | Width:   7.8 cm
+    Leaves:   6 | Health: 9/10
+  Week  2 (2024-03-05)
+    Height:   21.0 cm | Width:   8.3 cm
+    Leaves:   6 | Health: 9/10
+    Notes: Strong new growth
+  Week  3 (2024-03-12)
+    Height:   22.8 cm | Width:   8.8 cm
+    Leaves:   6 | Health: 8/10
+    Notes: Strong new growth
+  Week  4 (2024-03-19)
+    Height:   24.7 cm | Width:   9.4 cm
+    Leaves:   8 | Health: 9/10
+    Notes: New leaf unfurling
+  Week  5 (2024-03-26)
+    Height:   26.7 cm | Width:  10.0 cm
+    Leaves:   8 | Health: 8/10
+    Notes: Slight yellowing on lower leaves
+  Week  6 (2024-04-02)
+    Height:   28.0 cm | Width:  10.4 cm
+    Leaves:   8 | Health: 8/10
+    Notes: Healthy development
+  Week  7 (2024-04-09)
+    Height:   29.4 cm | Width:  10.8 cm
+    Leaves:   8 | Health: 8/10
+    Notes: Healthy development
+  Week  8 (2024-04-16)
+    Height:   31.2 cm | Width:  11.4 cm
+    Leaves:   8 | Health: 8/10
+    Notes: Normal growth
+  Week  9 (2024-04-23)
+    Height:   32.6 cm | Width:  11.8 cm
+    Leaves:  10 | Health: 8/10
+  Week 10 (2024-04-30)
+    Height:   34.0 cm | Width:  12.2 cm
+    Leaves:  10 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week 11 (2024-05-07)
+    Height:   35.6 cm | Width:  12.7 cm
+    Leaves:  10 | Health: 10/10
+    Notes: Healthy development
+  Week 12 (2024-05-14)
+    Height:   37.9 cm | Width:  13.4 cm
+    Leaves:  10 | Health: 9/10
+
+PLANT: PLT-MON-001
+--------------------------------------------------
+  Week  1 (2024-01-04)
+    Height:   18.4 cm | Width:   7.2 cm
+    Leaves:   9 | Health: 9/10
+    Notes: New leaf unfurling
+  Week  2 (2024-01-11)
+    Height:   21.6 cm | Width:   8.1 cm
+    Leaves:   9 | Health: 8/10
+    Notes: Healthy development
+  Week  3 (2024-01-18)
+    Height:   24.1 cm | Width:   8.9 cm
+    Leaves:   9 | Health: 10/10
+    Notes: New leaf unfurling
+  Week  4 (2024-01-25)
+    Height:   26.9 cm | Width:   9.7 cm
+    Leaves:   9 | Health: 8/10
+    Notes: New leaf unfurling
+  Week  5 (2024-02-01)
+    Height:   29.0 cm | Width:  10.3 cm
+    Leaves:   9 | Health: 9/10
+  Week  6 (2024-02-08)
+    Height:   31.1 cm | Width:  11.0 cm
+    Leaves:   9 | Health: 10/10
+    Notes: Normal growth
+  Week  7 (2024-02-15)
+    Height:   33.0 cm | Width:  11.6 cm
+    Leaves:   9 | Health: 9/10
+  Week  8 (2024-02-22)
+    Height:   34.9 cm | Width:  12.1 cm
+    Leaves:   9 | Health: 7/10
+    Notes: Healthy development
+  Week  9 (2024-02-29)
+    Height:   37.2 cm | Width:  12.8 cm
+    Leaves:   9 | Health: 10/10
+    Notes: Normal growth
+  Week 10 (2024-03-07)
+    Height:   40.5 cm | Width:  13.8 cm
+    Leaves:   9 | Health: 10/10
+    Notes: Normal growth
+  Week 11 (2024-03-14)
+    Height:   43.3 cm | Width:  14.6 cm
+    Leaves:   9 | Health: 9/10
+    Notes: Normal growth
+  Week 12 (2024-03-21)
+    Height:   46.1 cm | Width:  15.5 cm
+    Leaves:  10 | Health: 7/10
+
+PLANT: PLT-MON-007
+--------------------------------------------------
+  Week  1 (2024-01-21)
+    Height:   27.0 cm | Width:  12.7 cm
+    Leaves:   9 | Health: 7/10
+    Notes: New leaf unfurling
+  Week  2 (2024-01-28)
+    Height:   29.8 cm | Width:  13.5 cm
+    Leaves:   9 | Health: 7/10
+    Notes: Slight yellowing on lower leaves
+  Week  3 (2024-02-04)
+    Height:   32.2 cm | Width:  14.3 cm
+    Leaves:   9 | Health: 8/10
+    Notes: Strong new growth
+  Week  4 (2024-02-11)
+    Height:   35.1 cm | Width:  15.1 cm
+    Leaves:   9 | Health: 8/10
+    Notes: Normal growth
+  Week  5 (2024-02-18)
+    Height:   37.8 cm | Width:  16.0 cm
+    Leaves:   9 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week  6 (2024-02-25)
+    Height:   40.8 cm | Width:  16.8 cm
+    Leaves:   9 | Health: 7/10
+    Notes: Normal growth
+  Week  7 (2024-03-03)
+    Height:   43.9 cm | Width:  17.8 cm
+    Leaves:   9 | Health: 8/10
+    Notes: Healthy development
+  Week  8 (2024-03-10)
+    Height:   46.9 cm | Width:  18.7 cm
+    Leaves:  11 | Health: 9/10
+    Notes: New leaf unfurling
+  Week  9 (2024-03-17)
+    Height:   50.1 cm | Width:  19.6 cm
+    Leaves:  11 | Health: 9/10
+  Week 10 (2024-03-24)
+    Height:   52.0 cm | Width:  20.2 cm
+    Leaves:  11 | Health: 7/10
+    Notes: Healthy development
+  Week 11 (2024-03-31)
+    Height:   54.2 cm | Width:  20.9 cm
+    Leaves:  11 | Health: 7/10
+    Notes: Slight yellowing on lower leaves
+  Week 12 (2024-04-07)
+    Height:   56.7 cm | Width:  21.6 cm
+    Leaves:  11 | Health: 9/10
+    Notes: Normal growth
+
+PLANT: PLT-MON-013
+--------------------------------------------------
+  Week  1 (2024-01-26)
+    Height:   30.2 cm | Width:  13.5 cm
+    Leaves:   5 | Health: 10/10
+  Week  2 (2024-02-02)
+    Height:   32.7 cm | Width:  14.3 cm
+    Leaves:   5 | Health: 9/10
+    Notes: Healthy development
+  Week  3 (2024-02-09)
+    Height:   35.8 cm | Width:  15.2 cm
+    Leaves:   5 | Health: 9/10
+    Notes: Normal growth
+  Week  4 (2024-02-16)
+    Height:   38.6 cm | Width:  16.0 cm
+    Leaves:   5 | Health: 8/10
+    Notes: Normal growth
+  Week  5 (2024-02-23)
+    Height:   41.7 cm | Width:  17.0 cm
+    Leaves:   5 | Health: 10/10
+  Week  6 (2024-03-01)
+    Height:   44.1 cm | Width:  17.7 cm
+    Leaves:   5 | Health: 7/10
+    Notes: New leaf unfurling
+  Week  7 (2024-03-08)
+    Height:   45.9 cm | Width:  18.2 cm
+    Leaves:   7 | Health: 10/10
+    Notes: New leaf unfurling
+  Week  8 (2024-03-15)
+    Height:   48.9 cm | Width:  19.1 cm
+    Leaves:   8 | Health: 9/10
+    Notes: Normal growth
+  Week  9 (2024-03-22)
+    Height:   51.1 cm | Width:  19.8 cm
+    Leaves:   8 | Health: 7/10
+    Notes: New leaf unfurling
+  Week 10 (2024-03-29)
+    Height:   53.5 cm | Width:  20.5 cm
+    Leaves:   8 | Health: 8/10
+    Notes: Slight yellowing on lower leaves
+  Week 11 (2024-04-05)
+    Height:   55.7 cm | Width:  21.2 cm
+    Leaves:   8 | Health: 9/10
+    Notes: Healthy development
+  Week 12 (2024-04-12)
+    Height:   58.2 cm | Width:  21.9 cm
+    Leaves:   8 | Health: 7/10
+    Notes: Healthy development
+
+PLANT: PLT-MON-019
+--------------------------------------------------
+  Week  1 (2024-01-13)
+    Height:   24.2 cm | Width:   9.5 cm
+    Leaves:   8 | Health: 9/10
+  Week  2 (2024-01-20)
+    Height:   27.3 cm | Width:  10.4 cm
+    Leaves:   8 | Health: 10/10
+  Week  3 (2024-01-27)
+    Height:   30.0 cm | Width:  11.2 cm
+    Leaves:   8 | Health: 8/10
+    Notes: Strong new growth
+  Week  4 (2024-02-03)
+    Height:   31.8 cm | Width:  11.8 cm
+    Leaves:   8 | Health: 8/10
+  Week  5 (2024-02-10)
+    Height:   34.9 cm | Width:  12.7 cm
+    Leaves:   8 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week  6 (2024-02-17)
+    Height:   36.8 cm | Width:  13.3 cm
+    Leaves:   9 | Health: 8/10
+    Notes: Strong new growth
+  Week  7 (2024-02-24)
+    Height:   38.8 cm | Width:  13.9 cm
+    Leaves:  11 | Health: 8/10
+    Notes: Slight yellowing on lower leaves
+  Week  8 (2024-03-02)
+    Height:   40.7 cm | Width:  14.4 cm
+    Leaves:  11 | Health: 7/10
+  Week  9 (2024-03-09)
+    Height:   43.6 cm | Width:  15.3 cm
+    Leaves:  11 | Health: 7/10
+  Week 10 (2024-03-16)
+    Height:   46.3 cm | Width:  16.1 cm
+    Leaves:  13 | Health: 9/10
+  Week 11 (2024-03-23)
+    Height:   48.2 cm | Width:  16.7 cm
+    Leaves:  13 | Health: 9/10
+  Week 12 (2024-03-30)
+    Height:   50.6 cm | Width:  17.4 cm
+    Leaves:  13 | Health: 9/10
+    Notes: Strong new growth
+
+PLANT: PLT-PLY-005
+--------------------------------------------------
+  Week  1 (2024-01-11)
+    Height:   11.7 cm | Width:   4.7 cm
+    Leaves:   7 | Health: 9/10
+    Notes: Healthy development
+  Week  2 (2024-01-18)
+    Height:   12.9 cm | Width:   5.1 cm
+    Leaves:   9 | Health: 8/10
+    Notes: Slight yellowing on lower leaves
+  Week  3 (2024-01-25)
+    Height:   14.4 cm | Width:   5.5 cm
+    Leaves:   9 | Health: 9/10
+    Notes: Healthy development
+  Week  4 (2024-02-01)
+    Height:   15.5 cm | Width:   5.9 cm
+    Leaves:   9 | Health: 9/10
+    Notes: Strong new growth
+  Week  5 (2024-02-08)
+    Height:   17.0 cm | Width:   6.3 cm
+    Leaves:  11 | Health: 10/10
+    Notes: New leaf unfurling
+  Week  6 (2024-02-15)
+    Height:   18.8 cm | Width:   6.8 cm
+    Leaves:  11 | Health: 7/10
+    Notes: Healthy development
+  Week  7 (2024-02-22)
+    Height:   20.2 cm | Width:   7.3 cm
+    Leaves:  11 | Health: 9/10
+    Notes: Strong new growth
+  Week  8 (2024-02-29)
+    Height:   21.7 cm | Width:   7.7 cm
+    Leaves:  11 | Health: 8/10
+    Notes: Strong new growth
+  Week  9 (2024-03-07)
+    Height:   23.6 cm | Width:   8.3 cm
+    Leaves:  11 | Health: 8/10
+    Notes: Normal growth
+  Week 10 (2024-03-14)
+    Height:   25.0 cm | Width:   8.7 cm
+    Leaves:  11 | Health: 10/10
+  Week 11 (2024-03-21)
+    Height:   26.4 cm | Width:   9.1 cm
+    Leaves:  11 | Health: 8/10
+  Week 12 (2024-03-28)
+    Height:   28.2 cm | Width:   9.7 cm
+    Leaves:  13 | Health: 9/10
+    Notes: Strong new growth
+
+PLANT: PLT-PLY-011
+--------------------------------------------------
+  Week  1 (2024-02-03)
+    Height:   27.1 cm | Width:   9.0 cm
+    Leaves:   6 | Health: 9/10
+    Notes: New leaf unfurling
+  Week  2 (2024-02-10)
+    Height:   28.7 cm | Width:   9.5 cm
+    Leaves:   8 | Health: 7/10
+    Notes: Strong new growth
+  Week  3 (2024-02-17)
+    Height:   30.3 cm | Width:  10.0 cm
+    Leaves:  10 | Health: 7/10
+    Notes: New leaf unfurling
+  Week  4 (2024-02-24)
+    Height:   32.2 cm | Width:  10.5 cm
+    Leaves:  12 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week  5 (2024-03-02)
+    Height:   33.5 cm | Width:  10.9 cm
+    Leaves:  12 | Health: 10/10
+  Week  6 (2024-03-09)
+    Height:   35.5 cm | Width:  11.5 cm
+    Leaves:  12 | Health: 10/10
+    Notes: Strong new growth
+  Week  7 (2024-03-16)
+    Height:   36.7 cm | Width:  11.9 cm
+    Leaves:  12 | Health: 8/10
+    Notes: Slight yellowing on lower leaves
+  Week  8 (2024-03-23)
+    Height:   38.6 cm | Width:  12.5 cm
+    Leaves:  12 | Health: 8/10
+  Week  9 (2024-03-30)
+    Height:   40.3 cm | Width:  13.0 cm
+    Leaves:  12 | Health: 8/10
+    Notes: Healthy development
+  Week 10 (2024-04-06)
+    Height:   42.2 cm | Width:  13.5 cm
+    Leaves:  12 | Health: 10/10
+    Notes: Healthy development
+  Week 11 (2024-04-13)
+    Height:   43.8 cm | Width:  14.0 cm
+    Leaves:  12 | Health: 9/10
+    Notes: Slight yellowing on lower leaves
+  Week 12 (2024-04-20)
+    Height:   45.8 cm | Width:  14.6 cm
+    Leaves:  12 | Health: 10/10
+    Notes: Strong new growth
+
+PLANT: PLT-PLY-017
+--------------------------------------------------
+  Week  1 (2024-01-11)
+    Height:   18.6 cm | Width:   8.4 cm
+    Leaves:   7 | Health: 9/10
+    Notes: Slight yellowing on lower leaves
+  Week  2 (2024-01-18)
+    Height:   20.2 cm | Width:   8.9 cm
+    Leaves:   7 | Health: 7/10
+  Week  3 (2024-01-25)
+    Height:   21.9 cm | Width:   9.4 cm
+    Leaves:   7 | Health: 10/10
+    Notes: New leaf unfurling
+  Week  4 (2024-02-01)
+    Height:   23.3 cm | Width:   9.8 cm
+    Leaves:   7 | Health: 8/10
+  Week  5 (2024-02-08)
+    Height:   24.9 cm | Width:  10.3 cm
+    Leaves:   7 | Health: 10/10
+    Notes: Strong new growth
+  Week  6 (2024-02-15)
+    Height:   26.7 cm | Width:  10.9 cm
+    Leaves:   7 | Health: 8/10
+  Week  7 (2024-02-22)
+    Height:   28.5 cm | Width:  11.4 cm
+    Leaves:   7 | Health: 8/10
+    Notes: Slight yellowing on lower leaves
+  Week  8 (2024-02-29)
+    Height:   30.4 cm | Width:  12.0 cm
+    Leaves:   7 | Health: 10/10
+    Notes: Healthy development
+  Week  9 (2024-03-07)
+    Height:   32.1 cm | Width:  12.5 cm
+    Leaves:   7 | Health: 7/10
+  Week 10 (2024-03-14)
+    Height:   34.0 cm | Width:  13.0 cm
+    Leaves:   7 | Health: 8/10
+    Notes: Strong new growth
+  Week 11 (2024-03-21)
+    Height:   35.9 cm | Width:  13.6 cm
+    Leaves:   7 | Health: 9/10
+  Week 12 (2024-03-28)
+    Height:   37.0 cm | Width:  13.9 cm
+    Leaves:   7 | Health: 10/10
+
+PLANT: PLT-POT-003
+--------------------------------------------------
+  Week  1 (2024-02-04)
+    Height:   25.1 cm | Width:   9.7 cm
+    Leaves:  10 | Health: 9/10
+    Notes: Healthy development
+  Week  2 (2024-02-11)
+    Height:   27.6 cm | Width:  10.4 cm
+    Leaves:  10 | Health: 7/10
+    Notes: Slight yellowing on lower leaves
+  Week  3 (2024-02-18)
+    Height:   30.7 cm | Width:  11.4 cm
+    Leaves:  10 | Health: 8/10
+    Notes: New leaf unfurling
+  Week  4 (2024-02-25)
+    Height:   33.7 cm | Width:  12.2 cm
+    Leaves:  10 | Health: 7/10
+    Notes: Slight yellowing on lower leaves
+  Week  5 (2024-03-03)
+    Height:   37.1 cm | Width:  13.3 cm
+    Leaves:  11 | Health: 9/10
+    Notes: New leaf unfurling
+  Week  6 (2024-03-10)
+    Height:   40.8 cm | Width:  14.4 cm
+    Leaves:  11 | Health: 7/10
+    Notes: Healthy development
+  Week  7 (2024-03-17)
+    Height:   44.0 cm | Width:  15.3 cm
+    Leaves:  11 | Health: 7/10
+  Week  8 (2024-03-24)
+    Height:   46.2 cm | Width:  16.0 cm
+    Leaves:  12 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week  9 (2024-03-31)
+    Height:   49.0 cm | Width:  16.8 cm
+    Leaves:  13 | Health: 8/10
+    Notes: Strong new growth
+  Week 10 (2024-04-07)
+    Height:   51.7 cm | Width:  17.7 cm
+    Leaves:  14 | Health: 10/10
+    Notes: Healthy development
+  Week 11 (2024-04-14)
+    Height:   54.3 cm | Width:  18.4 cm
+    Leaves:  16 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week 12 (2024-04-21)
+    Height:   56.5 cm | Width:  19.1 cm
+    Leaves:  16 | Health: 9/10
+    Notes: Healthy development
+
+PLANT: PLT-POT-009
+--------------------------------------------------
+  Week  1 (2024-01-19)
+    Height:   31.0 cm | Width:  10.3 cm
+    Leaves:   5 | Health: 8/10
+    Notes: Normal growth
+  Week  2 (2024-01-26)
+    Height:   34.6 cm | Width:  11.4 cm
+    Leaves:   5 | Health: 7/10
+    Notes: Strong new growth
+  Week  3 (2024-02-02)
+    Height:   37.6 cm | Width:  12.3 cm
+    Leaves:   5 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week  4 (2024-02-09)
+    Height:   39.8 cm | Width:  13.0 cm
+    Leaves:   5 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week  5 (2024-02-16)
+    Height:   43.0 cm | Width:  13.9 cm
+    Leaves:   5 | Health: 8/10
+    Notes: Slight yellowing on lower leaves
+  Week  6 (2024-02-23)
+    Height:   45.6 cm | Width:  14.7 cm
+    Leaves:   5 | Health: 9/10
+    Notes: Normal growth
+  Week  7 (2024-03-01)
+    Height:   48.9 cm | Width:  15.7 cm
+    Leaves:   5 | Health: 8/10
+    Notes: New leaf unfurling
+  Week  8 (2024-03-08)
+    Height:   51.4 cm | Width:  16.4 cm
+    Leaves:   5 | Health: 7/10
+    Notes: Strong new growth
+  Week  9 (2024-03-15)
+    Height:   53.8 cm | Width:  17.2 cm
+    Leaves:   5 | Health: 8/10
+    Notes: Normal growth
+  Week 10 (2024-03-22)
+    Height:   56.7 cm | Width:  18.0 cm
+    Leaves:   6 | Health: 10/10
+  Week 11 (2024-03-29)
+    Height:   59.8 cm | Width:  18.9 cm
+    Leaves:   6 | Health: 8/10
+    Notes: Normal growth
+  Week 12 (2024-04-05)
+    Height:   62.7 cm | Width:  19.8 cm
+    Leaves:   7 | Health: 7/10
+    Notes: Strong new growth
+
+PLANT: PLT-POT-015
+--------------------------------------------------
+  Week  1 (2024-02-12)
+    Height:   21.3 cm | Width:   7.9 cm
+    Leaves:   5 | Health: 8/10
+    Notes: Slight yellowing on lower leaves
+  Week  2 (2024-02-19)
+    Height:   23.8 cm | Width:   8.7 cm
+    Leaves:   5 | Health: 9/10
+    Notes: Strong new growth
+  Week  3 (2024-02-26)
+    Height:   27.0 cm | Width:   9.6 cm
+    Leaves:   5 | Health: 8/10
+    Notes: Slight yellowing on lower leaves
+  Week  4 (2024-03-04)
+    Height:   30.2 cm | Width:  10.6 cm
+    Leaves:   6 | Health: 7/10
+    Notes: Normal growth
+  Week  5 (2024-03-11)
+    Height:   32.7 cm | Width:  11.3 cm
+    Leaves:   6 | Health: 7/10
+    Notes: Strong new growth
+  Week  6 (2024-03-18)
+    Height:   36.5 cm | Width:  12.5 cm
+    Leaves:   6 | Health: 7/10
+    Notes: Healthy development
+  Week  7 (2024-03-25)
+    Height:   39.5 cm | Width:  13.4 cm
+    Leaves:   6 | Health: 8/10
+  Week  8 (2024-04-01)
+    Height:   41.8 cm | Width:  14.1 cm
+    Leaves:   6 | Health: 9/10
+    Notes: Strong new growth
+  Week  9 (2024-04-08)
+    Height:   44.7 cm | Width:  14.9 cm
+    Leaves:   6 | Health: 9/10
+  Week 10 (2024-04-15)
+    Height:   47.5 cm | Width:  15.8 cm
+    Leaves:   6 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week 11 (2024-04-22)
+    Height:   50.4 cm | Width:  16.7 cm
+    Leaves:   6 | Health: 8/10
+    Notes: Strong new growth
+  Week 12 (2024-04-29)
+    Height:   52.9 cm | Width:  17.4 cm
+    Leaves:   7 | Health: 8/10
+
+PLANT: PLT-RUB-006
+--------------------------------------------------
+  Week  1 (2024-02-26)
+    Height:   24.2 cm | Width:   8.6 cm
+    Leaves:   6 | Health: 7/10
+  Week  2 (2024-03-04)
+    Height:   26.0 cm | Width:   9.2 cm
+    Leaves:   6 | Health: 8/10
+    Notes: New leaf unfurling
+  Week  3 (2024-03-11)
+    Height:   27.7 cm | Width:   9.7 cm
+    Leaves:   6 | Health: 10/10
+    Notes: New leaf unfurling
+  Week  4 (2024-03-18)
+    Height:   29.8 cm | Width:  10.3 cm
+    Leaves:   6 | Health: 10/10
+    Notes: Normal growth
+  Week  5 (2024-03-25)
+    Height:   31.5 cm | Width:  10.8 cm
+    Leaves:   6 | Health: 7/10
+    Notes: Strong new growth
+  Week  6 (2024-04-01)
+    Height:   33.1 cm | Width:  11.3 cm
+    Leaves:   7 | Health: 7/10
+    Notes: New leaf unfurling
+  Week  7 (2024-04-08)
+    Height:   35.1 cm | Width:  11.9 cm
+    Leaves:   7 | Health: 8/10
+    Notes: New leaf unfurling
+  Week  8 (2024-04-15)
+    Height:   37.6 cm | Width:  12.6 cm
+    Leaves:   7 | Health: 7/10
+    Notes: Healthy development
+  Week  9 (2024-04-22)
+    Height:   39.8 cm | Width:  13.3 cm
+    Leaves:   9 | Health: 8/10
+    Notes: New leaf unfurling
+  Week 10 (2024-04-29)
+    Height:   41.4 cm | Width:  13.8 cm
+    Leaves:   9 | Health: 10/10
+    Notes: Strong new growth
+  Week 11 (2024-05-06)
+    Height:   43.9 cm | Width:  14.5 cm
+    Leaves:   9 | Health: 7/10
+    Notes: Slight yellowing on lower leaves
+  Week 12 (2024-05-13)
+    Height:   45.3 cm | Width:  14.9 cm
+    Leaves:   9 | Health: 10/10
+    Notes: New leaf unfurling
+
+PLANT: PLT-RUB-012
+--------------------------------------------------
+  Week  1 (2024-02-10)
+    Height:   22.9 cm | Width:   7.1 cm
+    Leaves:   9 | Health: 9/10
+    Notes: Normal growth
+  Week  2 (2024-02-17)
+    Height:   25.1 cm | Width:   7.8 cm
+    Leaves:  11 | Health: 7/10
+    Notes: Slight yellowing on lower leaves
+  Week  3 (2024-02-24)
+    Height:   27.0 cm | Width:   8.4 cm
+    Leaves:  11 | Health: 7/10
+  Week  4 (2024-03-02)
+    Height:   29.6 cm | Width:   9.1 cm
+    Leaves:  11 | Health: 8/10
+  Week  5 (2024-03-09)
+    Height:   31.6 cm | Width:   9.8 cm
+    Leaves:  11 | Health: 10/10
+  Week  6 (2024-03-16)
+    Height:   34.0 cm | Width:  10.5 cm
+    Leaves:  11 | Health: 9/10
+  Week  7 (2024-03-23)
+    Height:   35.6 cm | Width:  11.0 cm
+    Leaves:  11 | Health: 10/10
+    Notes: Strong new growth
+  Week  8 (2024-03-30)
+    Height:   38.0 cm | Width:  11.7 cm
+    Leaves:  12 | Health: 7/10
+    Notes: Slight yellowing on lower leaves
+  Week  9 (2024-04-06)
+    Height:   40.6 cm | Width:  12.4 cm
+    Leaves:  13 | Health: 9/10
+    Notes: Healthy development
+  Week 10 (2024-04-13)
+    Height:   42.3 cm | Width:  13.0 cm
+    Leaves:  13 | Health: 8/10
+    Notes: Normal growth
+  Week 11 (2024-04-20)
+    Height:   43.9 cm | Width:  13.4 cm
+    Leaves:  13 | Health: 7/10
+    Notes: Healthy development
+  Week 12 (2024-04-27)
+    Height:   45.9 cm | Width:  14.0 cm
+    Leaves:  13 | Health: 10/10
+    Notes: Normal growth
+
+PLANT: PLT-RUB-018
+--------------------------------------------------
+  Week  1 (2024-02-16)
+    Height:   20.8 cm | Width:   6.5 cm
+    Leaves:   4 | Health: 10/10
+    Notes: Strong new growth
+  Week  2 (2024-02-23)
+    Height:   23.0 cm | Width:   7.1 cm
+    Leaves:   4 | Health: 8/10
+    Notes: Strong new growth
+  Week  3 (2024-03-01)
+    Height:   25.1 cm | Width:   7.7 cm
+    Leaves:   4 | Health: 9/10
+    Notes: New leaf unfurling
+  Week  4 (2024-03-08)
+    Height:   27.1 cm | Width:   8.3 cm
+    Leaves:   4 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week  5 (2024-03-15)
+    Height:   29.7 cm | Width:   9.1 cm
+    Leaves:   4 | Health: 9/10
+    Notes: Strong new growth
+  Week  6 (2024-03-22)
+    Height:   31.2 cm | Width:   9.6 cm
+    Leaves:   5 | Health: 9/10
+    Notes: Normal growth
+  Week  7 (2024-03-29)
+    Height:   33.7 cm | Width:  10.3 cm
+    Leaves:   5 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week  8 (2024-04-05)
+    Height:   36.2 cm | Width:  11.1 cm
+    Leaves:   5 | Health: 10/10
+    Notes: Healthy development
+  Week  9 (2024-04-12)
+    Height:   37.6 cm | Width:  11.5 cm
+    Leaves:   5 | Health: 10/10
+    Notes: New leaf unfurling
+  Week 10 (2024-04-19)
+    Height:   39.3 cm | Width:  12.0 cm
+    Leaves:   5 | Health: 7/10
+    Notes: Healthy development
+  Week 11 (2024-04-26)
+    Height:   41.7 cm | Width:  12.7 cm
+    Leaves:   6 | Health: 8/10
+    Notes: Strong new growth
+  Week 12 (2024-05-03)
+    Height:   43.4 cm | Width:  13.2 cm
+    Leaves:   6 | Health: 7/10
+    Notes: Normal growth
+
+PLANT: PLT-SNK-004
+--------------------------------------------------
+  Week  1 (2024-01-11)
+    Height:   13.3 cm | Width:   6.1 cm
+    Leaves:   6 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week  2 (2024-01-18)
+    Height:   13.9 cm | Width:   6.3 cm
+    Leaves:   6 | Health: 9/10
+    Notes: Strong new growth
+  Week  3 (2024-01-25)
+    Height:   14.8 cm | Width:   6.5 cm
+    Leaves:   6 | Health: 10/10
+    Notes: Healthy development
+  Week  4 (2024-02-01)
+    Height:   15.6 cm | Width:   6.8 cm
+    Leaves:   6 | Health: 10/10
+    Notes: Healthy development
+  Week  5 (2024-02-08)
+    Height:   16.4 cm | Width:   7.0 cm
+    Leaves:   7 | Health: 7/10
+    Notes: Strong new growth
+  Week  6 (2024-02-15)
+    Height:   17.1 cm | Width:   7.2 cm
+    Leaves:   7 | Health: 10/10
+  Week  7 (2024-02-22)
+    Height:   17.7 cm | Width:   7.4 cm
+    Leaves:   7 | Health: 10/10
+    Notes: Healthy development
+  Week  8 (2024-02-29)
+    Height:   18.3 cm | Width:   7.6 cm
+    Leaves:   7 | Health: 7/10
+    Notes: New leaf unfurling
+  Week  9 (2024-03-07)
+    Height:   19.1 cm | Width:   7.8 cm
+    Leaves:   9 | Health: 9/10
+  Week 10 (2024-03-14)
+    Height:   19.9 cm | Width:   8.1 cm
+    Leaves:  10 | Health: 10/10
+    Notes: Strong new growth
+  Week 11 (2024-03-21)
+    Height:   20.8 cm | Width:   8.3 cm
+    Leaves:  10 | Health: 9/10
+    Notes: Slight yellowing on lower leaves
+  Week 12 (2024-03-28)
+    Height:   21.5 cm | Width:   8.5 cm
+    Leaves:  10 | Health: 10/10
+    Notes: Normal growth
+
+PLANT: PLT-SNK-010
+--------------------------------------------------
+  Week  1 (2024-01-31)
+    Height:   27.8 cm | Width:  12.0 cm
+    Leaves:   5 | Health: 7/10
+    Notes: New leaf unfurling
+  Week  2 (2024-02-07)
+    Height:   28.7 cm | Width:  12.2 cm
+    Leaves:   7 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week  3 (2024-02-14)
+    Height:   29.6 cm | Width:  12.5 cm
+    Leaves:   7 | Health: 10/10
+    Notes: New leaf unfurling
+  Week  4 (2024-02-21)
+    Height:   30.5 cm | Width:  12.8 cm
+    Leaves:   7 | Health: 7/10
+    Notes: Strong new growth
+  Week  5 (2024-02-28)
+    Height:   31.1 cm | Width:  12.9 cm
+    Leaves:   7 | Health: 9/10
+    Notes: Slight yellowing on lower leaves
+  Week  6 (2024-03-06)
+    Height:   31.9 cm | Width:  13.2 cm
+    Leaves:   8 | Health: 10/10
+    Notes: Strong new growth
+  Week  7 (2024-03-13)
+    Height:   32.7 cm | Width:  13.4 cm
+    Leaves:  10 | Health: 7/10
+    Notes: Normal growth
+  Week  8 (2024-03-20)
+    Height:   33.7 cm | Width:  13.7 cm
+    Leaves:  10 | Health: 8/10
+    Notes: Healthy development
+  Week  9 (2024-03-27)
+    Height:   34.6 cm | Width:  14.0 cm
+    Leaves:  12 | Health: 7/10
+    Notes: New leaf unfurling
+  Week 10 (2024-04-03)
+    Height:   35.6 cm | Width:  14.3 cm
+    Leaves:  12 | Health: 10/10
+    Notes: Normal growth
+  Week 11 (2024-04-10)
+    Height:   36.4 cm | Width:  14.5 cm
+    Leaves:  13 | Health: 9/10
+  Week 12 (2024-04-17)
+    Height:   37.3 cm | Width:  14.8 cm
+    Leaves:  15 | Health: 9/10
+    Notes: Strong new growth
+
+PLANT: PLT-SNK-016
+--------------------------------------------------
+  Week  1 (2024-02-16)
+    Height:   27.1 cm | Width:  11.2 cm
+    Leaves:  10 | Health: 8/10
+    Notes: New leaf unfurling
+  Week  2 (2024-02-23)
+    Height:   28.0 cm | Width:  11.5 cm
+    Leaves:  10 | Health: 9/10
+  Week  3 (2024-03-01)
+    Height:   28.7 cm | Width:  11.7 cm
+    Leaves:  10 | Health: 10/10
+    Notes: Strong new growth
+  Week  4 (2024-03-08)
+    Height:   29.5 cm | Width:  12.0 cm
+    Leaves:  12 | Health: 10/10
+  Week  5 (2024-03-15)
+    Height:   30.6 cm | Width:  12.3 cm
+    Leaves:  12 | Health: 9/10
+    Notes: Slight yellowing on lower leaves
+  Week  6 (2024-03-22)
+    Height:   31.4 cm | Width:  12.5 cm
+    Leaves:  12 | Health: 8/10
+    Notes: Healthy development
+  Week  7 (2024-03-29)
+    Height:   32.0 cm | Width:  12.7 cm
+    Leaves:  12 | Health: 7/10
+    Notes: New leaf unfurling
+  Week  8 (2024-04-05)
+    Height:   32.8 cm | Width:  13.0 cm
+    Leaves:  12 | Health: 8/10
+    Notes: New leaf unfurling
+  Week  9 (2024-04-12)
+    Height:   33.6 cm | Width:  13.2 cm
+    Leaves:  12 | Health: 9/10
+    Notes: Normal growth
+  Week 10 (2024-04-19)
+    Height:   34.5 cm | Width:  13.4 cm
+    Leaves:  12 | Health: 8/10
+    Notes: Slight yellowing on lower leaves
+  Week 11 (2024-04-26)
+    Height:   35.2 cm | Width:  13.7 cm
+    Leaves:  12 | Health: 10/10
+    Notes: Slight yellowing on lower leaves
+  Week 12 (2024-05-03)
+    Height:   35.8 cm | Width:  13.8 cm
+    Leaves:  12 | Health: 9/10
+    Notes: Slight yellowing on lower leaves

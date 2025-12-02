@@ -1,0 +1,1651 @@
+======================================================================
+PLANT WATERING LOGS
+======================================================================
+
+DOCUMENT STRUCTURE
+----------------------------------------
+Records of all watering activities.
+Includes water amount, soil moisture readings, and method.
+
+SOIL MOISTURE SCALE: 0-100% (optimal range: 40-60%)
+WATERING METHODS: Top water, Bottom water
+
+For watering calculations, see 'care_formulas' document.
+
+======================================================================
+
+PLANT: PLT-FIC-002
+--------------------------------------------------
+  2024-01-07
+    Water:  331 ml | Method: Top water
+    Moisture: 33% -> 72%
+    By: Elena Kowalski (CT-03)
+  2024-01-10
+    Water:  328 ml | Method: Top water
+    Moisture: 34% -> 68%
+    By: Sarah Mitchell (CT-05)
+  2024-01-15
+    Water:  355 ml | Method: Top water
+    Moisture: 30% -> 64%
+    By: James Chen (CT-02)
+  2024-01-18
+    Water:  293 ml | Method: Top water
+    Moisture: 45% -> 80%
+    By: Maria Santos (CT-01)
+  2024-01-22
+    Water:  335 ml | Method: Bottom water
+    Moisture: 27% -> 59%
+    By: David Okonkwo (CT-04)
+  2024-01-26
+    Water:  324 ml | Method: Top water
+    Moisture: 37% -> 70%
+    By: Sarah Mitchell (CT-05)
+  2024-01-31
+    Water:  263 ml | Method: Top water
+    Moisture: 43% -> 71%
+    By: David Okonkwo (CT-04)
+  2024-02-03
+    Water:  346 ml | Method: Top water
+    Moisture: 24% -> 62%
+    By: James Chen (CT-02)
+  2024-02-07
+    Water:  317 ml | Method: Top water
+    Moisture: 43% -> 76%
+    By: James Chen (CT-02)
+  2024-02-10
+    Water:  358 ml | Method: Top water
+    Moisture: 23% -> 57%
+    By: Elena Kowalski (CT-03)
+  2024-02-14
+    Water:  293 ml | Method: Top water
+    Moisture: 41% -> 68%
+    By: James Chen (CT-02)
+  2024-02-19
+    Water:  384 ml | Method: Bottom water
+    Moisture: 21% -> 58%
+    By: Elena Kowalski (CT-03)
+  2024-02-24
+    Water:  340 ml | Method: Bottom water
+    Moisture: 21% -> 53%
+    By: Elena Kowalski (CT-03)
+  2024-02-29
+    Water:  291 ml | Method: Top water
+    Moisture: 37% -> 64%
+    By: James Chen (CT-02)
+  2024-03-05
+    Water:  345 ml | Method: Bottom water
+    Moisture: 25% -> 59%
+    By: James Chen (CT-02)
+  2024-03-08
+    Water:  305 ml | Method: Bottom water
+    Moisture: 29% -> 65%
+    By: James Chen (CT-02)
+  2024-03-13
+    Water:  334 ml | Method: Top water
+    Moisture: 34% -> 59%
+    By: Elena Kowalski (CT-03)
+  2024-03-18
+    Water:  385 ml | Method: Bottom water
+    Moisture: 20% -> 52%
+    By: David Okonkwo (CT-04)
+  2024-03-21
+    Water:  320 ml | Method: Bottom water
+    Moisture: 29% -> 55%
+    By: James Chen (CT-02)
+  2024-03-24
+    Water:  385 ml | Method: Top water
+    Moisture: 20% -> 56%
+    By: Elena Kowalski (CT-03)
+  2024-03-28
+    Water:  300 ml | Method: Bottom water
+    Moisture: 43% -> 70%
+    By: James Chen (CT-02)
+
+PLANT: PLT-FIC-008
+--------------------------------------------------
+  2024-01-06
+    Water:  370 ml | Method: Top water
+    Moisture: 23% -> 63%
+    By: Elena Kowalski (CT-03)
+  2024-01-10
+    Water:  348 ml | Method: Top water
+    Moisture: 30% -> 58%
+    By: Elena Kowalski (CT-03)
+  2024-01-13
+    Water:  290 ml | Method: Bottom water
+    Moisture: 44% -> 80%
+    By: Maria Santos (CT-01)
+  2024-01-17
+    Water:  357 ml | Method: Bottom water
+    Moisture: 22% -> 58%
+    By: James Chen (CT-02)
+  2024-01-22
+    Water:  383 ml | Method: Top water
+    Moisture: 21% -> 59%
+    By: Maria Santos (CT-01)
+  2024-01-27
+    Water:  313 ml | Method: Top water
+    Moisture: 28% -> 57%
+    By: Sarah Mitchell (CT-05)
+  2024-01-31
+    Water:  288 ml | Method: Top water
+    Moisture: 35% -> 71%
+    By: Maria Santos (CT-01)
+  2024-02-04
+    Water:  292 ml | Method: Bottom water
+    Moisture: 39% -> 67%
+    By: Sarah Mitchell (CT-05)
+  2024-02-09
+    Water:  351 ml | Method: Top water
+    Moisture: 26% -> 58%
+    By: Elena Kowalski (CT-03)
+  2024-02-14
+    Water:  339 ml | Method: Top water
+    Moisture: 29% -> 67%
+    By: David Okonkwo (CT-04)
+  2024-02-17
+    Water:  347 ml | Method: Top water
+    Moisture: 28% -> 56%
+    By: Elena Kowalski (CT-03)
+  2024-02-21
+    Water:  342 ml | Method: Bottom water
+    Moisture: 28% -> 62%
+    By: James Chen (CT-02)
+  2024-02-24
+    Water:  346 ml | Method: Top water
+    Moisture: 24% -> 52%
+    By: Elena Kowalski (CT-03)
+  2024-02-27
+    Water:  299 ml | Method: Top water
+    Moisture: 38% -> 78%
+    By: Maria Santos (CT-01)
+  2024-03-03
+    Water:  316 ml | Method: Top water
+    Moisture: 43% -> 80%
+    By: David Okonkwo (CT-04)
+  2024-03-06
+    Water:  365 ml | Method: Bottom water
+    Moisture: 26% -> 60%
+    By: Elena Kowalski (CT-03)
+  2024-03-09
+    Water:  290 ml | Method: Top water
+    Moisture: 37% -> 76%
+    By: David Okonkwo (CT-04)
+  2024-03-14
+    Water:  290 ml | Method: Top water
+    Moisture: 43% -> 75%
+    By: David Okonkwo (CT-04)
+  2024-03-18
+    Water:  319 ml | Method: Bottom water
+    Moisture: 33% -> 70%
+    By: David Okonkwo (CT-04)
+  2024-03-21
+    Water:  362 ml | Method: Bottom water
+    Moisture: 24% -> 63%
+    By: Sarah Mitchell (CT-05)
+  2024-03-25
+    Water:  357 ml | Method: Top water
+    Moisture: 20% -> 54%
+    By: David Okonkwo (CT-04)
+  2024-03-28
+    Water:  321 ml | Method: Top water
+    Moisture: 30% -> 63%
+    By: Maria Santos (CT-01)
+
+PLANT: PLT-FIC-014
+--------------------------------------------------
+  2024-02-10
+    Water:  337 ml | Method: Top water
+    Moisture: 36% -> 62%
+    By: Elena Kowalski (CT-03)
+  2024-02-13
+    Water:  286 ml | Method: Bottom water
+    Moisture: 35% -> 71%
+    By: Maria Santos (CT-01)
+  2024-02-16
+    Water:  297 ml | Method: Top water
+    Moisture: 33% -> 71%
+    By: Elena Kowalski (CT-03)
+  2024-02-19
+    Water:  284 ml | Method: Top water
+    Moisture: 44% -> 77%
+    By: David Okonkwo (CT-04)
+  2024-02-23
+    Water:  306 ml | Method: Top water
+    Moisture: 34% -> 61%
+    By: Maria Santos (CT-01)
+  2024-02-28
+    Water:  295 ml | Method: Top water
+    Moisture: 42% -> 72%
+    By: Maria Santos (CT-01)
+  2024-03-02
+    Water:  299 ml | Method: Top water
+    Moisture: 31% -> 68%
+    By: James Chen (CT-02)
+  2024-03-06
+    Water:  324 ml | Method: Bottom water
+    Moisture: 23% -> 58%
+    By: Maria Santos (CT-01)
+  2024-03-09
+    Water:  327 ml | Method: Top water
+    Moisture: 34% -> 65%
+    By: James Chen (CT-02)
+  2024-03-12
+    Water:  355 ml | Method: Top water
+    Moisture: 24% -> 61%
+    By: Maria Santos (CT-01)
+  2024-03-17
+    Water:  309 ml | Method: Top water
+    Moisture: 44% -> 71%
+    By: Elena Kowalski (CT-03)
+  2024-03-20
+    Water:  357 ml | Method: Top water
+    Moisture: 24% -> 58%
+    By: James Chen (CT-02)
+  2024-03-24
+    Water:  296 ml | Method: Top water
+    Moisture: 37% -> 71%
+    By: Maria Santos (CT-01)
+  2024-03-27
+    Water:  315 ml | Method: Top water
+    Moisture: 36% -> 72%
+    By: James Chen (CT-02)
+  2024-03-30
+    Water:  330 ml | Method: Bottom water
+    Moisture: 28% -> 67%
+    By: Sarah Mitchell (CT-05)
+  2024-04-04
+    Water:  282 ml | Method: Bottom water
+    Moisture: 37% -> 62%
+    By: Sarah Mitchell (CT-05)
+  2024-04-08
+    Water:  336 ml | Method: Top water
+    Moisture: 32% -> 57%
+    By: Maria Santos (CT-01)
+  2024-04-13
+    Water:  328 ml | Method: Top water
+    Moisture: 29% -> 56%
+    By: James Chen (CT-02)
+  2024-04-17
+    Water:  353 ml | Method: Bottom water
+    Moisture: 25% -> 50%
+    By: Maria Santos (CT-01)
+  2024-04-20
+    Water:  320 ml | Method: Bottom water
+    Moisture: 28% -> 67%
+    By: Maria Santos (CT-01)
+  2024-04-24
+    Water:  325 ml | Method: Bottom water
+    Moisture: 40% -> 77%
+    By: Maria Santos (CT-01)
+  2024-04-29
+    Water:  356 ml | Method: Top water
+    Moisture: 26% -> 64%
+    By: Elena Kowalski (CT-03)
+
+PLANT: PLT-FIC-020
+--------------------------------------------------
+  2024-02-27
+    Water:  268 ml | Method: Top water
+    Moisture: 43% -> 79%
+    By: Sarah Mitchell (CT-05)
+  2024-03-02
+    Water:  330 ml | Method: Top water
+    Moisture: 36% -> 76%
+    By: Elena Kowalski (CT-03)
+  2024-03-05
+    Water:  384 ml | Method: Top water
+    Moisture: 20% -> 50%
+    By: David Okonkwo (CT-04)
+  2024-03-09
+    Water:  310 ml | Method: Top water
+    Moisture: 39% -> 64%
+    By: Maria Santos (CT-01)
+  2024-03-13
+    Water:  338 ml | Method: Top water
+    Moisture: 27% -> 65%
+    By: Sarah Mitchell (CT-05)
+  2024-03-16
+    Water:  333 ml | Method: Bottom water
+    Moisture: 33% -> 73%
+    By: Sarah Mitchell (CT-05)
+  2024-03-21
+    Water:  344 ml | Method: Top water
+    Moisture: 30% -> 69%
+    By: David Okonkwo (CT-04)
+  2024-03-26
+    Water:  317 ml | Method: Top water
+    Moisture: 30% -> 69%
+    By: James Chen (CT-02)
+  2024-03-29
+    Water:  262 ml | Method: Bottom water
+    Moisture: 45% -> 79%
+    By: Elena Kowalski (CT-03)
+  2024-04-03
+    Water:  327 ml | Method: Bottom water
+    Moisture: 39% -> 77%
+    By: Maria Santos (CT-01)
+  2024-04-08
+    Water:  295 ml | Method: Bottom water
+    Moisture: 31% -> 61%
+    By: Elena Kowalski (CT-03)
+  2024-04-12
+    Water:  358 ml | Method: Bottom water
+    Moisture: 23% -> 62%
+    By: Maria Santos (CT-01)
+  2024-04-17
+    Water:  334 ml | Method: Bottom water
+    Moisture: 21% -> 60%
+    By: David Okonkwo (CT-04)
+  2024-04-21
+    Water:  363 ml | Method: Top water
+    Moisture: 20% -> 49%
+    By: Maria Santos (CT-01)
+  2024-04-24
+    Water:  296 ml | Method: Top water
+    Moisture: 39% -> 79%
+    By: David Okonkwo (CT-04)
+  2024-04-28
+    Water:  319 ml | Method: Bottom water
+    Moisture: 33% -> 61%
+    By: Maria Santos (CT-01)
+  2024-05-03
+    Water:  292 ml | Method: Bottom water
+    Moisture: 37% -> 68%
+    By: Elena Kowalski (CT-03)
+  2024-05-08
+    Water:  308 ml | Method: Top water
+    Moisture: 32% -> 66%
+    By: David Okonkwo (CT-04)
+  2024-05-13
+    Water:  308 ml | Method: Top water
+    Moisture: 42% -> 80%
+    By: Maria Santos (CT-01)
+  2024-05-17
+    Water:  324 ml | Method: Top water
+    Moisture: 32% -> 69%
+    By: David Okonkwo (CT-04)
+  2024-05-20
+    Water:  326 ml | Method: Top water
+    Moisture: 38% -> 64%
+    By: David Okonkwo (CT-04)
+
+PLANT: PLT-MON-001
+--------------------------------------------------
+  2024-01-04
+    Water:  234 ml | Method: Bottom water
+    Moisture: 44% -> 74%
+    By: Sarah Mitchell (CT-05)
+  2024-01-07
+    Water:  259 ml | Method: Bottom water
+    Moisture: 30% -> 56%
+    By: James Chen (CT-02)
+  2024-01-12
+    Water:  290 ml | Method: Bottom water
+    Moisture: 30% -> 58%
+    By: Maria Santos (CT-01)
+  2024-01-15
+    Water:  274 ml | Method: Top water
+    Moisture: 39% -> 65%
+    By: David Okonkwo (CT-04)
+  2024-01-18
+    Water:  267 ml | Method: Top water
+    Moisture: 42% -> 71%
+    By: Elena Kowalski (CT-03)
+  2024-01-21
+    Water:  265 ml | Method: Top water
+    Moisture: 28% -> 60%
+    By: David Okonkwo (CT-04)
+  2024-01-24
+    Water:  295 ml | Method: Top water
+    Moisture: 22% -> 62%
+    By: Elena Kowalski (CT-03)
+  2024-01-27
+    Water:  228 ml | Method: Top water
+    Moisture: 42% -> 80%
+    By: David Okonkwo (CT-04)
+  2024-02-01
+    Water:  239 ml | Method: Bottom water
+    Moisture: 39% -> 77%
+    By: Maria Santos (CT-01)
+  2024-02-04
+    Water:  259 ml | Method: Bottom water
+    Moisture: 41% -> 68%
+    By: James Chen (CT-02)
+  2024-02-09
+    Water:  243 ml | Method: Top water
+    Moisture: 37% -> 66%
+    By: James Chen (CT-02)
+  2024-02-12
+    Water:  263 ml | Method: Bottom water
+    Moisture: 25% -> 58%
+    By: Sarah Mitchell (CT-05)
+  2024-02-15
+    Water:  267 ml | Method: Bottom water
+    Moisture: 27% -> 60%
+    By: Elena Kowalski (CT-03)
+  2024-02-18
+    Water:  283 ml | Method: Top water
+    Moisture: 27% -> 61%
+    By: Maria Santos (CT-01)
+  2024-02-23
+    Water:  252 ml | Method: Top water
+    Moisture: 43% -> 70%
+    By: Sarah Mitchell (CT-05)
+  2024-02-28
+    Water:  256 ml | Method: Top water
+    Moisture: 32% -> 67%
+    By: David Okonkwo (CT-04)
+  2024-03-02
+    Water:  254 ml | Method: Top water
+    Moisture: 37% -> 63%
+    By: Maria Santos (CT-01)
+  2024-03-05
+    Water:  315 ml | Method: Top water
+    Moisture: 23% -> 60%
+    By: James Chen (CT-02)
+  2024-03-10
+    Water:  271 ml | Method: Top water
+    Moisture: 36% -> 61%
+    By: Sarah Mitchell (CT-05)
+  2024-03-15
+    Water:  311 ml | Method: Top water
+    Moisture: 26% -> 55%
+    By: James Chen (CT-02)
+  2024-03-20
+    Water:  294 ml | Method: Top water
+    Moisture: 25% -> 59%
+    By: Elena Kowalski (CT-03)
+  2024-03-24
+    Water:  321 ml | Method: Top water
+    Moisture: 20% -> 53%
+    By: Sarah Mitchell (CT-05)
+
+PLANT: PLT-MON-007
+--------------------------------------------------
+  2024-01-21
+    Water:  294 ml | Method: Bottom water
+    Moisture: 25% -> 59%
+    By: James Chen (CT-02)
+  2024-01-25
+    Water:  247 ml | Method: Bottom water
+    Moisture: 36% -> 72%
+    By: Elena Kowalski (CT-03)
+  2024-01-30
+    Water:  246 ml | Method: Top water
+    Moisture: 36% -> 72%
+    By: Maria Santos (CT-01)
+  2024-02-03
+    Water:  276 ml | Method: Top water
+    Moisture: 21% -> 46%
+    By: Maria Santos (CT-01)
+  2024-02-06
+    Water:  294 ml | Method: Top water
+    Moisture: 27% -> 57%
+    By: Maria Santos (CT-01)
+  2024-02-09
+    Water:  277 ml | Method: Top water
+    Moisture: 37% -> 63%
+    By: Maria Santos (CT-01)
+  2024-02-14
+    Water:  219 ml | Method: Top water
+    Moisture: 45% -> 73%
+    By: David Okonkwo (CT-04)
+  2024-02-19
+    Water:  288 ml | Method: Top water
+    Moisture: 27% -> 67%
+    By: James Chen (CT-02)
+  2024-02-22
+    Water:  269 ml | Method: Top water
+    Moisture: 35% -> 67%
+    By: Maria Santos (CT-01)
+  2024-02-27
+    Water:  234 ml | Method: Bottom water
+    Moisture: 44% -> 80%
+    By: Elena Kowalski (CT-03)
+  2024-03-03
+    Water:  271 ml | Method: Bottom water
+    Moisture: 21% -> 46%
+    By: Sarah Mitchell (CT-05)
+  2024-03-08
+    Water:  279 ml | Method: Top water
+    Moisture: 37% -> 77%
+    By: Elena Kowalski (CT-03)
+  2024-03-12
+    Water:  249 ml | Method: Top water
+    Moisture: 42% -> 77%
+    By: David Okonkwo (CT-04)
+  2024-03-15
+    Water:  267 ml | Method: Top water
+    Moisture: 30% -> 69%
+    By: Elena Kowalski (CT-03)
+  2024-03-19
+    Water:  262 ml | Method: Bottom water
+    Moisture: 24% -> 49%
+    By: James Chen (CT-02)
+  2024-03-22
+    Water:  275 ml | Method: Top water
+    Moisture: 35% -> 74%
+    By: Sarah Mitchell (CT-05)
+  2024-03-26
+    Water:  262 ml | Method: Bottom water
+    Moisture: 40% -> 76%
+    By: Sarah Mitchell (CT-05)
+  2024-03-31
+    Water:  288 ml | Method: Bottom water
+    Moisture: 31% -> 67%
+    By: Sarah Mitchell (CT-05)
+  2024-04-05
+    Water:  277 ml | Method: Top water
+    Moisture: 30% -> 63%
+    By: David Okonkwo (CT-04)
+  2024-04-10
+    Water:  292 ml | Method: Top water
+    Moisture: 25% -> 50%
+    By: James Chen (CT-02)
+
+PLANT: PLT-MON-013
+--------------------------------------------------
+  2024-01-26
+    Water:  252 ml | Method: Top water
+    Moisture: 44% -> 69%
+    By: Maria Santos (CT-01)
+  2024-01-31
+    Water:  262 ml | Method: Bottom water
+    Moisture: 36% -> 68%
+    By: David Okonkwo (CT-04)
+  2024-02-04
+    Water:  283 ml | Method: Bottom water
+    Moisture: 24% -> 50%
+    By: James Chen (CT-02)
+  2024-02-09
+    Water:  267 ml | Method: Top water
+    Moisture: 29% -> 69%
+    By: Maria Santos (CT-01)
+  2024-02-12
+    Water:  301 ml | Method: Top water
+    Moisture: 21% -> 47%
+    By: Maria Santos (CT-01)
+  2024-02-16
+    Water:  285 ml | Method: Top water
+    Moisture: 36% -> 63%
+    By: Sarah Mitchell (CT-05)
+  2024-02-21
+    Water:  274 ml | Method: Bottom water
+    Moisture: 22% -> 58%
+    By: Maria Santos (CT-01)
+  2024-02-24
+    Water:  275 ml | Method: Top water
+    Moisture: 35% -> 69%
+    By: David Okonkwo (CT-04)
+  2024-02-29
+    Water:  290 ml | Method: Top water
+    Moisture: 34% -> 74%
+    By: James Chen (CT-02)
+  2024-03-03
+    Water:  248 ml | Method: Bottom water
+    Moisture: 32% -> 61%
+    By: Elena Kowalski (CT-03)
+  2024-03-06
+    Water:  285 ml | Method: Bottom water
+    Moisture: 36% -> 74%
+    By: Elena Kowalski (CT-03)
+  2024-03-09
+    Water:  265 ml | Method: Top water
+    Moisture: 39% -> 76%
+    By: James Chen (CT-02)
+  2024-03-13
+    Water:  282 ml | Method: Bottom water
+    Moisture: 33% -> 60%
+    By: Maria Santos (CT-01)
+  2024-03-17
+    Water:  269 ml | Method: Bottom water
+    Moisture: 32% -> 67%
+    By: David Okonkwo (CT-04)
+  2024-03-21
+    Water:  288 ml | Method: Top water
+    Moisture: 25% -> 56%
+    By: Maria Santos (CT-01)
+  2024-03-24
+    Water:  258 ml | Method: Bottom water
+    Moisture: 30% -> 67%
+    By: David Okonkwo (CT-04)
+  2024-03-28
+    Water:  259 ml | Method: Top water
+    Moisture: 31% -> 65%
+    By: Maria Santos (CT-01)
+  2024-03-31
+    Water:  304 ml | Method: Top water
+    Moisture: 24% -> 54%
+    By: James Chen (CT-02)
+  2024-04-04
+    Water:  272 ml | Method: Top water
+    Moisture: 37% -> 62%
+    By: Maria Santos (CT-01)
+  2024-04-08
+    Water:  252 ml | Method: Top water
+    Moisture: 37% -> 71%
+    By: Maria Santos (CT-01)
+  2024-04-13
+    Water:  307 ml | Method: Top water
+    Moisture: 27% -> 63%
+    By: David Okonkwo (CT-04)
+  2024-04-18
+    Water:  245 ml | Method: Top water
+    Moisture: 44% -> 80%
+    By: Elena Kowalski (CT-03)
+
+PLANT: PLT-MON-019
+--------------------------------------------------
+  2024-01-13
+    Water:  272 ml | Method: Top water
+    Moisture: 22% -> 50%
+    By: Elena Kowalski (CT-03)
+  2024-01-17
+    Water:  259 ml | Method: Top water
+    Moisture: 43% -> 74%
+    By: Sarah Mitchell (CT-05)
+  2024-01-20
+    Water:  312 ml | Method: Top water
+    Moisture: 26% -> 54%
+    By: Maria Santos (CT-01)
+  2024-01-25
+    Water:  232 ml | Method: Top water
+    Moisture: 41% -> 80%
+    By: David Okonkwo (CT-04)
+  2024-01-28
+    Water:  303 ml | Method: Top water
+    Moisture: 21% -> 52%
+    By: Sarah Mitchell (CT-05)
+  2024-01-31
+    Water:  286 ml | Method: Top water
+    Moisture: 34% -> 59%
+    By: David Okonkwo (CT-04)
+  2024-02-04
+    Water:  226 ml | Method: Top water
+    Moisture: 41% -> 80%
+    By: David Okonkwo (CT-04)
+  2024-02-09
+    Water:  266 ml | Method: Top water
+    Moisture: 25% -> 61%
+    By: Elena Kowalski (CT-03)
+  2024-02-12
+    Water:  290 ml | Method: Top water
+    Moisture: 29% -> 62%
+    By: Maria Santos (CT-01)
+  2024-02-17
+    Water:  291 ml | Method: Top water
+    Moisture: 23% -> 63%
+    By: Maria Santos (CT-01)
+  2024-02-22
+    Water:  241 ml | Method: Bottom water
+    Moisture: 43% -> 68%
+    By: Maria Santos (CT-01)
+  2024-02-26
+    Water:  272 ml | Method: Top water
+    Moisture: 31% -> 71%
+    By: James Chen (CT-02)
+  2024-03-01
+    Water:  284 ml | Method: Top water
+    Moisture: 25% -> 55%
+    By: Elena Kowalski (CT-03)
+  2024-03-04
+    Water:  289 ml | Method: Bottom water
+    Moisture: 27% -> 58%
+    By: David Okonkwo (CT-04)
+  2024-03-07
+    Water:  264 ml | Method: Top water
+    Moisture: 28% -> 61%
+    By: David Okonkwo (CT-04)
+  2024-03-10
+    Water:  225 ml | Method: Bottom water
+    Moisture: 41% -> 80%
+    By: James Chen (CT-02)
+  2024-03-15
+    Water:  295 ml | Method: Top water
+    Moisture: 30% -> 63%
+    By: David Okonkwo (CT-04)
+  2024-03-18
+    Water:  277 ml | Method: Top water
+    Moisture: 34% -> 64%
+    By: Elena Kowalski (CT-03)
+  2024-03-23
+    Water:  285 ml | Method: Top water
+    Moisture: 31% -> 68%
+    By: David Okonkwo (CT-04)
+  2024-03-28
+    Water:  233 ml | Method: Bottom water
+    Moisture: 38% -> 71%
+    By: Maria Santos (CT-01)
+  2024-04-02
+    Water:  284 ml | Method: Bottom water
+    Moisture: 25% -> 51%
+    By: James Chen (CT-02)
+  2024-04-05
+    Water:  313 ml | Method: Bottom water
+    Moisture: 24% -> 57%
+    By: James Chen (CT-02)
+
+PLANT: PLT-PLY-005
+--------------------------------------------------
+  2024-01-11
+    Water:  216 ml | Method: Top water
+    Moisture: 37% -> 69%
+    By: Elena Kowalski (CT-03)
+  2024-01-16
+    Water:  196 ml | Method: Bottom water
+    Moisture: 44% -> 80%
+    By: Elena Kowalski (CT-03)
+  2024-01-21
+    Water:  242 ml | Method: Top water
+    Moisture: 21% -> 49%
+    By: David Okonkwo (CT-04)
+  2024-01-25
+    Water:  221 ml | Method: Bottom water
+    Moisture: 37% -> 77%
+    By: Maria Santos (CT-01)
+  2024-01-30
+    Water:  216 ml | Method: Top water
+    Moisture: 23% -> 63%
+    By: Elena Kowalski (CT-03)
+  2024-02-05
+    Water:  194 ml | Method: Bottom water
+    Moisture: 40% -> 67%
+    By: James Chen (CT-02)
+  2024-02-09
+    Water:  197 ml | Method: Top water
+    Moisture: 33% -> 71%
+    By: Maria Santos (CT-01)
+  2024-02-14
+    Water:  183 ml | Method: Top water
+    Moisture: 42% -> 74%
+    By: Maria Santos (CT-01)
+  2024-02-20
+    Water:  215 ml | Method: Top water
+    Moisture: 25% -> 50%
+    By: Sarah Mitchell (CT-05)
+  2024-02-24
+    Water:  218 ml | Method: Bottom water
+    Moisture: 27% -> 59%
+    By: David Okonkwo (CT-04)
+  2024-02-29
+    Water:  221 ml | Method: Top water
+    Moisture: 25% -> 54%
+    By: David Okonkwo (CT-04)
+  2024-03-06
+    Water:  248 ml | Method: Top water
+    Moisture: 23% -> 50%
+    By: Sarah Mitchell (CT-05)
+  2024-03-10
+    Water:  215 ml | Method: Top water
+    Moisture: 37% -> 64%
+    By: Elena Kowalski (CT-03)
+  2024-03-16
+    Water:  200 ml | Method: Top water
+    Moisture: 44% -> 80%
+    By: David Okonkwo (CT-04)
+  2024-03-20
+    Water:  206 ml | Method: Bottom water
+    Moisture: 27% -> 57%
+    By: Maria Santos (CT-01)
+  2024-03-24
+    Water:  228 ml | Method: Top water
+    Moisture: 26% -> 53%
+    By: Elena Kowalski (CT-03)
+  2024-03-28
+    Water:  214 ml | Method: Bottom water
+    Moisture: 32% -> 71%
+    By: David Okonkwo (CT-04)
+  2024-04-01
+    Water:  228 ml | Method: Top water
+    Moisture: 24% -> 56%
+    By: Maria Santos (CT-01)
+
+PLANT: PLT-PLY-011
+--------------------------------------------------
+  2024-02-03
+    Water:  241 ml | Method: Top water
+    Moisture: 22% -> 52%
+    By: David Okonkwo (CT-04)
+  2024-02-07
+    Water:  206 ml | Method: Bottom water
+    Moisture: 32% -> 62%
+    By: Sarah Mitchell (CT-05)
+  2024-02-11
+    Water:  229 ml | Method: Top water
+    Moisture: 30% -> 64%
+    By: Maria Santos (CT-01)
+  2024-02-15
+    Water:  232 ml | Method: Bottom water
+    Moisture: 31% -> 69%
+    By: James Chen (CT-02)
+  2024-02-19
+    Water:  251 ml | Method: Top water
+    Moisture: 22% -> 58%
+    By: James Chen (CT-02)
+  2024-02-23
+    Water:  178 ml | Method: Top water
+    Moisture: 45% -> 80%
+    By: Sarah Mitchell (CT-05)
+  2024-02-29
+    Water:  215 ml | Method: Top water
+    Moisture: 38% -> 64%
+    By: David Okonkwo (CT-04)
+  2024-03-06
+    Water:  220 ml | Method: Top water
+    Moisture: 35% -> 67%
+    By: David Okonkwo (CT-04)
+  2024-03-12
+    Water:  194 ml | Method: Bottom water
+    Moisture: 37% -> 70%
+    By: David Okonkwo (CT-04)
+  2024-03-16
+    Water:  193 ml | Method: Top water
+    Moisture: 45% -> 80%
+    By: Elena Kowalski (CT-03)
+  2024-03-20
+    Water:  194 ml | Method: Top water
+    Moisture: 45% -> 77%
+    By: Maria Santos (CT-01)
+  2024-03-25
+    Water:  253 ml | Method: Top water
+    Moisture: 23% -> 54%
+    By: David Okonkwo (CT-04)
+  2024-03-29
+    Water:  217 ml | Method: Bottom water
+    Moisture: 40% -> 74%
+    By: Sarah Mitchell (CT-05)
+  2024-04-03
+    Water:  213 ml | Method: Top water
+    Moisture: 26% -> 52%
+    By: James Chen (CT-02)
+  2024-04-08
+    Water:  206 ml | Method: Top water
+    Moisture: 43% -> 68%
+    By: Sarah Mitchell (CT-05)
+  2024-04-14
+    Water:  218 ml | Method: Bottom water
+    Moisture: 24% -> 53%
+    By: Sarah Mitchell (CT-05)
+  2024-04-18
+    Water:  231 ml | Method: Top water
+    Moisture: 27% -> 54%
+    By: Sarah Mitchell (CT-05)
+  2024-04-23
+    Water:  215 ml | Method: Top water
+    Moisture: 21% -> 61%
+    By: Maria Santos (CT-01)
+
+PLANT: PLT-PLY-017
+--------------------------------------------------
+  2024-01-11
+    Water:  248 ml | Method: Top water
+    Moisture: 25% -> 64%
+    By: James Chen (CT-02)
+  2024-01-17
+    Water:  205 ml | Method: Bottom water
+    Moisture: 34% -> 69%
+    By: David Okonkwo (CT-04)
+  2024-01-23
+    Water:  192 ml | Method: Top water
+    Moisture: 41% -> 75%
+    By: David Okonkwo (CT-04)
+  2024-01-28
+    Water:  204 ml | Method: Top water
+    Moisture: 29% -> 63%
+    By: Elena Kowalski (CT-03)
+  2024-02-01
+    Water:  201 ml | Method: Top water
+    Moisture: 29% -> 67%
+    By: James Chen (CT-02)
+  2024-02-07
+    Water:  196 ml | Method: Top water
+    Moisture: 38% -> 66%
+    By: James Chen (CT-02)
+  2024-02-11
+    Water:  238 ml | Method: Top water
+    Moisture: 25% -> 52%
+    By: Maria Santos (CT-01)
+  2024-02-16
+    Water:  198 ml | Method: Top water
+    Moisture: 43% -> 74%
+    By: David Okonkwo (CT-04)
+  2024-02-20
+    Water:  234 ml | Method: Top water
+    Moisture: 21% -> 51%
+    By: Elena Kowalski (CT-03)
+  2024-02-24
+    Water:  214 ml | Method: Bottom water
+    Moisture: 32% -> 69%
+    By: Maria Santos (CT-01)
+  2024-02-29
+    Water:  200 ml | Method: Top water
+    Moisture: 39% -> 72%
+    By: David Okonkwo (CT-04)
+  2024-03-05
+    Water:  196 ml | Method: Top water
+    Moisture: 31% -> 57%
+    By: Sarah Mitchell (CT-05)
+  2024-03-11
+    Water:  180 ml | Method: Top water
+    Moisture: 42% -> 67%
+    By: Maria Santos (CT-01)
+  2024-03-17
+    Water:  186 ml | Method: Top water
+    Moisture: 40% -> 72%
+    By: Elena Kowalski (CT-03)
+  2024-03-23
+    Water:  199 ml | Method: Top water
+    Moisture: 37% -> 76%
+    By: Maria Santos (CT-01)
+  2024-03-29
+    Water:  194 ml | Method: Top water
+    Moisture: 38% -> 78%
+    By: David Okonkwo (CT-04)
+
+PLANT: PLT-POT-003
+--------------------------------------------------
+  2024-02-04
+    Water:  191 ml | Method: Top water
+    Moisture: 20% -> 49%
+    By: Maria Santos (CT-01)
+  2024-02-08
+    Water:  144 ml | Method: Top water
+    Moisture: 45% -> 70%
+    By: Maria Santos (CT-01)
+  2024-02-12
+    Water:  173 ml | Method: Top water
+    Moisture: 34% -> 70%
+    By: James Chen (CT-02)
+  2024-02-17
+    Water:  144 ml | Method: Top water
+    Moisture: 35% -> 68%
+    By: James Chen (CT-02)
+  2024-02-22
+    Water:  155 ml | Method: Top water
+    Moisture: 39% -> 64%
+    By: Sarah Mitchell (CT-05)
+  2024-02-26
+    Water:  184 ml | Method: Top water
+    Moisture: 26% -> 56%
+    By: David Okonkwo (CT-04)
+  2024-03-02
+    Water:  167 ml | Method: Bottom water
+    Moisture: 24% -> 64%
+    By: Sarah Mitchell (CT-05)
+  2024-03-08
+    Water:  177 ml | Method: Top water
+    Moisture: 29% -> 57%
+    By: James Chen (CT-02)
+  2024-03-13
+    Water:  141 ml | Method: Bottom water
+    Moisture: 42% -> 69%
+    By: James Chen (CT-02)
+  2024-03-19
+    Water:  131 ml | Method: Top water
+    Moisture: 43% -> 77%
+    By: David Okonkwo (CT-04)
+  2024-03-24
+    Water:  187 ml | Method: Top water
+    Moisture: 21% -> 61%
+    By: David Okonkwo (CT-04)
+  2024-03-28
+    Water:  149 ml | Method: Top water
+    Moisture: 32% -> 69%
+    By: Elena Kowalski (CT-03)
+  2024-04-03
+    Water:  160 ml | Method: Top water
+    Moisture: 26% -> 58%
+    By: Sarah Mitchell (CT-05)
+  2024-04-09
+    Water:  136 ml | Method: Bottom water
+    Moisture: 43% -> 76%
+    By: David Okonkwo (CT-04)
+  2024-04-15
+    Water:  150 ml | Method: Bottom water
+    Moisture: 43% -> 71%
+    By: Maria Santos (CT-01)
+  2024-04-21
+    Water:  165 ml | Method: Bottom water
+    Moisture: 28% -> 55%
+    By: Maria Santos (CT-01)
+  2024-04-27
+    Water:  158 ml | Method: Bottom water
+    Moisture: 32% -> 68%
+    By: Sarah Mitchell (CT-05)
+
+PLANT: PLT-POT-009
+--------------------------------------------------
+  2024-01-19
+    Water:  154 ml | Method: Top water
+    Moisture: 41% -> 75%
+    By: James Chen (CT-02)
+  2024-01-25
+    Water:  163 ml | Method: Top water
+    Moisture: 23% -> 49%
+    By: James Chen (CT-02)
+  2024-01-30
+    Water:  137 ml | Method: Top water
+    Moisture: 40% -> 75%
+    By: Maria Santos (CT-01)
+  2024-02-04
+    Water:  171 ml | Method: Top water
+    Moisture: 34% -> 61%
+    By: Maria Santos (CT-01)
+  2024-02-10
+    Water:  186 ml | Method: Bottom water
+    Moisture: 21% -> 51%
+    By: Maria Santos (CT-01)
+  2024-02-14
+    Water:  164 ml | Method: Top water
+    Moisture: 26% -> 60%
+    By: David Okonkwo (CT-04)
+  2024-02-18
+    Water:  176 ml | Method: Bottom water
+    Moisture: 26% -> 61%
+    By: David Okonkwo (CT-04)
+  2024-02-24
+    Water:  176 ml | Method: Bottom water
+    Moisture: 33% -> 64%
+    By: Maria Santos (CT-01)
+  2024-02-28
+    Water:  173 ml | Method: Top water
+    Moisture: 27% -> 61%
+    By: Maria Santos (CT-01)
+  2024-03-05
+    Water:  175 ml | Method: Bottom water
+    Moisture: 21% -> 59%
+    By: James Chen (CT-02)
+  2024-03-10
+    Water:  160 ml | Method: Top water
+    Moisture: 31% -> 66%
+    By: Sarah Mitchell (CT-05)
+  2024-03-15
+    Water:  171 ml | Method: Bottom water
+    Moisture: 25% -> 58%
+    By: David Okonkwo (CT-04)
+  2024-03-20
+    Water:  174 ml | Method: Bottom water
+    Moisture: 21% -> 57%
+    By: Sarah Mitchell (CT-05)
+  2024-03-25
+    Water:  171 ml | Method: Top water
+    Moisture: 32% -> 62%
+    By: James Chen (CT-02)
+  2024-03-30
+    Water:  165 ml | Method: Bottom water
+    Moisture: 21% -> 53%
+    By: James Chen (CT-02)
+  2024-04-04
+    Water:  144 ml | Method: Bottom water
+    Moisture: 38% -> 73%
+    By: Elena Kowalski (CT-03)
+  2024-04-09
+    Water:  183 ml | Method: Bottom water
+    Moisture: 27% -> 66%
+    By: Elena Kowalski (CT-03)
+
+PLANT: PLT-POT-015
+--------------------------------------------------
+  2024-02-12
+    Water:  159 ml | Method: Bottom water
+    Moisture: 30% -> 62%
+    By: Elena Kowalski (CT-03)
+  2024-02-17
+    Water:  132 ml | Method: Top water
+    Moisture: 45% -> 80%
+    By: James Chen (CT-02)
+  2024-02-21
+    Water:  176 ml | Method: Top water
+    Moisture: 20% -> 52%
+    By: Sarah Mitchell (CT-05)
+  2024-02-25
+    Water:  160 ml | Method: Bottom water
+    Moisture: 37% -> 74%
+    By: Maria Santos (CT-01)
+  2024-02-29
+    Water:  166 ml | Method: Top water
+    Moisture: 37% -> 63%
+    By: David Okonkwo (CT-04)
+  2024-03-06
+    Water:  137 ml | Method: Bottom water
+    Moisture: 43% -> 68%
+    By: Maria Santos (CT-01)
+  2024-03-10
+    Water:  160 ml | Method: Bottom water
+    Moisture: 27% -> 64%
+    By: Elena Kowalski (CT-03)
+  2024-03-15
+    Water:  159 ml | Method: Bottom water
+    Moisture: 42% -> 74%
+    By: Sarah Mitchell (CT-05)
+  2024-03-21
+    Water:  157 ml | Method: Top water
+    Moisture: 33% -> 72%
+    By: Sarah Mitchell (CT-05)
+  2024-03-27
+    Water:  143 ml | Method: Top water
+    Moisture: 34% -> 71%
+    By: James Chen (CT-02)
+  2024-03-31
+    Water:  166 ml | Method: Bottom water
+    Moisture: 28% -> 56%
+    By: Sarah Mitchell (CT-05)
+  2024-04-06
+    Water:  171 ml | Method: Top water
+    Moisture: 28% -> 53%
+    By: Maria Santos (CT-01)
+  2024-04-10
+    Water:  180 ml | Method: Bottom water
+    Moisture: 23% -> 51%
+    By: Elena Kowalski (CT-03)
+  2024-04-14
+    Water:  169 ml | Method: Top water
+    Moisture: 27% -> 54%
+    By: David Okonkwo (CT-04)
+  2024-04-19
+    Water:  158 ml | Method: Top water
+    Moisture: 44% -> 72%
+    By: David Okonkwo (CT-04)
+  2024-04-23
+    Water:  156 ml | Method: Bottom water
+    Moisture: 25% -> 57%
+    By: James Chen (CT-02)
+  2024-04-29
+    Water:  139 ml | Method: Top water
+    Moisture: 45% -> 80%
+    By: Maria Santos (CT-01)
+  2024-05-05
+    Water:  149 ml | Method: Top water
+    Moisture: 38% -> 71%
+    By: David Okonkwo (CT-04)
+
+PLANT: PLT-RUB-006
+--------------------------------------------------
+  2024-02-26
+    Water:  305 ml | Method: Bottom water
+    Moisture: 31% -> 68%
+    By: Elena Kowalski (CT-03)
+  2024-02-29
+    Water:  280 ml | Method: Top water
+    Moisture: 31% -> 57%
+    By: David Okonkwo (CT-04)
+  2024-03-03
+    Water:  297 ml | Method: Top water
+    Moisture: 34% -> 70%
+    By: Elena Kowalski (CT-03)
+  2024-03-07
+    Water:  310 ml | Method: Top water
+    Moisture: 38% -> 73%
+    By: Maria Santos (CT-01)
+  2024-03-11
+    Water:  313 ml | Method: Top water
+    Moisture: 33% -> 70%
+    By: David Okonkwo (CT-04)
+  2024-03-15
+    Water:  327 ml | Method: Bottom water
+    Moisture: 29% -> 65%
+    By: Sarah Mitchell (CT-05)
+  2024-03-18
+    Water:  283 ml | Method: Bottom water
+    Moisture: 38% -> 75%
+    By: Maria Santos (CT-01)
+  2024-03-22
+    Water:  297 ml | Method: Top water
+    Moisture: 27% -> 54%
+    By: James Chen (CT-02)
+  2024-03-27
+    Water:  312 ml | Method: Bottom water
+    Moisture: 30% -> 68%
+    By: Maria Santos (CT-01)
+  2024-03-30
+    Water:  322 ml | Method: Bottom water
+    Moisture: 34% -> 60%
+    By: Maria Santos (CT-01)
+  2024-04-02
+    Water:  285 ml | Method: Top water
+    Moisture: 29% -> 58%
+    By: Elena Kowalski (CT-03)
+  2024-04-06
+    Water:  303 ml | Method: Top water
+    Moisture: 40% -> 68%
+    By: James Chen (CT-02)
+  2024-04-09
+    Water:  333 ml | Method: Top water
+    Moisture: 31% -> 66%
+    By: Sarah Mitchell (CT-05)
+  2024-04-14
+    Water:  275 ml | Method: Top water
+    Moisture: 39% -> 79%
+    By: Elena Kowalski (CT-03)
+  2024-04-19
+    Water:  316 ml | Method: Bottom water
+    Moisture: 22% -> 55%
+    By: James Chen (CT-02)
+  2024-04-23
+    Water:  304 ml | Method: Top water
+    Moisture: 38% -> 64%
+    By: Maria Santos (CT-01)
+  2024-04-26
+    Water:  280 ml | Method: Top water
+    Moisture: 39% -> 65%
+    By: James Chen (CT-02)
+  2024-04-30
+    Water:  304 ml | Method: Bottom water
+    Moisture: 40% -> 67%
+    By: Elena Kowalski (CT-03)
+  2024-05-03
+    Water:  283 ml | Method: Bottom water
+    Moisture: 29% -> 60%
+    By: James Chen (CT-02)
+  2024-05-08
+    Water:  275 ml | Method: Top water
+    Moisture: 37% -> 73%
+    By: Elena Kowalski (CT-03)
+  2024-05-12
+    Water:  307 ml | Method: Top water
+    Moisture: 33% -> 66%
+    By: Sarah Mitchell (CT-05)
+  2024-05-15
+    Water:  261 ml | Method: Top water
+    Moisture: 45% -> 71%
+    By: James Chen (CT-02)
+  2024-05-19
+    Water:  279 ml | Method: Top water
+    Moisture: 33% -> 68%
+    By: David Okonkwo (CT-04)
+
+PLANT: PLT-RUB-012
+--------------------------------------------------
+  2024-02-10
+    Water:  353 ml | Method: Top water
+    Moisture: 20% -> 53%
+    By: James Chen (CT-02)
+  2024-02-14
+    Water:  298 ml | Method: Bottom water
+    Moisture: 33% -> 61%
+    By: Maria Santos (CT-01)
+  2024-02-19
+    Water:  322 ml | Method: Top water
+    Moisture: 31% -> 68%
+    By: Maria Santos (CT-01)
+  2024-02-23
+    Water:  276 ml | Method: Top water
+    Moisture: 45% -> 70%
+    By: David Okonkwo (CT-04)
+  2024-02-26
+    Water:  321 ml | Method: Top water
+    Moisture: 27% -> 55%
+    By: Sarah Mitchell (CT-05)
+  2024-03-01
+    Water:  297 ml | Method: Top water
+    Moisture: 38% -> 74%
+    By: Maria Santos (CT-01)
+  2024-03-06
+    Water:  305 ml | Method: Bottom water
+    Moisture: 30% -> 61%
+    By: Elena Kowalski (CT-03)
+  2024-03-09
+    Water:  330 ml | Method: Top water
+    Moisture: 24% -> 52%
+    By: Sarah Mitchell (CT-05)
+  2024-03-13
+    Water:  310 ml | Method: Top water
+    Moisture: 34% -> 72%
+    By: Sarah Mitchell (CT-05)
+  2024-03-16
+    Water:  274 ml | Method: Bottom water
+    Moisture: 34% -> 63%
+    By: Sarah Mitchell (CT-05)
+  2024-03-20
+    Water:  285 ml | Method: Bottom water
+    Moisture: 45% -> 80%
+    By: Maria Santos (CT-01)
+  2024-03-23
+    Water:  292 ml | Method: Top water
+    Moisture: 27% -> 64%
+    By: Maria Santos (CT-01)
+  2024-03-28
+    Water:  286 ml | Method: Top water
+    Moisture: 28% -> 58%
+    By: James Chen (CT-02)
+  2024-04-02
+    Water:  270 ml | Method: Top water
+    Moisture: 43% -> 80%
+    By: James Chen (CT-02)
+  2024-04-05
+    Water:  338 ml | Method: Top water
+    Moisture: 30% -> 62%
+    By: David Okonkwo (CT-04)
+  2024-04-09
+    Water:  289 ml | Method: Top water
+    Moisture: 38% -> 67%
+    By: Maria Santos (CT-01)
+  2024-04-12
+    Water:  300 ml | Method: Top water
+    Moisture: 26% -> 53%
+    By: Maria Santos (CT-01)
+  2024-04-16
+    Water:  304 ml | Method: Top water
+    Moisture: 40% -> 68%
+    By: David Okonkwo (CT-04)
+  2024-04-21
+    Water:  275 ml | Method: Top water
+    Moisture: 35% -> 73%
+    By: Maria Santos (CT-01)
+  2024-04-24
+    Water:  321 ml | Method: Top water
+    Moisture: 22% -> 58%
+    By: David Okonkwo (CT-04)
+  2024-04-27
+    Water:  286 ml | Method: Top water
+    Moisture: 43% -> 73%
+    By: David Okonkwo (CT-04)
+  2024-05-02
+    Water:  288 ml | Method: Bottom water
+    Moisture: 30% -> 59%
+    By: David Okonkwo (CT-04)
+
+PLANT: PLT-RUB-018
+--------------------------------------------------
+  2024-02-16
+    Water:  309 ml | Method: Top water
+    Moisture: 34% -> 68%
+    By: James Chen (CT-02)
+  2024-02-20
+    Water:  334 ml | Method: Bottom water
+    Moisture: 22% -> 61%
+    By: David Okonkwo (CT-04)
+  2024-02-23
+    Water:  325 ml | Method: Top water
+    Moisture: 26% -> 57%
+    By: David Okonkwo (CT-04)
+  2024-02-26
+    Water:  296 ml | Method: Top water
+    Moisture: 30% -> 69%
+    By: Sarah Mitchell (CT-05)
+  2024-03-01
+    Water:  330 ml | Method: Bottom water
+    Moisture: 27% -> 60%
+    By: James Chen (CT-02)
+  2024-03-06
+    Water:  266 ml | Method: Top water
+    Moisture: 44% -> 71%
+    By: James Chen (CT-02)
+  2024-03-11
+    Water:  257 ml | Method: Top water
+    Moisture: 45% -> 80%
+    By: Maria Santos (CT-01)
+  2024-03-15
+    Water:  277 ml | Method: Top water
+    Moisture: 44% -> 79%
+    By: Elena Kowalski (CT-03)
+  2024-03-18
+    Water:  261 ml | Method: Top water
+    Moisture: 43% -> 80%
+    By: Sarah Mitchell (CT-05)
+  2024-03-22
+    Water:  349 ml | Method: Top water
+    Moisture: 21% -> 57%
+    By: Sarah Mitchell (CT-05)
+  2024-03-26
+    Water:  267 ml | Method: Top water
+    Moisture: 34% -> 72%
+    By: Maria Santos (CT-01)
+  2024-03-30
+    Water:  273 ml | Method: Bottom water
+    Moisture: 33% -> 65%
+    By: Maria Santos (CT-01)
+  2024-04-02
+    Water:  338 ml | Method: Top water
+    Moisture: 26% -> 52%
+    By: Maria Santos (CT-01)
+  2024-04-05
+    Water:  329 ml | Method: Top water
+    Moisture: 30% -> 57%
+    By: Sarah Mitchell (CT-05)
+  2024-04-09
+    Water:  280 ml | Method: Bottom water
+    Moisture: 41% -> 75%
+    By: James Chen (CT-02)
+  2024-04-13
+    Water:  284 ml | Method: Top water
+    Moisture: 36% -> 68%
+    By: Elena Kowalski (CT-03)
+  2024-04-18
+    Water:  301 ml | Method: Top water
+    Moisture: 38% -> 63%
+    By: Maria Santos (CT-01)
+  2024-04-21
+    Water:  279 ml | Method: Top water
+    Moisture: 34% -> 64%
+    By: Sarah Mitchell (CT-05)
+  2024-04-25
+    Water:  340 ml | Method: Top water
+    Moisture: 20% -> 51%
+    By: Maria Santos (CT-01)
+  2024-04-29
+    Water:  355 ml | Method: Top water
+    Moisture: 20% -> 60%
+    By: Elena Kowalski (CT-03)
+  2024-05-02
+    Water:  260 ml | Method: Top water
+    Moisture: 37% -> 72%
+    By: Maria Santos (CT-01)
+  2024-05-06
+    Water:  356 ml | Method: Bottom water
+    Moisture: 20% -> 60%
+    By: Sarah Mitchell (CT-05)
+
+PLANT: PLT-SNK-004
+--------------------------------------------------
+  2024-01-11
+    Water:  104 ml | Method: Top water
+    Moisture: 44% -> 80%
+    By: James Chen (CT-02)
+  2024-01-15
+    Water:  127 ml | Method: Top water
+    Moisture: 22% -> 49%
+    By: Elena Kowalski (CT-03)
+  2024-01-21
+    Water:  123 ml | Method: Top water
+    Moisture: 21% -> 46%
+    By: David Okonkwo (CT-04)
+  2024-01-27
+    Water:  108 ml | Method: Bottom water
+    Moisture: 40% -> 68%
+    By: James Chen (CT-02)
+  2024-02-02
+    Water:  110 ml | Method: Top water
+    Moisture: 31% -> 64%
+    By: Sarah Mitchell (CT-05)
+  2024-02-07
+    Water:   96 ml | Method: Top water
+    Moisture: 37% -> 77%
+    By: Sarah Mitchell (CT-05)
+  2024-02-12
+    Water:  106 ml | Method: Top water
+    Moisture: 29% -> 54%
+    By: Maria Santos (CT-01)
+  2024-02-16
+    Water:  113 ml | Method: Top water
+    Moisture: 31% -> 64%
+    By: Maria Santos (CT-01)
+  2024-02-20
+    Water:  119 ml | Method: Top water
+    Moisture: 21% -> 60%
+    By: Sarah Mitchell (CT-05)
+  2024-02-24
+    Water:  105 ml | Method: Bottom water
+    Moisture: 29% -> 64%
+    By: Sarah Mitchell (CT-05)
+  2024-02-29
+    Water:   94 ml | Method: Top water
+    Moisture: 39% -> 70%
+    By: James Chen (CT-02)
+  2024-03-05
+    Water:  101 ml | Method: Bottom water
+    Moisture: 33% -> 63%
+    By: Elena Kowalski (CT-03)
+  2024-03-11
+    Water:   95 ml | Method: Top water
+    Moisture: 35% -> 70%
+    By: Elena Kowalski (CT-03)
+  2024-03-17
+    Water:  111 ml | Method: Top water
+    Moisture: 21% -> 50%
+    By: Elena Kowalski (CT-03)
+  2024-03-22
+    Water:  105 ml | Method: Top water
+    Moisture: 31% -> 67%
+    By: Sarah Mitchell (CT-05)
+  2024-03-26
+    Water:  120 ml | Method: Bottom water
+    Moisture: 23% -> 53%
+    By: Elena Kowalski (CT-03)
+  2024-03-30
+    Water:  108 ml | Method: Bottom water
+    Moisture: 36% -> 68%
+    By: David Okonkwo (CT-04)
+
+PLANT: PLT-SNK-010
+--------------------------------------------------
+  2024-01-31
+    Water:   98 ml | Method: Top water
+    Moisture: 44% -> 72%
+    By: Elena Kowalski (CT-03)
+  2024-02-04
+    Water:  100 ml | Method: Top water
+    Moisture: 41% -> 73%
+    By: Sarah Mitchell (CT-05)
+  2024-02-08
+    Water:  120 ml | Method: Top water
+    Moisture: 21% -> 51%
+    By: James Chen (CT-02)
+  2024-02-14
+    Water:   97 ml | Method: Top water
+    Moisture: 33% -> 73%
+    By: Maria Santos (CT-01)
+  2024-02-20
+    Water:  101 ml | Method: Top water
+    Moisture: 37% -> 72%
+    By: James Chen (CT-02)
+  2024-02-26
+    Water:  112 ml | Method: Bottom water
+    Moisture: 28% -> 54%
+    By: Elena Kowalski (CT-03)
+  2024-03-01
+    Water:  114 ml | Method: Top water
+    Moisture: 30% -> 68%
+    By: Elena Kowalski (CT-03)
+  2024-03-06
+    Water:  102 ml | Method: Bottom water
+    Moisture: 31% -> 57%
+    By: Sarah Mitchell (CT-05)
+  2024-03-12
+    Water:   91 ml | Method: Top water
+    Moisture: 42% -> 75%
+    By: Maria Santos (CT-01)
+  2024-03-17
+    Water:  109 ml | Method: Top water
+    Moisture: 35% -> 70%
+    By: James Chen (CT-02)
+  2024-03-21
+    Water:  109 ml | Method: Top water
+    Moisture: 38% -> 78%
+    By: Sarah Mitchell (CT-05)
+  2024-03-25
+    Water:  104 ml | Method: Bottom water
+    Moisture: 38% -> 69%
+    By: Sarah Mitchell (CT-05)
+  2024-03-30
+    Water:   98 ml | Method: Top water
+    Moisture: 31% -> 70%
+    By: Maria Santos (CT-01)
+  2024-04-04
+    Water:  117 ml | Method: Top water
+    Moisture: 24% -> 59%
+    By: David Okonkwo (CT-04)
+  2024-04-08
+    Water:  117 ml | Method: Bottom water
+    Moisture: 33% -> 62%
+    By: James Chen (CT-02)
+  2024-04-14
+    Water:  102 ml | Method: Top water
+    Moisture: 45% -> 70%
+    By: Elena Kowalski (CT-03)
+  2024-04-18
+    Water:  125 ml | Method: Top water
+    Moisture: 21% -> 54%
+    By: Sarah Mitchell (CT-05)
+
+PLANT: PLT-SNK-016
+--------------------------------------------------
+  2024-02-16
+    Water:  102 ml | Method: Bottom water
+    Moisture: 37% -> 67%
+    By: Elena Kowalski (CT-03)
+  2024-02-21
+    Water:  107 ml | Method: Bottom water
+    Moisture: 24% -> 49%
+    By: David Okonkwo (CT-04)
+  2024-02-26
+    Water:  101 ml | Method: Bottom water
+    Moisture: 45% -> 79%
+    By: David Okonkwo (CT-04)
+  2024-03-01
+    Water:  112 ml | Method: Bottom water
+    Moisture: 21% -> 48%
+    By: James Chen (CT-02)
+  2024-03-05
+    Water:  106 ml | Method: Top water
+    Moisture: 42% -> 80%
+    By: Elena Kowalski (CT-03)
+  2024-03-11
+    Water:  115 ml | Method: Bottom water
+    Moisture: 20% -> 54%
+    By: Sarah Mitchell (CT-05)
+  2024-03-17
+    Water:  122 ml | Method: Bottom water
+    Moisture: 24% -> 59%
+    By: David Okonkwo (CT-04)
+  2024-03-23
+    Water:  114 ml | Method: Top water
+    Moisture: 34% -> 74%
+    By: Maria Santos (CT-01)
+  2024-03-29
+    Water:  120 ml | Method: Top water
+    Moisture: 28% -> 57%
+    By: James Chen (CT-02)
+  2024-04-03
+    Water:   94 ml | Method: Top water
+    Moisture: 41% -> 71%
+    By: James Chen (CT-02)
+  2024-04-08
+    Water:  103 ml | Method: Top water
+    Moisture: 33% -> 64%
+    By: James Chen (CT-02)
+  2024-04-12
+    Water:  104 ml | Method: Top water
+    Moisture: 31% -> 62%
+    By: Maria Santos (CT-01)
+  2024-04-16
+    Water:  127 ml | Method: Top water
+    Moisture: 24% -> 61%
+    By: Maria Santos (CT-01)
+  2024-04-21
+    Water:   91 ml | Method: Top water
+    Moisture: 42% -> 80%
+    By: Maria Santos (CT-01)
+  2024-04-26
+    Water:   91 ml | Method: Top water
+    Moisture: 44% -> 80%
+    By: Maria Santos (CT-01)
+  2024-05-01
+    Water:  119 ml | Method: Top water
+    Moisture: 26% -> 59%
+    By: Elena Kowalski (CT-03)
+  2024-05-07
+    Water:  102 ml | Method: Bottom water
+    Moisture: 44% -> 75%
+    By: David Okonkwo (CT-04)

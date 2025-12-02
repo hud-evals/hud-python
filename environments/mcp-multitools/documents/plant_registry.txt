@@ -1,0 +1,244 @@
+======================================================================
+GREENHOUSE PLANT REGISTRY
+======================================================================
+
+DOCUMENT STRUCTURE & ORDERING
+----------------------------------------
+This registry contains all 20 active plants in the greenhouse.
+
+ORGANIZATION:
+  - Plants are grouped by ZONE (Zone-A, Zone-B, Zone-C, Zone-D)
+  - Within each zone, plants are listed by Plant ID ascending
+  - 5 plants per zone
+
+PLANT ID FORMAT: PLT-XXX-NNN
+  - PLT = Plant prefix
+  - XXX = Species code (MON, FIC, POT, SNK, PLY, RUB)
+  - NNN = Sequential number (001-020)
+
+SPECIES CODES:
+  MON = Monstera Deliciosa
+  FIC = Ficus Lyrata
+  POT = Pothos Golden
+  SNK = Snake Plant
+  PLY = Peace Lily
+  RUB = Rubber Plant
+
+RELATED DOCUMENTS:
+  - 'plant_growth_logs' - height/growth by plant ID, weekly
+  - 'plant_watering_logs' - watering records by plant ID
+  - 'plant_nutrition_logs' - fertilizer by plant ID
+  - 'environmental_data' - zone temperature/humidity by week
+  - 'care_formulas' - calculation formulas by species
+  - 'species_reference' - species care requirements
+
+======================================================================
+
+ZONE: Zone-A
+--------------------------------------------------
+Plants in zone: 5
+
+  Plant ID: PLT-MON-001
+    Species: Monstera Deliciosa
+    Started: 2024-01-04
+    Initial Height: 15.4 cm
+    Pot Size: 30 cm
+    Caretaker: Maria Santos (CT-01)
+    Status: Healthy
+
+  Plant ID: PLT-PLY-005
+    Species: Peace Lily
+    Started: 2024-01-11
+    Initial Height: 10.0 cm
+    Pot Size: 30 cm
+    Caretaker: Sarah Mitchell (CT-05)
+    Status: Healthy
+
+  Plant ID: PLT-POT-009
+    Species: Pothos Golden
+    Started: 2024-01-19
+    Initial Height: 28.2 cm
+    Pot Size: 30 cm
+    Caretaker: David Okonkwo (CT-04)
+    Status: Healthy
+
+  Plant ID: PLT-MON-013
+    Species: Monstera Deliciosa
+    Started: 2024-01-26
+    Initial Height: 27.9 cm
+    Pot Size: 30 cm
+    Caretaker: Elena Kowalski (CT-03)
+    Status: Thriving
+
+  Plant ID: PLT-PLY-017
+    Species: Peace Lily
+    Started: 2024-01-11
+    Initial Height: 16.7 cm
+    Pot Size: 30 cm
+    Caretaker: James Chen (CT-02)
+    Status: Healthy
+
+
+ZONE: Zone-B
+--------------------------------------------------
+Plants in zone: 5
+
+  Plant ID: PLT-FIC-002
+    Species: Ficus Lyrata
+    Started: 2024-01-07
+    Initial Height: 26.8 cm
+    Pot Size: 15 cm
+    Caretaker: James Chen (CT-02)
+    Status: Needs Attention
+
+  Plant ID: PLT-RUB-006
+    Species: Rubber Plant
+    Started: 2024-02-26
+    Initial Height: 22.0 cm
+    Pot Size: 15 cm
+    Caretaker: Maria Santos (CT-01)
+    Status: Healthy
+
+  Plant ID: PLT-SNK-010
+    Species: Snake Plant
+    Started: 2024-01-31
+    Initial Height: 26.8 cm
+    Pot Size: 25 cm
+    Caretaker: Sarah Mitchell (CT-05)
+    Status: Healthy
+
+  Plant ID: PLT-FIC-014
+    Species: Ficus Lyrata
+    Started: 2024-02-10
+    Initial Height: 25.9 cm
+    Pot Size: 30 cm
+    Caretaker: David Okonkwo (CT-04)
+    Status: Thriving
+
+  Plant ID: PLT-RUB-018
+    Species: Rubber Plant
+    Started: 2024-02-16
+    Initial Height: 19.1 cm
+    Pot Size: 25 cm
+    Caretaker: Elena Kowalski (CT-03)
+    Status: Healthy
+
+
+ZONE: Zone-C
+--------------------------------------------------
+Plants in zone: 5
+
+  Plant ID: PLT-POT-003
+    Species: Pothos Golden
+    Started: 2024-02-04
+    Initial Height: 21.2 cm
+    Pot Size: 25 cm
+    Caretaker: Elena Kowalski (CT-03)
+    Status: Healthy
+
+  Plant ID: PLT-MON-007
+    Species: Monstera Deliciosa
+    Started: 2024-01-21
+    Initial Height: 24.6 cm
+    Pot Size: 15 cm
+    Caretaker: James Chen (CT-02)
+    Status: Healthy
+
+  Plant ID: PLT-PLY-011
+    Species: Peace Lily
+    Started: 2024-02-03
+    Initial Height: 26.0 cm
+    Pot Size: 20 cm
+    Caretaker: Maria Santos (CT-01)
+    Status: Thriving
+
+  Plant ID: PLT-POT-015
+    Species: Pothos Golden
+    Started: 2024-02-12
+    Initial Height: 18.4 cm
+    Pot Size: 15 cm
+    Caretaker: Sarah Mitchell (CT-05)
+    Status: Healthy
+
+  Plant ID: PLT-MON-019
+    Species: Monstera Deliciosa
+    Started: 2024-01-13
+    Initial Height: 21.7 cm
+    Pot Size: 25 cm
+    Caretaker: David Okonkwo (CT-04)
+    Status: Healthy
+
+
+ZONE: Zone-D
+--------------------------------------------------
+Plants in zone: 5
+
+  Plant ID: PLT-SNK-004
+    Species: Snake Plant
+    Started: 2024-01-11
+    Initial Height: 12.7 cm
+    Pot Size: 25 cm
+    Caretaker: David Okonkwo (CT-04)
+    Status: Healthy
+
+  Plant ID: PLT-FIC-008
+    Species: Ficus Lyrata
+    Started: 2024-01-06
+    Initial Height: 23.3 cm
+    Pot Size: 20 cm
+    Caretaker: Elena Kowalski (CT-03)
+    Status: Healthy
+
+  Plant ID: PLT-RUB-012
+    Species: Rubber Plant
+    Started: 2024-02-10
+    Initial Height: 20.5 cm
+    Pot Size: 25 cm
+    Caretaker: James Chen (CT-02)
+    Status: Healthy
+
+  Plant ID: PLT-SNK-016
+    Species: Snake Plant
+    Started: 2024-02-16
+    Initial Height: 26.4 cm
+    Pot Size: 30 cm
+    Caretaker: Maria Santos (CT-01)
+    Status: Healthy
+
+  Plant ID: PLT-FIC-020
+    Species: Ficus Lyrata
+    Started: 2024-02-27
+    Initial Height: 17.0 cm
+    Pot Size: 20 cm
+    Caretaker: Sarah Mitchell (CT-05)
+    Status: Needs Attention
+
+
+======================================================================
+CARETAKER ASSIGNMENTS
+--------------------------------------------------
+  CT-01 (Maria Santos): 4 plants
+    - PLT-MON-001: Monstera Deliciosa
+    - PLT-RUB-006: Rubber Plant
+    - PLT-PLY-011: Peace Lily
+    - PLT-SNK-016: Snake Plant
+  CT-02 (James Chen): 4 plants
+    - PLT-FIC-002: Ficus Lyrata
+    - PLT-MON-007: Monstera Deliciosa
+    - PLT-RUB-012: Rubber Plant
+    - PLT-PLY-017: Peace Lily
+  CT-03 (Elena Kowalski): 4 plants
+    - PLT-POT-003: Pothos Golden
+    - PLT-FIC-008: Ficus Lyrata
+    - PLT-MON-013: Monstera Deliciosa
+    - PLT-RUB-018: Rubber Plant
+  CT-04 (David Okonkwo): 4 plants
+    - PLT-SNK-004: Snake Plant
+    - PLT-POT-009: Pothos Golden
+    - PLT-FIC-014: Ficus Lyrata
+    - PLT-MON-019: Monstera Deliciosa
+  CT-05 (Sarah Mitchell): 4 plants
+    - PLT-PLY-005: Peace Lily
+    - PLT-SNK-010: Snake Plant
+    - PLT-POT-015: Pothos Golden
+    - PLT-FIC-020: Ficus Lyrata

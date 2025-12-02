@@ -1,0 +1,371 @@
+======================================================================
+PLANT CARE FORMULAS AND CALCULATIONS
+======================================================================
+
+DOCUMENT STRUCTURE
+----------------------------------------
+This document contains all formulas for calculating:
+  1. Watering amounts based on conditions
+  2. Nutrition amounts based on growth
+  3. Expected growth rates
+  4. Health score interpretations
+
+Variables used in formulas:
+  T = Average temperature (°C)
+  H = Humidity (%)
+  M = Soil moisture before watering (%)
+  L = Light hours per day
+  W = Current plant width (cm)
+  Ht = Current plant height (cm)
+  A = Days since last application
+  P = Pot size (cm)
+
+======================================================================
+
+SECTION 1: WATERING FORMULAS
+==================================================
+
+Species: Monstera Deliciosa (Code: MON)
+----------------------------------------
+  Base Water Amount: 250 ml
+
+  FORMULA W1 - Temperature Adjustment:
+    Water_ml = 250 × (1 + (T - 22) × 0.03)
+    Example: At 26°C: 250 × (1 + (26-22) × 0.03) = 280 ml
+
+  FORMULA W2 - Moisture Adjustment:
+    Water_ml = 250 × (1 + (40 - M) / 100)
+    Example: At 30% moisture: 250 × (1 + (40-30)/100) = 275 ml
+
+  FORMULA W3 - Combined (use this):
+    Water_ml = 250 × (1 + (T - 22) × 0.03) × (1 + (40 - M) / 100) × (P / 20)
+
+Species: Ficus Lyrata (Code: FIC)
+----------------------------------------
+  Base Water Amount: 300 ml
+
+  FORMULA W1 - Temperature Adjustment:
+    Water_ml = 300 × (1 + (T - 22) × 0.03)
+    Example: At 26°C: 300 × (1 + (26-22) × 0.03) = 336 ml
+
+  FORMULA W2 - Moisture Adjustment:
+    Water_ml = 300 × (1 + (40 - M) / 100)
+    Example: At 30% moisture: 300 × (1 + (40-30)/100) = 330 ml
+
+  FORMULA W3 - Combined (use this):
+    Water_ml = 300 × (1 + (T - 22) × 0.03) × (1 + (40 - M) / 100) × (P / 20)
+
+Species: Pothos Golden (Code: POT)
+----------------------------------------
+  Base Water Amount: 150 ml
+
+  FORMULA W1 - Temperature Adjustment:
+    Water_ml = 150 × (1 + (T - 22) × 0.03)
+    Example: At 26°C: 150 × (1 + (26-22) × 0.03) = 168 ml
+
+  FORMULA W2 - Moisture Adjustment:
+    Water_ml = 150 × (1 + (40 - M) / 100)
+    Example: At 30% moisture: 150 × (1 + (40-30)/100) = 165 ml
+
+  FORMULA W3 - Combined (use this):
+    Water_ml = 150 × (1 + (T - 22) × 0.03) × (1 + (40 - M) / 100) × (P / 20)
+
+Species: Snake Plant (Code: SNK)
+----------------------------------------
+  Base Water Amount: 100 ml
+
+  FORMULA W1 - Temperature Adjustment:
+    Water_ml = 100 × (1 + (T - 22) × 0.03)
+    Example: At 26°C: 100 × (1 + (26-22) × 0.03) = 112 ml
+
+  FORMULA W2 - Moisture Adjustment:
+    Water_ml = 100 × (1 + (40 - M) / 100)
+    Example: At 30% moisture: 100 × (1 + (40-30)/100) = 110 ml
+
+  FORMULA W3 - Combined (use this):
+    Water_ml = 100 × (1 + (T - 22) × 0.03) × (1 + (40 - M) / 100) × (P / 20)
+
+Species: Peace Lily (Code: PLY)
+----------------------------------------
+  Base Water Amount: 200 ml
+
+  FORMULA W1 - Temperature Adjustment:
+    Water_ml = 200 × (1 + (T - 22) × 0.03)
+    Example: At 26°C: 200 × (1 + (26-22) × 0.03) = 224 ml
+
+  FORMULA W2 - Moisture Adjustment:
+    Water_ml = 200 × (1 + (40 - M) / 100)
+    Example: At 30% moisture: 200 × (1 + (40-30)/100) = 220 ml
+
+  FORMULA W3 - Combined (use this):
+    Water_ml = 200 × (1 + (T - 22) × 0.03) × (1 + (40 - M) / 100) × (P / 20)
+
+Species: Rubber Plant (Code: RUB)
+----------------------------------------
+  Base Water Amount: 280 ml
+
+  FORMULA W1 - Temperature Adjustment:
+    Water_ml = 280 × (1 + (T - 22) × 0.03)
+    Example: At 26°C: 280 × (1 + (26-22) × 0.03) = 313 ml
+
+  FORMULA W2 - Moisture Adjustment:
+    Water_ml = 280 × (1 + (40 - M) / 100)
+    Example: At 30% moisture: 280 × (1 + (40-30)/100) = 308 ml
+
+  FORMULA W3 - Combined (use this):
+    Water_ml = 280 × (1 + (T - 22) × 0.03) × (1 + (40 - M) / 100) × (P / 20)
+
+
+SECTION 2: NUTRITION FORMULAS
+==================================================
+
+Species: Monstera Deliciosa (Code: MON)
+----------------------------------------
+  Recommended NPK: 10-10-10
+
+  FORMULA N1 - Liquid Fertilizer Amount:
+    Fertilizer_ml = (Ht / 10) × (P / 15) × 2
+    Apply every 14-21 days during growing season
+
+  FORMULA N2 - Growth-Based Adjustment:
+    If weekly growth < expected: increase by 20%
+    Expected weekly growth: 2.5 cm
+
+  FORMULA N3 - Dilution Ratio:
+    Standard dilution: 1:100 (fertilizer:water)
+    Young plants (<30cm): 1:150 (weaker)
+    Mature plants (>60cm): 1:80 (stronger)
+
+Species: Ficus Lyrata (Code: FIC)
+----------------------------------------
+  Recommended NPK: 12-8-10
+
+  FORMULA N1 - Liquid Fertilizer Amount:
+    Fertilizer_ml = (Ht / 10) × (P / 15) × 2
+    Apply every 14-21 days during growing season
+
+  FORMULA N2 - Growth-Based Adjustment:
+    If weekly growth < expected: increase by 20%
+    Expected weekly growth: 1.8 cm
+
+  FORMULA N3 - Dilution Ratio:
+    Standard dilution: 1:100 (fertilizer:water)
+    Young plants (<30cm): 1:150 (weaker)
+    Mature plants (>60cm): 1:80 (stronger)
+
+Species: Pothos Golden (Code: POT)
+----------------------------------------
+  Recommended NPK: 8-8-8
+
+  FORMULA N1 - Liquid Fertilizer Amount:
+    Fertilizer_ml = (Ht / 10) × (P / 15) × 2
+    Apply every 14-21 days during growing season
+
+  FORMULA N2 - Growth-Based Adjustment:
+    If weekly growth < expected: increase by 20%
+    Expected weekly growth: 3.0 cm
+
+  FORMULA N3 - Dilution Ratio:
+    Standard dilution: 1:100 (fertilizer:water)
+    Young plants (<30cm): 1:150 (weaker)
+    Mature plants (>60cm): 1:80 (stronger)
+
+Species: Snake Plant (Code: SNK)
+----------------------------------------
+  Recommended NPK: 5-5-5
+
+  FORMULA N1 - Liquid Fertilizer Amount:
+    Fertilizer_ml = (Ht / 10) × (P / 15) × 2
+    Apply every 14-21 days during growing season
+
+  FORMULA N2 - Growth-Based Adjustment:
+    If weekly growth < expected: increase by 20%
+    Expected weekly growth: 0.8 cm
+
+  FORMULA N3 - Dilution Ratio:
+    Standard dilution: 1:100 (fertilizer:water)
+    Young plants (<30cm): 1:150 (weaker)
+    Mature plants (>60cm): 1:80 (stronger)
+
+Species: Peace Lily (Code: PLY)
+----------------------------------------
+  Recommended NPK: 10-15-10
+
+  FORMULA N1 - Liquid Fertilizer Amount:
+    Fertilizer_ml = (Ht / 10) × (P / 15) × 2
+    Apply every 14-21 days during growing season
+
+  FORMULA N2 - Growth-Based Adjustment:
+    If weekly growth < expected: increase by 20%
+    Expected weekly growth: 1.5 cm
+
+  FORMULA N3 - Dilution Ratio:
+    Standard dilution: 1:100 (fertilizer:water)
+    Young plants (<30cm): 1:150 (weaker)
+    Mature plants (>60cm): 1:80 (stronger)
+
+Species: Rubber Plant (Code: RUB)
+----------------------------------------
+  Recommended NPK: 10-10-10
+
+  FORMULA N1 - Liquid Fertilizer Amount:
+    Fertilizer_ml = (Ht / 10) × (P / 15) × 2
+    Apply every 14-21 days during growing season
+
+  FORMULA N2 - Growth-Based Adjustment:
+    If weekly growth < expected: increase by 20%
+    Expected weekly growth: 2.0 cm
+
+  FORMULA N3 - Dilution Ratio:
+    Standard dilution: 1:100 (fertilizer:water)
+    Young plants (<30cm): 1:150 (weaker)
+    Mature plants (>60cm): 1:80 (stronger)
+
+
+SECTION 3: GROWTH ESTIMATION
+==================================================
+
+Species: Monstera Deliciosa
+----------------------------------------
+  Base Growth Rate: 2.5 cm/week
+
+  FORMULA G1 - Temperature Effect:
+    Optimal range: 18-27°C
+    Growth_factor = 1 - |T - 22| × 0.05
+
+  FORMULA G2 - Light Effect:
+    Optimal light: 6-10 hours/day
+    If L < 6: Growth reduced by 30%
+    If L > 10: Growth reduced by 10%
+
+  FORMULA G3 - Weekly Height Estimate:
+    New_height = Current_height + (2.5 × Growth_factor × Light_factor)
+
+Species: Ficus Lyrata
+----------------------------------------
+  Base Growth Rate: 1.8 cm/week
+
+  FORMULA G1 - Temperature Effect:
+    Optimal range: 16-24°C
+    Growth_factor = 1 - |T - 20| × 0.05
+
+  FORMULA G2 - Light Effect:
+    Optimal light: 8-12 hours/day
+    If L < 8: Growth reduced by 30%
+    If L > 12: Growth reduced by 10%
+
+  FORMULA G3 - Weekly Height Estimate:
+    New_height = Current_height + (1.8 × Growth_factor × Light_factor)
+
+Species: Pothos Golden
+----------------------------------------
+  Base Growth Rate: 3.0 cm/week
+
+  FORMULA G1 - Temperature Effect:
+    Optimal range: 15-30°C
+    Growth_factor = 1 - |T - 22| × 0.05
+
+  FORMULA G2 - Light Effect:
+    Optimal light: 4-8 hours/day
+    If L < 4: Growth reduced by 30%
+    If L > 8: Growth reduced by 10%
+
+  FORMULA G3 - Weekly Height Estimate:
+    New_height = Current_height + (3.0 × Growth_factor × Light_factor)
+
+Species: Snake Plant
+----------------------------------------
+  Base Growth Rate: 0.8 cm/week
+
+  FORMULA G1 - Temperature Effect:
+    Optimal range: 13-29°C
+    Growth_factor = 1 - |T - 21| × 0.05
+
+  FORMULA G2 - Light Effect:
+    Optimal light: 4-10 hours/day
+    If L < 4: Growth reduced by 30%
+    If L > 10: Growth reduced by 10%
+
+  FORMULA G3 - Weekly Height Estimate:
+    New_height = Current_height + (0.8 × Growth_factor × Light_factor)
+
+Species: Peace Lily
+----------------------------------------
+  Base Growth Rate: 1.5 cm/week
+
+  FORMULA G1 - Temperature Effect:
+    Optimal range: 18-26°C
+    Growth_factor = 1 - |T - 22| × 0.05
+
+  FORMULA G2 - Light Effect:
+    Optimal light: 6-8 hours/day
+    If L < 6: Growth reduced by 30%
+    If L > 8: Growth reduced by 10%
+
+  FORMULA G3 - Weekly Height Estimate:
+    New_height = Current_height + (1.5 × Growth_factor × Light_factor)
+
+Species: Rubber Plant
+----------------------------------------
+  Base Growth Rate: 2.0 cm/week
+
+  FORMULA G1 - Temperature Effect:
+    Optimal range: 16-27°C
+    Growth_factor = 1 - |T - 22| × 0.05
+
+  FORMULA G2 - Light Effect:
+    Optimal light: 6-10 hours/day
+    If L < 6: Growth reduced by 30%
+    If L > 10: Growth reduced by 10%
+
+  FORMULA G3 - Weekly Height Estimate:
+    New_height = Current_height + (2.0 × Growth_factor × Light_factor)
+
+
+SECTION 4: HEALTH SCORE INTERPRETATION
+==================================================
+
+Score | Status         | Action Required
+--------------------------------------------------
+9-10  | Thriving       | Maintain current care
+7-8   | Healthy        | No changes needed
+5-6   | Needs Attention| Check water/light/nutrients
+3-4   | Stressed       | Immediate intervention
+1-2   | Critical       | Emergency care protocol
+
+FORMULA H1 - Health Score Calculation:
+  Base Score = 10
+  Deductions:
+    - Temperature outside optimal: -1 per 3°C deviation
+    - Soil moisture <30% or >70%: -1
+    - Growth rate <50% expected: -2
+    - No fertilizer in 30+ days: -1
+    - Pest/disease visible: -3
+
+
+SECTION 5: QUICK REFERENCE COEFFICIENTS
+==================================================
+
+TEMPERATURE COEFFICIENTS (multiply water amount)
+----------------------------------------
+  < 15°C:  0.70
+  15-18°C: 0.85
+  18-22°C: 1.00
+  22-26°C: 1.15
+  26-30°C: 1.30
+  > 30°C:  1.50
+
+HUMIDITY COEFFICIENTS (multiply water amount)
+----------------------------------------
+  < 40%:   1.20
+  40-50%:  1.10
+  50-60%:  1.00
+  60-70%:  0.90
+  > 70%:   0.80
+
+POT SIZE COEFFICIENTS (multiply all amounts)
+----------------------------------------
+  15 cm:   0.75
+  20 cm:   1.00
+  25 cm:   1.25
+  30 cm:   1.50

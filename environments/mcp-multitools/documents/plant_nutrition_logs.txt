@@ -1,0 +1,434 @@
+======================================================================
+PLANT NUTRITION APPLICATION LOGS
+======================================================================
+
+DOCUMENT STRUCTURE
+----------------------------------------
+Records of fertilizer and nutrient applications.
+NPK ratios are species-specific (see 'species_reference').
+
+APPLICATION FREQUENCY: Every 2-3 weeks during growing season
+
+For nutrition calculations, see 'care_formulas' document.
+
+======================================================================
+
+PLANT: PLT-FIC-002
+--------------------------------------------------
+  2024-01-21
+    Type: Foliar Spray
+    NPK: 12-8-10 | Amount: 65 ml spray
+    Applied by: Maria Santos
+  2024-02-06
+    Type: Compost Tea
+    NPK: 12-8-10 | Amount: 155 ml
+    Applied by: James Chen
+  2024-02-21
+    Type: Slow Release Granules
+    NPK: 12-8-10 | Amount: 18 g
+    Applied by: Sarah Mitchell
+  2024-03-10
+    Type: Liquid Fertilizer
+    NPK: 12-8-10 | Amount: 5 ml
+    Applied by: Sarah Mitchell
+  2024-03-30
+    Type: Foliar Spray
+    NPK: 12-8-10 | Amount: 76 ml spray
+    Applied by: Maria Santos
+
+PLANT: PLT-FIC-008
+--------------------------------------------------
+  2024-01-20
+    Type: Foliar Spray
+    NPK: 12-8-10 | Amount: 86 ml spray
+    Applied by: James Chen
+  2024-02-05
+    Type: Liquid Fertilizer
+    NPK: 12-8-10 | Amount: 9 ml
+    Applied by: Elena Kowalski
+  2024-02-23
+    Type: Liquid Fertilizer
+    NPK: 12-8-10 | Amount: 13 ml
+    Applied by: Maria Santos
+  2024-03-11
+    Type: Foliar Spray
+    NPK: 12-8-10 | Amount: 77 ml spray
+    Applied by: Sarah Mitchell
+
+PLANT: PLT-FIC-014
+--------------------------------------------------
+  2024-02-24
+    Type: Compost Tea
+    NPK: 12-8-10 | Amount: 107 ml
+    Applied by: Maria Santos
+  2024-03-09
+    Type: Slow Release Granules
+    NPK: 12-8-10 | Amount: 21 g
+    Applied by: James Chen
+  2024-03-30
+    Type: Slow Release Granules
+    NPK: 12-8-10 | Amount: 22 g
+    Applied by: Maria Santos
+  2024-04-13
+    Type: Liquid Fertilizer
+    NPK: 12-8-10 | Amount: 5 ml
+    Applied by: Sarah Mitchell
+
+PLANT: PLT-FIC-020
+--------------------------------------------------
+  2024-03-12
+    Type: Compost Tea
+    NPK: 12-8-10 | Amount: 197 ml
+    Applied by: Elena Kowalski
+  2024-03-26
+    Type: Slow Release Granules
+    NPK: 12-8-10 | Amount: 29 g
+    Applied by: Maria Santos
+  2024-04-09
+    Type: Slow Release Granules
+    NPK: 12-8-10 | Amount: 17 g
+    Applied by: Sarah Mitchell
+  2024-04-30
+    Type: Foliar Spray
+    NPK: 12-8-10 | Amount: 67 ml spray
+    Applied by: Elena Kowalski
+  2024-05-20
+    Type: Slow Release Granules
+    NPK: 12-8-10 | Amount: 20 g
+    Applied by: Maria Santos
+
+PLANT: PLT-MON-001
+--------------------------------------------------
+  2024-01-18
+    Type: Foliar Spray
+    NPK: 10-10-10 | Amount: 84 ml spray
+    Applied by: David Okonkwo
+  2024-02-05
+    Type: Slow Release Granules
+    NPK: 10-10-10 | Amount: 30 g
+    Applied by: Elena Kowalski
+  2024-02-21
+    Type: Slow Release Granules
+    NPK: 10-10-10 | Amount: 27 g
+    Applied by: Maria Santos
+  2024-03-08
+    Type: Foliar Spray
+    NPK: 10-10-10 | Amount: 54 ml spray
+    Applied by: James Chen
+  2024-03-24
+    Type: Liquid Fertilizer
+    NPK: 10-10-10 | Amount: 11 ml
+    Applied by: Elena Kowalski
+
+PLANT: PLT-MON-007
+--------------------------------------------------
+  2024-02-04
+    Type: Foliar Spray
+    NPK: 10-10-10 | Amount: 61 ml spray
+    Applied by: James Chen
+  2024-02-25
+    Type: Compost Tea
+    NPK: 10-10-10 | Amount: 200 ml
+    Applied by: Sarah Mitchell
+  2024-03-13
+    Type: Liquid Fertilizer
+    NPK: 10-10-10 | Amount: 12 ml
+    Applied by: David Okonkwo
+  2024-03-31
+    Type: Liquid Fertilizer
+    NPK: 10-10-10 | Amount: 5 ml
+    Applied by: Elena Kowalski
+
+PLANT: PLT-MON-013
+--------------------------------------------------
+  2024-02-09
+    Type: Slow Release Granules
+    NPK: 10-10-10 | Amount: 18 g
+    Applied by: James Chen
+  2024-02-28
+    Type: Foliar Spray
+    NPK: 10-10-10 | Amount: 80 ml spray
+    Applied by: Elena Kowalski
+  2024-03-18
+    Type: Slow Release Granules
+    NPK: 10-10-10 | Amount: 28 g
+    Applied by: Maria Santos
+  2024-04-02
+    Type: Slow Release Granules
+    NPK: 10-10-10 | Amount: 11 g
+    Applied by: Sarah Mitchell
+  2024-04-17
+    Type: Slow Release Granules
+    NPK: 10-10-10 | Amount: 11 g
+    Applied by: Maria Santos
+
+PLANT: PLT-MON-019
+--------------------------------------------------
+  2024-01-27
+    Type: Liquid Fertilizer
+    NPK: 10-10-10 | Amount: 8 ml
+    Applied by: Sarah Mitchell
+  2024-02-15
+    Type: Foliar Spray
+    NPK: 10-10-10 | Amount: 90 ml spray
+    Applied by: Sarah Mitchell
+  2024-03-06
+    Type: Slow Release Granules
+    NPK: 10-10-10 | Amount: 16 g
+    Applied by: Elena Kowalski
+  2024-03-23
+    Type: Liquid Fertilizer
+    NPK: 10-10-10 | Amount: 13 ml
+    Applied by: Sarah Mitchell
+
+PLANT: PLT-PLY-005
+--------------------------------------------------
+  2024-01-25
+    Type: Foliar Spray
+    NPK: 10-15-10 | Amount: 89 ml spray
+    Applied by: Maria Santos
+  2024-02-15
+    Type: Compost Tea
+    NPK: 10-15-10 | Amount: 113 ml
+    Applied by: James Chen
+  2024-03-03
+    Type: Slow Release Granules
+    NPK: 10-15-10 | Amount: 11 g
+    Applied by: David Okonkwo
+  2024-03-23
+    Type: Slow Release Granules
+    NPK: 10-15-10 | Amount: 23 g
+    Applied by: David Okonkwo
+
+PLANT: PLT-PLY-011
+--------------------------------------------------
+  2024-02-17
+    Type: Compost Tea
+    NPK: 10-15-10 | Amount: 157 ml
+    Applied by: Elena Kowalski
+  2024-03-08
+    Type: Compost Tea
+    NPK: 10-15-10 | Amount: 137 ml
+    Applied by: Sarah Mitchell
+  2024-03-27
+    Type: Foliar Spray
+    NPK: 10-15-10 | Amount: 68 ml spray
+    Applied by: Sarah Mitchell
+  2024-04-13
+    Type: Compost Tea
+    NPK: 10-15-10 | Amount: 116 ml
+    Applied by: Maria Santos
+
+PLANT: PLT-PLY-017
+--------------------------------------------------
+  2024-01-25
+    Type: Liquid Fertilizer
+    NPK: 10-15-10 | Amount: 11 ml
+    Applied by: Sarah Mitchell
+  2024-02-15
+    Type: Compost Tea
+    NPK: 10-15-10 | Amount: 193 ml
+    Applied by: Elena Kowalski
+  2024-03-07
+    Type: Compost Tea
+    NPK: 10-15-10 | Amount: 177 ml
+    Applied by: Maria Santos
+  2024-03-25
+    Type: Slow Release Granules
+    NPK: 10-15-10 | Amount: 10 g
+    Applied by: Maria Santos
+
+PLANT: PLT-POT-003
+--------------------------------------------------
+  2024-02-18
+    Type: Slow Release Granules
+    NPK: 8-8-8 | Amount: 12 g
+    Applied by: Maria Santos
+  2024-03-06
+    Type: Compost Tea
+    NPK: 8-8-8 | Amount: 192 ml
+    Applied by: Elena Kowalski
+  2024-03-23
+    Type: Slow Release Granules
+    NPK: 8-8-8 | Amount: 18 g
+    Applied by: Maria Santos
+  2024-04-08
+    Type: Slow Release Granules
+    NPK: 8-8-8 | Amount: 11 g
+    Applied by: James Chen
+  2024-04-27
+    Type: Liquid Fertilizer
+    NPK: 8-8-8 | Amount: 6 ml
+    Applied by: Maria Santos
+
+PLANT: PLT-POT-009
+--------------------------------------------------
+  2024-02-02
+    Type: Foliar Spray
+    NPK: 8-8-8 | Amount: 99 ml spray
+    Applied by: Maria Santos
+  2024-02-23
+    Type: Compost Tea
+    NPK: 8-8-8 | Amount: 195 ml
+    Applied by: Elena Kowalski
+  2024-03-08
+    Type: Slow Release Granules
+    NPK: 8-8-8 | Amount: 13 g
+    Applied by: Sarah Mitchell
+  2024-03-25
+    Type: Slow Release Granules
+    NPK: 8-8-8 | Amount: 13 g
+    Applied by: Maria Santos
+  2024-04-09
+    Type: Foliar Spray
+    NPK: 8-8-8 | Amount: 74 ml spray
+    Applied by: Sarah Mitchell
+
+PLANT: PLT-POT-015
+--------------------------------------------------
+  2024-02-26
+    Type: Foliar Spray
+    NPK: 8-8-8 | Amount: 99 ml spray
+    Applied by: Elena Kowalski
+  2024-03-12
+    Type: Foliar Spray
+    NPK: 8-8-8 | Amount: 69 ml spray
+    Applied by: Elena Kowalski
+  2024-03-31
+    Type: Compost Tea
+    NPK: 8-8-8 | Amount: 190 ml
+    Applied by: James Chen
+  2024-04-18
+    Type: Compost Tea
+    NPK: 8-8-8 | Amount: 193 ml
+    Applied by: Maria Santos
+  2024-05-02
+    Type: Foliar Spray
+    NPK: 8-8-8 | Amount: 85 ml spray
+    Applied by: Elena Kowalski
+
+PLANT: PLT-RUB-006
+--------------------------------------------------
+  2024-03-11
+    Type: Compost Tea
+    NPK: 10-10-10 | Amount: 158 ml
+    Applied by: David Okonkwo
+  2024-03-31
+    Type: Slow Release Granules
+    NPK: 10-10-10 | Amount: 14 g
+    Applied by: James Chen
+  2024-04-17
+    Type: Foliar Spray
+    NPK: 10-10-10 | Amount: 99 ml spray
+    Applied by: Maria Santos
+  2024-05-02
+    Type: Foliar Spray
+    NPK: 10-10-10 | Amount: 54 ml spray
+    Applied by: Maria Santos
+
+PLANT: PLT-RUB-012
+--------------------------------------------------
+  2024-02-24
+    Type: Slow Release Granules
+    NPK: 10-10-10 | Amount: 25 g
+    Applied by: James Chen
+  2024-03-14
+    Type: Foliar Spray
+    NPK: 10-10-10 | Amount: 58 ml spray
+    Applied by: David Okonkwo
+  2024-03-29
+    Type: Foliar Spray
+    NPK: 10-10-10 | Amount: 56 ml spray
+    Applied by: David Okonkwo
+  2024-04-16
+    Type: Compost Tea
+    NPK: 10-10-10 | Amount: 139 ml
+    Applied by: David Okonkwo
+  2024-04-30
+    Type: Foliar Spray
+    NPK: 10-10-10 | Amount: 88 ml spray
+    Applied by: David Okonkwo
+
+PLANT: PLT-RUB-018
+--------------------------------------------------
+  2024-03-01
+    Type: Compost Tea
+    NPK: 10-10-10 | Amount: 131 ml
+    Applied by: Elena Kowalski
+  2024-03-21
+    Type: Slow Release Granules
+    NPK: 10-10-10 | Amount: 11 g
+    Applied by: James Chen
+  2024-04-07
+    Type: Compost Tea
+    NPK: 10-10-10 | Amount: 175 ml
+    Applied by: Elena Kowalski
+  2024-04-27
+    Type: Compost Tea
+    NPK: 10-10-10 | Amount: 135 ml
+    Applied by: David Okonkwo
+
+PLANT: PLT-SNK-004
+--------------------------------------------------
+  2024-01-25
+    Type: Foliar Spray
+    NPK: 5-5-5 | Amount: 60 ml spray
+    Applied by: Sarah Mitchell
+  2024-02-10
+    Type: Foliar Spray
+    NPK: 5-5-5 | Amount: 51 ml spray
+    Applied by: Sarah Mitchell
+  2024-03-01
+    Type: Foliar Spray
+    NPK: 5-5-5 | Amount: 88 ml spray
+    Applied by: David Okonkwo
+  2024-03-17
+    Type: Slow Release Granules
+    NPK: 5-5-5 | Amount: 13 g
+    Applied by: Sarah Mitchell
+  2024-04-03
+    Type: Compost Tea
+    NPK: 5-5-5 | Amount: 190 ml
+    Applied by: James Chen
+
+PLANT: PLT-SNK-010
+--------------------------------------------------
+  2024-02-14
+    Type: Liquid Fertilizer
+    NPK: 5-5-5 | Amount: 9 ml
+    Applied by: Elena Kowalski
+  2024-03-04
+    Type: Liquid Fertilizer
+    NPK: 5-5-5 | Amount: 8 ml
+    Applied by: David Okonkwo
+  2024-03-21
+    Type: Slow Release Granules
+    NPK: 5-5-5 | Amount: 21 g
+    Applied by: David Okonkwo
+  2024-04-11
+    Type: Compost Tea
+    NPK: 5-5-5 | Amount: 165 ml
+    Applied by: Elena Kowalski
+
+PLANT: PLT-SNK-016
+--------------------------------------------------
+  2024-03-01
+    Type: Liquid Fertilizer
+    NPK: 5-5-5 | Amount: 7 ml
+    Applied by: Maria Santos
+  2024-03-19
+    Type: Liquid Fertilizer
+    NPK: 5-5-5 | Amount: 13 ml
+    Applied by: David Okonkwo
+  2024-04-03
+    Type: Compost Tea
+    NPK: 5-5-5 | Amount: 127 ml
+    Applied by: Sarah Mitchell
+  2024-04-20
+    Type: Slow Release Granules
+    NPK: 5-5-5 | Amount: 29 g
+    Applied by: Sarah Mitchell
+  2024-05-08
+    Type: Compost Tea
+    NPK: 5-5-5 | Amount: 113 ml
+    Applied by: James Chen

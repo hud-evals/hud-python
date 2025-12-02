@@ -1,0 +1,214 @@
+======================================================================
+PLANT SPECIES REFERENCE GUIDE
+======================================================================
+
+DOCUMENT STRUCTURE
+----------------------------------------
+Comprehensive care requirements for each species.
+Use this document to determine optimal conditions.
+
+======================================================================
+
+SPECIES: Monstera Deliciosa
+Code: MON
+==================================================
+
+ENVIRONMENTAL REQUIREMENTS
+----------------------------------------
+  Temperature Range: 18-27°C
+  Optimal Temperature: 22°C
+  Light Requirements: 6-10 hours/day
+  Soil pH Range: 5.5-7.0
+
+WATER REQUIREMENTS
+----------------------------------------
+  Base Water Amount: 250 ml per watering
+  Watering Frequency: Every 3 days (adjust based on conditions)
+  Preferred Soil Moisture: 40-60%
+
+NUTRITION REQUIREMENTS
+----------------------------------------
+  NPK Ratio: 10-10-10
+  Fertilizing Frequency: Every 2-3 weeks
+
+GROWTH CHARACTERISTICS
+----------------------------------------
+  Expected Growth Rate: 2.5 cm/week
+  Monthly Growth Estimate: 10.0 cm/month
+
+CARE NOTES
+----------------------------------------
+  - Likes to climb; provide moss pole for best growth
+  - Fenestrations appear on mature leaves
+  - Sensitive to cold drafts
+
+
+SPECIES: Ficus Lyrata
+Code: FIC
+==================================================
+
+ENVIRONMENTAL REQUIREMENTS
+----------------------------------------
+  Temperature Range: 16-24°C
+  Optimal Temperature: 20°C
+  Light Requirements: 8-12 hours/day
+  Soil pH Range: 6.0-7.0
+
+WATER REQUIREMENTS
+----------------------------------------
+  Base Water Amount: 300 ml per watering
+  Watering Frequency: Every 3 days (adjust based on conditions)
+  Preferred Soil Moisture: 40-60%
+
+NUTRITION REQUIREMENTS
+----------------------------------------
+  NPK Ratio: 12-8-10
+  Fertilizing Frequency: Every 2-3 weeks
+
+GROWTH CHARACTERISTICS
+----------------------------------------
+  Expected Growth Rate: 1.8 cm/week
+  Monthly Growth Estimate: 7.2 cm/month
+
+CARE NOTES
+----------------------------------------
+  - Drops leaves when stressed or moved
+  - Prefers consistent conditions
+  - Wipe leaves monthly to remove dust
+
+
+SPECIES: Pothos Golden
+Code: POT
+==================================================
+
+ENVIRONMENTAL REQUIREMENTS
+----------------------------------------
+  Temperature Range: 15-30°C
+  Optimal Temperature: 22°C
+  Light Requirements: 4-8 hours/day
+  Soil pH Range: 6.0-6.5
+
+WATER REQUIREMENTS
+----------------------------------------
+  Base Water Amount: 150 ml per watering
+  Watering Frequency: Every 5 days (adjust based on conditions)
+  Preferred Soil Moisture: 40-60%
+
+NUTRITION REQUIREMENTS
+----------------------------------------
+  NPK Ratio: 8-8-8
+  Fertilizing Frequency: Every 2-3 weeks
+
+GROWTH CHARACTERISTICS
+----------------------------------------
+  Expected Growth Rate: 3.0 cm/week
+  Monthly Growth Estimate: 12.0 cm/month
+
+CARE NOTES
+----------------------------------------
+  - Very tolerant of low light
+  - Can be grown in water
+  - Trail or climb with support
+
+
+SPECIES: Snake Plant
+Code: SNK
+==================================================
+
+ENVIRONMENTAL REQUIREMENTS
+----------------------------------------
+  Temperature Range: 13-29°C
+  Optimal Temperature: 21°C
+  Light Requirements: 4-10 hours/day
+  Soil pH Range: 5.5-7.5
+
+WATER REQUIREMENTS
+----------------------------------------
+  Base Water Amount: 100 ml per watering
+  Watering Frequency: Every 5 days (adjust based on conditions)
+  Preferred Soil Moisture: 40-60%
+
+NUTRITION REQUIREMENTS
+----------------------------------------
+  NPK Ratio: 5-5-5
+  Fertilizing Frequency: Every 2-3 weeks
+
+GROWTH CHARACTERISTICS
+----------------------------------------
+  Expected Growth Rate: 0.8 cm/week
+  Monthly Growth Estimate: 3.2 cm/month
+
+CARE NOTES
+----------------------------------------
+  - Extremely drought tolerant
+  - Sensitive to overwatering (root rot)
+  - Tolerates low light well
+
+
+SPECIES: Peace Lily
+Code: PLY
+==================================================
+
+ENVIRONMENTAL REQUIREMENTS
+----------------------------------------
+  Temperature Range: 18-26°C
+  Optimal Temperature: 22°C
+  Light Requirements: 6-8 hours/day
+  Soil pH Range: 5.8-6.5
+
+WATER REQUIREMENTS
+----------------------------------------
+  Base Water Amount: 200 ml per watering
+  Watering Frequency: Every 5 days (adjust based on conditions)
+  Preferred Soil Moisture: 40-60%
+
+NUTRITION REQUIREMENTS
+----------------------------------------
+  NPK Ratio: 10-15-10
+  Fertilizing Frequency: Every 2-3 weeks
+
+GROWTH CHARACTERISTICS
+----------------------------------------
+  Expected Growth Rate: 1.5 cm/week
+  Monthly Growth Estimate: 6.0 cm/month
+
+CARE NOTES
+----------------------------------------
+  - Droops dramatically when thirsty
+  - Flowers with adequate light
+  - Sensitive to chlorine in tap water
+
+
+SPECIES: Rubber Plant
+Code: RUB
+==================================================
+
+ENVIRONMENTAL REQUIREMENTS
+----------------------------------------
+  Temperature Range: 16-27°C
+  Optimal Temperature: 22°C
+  Light Requirements: 6-10 hours/day
+  Soil pH Range: 5.5-7.0
+
+WATER REQUIREMENTS
+----------------------------------------
+  Base Water Amount: 280 ml per watering
+  Watering Frequency: Every 3 days (adjust based on conditions)
+  Preferred Soil Moisture: 40-60%
+
+NUTRITION REQUIREMENTS
+----------------------------------------
+  NPK Ratio: 10-10-10
+  Fertilizing Frequency: Every 2-3 weeks
+
+GROWTH CHARACTERISTICS
+----------------------------------------
+  Expected Growth Rate: 2.0 cm/week
+  Monthly Growth Estimate: 8.0 cm/month
+
+CARE NOTES
+----------------------------------------
+  - Wipe leaves to maintain shine
+  - Prune to encourage bushiness
+  - Sap can irritate skin
+

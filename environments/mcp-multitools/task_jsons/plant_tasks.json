@@ -1,0 +1,372 @@
+[
+  {
+    "id": "task-plant-w1-five-monstera",
+    "prompt": "Find all Monstera Deliciosa plants in the greenhouse.\n\nUsing formula W1 from care_formulas (Temperature Adjustment), calculate the water amount for each Monstera at T = 24\u00b0C.\n\nReturn the SUM of water amounts for all Monstera plants.\n\nFORMAT: Just the number in ml, rounded to nearest integer (e.g., \"1120\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the sum as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "1060"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-w3-indirect-reference",
+    "prompt": "Find the Pothos Golden plant that is:\n- In Zone-C\n- Assigned to Elena Kowalski\n\nUsing formula W3 from care_formulas, calculate the recommended water amount.\nUse these values: T = 23\u00b0C, M = 35% (soil moisture before watering).\nGet the pot size (P) from the plant registry.\n\nReturn the calculated water amount.\n\nFORMAT: Number in ml, rounded to nearest integer (e.g., \"187\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the water amount as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "203"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-modified-coefficient",
+    "prompt": "IMPORTANT: Due to recent calibration, the temperature coefficient in formula W1 should be increased by 0.02 (making it 0.05 instead of the documented 0.03).\n\nFind plant PLT-FIC-002 (Ficus Lyrata).\n\nUsing the MODIFIED formula W1 (with coefficient 0.05), calculate the water amount at T = 26\u00b0C.\n\nShow your calculation and return the final water amount.\n\nFORMAT: Just the number in ml, rounded to nearest integer (e.g., \"360\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the water amount as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "360"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-n1-nutrition",
+    "prompt": "Find the current height (Week 12) of plant PLT-MON-013 from plant_growth_logs.\n\nUsing formula N1 from care_formulas, calculate the recommended liquid fertilizer amount.\nUse the pot size from plant_registry and the Week 12 height as Ht.\n\nReturn the calculated fertilizer amount.\n\nFORMAT: Number in ml, rounded to 1 decimal place (e.g., \"8.5\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the fertilizer amount as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "23.3"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-growth-comparison",
+    "prompt": "For plant PLT-FIC-008 (Ficus Lyrata):\n\n1. Find its Week 1 and Week 12 heights from plant_growth_logs\n2. Calculate the ACTUAL average weekly growth: (Week12 - Week1) / 11\n3. Find the EXPECTED weekly growth rate from species_reference\n4. Calculate: (Actual / Expected) \u00d7 100 to get percentage of expected growth\n\nReturn the percentage.\n\nFORMAT: Number rounded to nearest integer with % sign (e.g., \"95%\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the percentage as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "95%"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-zone-a-heights",
+    "prompt": "Find all plants in Zone-A from plant_registry.\n\nFor each Zone-A plant, find its Week 12 height from plant_growth_logs.\n\nReturn the plant IDs and their Week 12 heights.\n\nFORMAT: \"PLT-XXX-NNN: HH.H cm; PLT-XXX-NNN: HH.H cm; ...\"\n- Entries separated by \"; \" (semicolon space)\n- Sorted by Plant ID ascending\n- Heights to 1 decimal place\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "PLT-MON-001: 46.1 cm; PLT-MON-013: 58.2 cm; PLT-PLY-005: 28.2 cm; PLT-PLY-017: 37.0 cm; PLT-POT-009: 62.7 cm"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-caretaker-watering-count",
+    "prompt": "Count how many times Maria Santos (CT-01) performed watering across ALL plants.\n\nLook through plant_watering_logs and count every watering entry where Maria Santos is listed as the person who watered.\n\nReturn the total count.\n\nFORMAT: Just the number (e.g., \"42\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "100"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-complex-filter",
+    "prompt": "Find plants that match ALL of these criteria:\n1. (Zone-A OR Zone-B)\n2. AND pot size >= 25 cm\n3. AND NOT status \"Needs Attention\"\n\nReturn the plant IDs that match.\n\nFORMAT: \"PLT-XXX-NNN; PLT-XXX-NNN; ...\"\n- Separated by \"; \" (semicolon space)\n- Sorted alphabetically by Plant ID\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "PLT-FIC-014; PLT-MON-001; PLT-MON-013; PLT-PLY-005; PLT-PLY-017; PLT-POT-009; PLT-RUB-018; PLT-SNK-010"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-low-health-week8",
+    "prompt": "Find all plants that had a health score of 7 or below during Week 8.\n\nReturn the plant IDs and their Week 8 health scores.\n\nFORMAT: \"PLT-XXX-NNN: N; PLT-XXX-NNN: N; ...\"\n- Separated by \"; \" (semicolon space)\n- Sorted by Plant ID ascending\n- N is the health score (integer)\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "PLT-FIC-008: 7; PLT-MON-001: 7; PLT-MON-019: 7; PLT-POT-009: 7; PLT-RUB-006: 7; PLT-RUB-012: 7; PLT-SNK-004: 7"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-plant-caretaker-performance",
+    "prompt": "Evaluate James Chen's (CT-02) plant care performance:\n\n1. Find all plants assigned to James Chen from plant_registry\n2. For each plant, calculate actual weekly growth: (Week12 height - Week1 height) / 11\n3. Get the expected growth rate for each plant's species from species_reference\n4. Calculate: average of (actual / expected) across all his plants\n5. Return the average as a percentage\n\nFORMAT: Number rounded to nearest integer with % sign (e.g., \"105%\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the percentage as 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "105%"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  }
+]
