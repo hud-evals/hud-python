@@ -561,15 +561,15 @@ def sanity_check(
     old_logp: torch.Tensor | None,
     ref_logp: torch.Tensor | None,
 ) -> None:
-    assert "assistant_mask" in sample.inputs  # noqa: S101
+    assert "assistant_mask" in sample.inputs
     m = sample.inputs["assistant_mask"]
     if old_logp is None or ref_logp is None:
         return
     with torch.no_grad():
         B, K = pol_logp.shape
-        assert old_logp.shape == (B, K), "old_logp shape mismatch"  # noqa: S101
-        assert ref_logp.shape == (B, K), "ref_logp shape mismatch"  # noqa: S101
-        assert m.shape == (B, K), "assistant_mask shape mismatch"  # noqa: S101
+        assert old_logp.shape == (B, K), "old_logp shape mismatch"
+        assert ref_logp.shape == (B, K), "ref_logp shape mismatch"
+        assert m.shape == (B, K), "assistant_mask shape mismatch"
 
         # Check mask is subset of attention_mask[:, 1:]
         att = sample.inputs.get("attention_mask", None)
