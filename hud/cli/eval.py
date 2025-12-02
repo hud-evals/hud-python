@@ -51,6 +51,11 @@ _AGENT_PRESETS: list[AgentPreset] = [
     AgentPreset("GPT-5", AgentType.OPENAI, "gpt-5"),
     AgentPreset("Operator (OpenAI Computer Use)", AgentType.OPERATOR, "computer-use-preview"),
     AgentPreset("Gemini 3 Pro Preview", AgentType.GEMINI, "gemini-3-pro-preview"),
+    AgentPreset(
+        "Gemini CUA (Gemini Computer Use)",
+        AgentType.GEMINI_CUA,
+        "gemini-2.5-computer-use-preview-10-2025",
+    ),
     # HUD Gateway presets (models via HUD Inference API)
     AgentPreset(
         "Grok 4-1 Fast (xAI)",
@@ -98,6 +103,11 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # temperature = 1.0
 # top_p = 0.95
 
+[gemini_cua]
+# temperature = 1.0
+# top_p = 0.95
+# excluded_predefined_functions = []
+
 [openai_compatible]
 # base_url = "http://localhost:8000/v1"
 # model_name = "my-model"
@@ -107,6 +117,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 _API_KEY_REQUIREMENTS: dict[AgentType, tuple[str, str]] = {
     AgentType.CLAUDE: ("anthropic_api_key", "ANTHROPIC_API_KEY"),
     AgentType.GEMINI: ("gemini_api_key", "GEMINI_API_KEY"),
+    AgentType.GEMINI_CUA: ("gemini_api_key", "GEMINI_API_KEY"),
     AgentType.OPENAI: ("openai_api_key", "OPENAI_API_KEY"),
     AgentType.OPERATOR: ("openai_api_key", "OPENAI_API_KEY"),
 }
@@ -184,7 +195,7 @@ class EvalConfig(BaseModel):
                 hud_console.error("HUD_API_KEY is required for remote execution")
                 hud_console.info("Set it: hud set HUD_API_KEY=your-key-here")
                 raise typer.Exit(1)
-            if self.agent_type == AgentType.GEMINI:
+            if self.agent_type in (AgentType.GEMINI, AgentType.GEMINI_CUA):
                 hud_console.error(
                     f"Remote execution is not supported for {self.agent_type.value} agent"
                 )
@@ -253,6 +264,7 @@ class EvalConfig(BaseModel):
             AgentType.OPENAI,
             AgentType.OPERATOR,
             AgentType.GEMINI,
+            AgentType.GEMINI_CUA,
         ):
             kwargs["validate_api_key"] = False
 
@@ -639,7 +651,8 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
 def eval_command(
     source: str | None = typer.Argument(None, help="HuggingFace dataset or task JSON file"),
     agent: str | None = typer.Argument(
-        None, help="Agent: claude, openai, operator, gemini, openai_compatible, integration_test"
+        None,
+        help="Agent: claude, openai, operator, gemini, gemini_cua, openai_compatible, integration_test",
     ),
     full: bool = typer.Option(False, "--full", help="Run entire dataset"),
     model: str | None = typer.Option(None, "--model", "-m", help="Model name"),
