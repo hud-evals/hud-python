@@ -652,7 +652,7 @@ def eval_command(
     source: str | None = typer.Argument(None, help="HuggingFace dataset or task JSON file"),
     agent: str | None = typer.Argument(
         None,
-        help="Agent: claude, openai, operator, gemini, gemini_cua, openai_compatible, integration_test", # noqa: E501
+        help="Agent: claude, openai, operator, gemini, gemini_cua, openai_compatible, integration_test",  # noqa: E501
     ),
     full: bool = typer.Option(False, "--full", help="Run entire dataset"),
     model: str | None = typer.Option(None, "--model", "-m", help="Model name"),
