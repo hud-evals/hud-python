@@ -27,12 +27,14 @@ class AgentType(str, Enum):
     OPENAI = "openai"
     OPERATOR = "operator"
     GEMINI = "gemini"
+    GEMINI_CUA = "gemini_cua"
     OPENAI_COMPATIBLE = "openai_compatible"
     INTEGRATION_TEST = "integration_test"
 
     @property
     def cls(self) -> type:
         from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OperatorAgent
+        from hud.agents.gemini_cua import GeminiCUAAgent
         from hud.agents.openai_chat import OpenAIChatAgent
 
         mapping: dict[AgentType, type] = {
@@ -40,6 +42,7 @@ class AgentType(str, Enum):
             AgentType.OPENAI: OpenAIAgent,
             AgentType.OPERATOR: OperatorAgent,
             AgentType.GEMINI: GeminiAgent,
+            AgentType.GEMINI_CUA: GeminiCUAAgent,
             AgentType.OPENAI_COMPATIBLE: OpenAIChatAgent,
         }
         if self == AgentType.INTEGRATION_TEST:
