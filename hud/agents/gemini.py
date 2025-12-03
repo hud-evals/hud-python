@@ -279,10 +279,11 @@ class GeminiAgent(MCPAgent):
         Subclasses can override to customize tool conversion (e.g., for computer use).
         """
         # Ensure parameters have proper Schema format
-        params = tool.inputSchema or {"type": "object", "properties": {}}
+        if tool.description is None or tool.inputSchema is None:
+            raise ValueError(f"MCP tool {tool.name} requires both a description and inputSchema.")
         function_decl = genai_types.FunctionDeclaration(
             name=tool.name,
-            description=tool.description or f"Execute {tool.name}",
-            parameters=genai_types.Schema(**params) if isinstance(params, dict) else params,
+            description=tool.description,
+            parameters_json_schema=tool.inputSchema,
         )
         return genai_types.Tool(function_declarations=[function_decl])
