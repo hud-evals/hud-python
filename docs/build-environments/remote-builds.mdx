@@ -1,0 +1,108 @@
+---
+title: "Remote Builds"
+description: "Build and test environments from GitHub"
+icon: "cloud"
+---
+
+The HUD platform can build your environments in the cloud directly from your GitHub repositories with a few simple steps.
+
+## Connect GitHub
+
+First, connect your GitHub account to HUD by installing the GitHub App.
+
+<Steps>
+<Step title="Navigate to the New Environment Page">
+  Click **New** in the top right header of the HUD platform and click **Environment** to go to the [New Environment Page](https://hud.ai/environments/new).
+</Step>
+
+<Step title="Install the GitHub App">
+  Click **Connect GitHub** to install the HUD GitHub App. You'll be redirected to GitHub to authorize the installation.
+
+  ![Connect GitHub](/src/images/remote-builds/connect-github.png)
+</Step>
+
+<Step title="Choose Repository Access">
+  Select which repositories HUD can access:
+
+  - **All repositories** - HUD can build from any repo in your account
+  - **Only select repositories** - Grant access to specific repos
+
+  <Note>
+  You can change repository access later in your GitHub settings.
+  </Note>
+</Step>
+</Steps>
+
+## Build an Environment
+
+Once GitHub is connected, you can build environments from your repositories.
+
+<Steps>
+<Step title="Select a Repository">
+  Back on the HUD platform, choose a repository from the list and click **Import**. Only repositories you've granted access to will appear.
+
+  ![Repository selection](/src/images/remote-builds/select-repo.png)
+</Step>
+
+<Step title="Choose a Branch (Optional)">
+  Select a branch to build from. Defaults to `main` or the repository's default branch if not specified.
+</Step>
+
+<Step title="Start the Build">
+  Click **Build Environment** to start the remote build process. HUD will:
+
+  1. Clone your repository
+  2. Build the Docker image using your Dockerfile
+  3. Push the image to the HUD registry
+</Step>
+
+<Step title="Monitor Build Progress">
+  Watch the build logs in real-time. Build times vary depending on your Dockerfile complexity and dependencies.
+</Step>
+</Steps>
+
+## Test Your Environment
+
+After a successful build, test your environment by creating a task.
+
+<Steps>
+<Step title="Create a New Task">
+  Click **New** in the top right header again, then click **Task**.
+</Step>
+
+<Step title="Select Your Environment">
+  In the Task pane on the left, find and select your newly built environment.
+
+  ![Select environment](/src/images/remote-builds/select-environment.png)
+</Step>
+
+<Step title="Start Testing">
+  Connect to the environment and interact with it to verify it works as expected.
+</Step>
+
+<Step title="Run a Task">
+  Once you're ready, write a prompt, select at least an evaluate tool, and run the task with your new environment.
+</Step>
+</Steps>
+
+## Rebuild on Changes
+
+HUD automatically rebuilds your environment when you push changes to GitHub. Rebuilds are triggered on the branch you selected for your latest build.
+
+To manually trigger a rebuild:
+
+1. Navigate to your environment [on the HUD platform](https://hud.ai/environments)
+2. Click **Rebuild** in the Builds tab to pull the latest code and build a new image
+
+![Rebuild button](/src/images/remote-builds/rebuild.png)
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Repository not appearing | Check that you've granted HUD access in GitHub settings |
+| Build fails immediately | Verify your Dockerfile exists in the repository root or look for errors in the build logs |
+| Build fails with a Docker Hub rate limit error | Securely save your [Docker Hub credentials in your settings](https://www.hud.ai/project/secrets) to avoid hitting the unauthenticated rate limit | 
+| Build times out | Reduce image size or split into multi-stage builds |
+
+Refer to the [Environment Spec](/build-environments/spec) to understand what qualifies as a HUD environment. For further debugging, see [`hud debug`](/reference/cli/debug) for local testing before pushing.
