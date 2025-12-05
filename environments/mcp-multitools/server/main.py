@@ -214,6 +214,8 @@ async def search_document(doc_id: str, query: str, context_chars: int = 200) -> 
         context_chars: Characters of context to include around each match (default: 200).
     
     Returns matching sections with line numbers and surrounding context.
+    
+    NOTE: Returns maximum 20 matches.
     """
     resp = await http_client.post("/documents/search", json={
         "doc_id": doc_id, "query": query, "context_chars": context_chars,

@@ -965,5 +965,3 @@ PART C: OUTSTANDING FINES
   LIB-1064 (Adrian Young): $0.25
   LIB-1170 (Natalie Moore): $0.25
   LIB-1026 (Michael Irving): $0.25
-
-Total outstanding fines: $20999.50

@@ -757,7 +757,7 @@
   },
   {
     "id": "task-school-city-avg-score",
-    "prompt": "What is the average of all test scores that were taken by students who are active members of clubs at schools located in Brookline? \n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore the average (round to 2 decimal places, round half up: 1.505 becomes 1.51) with key 'answer'. Say 'Task completed.' when done.",
+    "prompt": "What is the average of all test scores that were taken by students who are active members of clubs assigned to schools in Brookline? \n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables have 'school_' prefix.\n\nStore the average (round to 2 decimal places, round half up: 1.505 becomes 1.51) with key 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -972,7 +972,7 @@
   },
   {
     "id": "task-count-avg-salary",
-    "prompt": "Analyze compensation across certification groups.\n\nFor each section, count employees and calculate their AVERAGE salary (sum of all salaries in that section divided by the number of employees in that section):\n- \"Cloud certified\"\n- \"Remote work approved\"\n- \"First aid certified\"\n- \"Certified Scrum Master\"\n- \"Certified PMP\"\n- \"Completed leadership training\"\n\nRounding: Round average to 2 decimal places (round half up: 1.505 \u2192 1.51).\n\nUse \"; \" (semicolon followed by space) to separate entries.\n\nFORMAT: \"{SectionName}: {count} employees, ${average:.2f} avg\" - entries separated by \"; \" (semicolon space).\nExample: \"Cloud certified: 25 employees, $95432.50 avg; Remote work approved: 18 employees, $87654.33 avg\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents \u2260 page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Analyze compensation across certification groups.\n\nFor each section, count employees and calculate their AVERAGE salary (sum of all salaries in that section divided by the number of employees in that section):\n- \"Cloud certified\"\n- \"Remote work approved\"\n- \"First aid certified\"\n- \"Certified Scrum Master\"\n- \"Certified PMP\"\n- \"Completed leadership training\"\n\nRounding: Round average to 2 decimal places (round half up: 1.505 → 1.51).\n\nUse \"; \" (semicolon followed by space) to separate entries.\n\nFORMAT: \"{SectionName}: {count} employees, ${average:.2f} avg\" - entries separated by \"; \" (semicolon space).\nExample: \"Cloud certified: 25 employees, $95432.50 avg; Remote work approved: 18 employees, $87654.33 avg\"\n\nNote: Always use \"employees\" (plural) regardless of count. Output sections in the exact order listed above.\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents ≠ page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -1017,7 +1017,7 @@
   },
   {
     "id": "task-or-languages-salary",
-    "prompt": "Find everyone who speaks Spanish OR French OR German OR Mandarin.\n\nCheck employee_attributes for all four language sections. Union all IDs.\nQuery Supabase for salaries only.\n\nUse \"; \" (semicolon followed by space) to separate entries.\nSort by employee ID.\n\nFORMAT: \"{employee_id}: {salary}\" - entries separated by \"; \" (semicolon space).\nSort alphabetically by employee ID (A-Z).\nExample: \"EMP-10001A: 85000; EMP-10002B: 92500\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents \u2260 page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find everyone who speaks Spanish OR French OR German OR Mandarin.\n\nCheck employee_attributes for all four language sections. Union all IDs.\nQuery Supabase for salaries only.\n\nUse \"; \" (semicolon followed by space) to separate entries.\nSort by employee ID.\n\nFORMAT: \"{employee_id}: {salary}\" - entries separated by \"; \" (semicolon space).\nSort alphabetically by employee ID (A-Z).\nExample: \"EMP-10001A: 85000; EMP-10002B: 92500\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents ≠ page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -1062,7 +1062,7 @@
   },
   {
     "id": "task-sort-birthdate",
-    "prompt": "Identify employees with both \"First aid certified\" AND \"CPR certified\".\n\nIMPORTANT: Sort results by birth_date (OLDEST first = earliest date first).\n\nUse \"; \" (semicolon followed by space) to separate entries.\n\nFORMAT: \"{employee_id}: {full_name}, {birth_date}\" - entries separated by \"; \" (semicolon space).\nSort by birth_date ascending (oldest/earliest date first).\nExample: \"EMP-10050X: John Smith, 1975-03-15; EMP-10022Y: Jane Doe, 1982-11-20\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents \u2260 page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Identify employees with both \"First aid certified\" AND \"CPR certified\".\n\nIMPORTANT: Sort results by birth_date (OLDEST first = earliest date first).\n\nUse \"; \" (semicolon followed by space) to separate entries.\n\nFORMAT: \"{employee_id}: {full_name}, {birth_date}\" - entries separated by \"; \" (semicolon space).\nSort by birth_date ascending (oldest/earliest date first).\nExample: \"EMP-10050X: John Smith, 1975-03-15; EMP-10022Y: Jane Doe, 1982-11-20\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents ≠ page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -1107,7 +1107,7 @@
   },
   {
     "id": "task-complex-certs",
-    "prompt": "Find remote-ready certified professionals.\n\nFilter:\n(\"Certified PMP\" OR \"Certified Scrum Master\" OR \"Cloud certified\")\nAND \"Remote work approved\"\nAND \"Data privacy trained\"\nBUT NOT \"Prefers morning meetings\"\n\nReturn: id, name, department, salary, position.\nSort by employee ID.\n\nUse \"; \" (semicolon followed by space) to separate entries.\n\nFORMAT: \"{id}: {name}, {department}, {salary}, {position}\" - entries separated by \"; \" (semicolon space).\nSort alphabetically by employee ID (A-Z).\nExample: \"EMP-10015K: Alice Brown, Engineering, 95000, Senior Engineer; EMP-10088M: Bob White, Sales, 78000, Account Manager\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents \u2260 page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find remote-ready certified professionals.\n\nFilter:\n(\"Certified PMP\" OR \"Certified Scrum Master\" OR \"Cloud certified\")\nAND \"Remote work approved\"\nAND \"Data privacy trained\"\nBUT NOT \"Prefers morning meetings\"\n\nReturn: id, name, department, salary, position.\nSort by employee ID.\n\nUse \"; \" (semicolon followed by space) to separate entries.\n\nFORMAT: \"{id}: {name}, {department}, {salary}, {position}\" - entries separated by \"; \" (semicolon space).\nSort alphabetically by employee ID (A-Z).\nExample: \"EMP-10015K: Alice Brown, Engineering, 95000, Senior Engineer; EMP-10088M: Bob White, Sales, 78000, Account Manager\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents ≠ page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -1152,7 +1152,7 @@
   },
   {
     "id": "task-pool-filter",
-    "prompt": "From ONLY these IDs, find who is both \"Cloud certified\" AND \"Data privacy trained\":\n\nEMP-10020K, EMP-10043H, EMP-10073L, EMP-10124K, EMP-10177L, EMP-10184S, EMP-10200I, EMP-10215X, EMP-10292W, EMP-10329H, EMP-10357J, EMP-10397X, EMP-10400A, EMP-10416Q, EMP-10424Y, EMP-10432G, EMP-10453B, EMP-10456E, EMP-10482E, EMP-10497T, EMP-10505B, EMP-10513J, EMP-10555Z, EMP-10588G, EMP-10593L, EMP-10608A, EMP-10620M, EMP-10654U, EMP-10668I, EMP-10683X, EMP-10696K, EMP-10716E, EMP-10719H, EMP-10726O, EMP-10754Q, EMP-10765B, EMP-10775L, EMP-10779P, EMP-10792C, EMP-10802M\n\nReturn matching IDs with name and phone.\nSort by employee ID.\n\nUse \"; \" (semicolon followed by space) to separate entries.\n\nFORMAT: \"{employee_id}: {name}, {phone}\" - entries separated by \"; \" (semicolon space).\nSort alphabetically by employee ID (A-Z).\nExample: \"EMP-10033F: Carol Green, +1-555-1234; EMP-10077H: David Black, +1-555-5678\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents \u2260 page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "prompt": "From ONLY these IDs, find who is both \"Cloud certified\" AND \"Data privacy trained\":\n\nEMP-10020K, EMP-10043H, EMP-10073L, EMP-10124K, EMP-10177L, EMP-10184S, EMP-10200I, EMP-10215X, EMP-10292W, EMP-10329H, EMP-10357J, EMP-10397X, EMP-10400A, EMP-10416Q, EMP-10424Y, EMP-10432G, EMP-10453B, EMP-10456E, EMP-10482E, EMP-10497T, EMP-10505B, EMP-10513J, EMP-10555Z, EMP-10588G, EMP-10593L, EMP-10608A, EMP-10620M, EMP-10654U, EMP-10668I, EMP-10683X, EMP-10696K, EMP-10716E, EMP-10719H, EMP-10726O, EMP-10754Q, EMP-10765B, EMP-10775L, EMP-10779P, EMP-10792C, EMP-10802M\n\nReturn matching IDs with name and phone.\nSort by employee ID.\n\nUse \"; \" (semicolon followed by space) to separate entries.\n\nFORMAT: \"{employee_id}: {name}, {phone}\" - entries separated by \"; \" (semicolon space).\nSort alphabetically by employee ID (A-Z).\nExample: \"EMP-10033F: Carol Green, +1-555-1234; EMP-10077H: David Black, +1-555-5678\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents ≠ page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -1197,7 +1197,7 @@
   },
   {
     "id": "task-language-safety-dept",
-    "prompt": "Identify bilingual safety-trained staff in customer-facing departments.\n\nFilter:\n(\"Speaks Spanish\" OR \"Speaks French\") AND \"First aid certified\"\n\nThen keep only those whose department is: Engineering, Marketing, Sales, or Customer Support.\n\nReturn ONLY names, sorted alphabetically.\n\nFORMAT: Just names separated by \"; \" (semicolon space).\nSort alphabetically by full name (A-Z).\nExample: \"Alice Johnson; Bob Martinez; Carol Williams\"\n\nData sources:\n- Document: doc_id 'employee_attributes'\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Identify bilingual safety-trained staff in customer-facing departments.\n\nFilter:\n(\"Speaks Spanish\" OR \"Speaks French\") AND \"First aid certified\"\n\nThen keep only those whose department name (from departments table) is exactly one of: \"Engineering\", \"Marketing\", \"Sales\", or \"Customer Support\".\n\nReturn ONLY names, sorted alphabetically.\n\nFORMAT: Just names separated by \"; \" (semicolon space).\nSort alphabetically by full name (A-Z).\nExample: \"Alice Johnson; Bob Martinez; Carol Williams\"\n\nData sources:\n- Document: doc_id 'employee_attributes'\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -1242,7 +1242,7 @@
   },
   {
     "id": "task-sort-salary-desc",
-    "prompt": "Who has both \"Budget approval authority\" AND \"Completed leadership training\"?\n\nSort by SALARY descending (highest first).\nReturn only name and salary.\n\nUse \"; \" (semicolon followed by space) to separate entries.\n\nFORMAT: \"{name}: {salary}\" - entries separated by \"; \" (semicolon space).\nSort by salary descending (highest first). For equal salaries, sort alphabetically by name (A-Z).\nExample: \"Alice Chen: 185000; Bob Smith: 142000; Carol Lee: 98000\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents \u2260 page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Who has both \"Budget approval authority\" AND \"Completed leadership training\"?\n\nSort by SALARY descending (highest first).\nReturn only name and salary.\n\nUse \"; \" (semicolon followed by space) to separate entries.\n\nFORMAT: \"{name}: {salary}\" - entries separated by \"; \" (semicolon space).\nSort by salary descending (highest first). For equal salaries, sort alphabetically by name (A-Z).\nExample: \"Alice Chen: 185000; Bob Smith: 142000; Carol Lee: 98000\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents ≠ page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -1287,7 +1287,7 @@
   },
   {
     "id": "task-four-ands",
-    "prompt": "Strict filter - find employees in ALL FOUR sections:\n- \"Has health insurance\"\n- \"Enrolled in 401k\"\n- \"Participates in wellness program\"\n- \"Emergency response trained\"\n\nReturn: employee_id, department, position.\n\nFORMAT: \"{employee_id}: {department}, {position}\" separated by \"; \"\nSort alphabetically by employee ID (A-Z).\nExample: \"EMP-10044J: Finance, Senior Analyst; EMP-10099P: Operations, Manager\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents \u2260 page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Strict filter - find employees in ALL FOUR sections:\n- \"Has health insurance\"\n- \"Enrolled in 401k\"\n- \"Participates in wellness program\"\n- \"Emergency response trained\"\n\nReturn: employee_id, department, position.\n\nFORMAT: \"{employee_id}: {department}, {position}\" separated by \"; \"\nSort alphabetically by employee ID (A-Z).\nExample: \"EMP-10044J: Finance, Senior Analyst; EMP-10099P: Operations, Manager\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents ≠ page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -1332,7 +1332,7 @@
   },
   {
     "id": "task-group-plus-pool",
-    "prompt": "DEFINITION: \"Senior Staff\" = employees earning more than $80,000 (salary > 80000, strictly greater)\n\nFrom ONLY these candidates:\nEMP-10028S, EMP-10091D, EMP-10103P, EMP-10124K, EMP-10152M, EMP-10170E, EMP-10283N, EMP-10292W, EMP-10306K, EMP-10337P, EMP-10388O, EMP-10412M, EMP-10432G, EMP-10442Q, EMP-10485H, EMP-10497T, EMP-10500W, EMP-10552W, EMP-10555Z, EMP-10588G, EMP-10598Q, EMP-10654U, EMP-10657X, EMP-10668I, EMP-10687B, EMP-10716E, EMP-10765B, EMP-10779P, EMP-10785V, EMP-10802M\n\n1. Query Supabase to find which earn > 80000 (Senior Staff)\n2. From those, find who is also \"Remote work approved\" in employee_attributes\n\nReturn: id, name, salary, hire_date.\n\nFORMAT: \"{id}: {name}, {salary}, {hire_date}\" separated by \"; \"\nSort alphabetically by employee ID (A-Z).\nExample: \"EMP-10012C: Alice Wong, 95000, 2019-06-15; EMP-10045D: Bob Kim, 112000, 2018-03-22\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents \u2260 page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "prompt": "DEFINITION: \"Senior Staff\" = employees earning more than $80,000 (salary > 80000, strictly greater)\n\nFrom ONLY these candidates:\nEMP-10028S, EMP-10091D, EMP-10103P, EMP-10124K, EMP-10152M, EMP-10170E, EMP-10283N, EMP-10292W, EMP-10306K, EMP-10337P, EMP-10388O, EMP-10412M, EMP-10432G, EMP-10442Q, EMP-10485H, EMP-10497T, EMP-10500W, EMP-10552W, EMP-10555Z, EMP-10588G, EMP-10598Q, EMP-10654U, EMP-10657X, EMP-10668I, EMP-10687B, EMP-10716E, EMP-10765B, EMP-10779P, EMP-10785V, EMP-10802M\n\n1. Query Supabase to find which earn > 80000 (Senior Staff)\n2. From those, find who is also \"Remote work approved\" in employee_attributes\n\nReturn: id, name, salary, hire_date.\n\nFORMAT: \"{id}: {name}, {salary}, {hire_date}\" separated by \"; \"\nSort alphabetically by employee ID (A-Z).\nExample: \"EMP-10012C: Alice Wong, 95000, 2019-06-15; EMP-10045D: Bob Kim, 112000, 2018-03-22\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents ≠ page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -1377,7 +1377,7 @@
   },
   {
     "id": "task-shifts-count",
-    "prompt": "Find employees who are \"Available for weekend oncall\" AND \"Emergency response trained\".\n\nFor each, get their name and NUMBER OF SHIFTS scheduled (from shifts table).\n\nFORMAT: \"{employee_id}: {name}, {shift_count} shifts\" separated by \"; \"\nSort alphabetically by employee ID (A-Z).\nExample: \"EMP-10025E: Alice Park, 12 shifts; EMP-10067G: Bob Lee, 8 shifts\"\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents \u2260 page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find employees who are \"Available for weekend oncall\" AND \"Emergency response trained\".\n\nFor each, get their name and NUMBER OF SHIFTS scheduled (from shifts table).\n\nFORMAT: \"{employee_id}: {name}, {shift_count} shifts\" separated by \"; \"\nSort alphabetically by employee ID (A-Z).\nExample: \"EMP-10025E: Alice Park, 12 shifts; EMP-10067G: Bob Lee, 8 shifts\"\n\nNote: Always use \"shifts\" (plural) regardless of count.\n\nData sources:\n- Document: doc_id 'employee_attributes' (14 pages). Note: section numbers in the table of contents ≠ page numbers.\n- Database: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments, shifts.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -1405,7 +1405,7 @@
       "name": "local_evaluate",
       "arguments": {
         "exact_values": {
-          "answer": "EMP-10053R: Eleanor Edwards, 29 shifts; EMP-10067F: Felix Fischer, 0 shifts; EMP-10124K: James Chen, 24 shifts; EMP-10329H: Isaac Mueller, 24 shifts; EMP-10485H: Hannah Edwards, 0 shifts; EMP-10528Y: Nicole Quinn, 0 shifts; EMP-10620M: Zoe Olsen, 0 shifts; EMP-10642I: Bianca Torres, 0 shifts; EMP-10668I: Edward Zhang, 0 shifts; EMP-10785V: Eleanor Gonzalez, 0 shifts; EMP-10802M: Harrison Morrison, 0 shifts"
+          "answer": "EMP-10053R: Eleanor Edwards, 29 shifts; EMP-10067F: Felix Fischer, 0 shifts; EMP-10124K: James Chen, 24 shifts; EMP-10329H: Isaac Mueller, 24 shifts; EMP-10485H: Hannah Edwards, 26 shifts; EMP-10528Y: Nicole Quinn, 28 shifts; EMP-10620M: Zoe Olsen, 0 shifts; EMP-10642I: Bianca Torres, 0 shifts; EMP-10668I: Edward Zhang, 0 shifts; EMP-10785V: Eleanor Gonzalez, 0 shifts; EMP-10802M: Harrison Morrison, 0 shifts"
         }
       }
     },
@@ -1466,7 +1466,7 @@
   },
   {
     "id": "task-linear-dept-breakdown",
-    "prompt": "For each department that has at least one employee with Linear issues assigned, report how many employees have issues and how many issues touch that department.\n\nAssignees are listed in issue descriptions. Only count individual employees from the database - skip generic team names like \"Product Team\" or \"Office Admin\". Do not include departments with 0 employees.\n\nFORMAT: \"{DeptName}: {X} employee/employees, {Y} issue/issues\" separated by \"; \"\nSort alphabetically by department name (A-Z).\nExample: \"Engineering: 5 employees, 12 issues; Finance: 1 employee, 3 issues\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "prompt": "For each department that has at least one employee with Linear issues assigned, report how many employees have issues and how many issues touch that department.\n\nAssignees are listed in issue descriptions. Only count individual employees from the database - skip generic team names like \"Product Team\" or \"Office Admin\". Do not include departments with 0 employees.\n\nFORMAT: \"{DeptName}: {X} employee/employees, {Y} issue/issues\" separated by \"; \"\nSort alphabetically by department name (A-Z).\nExample: \"Engineering: 5 employees, 12 issues; Finance: 1 employee, 3 issues\"\n\nNote: Use singular \"employee\"/\"issue\" when count is 1, plural \"employees\"/\"issues\" otherwise.\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -1510,7 +1510,7 @@
   },
   {
     "id": "task-linear-workload-rank",
-    "prompt": "Rank employees by their Linear issue workload.\n\nCount issues per employee from assignees in issue descriptions. Only count individual employees - skip generic team names like \"Product Team\" or \"Office Admin\".\n\nFORMAT: \"{name}: {issue_count}\" separated by \"; \"\nSort by issue count DESCENDING. For ties, sort by employee ID (A-Z).\nExample: \"Alice Chen: 8; Bob Smith: 5; Carol Lee: 5\"\n\nNote: If two employees share the same name, they will appear as separate entries.\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Rank employees by their Linear issue workload.\n\nCount issues per employee from assignees in issue descriptions. Only count individual employees - skip generic team names like \"Product Team\" or \"Office Admin\".\n\nFORMAT: \"{name}: {issue_count}\" separated by \"; \"\nSort by issue count DESCENDING. For ties, sort by employee ID (A-Z).\nExample: \"Alice Chen: 8; Bob Smith: 5; Carol Lee: 5\"\n\nNote: If two employees share the same name, they will appear as separate entries.\n\nNote: In your answer, submit only full names. Do not include IDs in parentheses next to names - those appear only for your reference.\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -1554,7 +1554,7 @@
   },
   {
     "id": "task-linear-high-earners",
-    "prompt": "Which high earners have Linear issues?\n\nFind employees with at least one Linear issue who earn more than $100,000 (salary > 100000). Only count individual employees - skip generic team names like \"Product Team\" or \"Office Admin\".\n\nFORMAT: \"{id}: {name}, ${salary}, {issue_count} issue/issues\" separated by \"; \"\nSort by employee ID (A-Z).\nExample: \"EMP-10033F: Alice Wong, $125000, 3 issues; EMP-10077K: Bob Chen, $108000, 1 issue\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Which high earners have Linear issues?\n\nFind employees with at least one Linear issue who earn more than $100,000 (salary > 100000). Only count individual employees - skip generic team names like \"Product Team\" or \"Office Admin\".\n\nFORMAT: \"{id}: {name}, ${salary}, {issue_count} issue/issues\" separated by \"; \"\nSort by employee ID (A-Z).\nExample: \"EMP-10033F: Alice Wong, $125000, 3 issues; EMP-10077K: Bob Chen, $108000, 1 issue\"\n\nNote: Use singular \"issue\" when count is 1, plural \"issues\" otherwise.\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt'). Tables: employees, departments.\n\nStore with key 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -1582,7 +1582,7 @@
       "name": "local_evaluate",
       "arguments": {
         "exact_values": {
-          "answer": "EMP-10020K: Benjamin Blackwood, $190868, 5 issues; EMP-10043H: Daniel Dimitrov, $116017, 2 issues; EMP-10053R: Eleanor Edwards, $181663, 3 issues; EMP-10067F: Felix Fischer, $133964, 6 issues; EMP-10073L: Georgia Gonzalez, $135714, 3 issues; EMP-10110W: James Chen, $186782, 6 issues; EMP-10124K: James Chen, $154181, 3 issues; EMP-1024Z3: Ulrich Olsen, $166781, 1 issue; EMP-10252I: Victoria Schmidt, $144229, 1 issue; EMP-10513J: Lydia Morrison, $158099, 1 issue"
+          "answer": "EMP-10020K: Benjamin Blackwood, $190868, 5 issues; EMP-10043H: Daniel Dimitrov, $116017, 2 issues; EMP-10053R: Eleanor Edwards, $181663, 3 issues; EMP-10067F: Felix Fischer, $133964, 6 issues; EMP-10073L: Georgia Gonzalez, $135714, 3 issues; EMP-10110W: James Chen, $186782, 6 issues; EMP-10124K: James Chen, $154181, 3 issues; EMP-10243Z: Ulrich Olsen, $166781, 1 issue; EMP-10252I: Victoria Schmidt, $144229, 1 issue; EMP-10513J: Lydia Morrison, $158099, 1 issue"
         }
       }
     },
@@ -2189,7 +2189,7 @@
   },
   {
     "id": "task-library-avg-late-fine",
-    "prompt": "Calculate the average fine amount per late borrowing.\n\nFrom the activity log:\n1. Find all borrowing records marked as late with a fine > 0\n2. Calculate the average fine (sum of fines / number of late borrowings)\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'library_members', 'library_catalog', 'library_activity'.\nEach document explains its structure at the beginning.\n\nStore the average (round to 2 decimal places, round half up) as 'answer'.\nExample format: \"3.75\"\n\nSay 'Task completed.' when done.\n\n",
+    "prompt": "Calculate the average fine amount per late borrowing (sum of fines / number of late borrowings).\n\nDOCUMENT: Use 'library_activity' (read_document tool). The document explains its structure at the beginning.\n\nStore the average (round to 2 decimal places, round half up) as 'answer'.\nExample format: \"3.75\"\n\nSay 'Task completed.' when done.\n\n",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -2263,7 +2263,7 @@
   },
   {
     "id": "task-conf-multi-interest-count",
-    "prompt": "How many attendees appear in 5 or more different interest sections?\n\nCheck the attendee registry for all sections and count how many unique attendees are listed in at least 5 different sections.\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "The attendee registry document contains 15 sections. How many unique attendees appear in 5 or more different sections?\n\nDOCUMENTS (use read_document tool):\nThree documents are available: 'conference_schedule', 'conference_speakers', 'conference_attendees'.\nEach document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -2596,7 +2596,7 @@
   },
   {
     "id": "task-rc-next-chapter-content",
-    "prompt": "Find Isabella Graham's highest-rated favorite chapter. Then return the first complete paragraph of the NEXT chapter in that same book (e.g., if favorite is Chapter 5, return content from Chapter 6).\n\nIf tied ratings, use alphabetically first book title.\n\nEXTRACTION: Return ONLY actual prose text. Exclude chapter headings, [Illustration] tags, and any markup. Replace line breaks with single spaces to create one continuous string.\n\nEXAMPLE (not the real answer): \"The morning sun rose over the hills and cast long shadows across the valley. Birds sang in the trees as the travelers made their way along the dusty road.\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the paragraph as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find Isabella Graham's highest-rated favorite chapter. Then return the first complete paragraph of the NEXT chapter in that same book (e.g., if favorite is Chapter 5, return content from Chapter 6).\n\nIf tied ratings, use alphabetically first book title.\n\nEXTRACTION: Return ONLY actual prose text. Exclude chapter headings, [Illustration] tags, and any markup. Replace line breaks with single spaces to create one continuous string.\n\nEXAMPLE (not the real answer): \"The morning sun rose over the hills and cast long shadows across the valley. Birds sang in the trees as the travelers made their way along the dusty road.\"\n\nCHARACTERS: Normalize curly apostrophes (') to straight apostrophes (') when submitting the answer.\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the paragraph as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -2707,7 +2707,7 @@
   },
   {
     "id": "task-rc-count-all-group-members",
-    "prompt": "Count the total number of UNIQUE members who belong to at least one discussion group.\n\nA member may belong to multiple groups but should only be counted once.\nYou must examine ALL discussion groups in the document to get an accurate count.\n\nFORMAT: Just the number as a string (no units, no text)\n\nEXAMPLE (not the real answer): \"25\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Count the total number of UNIQUE members who belong to at least one discussion group.\n\nA member may belong to multiple groups but should only be counted once.\nYou must examine ALL discussion groups in the document to get an accurate count.\n\nFORMAT: Just the number as a string (no units, no text)\n\nEXAMPLE (not the real answer): \"25\"\n\nDOCUMENT: 'reading_club_discussions'. Each document explains its structure at the beginning.\n\nStore the count as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -2744,7 +2744,7 @@
   },
   {
     "id": "task-rc-cross-constitution",
-    "prompt": "Find the study circle called \"THE STRATEGISTS\" in the study_circles document. Note what day they meet.\n\nThen, from the us_constitution document, return the complete text of Article 1 Section 1.\n\nFORMAT:\n- Pattern: \"Meeting day: [DAY]. Constitution text: [EXACT TEXT]\"\n- For meeting day, use just the day name with capital first letter (e.g., \"Tuesday\" not \"Every Tuesday\" or \"tuesday\")\n- For Constitution text, join all lines into a single string with spaces (no line breaks)\n\nEXAMPLE (not the real answer): \"Meeting day: Monday. Constitution text: The first section of article one states that all powers shall be granted to the people.\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the formatted answer as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find the study circle called \"THE STRATEGISTS\" in the study_circles document. Note what day they meet.\n\nThen, from the us_constitution document, return the body text of Article 1 Section 1 (the content AFTER the \"Section 1.\" heading, not including the heading itself).\n\nFORMAT:\n- Pattern: \"Meeting day: [DAY]. Constitution text: [EXACT TEXT]\"\n- For meeting day, use just the day name with capital first letter (e.g., \"Tuesday\" not \"Every Tuesday\" or \"tuesday\")\n- For Constitution text, include only the body text (do NOT include \"Section 1.\" prefix), join all lines into a single string with spaces (no line breaks)\n\nEXAMPLE (not the real answer): \"Meeting day: Monday. Constitution text: The first section of article one states that all powers shall be granted to the people.\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the formatted answer as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -2855,7 +2855,7 @@
   },
   {
     "id": "task-rc-override-correction",
-    "prompt": "IMPORTANT CORRECTION: There is a data entry error in the reading_club_preferences document.\n\nMember RC-1000 (Penelope Harrison) is incorrectly listed with certain chapter preferences. \nThe CORRECT preferences for RC-1000 are:\n- Pride and Prejudice, Chapter 1: Rating 10/10\n- Moby Dick, Chapter 42: Rating 8/10\n\nUsing this CORRECTED information (not what the document says), find Penelope Harrison's highest-rated chapter and return the first sentence of that chapter from the corresponding book.\n\nNOTE: When extracting text from book documents, return ONLY the actual prose text. Exclude chapter headings, [Illustration] tags, and any other markup. A sentence ends at the first period followed by a space.\n\nFORMAT: Return only the sentence text as a single continuous string with no line breaks.\n\nEXAMPLE (not the real answer): \"The captain stood on the deck and surveyed the horizon with a keen eye.\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the first sentence as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "IMPORTANT CORRECTION: There is a data entry error in the reading_club_preferences document.\n\nMember RC-1000 (Penelope Harrison) is incorrectly listed with certain chapter preferences. \nThe CORRECT preferences for RC-1000 are:\n- Pride and Prejudice, Chapter 1: Rating 10/10\n- Moby Dick, Chapter 42: Rating 8/10\n\nUsing this CORRECTED information (not what the document says), find Penelope Harrison's highest-rated chapter and return the first sentence of that chapter from the corresponding book (include the trailing period in the sentence, when you are returning it).\n\nNOTE: When extracting text from book documents, return ONLY the actual prose text. Exclude chapter headings, [Illustration] tags, and any other markup. A sentence ends at the first period followed by a space.\n\nFORMAT: Return only the sentence text as a single continuous string with no line breaks.\n\nEXAMPLE (not the real answer): \"The captain stood on the deck and surveyed the horizon with a keen eye.\"\n\nCHARACTERS: Do not change the type of any symbols. For example, do not convert curly quotes to straight quotes.\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the first sentence as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -2966,7 +2966,7 @@
   },
   {
     "id": "task-rc-second-paragraph-moby",
-    "prompt": "Find Olivia Crawford (RC-1004) in reading_club_preferences and identify her highest-rated chapter.\nIf tied ratings, use alphabetically first book title (\"Moby Dick\" before \"Pride and Prejudice\").\n\nGo to that book and extract the SECOND paragraph of that chapter.\n\nPARAGRAPH DEFINITION:\n- A paragraph is a block of continuous prose text separated by blank lines\n- The book files have line breaks within paragraphs due to text wrapping\n- Replace ALL line breaks within the paragraph with single spaces\n- Return one continuous string with no line breaks\n\nWHAT TO SKIP:\n- Chapter headings (e.g., \"CHAPTER 1. Loomings.\")\n- [Illustration] markers and their captions\n- Any blank lines\n\nFORMAT: Return only the paragraph text as a single continuous string.\n\nEXAMPLE (not the real answer): \"The waves crashed against the shore as the sun began to set. Colors of orange and pink painted the sky in brilliant streaks.\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the paragraph as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find Olivia Crawford (RC-1004) in reading_club_preferences and identify her highest-rated chapter.\nIf tied ratings, use alphabetically first book title (\"Moby Dick\" before \"Pride and Prejudice\").\n\nGo to that book and extract the SECOND paragraph of that chapter.\n\nPARAGRAPH DEFINITION:\n- A paragraph is a block of continuous prose text separated by blank lines\n- The book files have line breaks within paragraphs due to text wrapping\n- Replace ALL line breaks within the paragraph with single spaces\n- Return one continuous string with no line breaks\n\nWHAT TO SKIP:\n- Chapter headings (e.g., \"CHAPTER 1. Loomings.\")\n- [Illustration] markers and their captions\n- Any blank lines\n\nFORMAT: Return only the paragraph text as a single continuous string.\n\nEXAMPLE (not the real answer): \"The waves crashed against the shore as the sun began to set. Colors of orange and pink painted the sky in brilliant streaks.\"\n\nCHARACTERS: Do not change the type of any symbols. For example, do not convert curly quotes to straight quotes.\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the paragraph as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -3003,7 +3003,7 @@
   },
   {
     "id": "task-rc-three-first-sentences",
-    "prompt": "Find the first 3 Silver tier members who have \"Fantasy\" as their favorite genre.\n\nORDERING: \"First 3\" means the 3 members with the lowest member IDs (e.g., RC-1003 before RC-1026).\n\nFor each, find their highest-rated chapter. Then extract ONLY THE FIRST SENTENCE of that chapter from the corresponding book.\n\nFIRST SENTENCE RULES:\n- Start reading after the chapter heading (skip \"CHAPTER X. Title\")\n- Skip any [Illustration] markers or blank lines\n- A sentence ends at the first period followed by a space or end of line\n- Replace line breaks within the sentence with single spaces\n- If tied ratings, use alphabetically first book, then lowest chapter number\n\nFORMAT: Return JSON object with keys \"member1\", \"member2\", \"member3\".\n\nEXAMPLE (not the real answer):\n{\"member1\": \"The storm clouds gathered on the horizon.\", \"member2\": \"Captain Ahab stood at the helm.\", \"member3\": \"War is a matter of vital importance.\"}\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the JSON object as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find the first 2 Silver tier members who have \"Fantasy\" as their favorite genre.\n\nORDERING: \"First 2\" means the 2 members with the lowest member IDs (e.g., RC-1003 before RC-1026).\n\nFor each, find their highest-rated chapter. Then extract ONLY THE FIRST SENTENCE of that chapter from the corresponding book.\n\nFIRST SENTENCE RULES:\n- Start reading after the chapter heading (skip \"CHAPTER X. Title\")\n- Skip any [Illustration] markers or blank lines\n- A sentence ends at the first period followed by a space or end of line\n- Replace line breaks within the sentence with single spaces\n- If tied ratings, use alphabetically first book, then lowest chapter number\n\nFORMAT: Return JSON object with keys \"member1\", \"member2\".\n\nEXAMPLE (not the real answer):\n{\"member1\": \"The storm clouds gathered on the horizon.\", \"member2\": \"Captain Ahab stood at the helm.\"}\n\nCHARACTERS: Do not change the type of any symbols. For example, do not convert curly quotes to straight quotes.\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the JSON object as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -3025,7 +3025,7 @@
       "name": "evaluate",
       "arguments": {
         "exact_values": {
-          "answer": "{\"member1\": \"Mr. Bennet was among the earliest of those who waited on Mr. Bingley.\", \"member2\": \"Returning to the Spouter-Inn from the Chapel, I found Queequeg there quite alone; he having left the Chapel before the benediction some time.\", \"member3\": \"In war, the general receives his commands from the sovereign, collects his army and concentrates his forces.\"}"
+          "answer": "{\"member1\": \"The morning of the third day dawned fair and fresh, and once more the solitary night-man at the fore-mast-head was relieved by crowds of the daylight look-outs, who dotted every mast and almost every spar.\", \"member2\": \"Entering that gable-ended Spouter-Inn, you found yourself in a wide, low, straggling entry with old-fashioned wainscots, reminding one of the bulwarks of some condemned old craft.\"}"
         }
       }
     },
@@ -3040,7 +3040,7 @@
   },
   {
     "id": "task-rc-art-of-war-sections",
-    "prompt": "Find Uma Bennett (RC-1005) in reading_club_preferences. Get her Art of War chapter preference.\n\nGo to art_of_war and extract sections 1, 2, and 3 (the numbered points) from that chapter.\n\nEXTRACTION RULES:\n- Include the section numbers (1., 2., 3.)\n- Include ONLY the main numbered text\n- SKIP all bracketed commentary like [Ts'ao Kung...] or [That is...]\n- Replace line breaks within each section with single spaces\n- Separate sections with \" | \" (space-pipe-space)\n\nFORMAT: \"1. First section text | 2. Second section text | 3. Third section text\"\n\nEXAMPLE (not the real answer): \"1. The art of war is of vital importance. | 2. It is a matter of life and death. | 3. Hence it is a subject of inquiry.\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the formatted sections as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find Uma Bennett (RC-1005) in reading_club_preferences. Get her Art of War chapter preference.\n\nGo to art_of_war and extract sections 1, 2, and 3 (the numbered points) from that chapter.\n\nEXTRACTION RULES:\n- Include the section numbers (1., 2., 3.)\n- Include ONLY the main numbered text\n- SKIP all bracketed commentary like [Ts'ao Kung...] or [That is...]\n- Replace line breaks within each section with single spaces\n- Separate sections with \" | \" (space-pipe-space)\n\nFORMAT: \"1. First section text | 2. Second section text | 3. Third section text\"\n\nEXAMPLE (not the real answer): \"1. The art of war is of vital importance. | 2. It is a matter of life and death. | 3. Hence it is a subject of inquiry.\"\n\nCHARACTERS: Do not change the type of any symbols. For example, do not convert curly quotes to straight quotes.\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the formatted sections as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -3077,7 +3077,7 @@
   },
   {
     "id": "task-rc-group-moby-sentences",
-    "prompt": "Find all members of the \"Chapter Chasers\" discussion group (DG-04).\n\nFor each member who has a Moby Dick chapter in their preferences:\n1. Find their highest-rated Moby Dick chapter\n2. Extract the first sentence of that chapter\n\nFIRST SENTENCE RULES:\n- Start after chapter heading \"CHAPTER X. Title.\"\n- Skip blank lines\n- Sentence ends at first period followed by space or newline\n- Replace line breaks within sentence with single spaces\n\nORDERING: Sort alphabetically by member name (A-Z).\n\nFORMAT:\n- Pattern: \"Full Name: First sentence text\"\n- Entries separated by \"; \" (semicolon space)\n- Only include members who have Moby Dick in their preferences\n\nEXAMPLE (not the real answer): \"Alice Smith: Call me Ishmael.; Bob Jones: The voyage had begun.\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find all members of the \"Chapter Chasers\" discussion group (DG-04).\n\nFor each member who has a Moby Dick chapter in their preferences:\n1. Find their highest-rated Moby Dick chapter\n2. Extract the first sentence of that chapter\n\nFIRST SENTENCE RULES:\n- Start after chapter heading \"CHAPTER X. Title.\"\n- Skip blank lines\n- Sentence ends at first period followed by space or newline\n- Replace line breaks within sentence with single spaces\n\nORDERING: Sort alphabetically by member name (A-Z).\n\nFORMAT:\n- Pattern: \"Full Name: First sentence text\"\n- Entries separated by \"; \" (semicolon space)\n- Only include members who have Moby Dick in their preferences\n\nEXAMPLE (not the real answer): \"Alice Smith: Call me Ishmael.; Bob Jones: The voyage had begun.\"\n\nCHARACTERS: Do not change the type of any symbols. For example, do not convert curly quotes to straight quotes.\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the list as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -3114,7 +3114,7 @@
   },
   {
     "id": "task-rc-full-pp-opening",
-    "prompt": "Find Olivia Lawson (RC-1035) in reading_club_preferences. Get her highest-rated Pride and Prejudice chapter.\n\nExtract the COMPLETE FIRST TWO PARAGRAPHS of that chapter from pride_and_prejudice.\n\nPARAGRAPH RULES:\n- A paragraph is continuous prose text separated by blank lines\n- Skip the chapter heading \"CHAPTER I.\" and any [Illustration] markers\n- Include only actual prose content\n- Replace line breaks WITHIN each paragraph with single spaces\n- Separate the two paragraphs with \" || \" (space-double-pipe-space)\n\nFORMAT: \"First paragraph text || Second paragraph text\"\n\nEXAMPLE (not the real answer): \"The morning dawned bright and clear over the estate. || Mr. Darcy walked through the gardens contemplating his future.\"\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the two paragraphs as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Find Olivia Lawson (RC-1035) in reading_club_preferences. Get her highest-rated Pride and Prejudice chapter.\n\nExtract the COMPLETE FIRST TWO PARAGRAPHS of that chapter from pride_and_prejudice.\n\nPARAGRAPH RULES:\n- A paragraph is continuous prose text separated by blank lines\n- Skip the chapter heading \"CHAPTER I.\" and any [Illustration] markers\n- Include only actual prose content\n- Replace line breaks WITHIN each paragraph with single spaces\n- Separate the two paragraphs with \" || \" (space-double-pipe-space)\n\nFORMAT: \"First paragraph text || Second paragraph text\"\n\nEXAMPLE (not the real answer): \"The morning dawned bright and clear over the estate. || Mr. Darcy walked through the gardens contemplating his future.\"\n\nCHARACTERS: Do not change the type of any symbols. For example, do not convert curly quotes to straight quotes.\n\nDOCUMENTS: 'reading_club_members', 'reading_club_discussions', 'reading_club_preferences', 'study_circles', 'us_constitution', 'moby_dick', 'pride_and_prejudice', 'art_of_war'. Each document explains its structure at the beginning.\n\nStore the two paragraphs as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -3299,7 +3299,7 @@
   },
   {
     "id": "task-plant-growth-comparison",
-    "prompt": "For plant PLT-FIC-008, compare its actual average weekly growth (Week 1 to Week 12) against the expected growth rate for its species.\n\nReturn the actual growth as a percentage of expected growth.\n\nFORMAT: Number rounded to nearest integer with % sign (e.g., \"95%\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the percentage as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "For plant PLT-FIC-008, compare its actual average weekly growth (starting from date in Week 1 till Week 12 date) against the expected growth rate for its species.\n\nReturn the actual growth as a percentage of expected growth.\n\nFORMAT: Number rounded to nearest integer with % sign (e.g., \"95%\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the percentage as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -3484,7 +3484,7 @@
   },
   {
     "id": "task-plant-caretaker-performance",
-    "prompt": "Evaluate James Chen's (CT-02) plant care performance by comparing his plants' actual weekly growth against expected species growth rates.\n\nReturn the average performance as a percentage (actual/expected).\n\nFORMAT: Number rounded to nearest integer with % sign (e.g., \"105%\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the percentage as 'answer'. Say 'Task completed.' when done.",
+    "prompt": "Evaluate James Chen's (CT-02) plant care performance by comparing his plants' actual weekly growth (starting point week 1 date and height, until the end) against expected species growth rates.\n\nReturn the average performance as a percentage (actual/expected), taking average over all his plants.\n\nFORMAT: Number rounded to nearest integer with % sign (e.g., \"112%\")\n\nDOCUMENTS: 'plant_registry', 'plant_growth_logs', 'plant_watering_logs', 'plant_nutrition_logs', 'environmental_data', 'care_formulas', 'species_reference'. Each document explains its structure at the beginning.\n\nStore the percentage as 'answer'. Say 'Task completed.' when done.",
     "mcp_config": {
       "local": {
         "command": "docker",
@@ -3519,5 +3519,4 @@
       ]
     }
   }
-
 ]
