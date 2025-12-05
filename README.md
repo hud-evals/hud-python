@@ -38,7 +38,7 @@ OSS RL environment + evals toolkit. Wrap software as environments, run benchmark
 pip install hud-python
 
 # CLI - RL pipeline, environment design
-uv tool install hud-python@latest
+uv tool install hud-python@latest --python 3.12
 # uv tool update-shell
 ```
 
@@ -298,7 +298,7 @@ Train with the new interactive `hud rl` flow:
 
 ```bash
 # Install CLI
-uv tool install hud-python@latest
+uv tool install hud-python@latest --python 3.12
 
 # Option A: Run directly from a HuggingFace dataset
 hud rl hud-evals/2048-basic
