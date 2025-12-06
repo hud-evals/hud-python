@@ -195,11 +195,6 @@ class EvalConfig(BaseModel):
                 hud_console.error("HUD_API_KEY is required for remote execution")
                 hud_console.info("Set it: hud set HUD_API_KEY=your-key-here")
                 raise typer.Exit(1)
-            if self.agent_type in (AgentType.GEMINI, AgentType.GEMINI_CUA):
-                hud_console.error(
-                    f"Remote execution is not supported for {self.agent_type.value} agent"
-                )
-                raise typer.Exit(1)
             return
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
