@@ -4,7 +4,7 @@ description: "Unified LLM inference service with built-in auth and credit manage
 icon: "server"
 ---
 
-HUD Gateway is an OpenAI-compatible inference service that provides a unified endpoint for accessing various LLM providers (Anthropic, OpenAI, Gemini, OpenRouter). It handles authentication, rate limiting, and credit management, allowing you to focus on building agents.
+HUD Gateway is an OpenAI-compatible inference service that provides a unified endpoint for accessing various LLM providers (Anthropic, OpenAI, Gemini, xAI, and more). It handles authentication, rate limiting, and credit management, allowing you to focus on building agents.
 
 ## Quick Start
 
@@ -22,7 +22,7 @@ client = AsyncOpenAI(
 )
 
 response = await client.chat.completions.create(
-    model="claude-sonnet-4-5-20250929",
+    model="claude-sonnet-4-5",
     messages=[{"role": "user", "content": "Hello!"}]
 )
 print(response.choices[0].message.content)
@@ -35,36 +35,62 @@ curl -X POST https://inference.hud.ai/chat/completions \
   -H "Authorization: Bearer <HUD_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "claude-sonnet-4-5-20250929",
+    "model": "claude-sonnet-4-5",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
 
 ## Supported Models
 
-HUD Gateway supports models from major providers.
-
-### OpenAI
-- `gpt-5-2025-08-07`
-- `gpt-5.1-2025-11-13`
-- `computer-use-preview` (Operator)
+HUD Gateway supports models from major providers. For an up-to-date list, visit [hud.ai/models](https://hud.ai/models).
 
 ### Anthropic
-- `claude-sonnet-4-5-20250929`
-- `claude-haiku-4-5-20251001`
-- `claude-opus-4-5-20251101`
-- `claude-opus-4-1-20250805`
+
+| Model | Routes |
+|-------|--------|
+| `claude-sonnet-4-5` | chat, messages |
+| `claude-haiku-4-5` | chat, messages |
+| `claude-opus-4-5` | chat, messages |
+| `claude-opus-4-1` | chat, messages |
+
+### OpenAI
+
+| Model | Routes |
+|-------|--------|
+| `gpt-5.1` | chat, responses |
+| `gpt-5-mini` | chat, responses |
+| `gpt-4o` | chat, responses |
+| `gpt-4o-mini` | chat, responses |
+| `operator` | responses |
+
+### Google Gemini
+
+| Model | Routes |
+|-------|--------|
+| `gemini-3-pro-preview` | chat |
+| `gemini-2.5-pro` | chat |
+| `gemini-2.5-computer-use-preview` | gemini |
 
 ### xAI
-- `grok-4-1-fast`
 
-### Google
-- `gemini-3-pro-preview`
-- `gemini-2.5-pro`
-- `gemini-2.5-flash`
+| Model | Routes |
+|-------|--------|
+| `grok-4-1-fast` | chat |
 
-### Via OpenRouter
-- `glm-4.5v`
+### Z-AI (via OpenRouter)
+
+| Model | Routes |
+|-------|--------|
+| `z-ai/glm-4.5v` | chat |
+
+## Routes
+
+Different models support different API routes:
+
+- **chat** - OpenAI Chat Completions API (`/chat/completions`)
+- **messages** - Anthropic Messages API (`/messages`)
+- **responses** - OpenAI Responses API (`/responses`)
+- **gemini** - Google Gemini native API
 
 ## Features
 
@@ -73,6 +99,24 @@ When using HUD Gateway with your HUD API key, usage is automatically deducted fr
 
 ### Rate Limits
 HUD Gateway automatically handles key rotation and rate limiting across our pool of enterprise keys.
+
+## Using with HUD Agents
+
+You can use HUD Gateway with `OpenAIChatAgent` for any model that supports the chat route:
+
+```python
+from hud.agents import OpenAIChatAgent
+from hud.settings import settings
+
+# Use any gateway model with OpenAIChatAgent
+agent = OpenAIChatAgent.create(
+    base_url=settings.hud_gateway_url,
+    api_key=settings.api_key,
+    checkpoint_name="grok-4-1-fast",  # or any chat-compatible model
+)
+
+result = await agent.run(task, max_steps=10)
+```
 
 ## Building Custom Agents with Tracing
 
@@ -84,4 +128,3 @@ This example demonstrates:
 - Automatic token usage and latency tracking
 
 View your traces on the [HUD Dashboard](https://hud.ai/home).
-

@@ -37,14 +37,14 @@ class ResponseAgent:
 
     def __init__(
         self,
-        model: str = "openai/gpt-4o",
+        model: str = "gpt-4o",
         system_prompt: str | None = None,
     ) -> None:
         """
         Initialize the ResponseAgent.
 
         Args:
-            model: The model to use via HUD inference gateway (default: "openai/gpt-4o-mini").
+            model: The model to use via HUD inference gateway (default: "gpt-4o").
                    Supports any model available through inference.hud.ai.
             system_prompt: Optional custom system prompt for determining responses.
         """
