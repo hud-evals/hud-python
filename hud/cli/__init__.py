@@ -394,6 +394,11 @@ def dev(
         "--watch",
         help="Additional directories to watch for changes (default: current directory)",
     ),
+    new: bool = typer.Option(
+        False,
+        "--new",
+        help="Create a new dev trace on hud.ai (opens in browser)",
+    ),
 ) -> None:
     """🔥 Development mode - run MCP server with hot-reload.
 
@@ -411,6 +416,7 @@ def dev(
 
     Examples:
         hud dev                      # Auto-detect in current directory
+        hud dev --new                # Create live dev trace on hud.ai
         hud dev controller           # Run specific module
         hud dev --inspector          # Launch MCP Inspector
         hud dev --interactive        # Launch interactive testing mode
@@ -434,6 +440,7 @@ def dev(
         watch,
         docker=docker,
         docker_args=docker_args,
+        new_trace=new,
     )
 
 
