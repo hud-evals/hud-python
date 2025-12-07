@@ -29,6 +29,7 @@ async def run_single_task(
     job_id: str | None = None,
     task_id: str | None = None,
     group_id: str | None = None,
+    trace_id: str | None = None,
     trace_name: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> Trace:
@@ -46,6 +47,7 @@ async def run_single_task(
         job_id: Job ID for telemetry grouping
         task_id: Task ID for telemetry
         group_id: Group ID for variance estimation runs
+        trace_id: Trace ID for telemetry (auto-generated if not provided)
         trace_name: Name for the trace (defaults to task prompt)
         metadata: Additional trace metadata
 
@@ -59,6 +61,7 @@ async def run_single_task(
         job_id=job_id,
         task_id=task_id,
         group_id=group_id,
+        trace_id=trace_id,
         attrs=metadata or {},
     ):
         agent = agent_type.cls.create(**(agent_params or {}))

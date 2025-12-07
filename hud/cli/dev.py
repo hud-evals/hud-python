@@ -28,8 +28,8 @@ def show_dev_server_info(
     inspector: bool,
     interactive: bool,
     env_dir: Path | None = None,
-    new: bool = False,
     docker_mode: bool = False,
+    telemetry: dict[str, Any] | None = None,
 ) -> str:
     """Show consistent server info for both Python and Docker modes.
 
@@ -67,6 +67,15 @@ def show_dev_server_info(
             hud_console.info(
                 f"{hud_console.sym.ITEM} Eval API: http://localhost:{port}/eval (POST)"
             )
+
+        # Show debugging URLs from telemetry
+        if telemetry:
+            if "live_url" in telemetry:
+                hud_console.info(f"{hud_console.sym.ITEM} Live URL: {telemetry['live_url']}")
+            if "vnc_url" in telemetry:
+                hud_console.info(f"{hud_console.sym.ITEM} VNC URL: {telemetry['vnc_url']}")
+            if "cdp_url" in telemetry:
+                hud_console.info(f"{hud_console.sym.ITEM} CDP URL: {telemetry['cdp_url']}")
 
         # Check for VNC (browser environment)
         if env_dir and (env_dir / "environment" / "server.py").exists():
@@ -138,7 +147,7 @@ async def run_mcp_module(
     verbose: bool,
     inspector: bool,
     interactive: bool,
-    new: bool = False,
+    new_trace: bool = False,
 ) -> None:
     """Run an MCP module directly."""
     # Check if this is a reload (not first run)
@@ -236,9 +245,9 @@ async def run_mcp_module(
 
     # Show server info only on first run
     if not is_reload:
-        # Try dynamic trace first for HTTP mode (only if --new)
+        # Try dynamic trace first for HTTP mode (only if --new flag is set)
         live_trace_url: str | None = None
-        if transport == "http" and new:
+        if transport == "http" and new_trace:
             try:
                 local_mcp_config: dict[str, dict[str, Any]] = {
                     "hud": {
@@ -254,11 +263,13 @@ async def run_mcp_module(
                     build_status=False,
                     environment_name=mcp_server.name or "mcp-server",
                 )
+            except SystemExit:
+                raise  # Let API key requirement exits through
             except Exception:  # noqa: S110
                 pass
 
         # Show UI using shared flow logic
-        if transport == "http" and live_trace_url and new:
+        if transport == "http" and live_trace_url:
             # Minimal UI with live trace
             from hud.cli.flows.dev import generate_cursor_deeplink, show_dev_ui
 
@@ -281,7 +292,6 @@ async def run_mcp_module(
                 inspector=inspector,
                 interactive=interactive,
                 env_dir=Path.cwd().parent if (Path.cwd().parent / "environment").exists() else None,
-                new=new,
             )
 
     # Check if there's an environment backend and remind user to start it (first run only)
@@ -401,7 +411,7 @@ def run_with_reload(
     verbose: bool,
     inspector: bool,
     interactive: bool,
-    new: bool = False,
+    new_trace: bool = False,
 ) -> None:
     """Run module with file watching and auto-reload."""
     try:
@@ -445,7 +455,7 @@ def run_with_reload(
         if verbose:
             cmd.append("--verbose")
 
-        if new:
+        if new_trace and is_first_run:
             cmd.append("--new")
 
         if verbose:
@@ -519,7 +529,7 @@ def run_docker_dev_server(
     inspector: bool,
     interactive: bool,
     docker_args: list[str],
-    new: bool = False,
+    new_trace: bool = False,
 ) -> None:
     """Run MCP server in Docker with volume mounts, expose via local HTTP proxy."""
     import atexit
@@ -631,6 +641,10 @@ def run_docker_dev_server(
         if "@" in image_name:
             image_name = image_name.split("@")[0]
 
+        # Extract debugging ports from lock file
+        debugging_ports = lock_data.get("environment", {}).get("debuggingPorts", [])
+        telemetry = lock_data.get("environment", {}).get("telemetry", {})
+
     except Exception as e:
         hud_console.error(f"Failed to read lock file: {e}")
         raise typer.Exit(1) from e
@@ -661,6 +675,12 @@ def run_docker_dev_server(
         "-e",
         "HUD_DEV=1",
     ]
+
+    # Add debugging port mappings if available
+    if debugging_ports:
+        hud_console.info(f"Exposing debugging ports: {', '.join(map(str, debugging_ports))}")
+        for port_num in debugging_ports:
+            base_args.extend(["-p", f"{port_num}:{port_num}"])
     combined_args = [*base_args, *docker_args] if docker_args else base_args
     docker_cmd = create_docker_run_command(
         image_name,
@@ -676,13 +696,13 @@ def run_docker_dev_server(
         }
     }
 
-    # Attempt to create dynamic trace early (before any UI)
+    # Attempt to create dynamic trace early (before any UI) if --new flag is set
     import asyncio as _asy
 
     from hud.cli.flows.dev import create_dynamic_trace, generate_cursor_deeplink, show_dev_ui
 
     live_trace_url: str | None = None
-    if new:
+    if new_trace:
         try:
             local_mcp_config: dict[str, dict[str, Any]] = {
                 "hud": {
@@ -697,11 +717,13 @@ def run_docker_dev_server(
                     environment_name=image_name,
                 )
             )
+        except SystemExit:
+            raise  # Let API key requirement exits through
         except Exception:  # noqa: S110
             pass
 
     # Show appropriate UI
-    if live_trace_url and new:
+    if live_trace_url:
         # Minimal UI with live trace
         cursor_deeplink = generate_cursor_deeplink(image_name, port)
         show_dev_ui(
@@ -724,8 +746,8 @@ def run_docker_dev_server(
             inspector=inspector,
             interactive=interactive,
             env_dir=env_dir,
-            new=new,
             docker_mode=True,
+            telemetry=telemetry,
         )
         hud_console.dim_info(
             "",
@@ -822,7 +844,7 @@ def run_mcp_dev_server(
     watch: list[str] | None,
     docker: bool = False,
     docker_args: list[str] | None = None,
-    new: bool = False,
+    new_trace: bool = False,
 ) -> None:
     """Run MCP development server with hot-reload."""
     docker_args = docker_args or []
@@ -847,12 +869,12 @@ def run_mcp_dev_server(
         hud_console.note("Detected Dockerfile - using Docker mode with volume mounts")
         hud_console.dim_info("Tip", "Use 'hud dev --help' to see all options")
         hud_console.info("")
-        run_docker_dev_server(port, verbose, inspector, interactive, docker_args, new)
+        run_docker_dev_server(port, verbose, inspector, interactive, docker_args, new_trace)
         return
 
     # Route to Docker mode if explicitly requested
     if docker:
-        run_docker_dev_server(port, verbose, inspector, interactive, docker_args, new)
+        run_docker_dev_server(port, verbose, inspector, interactive, docker_args, new_trace)
         return
 
     transport = "stdio" if stdio else "http"
@@ -896,6 +918,8 @@ def run_mcp_dev_server(
     is_child = os.environ.get("_HUD_DEV_CHILD") == "1"
 
     if is_child:
-        asyncio.run(run_mcp_module(module, transport, port, verbose, False, False, new))
+        asyncio.run(run_mcp_module(module, transport, port, verbose, False, False, new_trace))
     else:
-        run_with_reload(module, watch_paths, transport, port, verbose, inspector, interactive, new)
+        run_with_reload(
+            module, watch_paths, transport, port, verbose, inspector, interactive, new_trace
+        )

@@ -238,36 +238,23 @@ class TestRunDatasetExtended:
     @pytest.mark.asyncio
     async def test_run_dataset_exception_handling(self):
         """Test exception handling during task execution."""
-        # Track execution
-        executed_tasks = []
+        # Track execution by task index
+        executed_task_indices: set[int] = set()
 
-        # Create mock agent instances with proper run behavior
-        mock_agents = []
-        for i in range(3):
-            agent = AsyncMock()
-            if i == 1:  # Second task should fail
-                agent.run.side_effect = RuntimeError("Task 2 failed")
-            else:
-                agent.run.return_value = {"result": f"success-{i + 1}"}
-            mock_agents.append(agent)
-
-        # Create a mock agent class that returns our prepared instances
-        agent_creation_count = 0
-
+        # Create a mock agent class where behavior depends on the task being run
         def create_mock_agent(**kwargs):
-            nonlocal agent_creation_count
-            agent = mock_agents[agent_creation_count]
-            agent_creation_count += 1
+            agent = AsyncMock()
 
-            # Track when run is called
-            original_run = agent.run
+            async def mock_run(task, **run_kwargs):
+                # Extract task index from prompt "Task {i}"
+                task_idx = int(task.prompt.split()[-1])
+                executed_task_indices.add(task_idx)
 
-            async def tracked_run(*args, **kwargs):
-                executed_tasks.append(agent_creation_count - 1)
-                return await original_run(*args, **kwargs)
+                if task_idx == 1:  # Second task (index 1) should fail
+                    raise RuntimeError("Task 2 failed")
+                return {"result": f"success-{task_idx + 1}"}
 
-            agent.run = tracked_run
-
+            agent.run = mock_run
             return agent
 
         # Mock the agent class itself - runner calls agent_class.create()
@@ -294,8 +281,8 @@ class TestRunDatasetExtended:
             results = await run_dataset("error_run", tasks, mock_agent_class)  # type: ignore
 
             # All tasks should be attempted
-            assert len(executed_tasks) == 3
-            assert executed_tasks == [0, 1, 2]
+            assert len(executed_task_indices) == 3
+            assert executed_task_indices == {0, 1, 2}
 
             # First and third should succeed
             assert results[0] == {"result": "success-1"}

@@ -334,6 +334,7 @@ class TestBuildEnvironment:
     """Test the main build_environment function."""
 
     @mock.patch("hud.cli.build.build_docker_image")
+    @mock.patch("hud.cli.build.collect_runtime_metadata")
     @mock.patch("hud.cli.build.analyze_mcp_environment")
     @mock.patch("hud.cli.build.save_to_registry")
     @mock.patch("hud.cli.build.get_docker_image_id")
@@ -344,6 +345,7 @@ class TestBuildEnvironment:
         mock_get_id,
         mock_save_registry,
         mock_analyze,
+        mock_collect_runtime,
         mock_build_docker,
         tmp_path,
     ):
@@ -378,6 +380,12 @@ ENV API_KEY
             ],
         }
         mock_get_id.return_value = "sha256:abc123"
+        mock_collect_runtime.return_value = {
+            "python": "3.11.6",
+            "cuda": None,
+            "cudnn": None,
+            "pytorch": None,
+        }
 
         # Mock final rebuild
         mock_result = mock.Mock()
@@ -398,8 +406,75 @@ ENV API_KEY
         assert lock_data["images"]["full"] == "test-env:0.1.0@sha256:abc123"
         assert lock_data["images"]["local"] == "test-env:0.1.0"
         assert lock_data["build"]["version"] == "0.1.0"
+        assert lock_data["build"]["baseImage"] == "python:3.11"
+        assert lock_data["build"]["platform"] == "linux/amd64"
         assert lock_data["environment"]["toolCount"] == 2
+        assert lock_data["environment"]["runtime"]["python"] == "3.11.6"
         assert len(lock_data["tools"]) == 2
+
+    @mock.patch("hud.cli.build.build_docker_image")
+    @mock.patch("hud.cli.build.collect_runtime_metadata")
+    @mock.patch("hud.cli.build.analyze_mcp_environment")
+    @mock.patch("hud.cli.build.save_to_registry")
+    @mock.patch("hud.cli.build.get_docker_image_id")
+    @mock.patch("subprocess.run")
+    def test_build_environment_internal_tools(
+        self,
+        mock_run,
+        mock_get_id,
+        mock_save_registry,
+        mock_analyze,
+        mock_collect_runtime,
+        mock_build_docker,
+        tmp_path,
+    ):
+        """Dispatcher tools should include internalTools in lock, with count."""
+        env_dir = tmp_path / "env-int"
+        env_dir.mkdir()
+        (env_dir / "pyproject.toml").write_text("""
+[tool.hud]
+image = "test/env:dev"
+""")
+        dockerfile = env_dir / "Dockerfile"
+        dockerfile.write_text("""
+FROM python:3.11
+""")
+
+        mock_build_docker.return_value = True
+        mock_analyze.return_value = {
+            "success": True,
+            "toolCount": 1,
+            "internalToolCount": 2,
+            "initializeMs": 500,
+            "tools": [
+                {
+                    "name": "setup",
+                    "description": "setup dispatcher",
+                    "inputSchema": {"type": "object"},
+                    "internalTools": ["board", "seed"],
+                }
+            ],
+        }
+        mock_get_id.return_value = "sha256:fff111"
+        mock_collect_runtime.return_value = {
+            "python": "3.11.6",
+            "cuda": None,
+            "cudnn": None,
+            "pytorch": None,
+        }
+
+        mock_result = mock.Mock()
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+
+        build_environment(str(env_dir), "env-int:latest")
+
+        lock_file = env_dir / "hud.lock.yaml"
+        with open(lock_file) as f:
+            data = yaml.safe_load(f)
+        assert data["environment"]["internalToolCount"] == 2
+        assert data["tools"][0]["name"] == "setup"
+        assert data["tools"][0]["internalTools"] == ["board", "seed"]
 
     def test_build_environment_no_directory(self):
         """Test build when directory doesn't exist."""
