@@ -484,13 +484,16 @@ async def analyze_mcp_environment(
 
             normalized_tools.append(tool_entry)
 
-        return {
+        result = {
             "initializeMs": initialize_ms,
             "toolCount": len(tools_list),
             "internalToolCount": internal_total,
             "tools": normalized_tools,
             "success": True,
         }
+        if hub_map:
+            result["hub_tools"] = hub_map
+        return result
     except TimeoutError:
         from hud.shared.exceptions import HudException
 
