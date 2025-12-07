@@ -1,6 +1,6 @@
 [project]
 name = "hud-python"
-version = "0.4.69"
+version = "0.4.70"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
@@ -192,6 +192,7 @@ lint.ignore = [
     "ANN401", # Allow Any.
     "W293",   # Ignore blank line contains whitespace
     "PLC0415", # Allow function-local imports.
+    "S101", # Allow assert statements.
 ]
 
 [tool.ruff.lint.extend-per-file-ignores]

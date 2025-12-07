@@ -38,7 +38,7 @@ OSS RL environment + evals toolkit. Wrap software as environments, run benchmark
 pip install hud-python
 
 # CLI - RL pipeline, environment design
-uv tool install hud-python@latest
+uv tool install hud-python@latest --python 3.12
 # uv tool update-shell
 ```
 
@@ -298,7 +298,7 @@ Train with the new interactive `hud rl` flow:
 
 ```bash
 # Install CLI
-uv tool install hud-python@latest
+uv tool install hud-python@latest --python 3.12
 
 # Option A: Run directly from a HuggingFace dataset
 hud rl hud-evals/2048-basic
@@ -403,8 +403,8 @@ Thanks to all our contributors!
 
 ```bibtex
 @software{hud2025agentevalplatform,
-  author = {HUD and Jay Ram and Lorenss Martinsons and Parth Patel and Oskars Putans and Govind Pimpale and Mayank Singamreddy and Nguyen Nhat Minh},
-  title  = {HUD: An Evaluation Platform for Agents},
+  author = {HUD and Jay Ram and Lorenss Martinsons and Parth Patel and Govind Pimpale and Dylan Bowman and Jaideep and Nguyen Nhat Minh},
+  title  = {HUD: An Evaluation and RL Envrionments Platform for Agents},
   date   = {2025-04},
   url    = {https://github.com/hud-evals/hud-python},
   langid = {en}

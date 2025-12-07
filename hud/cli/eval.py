@@ -47,18 +47,27 @@ class AgentPreset:
 # Built-in presets for the interactive picker
 _AGENT_PRESETS: list[AgentPreset] = [
     # Native agents (use provider SDKs directly)
-    AgentPreset("Claude Sonnet 4.5", AgentType.CLAUDE, "claude-sonnet-4-5-20250929"),
+    AgentPreset("Claude Sonnet 4.5", AgentType.CLAUDE, "claude-sonnet-4-5"),
     AgentPreset("GPT-5", AgentType.OPENAI, "gpt-5"),
     AgentPreset("Operator (OpenAI Computer Use)", AgentType.OPERATOR, "computer-use-preview"),
+    AgentPreset("Gemini 3 Pro Preview", AgentType.GEMINI, "gemini-3-pro-preview"),
     AgentPreset(
-        "Gemini 2.5 Computer Use", AgentType.GEMINI, "gemini-2.5-computer-use-preview-10-2025"
+        "Gemini CUA (Gemini Computer Use)",
+        AgentType.GEMINI_CUA,
+        "gemini-2.5-computer-use-preview-10-2025",
     ),
-    # HUD Gateway presets
+    # HUD Gateway presets (models via HUD Inference API)
     AgentPreset(
-        "Grok 4.1 Fast",
+        "Grok 4-1 Fast (xAI)",
         AgentType.OPENAI_COMPATIBLE,
-        "xai/grok-4-1-fast-reasoning",
+        "grok-4-1-fast",
         {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "Grok"}},
+    ),
+    AgentPreset(
+        "GLM-4.5V (Z-AI)",
+        AgentType.OPENAI_COMPATIBLE,
+        "glm-4.5v",
+        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "GLM"}},
     ),
 ]
 
@@ -94,6 +103,11 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # temperature = 1.0
 # top_p = 0.95
 
+[gemini_cua]
+# temperature = 1.0
+# top_p = 0.95
+# excluded_predefined_functions = []
+
 [openai_compatible]
 # base_url = "http://localhost:8000/v1"
 # model_name = "my-model"
@@ -103,6 +117,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 _API_KEY_REQUIREMENTS: dict[AgentType, tuple[str, str]] = {
     AgentType.CLAUDE: ("anthropic_api_key", "ANTHROPIC_API_KEY"),
     AgentType.GEMINI: ("gemini_api_key", "GEMINI_API_KEY"),
+    AgentType.GEMINI_CUA: ("gemini_api_key", "GEMINI_API_KEY"),
     AgentType.OPENAI: ("openai_api_key", "OPENAI_API_KEY"),
     AgentType.OPERATOR: ("openai_api_key", "OPENAI_API_KEY"),
 }
@@ -180,11 +195,6 @@ class EvalConfig(BaseModel):
                 hud_console.error("HUD_API_KEY is required for remote execution")
                 hud_console.info("Set it: hud set HUD_API_KEY=your-key-here")
                 raise typer.Exit(1)
-            if self.agent_type in (AgentType.GEMINI, AgentType.OPERATOR):
-                hud_console.error(
-                    f"Remote execution is not supported for {self.agent_type.value} agent"
-                )
-                raise typer.Exit(1)
             return
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
@@ -229,6 +239,12 @@ class EvalConfig(BaseModel):
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
             base_url = kwargs.get("base_url", "")
+            model_name = kwargs.get("model_name", "")
+            if model_name:
+                kwargs["model_name"] = model_name
+            else:
+                kwargs["model_name"] = "OpenAI Compatible"
+
             if "api_key" not in kwargs:
                 # Use HUD API key for gateway, otherwise fall back to OpenAI API key
                 if settings.hud_gateway_url in base_url:
@@ -243,6 +259,7 @@ class EvalConfig(BaseModel):
             AgentType.OPENAI,
             AgentType.OPERATOR,
             AgentType.GEMINI,
+            AgentType.GEMINI_CUA,
         ):
             kwargs["validate_api_key"] = False
 
@@ -629,7 +646,8 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
 def eval_command(
     source: str | None = typer.Argument(None, help="HuggingFace dataset or task JSON file"),
     agent: str | None = typer.Argument(
-        None, help="Agent: claude, openai, operator, gemini, openai_compatible, integration_test"
+        None,
+        help="Agent: claude, openai, operator, gemini, gemini_cua, openai_compatible, integration_test",  # noqa: E501
     ),
     full: bool = typer.Option(False, "--full", help="Run entire dataset"),
     model: str | None = typer.Option(None, "--model", "-m", help="Model name"),

@@ -157,22 +157,26 @@ class ClaudeAgent(MCPAgent):
 
         messages_cached = self._add_prompt_caching(messages)
 
-        response = await self.anthropic_client.beta.messages.create(
+        # betas to use
+        betas = ["fine-grained-tool-streaming-2025-05-14"]
+        if self.has_computer_tool:
+            betas.append("computer-use-2025-01-24")
+
+        async with self.anthropic_client.beta.messages.stream(
             model=self.config.checkpoint_name,
             system=self.system_prompt if self.system_prompt is not None else Omit(),
             max_tokens=self.max_tokens,
             messages=messages_cached,
             tools=self.claude_tools,
             tool_choice={"type": "auto", "disable_parallel_tool_use": True},
-            betas=["computer-use-2025-01-24"] if self.has_computer_tool else Omit(),
-        )
-
-        messages.append(
-            BetaMessageParam(
-                role="assistant",
-                content=response.content,
-            )
-        )
+            betas=betas,
+        ) as stream:
+            # allow backend to accumulate message content
+            async for _ in stream:
+                pass
+            # get final message
+            response = await stream.get_final_message()
+            messages.append(BetaMessageParam(role="assistant", content=response.content))
 
         # Process response
         result = AgentResponse(content="", tool_calls=[], done=True)
