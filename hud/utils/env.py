@@ -8,6 +8,8 @@ from collections import defaultdict
 from string import Template
 from typing import TYPE_CHECKING, Any
 
+from hud.settings import settings
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -36,8 +38,6 @@ def resolve_env_vars(obj: Any, extra_mapping: Mapping[str, Any] | None = None) -
         >>> resolve_env_vars({"key": "${MY_VAR}"})
         {'key': 'resolved_value'}
     """
-    from hud.settings import settings
-
     # Build mapping from environment and settings
     mapping: dict[str, Any] = dict(os.environ)
     settings_dict = settings.model_dump()
