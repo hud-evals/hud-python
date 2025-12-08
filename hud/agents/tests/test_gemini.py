@@ -317,12 +317,12 @@ class TestGeminiCUAAgent:
         agent = GeminiCUAAgent.create(
             mcp_client=mock_mcp_client_gemini_computer,
             model_client=mock_gemini_client,
-            checkpoint_name="gemini-2.5-computer-use-preview-10-2025",
+            checkpoint_name="gemini-2.5-computer-use-preview",
             validate_api_key=False,  # Skip validation in tests
         )
 
         assert agent.model_name == "GeminiCUA"
-        assert agent.config.checkpoint_name == "gemini-2.5-computer-use-preview-10-2025"
+        assert agent.config.checkpoint_name == "gemini-2.5-computer-use-preview"
         assert agent.gemini_client == mock_gemini_client
 
     @pytest.mark.asyncio

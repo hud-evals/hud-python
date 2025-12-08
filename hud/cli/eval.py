@@ -54,7 +54,7 @@ _AGENT_PRESETS: list[AgentPreset] = [
     AgentPreset(
         "Gemini CUA (Gemini Computer Use)",
         AgentType.GEMINI_CUA,
-        "gemini-2.5-computer-use-preview-10-2025",
+        "gemini-2.5-computer-use-preview",
     ),
     # HUD Gateway presets (models via HUD Inference API)
     AgentPreset(
@@ -66,7 +66,7 @@ _AGENT_PRESETS: list[AgentPreset] = [
     AgentPreset(
         "GLM-4.5V (Z-AI)",
         AgentType.OPENAI_COMPATIBLE,
-        "glm-4.5v",
+        "z-ai/glm-4.5v",
         {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "GLM"}},
     ),
 ]
