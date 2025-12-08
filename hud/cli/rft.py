@@ -3,8 +3,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from hud.settings import settings
 from hud.utils.hud_console import HUDConsole
@@ -39,12 +41,86 @@ def _patch_mcp_urls_to_staging(tasks: list[dict[str, Any]]) -> list[dict[str, An
     return [patch_value(task) for task in tasks]
 
 
+def _fetch_models() -> list[dict[str, Any]]:
+    """Fetch trainable models from the HUD API for the user's team."""
+    url = f"{settings.hud_api_url}/models/"
+    headers = {
+        "Authorization": f"Bearer {settings.api_key}",
+        "x-api-key": settings.api_key or "",
+    }
+    params = {"team_only": "true", "limit": 200}
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.get(url, headers=headers, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("models", [])
+    except httpx.HTTPStatusError as e:
+        hud_console.error(f"Failed to fetch models: {e.response.status_code}")
+        if e.response.status_code == 401:
+            hud_console.hint("Check that your HUD_API_KEY is valid")
+        raise typer.Exit(1) from e
+    except httpx.RequestError as e:
+        hud_console.error(f"Connection error while fetching models: {e}")
+        raise typer.Exit(1) from e
+
+
+def _select_model(models: list[dict[str, Any]]) -> dict[str, Any]:
+    """Display models and let user select one for training."""
+    # Filter to only trainable models that are ready
+    trainable_models = [
+        m
+        for m in models
+        if m.get("is_trainable", False)
+        and m.get("status") == "ready"
+        and not m.get("public", False)
+        and m.get("model_name") is not None
+    ]
+
+    if not trainable_models:
+        hud_console.error("No trainable models found in your team.")
+        hud_console.hint("Fork a trainable model at https://api.hud.so/models to start training.")
+        raise typer.Exit(1)
+
+    # Display models in a table
+    hud_console.section_title("Available Trainable Models")
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Name", style="bold")
+    table.add_column("Status")
+    table.add_column("Provider")
+
+    for i, model in enumerate(trainable_models, 1):
+        provider_name = (
+            model.get("provider", {}).get("name", "unknown") if model.get("provider") else "unknown"
+        )
+        table.add_row(
+            str(i),
+            model.get("name", "unnamed"),
+            model.get("status", "unknown"),
+            provider_name,
+        )
+
+    hud_console.console.print(table)
+    hud_console.print("")
+
+    # Build choices for selection
+    choices = [
+        {"name": f"{m.get('name', 'unnamed')} ({m.get('base_model', 'unknown')})", "value": m}
+        for m in trainable_models
+    ]
+
+    selected: dict[str, Any] = hud_console.select("Select a model to train:", choices)  # type: ignore[assignment]
+    return selected
+
+
 def rft_command(
     tasks_file: str,
-    provider: str = "openai",
     reasoning_effort: str = "medium",
     verbose: bool = False,
     yes: bool = False,
+    model_id: str | None = None,
 ) -> None:
     """
     Run Reinforcement Fine-Tuning (RFT) via the HUD RL service.
@@ -56,6 +132,47 @@ def rft_command(
         hud_console.error("HUD_API_KEY not found in environment.")
         hud_console.info("Run 'hud set HUD_API_KEY=...' or export it.")
         raise typer.Exit(1)
+
+    # Model selection
+    selected_model_id: str
+    if model_id:
+        # Use provided model_id directly
+        selected_model_id = model_id
+        hud_console.info(f"Using provided model ID: {selected_model_id}")
+    else:
+        # Fetch and let user select a model
+        hud_console.section_title("Fetching available models")
+        hud_console.info("Loading models from your team...")
+        models = _fetch_models()
+
+        if yes:
+            # Auto-select first trainable model in non-interactive mode
+            trainable_models = [
+                m
+                for m in models
+                if m.get("is_trainable", False)
+                and m.get("status") == "ready"
+                and not m.get("public", False)
+                and m.get("model_name") is not None
+            ]
+            if not trainable_models:
+                hud_console.error("No trainable models found in your team.")
+                hud_console.hint(
+                    "Fork a trainable model at https://api.hud.so/models to start training."
+                )
+                raise typer.Exit(1)
+            selected_model = trainable_models[0]
+            hud_console.info(
+                f"Auto-selected first trainable model (--yes mode): "
+                f"{selected_model.get('name', 'unnamed')}"
+            )
+        else:
+            selected_model = _select_model(models)
+
+        selected_model_id = selected_model["id"]
+        hud_console.success(
+            f"Selected model: {selected_model.get('name', 'unnamed')} (ID: {selected_model_id})"
+        )
 
     # Preflight check: Convert tasks to remote if needed
     hud_console.section_title("Preparing tasks for remote training")
@@ -153,16 +270,13 @@ def rft_command(
 
     # Prepare payload
     payload = {
-        "provider": provider,
-        "base_model": "o4-mini-2025-04-16",
+        "model_id": selected_model_id,
         "dataset": {"tasks": tasks},
         "config": {"parameters": {"reasoning_effort": reasoning_effort}},
     }
 
     # Send request to service
     hud_console.section_title("Submitting RFT job")
-
-    import httpx
 
     base_url = settings.hud_rl_url
     url = f"{base_url}/training/jobs"

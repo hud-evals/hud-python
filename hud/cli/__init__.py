@@ -560,10 +560,11 @@ def rft_run(
         ...,
         help="Path to tasks file (JSON/JSONL)",
     ),
-    provider: str = typer.Option(
-        "openai",
-        "--provider",
-        help="Provider to use (e.g., openai)",
+    model_id: str | None = typer.Option(
+        None,
+        "--model-id",
+        "-m",
+        help="Model ID to train (skip interactive selection)",
     ),
     reasoning_effort: str = typer.Option(
         "medium",
@@ -586,10 +587,10 @@ def rft_run(
     """Launch an RFT training job."""
     rft_command(
         tasks_file=tasks_file,
-        provider=provider,
         reasoning_effort=reasoning_effort,
         verbose=verbose,
         yes=yes,
+        model_id=model_id,
     )
 
 
