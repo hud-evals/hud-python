@@ -144,7 +144,31 @@ def rft_command(
         hud_console.section_title("Fetching available models")
         hud_console.info("Loading models from your team...")
         models = _fetch_models()
-        selected_model = _select_model(models)
+
+        if yes:
+            # Auto-select first trainable model in non-interactive mode
+            trainable_models = [
+                m
+                for m in models
+                if m.get("is_trainable", False)
+                and m.get("status") == "ready"
+                and not m.get("public", False)
+                and m.get("model_name") is not None
+            ]
+            if not trainable_models:
+                hud_console.error("No trainable models found in your team.")
+                hud_console.hint(
+                    "Fork a trainable model at https://api.hud.so/models to start training."
+                )
+                raise typer.Exit(1)
+            selected_model = trainable_models[0]
+            hud_console.info(
+                f"Auto-selected first trainable model (--yes mode): "
+                f"{selected_model.get('name', 'unnamed')}"
+            )
+        else:
+            selected_model = _select_model(models)
+
         selected_model_id = selected_model["id"]
         hud_console.success(
             f"Selected model: {selected_model.get('name', 'unnamed')} (ID: {selected_model_id})"
