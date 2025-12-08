@@ -1,0 +1,27 @@
+[project]
+name = "hud-remote-browser"
+version = "0.1.0"
+description = "HUD Remote Browser Controller with MCP tools for cloud browser providers"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "hud-python @ git+https://github.com/hud-evals/hud-python.git@l/text-2048",
+    "pyautogui",
+    "playwright",
+    "httpx",
+    "typer",
+    "google-api-python-client",
+    "google-auth",
+]
+
+[project.scripts]
+hud-remote-browser = "hud_controller.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hud_controller"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
