@@ -28,11 +28,7 @@ def _is_hud_server(url: str) -> bool:
     if not url:
         return False
     url_lower = url.lower()
-    return (
-        "mcp.hud." in url_lower
-        or ".hud.ai" in url_lower
-        or ".hud.so" in url_lower
-    )
+    return "mcp.hud." in url_lower or ".hud.ai" in url_lower or ".hud.so" in url_lower
 
 
 def patch_mcp_config(mcp_config: dict[str, dict[str, Any]], patch: MCPConfigPatch) -> None:
