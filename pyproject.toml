@@ -44,6 +44,7 @@ dependencies = [
     "openai>=2.8.1",
     "google-genai",
     "tornado>=6.5.2",
+    "scarf-sdk>=0.1.0",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
