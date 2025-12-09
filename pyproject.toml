@@ -127,18 +127,6 @@ agents = [
     "tornado>=6.5.2",
 ]
 
-# RL training dependencies
-rl = [
-    "hud-python[agents]",  # RL needs agent dependencies
-    "peft>=0.17.1",
-    "vllm==0.10.1.1",
-    "numpy>=1.24.0",  # Required for RL training
-    "bitsandbytes>=0.41.0 ; sys_platform == 'linux'",  # For 8-bit optimizers (Linux only)
-    "liger-kernel>=0.5.0 ; sys_platform == 'linux'",  # Optimized Triton kernels for LLM training (Linux only)
-    # Note: flash-attn is recommended but optional
-    # Install separately with: uv pip install flash-attn --no-build-isolation
-]
-
 # Development dependencies - includes testing, linting, and automation tools
 dev = [
     "hud-python[agents]",  # Include agents for dev
@@ -229,8 +217,6 @@ source = ["hud"]
 omit = [
     "*/tests/*",
     "*/examples/*",
-    "hud/rl/*",
-    "hud/cli/rl/*",
     "hud/misc/*",
 ]
 
@@ -252,8 +238,6 @@ fail_under = 58
 omit = [
     "*/tests/*",
     "*/examples/*",
-    "hud/rl/*",
-    "hud/cli/rl/*",
     "hud/misc/*",
 ]
 
