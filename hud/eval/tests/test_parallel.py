@@ -179,7 +179,7 @@ class TestRunParallelEvals:
         body_source = "env.reward = env.index * 10"
         captured_locals: dict[str, object] = {}
 
-        results = await run_parallel_evals(mock_ctxs, body_source, captured_locals)
+        results = await run_parallel_evals(mock_ctxs, body_source, captured_locals, "env")
 
         assert len(results) == 3
         # Each context should have had __aenter__ and __aexit__ called
@@ -199,7 +199,7 @@ class TestRunParallelEvals:
         body_source = "raise ValueError('test error')"
         captured_locals: dict[str, object] = {}
 
-        results = await run_parallel_evals([ctx], body_source, captured_locals)
+        results = await run_parallel_evals([ctx], body_source, captured_locals, "env")
 
         assert len(results) == 1
         # Error should be captured, not raised
@@ -218,7 +218,7 @@ class TestRunParallelEvals:
         body_source = "env.result = my_value * 2"
         captured_locals = {"my_value": 21}
 
-        results = await run_parallel_evals([ctx], body_source, captured_locals)
+        results = await run_parallel_evals([ctx], body_source, captured_locals, "env")
 
         assert len(results) == 1
 

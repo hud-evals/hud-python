@@ -50,6 +50,7 @@
           {
             "group": "SDK Reference",
             "pages": [
+              "reference/eval",
               "reference/tools",
               "reference/agents",
               "reference/types",
@@ -62,13 +63,6 @@
             "pages": [
               "build-environments/index",
               "build-environments/spec"
-            ]
-          },
-          {
-            "group": "Training (RL)",
-            "pages": [
-              "train-agents/quickstart",
-              "train-agents/tasks"
             ]
           },
           {
@@ -103,7 +97,6 @@
               "reference/cli/debug",
               "reference/cli/run",
               "reference/cli/eval",
-              "reference/cli/rl",
               "reference/cli/rft",
               "reference/cli/misc"
             ]

@@ -1,6 +1,6 @@
 ---
 title: "Introduction"
-description: "OSS RL environment + evals toolkit."
+description: "OSS environment + evals toolkit for AI agents."
 icon: "book"
 ---
 
@@ -8,7 +8,7 @@ icon: "book"
 **Version 0.4.73** - Latest stable release
 </Note>
 
-<CardGroup cols={3}>
+<CardGroup cols={2}>
 <Card title="I want to evaluate agents" icon="robot" href="/evaluate-agents/create-agents">
   Test Claude, Operator, or custom agents on benchmarks like SheetBench and OSWorld
 </Card>
@@ -16,15 +16,11 @@ icon: "book"
 <Card title="I want to build environments" icon="cube" href="/build-environments">
   Wrap any software in dockerized MCP for scalable and generalizable agent evaluation
 </Card>
-
-<Card title="I want to train agents" icon="brain" href="/train-agents/quickstart">
-  Use reinforcement learning and GRPO on evaluations to improve agent performance
-</Card>
 </CardGroup>
 
 ## What is HUD?
 
-HUD connects AI agents to software environments using the Model Context Protocol (MCP). Whether you're evaluating existing agents, building new environments, or training models with RL, HUD provides the infrastructure.
+HUD connects AI agents to software environments using the Model Context Protocol (MCP). Whether you're evaluating existing agents or building new environments, HUD provides the infrastructure.
 
 ```mermaid
 graph LR
@@ -49,7 +45,7 @@ graph LR
 - **⚡ HUD Gateway**: Unified inference API for all LLMs
 - **🚀 Production-ready**: From local Docker to cloud scale
 - **🎯 Built-in benchmarks**: OSWorld-Verified, SheetBench-50, and more
- - **🔧 CLI tools**: Create, develop, run, and train with `hud init`, `hud dev`, `hud run`, `hud eval`, `hud rl`
+- **🔧 CLI tools**: Create, develop, and run with `hud init`, `hud dev`, `hud run`, `hud eval`
 
 <CardGroup cols={2}>
 <Card title="3-minute quickstart" icon="bolt" href="/quickstart">

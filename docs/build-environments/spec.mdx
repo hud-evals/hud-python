@@ -24,7 +24,7 @@ graph TD
 - No non‑MCP output on stdout (all logging to stderr).
 - No required file layout, framework, or endpoints.
 
-Recommended (for HUD RL/evals): provide tools named `setup` and `evaluate`.
+Recommended (for HUD evals): provide tools named `setup` and `evaluate`.
 
 ## Make it runnable remotely (mcp.hud.ai)
 
@@ -143,7 +143,7 @@ The same structure is used by `hud init`’s template and by programmatic tasks.
 ]
 ```
 
-Switching this file to remote is as simple as replacing the `mcp_config` with the `hud` section shown above (or using `hud rl`, which will help convert it automatically).
+Switching this file to remote is as simple as replacing the `mcp_config` with the `hud` section shown above (or using `hud convert`, which will help convert it automatically).
 
 Run tasks with either the CLI or an agent:
 

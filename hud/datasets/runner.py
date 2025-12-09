@@ -56,20 +56,24 @@ async def run_single_task(
     Returns:
         Trace result from agent execution
     """
-    from hud.telemetry import async_trace
+    from hud.eval.context import EvalContext
 
     name = trace_name or task.prompt or task_id or "task"
 
-    async with async_trace(
-        name,
-        job_id=job_id,
-        task_id=task_id,
-        group_id=group_id,
+    ctx = EvalContext.from_task(
+        task=task,
+        name=name,
         trace_id=trace_id,
-        attrs=metadata or {},
-    ):
+        job_id=job_id,
+        group_id=group_id,
+    )
+
+    async with ctx:
         agent = agent_type.cls.create(**(agent_params or {}))
-        return await agent.run(task, max_steps=max_steps)
+        result = await agent.run(task, max_steps=max_steps)
+        # Transfer reward to context for tracking
+        ctx.reward = result.reward
+        return result
 
 
 async def run_tasks(
@@ -119,8 +123,7 @@ async def run_tasks(
         # Submit for remote execution
         await run_tasks(tasks, AgentType.CLAUDE, remote=True)
     """
-    import hud
-    from hud.telemetry import async_job
+    from hud.eval.display import print_complete, print_link
     from hud.utils.hud_console import HUDConsole
 
     job_metadata = metadata or {}
@@ -131,9 +134,11 @@ async def run_tasks(
         job_metadata["total_episodes"] = len(tasks) * group_size
 
     if remote:
+        from hud.telemetry.job import create_job
+
         hud_console = HUDConsole()
 
-        job = hud.create_job(name, metadata=job_metadata)
+        job = create_job(name, metadata=job_metadata)
         job.update_status_sync("created")
 
         await submit_rollouts(
@@ -149,13 +154,102 @@ async def run_tasks(
         hud_console.info(f"Monitor progress at: https://hud.ai/jobs/{job.id}")
         return []
 
-    # Local execution
+    # Local execution using new eval system
     agent_class = agent_type.cls
+    job_id = str(uuid.uuid4())
+    job_url = f"https://hud.ai/jobs/{job_id}"
 
-    async with async_job(name, metadata=job_metadata) as job_obj:
-        return await _run_tasks(
-            tasks, agent_class, agent_params, max_concurrent, max_steps, group_size, job_obj
+    # Print job URL
+    print_link(job_url, f"🚀 Job '{name}'")
+
+    error_occurred = False
+    try:
+        results = await _run_tasks_with_eval(
+            tasks=tasks,
+            agent_class=agent_class,
+            agent_params=agent_params,
+            max_concurrent=max_concurrent,
+            max_steps=max_steps,
+            group_size=group_size,
+            job_id=job_id,
         )
+        error_occurred = any(r is None or (isinstance(r, Trace) and r.isError) for r in results)
+        return results
+    except Exception:
+        error_occurred = True
+        raise
+    finally:
+        print_complete(job_url, name, error=error_occurred)
+
+
+async def _run_tasks_with_eval(
+    tasks: list[Task],
+    agent_class: type[MCPAgent],
+    agent_params: dict[str, Any] | None,
+    max_concurrent: int,
+    max_steps: int,
+    group_size: int,
+    job_id: str,
+) -> list[Any]:
+    """Run tasks using the new EvalContext system."""
+    from hud.eval.context import EvalContext
+
+    sem = asyncio.Semaphore(max_concurrent)
+    params = agent_params or {}
+
+    # Generate group IDs for each task (used for telemetry grouping)
+    group_ids = {i: str(uuid.uuid4()) for i in range(len(tasks))}
+
+    # Expand tasks: each task runs group_size times
+    expanded: list[tuple[int, int, Task]] = []  # (flat_idx, task_idx, task)
+    for task_idx, task in enumerate(tasks):
+        for _ in range(group_size):
+            expanded.append((len(expanded), task_idx, task))
+
+    traces: list[Trace | None] = [None] * len(expanded)
+
+    async def worker(flat_idx: int, task_idx: int, run_idx: int, task: Task) -> None:
+        async with sem:
+            try:
+                base_task_id = str(task.id) if task.id is not None else f"task_{task_idx}"
+                trace_name = task.prompt or base_task_id
+
+                # Create EvalContext for this task run
+                ctx = EvalContext.from_task(
+                    task=task,
+                    name=trace_name,
+                    job_id=job_id,
+                    group_id=group_ids[task_idx] if group_size > 1 else None,
+                )
+                ctx._suppress_link = True  # Don't print individual trace links
+
+                async with ctx:
+                    agent = agent_class.create(**params)
+                    result = await agent.run(task, max_steps=max_steps)
+                    ctx.reward = result.reward
+                    traces[flat_idx] = result
+
+            except Exception as e:
+                if group_size == 1:
+                    logger.exception("Task %s failed: %s", task_idx, e)
+                    traces[flat_idx] = None
+                else:
+                    logger.warning("Episode %s failed: %s", flat_idx, e)
+                    traces[flat_idx] = Trace(isError=True, content=str(e), reward=0.0, done=True)
+
+    await asyncio.gather(
+        *[
+            worker(flat_idx, task_idx, flat_idx % group_size, task)
+            for flat_idx, task_idx, task in expanded
+        ],
+        return_exceptions=True,
+    )
+
+    # Return format depends on group_size
+    if group_size == 1:
+        return list(traces)
+    else:
+        return calculate_group_stats(tasks, traces, group_size, group_ids)
 
 
 async def run_dataset(
@@ -196,7 +290,7 @@ async def run_dataset(
     from datasets import Dataset as HFDataset
     from datasets import load_dataset
 
-    from hud.telemetry import async_job
+    from hud.eval.display import print_complete, print_link
 
     warnings.warn(
         "run_dataset() is deprecated. Use run_tasks() instead for more flexibility.",
@@ -236,75 +330,27 @@ async def run_dataset(
         job_metadata["group_size"] = group_size
         job_metadata["total_episodes"] = len(tasks) * group_size
 
-    async with async_job(name, metadata=job_metadata) as job_obj:
-        return await _run_tasks(
-            tasks, agent_class, agent_config, max_concurrent, max_steps, group_size, job_obj
+    # Use new eval system
+    job_id = str(uuid.uuid4())
+    job_url = f"https://hud.ai/jobs/{job_id}"
+
+    print_link(job_url, f"🚀 Job '{name}'")
+
+    error_occurred = False
+    try:
+        results = await _run_tasks_with_eval(
+            tasks=tasks,
+            agent_class=agent_class,
+            agent_params=agent_config,
+            max_concurrent=max_concurrent,
+            max_steps=max_steps,
+            group_size=group_size,
+            job_id=job_id,
         )
-
-
-async def _run_tasks(
-    tasks: list[Task],
-    agent_class: type[MCPAgent],
-    agent_params: dict[str, Any] | None,
-    max_concurrent: int,
-    max_steps: int,
-    group_size: int,
-    job_obj: Any,
-) -> list[Any]:
-    from hud.telemetry import async_trace
-
-    sem = asyncio.Semaphore(max_concurrent)
-    params = agent_params or {}
-
-    # Generate group IDs for each task (used for telemetry grouping)
-    group_ids = {i: str(uuid.uuid4()) for i in range(len(tasks))}
-
-    # Expand tasks: each task runs group_size times
-    expanded: list[tuple[int, int, Task]] = []  # (flat_idx, task_idx, task)
-    for task_idx, task in enumerate(tasks):
-        for _ in range(group_size):
-            expanded.append((len(expanded), task_idx, task))
-
-    traces: list[Trace | None] = [None] * len(expanded)
-
-    async def worker(flat_idx: int, task_idx: int, run_idx: int, task: Task) -> None:
-        async with sem:
-            try:
-                base_task_id = str(task.id) if task.id is not None else f"task_{task_idx}"
-                trace_name = task.prompt or base_task_id
-
-                if group_size == 1:
-                    async with async_trace(trace_name, job_id=job_obj.id, task_id=base_task_id):
-                        agent = agent_class.create(**params)
-                        traces[flat_idx] = await agent.run(task, max_steps=max_steps)
-                else:
-                    task_id_with_run = f"{base_task_id}_{run_idx}"
-                    async with async_trace(
-                        trace_name,
-                        job_id=job_obj.id,
-                        task_id=task_id_with_run,
-                        group_id=group_ids[task_idx],
-                    ):
-                        agent = agent_class.create(**params)
-                        traces[flat_idx] = await agent.run(task, max_steps=max_steps)
-            except Exception as e:
-                if group_size == 1:
-                    logger.exception("Task %s failed: %s", task_idx, e)
-                    traces[flat_idx] = None
-                else:
-                    logger.warning("Episode %s failed: %s", flat_idx, e)
-                    traces[flat_idx] = Trace(isError=True, content=str(e), reward=0.0, done=True)
-
-    await asyncio.gather(
-        *[
-            worker(flat_idx, task_idx, flat_idx % group_size, task)
-            for flat_idx, task_idx, task in expanded
-        ],
-        return_exceptions=True,
-    )
-
-    # Return format depends on group_size
-    if group_size == 1:
-        return list(traces)
-    else:
-        return calculate_group_stats(tasks, traces, group_size, group_ids)
+        error_occurred = any(r is None or (isinstance(r, Trace) and r.isError) for r in results)
+        return results
+    except Exception:
+        error_occurred = True
+        raise
+    finally:
+        print_complete(job_url, name, error=error_occurred)

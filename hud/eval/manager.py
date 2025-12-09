@@ -29,6 +29,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Type alias for task source: can be slug strings or Task objects
+TaskSource = "str | list[str] | Task | list[Task] | None"
+
+
 def _parse_slug(slug: str) -> tuple[str, str | None]:
     """Parse a task slug into (base_slug, index_or_wildcard).
 
@@ -47,29 +51,47 @@ def _parse_slug(slug: str) -> tuple[str, str | None]:
     return slug, None
 
 
-def _get_eval_name(slugs: str | list[str] | None) -> str:
-    """Extract a nice name from slugs for job display.
+def _get_eval_name(
+    source: str | list[str] | None = None,
+    tasks: list[Task] | None = None,
+) -> str:
+    """Extract a nice name for job display.
 
     Args:
-        slugs: Single slug or list of slugs
+        source: Single slug or list of slugs (if string-based)
+        tasks: List of Task objects (if using direct tasks)
 
     Returns:
-        Name like "evalset" or "eval" if no slugs
+        Name like "evalset", task ID, or "eval" if no source
     """
-    if slugs is None:
-        return "eval"
+    # If we have tasks with IDs, use first task ID
+    if tasks:
+        first_task = tasks[0]
+        if first_task.id:
+            # Extract name from task ID (might be "evalset/task_name")
+            task_id = str(first_task.id)
+            if "/" in task_id:
+                return task_id.rsplit("/", 1)[1]
+            return task_id
+        # Fall back to prompt excerpt
+        if first_task.prompt:
+            return first_task.prompt[:30].strip()
 
-    # Get the first slug
-    first_slug = slugs if isinstance(slugs, str) else slugs[0]
+    # If we have string slugs
+    if source is not None:
+        # Get the first slug
+        first_slug = source if isinstance(source, str) else source[0]
 
-    # Remove index/wildcard suffix (":1" or ":*")
-    base_slug, _ = _parse_slug(first_slug)
+        # Remove index/wildcard suffix (":1" or ":*")
+        base_slug, _ = _parse_slug(first_slug)
 
-    # Extract the evalset name (part after last "/")
-    if "/" in base_slug:
-        return base_slug.rsplit("/", 1)[1]
+        # Extract the evalset name (part after last "/")
+        if "/" in base_slug:
+            return base_slug.rsplit("/", 1)[1]
 
-    return base_slug
+        return base_slug
+
+    return "eval"
 
 
 def _load_tasks_from_slugs(slugs: str | list[str]) -> list[Task]:
@@ -146,7 +168,7 @@ def _load_tasks_from_slugs(slugs: str | list[str]) -> list[Task]:
 
 @asynccontextmanager
 async def run_eval(
-    slugs: str | list[str] | None = None,
+    source: str | list[str] | Task | list[Task] | None = None,
     *,
     variants: dict[str, Any] | None = None,
     group: int = 1,
@@ -158,15 +180,15 @@ async def run_eval(
     """Standalone eval context manager.
 
     Creates an EvalContext for evaluation, optionally loading task configuration
-    from slugs.
+    from slugs or using Task objects directly.
 
     Args:
-        slugs: Task slug(s) to load. Can be:
+        source: Task source. Can be:
             - None: Create blank eval context
-            - "my-org/task": Single task
-            - "my-org/task:N": Task at index N
-            - "my-org/task:*": All tasks matching pattern
-            - List of any above: Multiple tasks
+            - str: Task slug like "my-org/task", "my-org/task:N", "my-org/task:*"
+            - list[str]: Multiple task slugs
+            - Task: Single Task object (for backwards compat with run_tasks)
+            - list[Task]: List of Task objects (for backwards compat with run_tasks)
         variants: A/B test configuration (dict with list values expanded)
         group: Runs per variant for statistical significance
         group_ids: Optional list of group IDs
@@ -196,6 +218,13 @@ async def run_eval(
         async with hud.eval("my-org/evalset:*") as ctx:
             await agent.run(ctx)
 
+        # With Task objects directly
+        from hud.types import Task
+
+        tasks = [Task(prompt="Do X", mcp_config={...})]
+        async with hud.eval(tasks) as ctx:
+            await agent.run(ctx)
+
         # With variants and group
         async with hud.eval(
             "task",
@@ -215,16 +244,33 @@ async def run_eval(
             print(f"{e.variants}: reward={e.reward}")
         ```
     """
+    from hud.types import Task
+
     if group <= 0:
         raise ValueError("group must be >= 1")
 
     # Expand variants
     variant_combos = expand_variants(variants)
 
-    # Load tasks if slugs provided
+    # Parse source into tasks list
     tasks: list[Task] = []
-    if slugs is not None:
-        tasks = _load_tasks_from_slugs(slugs)
+    slugs: str | list[str] | None = None  # Track if we had string slugs (for naming)
+
+    if source is not None:
+        if isinstance(source, Task):
+            # Single Task object
+            tasks = [source]
+        elif isinstance(source, list) and source and isinstance(source[0], Task):
+            # List of Task objects
+            tasks = source  # type: ignore[assignment]
+        elif isinstance(source, str):
+            # String slug
+            slugs = source
+            tasks = _load_tasks_from_slugs(source)
+        elif isinstance(source, list) and source and isinstance(source[0], str):
+            # List of string slugs
+            slugs = source  # type: ignore[assignment]
+            tasks = _load_tasks_from_slugs(source)  # type: ignore[arg-type]
 
     # Calculate total evaluations
     # If we have tasks, each task gets (variants x group) runs
@@ -274,7 +320,7 @@ async def run_eval(
 
     else:
         # Parallel execution: create implicit job to group traces
-        eval_name = _get_eval_name(slugs)
+        eval_name = _get_eval_name(source=slugs, tasks=tasks)
         implicit_job_id = job_id or str(uuid.uuid4())
         job_url = f"https://hud.ai/jobs/{implicit_job_id}"
 
