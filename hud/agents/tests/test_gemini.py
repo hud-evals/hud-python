@@ -246,7 +246,9 @@ class TestGeminiAgent:
 
             mock_gemini_client.models.generate_content = MagicMock(return_value=mock_response)
 
-            messages = [genai_types.Content(role="user", parts=[genai_types.Part(text="Hard question")])]
+            messages = [
+                genai_types.Content(role="user", parts=[genai_types.Part(text="Hard question")])
+            ]
             response = await agent.get_response(messages)
 
             assert response.content == "Here is my answer"
