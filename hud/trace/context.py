@@ -21,6 +21,9 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Self
 
+from pydantic import BaseModel
+
+from hud.environment.types import EnvConfig
 from hud.settings import settings
 from hud.shared import make_request
 from hud.telemetry.job import get_current_job
@@ -45,23 +48,73 @@ def get_current_trace_headers() -> dict[str, str] | None:
 
 
 # =============================================================================
+# Payload Models
+# =============================================================================
+
+
+class TracePayload(BaseModel):
+    """Base payload for trace enter/exit - sent to both endpoints."""
+    
+    task_name: str
+    prompt: str | None = None
+    code_snippet: str | None = None
+    env_config: EnvConfig | None = None
+    all_hubs: bool = False  # True if all connectors are from connect_hub
+    job_id: str | None = None
+    group_id: str | None = None
+    variants: dict[str, Any] | None = None
+
+
+class TraceExitPayload(TracePayload):
+    """Exit payload - includes result fields."""
+    
+    reward: float | None = None
+    success: bool = True
+    error_message: str | None = None
+
+
+# =============================================================================
 # Auto-instrumentation for httpx
 # =============================================================================
 
+def _is_hud_url(url_str: str) -> bool:
+    """Check if URL is a HUD service (inference or MCP)."""
+    from urllib.parse import urlparse
+    
+    # Extract hostnames from settings URLs
+    gateway_host = urlparse(settings.hud_gateway_url).netloc
+    mcp_host = urlparse(settings.hud_mcp_url).netloc
+    
+    # Parse the request URL and check against known HUD hosts
+    parsed = urlparse(url_str)
+    request_host = parsed.netloc or url_str.split("/")[0]
+    
+    return request_host == gateway_host or request_host == mcp_host
+
+
 def _httpx_request_hook(request: Any) -> None:
-    """httpx event hook that adds trace headers to inference.hud.ai requests."""
-    headers = get_current_trace_headers()
-    if headers is None:
-        return
+    """httpx event hook that adds trace headers and auth to HUD requests.
     
+    For inference.hud.ai and mcp.hud.ai:
+    - Injects trace headers (Trace-Id) if in trace context
+    - Injects Authorization header if API key is set and no auth present
+    """
     url_str = str(request.url)
-    if "inference.hud.ai" not in url_str:
+    if not _is_hud_url(url_str):
         return
     
-    for key, value in headers.items():
-        request.headers[key] = value
+    # Inject trace headers if in trace context
+    headers = get_current_trace_headers()
+    if headers is not None:
+        for key, value in headers.items():
+            request.headers[key] = value
+        logger.debug("Added trace headers to request: %s", url_str)
     
-    logger.debug("Added trace headers to request: %s", url_str)
+    # Auto-inject API key if not present
+    has_auth = "authorization" in {k.lower() for k in request.headers}
+    if not has_auth and settings.api_key:
+        request.headers["Authorization"] = f"Bearer {settings.api_key}"
+        logger.debug("Added API key auth to request: %s", url_str)
 
 
 async def _async_httpx_request_hook(request: Any) -> None:
@@ -125,6 +178,7 @@ class TraceContext:
         group_id: Links parallel traces together (None for single traces)
         variants: Variant assignment dict (for A/B testing)
         reward: Reward value (user-settable)
+        prompt: Task prompt (defaults from env.prompt, user-settable)
         error: Exception if failed
         results: All trace results (for parent trace)
         
@@ -168,6 +222,8 @@ class TraceContext:
         _group_id: str | None = None,
         _index: int = 0,
         _variants: dict[str, Any] | None = None,
+        _code_snippet: str | None = None,
+        _env_config: dict[str, Any] | None = None,
     ) -> None:
         # Identity
         self.trace_id: str = trace_id or str(uuid.uuid4())
@@ -188,12 +244,17 @@ class TraceContext:
         
         # User-settable
         self.reward: float | None = None
+        self.prompt: str | None = getattr(env, "prompt", None)  # From env, can override
         
         # Error tracking
         self.error: BaseException | None = None
         
         # Parallel/variant results (nested)
         self.results: list[TraceContext] | None = None
+        
+        # Code and config (for reproducibility)
+        self.code_snippet: str | None = _code_snippet
+        self.env_config: dict[str, Any] | None = _env_config
         
         # Private
         self._env = env
@@ -209,7 +270,7 @@ class TraceContext:
     @property
     def headers(self) -> dict[str, str]:
         """Headers for gateway integration."""
-        return {"HUD-Trace-Id": self.trace_id}
+        return {"Trace-Id": self.trace_id}
     
     @property
     def duration(self) -> float:
@@ -231,6 +292,27 @@ class TraceContext:
     
     def _get_api_key(self) -> str | None:
         return self._api_key or settings.api_key
+    
+    def _build_base_payload(self) -> TracePayload:
+        """Build the base payload for enter/exit."""
+        # Check if all connectors are from hubs (fully reproducible)
+        all_hubs = getattr(self._env, "_all_hubs", False)
+        
+        # Convert env_config dict to EnvConfig model
+        env_config_model: EnvConfig | None = None
+        if self.env_config:
+            env_config_model = EnvConfig(**self.env_config)
+        
+        return TracePayload(
+            task_name=self.name,
+            prompt=self.prompt,
+            code_snippet=self.code_snippet,
+            env_config=env_config_model,
+            all_hubs=all_hubs,
+            job_id=self.job_id,
+            group_id=self.group_id,
+            variants=self.variants if self.variants else None,
+        )
     
     # =========================================================================
     # Tool Operations
@@ -258,7 +340,7 @@ class TraceContext:
             await make_request(
                 method="POST",
                 url=f"{settings.hud_telemetry_url}/traces/{self.trace_id}/log",
-                json={"metrics": metrics, "timestamp": datetime.now(UTC).isoformat()},
+                json={"metrics": metrics},
                 api_key=api_key,
             )
         except Exception as e:
@@ -271,21 +353,11 @@ class TraceContext:
             return
         
         try:
-            data: dict[str, Any] = {
-                "task_name": self.name,
-                "started_at": self._started_at.isoformat() if self._started_at else None,
-            }
-            if self.job_id:
-                data["job_id"] = self.job_id
-            if self.group_id:
-                data["group_id"] = self.group_id
-            if self.variants:
-                data["variants"] = self.variants
-            
+            payload = self._build_base_payload()
             await make_request(
                 method="POST",
-                url=f"{settings.hud_telemetry_url}/trace/{self.trace_id}/enter",
-                json=data,
+                url=f"{settings.hud_api_url}/trace/{self.trace_id}/enter",
+                json=payload.model_dump(exclude_none=True),
                 api_key=api_key,
             )
         except Exception as e:
@@ -297,27 +369,22 @@ class TraceContext:
         if not settings.telemetry_enabled or not api_key:
             return
         
+        # Use evaluate tool reward if not manually set
+        reward = self.reward
+        if reward is None:
+            reward = getattr(self._env, "_evaluate_reward", None)
+        
         try:
-            data: dict[str, Any] = {
-                "task_name": self.name,
-                "completed_at": self._completed_at.isoformat() if self._completed_at else None,
-                "success": self.success,
-            }
-            if self.job_id:
-                data["job_id"] = self.job_id
-            if self.group_id:
-                data["group_id"] = self.group_id
-            if self.variants:
-                data["variants"] = self.variants
-            if self.reward is not None:
-                data["reward"] = self.reward
-            if error_message:
-                data["error_message"] = error_message
-            
+            payload = TraceExitPayload(
+                **self._build_base_payload().model_dump(),
+                reward=reward,
+                success=self.success,
+                error_message=error_message,
+            )
             await make_request(
                 method="POST",
-                url=f"{settings.hud_telemetry_url}/trace/{self.trace_id}/exit",
-                json=data,
+                url=f"{settings.hud_api_url}/trace/{self.trace_id}/exit",
+                json=payload.model_dump(exclude_none=True),
                 api_key=api_key,
             )
         except Exception as e:

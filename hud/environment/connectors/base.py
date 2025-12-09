@@ -50,16 +50,12 @@ class BaseConnectorMixin:
         Returns:
             self for chaining.
         """
-        from fastmcp.client import Client as FastMCPClient
-
         from hud.environment.connection import ConnectionConfig, Connector
         
         config = ConnectionConfig(
             prefix=prefix, include=include, exclude=exclude, transform=transform,
         )
-        client = FastMCPClient(transport=transport, auth=auth)
         self._connections[name] = Connector(
-            client, config, name, connection_type=connection_type,
+            transport, config, name, connection_type=connection_type, auth=auth,
         )
         return self
-

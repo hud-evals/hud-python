@@ -79,10 +79,15 @@ class TaskConnectorMixin(MCPConfigConnectorMixin):
         """Apply a Task definition to this environment.
         
         Sets up:
+            - Prompt from task.prompt
             - MCP connections from task.mcp_config
             - Setup tool calls from task.setup_tool
             - Evaluate tool calls from task.evaluate_tool
         """
+        # Set prompt
+        if task.prompt:
+            self.prompt = task.prompt  # type: ignore[attr-defined]
+        
         # Connect MCP servers
         if task.mcp_config:
             self.connect_mcp_config(task.mcp_config)

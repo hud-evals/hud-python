@@ -83,7 +83,7 @@ class MCPConfigConnectorMixin(BaseConnectorMixin):
                     "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
                 },
                 "github": {
-                    "command": "npx", 
+                    "command": "npx",
                     "args": ["-y", "@modelcontextprotocol/server-github"],
                     "env": {"GITHUB_TOKEN": "..."},
                 },

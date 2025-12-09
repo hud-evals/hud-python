@@ -124,6 +124,42 @@ class TraceMixin:
         """Placeholder - implemented by Environment."""
         raise NotImplementedError
     
+    def _capture_code_snippet(self) -> str | None:
+        """Capture the code inside the trace() with-block (best effort).
+        
+        Returns None if source cannot be extracted (e.g., REPL, Jupyter).
+        """
+        frame = inspect.currentframe()
+        if frame is None:
+            return None
+        
+        try:
+            # Go up: _capture_code_snippet -> trace -> user code
+            caller = frame.f_back
+            if caller is not None:
+                caller = caller.f_back
+            if caller is None:
+                return None
+            
+            body_source, _ = _get_with_block_body(caller)
+            return body_source
+        except ASTExtractionError:
+            # Can't extract from REPL/Jupyter - that's OK
+            return None
+        except Exception as e:
+            logger.debug("Failed to capture code snippet: %s", e)
+            return None
+        finally:
+            del frame
+    
+    def _get_env_config(self) -> dict[str, Any] | None:
+        """Get serializable environment configuration.
+        
+        Returns dict with connections and local tools.
+        """
+        # This will be overridden by Environment with actual implementation
+        return None
+    
     @property
     def last_traces(self) -> list[TraceContext] | None:
         """Get TraceContext objects from the last parallel execution.
@@ -223,6 +259,12 @@ class TraceMixin:
         variant_combos = _expand_variants(variants)
         total_traces = len(variant_combos) * group
         
+        # Capture code snippet (best effort - won't work in REPL/Jupyter)
+        code_snippet = self._capture_code_snippet()
+        
+        # Get environment config
+        env_config = self._get_env_config()
+        
         # Validate parallelization - only remote connections allowed for group > 1
         if total_traces > 1 and not self.is_parallelizable:  # type: ignore[attr-defined]
             local_conns = self.local_connections  # type: ignore[attr-defined]
@@ -244,6 +286,8 @@ class TraceMixin:
                 api_key=api_key,
                 job_id=job_id,
                 _variants=variant_combos[0],
+                _code_snippet=code_snippet,
+                _env_config=env_config,
             )
             async with tc:
                 async with self:  # type: ignore[attr-defined]
@@ -258,6 +302,8 @@ class TraceMixin:
                 group_ids=group_ids,
                 job_id=job_id,
                 api_key=api_key,
+                code_snippet=code_snippet,
+                env_config=env_config,
             )
             
             # Create parent tc with results injected
@@ -267,6 +313,8 @@ class TraceMixin:
                 trace_id=trace_id,
                 api_key=api_key,
                 job_id=job_id,
+                _code_snippet=code_snippet,
+                _env_config=env_config,
             )
             tc.results = completed
             self._last_traces = completed
@@ -286,6 +334,8 @@ class TraceMixin:
         group_ids: list[str] | None,
         job_id: str | None,
         api_key: str | None,
+        code_snippet: str | None,
+        env_config: dict[str, Any] | None,
     ) -> list[TraceContext]:
         """Run parallel trace execution using AST extraction.
         
@@ -303,6 +353,8 @@ class TraceMixin:
             group_ids: Optional list of group IDs (one per total trace)
             job_id: Optional job ID (auto-detected from current job if not provided)
             api_key: Optional API key
+            code_snippet: Captured code from the with-block
+            env_config: Environment configuration
         """
         # Get the caller's frame (skip this method and the trace method)
         frame = inspect.currentframe()
@@ -352,6 +404,8 @@ class TraceMixin:
                     _group_id=resolved_group_ids[idx],
                     _index=idx,
                     _variants=variant,
+                    _code_snippet=code_snippet,
+                    _env_config=env_config,
                 )
                 trace_contexts.append(tc)
                 idx += 1

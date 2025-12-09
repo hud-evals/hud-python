@@ -129,6 +129,9 @@ class Environment(
         self._setup_calls: list[tuple[str, dict[str, Any]]] = []
         self._evaluate_calls: list[tuple[str, dict[str, Any]]] = []
         
+        # Task prompt - set by connect_task or manually
+        self.prompt: str | None = None
+        
         # Track which lifecycle tools we've warned about (only warn once per tool)
         self._warned_lifecycle_tools: set[str] = set()
         
@@ -268,12 +271,21 @@ class Environment(
         exc_tb: types.TracebackType | None,
     ) -> None:
         """Run evaluate tools, exit queue, then disconnect."""
-        # Evaluate tool calls
+        from hud.agents.base import find_reward
+        
+        # Evaluate tool calls and collect rewards
+        rewards: list[float] = []
         for name, args in self._evaluate_calls:
             try:
-                await self._execute_tool(name, args)
+                result = await self._execute_tool(name, args)
+                rewards.append(find_reward(result))
             except Exception as e:
                 logger.warning("Evaluate tool %s failed: %s", name, e)
+        
+        # Store average reward from evaluate tools
+        self._evaluate_reward: float | None = None
+        if rewards:
+            self._evaluate_reward = sum(rewards) / len(rewards)
         
         self._in_context = False
         if self._connections:
@@ -442,6 +454,65 @@ class Environment(
     def local_connections(self) -> list[str]:
         """Names of local (non-parallelizable) connections."""
         return [name for name, conn in self._connections.items() if conn.is_local]
+
+    def _get_env_config(self) -> dict[str, Any] | None:
+        """Get serializable environment configuration for trace storage.
+        
+        Returns EnvConfig-compatible dict with:
+        - name: Environment name
+        - hubs: List of hub configs (connect_hub calls)
+        - setup_tools: Tools to run after connection (MCPToolCall format)
+        - evaluate_tools: Tools to run before disconnection (MCPToolCall format)
+        """
+        hub_configs = getattr(self, "_hub_configs", [])
+        
+        # Convert setup/evaluate calls to MCPToolCall format
+        setup_tools = [
+            {"name": name, "arguments": args}
+            for name, args in self._setup_calls
+        ]
+        evaluate_tools = [
+            {"name": name, "arguments": args}
+            for name, args in self._evaluate_calls
+        ]
+        
+        # Only return config if there's something to store
+        if not hub_configs and not setup_tools and not evaluate_tools:
+            return None
+        
+        return {
+            "name": self.name,
+            "hubs": hub_configs,
+            "setup_tools": setup_tools,
+            "evaluate_tools": evaluate_tools,
+        }
+    
+    @property
+    def _all_hubs(self) -> bool:
+        """True if all tools came from connect_hub (fully reproducible).
+        
+        Returns False if there are:
+        - Local tools (@env.tool, connect_fastapi, connect_openapi, connect_server)
+        - Non-hub connections (connect_url, connect_mcp, connect_image, etc.)
+        """
+        hub_configs = getattr(self, "_hub_configs", [])
+        
+        # Check for local tools (mounted servers, @env.tool)
+        # _tool_manager comes from MCPServer base class
+        local_tool_count = len(self._tool_manager._tools) if hasattr(self, "_tool_manager") else 0
+        if local_tool_count > 0:
+            return False
+        
+        # No hubs and no connections = trivially all hubs (empty env)
+        if not hub_configs and not self._connections:
+            return True
+        
+        # Has connections but no hubs = not all hubs
+        if not hub_configs:
+            return False
+        
+        # Compare hub count to connection count
+        return len(hub_configs) >= len(self._connections)
 
     def __repr__(self) -> str:
         return f"Environment({self.name!r}, connections={list(self._connections.keys())})"

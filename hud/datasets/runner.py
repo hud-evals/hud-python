@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from datasets import Dataset, load_dataset
 
-from hud import async_job, async_trace
+from hud.telemetry import async_job, async_trace
 from hud.datasets.utils import calculate_group_stats, submit_rollouts
 from hud.types import AgentType, Task, Trace
 
