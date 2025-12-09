@@ -13,10 +13,11 @@ def test_get_settings():
 
 
 def test_settings_defaults():
-    """Test that settings have expected default values."""
+    """Test that settings have expected default values or env overrides."""
     s = get_settings()
-    assert s.hud_telemetry_url == "https://telemetry.hud.ai/v3/api"
-    assert s.hud_mcp_url == "https://mcp.hud.ai/v3/mcp"
+    # These URLs may be overridden by environment variables
+    assert s.hud_telemetry_url.endswith("/v3/api")
+    assert s.hud_mcp_url.endswith("/v3/mcp")
     # Default may be overridden in CI; just assert the field exists and is bool
     assert isinstance(s.telemetry_enabled, bool)
     assert s.hud_logging is True

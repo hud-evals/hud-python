@@ -20,11 +20,19 @@ class MCPConfigPatch(BaseModel):
 def _is_hud_server(url: str) -> bool:
     """Check if a URL is a HUD MCP server.
 
-    Matches any mcp.hud.* domain (including .ai, .so, and future domains).
+    Matches:
+    - Any mcp.hud.* domain (including .ai, .so, and future domains)
+    - Staging servers (orcstaging.hud.so)
+    - Any *.hud.ai or *.hud.so domain
     """
     if not url:
         return False
-    return "mcp.hud." in url.lower()
+    url_lower = url.lower()
+    return (
+        "mcp.hud." in url_lower
+        or ".hud.ai" in url_lower
+        or ".hud.so" in url_lower
+    )
 
 
 def patch_mcp_config(mcp_config: dict[str, dict[str, Any]], patch: MCPConfigPatch) -> None:

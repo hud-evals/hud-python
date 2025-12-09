@@ -129,18 +129,22 @@ class TestEvalContextFromEnvironment:
     """Tests for EvalContext.from_environment factory."""
 
     def test_copies_connections(self) -> None:
-        """from_environment copies connections from parent."""
+        """from_environment copies connections from parent (deep copy)."""
         from hud.environment import Environment
 
         parent = Environment("parent-env")
-        # Add a mock connection
+        # Add a mock connection with copy method
         mock_conn = MagicMock()
+        mock_conn_copy = MagicMock()
+        mock_conn.copy.return_value = mock_conn_copy
         parent._connections["test-conn"] = mock_conn
 
         ctx = EvalContext.from_environment(parent, name="test-task")
 
+        # Verify connection was copied (not same object)
         assert "test-conn" in ctx._connections
-        assert ctx._connections["test-conn"] is mock_conn
+        mock_conn.copy.assert_called_once()
+        assert ctx._connections["test-conn"] is mock_conn_copy
 
     def test_copies_prompt(self) -> None:
         """from_environment copies prompt from parent."""
