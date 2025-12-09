@@ -190,6 +190,7 @@ class TestConvertCommand:
     ):
         """Test conversion includes environment variables as headers."""
         mock_settings.api_key = "test-api-key"
+        mock_settings.hud_mcp_url = "https://mcp.hud.ai/v3/mcp"
         mock_find_env.return_value = mock_env_dir
         mock_confirm.return_value = True  # Always confirm in tests
 
