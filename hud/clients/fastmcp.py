@@ -110,7 +110,7 @@ class FastMCPHUDClient(BaseHUDClient):
                     hasattr(self._client, "_session_state")
                     and self._client._session_state.session is not None
                 ):
-                    self._client._session_state.session._validate_structured_outputs = (
+                    self._client._session_state.session._validate_structured_outputs = (  # type: ignore[attr-defined]
                         self._strict_validation
                     )
             except ImportError:

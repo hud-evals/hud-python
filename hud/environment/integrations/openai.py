@@ -181,29 +181,20 @@ class OpenAIMixin:
 
 def _create_function_tool(env: OpenAIMixin, tool: mcp_types.Tool) -> Any:
     """Create a FunctionTool that calls back to the environment."""
-    import asyncio
-
     schema = tool.inputSchema or {"type": "object", "properties": {}}
 
-    def sync_wrapper(**kwargs: Any) -> str:
-        """Synchronous wrapper for the tool."""
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, env.call_tool(tool.name, **kwargs))
-                result = future.result()
-        else:
-            result = loop.run_until_complete(env.call_tool(tool.name, **kwargs))
-
+    async def async_wrapper(ctx: Any, args_json: str) -> str:
+        """Async wrapper for the tool that matches FunctionTool signature."""
+        kwargs = json.loads(args_json) if args_json else {}
+        result = await env.call_tool(tool.name, **kwargs)
         if isinstance(result, str):
             return result
         return json.dumps(result) if result else ""
 
+    assert FunctionTool is not None  # Checked in as_openai_agent_tools
     return FunctionTool(
         name=tool.name,
         description=tool.description or "",
         params_json_schema=schema,
-        on_invoke_tool=sync_wrapper,
+        on_invoke_tool=async_wrapper,
     )

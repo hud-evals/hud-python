@@ -170,7 +170,7 @@ class EnvToolRunner:
             self._tool_names = {t.name for t in self.env.as_tools()}
         return self._tool_names
 
-    async def run(self, tool_use_block: Any) -> dict[str, Any]:
+    async def run(self, tool_use_block: Any) -> Any:
         """Execute a tool_use block from Claude.
 
         Args:

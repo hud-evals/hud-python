@@ -67,7 +67,7 @@ class OpenAIConnectorMixin:
             )
 
         for tool in tools:
-            if isinstance(tool, FunctionTool):
+            if FunctionTool is not None and isinstance(tool, FunctionTool):
                 self._add_openai_function_tool(tool, prefix)
 
         return self

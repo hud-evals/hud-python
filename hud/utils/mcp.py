@@ -67,7 +67,7 @@ def setup_hud_telemetry(
         return None
 
     from hud.otel import get_current_task_run_id
-    from hud.telemetry import trace
+    from hud.telemetry.trace import trace
 
     run_id = get_current_task_run_id()
     auto_trace_cm = None

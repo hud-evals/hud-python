@@ -107,6 +107,7 @@ def _create_structured_tool(env: LangChainMixin, tool: mcp_types.Tool) -> Any:
             return result
         return json.dumps(result) if result else ""
 
+    assert StructuredTool is not None  # Checked in as_langchain_tools
     return StructuredTool(
         name=tool.name,
         description=tool.description or "",
