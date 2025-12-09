@@ -5,15 +5,6 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-# Try to import anthropic
-try:
-    from anthropic.types.beta import BetaToolResultBlockParam
-
-    _HAS_ANTHROPIC = True
-except ImportError:
-    _HAS_ANTHROPIC = False
-    BetaToolResultBlockParam = None  # type: ignore[misc, assignment]
-
 if TYPE_CHECKING:
     import mcp.types as mcp_types
 
@@ -150,9 +141,6 @@ class AnthropicMixin:
                         results.append(result)
             ```
         """
-        if not _HAS_ANTHROPIC:
-            raise ImportError("Anthropic SDK not installed. Install with: pip install anthropic")
-
         return EnvToolRunner(self)
 
 
@@ -200,6 +188,9 @@ class EnvToolRunner:
             }
 
         # Return typed object if anthropic is available
-        if _HAS_ANTHROPIC and BetaToolResultBlockParam is not None:
+        try:
+            from anthropic.types.beta import BetaToolResultBlockParam
+
             return BetaToolResultBlockParam(**result_dict)
-        return result_dict
+        except ImportError:
+            return result_dict

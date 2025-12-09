@@ -7,15 +7,6 @@ from typing import TYPE_CHECKING, Any
 
 from hud.environment.utils.schema import schema_to_pydantic
 
-# Try to import langchain
-try:
-    from langchain_core.tools import StructuredTool
-
-    _HAS_LANGCHAIN = True
-except ImportError:
-    _HAS_LANGCHAIN = False
-    StructuredTool = None  # type: ignore[misc, assignment]
-
 if TYPE_CHECKING:
     import mcp.types as mcp_types
 
@@ -68,17 +59,21 @@ class LangChainMixin:
                 result = await executor.ainvoke({"input": "Navigate to google.com"})
             ```
         """
-        if not _HAS_LANGCHAIN:
-            raise ImportError("LangChain not installed. Install with: pip install langchain-core")
+        try:
+            from langchain_core.tools import StructuredTool
+        except ImportError as e:
+            raise ImportError(
+                "LangChain not installed. Install with: pip install langchain-core"
+            ) from e
 
         tools = []
         for t in self.as_tools():
-            tool = _create_structured_tool(self, t)
+            tool = _create_structured_tool(self, t, StructuredTool)
             tools.append(tool)
         return tools
 
 
-def _create_structured_tool(env: LangChainMixin, tool: mcp_types.Tool) -> Any:
+def _create_structured_tool(env: LangChainMixin, tool: mcp_types.Tool, StructuredTool: type) -> Any:
     """Create a StructuredTool that calls back to the environment."""
     import asyncio
 
@@ -107,7 +102,6 @@ def _create_structured_tool(env: LangChainMixin, tool: mcp_types.Tool) -> Any:
             return result
         return json.dumps(result) if result else ""
 
-    assert StructuredTool is not None  # Checked in as_langchain_tools
     return StructuredTool(
         name=tool.name,
         description=tool.description or "",

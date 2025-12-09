@@ -7,15 +7,6 @@ from typing import Any
 
 __all__ = ["OpenAIConnectorMixin"]
 
-# Lazy import check
-try:
-    from agents import FunctionTool
-
-    _HAS_OPENAI_AGENTS = True
-except ImportError:
-    _HAS_OPENAI_AGENTS = False
-    FunctionTool = None  # type: ignore[misc, assignment]
-
 
 class OpenAIConnectorMixin:
     """Mixin providing OpenAI Agents SDK connector methods."""
@@ -60,14 +51,16 @@ class OpenAIConnectorMixin:
         Note:
             Requires `openai-agents`: pip install openai-agents
         """
-        if not _HAS_OPENAI_AGENTS:
+        try:
+            from agents import FunctionTool
+        except ImportError as e:
             raise ImportError(
                 "openai-agents is required for connect_function_tools. "
                 "Install with: pip install openai-agents"
-            )
+            ) from e
 
         for tool in tools:
-            if FunctionTool is not None and isinstance(tool, FunctionTool):
+            if isinstance(tool, FunctionTool):
                 self._add_openai_function_tool(tool, prefix)
 
         return self

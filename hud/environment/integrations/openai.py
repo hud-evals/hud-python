@@ -7,15 +7,6 @@ from typing import TYPE_CHECKING, Any
 
 from hud.environment.utils.schema import ensure_strict_schema
 
-# Try to import OpenAI Agents SDK
-try:
-    from agents import FunctionTool
-
-    _HAS_AGENTS = True
-except ImportError:
-    _HAS_AGENTS = False
-    FunctionTool = None  # type: ignore[misc, assignment]
-
 if TYPE_CHECKING:
     import mcp.types as mcp_types
 
@@ -167,19 +158,21 @@ class OpenAIMixin:
                 print(result.final_output)
             ```
         """
-        if not _HAS_AGENTS:
+        try:
+            from agents import FunctionTool
+        except ImportError as e:
             raise ImportError(
                 "OpenAI Agents SDK not installed. Install with: pip install openai-agents"
-            )
+            ) from e
 
         tools = []
         for t in self.as_tools():
-            tool = _create_function_tool(self, t)
+            tool = _create_function_tool(self, t, FunctionTool)
             tools.append(tool)
         return tools
 
 
-def _create_function_tool(env: OpenAIMixin, tool: mcp_types.Tool) -> Any:
+def _create_function_tool(env: OpenAIMixin, tool: mcp_types.Tool, FunctionTool: type) -> Any:
     """Create a FunctionTool that calls back to the environment."""
     schema = tool.inputSchema or {"type": "object", "properties": {}}
 
@@ -191,7 +184,6 @@ def _create_function_tool(env: OpenAIMixin, tool: mcp_types.Tool) -> Any:
             return result
         return json.dumps(result) if result else ""
 
-    assert FunctionTool is not None  # Checked in as_openai_agent_tools
     return FunctionTool(
         name=tool.name,
         description=tool.description or "",
