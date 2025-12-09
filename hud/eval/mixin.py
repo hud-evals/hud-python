@@ -7,12 +7,14 @@ variant-based A/B testing.
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import logging
 import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
+from hud.eval.display import print_complete, print_eval_stats, print_link
 from hud.eval.parallel import (
     ASTExtractionError,
     expand_variants,
@@ -20,7 +22,7 @@ from hud.eval.parallel import (
     get_with_block_body,
     resolve_group_ids,
 )
-from hud.telemetry.job import _print_job_complete_url, _print_job_url
+from hud.eval.types import ParallelEvalComplete
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -137,6 +139,7 @@ class EvalMixin:
         job_id: str | None = None,
         trace_id: str | None = None,
         api_key: str | None = None,
+        max_concurrent: int | None = None,
     ) -> AsyncGenerator[EvalContext, None]:
         """Create an eval context for recording an agent run.
 
@@ -172,6 +175,7 @@ class EvalMixin:
             trace_id: Optional trace ID (auto-generated if not provided).
                       For parallel execution, each eval gets a unique ID.
             api_key: Optional API key for backend calls (defaults to settings.api_key)
+            max_concurrent: Maximum concurrent evals (None = unlimited)
 
         Yields:
             EvalContext for this evaluation. Inside the body:
@@ -257,9 +261,10 @@ class EvalMixin:
         else:
             # Parallel execution: create implicit job to group traces
             implicit_job_id = job_id or str(uuid.uuid4())
+            job_url = f"https://hud.ai/jobs/{implicit_job_id}"
 
             # Print job URL (not individual trace URLs)
-            _print_job_url(implicit_job_id, name)
+            print_link(job_url, f"🚀 Job '{name}'")
 
             error_occurred = False
             try:
@@ -273,6 +278,7 @@ class EvalMixin:
                     api_key=api_key,
                     code_snippet=code_snippet,
                     env_config=env_config,
+                    max_concurrent=max_concurrent,
                 )
 
                 # Create summary context (no trace, just aggregates results)
@@ -297,12 +303,10 @@ class EvalMixin:
                 # Check if any failed
                 error_occurred = any(e.error is not None for e in completed)
 
-                yield ctx
-            except Exception:
-                error_occurred = True
-                raise
+                with contextlib.suppress(ParallelEvalComplete):
+                    yield ctx
             finally:
-                _print_job_complete_url(implicit_job_id, name, error_occurred)
+                print_complete(job_url, name, error=error_occurred)
 
     async def _run_parallel_eval(
         self,
@@ -314,6 +318,7 @@ class EvalMixin:
         api_key: str | None,
         code_snippet: str | None,
         env_config: dict[str, Any] | None,
+        max_concurrent: int | None,
     ) -> list[EvalContext]:
         """Run parallel eval execution.
 
@@ -353,20 +358,23 @@ class EvalMixin:
 
         # Run in parallel
         logger.info(
-            "Running %d evals for '%s' (%d variants x %d runs)",
+            "Running %d evals for '%s' (%d variants x %d runs)%s",
             len(eval_contexts),
             name,
             len(variant_combos),
             group,
+            f", max_concurrent={max_concurrent}" if max_concurrent else "",
         )
-        completed = await run_parallel_evals(eval_contexts, body_source, captured_locals, context_var)
+        completed = await run_parallel_evals(
+            eval_contexts, body_source, captured_locals, context_var, max_concurrent
+        )
 
-        # Store results and log stats
+        # Store results and print stats
         self._last_evals = completed
         log_eval_stats(completed, name)
+        print_eval_stats(completed, name)
 
         return completed
 
 
 __all__ = ["EvalMixin"]
-

@@ -15,8 +15,6 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Self
 
-from pydantic import BaseModel
-
 from hud.environment import Environment
 from hud.environment.types import EnvConfig
 from hud.settings import settings
@@ -27,6 +25,8 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from hud.types import Task
+
+from hud.eval.types import EvalExitPayload, EvalPayload, ParallelEvalComplete
 
 logger = logging.getLogger(__name__)
 
@@ -39,32 +39,6 @@ _current_trace_headers: contextvars.ContextVar[dict[str, str] | None] = contextv
 def get_current_trace_headers() -> dict[str, str] | None:
     """Get the current trace headers from context."""
     return _current_trace_headers.get()
-
-
-# =============================================================================
-# Payload Models
-# =============================================================================
-
-
-class EvalPayload(BaseModel):
-    """Base payload for eval enter/exit."""
-
-    task_name: str
-    prompt: str | None = None
-    code_snippet: str | None = None
-    env_config: EnvConfig | None = None
-    all_hubs: bool = False
-    job_id: str | None = None
-    group_id: str | None = None
-    variants: dict[str, Any] | None = None
-
-
-class EvalExitPayload(EvalPayload):
-    """Exit payload with result fields."""
-
-    reward: float | None = None
-    success: bool = True
-    error_message: str | None = None
 
 
 # =============================================================================
@@ -256,9 +230,7 @@ class EvalContext(Environment):
 
         # Copy connections from parent - each connector is copied so parallel
         # execution gets fresh client instances
-        ctx._connections = {
-            name: connector.copy() for name, connector in env._connections.items()
-        }
+        ctx._connections = {name: connector.copy() for name, connector in env._connections.items()}
         ctx._hub_configs = getattr(env, "_hub_configs", []).copy()
         ctx._setup_calls = env._setup_calls.copy()
         ctx._evaluate_calls = env._evaluate_calls.copy()
@@ -311,6 +283,51 @@ class EvalContext(Environment):
             code_snippet=code_snippet,
             task=task,
         )
+
+    # =========================================================================
+    # Summary Context - Attribute Access Control
+    # =========================================================================
+
+    # Attributes accessible on summary context (everything else raises)
+    _SUMMARY_ALLOWED = frozenset(
+        {
+            # Results and metadata
+            "results",
+            "reward",
+            "error",
+            "trace_id",
+            "job_id",
+            "group_id",
+            "index",
+            "variants",
+            "eval_name",
+            "duration",
+            "success",
+            "done"
+            # Private attrs
+            "_is_summary",
+            "_suppress_link",
+            "__class__",
+            "__dict__",
+        }
+    )
+
+    def __getattribute__(self, name: str) -> Any:
+        """Block most attribute access on summary contexts."""
+        # Always allow private/dunder and whitelisted attrs
+        if name.startswith("_") or name in EvalContext._SUMMARY_ALLOWED:
+            return super().__getattribute__(name)
+
+        # Check if this is a summary context
+        try:
+            is_summary = super().__getattribute__("_is_summary")
+        except AttributeError:
+            is_summary = False
+
+        if is_summary:
+            raise ParallelEvalComplete
+
+        return super().__getattribute__(name)
 
     # =========================================================================
     # Computed Properties (eval-specific)
@@ -485,35 +502,10 @@ class EvalContext(Environment):
         if self._suppress_link:
             return
 
-        import contextlib
-        import webbrowser
+        from hud.eval.display import print_link
 
         trace_url = f"https://hud.ai/trace/{self.trace_id}"
-
-        with contextlib.suppress(Exception):
-            webbrowser.open(trace_url, new=2)
-
-        try:
-            from rich.align import Align
-            from rich.console import Console
-            from rich.panel import Panel
-
-            console = Console()
-
-            style = "bold underline rgb(108,113,196)"
-            link_markup = f"[{style}][link={trace_url}]{trace_url}[/link][/{style}]"
-
-            content = Align.center(link_markup)
-
-            panel = Panel(
-                content,
-                title="🔗 Eval Started",
-                border_style="rgb(192,150,12)",
-                padding=(0, 2),
-            )
-            console.print(panel)
-        except ImportError:
-            print(f"Eval: {trace_url}")  # noqa: T201
+        print_link(trace_url, "🔗 Eval Started")
 
 
 # Re-export for backwards compatibility with trace module

@@ -54,7 +54,12 @@ def __getattr__(name: str):  # noqa: ANN202
         if name in ("Job", "job", "create_job", "get_current_job"):
             from .job import Job, create_job, get_current_job, job
 
-            return {"Job": Job, "job": job, "create_job": create_job, "get_current_job": get_current_job}[name]
+            return {
+                "Job": Job,
+                "job": job,
+                "create_job": create_job,
+                "get_current_job": get_current_job,
+            }[name]
         elif name in ("async_job", "async_trace"):
             from .async_context import async_job, async_trace
 
@@ -72,9 +77,6 @@ def __getattr__(name: str):  # noqa: ANN202
 
 
 __all__ = [
-    # Core (always available)
-    "instrument",
-    # Deprecated
     "Job",
     "Trace",
     "async_job",
@@ -83,6 +85,7 @@ __all__ = [
     "create_job",
     "get_current_job",
     "get_trace",
+    "instrument",
     "job",
     "trace",
 ]

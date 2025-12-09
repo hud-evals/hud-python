@@ -231,4 +231,3 @@ class TestASTExtractionError:
         error = ASTExtractionError("test message")
         assert isinstance(error, Exception)
         assert str(error) == "test message"
-

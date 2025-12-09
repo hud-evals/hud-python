@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import types
 from collections.abc import Awaitable, Callable
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 import mcp.types as mcp_types
 
-from hud.environment.connection import Connector
 from hud.environment.connectors import ConnectorsMixin
 from hud.environment.integrations import IntegrationsMixin
 from hud.environment.mock import MockMixin
@@ -18,6 +16,11 @@ from hud.environment.router import ConflictResolution, ToolRouter
 from hud.eval.mixin import EvalMixin
 from hud.server.server import MCPServer
 from hud.types import MCPToolResult
+
+if TYPE_CHECKING:
+    import types
+
+    from hud.environment.connection import Connector
 
 __all__ = ["Environment"]
 
@@ -229,7 +232,7 @@ class Environment(
     # Context Manager
     # =========================================================================
 
-    async def __aenter__(self) -> Environment:
+    async def __aenter__(self) -> Self:
         """Connect all connectors, build routing, run setup tools."""
         self._in_context = True
 
@@ -372,13 +375,14 @@ class Environment(
                     uri=resource_uri, blob=base64.b64encode(result).decode()
                 )
             ]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Local resource read failed for %s: %s", uri, e)
 
         for conn in self._connections.values():
             try:
                 return await conn.read_resource(uri)
-            except Exception:
+            except Exception as e:
+                logger.debug("Remote resource read failed for %s: %s", uri, e)
                 continue
 
         raise ValueError(f"Resource not found: {uri}")
@@ -408,13 +412,14 @@ class Environment(
         """Get a prompt by name (tries local first, then remote)."""
         try:
             return await self._prompt_manager.render_prompt(name, arguments or {})
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Local prompt render failed for %s: %s", name, e)
 
         for conn in self._connections.values():
             try:
                 return await conn.get_prompt(name, arguments)
-            except Exception:
+            except Exception as e:
+                logger.debug("Remote prompt get failed for %s: %s", name, e)
                 continue
 
         raise ValueError(f"Prompt not found: {name}")

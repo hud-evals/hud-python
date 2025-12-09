@@ -11,6 +11,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
+from hud.eval.display import print_complete, print_eval_stats, print_link
 from hud.eval.parallel import (
     ASTExtractionError,
     expand_variants,
@@ -18,7 +19,6 @@ from hud.eval.parallel import (
     get_with_block_body,
     resolve_group_ids,
 )
-from hud.telemetry.job import _print_job_complete_url, _print_job_url
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -114,8 +114,7 @@ def _load_tasks_from_slugs(slugs: str | list[str]) -> list[Task]:
                 data = response.json()
 
                 if isinstance(data, list):
-                    for item in data:
-                        tasks.append(Task(**item))
+                    tasks.extend(Task(**item) for item in data)
                 else:
                     tasks.append(Task(**data))
 
@@ -154,6 +153,7 @@ async def run_eval(
     group_ids: list[str] | None = None,
     job_id: str | None = None,
     api_key: str | None = None,
+    max_concurrent: int | None = None,
 ) -> AsyncGenerator[EvalContext, None]:
     """Standalone eval context manager.
 
@@ -172,6 +172,7 @@ async def run_eval(
         group_ids: Optional list of group IDs
         job_id: Job ID to link to
         api_key: API key for backend calls
+        max_concurrent: Maximum concurrent evals (None = unlimited)
 
     Yields:
         EvalContext: Environment with evaluation tracking
@@ -205,6 +206,10 @@ async def run_eval(
             await run_agent(model)
             ctx.reward = evaluate()
 
+        # With concurrency limit
+        async with hud.eval("my-org/evalset:*", max_concurrent=10) as ctx:
+            await agent.run(ctx)
+
         # Access results after parallel run
         for e in ctx.results:
             print(f"{e.variants}: reward={e.reward}")
@@ -224,10 +229,7 @@ async def run_eval(
     # Calculate total evaluations
     # If we have tasks, each task gets (variants x group) runs
     # If no tasks, we have a single blank eval with (variants x group) runs
-    if tasks:
-        total_evals = len(tasks) * len(variant_combos) * group
-    else:
-        total_evals = len(variant_combos) * group
+    total_evals = len(tasks) * len(variant_combos) * group if tasks else len(variant_combos) * group
 
     # Capture code snippet for parallel execution
     code_snippet: str | None = None
@@ -274,9 +276,10 @@ async def run_eval(
         # Parallel execution: create implicit job to group traces
         eval_name = _get_eval_name(slugs)
         implicit_job_id = job_id or str(uuid.uuid4())
+        job_url = f"https://hud.ai/jobs/{implicit_job_id}"
 
         # Print job URL (not individual trace URLs)
-        _print_job_url(implicit_job_id, eval_name)
+        print_link(job_url, f"🚀 Job '{eval_name}'")
 
         error_occurred = False
         try:
@@ -289,6 +292,7 @@ async def run_eval(
                 job_id=implicit_job_id,  # Propagate job_id to child traces
                 api_key=api_key,
                 code_snippet=code_snippet,
+                max_concurrent=max_concurrent,
             )
 
             # Create summary context (no trace, just aggregates results)
@@ -321,7 +325,7 @@ async def run_eval(
             error_occurred = True
             raise
         finally:
-            _print_job_complete_url(implicit_job_id, eval_name, error_occurred)
+            print_complete(job_url, eval_name, error=error_occurred)
 
 
 async def _run_parallel_eval(
@@ -332,6 +336,7 @@ async def _run_parallel_eval(
     job_id: str | None,
     api_key: str | None,
     code_snippet: str | None,
+    max_concurrent: int | None,
 ) -> list[EvalContext]:
     """Run parallel evaluation.
 
@@ -346,11 +351,7 @@ async def _run_parallel_eval(
     body_source, captured_locals, context_var = get_with_block_body(caller_frame)
 
     # Calculate total evals and resolve group IDs
-    if tasks:
-        total_evals = len(tasks) * len(variant_combos) * group
-    else:
-        total_evals = len(variant_combos) * group
-
+    total_evals = len(tasks) * len(variant_combos) * group if tasks else len(variant_combos) * group
     resolved_group_ids = resolve_group_ids(group_ids, total_evals)
 
     # Create EvalContexts
@@ -393,19 +394,23 @@ async def _run_parallel_eval(
 
     # Run in parallel
     logger.info(
-        "Running %d evals (%d tasks x %d variants x %d runs)",
+        "Running %d evals (%d tasks x %d variants x %d runs)%s",
         len(eval_contexts),
         max(len(tasks), 1),
         len(variant_combos),
         group,
+        f", max_concurrent={max_concurrent}" if max_concurrent else "",
     )
-    completed = await run_parallel_evals(eval_contexts, body_source, captured_locals, context_var)
+    completed = await run_parallel_evals(
+        eval_contexts, body_source, captured_locals, context_var, max_concurrent
+    )
 
-    # Log stats
+    # Log and print stats
+    eval_name = completed[0].eval_name if completed else "eval"
     log_eval_stats(completed)
+    print_eval_stats(completed, eval_name)
 
     return completed
 
 
 __all__ = ["run_eval"]
-

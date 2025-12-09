@@ -7,9 +7,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
-import mcp.types as mcp_types
-
 if TYPE_CHECKING:
+    import mcp.types as mcp_types
+
     from hud.environment.connection import Connector
 
 __all__ = ["LOCAL_CONNECTION", "ConflictResolution", "ToolRouter"]
@@ -100,7 +100,5 @@ class ToolRouter:
             raise ValueError(f"Tool conflict: '{name}' in '{existing}' and '{new}'")
         if self.conflict_resolution == ConflictResolution.FIRST_WINS:
             return False
-        if self.conflict_resolution == ConflictResolution.LAST_WINS:
-            return True
-        # PREFIX - shouldn't conflict if prefixes set correctly
-        return False
+        # LAST_WINS returns True, PREFIX (shouldn't conflict) returns False
+        return self.conflict_resolution == ConflictResolution.LAST_WINS

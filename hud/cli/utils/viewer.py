@@ -139,4 +139,3 @@ def show_json_interactive(
             input()
 
     console.print()
-

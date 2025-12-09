@@ -392,7 +392,6 @@ Key areas:
 - [Environment examples](environments/) - Add new MCP environments
 - [Agent implementations](hud/agents/) - Add support for new LLM providers
 - [Tool library](hud/tools/) - Extend the built-in tool collection
-- [RL training](hud/rl/) - Improve reinforcement learning pipelines
 
 Thanks to all our contributors!
 

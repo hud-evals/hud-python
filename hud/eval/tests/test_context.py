@@ -77,30 +77,27 @@ class TestEvalContext:
         with (
             patch.object(ctx, "_eval_enter", new_callable=AsyncMock),
             patch.object(ctx, "_eval_exit", new_callable=AsyncMock),
+            patch.object(EvalContext, "__aenter__", return_value=ctx),
+            patch.object(EvalContext, "__aexit__", return_value=None),
         ):
-                # Mock parent Environment context manager
-                with patch.object(EvalContext, "__aenter__", return_value=ctx):
-                    with patch.object(EvalContext, "__aexit__", return_value=None):
-                        assert get_current_trace_headers() is None
+            assert get_current_trace_headers() is None
 
-                        # Manually set token for test
-                        from hud.eval.context import _current_trace_headers
+            # Manually set token for test
+            from hud.eval.context import _current_trace_headers
 
-                        token = _current_trace_headers.set(ctx.headers)
-                        try:
-                            headers = get_current_trace_headers()
-                            assert headers is not None
-                            assert headers["Trace-Id"] == "test-123"
-                        finally:
-                            _current_trace_headers.reset(token)
+            token = _current_trace_headers.set(ctx.headers)
+            try:
+                headers = get_current_trace_headers()
+                assert headers is not None
+                assert headers["Trace-Id"] == "test-123"
+            finally:
+                _current_trace_headers.reset(token)
 
-                        assert get_current_trace_headers() is None
+            assert get_current_trace_headers() is None
 
     def test_repr(self) -> None:
         """__repr__ shows useful info."""
-        ctx = EvalContext(
-            name="test-task", trace_id="abc12345-6789-0000-0000-000000000000"
-        )
+        ctx = EvalContext(name="test-task", trace_id="abc12345-6789-0000-0000-000000000000")
         ctx.reward = 0.95
 
         repr_str = repr(ctx)
@@ -176,4 +173,3 @@ class TestEvalContextFromEnvironment:
         assert ctx.variants == {"model": "gpt-4o"}
         assert ctx.group_id == "group-123"
         assert ctx.index == 5
-

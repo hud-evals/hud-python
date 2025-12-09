@@ -22,14 +22,6 @@ from __future__ import annotations
 
 import warnings
 
-# Show deprecation warning when module is imported
-warnings.warn(
-    "The hud.otel module is deprecated. Use env.trace() instead. "
-    "This module requires pip install hud-python[agents].",
-    DeprecationWarning,
-    stacklevel=2,
-)
-
 from .collector import enable_trace_collection
 from .config import configure_telemetry, is_telemetry_configured, shutdown_telemetry
 from .context import (
@@ -37,6 +29,14 @@ from .context import (
     is_root_trace,
     span_context,
     trace,
+)
+
+# Show deprecation warning when module is imported
+warnings.warn(
+    "The hud.otel module is deprecated. Use env.trace() instead. "
+    "This module requires pip install hud-python[agents].",
+    DeprecationWarning,
+    stacklevel=2,
 )
 
 __all__ = [

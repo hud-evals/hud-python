@@ -14,10 +14,11 @@ import linecache
 import logging
 import textwrap
 import uuid
-from types import FrameType
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from types import FrameType
+
     from hud.eval.context import EvalContext
 
 logger = logging.getLogger(__name__)
@@ -244,7 +245,10 @@ def get_with_block_body(frame: Any) -> tuple[str, dict[str, Any], str]:
     # Extract the context variable name from 'as' clause
     context_var = _extract_context_var(with_node)
 
-    return body_source, frame.f_locals.copy(), context_var
+    # Capture both globals (imports) and locals (variables in scope)
+    captured = {**frame.f_globals, **frame.f_locals}
+
+    return body_source, captured, context_var
 
 
 def _extract_context_var(with_node: ast.AsyncWith) -> str:
@@ -296,6 +300,7 @@ async def run_parallel_evals(
     body_source: str,
     captured_locals: dict[str, Any],
     context_var: str,
+    max_concurrent: int | None = None,
 ) -> list[EvalContext]:
     """Run the eval body in parallel for multiple contexts.
 
@@ -311,6 +316,7 @@ async def run_parallel_evals(
         body_source: The source code of the with-block body
         captured_locals: Local variables captured from the caller
         context_var: The variable name used in the 'as' clause
+        max_concurrent: Maximum concurrent evals (None = unlimited)
     """
 
     # Create runner function using the actual variable name from the 'as' clause
@@ -320,10 +326,17 @@ async def run_parallel_evals(
     exec(code, namespace)  # noqa: S102
     runner = namespace["__runner__"]
 
+    # Create semaphore for concurrency control
+    sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
+
     async def run_one(ctx: EvalContext) -> EvalContext:
         try:
-            async with ctx:
-                await runner(ctx)
+            if sem:
+                async with sem, ctx:
+                    await runner(ctx)
+            else:
+                async with ctx:
+                    await runner(ctx)
         except Exception as e:
             logger.warning("Parallel eval %d failed: %s", ctx.index, e)
             ctx.error = e
@@ -342,4 +355,3 @@ __all__ = [
     "resolve_group_ids",
     "run_parallel_evals",
 ]
-

@@ -24,11 +24,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-# EvalMixin is safe to import (uses lazy imports internally)
-from hud.eval.mixin import EvalMixin
+# Auto-instrument httpx on import
+import hud.eval.instrument  # noqa: F401
 
 # run_eval is safe to import (uses lazy imports internally)
 from hud.eval.manager import run_eval
+
+# EvalMixin is safe to import (uses lazy imports internally)
+from hud.eval.mixin import EvalMixin
 
 if TYPE_CHECKING:
     from hud.eval.context import EvalContext
@@ -44,5 +47,6 @@ def __getattr__(name: str) -> object:
     """Lazy import EvalContext to avoid circular imports."""
     if name == "EvalContext":
         from hud.eval.context import EvalContext
+
         return EvalContext
     raise AttributeError(f"module 'hud.eval' has no attribute {name!r}")

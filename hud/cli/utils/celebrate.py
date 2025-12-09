@@ -186,5 +186,4 @@ def show_confetti_async(console: Console, seconds: float = 2.5, message: str | N
     # Don't wait - let operations continue while confetti plays
 
 
-__all__ = ["show_confetti", "show_confetti_async", "ConfettiSystem", "Particle"]
-
+__all__ = ["ConfettiSystem", "Particle", "show_confetti", "show_confetti_async"]

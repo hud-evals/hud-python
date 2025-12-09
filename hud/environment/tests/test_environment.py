@@ -27,7 +27,7 @@ class TestEnvironmentPrompt:
 
     def test_prompt_set_from_task(self) -> None:
         """connect_task sets prompt from task.prompt."""
-        from hud.environment.connection import Connector
+        from hud.environment.connection import Connector  # noqa: TC001
         from hud.environment.connectors.task import TaskConnectorMixin
         from hud.types import Task
 
