@@ -284,7 +284,9 @@ class OpenAIAgent(MCPAgent):
         if agent_response.tool_calls:
             agent_response.done = False
 
-        agent_response.content = "".join(reasoning_chunks) + "".join(text_chunks)
+        agent_response.content = "".join(text_chunks)
+        if reasoning_chunks:
+            agent_response.reasoning = "".join(reasoning_chunks)
         return agent_response
 
     async def format_tool_results(

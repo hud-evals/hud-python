@@ -217,6 +217,42 @@ class TestGeminiAgent:
             assert response.done is True
 
     @pytest.mark.asyncio
+    async def test_get_response_with_thinking(self, mock_mcp_client, mock_gemini_client):
+        """Test getting response with thinking content."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = GeminiAgent.create(
+                mcp_client=mock_mcp_client,
+                model_client=mock_gemini_client,
+                validate_api_key=False,
+            )
+
+            mock_response = MagicMock()
+            mock_candidate = MagicMock()
+
+            thinking_part = MagicMock()
+            thinking_part.text = None
+            thinking_part.function_call = None
+            thinking_part.thought = "Let me reason through this..."
+
+            text_part = MagicMock()
+            text_part.text = "Here is my answer"
+            text_part.function_call = None
+            text_part.thought = None
+
+            mock_candidate.content = MagicMock()
+            mock_candidate.content.parts = [thinking_part, text_part]
+
+            mock_response.candidates = [mock_candidate]
+
+            mock_gemini_client.models.generate_content = MagicMock(return_value=mock_response)
+
+            messages = [genai_types.Content(role="user", parts=[genai_types.Part(text="Hard question")])]
+            response = await agent.get_response(messages)
+
+            assert response.content == "Here is my answer"
+            assert response.reasoning == "Thinking: Let me reason through this...\n"
+
+    @pytest.mark.asyncio
     async def test_convert_tools_for_gemini(self, mock_mcp_client, mock_gemini_client):
         """Test converting MCP tools to Gemini format."""
         agent = GeminiAgent.create(

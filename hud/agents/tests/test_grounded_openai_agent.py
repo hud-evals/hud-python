@@ -115,3 +115,45 @@ async def test_call_tools_injects_screenshot_and_delegates(monkeypatch: pytest.M
     assert dummy_tool.last_args["element_description"] == "blue button"
     assert "screenshot_b64" in dummy_tool.last_args
     assert isinstance(dummy_tool.last_args["screenshot_b64"], str)
+
+
+@pytest.mark.asyncio
+async def test_get_response_with_reasoning() -> None:
+    """Test that reasoning content is extracted from the response."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    grounder_cfg = GrounderConfig(api_base="http://example", model="qwen")
+    fake_openai = AsyncOpenAI(api_key="test")
+
+    with patch("hud.settings.settings.telemetry_enabled", False):
+        agent = GroundedOpenAIChatAgent.create(
+            grounder_config=grounder_cfg,
+            openai_client=fake_openai,
+            checkpoint_name="gpt-4o-mini",
+            mcp_client=FakeMCPClient(),
+            initial_screenshot=False,
+        )
+
+        mock_response = MagicMock()
+        mock_choice = MagicMock()
+        mock_message = MagicMock()
+
+        mock_message.content = "Here is my answer"
+        mock_message.reasoning_content = "Let me think step by step..."
+        mock_message.tool_calls = None
+
+        mock_choice.message = mock_message
+        mock_choice.finish_reason = "stop"
+
+        mock_response.choices = [mock_choice]
+
+        agent.oai.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        agent.conversation_history = [
+            {"role": "user", "content": [{"type": "text", "text": "Hard question"}]}
+        ]
+
+        response = await agent.get_response(agent.conversation_history)
+
+        assert response.content == "Here is my answer"
+        assert response.reasoning == "Let me think step by step..."

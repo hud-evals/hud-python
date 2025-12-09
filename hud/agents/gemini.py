@@ -182,11 +182,9 @@ class GeminiAgent(MCPAgent):
             result.tool_calls = collected_tool_calls
             result.done = False
 
-        # Combine text and thinking for final content
+        result.content = text_content
         if thinking_content:
-            result.content = thinking_content + text_content
-        else:
-            result.content = text_content
+            result.reasoning = thinking_content
 
         return result
 

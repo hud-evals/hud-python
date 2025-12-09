@@ -287,9 +287,10 @@ class OpenAIChatAgent(MCPAgent):
 
         return AgentResponse(
             content=msg.content or "",
+            reasoning=msg.reasoning_content,
             tool_calls=tool_calls,
             done=done,
-            raw=response,  # Include raw response for access to Choice objects
+            raw=response,
         )
 
     async def format_tool_results(

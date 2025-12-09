@@ -276,6 +276,43 @@ class TestClaudeAgent:
             assert response.tool_calls == []
 
     @pytest.mark.asyncio
+    async def test_get_response_with_thinking(self, mock_mcp_client, mock_anthropic):
+        """Test getting model response with thinking content."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = ClaudeAgent.create(
+                mcp_client=mock_mcp_client,
+                model_client=mock_anthropic,
+                validate_api_key=False,
+            )
+
+            mock_response = MagicMock()
+
+            thinking_block = MagicMock()
+            thinking_block.type = "thinking"
+            thinking_block.thinking = "Let me analyze this problem..."
+
+            text_block = MagicMock()
+            text_block.type = "text"
+            text_block.text = "Here is the answer"
+
+            mock_response.content = [thinking_block, text_block]
+            mock_response.usage = MagicMock(input_tokens=10, output_tokens=30)
+
+            mock_stream = MockStreamContextManager(mock_response)
+            mock_anthropic.beta.messages.stream = MagicMock(return_value=mock_stream)
+
+            messages = [
+                cast(
+                    "BetaMessageParam",
+                    {"role": "user", "content": [{"type": "text", "text": "Hard question"}]},
+                )
+            ]
+            response = await agent.get_response(messages)
+
+            assert response.content == "Here is the answer"
+            assert response.reasoning == "Thinking: Let me analyze this problem...\n"
+
+    @pytest.mark.asyncio
     async def test_get_model_response_error(self, mock_mcp_client, mock_anthropic):
         """Test handling API errors."""
         # Disable telemetry for this test to avoid backend configuration issues
