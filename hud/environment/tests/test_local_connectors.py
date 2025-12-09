@@ -5,8 +5,6 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from hud.environment.connection import ConnectionType, Connector
 
 
@@ -201,4 +199,3 @@ class TestConnectFastAPI:
         result = env.connect_fastapi(MagicMock())
 
         assert result is env
-

@@ -12,7 +12,7 @@ import mcp.types as mcp_types
 if TYPE_CHECKING:
     from hud.environment.connection import Connector
 
-__all__ = ["ConflictResolution", "ToolRouter", "LOCAL_CONNECTION"]
+__all__ = ["LOCAL_CONNECTION", "ConflictResolution", "ToolRouter"]
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +21,11 @@ LOCAL_CONNECTION = "__local__"
 
 class ConflictResolution(str, Enum):
     """Strategy for resolving tool name conflicts."""
-    PREFIX = "prefix"        # Add connection name as prefix
+
+    PREFIX = "prefix"  # Add connection name as prefix
     FIRST_WINS = "first_wins"  # First connection wins
-    LAST_WINS = "last_wins"   # Last connection wins
-    ERROR = "error"          # Raise error on conflict
+    LAST_WINS = "last_wins"  # Last connection wins
+    ERROR = "error"  # Raise error on conflict
 
 
 @dataclass
@@ -60,7 +61,7 @@ class ToolRouter:
         connection_order: list[str],
     ) -> None:
         """Build routing from local tools and connection caches.
-        
+
         Local tools always have priority over remote tools.
         """
         self.clear()

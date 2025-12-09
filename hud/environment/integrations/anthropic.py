@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 # Try to import anthropic
 try:
     from anthropic.types.beta import BetaToolResultBlockParam
+
     _HAS_ANTHROPIC = True
 except ImportError:
     _HAS_ANTHROPIC = False
@@ -21,14 +22,14 @@ __all__ = ["AnthropicMixin"]
 
 class AnthropicMixin:
     """Mixin providing Anthropic/Claude format conversion and tool runner.
-    
+
     Format methods (no deps):
         as_claude_tools() - Claude API format
         as_claude_programmatic_tools() - Programmatic tool use format
-    
+
     Integration methods (requires anthropic):
         as_anthropic_runner() - Tool runner for executing tool_use blocks
-    
+
     Requires: as_tools() -> list[mcp_types.Tool], call_tool(name, args)
     """
 
@@ -44,17 +45,17 @@ class AnthropicMixin:
 
     def as_claude_tools(self, *, cache_control: bool = False) -> list[dict[str, Any]]:
         """Convert to Claude/Anthropic tool format.
-        
+
         Args:
             cache_control: Add cache_control for prompt caching
-        
+
         Returns:
             List of tool definitions for Claude API.
-        
+
         Example:
             ```python
             from anthropic import Anthropic
-            
+
             client = Anthropic()
             async with env:
                 response = client.messages.create(
@@ -83,13 +84,13 @@ class AnthropicMixin:
 
     def as_claude_programmatic_tools(self, *, cache_control: bool = False) -> list[dict[str, Any]]:
         """Convert to Claude programmatic tool use format.
-        
+
         Programmatic tool use allows Claude to execute tools via code execution.
-        
+
         Example:
             ```python
             from anthropic import Anthropic
-            
+
             client = Anthropic()
             async with env:
                 response = client.messages.create(
@@ -120,27 +121,27 @@ class AnthropicMixin:
 
     def as_anthropic_runner(self) -> EnvToolRunner:
         """Create an Anthropic tool runner for this environment.
-        
+
         Requires: pip install anthropic
-        
+
         Returns:
             EnvToolRunner that can process tool_use blocks from Claude.
-        
+
         Example:
             ```python
             from anthropic import Anthropic
-            
+
             client = Anthropic()
             async with env:
                 runner = env.as_anthropic_runner()
-                
+
                 response = client.messages.create(
                     model="claude-sonnet-4-20250514",
                     max_tokens=1024,
                     messages=[{"role": "user", "content": "Navigate to google.com"}],
                     tools=env.as_claude_tools(),
                 )
-                
+
                 # Execute all tool_use blocks
                 results = []
                 for block in response.content:
@@ -150,16 +151,14 @@ class AnthropicMixin:
             ```
         """
         if not _HAS_ANTHROPIC:
-            raise ImportError(
-                "Anthropic SDK not installed. Install with: pip install anthropic"
-            )
+            raise ImportError("Anthropic SDK not installed. Install with: pip install anthropic")
 
         return EnvToolRunner(self)
 
 
 class EnvToolRunner:
     """Tool runner that executes tools against an Environment."""
-    
+
     def __init__(self, env: AnthropicMixin) -> None:
         self.env = env
         self._tool_names: set[str] | None = None
@@ -173,17 +172,17 @@ class EnvToolRunner:
 
     async def run(self, tool_use_block: Any) -> dict[str, Any]:
         """Execute a tool_use block from Claude.
-        
+
         Args:
             tool_use_block: A ToolUseBlock from Claude's response.
-        
+
         Returns:
             Tool result dict (or BetaToolResultBlockParam if anthropic installed).
         """
         name = tool_use_block.name
         tool_use_id = tool_use_block.id
         arguments = tool_use_block.input or {}
-        
+
         try:
             result = await self.env.call_tool(name, **arguments)
             content = result if isinstance(result, str) else json.dumps(result) if result else ""
@@ -199,7 +198,7 @@ class EnvToolRunner:
                 "content": f"Error: {e}",
                 "is_error": True,
             }
-        
+
         # Return typed object if anthropic is available
         if _HAS_ANTHROPIC and BetaToolResultBlockParam is not None:
             return BetaToolResultBlockParam(**result_dict)

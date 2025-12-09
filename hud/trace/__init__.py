@@ -12,7 +12,7 @@ Usage (single execution):
     async with env.trace("google-search") as tc:
         await tc.call_tool("navigate", {"url": "..."})
         tc.reward = 0.9
-    
+
     # tc has the results
     print(tc.trace_id, tc.reward, tc.duration, tc.success)
     ```
@@ -23,7 +23,7 @@ Usage (parallel execution):
         # This body runs 4 times, each with a different tc!
         await tc.call_tool("navigate", {"url": "..."})
         tc.reward = evaluate()
-    
+
     # tc.results contains all parallel traces
     # tc.reward is the mean reward
     print(f"Mean reward: {tc.reward}")

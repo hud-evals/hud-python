@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
 
 import mcp.types as mcp_types
-import pytest
 
 
-def create_mock_tool(name: str, description: str = "", schema: dict | None = None) -> mcp_types.Tool:
+def create_mock_tool(
+    name: str, description: str = "", schema: dict | None = None
+) -> mcp_types.Tool:
     """Create a mock MCP tool for testing."""
     return mcp_types.Tool(
         name=name,
@@ -28,11 +28,15 @@ class TestOpenAIMixin:
         class TestEnv(OpenAIMixin):
             def as_tools(self) -> list[mcp_types.Tool]:
                 return [
-                    create_mock_tool("navigate", "Navigate to URL", {
-                        "type": "object",
-                        "properties": {"url": {"type": "string"}},
-                        "required": ["url"],
-                    }),
+                    create_mock_tool(
+                        "navigate",
+                        "Navigate to URL",
+                        {
+                            "type": "object",
+                            "properties": {"url": {"type": "string"}},
+                            "required": ["url"],
+                        },
+                    ),
                 ]
 
             async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
@@ -109,10 +113,14 @@ class TestAnthropicMixin:
         class TestEnv(AnthropicMixin):
             def as_tools(self) -> list[mcp_types.Tool]:
                 return [
-                    create_mock_tool("click", "Click element", {
-                        "type": "object",
-                        "properties": {"selector": {"type": "string"}},
-                    }),
+                    create_mock_tool(
+                        "click",
+                        "Click element",
+                        {
+                            "type": "object",
+                            "properties": {"selector": {"type": "string"}},
+                        },
+                    ),
                 ]
 
             async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
@@ -170,10 +178,14 @@ class TestGeminiMixin:
         class TestEnv(GeminiMixin):
             def as_tools(self) -> list[mcp_types.Tool]:
                 return [
-                    create_mock_tool("search", "Search query", {
-                        "type": "object",
-                        "properties": {"query": {"type": "string"}},
-                    }),
+                    create_mock_tool(
+                        "search",
+                        "Search query",
+                        {
+                            "type": "object",
+                            "properties": {"query": {"type": "string"}},
+                        },
+                    ),
                 ]
 
         env = TestEnv()
@@ -243,4 +255,3 @@ class TestGeminiMixin:
         config = env.as_gemini_tool_config(mode="NONE")
 
         assert config["function_calling_config"]["mode"] == "NONE"
-

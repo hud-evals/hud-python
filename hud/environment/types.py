@@ -11,7 +11,7 @@ __all__ = ["EnvConfig", "HubConfig"]
 
 class HubConfig(BaseModel):
     """Configuration for a single hub connection."""
-    
+
     slug: str
     alias: str | None = None
     prefix: str | None = None
@@ -21,9 +21,8 @@ class HubConfig(BaseModel):
 
 class EnvConfig(BaseModel):
     """Environment configuration for trace reproducibility."""
-    
+
     name: str
     hubs: list[HubConfig] = []
     setup_tools: list[MCPToolCall] = []
     evaluate_tools: list[MCPToolCall] = []
-

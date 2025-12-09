@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -35,11 +35,13 @@ class TestExpandVariants:
 
     def test_multiple_lists_create_combinations(self) -> None:
         """Multiple lists create all combinations."""
-        result = _expand_variants({
-            "model": ["a", "b"],
-            "temp": [0.0, 1.0],
-        })
-        
+        result = _expand_variants(
+            {
+                "model": ["a", "b"],
+                "temp": [0.0, 1.0],
+            }
+        )
+
         assert len(result) == 4
         assert {"model": "a", "temp": 0.0} in result
         assert {"model": "a", "temp": 1.0} in result
@@ -48,11 +50,13 @@ class TestExpandVariants:
 
     def test_mixed_single_and_list(self) -> None:
         """Mixed single values and lists work correctly."""
-        result = _expand_variants({
-            "model": ["gpt-4o", "claude"],
-            "temp": 0.7,
-        })
-        
+        result = _expand_variants(
+            {
+                "model": ["gpt-4o", "claude"],
+                "temp": 0.7,
+            }
+        )
+
         assert len(result) == 2
         assert {"model": "gpt-4o", "temp": 0.7} in result
         assert {"model": "claude", "temp": 0.7} in result
@@ -60,32 +64,26 @@ class TestExpandVariants:
 
 class MockEnvironment(TraceMixin):
     """Mock environment for testing TraceMixin."""
-    
+
     def __init__(self) -> None:
         self.name = "test-env"
         self._connections: dict[str, Any] = {}
         self._last_traces = None
-    
+
     @property
     def is_parallelizable(self) -> bool:
-        return all(
-            getattr(c, "is_remote", True)
-            for c in self._connections.values()
-        )
-    
+        return all(getattr(c, "is_remote", True) for c in self._connections.values())
+
     @property
     def local_connections(self) -> list[str]:
-        return [
-            name for name, c in self._connections.items()
-            if getattr(c, "is_local", False)
-        ]
-    
+        return [name for name, c in self._connections.items() if getattr(c, "is_local", False)]
+
     async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         return {"name": name, "arguments": arguments}
-    
-    async def __aenter__(self) -> "MockEnvironment":
+
+    async def __aenter__(self) -> MockEnvironment:
         return self
-    
+
     async def __aexit__(self, *args: Any) -> None:
         pass
 
@@ -97,7 +95,7 @@ class TestTraceMixin:
     async def test_trace_single_creates_context(self) -> None:
         """trace() with group=1 creates single TraceContext."""
         env = MockEnvironment()
-        
+
         async with env.trace("test-task") as tc:
             assert tc.name == "test-task"
             assert tc.trace_id is not None
@@ -107,17 +105,17 @@ class TestTraceMixin:
     async def test_trace_sets_reward(self) -> None:
         """reward can be set on TraceContext."""
         env = MockEnvironment()
-        
+
         async with env.trace("test-task") as tc:
             tc.reward = 0.95
-        
+
         assert tc.reward == 0.95
 
     @pytest.mark.asyncio
     async def test_trace_with_variants_single(self) -> None:
         """trace() with single variant value works."""
         env = MockEnvironment()
-        
+
         async with env.trace("test-task", variants={"model": "gpt-4o"}) as tc:
             assert tc.variants == {"model": "gpt-4o"}
 
@@ -125,13 +123,13 @@ class TestTraceMixin:
     async def test_trace_rejects_parallel_with_local_connections(self) -> None:
         """trace() raises error for parallel with local connections."""
         env = MockEnvironment()
-        
+
         # Add a local connection
         mock_conn = MagicMock()
         mock_conn.is_local = True
         mock_conn.is_remote = False
         env._connections["local-server"] = mock_conn
-        
+
         with pytest.raises(ValueError, match="Cannot run parallel traces"):
             async with env.trace("test-task", group=2) as tc:
                 pass
@@ -140,13 +138,13 @@ class TestTraceMixin:
     async def test_trace_allows_parallel_with_remote_connections(self) -> None:
         """trace() allows parallel with only remote connections."""
         env = MockEnvironment()
-        
+
         # Add a remote connection
         mock_conn = MagicMock()
         mock_conn.is_local = False
         mock_conn.is_remote = True
         env._connections["remote-server"] = mock_conn
-        
+
         # This should not raise (though parallel execution is complex to test)
         # Just verify it doesn't raise the local connection error
         assert env.is_parallelizable is True
@@ -155,7 +153,7 @@ class TestTraceMixin:
     async def test_trace_rejects_zero_group(self) -> None:
         """trace() raises error for group <= 0."""
         env = MockEnvironment()
-        
+
         with pytest.raises(ValueError, match="group must be >= 1"):
             async with env.trace("test-task", group=0) as tc:
                 pass
@@ -169,10 +167,9 @@ class TestTraceMixin:
     async def test_trace_context_delegates_call_tool(self) -> None:
         """TraceContext.call_tool delegates to environment."""
         env = MockEnvironment()
-        
+
         async with env.trace("test-task") as tc:
             result = await tc.call_tool("my_tool", {"arg": "value"})
-        
+
         assert result["name"] == "my_tool"
         assert result["arguments"] == {"arg": "value"}
-

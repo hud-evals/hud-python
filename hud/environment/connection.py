@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 
 class ConnectionType(str, Enum):
     """Type of connection - determines parallelization capability."""
-    
-    LOCAL = "local"    # Stdio/Docker - single instance, not parallelizable
+
+    LOCAL = "local"  # Stdio/Docker - single instance, not parallelizable
     REMOTE = "remote"  # HTTP/URL - can spawn multiple instances
 
 
@@ -45,7 +45,7 @@ class ConnectionConfig:
 
 class Connector:
     """Manages a connection to an MCP server with tool caching.
-    
+
     Client creation is deferred to connect() so that:
     1. Each parallel trace gets fresh client instances
     2. Connection happens inside trace context (for header injection)
@@ -68,12 +68,12 @@ class Connector:
         self.connection_type = connection_type
         self.client: FastMCPClient[Any] | None = None
         self._tools_cache: list[mcp_types.Tool] | None = None
-    
+
     @property
     def is_local(self) -> bool:
         """True if this is a local (non-parallelizable) connection."""
         return self.connection_type == ConnectionType.LOCAL
-    
+
     @property
     def is_remote(self) -> bool:
         """True if this is a remote (parallelizable) connection."""
@@ -89,13 +89,13 @@ class Connector:
 
     async def connect(self) -> None:
         """Create FastMCP client and connect.
-        
+
         Client is created here (not in __init__) so that:
         1. Each parallel trace gets fresh client instances
         2. httpx auto-instrumentation can inject trace headers
         """
         from fastmcp.client import Client as FastMCPClient
-        
+
         # Create fresh client from stored transport config
         self.client = FastMCPClient(transport=self._transport, auth=self._auth)
         await self.client.__aenter__()
@@ -141,11 +141,13 @@ class Connector:
 
             # Apply prefix
             name = f"{self.config.prefix}_{tool.name}" if self.config.prefix else tool.name
-            result.append(mcp_types.Tool(
-                name=name,
-                description=tool.description,
-                inputSchema=tool.inputSchema,
-            ))
+            result.append(
+                mcp_types.Tool(
+                    name=name,
+                    description=tool.description,
+                    inputSchema=tool.inputSchema,
+                )
+            )
 
         self._tools_cache = result
         return result
@@ -158,7 +160,7 @@ class Connector:
             raise RuntimeError("Not connected - call connect() first")
         # Strip prefix when calling remote
         if self.config.prefix and name.startswith(f"{self.config.prefix}_"):
-            name = name[len(self.config.prefix) + 1:]
+            name = name[len(self.config.prefix) + 1 :]
         return await self.client.call_tool_mcp(name, arguments or {})
 
     async def list_resources(self) -> list[mcp_types.Resource]:

@@ -15,22 +15,22 @@ class IntegrationsMixin(
     LangChainMixin,
 ):
     """Combined integration mixin for all providers.
-    
+
     OpenAI:
         as_openai_chat_tools() - Chat Completions format
         as_openai_responses_tools() - Responses API format
         as_openai_agent_tools() - Agents SDK (requires openai-agents)
-    
+
     Anthropic/Claude:
         as_claude_tools() - Claude API format
         as_claude_programmatic_tools() - Programmatic tool use
         as_anthropic_runner() - Tool runner (requires anthropic)
-    
+
     Google/Gemini:
         as_gemini_tools() - Gemini format
         as_gemini_tool_config() - Tool config
-    
+
     LangChain:
         as_langchain_tools() - StructuredTools (requires langchain-core)
     """
-    pass
+

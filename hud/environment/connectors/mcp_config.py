@@ -28,33 +28,35 @@ class MCPConfigConnectorMixin(BaseConnectorMixin):
         transform: Callable[[Tool], Tool | None] | None = None,
     ) -> Any:
         """Connect using an mcp_config dictionary (single server).
-        
+
         Auto-detects LOCAL (stdio) vs REMOTE (URL) based on config.
-        
+
         Example:
             ```python
             env = Environment("my-env")
-            
+
             # Stdio server
-            env.connect_mcp({
-                "filesystem": {
-                    "command": "npx",
-                    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+            env.connect_mcp(
+                {
+                    "filesystem": {
+                        "command": "npx",
+                        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+                    }
                 }
-            })
-            
+            )
+
             async with env:
                 await env.call_tool("read_file", path="/tmp/test.txt")
             ```
         """
         from hud.environment.connection import ConnectionType
-        
+
         name = alias or next(iter(config.keys()), "mcp")
         server_config = next(iter(config.values()), {})
-        
+
         is_local = "command" in server_config or "args" in server_config
         conn_type = ConnectionType.LOCAL if is_local else ConnectionType.REMOTE
-        
+
         return self._add_connection(
             name,
             config,
@@ -71,24 +73,26 @@ class MCPConfigConnectorMixin(BaseConnectorMixin):
         **kwargs: Any,
     ) -> Any:
         """Connect multiple servers from an mcp_config dictionary.
-        
+
         Example:
             ```python
             env = Environment("my-env")
-            
+
             # Claude Desktop style config
-            env.connect_mcp_config({
-                "filesystem": {
-                    "command": "npx",
-                    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-                },
-                "github": {
-                    "command": "npx",
-                    "args": ["-y", "@modelcontextprotocol/server-github"],
-                    "env": {"GITHUB_TOKEN": "..."},
-                },
-            })
-            
+            env.connect_mcp_config(
+                {
+                    "filesystem": {
+                        "command": "npx",
+                        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+                    },
+                    "github": {
+                        "command": "npx",
+                        "args": ["-y", "@modelcontextprotocol/server-github"],
+                        "env": {"GITHUB_TOKEN": "..."},
+                    },
+                }
+            )
+
             async with env:
                 await env.call_tool("read_file", path="/tmp/test.txt")
                 await env.call_tool("search_repositories", query="mcp")

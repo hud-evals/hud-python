@@ -16,7 +16,7 @@ __all__ = ["BaseConnectorMixin"]
 
 class BaseConnectorMixin:
     """Base mixin providing connection helper.
-    
+
     Requires:
         _connections: dict[str, Connector]
     """
@@ -36,7 +36,7 @@ class BaseConnectorMixin:
         transform: Callable[[Tool], Tool | None] | None = None,
     ) -> Any:
         """Add a connection to the environment.
-        
+
         Args:
             name: Connection name/alias.
             transport: FastMCP transport (URL, config dict, etc.).
@@ -46,16 +46,23 @@ class BaseConnectorMixin:
             include: Only include these tools.
             exclude: Exclude these tools.
             transform: Transform function for tools.
-        
+
         Returns:
             self for chaining.
         """
         from hud.environment.connection import ConnectionConfig, Connector
-        
+
         config = ConnectionConfig(
-            prefix=prefix, include=include, exclude=exclude, transform=transform,
+            prefix=prefix,
+            include=include,
+            exclude=exclude,
+            transform=transform,
         )
         self._connections[name] = Connector(
-            transport, config, name, connection_type=connection_type, auth=auth,
+            transport,
+            config,
+            name,
+            connection_type=connection_type,
+            auth=auth,
         )
         return self

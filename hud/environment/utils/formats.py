@@ -19,15 +19,17 @@ __all__ = [
 
 class ToolFormat(Enum):
     """Detected tool call format."""
-    OPENAI = auto()   # function.arguments as JSON string
-    CLAUDE = auto()   # type="tool_use", input as dict
-    GEMINI = auto()   # functionCall with args
-    MCP = auto()      # name + arguments
+
+    OPENAI = auto()  # function.arguments as JSON string
+    CLAUDE = auto()  # type="tool_use", input as dict
+    GEMINI = auto()  # functionCall with args
+    MCP = auto()  # name + arguments
 
 
 # -----------------------------------------------------------------------------
 # Parsing
 # -----------------------------------------------------------------------------
+
 
 def _to_dict(obj: Any) -> dict[str, Any]:
     """Convert object to dict for uniform processing."""
@@ -54,7 +56,7 @@ def _parse_json_args(args: Any) -> dict[str, Any]:
 
 def parse_tool_call(call: Any, **kwargs: Any) -> tuple[MCPToolCall, ToolFormat]:
     """Parse any tool call format into (MCPToolCall, ToolFormat).
-    
+
     Supports:
         - String (tool name only, or with kwargs)
         - Tuple: (name,), (name, args), (name, args, id)
@@ -63,33 +65,33 @@ def parse_tool_call(call: Any, **kwargs: Any) -> tuple[MCPToolCall, ToolFormat]:
         - Claude: {type: "tool_use", name, input, id}
         - Gemini: {functionCall: {name, args}} or {name, args}
         - Generic: {name, arguments}
-    
+
     Args:
         call: Tool call in any supported format.
         **kwargs: Additional arguments (merged when call is a string).
-    
+
     Returns:
         Tuple of (MCPToolCall, ToolFormat) for the parsed call.
-    
+
     Raises:
         ValueError: If format is unrecognized.
     """
     # Primitives
     if isinstance(call, str):
         return MCPToolCall(name=call, arguments=kwargs or {}), ToolFormat.MCP
-    
+
     if isinstance(call, tuple):
         tc = MCPToolCall(name=call[0], arguments=call[1] if len(call) > 1 else {})
         if len(call) > 2:
             tc.id = call[2]
         return tc, ToolFormat.MCP
-    
+
     if isinstance(call, MCPToolCall):
         return call, ToolFormat.MCP
-    
+
     # Convert to dict
     d = _to_dict(call)
-    
+
     # OpenAI: {function: {name, arguments}, id}
     if "function" in d:
         f = _to_dict(d["function"]) if not isinstance(d["function"], dict) else d["function"]
@@ -97,29 +99,29 @@ def parse_tool_call(call: Any, **kwargs: Any) -> tuple[MCPToolCall, ToolFormat]:
         if d.get("id"):
             tc.id = d["id"]
         return tc, ToolFormat.OPENAI
-    
+
     # Claude: {type: "tool_use", name, input, id}
     if d.get("type") == "tool_use":
         tc = MCPToolCall(name=d["name"], arguments=d.get("input") or {})
         if d.get("id"):
             tc.id = d["id"]
         return tc, ToolFormat.CLAUDE
-    
+
     # Gemini: {functionCall: {name, args}} or {name, args}
     if "functionCall" in d:
         fc = d["functionCall"]
         return MCPToolCall(name=fc["name"], arguments=fc.get("args") or {}), ToolFormat.GEMINI
-    
+
     if "args" in d and "name" in d and "arguments" not in d:
         return MCPToolCall(name=d["name"], arguments=d.get("args") or {}), ToolFormat.GEMINI
-    
+
     # Generic: {name, arguments/input}
     if "name" in d:
         tc = MCPToolCall(name=d["name"], arguments=d.get("arguments") or d.get("input") or {})
         if d.get("id"):
             tc.id = d["id"]
         return tc, ToolFormat.MCP
-    
+
     raise ValueError(f"Unrecognized tool call format: {list(d.keys())}")
 
 
@@ -131,10 +133,10 @@ def _is_tool_block(item: Any) -> bool:
 
 def parse_tool_calls(calls: Any) -> list[tuple[MCPToolCall, ToolFormat]]:
     """Parse multiple tool calls, filtering non-tool content (e.g. Claude TextBlock).
-    
+
     Args:
         calls: Single call or list of calls in any format.
-    
+
     Returns:
         List of (MCPToolCall, ToolFormat) tuples.
     """
@@ -145,7 +147,7 @@ def parse_tool_calls(calls: Any) -> list[tuple[MCPToolCall, ToolFormat]]:
             return [parse_tool_call(calls)]
         except ValueError:
             return []
-    
+
     results = []
     for item in calls:
         if not _is_tool_block(item):
@@ -161,12 +163,13 @@ def parse_tool_calls(calls: Any) -> list[tuple[MCPToolCall, ToolFormat]]:
 # Result Formatting
 # -----------------------------------------------------------------------------
 
+
 def result_to_string(result: MCPToolResult) -> str:
     """Convert MCPToolResult content to string.
-    
+
     Args:
         result: MCP tool result with content blocks.
-    
+
     Returns:
         String representation of the result content.
     """
@@ -183,12 +186,12 @@ def result_to_string(result: MCPToolResult) -> str:
 
 def format_result(result: MCPToolResult, tc: MCPToolCall, fmt: ToolFormat) -> Any:
     """Format MCPToolResult based on the input format.
-    
+
     Args:
         result: MCP tool result.
         tc: Original tool call (for id/name).
         fmt: Target format.
-    
+
     Returns:
         OpenAI: {"role": "tool", "tool_call_id": ..., "content": ...}
         Claude: {"type": "tool_result", "tool_use_id": ..., "content": ..., "is_error"?: bool}
@@ -196,18 +199,17 @@ def format_result(result: MCPToolResult, tc: MCPToolCall, fmt: ToolFormat) -> An
         MCP: MCPToolResult unchanged
     """
     content = result_to_string(result)
-    
+
     if fmt == ToolFormat.OPENAI:
         return {"role": "tool", "tool_call_id": tc.id, "content": content}
-    
+
     if fmt == ToolFormat.CLAUDE:
         r: dict[str, Any] = {"type": "tool_result", "tool_use_id": tc.id, "content": content}
         if result.isError:
             r["is_error"] = True
         return r
-    
+
     if fmt == ToolFormat.GEMINI:
         return {"functionResponse": {"name": tc.name, "response": {"result": content}}}
-    
-    return result  # MCP format - return as-is
 
+    return result  # MCP format - return as-is

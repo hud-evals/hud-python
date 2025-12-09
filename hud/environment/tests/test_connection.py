@@ -55,7 +55,7 @@ class TestConnector:
         """__init__ stores transport config, doesn't create client."""
         transport = {"server": {"url": "http://example.com"}}
         config = ConnectionConfig()
-        
+
         connector = Connector(
             transport=transport,
             config=config,
@@ -63,7 +63,7 @@ class TestConnector:
             connection_type=ConnectionType.REMOTE,
             auth="test-token",
         )
-        
+
         assert connector._transport == transport
         assert connector._auth == "test-token"
         assert connector.name == "test"
@@ -124,17 +124,15 @@ class TestConnector:
             connection_type=ConnectionType.REMOTE,
             auth="test-token",
         )
-        
+
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.is_connected = MagicMock(return_value=True)
-        
+
         # Patch where it's imported from, not where it's used
-        with patch(
-            "fastmcp.client.Client", return_value=mock_client
-        ) as mock_cls:
+        with patch("fastmcp.client.Client", return_value=mock_client) as mock_cls:
             await connector.connect()
-            
+
             # Client was created with correct args
             mock_cls.assert_called_once_with(transport=transport, auth="test-token")
             # Client context was entered
@@ -151,15 +149,15 @@ class TestConnector:
             name="test",
             connection_type=ConnectionType.REMOTE,
         )
-        
+
         mock_client = MagicMock()
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.is_connected = MagicMock(return_value=True)
         connector.client = mock_client
         connector._tools_cache = [MagicMock()]
-        
+
         await connector.disconnect()
-        
+
         mock_client.__aexit__.assert_called_once_with(None, None, None)
         assert connector.client is None
         assert connector._tools_cache is None
@@ -173,7 +171,7 @@ class TestConnector:
             name="test",
             connection_type=ConnectionType.REMOTE,
         )
-        
+
         with pytest.raises(RuntimeError, match="Not connected"):
             await connector.list_tools()
 
@@ -186,16 +184,18 @@ class TestConnector:
             name="test",
             connection_type=ConnectionType.REMOTE,
         )
-        
+
         mock_client = MagicMock()
-        mock_client.list_tools = AsyncMock(return_value=[
-            mcp_types.Tool(name="tool1", description="Tool 1", inputSchema={}),
-            mcp_types.Tool(name="tool2", description="Tool 2", inputSchema={}),
-        ])
+        mock_client.list_tools = AsyncMock(
+            return_value=[
+                mcp_types.Tool(name="tool1", description="Tool 1", inputSchema={}),
+                mcp_types.Tool(name="tool2", description="Tool 2", inputSchema={}),
+            ]
+        )
         connector.client = mock_client
-        
+
         tools = await connector.list_tools()
-        
+
         assert len(tools) == 1
         assert tools[0].name == "tool1"
 
@@ -208,16 +208,18 @@ class TestConnector:
             name="test",
             connection_type=ConnectionType.REMOTE,
         )
-        
+
         mock_client = MagicMock()
-        mock_client.list_tools = AsyncMock(return_value=[
-            mcp_types.Tool(name="tool1", description="Tool 1", inputSchema={}),
-            mcp_types.Tool(name="tool2", description="Tool 2", inputSchema={}),
-        ])
+        mock_client.list_tools = AsyncMock(
+            return_value=[
+                mcp_types.Tool(name="tool1", description="Tool 1", inputSchema={}),
+                mcp_types.Tool(name="tool2", description="Tool 2", inputSchema={}),
+            ]
+        )
         connector.client = mock_client
-        
+
         tools = await connector.list_tools()
-        
+
         assert len(tools) == 1
         assert tools[0].name == "tool1"
 
@@ -230,15 +232,17 @@ class TestConnector:
             name="test",
             connection_type=ConnectionType.REMOTE,
         )
-        
+
         mock_client = MagicMock()
-        mock_client.list_tools = AsyncMock(return_value=[
-            mcp_types.Tool(name="tool1", description="Tool 1", inputSchema={}),
-        ])
+        mock_client.list_tools = AsyncMock(
+            return_value=[
+                mcp_types.Tool(name="tool1", description="Tool 1", inputSchema={}),
+            ]
+        )
         connector.client = mock_client
-        
+
         tools = await connector.list_tools()
-        
+
         assert len(tools) == 1
         assert tools[0].name == "myprefix_tool1"
 
@@ -251,15 +255,17 @@ class TestConnector:
             name="test",
             connection_type=ConnectionType.REMOTE,
         )
-        
+
         mock_client = MagicMock()
-        mock_client.list_tools = AsyncMock(return_value=[
-            mcp_types.Tool(name="tool1", description="Tool 1", inputSchema={}),
-        ])
+        mock_client.list_tools = AsyncMock(
+            return_value=[
+                mcp_types.Tool(name="tool1", description="Tool 1", inputSchema={}),
+            ]
+        )
         connector.client = mock_client
-        
+
         tools = await connector.list_tools()
-        
+
         assert connector._tools_cache == tools
         assert connector.cached_tools == tools
 
@@ -272,14 +278,14 @@ class TestConnector:
             name="test",
             connection_type=ConnectionType.REMOTE,
         )
-        
+
         mock_result = mcp_types.CallToolResult(content=[], isError=False)
         mock_client = MagicMock()
         mock_client.call_tool_mcp = AsyncMock(return_value=mock_result)
         connector.client = mock_client
-        
+
         await connector.call_tool("myprefix_tool1", {"arg": "value"})
-        
+
         # Prefix should be stripped
         mock_client.call_tool_mcp.assert_called_once_with("tool1", {"arg": "value"})
 
@@ -292,7 +298,7 @@ class TestConnector:
             name="test",
             connection_type=ConnectionType.REMOTE,
         )
-        
+
         with pytest.raises(RuntimeError, match="Not connected"):
             await connector.call_tool("tool1", {})
 
@@ -304,9 +310,8 @@ class TestConnector:
             name="my-server",
             connection_type=ConnectionType.REMOTE,
         )
-        
+
         repr_str = repr(connector)
         assert "my-server" in repr_str
         assert "remote" in repr_str
         assert "connected=False" in repr_str
-

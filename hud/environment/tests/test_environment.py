@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
 
-import mcp.types as mcp_types
 import pytest
 
 
@@ -29,8 +27,8 @@ class TestEnvironmentPrompt:
 
     def test_prompt_set_from_task(self) -> None:
         """connect_task sets prompt from task.prompt."""
-        from hud.environment.connectors.task import TaskConnectorMixin
         from hud.environment.connection import Connector
+        from hud.environment.connectors.task import TaskConnectorMixin
         from hud.types import Task
 
         class TestEnv(TaskConnectorMixin):
@@ -63,12 +61,12 @@ class TestEnvironmentContextManager:
         from hud.environment import Environment
 
         env = Environment("test")
-        
+
         assert env._in_context is False
-        
+
         async with env:
             assert env._in_context is True
-        
+
         assert env._in_context is False
 
     @pytest.mark.asyncio
@@ -77,7 +75,7 @@ class TestEnvironmentContextManager:
         from hud.environment import Environment
 
         env = Environment("test")
-        
+
         async with env:
             # Should work without connections
             pass
@@ -92,10 +90,10 @@ class TestEnvironmentResources:
         from hud.environment import Environment
 
         env = Environment("test")
-        
+
         async with env:
             resources = await env.list_resources()
-        
+
         assert resources == []
 
     @pytest.mark.asyncio
@@ -104,7 +102,7 @@ class TestEnvironmentResources:
         from hud.environment import Environment
 
         env = Environment("test")
-        
+
         async with env:
             with pytest.raises(ValueError, match="Resource not found"):
                 await env.read_resource("file://nonexistent.txt")
@@ -119,10 +117,10 @@ class TestEnvironmentPrompts:
         from hud.environment import Environment
 
         env = Environment("test")
-        
+
         async with env:
             prompts = await env.list_prompts()
-        
+
         assert prompts == []
 
     @pytest.mark.asyncio
@@ -131,7 +129,7 @@ class TestEnvironmentPrompts:
         from hud.environment import Environment
 
         env = Environment("test")
-        
+
         async with env:
             with pytest.raises(ValueError, match="Prompt not found"):
                 await env.get_prompt("nonexistent")
@@ -189,4 +187,3 @@ class TestEnvironmentSetupEvaluate:
         )
 
         assert len(env._setup_calls) == 2
-
