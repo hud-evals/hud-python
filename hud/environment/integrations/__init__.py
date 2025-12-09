@@ -33,4 +33,3 @@ class IntegrationsMixin(
     LangChain:
         as_langchain_tools() - StructuredTools (requires langchain-core)
     """
-

@@ -1,5 +1,22 @@
 """HUD Telemetry - Tracing and job management for agent execution.
 
+.. deprecated::
+    The `hud.telemetry` module is deprecated and will be removed in a future version.
+    Use `env.trace()` from `hud.environment.Environment` instead.
+
+    This module requires the [agents] extra:
+        pip install hud-python[agents]
+
+    Migration:
+        # Old (deprecated):
+        async with hud.async_trace("Task"):
+            await agent.run(task)
+
+        # New (recommended):
+        async with env.trace("Task") as tc:
+            await agent.run(task)
+            tc.reward = result.reward
+
 Provides telemetry APIs for tracking agent execution and experiments.
 
 Async Usage (Recommended):
@@ -26,6 +43,15 @@ APIs:
 """
 
 from __future__ import annotations
+
+import warnings
+
+warnings.warn(
+    "The hud.telemetry module is deprecated. Use env.trace() instead. "
+    "This module requires pip install hud-python[agents].",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 from .async_context import async_job, async_trace
 from .instrument import instrument

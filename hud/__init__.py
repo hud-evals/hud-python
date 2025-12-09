@@ -6,29 +6,16 @@ tools for building, evaluating, and training AI agents.
 from __future__ import annotations
 
 from .environment import Environment
-from .telemetry import (
-    Trace,
-    async_job,
-    async_trace,
-    clear_trace,
-    create_job,
-    get_trace,
-    instrument,
-    job,
-    trace,
-)
+from .telemetry.instrument import instrument
+from .telemetry.job import Job, create_job, get_current_job, job
 
 __all__ = [
     "Environment",
-    "Trace",
-    "async_job",
-    "async_trace",
-    "clear_trace",
+    "Job",
     "create_job",
-    "get_trace",
+    "get_current_job",
     "instrument",
     "job",
-    "trace",
 ]
 
 try:

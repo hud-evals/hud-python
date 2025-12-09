@@ -323,11 +323,19 @@ class TraceContext:
 
     async def call_tool(
         self,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-    ) -> MCPToolResult:
-        """Call a tool by name (delegates to environment)."""
-        return await self._env.call_tool(name, arguments)  # type: ignore[attr-defined]
+        call: Any,
+        /,
+        **kwargs: Any,
+    ) -> Any:
+        """Call a tool (delegates to environment).
+        
+        Accepts any format:
+            - String with kwargs: call_tool("navigate", url="...")
+            - OpenAI tool_call: call_tool(response.choices[0].message.tool_calls[0])
+            - Claude tool_use: call_tool(block)  # where block.type == "tool_use"
+            - Gemini function_call: call_tool(part)
+        """
+        return await self._env.call_tool(call, **kwargs)  # type: ignore[attr-defined]
 
     # =========================================================================
     # Backend Integration
@@ -401,6 +409,7 @@ class TraceContext:
         self._started_at = datetime.now(UTC)
         self._token = _current_trace_headers.set(self.headers)
         await self._trace_enter()
+        self._print_trace_link()
         return self
 
     async def __aexit__(
@@ -425,3 +434,37 @@ class TraceContext:
 
     def __repr__(self) -> str:
         return f"TraceContext({self.trace_id[:8]}..., name={self.name!r}, reward={self.reward})"
+
+    def _print_trace_link(self) -> None:
+        """Print a nicely formatted trace link to console and open in browser."""
+        import contextlib
+        import webbrowser
+
+        trace_url = f"https://hud.ai/trace/{self.trace_id}"
+
+        # Try to open in browser (new tab if possible)
+        with contextlib.suppress(Exception):
+            webbrowser.open(trace_url, new=2)
+
+        try:
+            from rich.console import Console
+            from rich.panel import Panel
+            from rich.align import Align
+
+            console = Console()
+            
+            # Style: HUD colors - gold border, purple link
+            link_markup = f"[bold underline rgb(108,113,196)][link={trace_url}]{trace_url}[/link][/bold underline rgb(108,113,196)]"
+            
+            content = Align.center(link_markup)
+            
+            panel = Panel(
+                content,
+                title="🔗 Trace Started",
+                border_style="rgb(192,150,12)",  # HUD gold
+                padding=(0, 2),
+            )
+            console.print(panel)
+        except ImportError:
+            # Fallback if rich not available
+            print(f"Trace: https://hud.ai/trace/{self.trace_id}")

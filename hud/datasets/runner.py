@@ -1,4 +1,7 @@
-"""Core task runner for evaluating agents on datasets."""
+"""Core task runner for evaluating agents on datasets.
+
+Requires the [agents] extra: pip install hud-python[agents]
+"""
 
 from __future__ import annotations
 
@@ -9,13 +12,12 @@ import uuid
 import warnings
 from typing import TYPE_CHECKING, Any, cast
 
-from datasets import Dataset, load_dataset
-
 from hud.datasets.utils import calculate_group_stats, submit_rollouts
-from hud.telemetry import async_job, async_trace
 from hud.types import AgentType, Task, Trace
 
 if TYPE_CHECKING:
+    from datasets import Dataset
+
     from hud.agents import MCPAgent
 
 logger = logging.getLogger("hud.datasets")
@@ -54,6 +56,8 @@ async def run_single_task(
     Returns:
         Trace result from agent execution
     """
+    from hud.telemetry import async_trace
+
     name = trace_name or task.prompt or task_id or "task"
 
     async with async_trace(
@@ -116,6 +120,7 @@ async def run_tasks(
         await run_tasks(tasks, AgentType.CLAUDE, remote=True)
     """
     import hud
+    from hud.telemetry import async_job
     from hud.utils.hud_console import HUDConsole
 
     job_metadata = metadata or {}
@@ -188,6 +193,11 @@ async def run_dataset(
         If group_size == 1: List of results from agent.run() in dataset order.
         If group_size > 1: List of statistics dicts for each task group.
     """
+    from datasets import Dataset as HFDataset
+    from datasets import load_dataset
+
+    from hud.telemetry import async_job
+
     warnings.warn(
         "run_dataset() is deprecated. Use run_tasks() instead for more flexibility.",
         DeprecationWarning,
@@ -201,9 +211,9 @@ async def run_dataset(
     if isinstance(dataset, str):
         logger.info("Loading dataset %s from HuggingFace...", dataset)
         dataset_link = dataset
-        loaded = cast("Dataset", load_dataset(dataset, split=split))
+        loaded = cast("HFDataset", load_dataset(dataset, split=split))
         task_dicts = cast("list[dict[str, Any]]", list(loaded))
-    elif isinstance(dataset, Dataset):
+    elif isinstance(dataset, HFDataset):
         task_dicts = cast("list[dict[str, Any]]", list(dataset))
         # Try to extract dataset link
         try:
@@ -241,6 +251,8 @@ async def _run_tasks(
     group_size: int,
     job_obj: Any,
 ) -> list[Any]:
+    from hud.telemetry import async_trace
+
     sem = asyncio.Semaphore(max_concurrent)
     params = agent_params or {}
 

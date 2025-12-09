@@ -17,33 +17,15 @@ dependencies = [
     # MCP dependencies
     "hud-mcp-python-sdk>=3.13.2",
     "hud-fastmcp-python-sdk>=0.1.2",
-    "hud-mcp-use-python-sdk==2.3.20",
-    "langchain==0.3.27",
-    "pathspec>=0.12.1",
-    "wrapt>=1.14.0",
     # CLI dependencies
     "typer>=0.9.0",
     "rich>=13.0.0",
     "toml>=0.10.2",
     "watchfiles>=0.21.0",
     "questionary==2.1.0",
-    "prompt-toolkit==3.0.51",
+    "prompt-toolkit==3.0.51",  # Locked for questionary compatibility
     # Terminal library with mouse support for JSON viewer
     "blessed>=1.20.0",
-    # Telemetry
-    "opentelemetry-instrumentation-mcp==0.47.0",
-    "opentelemetry-api>=1.34.1",
-    "opentelemetry-sdk>=1.34.1",
-    "opentelemetry-exporter-otlp-proto-http>=1.34.1",
-    # Data and evaluation
-    "datasets>=2.14.0",
-    "numpy>=1.24.0",
-    "pillow>=11.1.0",
-    # AI providers
-    "anthropic>=0.75",
-    "openai>=2.8.1",
-    "google-genai",
-    "tornado>=6.5.2",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -123,9 +105,34 @@ packages = ["hud"]
 "hud/py.typed" = "hud/py.typed"
 
 [project.optional-dependencies]
+# Agent implementations, AI providers, datasets, and telemetry
+agents = [
+    # MCP-use client (legacy)
+    "hud-mcp-use-python-sdk==2.3.20",
+    "langchain==0.3.27",  # Required by mcp-use
+    # AI providers
+    "anthropic>=0.75",
+    "openai>=2.8.1",
+    "google-genai",
+    # Dataset loading (HuggingFace)
+    "datasets>=2.14.0",
+    # Telemetry / OpenTelemetry tracing
+    "opentelemetry-instrumentation-mcp==0.47.0",
+    "opentelemetry-api>=1.34.1",
+    "opentelemetry-sdk>=1.34.1",
+    "opentelemetry-exporter-otlp-proto-http>=1.34.1",
+    # Image processing for screenshots/grounding
+    "pillow>=11.1.0",
+    # Jupyter kernel support
+    "tornado>=6.5.2",
+]
+
+# RL training dependencies
 rl = [
+    "hud-python[agents]",  # RL needs agent dependencies
     "peft>=0.17.1",
     "vllm==0.10.1.1",
+    "numpy>=1.24.0",  # Required for RL training
     "bitsandbytes>=0.41.0 ; sys_platform == 'linux'",  # For 8-bit optimizers (Linux only)
     "liger-kernel>=0.5.0 ; sys_platform == 'linux'",  # Optimized Triton kernels for LLM training (Linux only)
     # Note: flash-attn is recommended but optional
@@ -134,7 +141,7 @@ rl = [
 
 # Development dependencies - includes testing, linting, and automation tools
 dev = [
-    # Include agent dependencies
+    "hud-python[agents]",  # Include agents for dev
     # Jupyter support
     "ipykernel",
     "ipython <9",
@@ -151,13 +158,10 @@ dev = [
     # Automation and computer control
     "playwright",
     "pyautogui>=0.9.54",
-    "pillow>=11.1.0",
 ]
 
-# Agent dependencies extend dev
-agent = ["hud-python[dev]"]
-
-agents = ["hud-python[agent]"]
+# Alias for backwards compatibility
+agent = ["hud-python[agents]"]
 
 
 [tool.ruff]

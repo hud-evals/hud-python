@@ -323,7 +323,8 @@ class Environment(
             return self._get_mock_result(name, arguments)
 
         if self._router.is_local(name):
-            result = await self._call_tool(name, arguments)
+            # Call tool manager directly to avoid FastMCP context requirement
+            result = await self._tool_manager.call_tool(name, arguments)
             return MCPToolResult(content=result.content, isError=False)
 
         connection_name = self._router.get_connection(name)

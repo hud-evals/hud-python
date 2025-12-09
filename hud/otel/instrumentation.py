@@ -2,6 +2,9 @@
 
 This module provides functions to enable MCP OpenTelemetry instrumentation
 for automatic tracing of MCP protocol communication.
+
+Note: This module requires the [agents] extra to be installed:
+    pip install hud-python[agents]
 """
 
 from __future__ import annotations
@@ -16,8 +19,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Check if OpenTelemetry is available
+_HAS_OPENTELEMETRY = False
+try:
+    from opentelemetry import trace as _otel_trace  # noqa: F401
 
-def install_mcp_instrumentation(provider: TracerProvider) -> None:
+    _HAS_OPENTELEMETRY = True
+except ImportError:
+    pass
+
+
+def install_mcp_instrumentation(provider: TracerProvider | None = None) -> None:
     """Enable community MCP OpenTelemetry instrumentation if present.
 
     Args:

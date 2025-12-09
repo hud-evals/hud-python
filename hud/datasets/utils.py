@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging
-from statistics import mean, stdev
+from statistics import mean, pstdev
 from typing import Any
 
 import httpx
-import numpy as np
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from hud.settings import settings
@@ -304,7 +303,7 @@ def calculate_group_stats(
             )
             continue
 
-        rewards = np.array([t.reward for t in task_traces])
+        rewards = [t.reward for t in task_traces]
         errors = [t for t in task_traces if t.isError]
 
         task_stats = {
@@ -312,12 +311,12 @@ def calculate_group_stats(
             "prompt": task.prompt or "",
             "group_id": group_ids[task_idx],
             "group_size": group_size,
-            "rewards": rewards.tolist(),
-            "mean_reward": float(np.mean(rewards)),
-            "std_reward": float(np.std(rewards)) if len(rewards) > 1 else 0.0,
-            "min_reward": float(np.min(rewards)),
-            "max_reward": float(np.max(rewards)),
-            "success_rate": float(np.sum(rewards > 0) / len(rewards)),
+            "rewards": rewards,
+            "mean_reward": mean(rewards),
+            "std_reward": pstdev(rewards) if len(rewards) > 1 else 0.0,
+            "min_reward": min(rewards),
+            "max_reward": max(rewards),
+            "success_rate": sum(1 for r in rewards if r > 0) / len(rewards),
             "error_rate": len(errors) / len(task_traces),
             "traces": task_traces,
         }
@@ -360,7 +359,7 @@ def display_results(
         # Grouped evaluation stats
         all_means = [s["mean_reward"] for s in results]
         overall_mean = mean(all_means) if all_means else 0.0
-        overall_std = stdev(all_means) if len(all_means) > 1 else 0.0
+        overall_std = pstdev(all_means) if len(all_means) > 1 else 0.0
         group_size = results[0].get("group_size", 1)
         total_episodes = sum(len(s.get("rewards", [])) for s in results)
 
