@@ -1,0 +1,57 @@
+"""Types and exceptions for the eval module.
+
+Kept separate to avoid circular imports.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic import BaseModel
+
+from hud.environment.types import EnvConfig
+
+# =============================================================================
+# Exceptions
+# =============================================================================
+
+
+class ParallelEvalComplete(Exception):
+    """Raised by summary context to skip body re-execution after parallel eval.
+
+    This is caught by the eval() context manager to cleanly exit.
+    The summary context with results is still accessible after the with block.
+    """
+
+
+# =============================================================================
+# Payload Models
+# =============================================================================
+
+
+class EvalPayload(BaseModel):
+    """Base payload for eval enter/exit."""
+
+    task_name: str
+    prompt: str | None = None
+    code_snippet: str | None = None
+    env_config: EnvConfig | None = None
+    all_hubs: bool = False
+    job_id: str | None = None
+    group_id: str | None = None
+    variants: dict[str, Any] | None = None
+
+
+class EvalExitPayload(EvalPayload):
+    """Exit payload with result fields."""
+
+    reward: float | None = None
+    success: bool = True
+    error_message: str | None = None
+
+
+__all__ = [
+    "EvalExitPayload",
+    "EvalPayload",
+    "ParallelEvalComplete",
+]
