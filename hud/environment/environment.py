@@ -15,8 +15,8 @@ from hud.environment.connectors import ConnectorsMixin
 from hud.environment.integrations import IntegrationsMixin
 from hud.environment.mock import MockMixin
 from hud.environment.router import ConflictResolution, ToolRouter
+from hud.eval.mixin import EvalMixin
 from hud.server.server import MCPServer
-from hud.trace.mixin import TraceMixin
 from hud.types import MCPToolResult
 
 __all__ = ["Environment"]
@@ -31,7 +31,7 @@ class Environment(
     ConnectorsMixin,
     IntegrationsMixin,
     MockMixin,
-    TraceMixin,
+    EvalMixin,
     MCPServer,
 ):
     """Unified MCP environment that acts as both server and client.

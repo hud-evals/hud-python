@@ -6,16 +6,15 @@ tools for building, evaluating, and training AI agents.
 from __future__ import annotations
 
 from .environment import Environment
+from .eval import EvalContext
+from .eval import run_eval as eval
 from .telemetry.instrument import instrument
-from .telemetry.job import Job, create_job, get_current_job, job
 
 __all__ = [
     "Environment",
-    "Job",
-    "create_job",
-    "get_current_job",
+    "EvalContext",
+    "eval",
     "instrument",
-    "job",
 ]
 
 try:

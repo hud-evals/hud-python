@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import warnings
 
+# Show deprecation warning when module is imported
 warnings.warn(
     "The hud.otel module is deprecated. Use env.trace() instead. "
     "This module requires pip install hud-python[agents].",

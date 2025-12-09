@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 import mcp.types as types
 from pydantic import BaseModel, ConfigDict
 
-from hud.agents.utils import log_agent_metadata_to_status, log_task_config_to_current_trace
 from hud.clients.base import AgentMCPClient
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
 from hud.utils.hud_console import HUDConsole
@@ -210,8 +209,6 @@ class MCPAgent(ABC):
             f"Agent initialized with {len(self.get_available_tools())} tools: {', '.join([t.name for t in self.get_available_tools()])}"  # noqa: E501
         )
 
-        await log_agent_metadata_to_status(self.model_name, self.checkpoint_name)
-
     async def run(self, prompt_or_task: str | Task | dict[str, Any], max_steps: int = 10) -> Trace:
         """
         Run the agent with the given prompt or task.
@@ -237,9 +234,6 @@ class MCPAgent(ABC):
 
             # Handle Task objects with full lifecycle
             if isinstance(prompt_or_task, Task):
-                # Log a compact summary of task config to the current trace (async)
-                await log_task_config_to_current_trace(prompt_or_task)
-
                 return await self.run_task(prompt_or_task, max_steps)
 
             # Handle simple string prompts

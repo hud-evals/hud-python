@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from opentelemetry.trace import SpanKind
 
 from hud.telemetry.instrument import _serialize_value, instrument
 
@@ -102,7 +101,7 @@ async def test_instrument_async_basic():
 async def test_instrument_async_with_params():
     """Test instrument with custom parameters."""
 
-    @instrument(name="custom_name", span_type="custom_type")
+    @instrument(name="custom_name", category="custom_type")
     async def test_func(x: int) -> int:
         return x * 2
 
@@ -147,27 +146,15 @@ async def test_instrument_async_no_record_result():
 
 
 @pytest.mark.asyncio
-async def test_instrument_async_with_attributes():
-    """Test instrument with custom attributes."""
+async def test_instrument_async_with_category():
+    """Test instrument with custom category."""
 
-    @instrument(attributes={"custom_attr": "value"})
+    @instrument(category="agent")
     async def test_func() -> int:
         return 42
 
     result = await test_func()
     assert result == 42
-
-
-@pytest.mark.asyncio
-async def test_instrument_async_with_span_kind():
-    """Test instrument with custom span kind."""
-
-    @instrument(span_kind=SpanKind.CLIENT)
-    async def test_func() -> int:
-        return 1
-
-    result = await test_func()
-    assert result == 1
 
 
 def test_instrument_sync_basic():
@@ -184,7 +171,7 @@ def test_instrument_sync_basic():
 def test_instrument_sync_with_params():
     """Test instrument on sync function with parameters."""
 
-    @instrument(name="sync_custom", span_type="sync_type")
+    @instrument(name="sync_custom", category="sync_type")
     def test_func(x: int) -> int:
         return x * 2
 
@@ -225,10 +212,10 @@ def test_instrument_sync_no_record_result():
     assert result == "test"
 
 
-def test_instrument_sync_with_attributes():
-    """Test instrument sync with custom attributes."""
+def test_instrument_sync_with_category():
+    """Test instrument sync with custom category."""
 
-    @instrument(attributes={"sync_attr": "sync_value"})
+    @instrument(category="tool")
     def test_func() -> int:
         return 42
 

@@ -1,73 +1,88 @@
-"""HUD Telemetry - Tracing and job management for agent execution.
+"""HUD Telemetry - Instrumentation for agent execution.
 
-.. deprecated::
-    The `hud.telemetry` module is deprecated and will be removed in a future version.
-    Use `env.trace()` from `hud.environment.Environment` instead.
+This module provides:
+- instrument: Function instrumentation decorator
 
-    This module requires the [agents] extra:
-        pip install hud-python[agents]
+All other APIs are deprecated:
+- Job, job, create_job, get_current_job - Use hud.eval() instead
+- async_trace(), trace() - Use env.trace() instead
+- async_job() - Use hud.eval() instead
 
-    Migration:
-        # Old (deprecated):
-        async with hud.async_trace("Task"):
-            await agent.run(task)
+Migration:
+    # Old (deprecated):
+    async with hud.async_trace("Task"):
+        await agent.run(task)
 
-        # New (recommended):
-        async with env.trace("Task") as tc:
-            await agent.run(task)
-            tc.reward = result.reward
-
-Provides telemetry APIs for tracking agent execution and experiments.
-
-Async Usage (Recommended):
-    >>> import hud
-    >>> async with hud.async_trace("Task"):
-    ...     await agent.run(task)
-    >>> async with hud.async_job("Evaluation") as job:
-    ...     async with hud.async_trace("Task", job_id=job.id):
-    ...         await agent.run(task)
-
-Sync Usage:
-    >>> import hud
-    >>> with hud.trace("Task"):
-    ...     do_work()
-    >>> with hud.job("My Job") as job:
-    ...     with hud.trace("Task", job_id=job.id):
-    ...         do_work()
-
-APIs:
-    - async_trace(), async_job() - Async context managers (recommended)
-    - trace(), job() - Sync context managers
-    - flush_telemetry() - Manual span flushing (rarely needed)
-    - instrument() - Function instrumentation decorator
+    # New (recommended):
+    async with env.trace("Task") as tc:
+        await agent.run(task)
+        tc.reward = result.reward
 """
 
 from __future__ import annotations
 
-import warnings
-
-warnings.warn(
-    "The hud.telemetry module is deprecated. Use env.trace() instead. "
-    "This module requires pip install hud-python[agents].",
-    DeprecationWarning,
-    stacklevel=2,
-)
-
-from .async_context import async_job, async_trace
 from .instrument import instrument
-from .job import Job, create_job, job
-from .replay import clear_trace, get_trace
-from .trace import Trace, trace
+
+
+def __getattr__(name: str):  # noqa: ANN202
+    """Lazy load deprecated APIs and show warnings."""
+    import warnings
+
+    deprecated_apis = {
+        # Job APIs (deprecated)
+        "Job",
+        "job",
+        "create_job",
+        "get_current_job",
+        # OpenTelemetry-based APIs (deprecated, require [agents])
+        "async_job",
+        "async_trace",
+        "clear_trace",
+        "get_trace",
+        "Trace",
+        "trace",
+    }
+
+    if name in deprecated_apis:
+        warnings.warn(
+            f"hud.telemetry.{name} is deprecated. Use hud.eval() or env.trace() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+        # Import from submodules
+        if name in ("Job", "job", "create_job", "get_current_job"):
+            from .job import Job, create_job, get_current_job, job
+
+            return {"Job": Job, "job": job, "create_job": create_job, "get_current_job": get_current_job}[name]
+        elif name in ("async_job", "async_trace"):
+            from .async_context import async_job, async_trace
+
+            return async_job if name == "async_job" else async_trace
+        elif name in ("clear_trace", "get_trace"):
+            from .replay import clear_trace, get_trace
+
+            return clear_trace if name == "clear_trace" else get_trace
+        elif name in ("Trace", "trace"):
+            from .trace import Trace, trace
+
+            return Trace if name == "Trace" else trace
+
+    raise AttributeError(f"module 'hud.telemetry' has no attribute {name!r}")
+
 
 __all__ = [
+    # Core (always available)
+    "instrument",
+    # Deprecated
     "Job",
     "Trace",
     "async_job",
     "async_trace",
     "clear_trace",
     "create_job",
+    "get_current_job",
     "get_trace",
-    "instrument",
     "job",
     "trace",
 ]

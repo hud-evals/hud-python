@@ -1,0 +1,505 @@
+"""EvalContext - Environment with evaluation tracking.
+
+EvalContext IS an Environment, with additional evaluation tracking
+capabilities (trace_id, reward, backend reporting).
+
+This makes `async with env.eval("task") as env` natural - you get
+a full Environment that you can call tools on directly.
+"""
+
+from __future__ import annotations
+
+import contextvars
+import logging
+import uuid
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, Self
+
+from pydantic import BaseModel
+
+from hud.environment import Environment
+from hud.environment.types import EnvConfig
+from hud.settings import settings
+from hud.shared import make_request
+from hud.telemetry.job import get_current_job
+
+if TYPE_CHECKING:
+    from types import TracebackType
+
+    from hud.types import Task
+
+logger = logging.getLogger(__name__)
+
+# Contextvar to store current trace headers (for httpx auto-instrumentation)
+_current_trace_headers: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
+    "current_trace_headers", default=None
+)
+
+
+def get_current_trace_headers() -> dict[str, str] | None:
+    """Get the current trace headers from context."""
+    return _current_trace_headers.get()
+
+
+# =============================================================================
+# Payload Models
+# =============================================================================
+
+
+class EvalPayload(BaseModel):
+    """Base payload for eval enter/exit."""
+
+    task_name: str
+    prompt: str | None = None
+    code_snippet: str | None = None
+    env_config: EnvConfig | None = None
+    all_hubs: bool = False
+    job_id: str | None = None
+    group_id: str | None = None
+    variants: dict[str, Any] | None = None
+
+
+class EvalExitPayload(EvalPayload):
+    """Exit payload with result fields."""
+
+    reward: float | None = None
+    success: bool = True
+    error_message: str | None = None
+
+
+# =============================================================================
+# EvalContext
+# =============================================================================
+
+
+class EvalContext(Environment):
+    """Environment with evaluation tracking capabilities.
+
+    Attributes:
+        trace_id: Unique identifier for this evaluation
+        eval_name: Task/evaluation name (separate from env name)
+        job_id: Links to parent job (auto-detected from hud.job() context)
+        group_id: Links parallel evaluations together
+        variants: Variant assignment dict (for A/B testing)
+        reward: Reward value (user-settable)
+        error: Exception if failed
+        results: All eval results (for parallel execution)
+        task: Task definition (if loaded from slug)
+
+    Example:
+        ```python
+        # From existing environment
+        async with env.eval("task") as ctx:
+            await ctx.call_tool("navigate", url="...")
+            ctx.reward = 0.9
+
+        # Standalone with slug
+        async with hud.eval("my-org/task:1") as ctx:
+            await agent.run(ctx)
+            ctx.reward = result.reward
+
+        # Blank eval
+        async with hud.eval() as ctx:
+            ctx.reward = compute_reward()
+        ```
+    """
+
+    def __init__(
+        self,
+        name: str = "eval",
+        *,
+        trace_id: str | None = None,
+        api_key: str | None = None,
+        job_id: str | None = None,
+        group_id: str | None = None,
+        index: int = 0,
+        variants: dict[str, Any] | None = None,
+        code_snippet: str | None = None,
+        env_config: dict[str, Any] | None = None,
+        task: Task | None = None,
+        **env_kwargs: Any,
+    ) -> None:
+        """Initialize EvalContext.
+
+        Args:
+            name: Environment/evaluation name
+            trace_id: Unique trace ID (auto-generated if not provided)
+            api_key: API key for backend calls
+            job_id: Job ID to link to (auto-detected if not provided)
+            group_id: Group ID for parallel evaluations
+            index: Index in parallel execution
+            variants: Variant assignment for A/B testing
+            code_snippet: Code being evaluated (for reproducibility)
+            env_config: Environment configuration dict
+            task: Task definition (if loaded from slug)
+            **env_kwargs: Additional kwargs passed to Environment.__init__
+        """
+        # Initialize Environment
+        super().__init__(name=name, **env_kwargs)
+
+        # === Evaluation tracking (not in Environment) ===
+
+        # Identity
+        self.trace_id: str = trace_id or str(uuid.uuid4())
+        self.eval_name: str = name  # Separate from self.name for clarity
+
+        # Job linkage
+        if job_id is None:
+            current_job = get_current_job()
+            self.job_id: str | None = current_job.id if current_job else None
+        else:
+            self.job_id = job_id
+
+        self.group_id: str | None = group_id
+        self.index: int = index
+
+        # Variant assignment
+        self.variants: dict[str, Any] = variants or {}
+
+        # User-settable
+        self.reward: float | None = None
+
+        # Error tracking
+        self.error: BaseException | None = None
+
+        # Parallel results
+        self.results: list[EvalContext] | None = None
+
+        # Code and config
+        self.code_snippet: str | None = code_snippet
+        self._eval_env_config: dict[str, Any] | None = env_config
+
+        # Task definition (if loaded from slug)
+        self.task: Task | None = task
+
+        # Apply task configuration
+        if task:
+            self._apply_task(task)
+
+        # Private state for eval tracking
+        self._eval_api_key = api_key
+        self._started_at: datetime | None = None
+        self._completed_at: datetime | None = None
+        self._token: contextvars.Token[dict[str, str] | None] | None = None
+
+    def _apply_task(self, task: Task) -> None:
+        """Apply a Task definition to this environment."""
+        # Set prompt
+        if task.prompt:
+            self.prompt = task.prompt
+
+        # Connect MCP servers
+        if task.mcp_config:
+            self.connect_mcp_config(task.mcp_config)
+
+        # Configure setup tool calls
+        if task.setup_tool:
+            setup_calls = task.setup_tool
+            if not isinstance(setup_calls, list):
+                setup_calls = [setup_calls]
+            for call in setup_calls:
+                self.setup_tool(call.name, **(call.arguments or {}))
+
+        # Configure evaluate tool calls
+        if task.evaluate_tool:
+            eval_calls = task.evaluate_tool
+            if not isinstance(eval_calls, list):
+                eval_calls = [eval_calls]
+            for call in eval_calls:
+                self.evaluate_tool(call.name, **(call.arguments or {}))
+
+    @classmethod
+    def from_environment(
+        cls,
+        env: Environment,
+        name: str,
+        *,
+        trace_id: str | None = None,
+        api_key: str | None = None,
+        job_id: str | None = None,
+        group_id: str | None = None,
+        index: int = 0,
+        variants: dict[str, Any] | None = None,
+        code_snippet: str | None = None,
+        env_config: dict[str, Any] | None = None,
+    ) -> EvalContext:
+        """Create an EvalContext that copies configuration from an existing Environment.
+
+        This creates a new EvalContext with the same connections as the parent.
+        Used by env.eval() to create evaluation contexts.
+
+        Args:
+            env: Parent environment to copy from
+            name: Evaluation name
+            trace_id: Unique trace ID
+            api_key: API key for backend calls
+            job_id: Job ID to link to
+            group_id: Group ID for parallel evaluations
+            index: Index in parallel execution
+            variants: Variant assignment
+            code_snippet: Code being evaluated
+            env_config: Environment configuration
+        """
+        ctx = cls(
+            name=name,
+            trace_id=trace_id,
+            api_key=api_key,
+            job_id=job_id,
+            group_id=group_id,
+            index=index,
+            variants=variants,
+            code_snippet=code_snippet,
+            env_config=env_config,
+        )
+
+        # Copy connections from parent
+        # Note: These are shared references - for parallel execution,
+        # only remote connections should be used
+        ctx._connections = env._connections.copy()
+        ctx._hub_configs = getattr(env, "_hub_configs", []).copy()
+        ctx._setup_calls = env._setup_calls.copy()
+        ctx._evaluate_calls = env._evaluate_calls.copy()
+
+        # Copy prompt
+        if env.prompt:
+            ctx.prompt = env.prompt
+
+        return ctx
+
+    @classmethod
+    def from_task(
+        cls,
+        task: Task,
+        name: str | None = None,
+        *,
+        trace_id: str | None = None,
+        api_key: str | None = None,
+        job_id: str | None = None,
+        group_id: str | None = None,
+        index: int = 0,
+        variants: dict[str, Any] | None = None,
+        code_snippet: str | None = None,
+    ) -> EvalContext:
+        """Create an EvalContext from a Task definition.
+
+        Used by hud.eval(slug) to create evaluation contexts from tasks.
+
+        Args:
+            task: Task definition
+            name: Evaluation name (defaults to task.id or "eval")
+            trace_id: Unique trace ID
+            api_key: API key for backend calls
+            job_id: Job ID to link to
+            group_id: Group ID for parallel evaluations
+            index: Index in parallel execution
+            variants: Variant assignment
+            code_snippet: Code being evaluated
+        """
+        eval_name = name or task.id or "eval"
+
+        return cls(
+            name=eval_name,
+            trace_id=trace_id,
+            api_key=api_key,
+            job_id=job_id,
+            group_id=group_id,
+            index=index,
+            variants=variants,
+            code_snippet=code_snippet,
+            task=task,
+        )
+
+    # =========================================================================
+    # Computed Properties (eval-specific)
+    # =========================================================================
+
+    @property
+    def headers(self) -> dict[str, str]:
+        """Headers for gateway integration."""
+        return {"Trace-Id": self.trace_id}
+
+    @property
+    def duration(self) -> float:
+        """Execution duration in seconds."""
+        if self._started_at is None:
+            return 0.0
+        end = self._completed_at or datetime.now(UTC)
+        return (end - self._started_at).total_seconds()
+
+    @property
+    def success(self) -> bool:
+        """True if no error occurred."""
+        return self.error is None
+
+    @property
+    def done(self) -> bool:
+        """True if execution completed."""
+        return self._completed_at is not None
+
+    # =========================================================================
+    # Backend Integration
+    # =========================================================================
+
+    def _get_eval_api_key(self) -> str | None:
+        return self._eval_api_key or settings.api_key
+
+    def _build_base_payload(self) -> EvalPayload:
+        """Build the base payload for enter/exit."""
+        env_config_model: EnvConfig | None = None
+        if self._eval_env_config:
+            env_config_model = EnvConfig(**self._eval_env_config)
+
+        return EvalPayload(
+            task_name=self.eval_name,
+            prompt=self.prompt,
+            code_snippet=self.code_snippet,
+            env_config=env_config_model,
+            all_hubs=self._all_hubs,
+            job_id=self.job_id,
+            group_id=self.group_id,
+            variants=self.variants if self.variants else None,
+        )
+
+    async def log(self, metrics: dict[str, Any]) -> None:
+        """Log metrics to the backend."""
+        api_key = self._get_eval_api_key()
+        if not settings.telemetry_enabled or not api_key:
+            return
+
+        try:
+            await make_request(
+                method="POST",
+                url=f"{settings.hud_telemetry_url}/traces/{self.trace_id}/log",
+                json={"metrics": metrics},
+                api_key=api_key,
+            )
+        except Exception as e:
+            logger.warning("Failed to log metrics: %s", e)
+
+    async def _eval_enter(self) -> None:
+        """Notify backend that eval has started."""
+        api_key = self._get_eval_api_key()
+        if not settings.telemetry_enabled or not api_key:
+            return
+
+        try:
+            payload = self._build_base_payload()
+            await make_request(
+                method="POST",
+                url=f"{settings.hud_api_url}/trace/{self.trace_id}/enter",
+                json=payload.model_dump(exclude_none=True),
+                api_key=api_key,
+            )
+        except Exception as e:
+            logger.warning("Failed to send eval enter: %s", e)
+
+    async def _eval_exit(self, error_message: str | None = None) -> None:
+        """Notify backend that eval has completed."""
+        api_key = self._get_eval_api_key()
+        if not settings.telemetry_enabled or not api_key:
+            return
+
+        # Use evaluate tool reward if not manually set
+        reward = self.reward
+        if reward is None:
+            reward = getattr(self, "_evaluate_reward", None)
+
+        try:
+            payload = EvalExitPayload(
+                **self._build_base_payload().model_dump(),
+                reward=reward,
+                success=self.success,
+                error_message=error_message,
+            )
+            await make_request(
+                method="POST",
+                url=f"{settings.hud_api_url}/trace/{self.trace_id}/exit",
+                json=payload.model_dump(exclude_none=True),
+                api_key=api_key,
+            )
+        except Exception as e:
+            logger.warning("Failed to send eval exit: %s", e)
+
+    # =========================================================================
+    # Context Manager (override Environment)
+    # =========================================================================
+
+    async def __aenter__(self) -> Self:
+        """Enter eval context - start tracking and connect environment."""
+        # Start eval tracking
+        self._started_at = datetime.now(UTC)
+        self._token = _current_trace_headers.set(self.headers)
+
+        # Notify backend
+        await self._eval_enter()
+        self._print_eval_link()
+
+        # Connect environment (parent class)
+        await super().__aenter__()
+
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Exit eval context - disconnect and report."""
+        self._completed_at = datetime.now(UTC)
+
+        # Track error
+        error_msg: str | None = None
+        if exc_type is not None:
+            self.error = exc_val
+            error_msg = str(exc_val) if exc_val else "Unknown error"
+
+        # Disconnect environment (parent class)
+        await super().__aexit__(exc_type, exc_val, exc_tb)
+
+        # Reset context var
+        if self._token is not None:
+            _current_trace_headers.reset(self._token)
+            self._token = None
+
+        # Notify backend
+        await self._eval_exit(error_msg)
+
+    def __repr__(self) -> str:
+        return f"EvalContext({self.trace_id[:8]}..., name={self.eval_name!r}, reward={self.reward})"
+
+    def _print_eval_link(self) -> None:
+        """Print a nicely formatted eval link."""
+        import contextlib
+        import webbrowser
+
+        trace_url = f"https://hud.ai/trace/{self.trace_id}"
+
+        with contextlib.suppress(Exception):
+            webbrowser.open(trace_url, new=2)
+
+        try:
+            from rich.align import Align
+            from rich.console import Console
+            from rich.panel import Panel
+
+            console = Console()
+
+            style = "bold underline rgb(108,113,196)"
+            link_markup = f"[{style}][link={trace_url}]{trace_url}[/link][/{style}]"
+
+            content = Align.center(link_markup)
+
+            panel = Panel(
+                content,
+                title="🔗 Eval Started",
+                border_style="rgb(192,150,12)",
+                padding=(0, 2),
+            )
+            console.print(panel)
+        except ImportError:
+            print(f"Eval: {trace_url}")  # noqa: T201
+
+
+# Re-export for backwards compatibility with trace module
+__all__ = ["EvalContext", "get_current_trace_headers"]

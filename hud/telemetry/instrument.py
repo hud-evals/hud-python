@@ -9,7 +9,7 @@ Usage:
         ...
 
     # Within a trace context, calls are recorded
-    async with env.trace("task") as tc:
+    async with env.eval("task") as tc:
         result = await my_function("a", "b")
 """
 
@@ -60,6 +60,7 @@ def instrument(
     *,
     name: str | None = None,
     category: str = "function",
+    span_type: str | None = None,  # Alias for category
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]: ...
@@ -71,6 +72,7 @@ def instrument(
     *,
     name: str | None = None,
     category: str = "function",
+    span_type: str | None = None,  # Alias for category
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[P, R]: ...
@@ -82,6 +84,7 @@ def instrument(
     *,
     name: str | None = None,
     category: str = "function",
+    span_type: str | None = None,  # Alias for category
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[P, Awaitable[R]]: ...
@@ -92,17 +95,19 @@ def instrument(
     *,
     name: str | None = None,
     category: str = "function",
+    span_type: str | None = None,  # Alias for category
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[..., Any]:
-    """Instrument a function to record spans within trace context.
+    """Instrument a function to record spans within eval context.
 
-    This decorator records function calls as spans, compatible with env.trace().
+    This decorator records function calls as spans, compatible with env.eval().
 
     Args:
         func: The function to instrument
         name: Custom span name (defaults to module.function)
         category: Span category (e.g., "agent", "tool", "function")
+        span_type: Alias for category (deprecated, use category instead)
         record_args: Whether to record function arguments
         record_result: Whether to record function result
 
@@ -118,6 +123,9 @@ def instrument(
         async def call_model(messages: list) -> str:
             return await model.generate(messages)
     """
+
+    # span_type is an alias for category
+    effective_category = span_type if span_type is not None else category
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         if hasattr(func, "_hud_instrumented"):
@@ -145,7 +153,7 @@ def instrument(
         ) -> dict[str, Any]:
             """Build a span record."""
             attributes: dict[str, Any] = {
-                "category": category,
+                "category": effective_category,
                 "function": func_qualname,
                 "module": func_module,
                 "duration_ms": duration_ms,
@@ -188,8 +196,8 @@ def instrument(
             }
 
         def _get_trace_id() -> str | None:
-            """Get trace_id from current trace context."""
-            from hud.trace.context import get_current_trace_headers
+            """Get trace_id from current eval context."""
+            from hud.eval.context import get_current_trace_headers
 
             headers = get_current_trace_headers()
             if headers:
