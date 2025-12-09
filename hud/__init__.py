@@ -5,6 +5,7 @@ tools for building, evaluating, and training AI agents.
 
 from __future__ import annotations
 
+from .environment import Environment
 from .telemetry import (
     Trace,
     async_job,
@@ -18,6 +19,7 @@ from .telemetry import (
 )
 
 __all__ = [
+    "Environment",
     "Trace",
     "async_job",
     "async_trace",

@@ -236,7 +236,9 @@ class MCPToolCall(CallToolRequestParams):
 
 
 class MCPToolResult(CallToolResult):
-    """A tool result."""
+    """A tool result with optional call_id for correlation."""
+
+    call_id: str | None = None  # For correlating with provider-specific tool call IDs
 
     def _get_content_summary(self) -> str:
         """Extract a summary of the content."""
