@@ -9,16 +9,18 @@ from __future__ import annotations
 
 import inspect
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from hud.eval.parallel import (
     ASTExtractionError,
-    execute_parallel_evals,
     expand_variants,
+    find_user_frame,
     get_with_block_body,
     resolve_group_ids,
 )
+from hud.telemetry.job import _print_job_complete_url, _print_job_url
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -97,7 +99,7 @@ class EvalMixin:
             if caller is None:
                 return None
 
-            body_source, _ = get_with_block_body(caller)
+            body_source, _, _ = get_with_block_body(caller)
             return body_source
         except ASTExtractionError:
             # Can't extract from REPL/Jupyter - that's OK
@@ -253,37 +255,54 @@ class EvalMixin:
             async with ctx:
                 yield ctx
         else:
-            # Parallel execution: each eval gets its own environment instance
-            completed = await self._run_parallel_eval(
-                name=name,
-                variant_combos=variant_combos,
-                group=group,
-                group_ids=group_ids,
-                job_id=job_id,
-                api_key=api_key,
-                code_snippet=code_snippet,
-                env_config=env_config,
-            )
+            # Parallel execution: create implicit job to group traces
+            implicit_job_id = job_id or str(uuid.uuid4())
 
-            # Create parent ctx with results injected
-            ctx = EvalContext.from_environment(
-                env=self,  # type: ignore[arg-type]
-                name=name,
-                trace_id=trace_id,
-                api_key=api_key,
-                job_id=job_id,
-                code_snippet=code_snippet,
-                env_config=env_config,
-            )
-            ctx.results = completed
-            self._last_evals = completed
+            # Print job URL (not individual trace URLs)
+            _print_job_url(implicit_job_id, name)
 
-            # Compute aggregate reward (mean of non-None rewards)
-            rewards = [e.reward for e in completed if e.reward is not None]
-            if rewards:
-                ctx.reward = sum(rewards) / len(rewards)
+            error_occurred = False
+            try:
+                # Run parallel evals with job_id
+                completed = await self._run_parallel_eval(
+                    name=name,
+                    variant_combos=variant_combos,
+                    group=group,
+                    group_ids=group_ids,
+                    job_id=implicit_job_id,  # Propagate job_id to child traces
+                    api_key=api_key,
+                    code_snippet=code_snippet,
+                    env_config=env_config,
+                )
 
-            yield ctx
+                # Create summary context (no trace, just aggregates results)
+                ctx = EvalContext.from_environment(
+                    env=self,  # type: ignore[arg-type]
+                    name=name,
+                    trace_id=trace_id,
+                    api_key=api_key,
+                    job_id=implicit_job_id,
+                    code_snippet=code_snippet,
+                    env_config=env_config,
+                )
+                ctx._is_summary = True  # Skip trace tracking
+                ctx.results = completed
+                self._last_evals = completed
+
+                # Compute aggregate reward (mean of non-None rewards)
+                rewards = [e.reward for e in completed if e.reward is not None]
+                if rewards:
+                    ctx.reward = sum(rewards) / len(rewards)
+
+                # Check if any failed
+                error_occurred = any(e.error is not None for e in completed)
+
+                yield ctx
+            except Exception:
+                error_occurred = True
+                raise
+            finally:
+                _print_job_complete_url(implicit_job_id, name, error_occurred)
 
     async def _run_parallel_eval(
         self,
@@ -302,6 +321,11 @@ class EvalMixin:
         """
         # Lazy import to avoid circular dependency
         from hud.eval.context import EvalContext
+        from hud.eval.parallel import log_eval_stats, run_parallel_evals
+
+        # Find user code frame and extract the with block body
+        caller_frame = find_user_frame()
+        body_source, captured_locals, context_var = get_with_block_body(caller_frame)
 
         # Calculate total evals and resolve group IDs
         total_evals = len(variant_combos) * group
@@ -323,14 +347,24 @@ class EvalMixin:
                     code_snippet=code_snippet,
                     env_config=env_config,
                 )
+                ctx._suppress_link = True  # Suppress individual links, job URL shown instead
                 eval_contexts.append(ctx)
                 idx += 1
 
-        # Run in parallel (frame depth: _run_parallel_eval -> eval -> user code)
-        completed = await execute_parallel_evals(eval_contexts, caller_frame_depth=3)
+        # Run in parallel
+        logger.info(
+            "Running %d evals for '%s' (%d variants x %d runs)",
+            len(eval_contexts),
+            name,
+            len(variant_combos),
+            group,
+        )
+        completed = await run_parallel_evals(eval_contexts, body_source, captured_locals, context_var)
 
-        # Store results
+        # Store results and log stats
         self._last_evals = completed
+        log_eval_stats(completed, name)
+
         return completed
 
 

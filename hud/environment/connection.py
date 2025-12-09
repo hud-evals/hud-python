@@ -69,6 +69,20 @@ class Connector:
         self.client: FastMCPClient[Any] | None = None
         self._tools_cache: list[mcp_types.Tool] | None = None
 
+    def copy(self) -> Connector:
+        """Create a copy of this connector with fresh (unconnected) state.
+
+        The copy shares transport config but has its own client instance,
+        allowing parallel execution without conflicts.
+        """
+        return Connector(
+            transport=self._transport,
+            config=self.config,
+            name=self.name,
+            connection_type=self.connection_type,
+            auth=self._auth,
+        )
+
     @property
     def is_local(self) -> bool:
         """True if this is a local (non-parallelizable) connection."""

@@ -1,4 +1,4 @@
-"""Inline JSON preview with expandable view for RL flow.
+"""Inline JSON preview with expandable view.
 
 Uses minimal terminal interaction for inline display.
 """
@@ -139,3 +139,4 @@ def show_json_interactive(
             input()
 
     console.print()
+

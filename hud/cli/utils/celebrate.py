@@ -1,4 +1,6 @@
 # ruff: noqa: S311
+"""Confetti celebration animation for CLI."""
+
 from __future__ import annotations
 
 import random
@@ -121,20 +123,20 @@ class ConfettiSystem:
         return text
 
 
-def show_confetti(console: Console, seconds: float = 2.5) -> None:
-    """Display celebratory confetti animation inspired by confetty.
+def show_confetti(console: Console, seconds: float = 2.5, message: str | None = None) -> None:
+    """Display celebratory confetti animation.
 
-    Shows "Starting training!" message first, then creates two bursts of
+    Shows a message first, then creates two bursts of
     falling confetti particles that fall away completely.
 
     Args:
         console: Rich console instance
         seconds: Duration to show confetti
+        message: Custom message to display (default: "🎉 Success!")
     """
     # Show celebratory message first
-    console.print(
-        "[bold green]🎉 Starting training! See your model on https://hud.ai/models[/bold green]"
-    )
+    msg = message or "[bold green]🎉 Success![/bold green]"
+    console.print(msg)
     time.sleep(0.3)  # Brief pause to see the message
 
     width = min(console.size.width, 120)  # Cap width for performance
@@ -166,22 +168,23 @@ def show_confetti(console: Console, seconds: float = 2.5) -> None:
             frame += 1
 
 
-def show_confetti_async(console: Console, seconds: float = 2.5) -> None:
+def show_confetti_async(console: Console, seconds: float = 2.5, message: str | None = None) -> None:
     """Non-blocking confetti animation that runs in a background thread.
 
-    The animation will run independently while training starts immediately.
+    The animation will run independently while other operations continue.
     """
     import threading
 
     def _run_confetti() -> None:
         try:
-            show_confetti(console, seconds)
+            show_confetti(console, seconds, message)
         except Exception:
-            hud_console.info("Launching training...")
+            hud_console.info("Continuing...")
 
     thread = threading.Thread(target=_run_confetti, daemon=True)
     thread.start()
-    # Don't wait - let training start immediately while confetti plays
+    # Don't wait - let operations continue while confetti plays
 
 
-__all__ = ["show_confetti", "show_confetti_async"]
+__all__ = ["show_confetti", "show_confetti_async", "ConfettiSystem", "Particle"]
+

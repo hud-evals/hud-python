@@ -181,6 +181,8 @@ class EvalContext(Environment):
         self._started_at: datetime | None = None
         self._completed_at: datetime | None = None
         self._token: contextvars.Token[dict[str, str] | None] | None = None
+        self._is_summary: bool = False  # True for summary contexts (skip trace)
+        self._suppress_link: bool = False  # True to suppress printing eval link
 
     def _apply_task(self, task: Task) -> None:
         """Apply a Task definition to this environment."""
@@ -252,10 +254,11 @@ class EvalContext(Environment):
             env_config=env_config,
         )
 
-        # Copy connections from parent
-        # Note: These are shared references - for parallel execution,
-        # only remote connections should be used
-        ctx._connections = env._connections.copy()
+        # Copy connections from parent - each connector is copied so parallel
+        # execution gets fresh client instances
+        ctx._connections = {
+            name: connector.copy() for name, connector in env._connections.items()
+        }
         ctx._hub_configs = getattr(env, "_hub_configs", []).copy()
         ctx._setup_calls = env._setup_calls.copy()
         ctx._evaluate_calls = env._evaluate_calls.copy()
@@ -426,6 +429,10 @@ class EvalContext(Environment):
 
     async def __aenter__(self) -> Self:
         """Enter eval context - start tracking and connect environment."""
+        # Summary contexts skip trace tracking (parallel results already tracked)
+        if self._is_summary:
+            return self
+
         # Start eval tracking
         self._started_at = datetime.now(UTC)
         self._token = _current_trace_headers.set(self.headers)
@@ -446,6 +453,10 @@ class EvalContext(Environment):
         exc_tb: TracebackType | None,
     ) -> None:
         """Exit eval context - disconnect and report."""
+        # Summary contexts skip trace tracking (parallel results already tracked)
+        if self._is_summary:
+            return
+
         self._completed_at = datetime.now(UTC)
 
         # Track error
@@ -470,6 +481,10 @@ class EvalContext(Environment):
 
     def _print_eval_link(self) -> None:
         """Print a nicely formatted eval link."""
+        # Skip if link printing is suppressed (e.g., parallel child traces)
+        if self._suppress_link:
+            return
+
         import contextlib
         import webbrowser
 

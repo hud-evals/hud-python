@@ -8,17 +8,66 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import inspect
 import itertools
 import linecache
 import logging
 import textwrap
 import uuid
+from types import FrameType
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from hud.eval.context import EvalContext
 
 logger = logging.getLogger(__name__)
+
+# Frames to skip when walking the call stack to find user code
+# These are internal implementation details that shouldn't be considered user code
+_SKIP_FRAME_PATTERNS = (
+    # Python stdlib
+    "contextlib.py",
+    "asyncio",
+    # Third-party
+    "site-packages",
+    # HUD eval internals (both Unix and Windows paths)
+    "hud/eval/mixin.py",
+    "hud/eval/manager.py",
+    "hud/eval/parallel.py",
+    "hud\\eval\\mixin.py",
+    "hud\\eval\\manager.py",
+    "hud\\eval\\parallel.py",
+)
+
+
+def find_user_frame() -> FrameType:
+    """Walk the call stack to find the first user code frame.
+
+    Skips internal frames from contextlib, asyncio, site-packages,
+    and hud.eval internals.
+
+    Returns:
+        The frame containing user code (typically the async with statement).
+
+    Raises:
+        ASTExtractionError: If no user code frame can be found.
+    """
+    frame = inspect.currentframe()
+    if frame is None:
+        raise ASTExtractionError("Cannot get current frame")
+
+    try:
+        caller_frame = frame.f_back
+        while caller_frame is not None:
+            filename = caller_frame.f_code.co_filename
+            # Stop at first frame not matching skip patterns
+            if not any(pattern in filename for pattern in _SKIP_FRAME_PATTERNS):
+                return caller_frame
+            caller_frame = caller_frame.f_back
+
+        raise ASTExtractionError("Cannot find user code frame in call stack")
+    finally:
+        del frame
 
 
 def expand_variants(
@@ -140,14 +189,14 @@ async def execute_parallel_evals(
         if caller_frame is None:
             raise ASTExtractionError("Cannot get caller frame")
 
-        body_source, captured_locals = get_with_block_body(caller_frame)
+        body_source, captured_locals, context_var = get_with_block_body(caller_frame)
 
     finally:
         del frame
 
     # Run in parallel
     logger.info("Running %d parallel evals", len(contexts))
-    completed = await run_parallel_evals(contexts, body_source, captured_locals)
+    completed = await run_parallel_evals(contexts, body_source, captured_locals, context_var)
 
     # Log stats
     log_eval_stats(completed)
@@ -159,14 +208,14 @@ class ASTExtractionError(Exception):
     """Error extracting AST from source."""
 
 
-def get_with_block_body(frame: Any) -> tuple[str, dict[str, Any]]:
+def get_with_block_body(frame: Any) -> tuple[str, dict[str, Any], str]:
     """Extract the body of a with-block from the calling frame.
 
     Args:
         frame: The calling frame (from inspect.currentframe())
 
     Returns:
-        Tuple of (body_source, captured_locals)
+        Tuple of (body_source, captured_locals, context_var_name)
     """
     filename = frame.f_code.co_filename
     lineno = frame.f_lineno
@@ -192,7 +241,22 @@ def get_with_block_body(frame: Any) -> tuple[str, dict[str, Any]]:
     # Extract body source
     body_source = _extract_body(lines, with_node)
 
-    return body_source, frame.f_locals.copy()
+    # Extract the context variable name from 'as' clause
+    context_var = _extract_context_var(with_node)
+
+    return body_source, frame.f_locals.copy(), context_var
+
+
+def _extract_context_var(with_node: ast.AsyncWith) -> str:
+    """Extract the variable name from the 'as' clause of an async with statement."""
+    if not with_node.items or not with_node.items[0].optional_vars:
+        raise ASTExtractionError("async with statement must use 'as' clause for parallel execution")
+
+    var_node = with_node.items[0].optional_vars
+    if not isinstance(var_node, ast.Name):
+        raise ASTExtractionError("async with 'as' clause must be a simple variable name")
+
+    return var_node.id
 
 
 def _find_async_with(tree: ast.AST, target_line: int) -> ast.AsyncWith | None:
@@ -231,6 +295,7 @@ async def run_parallel_evals(
     eval_contexts: list[EvalContext],
     body_source: str,
     captured_locals: dict[str, Any],
+    context_var: str,
 ) -> list[EvalContext]:
     """Run the eval body in parallel for multiple contexts.
 
@@ -240,12 +305,16 @@ async def run_parallel_evals(
     - reward
     - duration
     - Any error is captured in the context
+
+    Args:
+        eval_contexts: List of EvalContext instances to run
+        body_source: The source code of the with-block body
+        captured_locals: Local variables captured from the caller
+        context_var: The variable name used in the 'as' clause
     """
 
-    # Create runner function
-    # The variable name in the with statement is 'ctx' by convention
-    # but we use 'env' since that's what the user will see
-    wrapped = f"async def __runner__(env):\n{textwrap.indent(body_source, '    ')}"
+    # Create runner function using the actual variable name from the 'as' clause
+    wrapped = f"async def __runner__({context_var}):\n{textwrap.indent(body_source, '    ')}"
     code = compile(wrapped, "<parallel_eval>", "exec")
     namespace = captured_locals.copy()
     exec(code, namespace)  # noqa: S102

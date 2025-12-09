@@ -7,16 +7,18 @@ from __future__ import annotations
 
 import inspect
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from hud.eval.parallel import (
     ASTExtractionError,
-    execute_parallel_evals,
     expand_variants,
+    find_user_frame,
     get_with_block_body,
     resolve_group_ids,
 )
+from hud.telemetry.job import _print_job_complete_url, _print_job_url
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -43,6 +45,31 @@ def _parse_slug(slug: str) -> tuple[str, str | None]:
         parts = slug.rsplit(":", 1)
         return parts[0], parts[1]
     return slug, None
+
+
+def _get_eval_name(slugs: str | list[str] | None) -> str:
+    """Extract a nice name from slugs for job display.
+
+    Args:
+        slugs: Single slug or list of slugs
+
+    Returns:
+        Name like "evalset" or "eval" if no slugs
+    """
+    if slugs is None:
+        return "eval"
+
+    # Get the first slug
+    first_slug = slugs if isinstance(slugs, str) else slugs[0]
+
+    # Remove index/wildcard suffix (":1" or ":*")
+    base_slug, _ = _parse_slug(first_slug)
+
+    # Extract the evalset name (part after last "/")
+    if "/" in base_slug:
+        return base_slug.rsplit("/", 1)[1]
+
+    return base_slug
 
 
 def _load_tasks_from_slugs(slugs: str | list[str]) -> list[Task]:
@@ -210,7 +237,7 @@ async def run_eval(
             try:
                 caller = frame.f_back
                 if caller is not None:
-                    code_snippet, _ = get_with_block_body(caller)
+                    code_snippet, _, _ = get_with_block_body(caller)
             except ASTExtractionError:
                 pass
             finally:
@@ -244,39 +271,57 @@ async def run_eval(
             yield ctx
 
     else:
-        # Parallel execution
-        completed = await _run_parallel_eval(
-            tasks=tasks,
-            variant_combos=variant_combos,
-            group=group,
-            group_ids=group_ids,
-            job_id=job_id,
-            api_key=api_key,
-            code_snippet=code_snippet,
-        )
+        # Parallel execution: create implicit job to group traces
+        eval_name = _get_eval_name(slugs)
+        implicit_job_id = job_id or str(uuid.uuid4())
 
-        # Create parent ctx with results
-        if tasks:
-            ctx = EvalContext.from_task(
-                task=tasks[0],
+        # Print job URL (not individual trace URLs)
+        _print_job_url(implicit_job_id, eval_name)
+
+        error_occurred = False
+        try:
+            # Run parallel evals with job_id
+            completed = await _run_parallel_eval(
+                tasks=tasks,
+                variant_combos=variant_combos,
+                group=group,
+                group_ids=group_ids,
+                job_id=implicit_job_id,  # Propagate job_id to child traces
                 api_key=api_key,
-                job_id=job_id,
-            )
-        else:
-            ctx = EvalContext(
-                name="eval",
-                api_key=api_key,
-                job_id=job_id,
+                code_snippet=code_snippet,
             )
 
-        ctx.results = completed
+            # Create summary context (no trace, just aggregates results)
+            if tasks:
+                ctx = EvalContext.from_task(
+                    task=tasks[0],
+                    api_key=api_key,
+                    job_id=implicit_job_id,
+                )
+            else:
+                ctx = EvalContext(
+                    name="eval",
+                    api_key=api_key,
+                    job_id=implicit_job_id,
+                )
 
-        # Compute aggregate reward
-        rewards = [e.reward for e in completed if e.reward is not None]
-        if rewards:
-            ctx.reward = sum(rewards) / len(rewards)
+            ctx._is_summary = True  # Skip trace tracking
+            ctx.results = completed
 
-        yield ctx
+            # Compute aggregate reward
+            rewards = [e.reward for e in completed if e.reward is not None]
+            if rewards:
+                ctx.reward = sum(rewards) / len(rewards)
+
+            # Check if any failed
+            error_occurred = any(e.error is not None for e in completed)
+
+            yield ctx
+        except Exception:
+            error_occurred = True
+            raise
+        finally:
+            _print_job_complete_url(implicit_job_id, eval_name, error_occurred)
 
 
 async def _run_parallel_eval(
@@ -294,6 +339,11 @@ async def _run_parallel_eval(
     """
     # Lazy import to avoid circular dependency
     from hud.eval.context import EvalContext
+    from hud.eval.parallel import log_eval_stats, run_parallel_evals
+
+    # Find user code frame and extract the with block body
+    caller_frame = find_user_frame()
+    body_source, captured_locals, context_var = get_with_block_body(caller_frame)
 
     # Calculate total evals and resolve group IDs
     if tasks:
@@ -321,6 +371,7 @@ async def _run_parallel_eval(
                         variants=variant,
                         code_snippet=code_snippet,
                     )
+                    ctx._suppress_link = True  # Suppress individual links, job URL shown instead
                     eval_contexts.append(ctx)
                     idx += 1
     else:
@@ -336,11 +387,24 @@ async def _run_parallel_eval(
                     variants=variant,
                     code_snippet=code_snippet,
                 )
+                ctx._suppress_link = True  # Suppress individual links, job URL shown instead
                 eval_contexts.append(ctx)
                 idx += 1
 
-    # Run in parallel (frame depth: _run_parallel_eval -> eval -> user code)
-    return await execute_parallel_evals(eval_contexts, caller_frame_depth=3)
+    # Run in parallel
+    logger.info(
+        "Running %d evals (%d tasks x %d variants x %d runs)",
+        len(eval_contexts),
+        max(len(tasks), 1),
+        len(variant_combos),
+        group,
+    )
+    completed = await run_parallel_evals(eval_contexts, body_source, captured_locals, context_var)
+
+    # Log stats
+    log_eval_stats(completed)
+
+    return completed
 
 
 __all__ = ["run_eval"]

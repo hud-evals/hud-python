@@ -243,7 +243,7 @@ def rft_command(
                 hud_console.info("Skipping task preview in auto-accept mode (--yes)")
             else:
                 try:
-                    from hud.cli.rl.viewer import show_json_interactive
+                    from hud.cli.utils.viewer import show_json_interactive
 
                     hud_console.section_title("Task Preview")
                     show_json_interactive(
