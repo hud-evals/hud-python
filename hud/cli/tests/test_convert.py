@@ -70,6 +70,7 @@ class TestConvertCommand:
         """Test basic task conversion from local to remote."""
         # Setup mocks
         mock_settings.api_key = "test-api-key"
+        mock_settings.hud_mcp_url = "https://mcp.hud.ai/v3/mcp"
         mock_find_env.return_value = mock_env_dir
 
         # Mock the push check to return updated lock data

@@ -128,7 +128,7 @@ class TestDatasetOperations:
 
     def test_save_taskconfigs_empty_list(self):
         """Test saving empty task list."""
-        with patch("hud.utils.tasks.Dataset") as MockDataset:
+        with patch("datasets.Dataset") as MockDataset:
             mock_instance = MagicMock()
             MockDataset.from_list.return_value = mock_instance
             mock_instance.push_to_hub.return_value = None

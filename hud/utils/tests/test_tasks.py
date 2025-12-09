@@ -195,7 +195,7 @@ def test_save_tasks_basic():
         {"id": "2", "prompt": "test2", "mcp_config": {"key2": "value2"}},
     ]
 
-    with patch("hud.utils.tasks.Dataset") as mock_dataset_class:
+    with patch("datasets.Dataset") as mock_dataset_class:
         mock_dataset = MagicMock()
         mock_dataset_class.from_list.return_value = mock_dataset
 
@@ -215,7 +215,7 @@ def test_save_tasks_with_specific_fields():
         {"id": "1", "prompt": "test", "mcp_config": {"key": "value"}, "extra": "data"},
     ]
 
-    with patch("hud.utils.tasks.Dataset") as mock_dataset_class:
+    with patch("datasets.Dataset") as mock_dataset_class:
         mock_dataset = MagicMock()
         mock_dataset_class.from_list.return_value = mock_dataset
 
@@ -233,7 +233,7 @@ def test_save_tasks_with_list_field():
         {"id": "1", "tags": ["tag1", "tag2"], "count": 5},
     ]
 
-    with patch("hud.utils.tasks.Dataset") as mock_dataset_class:
+    with patch("datasets.Dataset") as mock_dataset_class:
         mock_dataset = MagicMock()
         mock_dataset_class.from_list.return_value = mock_dataset
 
@@ -257,7 +257,7 @@ def test_save_tasks_with_primitive_types():
         },
     ]
 
-    with patch("hud.utils.tasks.Dataset") as mock_dataset_class:
+    with patch("datasets.Dataset") as mock_dataset_class:
         mock_dataset = MagicMock()
         mock_dataset_class.from_list.return_value = mock_dataset
 
@@ -282,7 +282,7 @@ def test_save_tasks_with_other_type():
         {"id": "1", "custom": CustomObj()},
     ]
 
-    with patch("hud.utils.tasks.Dataset") as mock_dataset_class:
+    with patch("datasets.Dataset") as mock_dataset_class:
         mock_dataset = MagicMock()
         mock_dataset_class.from_list.return_value = mock_dataset
 
@@ -315,7 +315,7 @@ def test_save_tasks_with_kwargs():
     """Test save_tasks passes kwargs to push_to_hub."""
     tasks = [{"id": "1", "prompt": "test"}]
 
-    with patch("hud.utils.tasks.Dataset") as mock_dataset_class:
+    with patch("datasets.Dataset") as mock_dataset_class:
         mock_dataset = MagicMock()
         mock_dataset_class.from_list.return_value = mock_dataset
 
@@ -332,7 +332,7 @@ def test_save_tasks_field_not_in_dict():
         {"id": "1", "prompt": "test"},
     ]
 
-    with patch("hud.utils.tasks.Dataset") as mock_dataset_class:
+    with patch("datasets.Dataset") as mock_dataset_class:
         mock_dataset = MagicMock()
         mock_dataset_class.from_list.return_value = mock_dataset
 
@@ -346,7 +346,7 @@ def test_save_tasks_field_not_in_dict():
 
 def test_save_tasks_empty_list():
     """Test save_tasks with empty list."""
-    with patch("hud.utils.tasks.Dataset") as mock_dataset_class:
+    with patch("datasets.Dataset") as mock_dataset_class:
         mock_dataset = MagicMock()
         mock_dataset_class.from_list.return_value = mock_dataset
 
