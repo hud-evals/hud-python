@@ -476,8 +476,8 @@ class TestOpenAIAgent:
             ]
             response = await agent.get_response(messages)
 
-            assert "Thinking: Let me think about this..." in response.content
-            assert "Final answer" in response.content
+            assert response.reasoning == "Let me think about this..."
+            assert response.content == "Final answer"
 
     @pytest.mark.asyncio
     async def test_get_response_empty_messages(self, mock_mcp_client, mock_openai):

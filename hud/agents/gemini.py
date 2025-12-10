@@ -172,21 +172,21 @@ class GeminiAgent(MCPAgent):
                     tool_call = self._extract_tool_call(part)
                     if tool_call is not None:
                         collected_tool_calls.append(tool_call)
+                elif part.thought is True and part.text:
+                    if thinking_content:
+                        thinking_content += "\n"
+                    thinking_content += part.text
                 elif part.text:
                     text_content += part.text
-                elif hasattr(part, "thought") and part.thought:
-                    thinking_content += f"Thinking: {part.thought}\n"
 
         # Assign collected tool calls and mark done status
         if collected_tool_calls:
             result.tool_calls = collected_tool_calls
             result.done = False
 
-        # Combine text and thinking for final content
+        result.content = text_content
         if thinking_content:
-            result.content = thinking_content + text_content
-        else:
-            result.content = text_content
+            result.reasoning = thinking_content
 
         return result
 
