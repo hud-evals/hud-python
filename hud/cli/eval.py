@@ -22,6 +22,7 @@ from rich.table import Table
 from hud.cli.utils.env_check import ensure_built, find_environment_dir
 from hud.settings import settings
 from hud.types import AgentType
+from hud.utils.env import resolve_env_vars
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
@@ -281,6 +282,8 @@ class EvalConfig(BaseModel):
             hud_console.warning(f"Failed to parse {path}: {e}")
             return cls()
 
+        toml_data = resolve_env_vars(toml_data)
+
         # Extract sections
         eval_section = toml_data.get("eval", {})
         agent_section = toml_data.get("agent", {})
@@ -470,6 +473,8 @@ class EvalConfig(BaseModel):
                 "initial_screenshot",
             }
 
+            sensitive_fields = {"api_key", "api_secret", "token", "password", "secret"}
+
             for name in config_cls.model_fields:
                 if name in skip:
                     continue
@@ -482,7 +487,12 @@ class EvalConfig(BaseModel):
                     )
                     table.add_row(f"  {name}", str(value) if value else "—")
                 elif name in overrides:
-                    table.add_row(f"  {name}", str(overrides[name]))
+                    value = overrides[name]
+                    if name in sensitive_fields and value:
+                        display_value = f"{str(value)[:4]}****" if len(str(value)) > 4 else "****"
+                    else:
+                        display_value = str(value)
+                    table.add_row(f"  {name}", display_value)
 
         hud_console.console.print(table)
 

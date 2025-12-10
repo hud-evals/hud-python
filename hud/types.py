@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import uuid
-from collections import defaultdict
 from enum import Enum
-from string import Template
 from typing import Any, Literal
 
 import mcp.types as types
@@ -14,6 +11,7 @@ from mcp.types import CallToolRequestParams, CallToolResult
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from hud.settings import settings
+from hud.utils.env import resolve_env_vars as _resolve_env_vars
 from hud.utils.tool_shorthand import normalize_to_tool_call_dict
 
 logger = logging.getLogger(__name__)
@@ -167,47 +165,21 @@ class Task(BaseModel):
     @classmethod
     def resolve_env_vars(cls, v: dict[str, Any]) -> dict[str, Any]:
         """
-        Automatically resolve environment variables in mcp_config using Template.
+        Automatically resolve environment variables in mcp_config.
 
         Supports ${VAR_NAME} syntax with variable substitution from
-        System environment variables (including HUD_API_KEY, etc.)
+        system environment variables and settings (including HUD_API_KEY, etc.)
 
         Missing variables resolve to empty strings.
         """
-        import os
-
-        # Start with current environment variables
-        mapping = dict(os.environ)
-        # Include settings (from process env, project .env, and user .env)
-        settings_dict = settings.model_dump()
-        mapping.update(settings_dict)
-        # Add UPPERCASE aliases for settings keys
-        for _key, _val in settings_dict.items():
-            with contextlib.suppress(Exception):
-                mapping[_key.upper()] = _val
-
-        if settings.api_key:
-            mapping["HUD_API_KEY"] = settings.api_key
-        else:
+        # Warn once if HUD_API_KEY is not set
+        if not settings.api_key:
             global _missing_api_key_error_logged
             if not _missing_api_key_error_logged:
                 logger.error("HUD_API_KEY is not set, tracing and remote training will not work")
                 _missing_api_key_error_logged = True
 
-        def substitute_in_value(obj: Any) -> Any:
-            """Recursively substitute variables in nested structures."""
-            if isinstance(obj, str):
-                # Use Template's substitute with defaultdict - missing vars become empty strings
-                safe_mapping = defaultdict(str, mapping)
-                return Template(obj).substitute(safe_mapping)
-            elif isinstance(obj, dict):
-                return {k: substitute_in_value(v) for k, v in obj.items()}
-            elif isinstance(obj, list):
-                return [substitute_in_value(item) for item in obj]
-            else:
-                return obj
-
-        return substitute_in_value(v)
+        return _resolve_env_vars(v)
 
 
 class MCPToolCall(CallToolRequestParams):
