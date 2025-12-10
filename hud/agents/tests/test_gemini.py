@@ -230,14 +230,14 @@ class TestGeminiAgent:
             mock_candidate = MagicMock()
 
             thinking_part = MagicMock()
-            thinking_part.text = None
+            thinking_part.text = "Let me reason through this..."
             thinking_part.function_call = None
-            thinking_part.thought = "Let me reason through this..."
+            thinking_part.thought = True
 
             text_part = MagicMock()
             text_part.text = "Here is my answer"
             text_part.function_call = None
-            text_part.thought = None
+            text_part.thought = False
 
             mock_candidate.content = MagicMock()
             mock_candidate.content.parts = [thinking_part, text_part]
