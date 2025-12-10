@@ -13,7 +13,7 @@ from hud.environment.connectors import ConnectorsMixin
 from hud.environment.integrations import IntegrationsMixin
 from hud.environment.mock import MockMixin
 from hud.environment.router import ConflictResolution, ToolRouter
-from hud.eval.mixin import EvalMixin
+from hud.environment.scripts import ScriptMixin
 from hud.server.server import MCPServer
 from hud.types import MCPToolResult
 
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     import types
 
     from hud.environment.connection import Connector
+    from hud.eval.eval import Eval
 
 __all__ = ["Environment"]
 
@@ -34,7 +35,7 @@ class Environment(
     ConnectorsMixin,
     IntegrationsMixin,
     MockMixin,
-    EvalMixin,
+    ScriptMixin,
     MCPServer,
 ):
     """Unified MCP environment that acts as both server and client.
@@ -139,6 +140,9 @@ class Environment(
 
         # Initialize mock state
         self._init_mock()
+
+        # Initialize script state
+        self._init_scripts()
 
     # =========================================================================
     # Core Methods
@@ -483,7 +487,7 @@ class Environment(
 
         return {
             "name": self.name,
-            "hubs": hub_configs,
+            "hubs": [h.model_dump() for h in hub_configs],
             "setup_tools": setup_tools,
             "evaluate_tools": evaluate_tools,
         }
@@ -517,3 +521,93 @@ class Environment(
 
     def __repr__(self) -> str:
         return f"Environment({self.name!r}, connections={list(self._connections.keys())})"
+
+    # =========================================================================
+    # Eval Creation
+    # =========================================================================
+
+    def __call__(self, script: str | None = None, **args: Any) -> Eval:
+        """Create an Eval from this environment.
+
+        Returns an Eval that can be entered as a context manager or passed
+        to hud.eval() for orchestration.
+
+        Args:
+            script: Optional script name to run (from @env.script)
+            **args: Arguments for the script
+
+        Returns:
+            Eval: A runnable evaluation unit
+
+        Example:
+            ```python
+            env = Environment("my-env").connect_hub("browser")
+
+            @env.script()
+            async def checkout(user_id: str):
+                yield "Complete checkout"
+                yield 1.0
+
+            # Simple use - Eval is context manager
+            async with env("checkout", user_id="alice") as ctx:
+                await agent.run(ctx.prompt)
+
+            # Empty - just env
+            async with env() as ctx:
+                await ctx.call_tool("navigate", url="...")
+
+            # Orchestrated via hud.eval
+            evals = [env("checkout", user_id="alice"), env("checkout", user_id="bob")]
+            async with hud.eval(evals, variants={"model": ["gpt-4o"]}, group=4) as ctx:
+                ...
+            ```
+        """
+        from hud.eval.eval import Eval
+
+        return Eval(
+            env_config=self._get_env_config(),
+            script=script,
+            args=args,
+        )
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any] | None) -> Environment:
+        """Create an Environment from a configuration dict.
+
+        Args:
+            config: EnvConfig-compatible dict with:
+                - name: Environment name
+                - hubs: List of hub configs (HubConfig dicts)
+                - setup_tools: Tools to run after connection
+                - evaluate_tools: Tools to run before disconnection
+
+        Returns:
+            Environment: Configured environment instance
+        """
+        if config is None:
+            return cls("eval")
+
+        env = cls(name=config.get("name", "eval"))
+
+        # Connect hubs
+        for hub in config.get("hubs", []):
+            if isinstance(hub, dict):
+                env.connect_hub(
+                    hub.get("slug", ""),
+                    alias=hub.get("alias"),
+                    prefix=hub.get("prefix"),
+                    include=hub.get("include"),
+                    exclude=hub.get("exclude"),
+                )
+
+        # Add setup tools
+        for tool in config.get("setup_tools", []):
+            if isinstance(tool, dict):
+                env.setup_tool(tool.get("name", ""), **(tool.get("arguments") or {}))
+
+        # Add evaluate tools
+        for tool in config.get("evaluate_tools", []):
+            if isinstance(tool, dict):
+                env.evaluate_tool(tool.get("name", ""), **(tool.get("arguments") or {}))
+
+        return env

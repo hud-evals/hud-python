@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -14,7 +13,6 @@ from hud.eval.parallel import (
     _get_end_line,
     expand_variants,
     resolve_group_ids,
-    run_parallel_evals,
 )
 
 
@@ -158,69 +156,6 @@ async with ctx:
         body = _extract_body(lines, async_with)
         assert "do_thing()" in body
         assert "more_thing()" in body
-
-
-class TestRunParallelEvals:
-    """Tests for run_parallel_evals function."""
-
-    @pytest.mark.asyncio
-    async def test_runs_body_for_each_context(self) -> None:
-        """run_parallel_evals runs body for each EvalContext."""
-        # Create mock eval contexts
-        mock_ctxs = []
-        for i in range(3):
-            ctx = MagicMock()
-            ctx.index = i
-            ctx.__aenter__ = AsyncMock(return_value=ctx)
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            mock_ctxs.append(ctx)
-
-        # Simple body that sets reward
-        body_source = "env.reward = env.index * 10"
-        captured_locals: dict[str, object] = {}
-
-        results = await run_parallel_evals(mock_ctxs, body_source, captured_locals, "env")
-
-        assert len(results) == 3
-        # Each context should have had __aenter__ and __aexit__ called
-        for ctx in mock_ctxs:
-            ctx.__aenter__.assert_called_once()
-            ctx.__aexit__.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_captures_exceptions(self) -> None:
-        """run_parallel_evals captures exceptions in context."""
-        ctx = MagicMock()
-        ctx.index = 0
-        ctx.__aenter__ = AsyncMock(return_value=ctx)
-        ctx.__aexit__ = AsyncMock(return_value=None)
-
-        # Body that raises
-        body_source = "raise ValueError('test error')"
-        captured_locals: dict[str, object] = {}
-
-        results = await run_parallel_evals([ctx], body_source, captured_locals, "env")
-
-        assert len(results) == 1
-        # Error should be captured, not raised
-        assert hasattr(ctx, "error") or ctx.__aexit__.called
-
-    @pytest.mark.asyncio
-    async def test_uses_captured_locals(self) -> None:
-        """run_parallel_evals uses captured locals in body execution."""
-        ctx = MagicMock()
-        ctx.index = 0
-        ctx.result = None
-        ctx.__aenter__ = AsyncMock(return_value=ctx)
-        ctx.__aexit__ = AsyncMock(return_value=None)
-
-        # Body that uses captured local
-        body_source = "env.result = my_value * 2"
-        captured_locals = {"my_value": 21}
-
-        results = await run_parallel_evals([ctx], body_source, captured_locals, "env")
-
-        assert len(results) == 1
 
 
 class TestASTExtractionError:

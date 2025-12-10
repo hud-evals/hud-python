@@ -1,23 +1,32 @@
 """HUD Eval - Evaluation context and management.
 
 This module provides:
+- Eval: A runnable evaluation unit (from env())
 - EvalContext: Environment with evaluation tracking (trace_id, reward, etc.)
-- EvalMixin: Adds env.eval() method to Environment
 - eval(): Standalone context manager for task-based evaluation
 
 Usage:
-    # Method on existing environment
-    async with env.eval("task_name") as env:
-        await env.call_tool("navigate", url="...")
-        env.reward = 0.9
+    # Using env() to create Eval
+    env = Environment("my-env").connect_hub("browser")
+
+    async with env() as ctx:
+        await ctx.call_tool("navigate", url="...")
+
+    async with env("checkout", user_id="alice") as ctx:
+        await agent.run(ctx.prompt)
 
     # Standalone with task slugs
-    async with hud.eval("my-org/task:1") as env:
-        await agent.run(env)
+    async with hud.eval("my-org/task:1") as ctx:
+        await agent.run(ctx)
+
+    # Orchestrated with Eval objects
+    evals = [env("checkout", user_id="alice"), env("checkout", user_id="bob")]
+    async with hud.eval(evals, variants={"model": ["gpt-4o"]}, group=4) as ctx:
+        await agent.run(ctx.prompt)
 
     # Blank eval for manual reward
-    async with hud.eval() as env:
-        env.reward = compute_reward()
+    async with hud.eval() as ctx:
+        ctx.reward = compute_reward()
 """
 
 from __future__ import annotations
@@ -30,15 +39,15 @@ import hud.eval.instrument  # noqa: F401
 # run_eval is safe to import (uses lazy imports internally)
 from hud.eval.manager import run_eval
 
-# EvalMixin is safe to import (uses lazy imports internally)
-from hud.eval.mixin import EvalMixin
+# Eval is safe to import
+from hud.eval.eval import Eval
 
 if TYPE_CHECKING:
     from hud.eval.context import EvalContext
 
 __all__ = [
+    "Eval",
     "EvalContext",
-    "EvalMixin",
     "run_eval",
 ]
 

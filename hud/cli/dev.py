@@ -136,8 +136,11 @@ def auto_detect_module() -> tuple[str, Path | None] | tuple[None, None]:
 
 
 def should_use_docker_mode(cwd: Path) -> bool:
-    """Check if environment requires Docker mode (has Dockerfile in current dir)."""
-    return (cwd / "Dockerfile").exists()
+    """Check if environment requires Docker mode (has Dockerfile in current dir).
+
+    Checks for Dockerfile.hud first (HUD-specific), then falls back to Dockerfile.
+    """
+    return (cwd / "Dockerfile.hud").exists() or (cwd / "Dockerfile").exists()
 
 
 async def run_mcp_module(

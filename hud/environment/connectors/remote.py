@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 
     from fastmcp.tools.tool import Tool
 
+    from hud.environment.types import HubConfig
+
 __all__ = ["RemoteConnectorMixin"]
 
 logger = logging.getLogger(__name__)
@@ -21,7 +23,7 @@ class RemoteConnectorMixin(MCPConfigConnectorMixin):
     """Mixin providing remote connection methods."""
 
     # Store hub configs for trace serialization
-    _hub_configs: list[dict[str, Any]]
+    _hub_configs: list[HubConfig]
 
     def mount(self, server: Any, *, prefix: str | None = None) -> None:
         raise NotImplementedError
@@ -51,18 +53,17 @@ class RemoteConnectorMixin(MCPConfigConnectorMixin):
         """
         import httpx
 
+        from hud.environment.types import HubConfig
         from hud.settings import settings
 
         # Store hub config for trace serialization
-        hub_config: dict[str, Any] = {"slug": slug}
-        if alias:
-            hub_config["alias"] = alias
-        if prefix:
-            hub_config["prefix"] = prefix
-        if include:
-            hub_config["include"] = include
-        if exclude:
-            hub_config["exclude"] = exclude
+        hub_config = HubConfig(
+            slug=slug,
+            alias=alias,
+            prefix=prefix,
+            include=include,
+            exclude=exclude,
+        )
 
         if not hasattr(self, "_hub_configs"):
             self._hub_configs = []

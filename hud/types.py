@@ -71,10 +71,16 @@ class BaseAgentConfig(BaseModel):
 
 class Task(BaseModel):
     """
+    DEPRECATED: Use Eval from env() instead.
+
     A task configuration that can be used to create a task.
 
     The mcp_config field supports environment variable substitution using
     template placeholders in the format ${VAR_NAME} or ${VAR_NAME:default_value}.
+
+    .. deprecated:: 0.5.0
+        Task is deprecated. Use `env("script_name", **args)` to create Eval objects,
+        or use string slugs with `hud.eval("org/evalset:*")`.
 
     Example:
         mcp_config: {
@@ -96,6 +102,18 @@ class Task(BaseModel):
     integration_test_tool: MCPToolCall | list[MCPToolCall] | None = None
     agent_config: BaseAgentConfig | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    def __init__(self, **data: Any) -> None:
+        """Initialize Task with deprecation warning."""
+        import warnings
+
+        warnings.warn(
+            "Task is deprecated. Use env('script_name', **args) to create Eval objects, "
+            "or use string slugs with hud.eval('org/evalset:*').",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(**data)
 
     @field_validator("mcp_config", "metadata", mode="before")
     @classmethod

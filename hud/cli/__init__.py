@@ -26,7 +26,6 @@ from .clone import clone_repository, get_clone_message, print_error, print_tutor
 from .debug import debug_mcp_stdio
 from .dev import run_mcp_dev_server
 from .eval import eval_command
-from .init import create_environment
 from .pull import pull_command
 from .push import push_command
 from .remove import remove_command
@@ -889,31 +888,37 @@ def remove(
 
 @app.command()
 def init(
-    name: str = typer.Argument(None, help="Environment name (default: chosen preset name)"),
+    name: str = typer.Argument(None, help="Environment name (default: directory name)"),
+    directory: str = typer.Option(".", "--dir", "-d", help="Target directory"),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing files"),
     preset: str | None = typer.Option(
         None,
         "--preset",
         "-p",
-        help="Preset to use: blank, deep-research, browser, rubrics. If omitted, you'll choose interactively.",  # noqa: E501
+        help="Download a preset: blank, deep-research, browser, rubrics",
     ),
-    directory: str = typer.Option(".", "--dir", "-d", help="Parent directory for the environment"),
-    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing files"),
 ) -> None:
-    """🚀 Initialize a new HUD environment with minimal boilerplate.
+    """🚀 Initialize a HUD environment.
 
-    [not dim]Creates a working MCP environment with:
-    - Dockerfile for containerization
-    - pyproject.toml for dependencies
-    - Minimal MCP server with context
-    - Required setup/evaluate tools
+    [not dim]• Empty directory: Choose a preset interactively
+    • Existing project: Add Dockerfile.hud and hud.py
+
+    Use --preset to skip selection and download a specific template.
 
     Examples:
-        hud init                    # Choose preset interactively, create ./preset-name/
-        hud init my-env             # Create new directory ./my-env/
-        hud init my-env --dir /tmp  # Create in /tmp/my-env/[/not dim]
+        hud init                    # Auto-detect mode
+        hud init my-env             # Initialize with custom name
+        hud init --preset browser   # Download browser preset[/not dim]
 
     """
-    create_environment(name, directory, force, preset)
+    if preset:
+        from hud.cli.init import create_environment
+
+        create_environment(name, directory, force, preset)
+    else:
+        from hud.cli.flows.init import smart_init
+
+        smart_init(name, directory, force)
 
 
 @app.command()

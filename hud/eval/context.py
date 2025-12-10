@@ -257,7 +257,8 @@ class EvalContext(Environment):
     ) -> EvalContext:
         """Create an EvalContext from a Task definition.
 
-        Used by hud.eval(slug) to create evaluation contexts from tasks.
+        .. deprecated:: 0.5.0
+            Use Eval objects from env() instead of Task objects.
 
         Args:
             task: Task definition
@@ -270,6 +271,14 @@ class EvalContext(Environment):
             variants: Variant assignment
             code_snippet: Code being evaluated
         """
+        import warnings
+
+        warnings.warn(
+            "EvalContext.from_task() is deprecated. Use Eval objects from env() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         eval_name = name or task.id or "eval"
 
         return cls(

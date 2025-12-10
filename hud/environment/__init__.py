@@ -28,6 +28,7 @@ from hud.environment.connection import ConnectionConfig, ConnectionType, Connect
 from hud.environment.environment import Environment
 from hud.environment.mock import MockMixin, generate_mock_value
 from hud.environment.router import ConflictResolution, ToolRouter
+from hud.environment.scripts import ScriptMixin
 from hud.environment.types import EnvConfig, HubConfig
 from hud.environment.utils import ToolFormat, format_result, parse_tool_call, parse_tool_calls
 
@@ -40,6 +41,7 @@ __all__ = [
     "Environment",
     "HubConfig",
     "MockMixin",
+    "ScriptMixin",
     "ToolFormat",
     "ToolRouter",
     "format_result",

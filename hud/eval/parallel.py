@@ -155,56 +155,6 @@ def log_eval_stats(completed: list[EvalContext], context: str = "") -> None:
     )
 
 
-async def execute_parallel_evals(
-    contexts: list[EvalContext],
-    caller_frame_depth: int = 2,
-) -> list[EvalContext]:
-    """Execute evaluations in parallel using AST extraction.
-
-    This is the shared implementation for parallel execution. It:
-    1. Captures the caller's frame and extracts with-block body
-    2. Runs all provided EvalContexts in parallel
-    3. Logs statistics
-
-    Args:
-        contexts: Pre-created EvalContext instances to run
-        caller_frame_depth: How many frames to go up to find user code
-                           (default 2: execute_parallel_evals -> caller -> user)
-
-    Returns:
-        List of completed EvalContext objects with results
-    """
-    import inspect
-
-    # Get the caller's frame
-    frame = inspect.currentframe()
-    if frame is None:
-        raise ASTExtractionError("Cannot get current frame")
-
-    try:
-        # Go up the specified number of frames
-        caller_frame = frame
-        for _ in range(caller_frame_depth):
-            if caller_frame is not None:
-                caller_frame = caller_frame.f_back
-        if caller_frame is None:
-            raise ASTExtractionError("Cannot get caller frame")
-
-        body_source, captured_locals, context_var = get_with_block_body(caller_frame)
-
-    finally:
-        del frame
-
-    # Run in parallel
-    logger.info("Running %d parallel evals", len(contexts))
-    completed = await run_parallel_evals(contexts, body_source, captured_locals, context_var)
-
-    # Log stats
-    log_eval_stats(completed)
-
-    return completed
-
-
 class ASTExtractionError(Exception):
     """Error extracting AST from source."""
 
@@ -295,63 +245,11 @@ def _extract_body(lines: list[str], with_node: ast.AsyncWith) -> str:
     return textwrap.dedent(body)
 
 
-async def run_parallel_evals(
-    eval_contexts: list[EvalContext],
-    body_source: str,
-    captured_locals: dict[str, Any],
-    context_var: str,
-    max_concurrent: int | None = None,
-) -> list[EvalContext]:
-    """Run the eval body in parallel for multiple contexts.
-
-    Returns the EvalContext objects after execution - they contain:
-    - trace_id
-    - index
-    - reward
-    - duration
-    - Any error is captured in the context
-
-    Args:
-        eval_contexts: List of EvalContext instances to run
-        body_source: The source code of the with-block body
-        captured_locals: Local variables captured from the caller
-        context_var: The variable name used in the 'as' clause
-        max_concurrent: Maximum concurrent evals (None = unlimited)
-    """
-
-    # Create runner function using the actual variable name from the 'as' clause
-    wrapped = f"async def __runner__({context_var}):\n{textwrap.indent(body_source, '    ')}"
-    code = compile(wrapped, "<parallel_eval>", "exec")
-    namespace = captured_locals.copy()
-    exec(code, namespace)  # noqa: S102
-    runner = namespace["__runner__"]
-
-    # Create semaphore for concurrency control
-    sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
-
-    async def run_one(ctx: EvalContext) -> EvalContext:
-        try:
-            if sem:
-                async with sem, ctx:
-                    await runner(ctx)
-            else:
-                async with ctx:
-                    await runner(ctx)
-        except Exception as e:
-            logger.warning("Parallel eval %d failed: %s", ctx.index, e)
-            ctx.error = e
-        return ctx
-
-    results = await asyncio.gather(*[run_one(ctx) for ctx in eval_contexts])
-    return list(results)
-
-
 __all__ = [
     "ASTExtractionError",
-    "execute_parallel_evals",
     "expand_variants",
+    "find_user_frame",
     "get_with_block_body",
     "log_eval_stats",
     "resolve_group_ids",
-    "run_parallel_evals",
 ]
