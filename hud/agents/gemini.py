@@ -173,6 +173,8 @@ class GeminiAgent(MCPAgent):
                     if tool_call is not None:
                         collected_tool_calls.append(tool_call)
                 elif part.thought is True and part.text:
+                    if thinking_content:
+                        thinking_content += "\n"
                     thinking_content += part.text
                 elif part.text:
                     text_content += part.text
