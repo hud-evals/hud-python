@@ -11,7 +11,7 @@ An environment is everything an agent can interact with—your APIs, services, d
 Start with `hud init` to scaffold an environment—works with existing codebases or from scratch:
 
 ```bash
-hud init my-env
+hud init
 ```
 
 Every tool is just a function. Decorate it with `@env.tool()` and agents can call it:
@@ -66,13 +66,13 @@ Call the environment with a script name and arguments to create an eval:
 eval = env("checkout", product_name="Laptop")
 
 async with hud.eval(eval, group=4) as ctx:
+    # Connect your agent here. Handle tool calls, run agent loop...
     response = await client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": ctx.prompt}],
         tools=ctx.as_openai_chat_tools()
     )
-    # Handle tool calls, run agent loop...
-    
+
     ctx.submit(response.choices[0].message.content)
 
 print(ctx.reward)
@@ -86,7 +86,7 @@ Testing your agent loop without hitting real services? Mock mode returns fake re
 
 ```python
 env.mock()
-env.mock_tool("search", "Mock search results")
+env.mock_tool("search", "Mock search results") # Manual override of mock
 
 async with hud.eval(env(), group=4) as ctx:
     tools = env.as_openai_chat_tools()
