@@ -18,7 +18,6 @@ import typer
 import yaml
 
 from hud.cli.utils.source_hash import compute_source_hash, list_source_files
-from hud.clients import MCPClient
 from hud.utils.hud_console import HUDConsole
 from hud.version import __version__ as hud_version
 
@@ -451,6 +450,9 @@ async def analyze_mcp_environment(
     mcp_config = parse_docker_command(docker_cmd)
 
     # Initialize client and measure timing
+    # Lazy import to avoid loading mcp_use on simple CLI commands
+    from hud.clients import MCPClient
+
     start_time = time.time()
     client = MCPClient(mcp_config=mcp_config, verbose=verbose, auto_trace=False)
     initialized = False

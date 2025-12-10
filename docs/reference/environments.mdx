@@ -1,490 +1,288 @@
 ---
 title: "Environments"
-description: "SDK reference for building MCP environments"
+description: "SDK reference for the Environment class - tools, connectors, and integrations"
 icon: "cube"
 ---
 
-The HUD SDK provides `MCPServer` for building MCP-compatible environments that work with any MCP client.
+`Environment` is the unified class for defining tools, connecting to services, and formatting for any LLM provider.
 
-## MCPServer
+## Environment
 
 ```python
-from hud.server import MCPServer
+from hud import Environment
+
+env = Environment("my-env")
 ```
 
-Enhanced FastMCP server with Docker-friendly features for building HUD environments.
+### Constructor
 
-**Constructor Parameters:**
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
-| `name` | `str` | Server name for MCP handshake | Required |
-| `instructions` | `str` | Server instructions/description | `None` |
-| `**fastmcp_kwargs` | `Any` | Additional FastMCP parameters | - |
+| `name` | `str` | Environment name | `"environment"` |
+| `instructions` | `str \| None` | Description/instructions | `None` |
+| `conflict_resolution` | `ConflictResolution` | How to handle tool name conflicts | `PREFIX` |
 
-**Key Features:**
-1. **SIGTERM handling** - Graceful shutdown in containers via custom runner
-2. **Initialize decorator** - Async setup during MCP initialize request (stdout is temporarily redirected to stderr during initialization to avoid corrupting MCP output)
-3. **Shutdown decorator** - Runs only on SIGTERM (container termination), not on hot‑reload/SIGINT
-4. **Enhanced add_tool()** - Automatically handles `BaseTool` instances and raw FastMCP Tool objects
-5. **Tool decorator passthrough** - `@mcp.tool` returns the original function for easy composition
-6. **FastMCP inheritance** - All FastMCP methods available (`mount`, `resource`, `tool`)
+### Context Manager
 
-### Decorators
-
-#### @initialize
-
-Run async setup during MCP initialize request:
+Environment must be used as an async context manager to connect:
 
 ```python
-mcp = MCPServer(name="my-env")
+async with env:
+    tools = env.as_openai_chat_tools()
+    result = await env.call_tool("my_tool", arg="value")
+```
 
-@mcp.initialize
-async def setup_environment(ctx):
-    """
-    Initialize environment resources.
+## Defining Tools
+
+### @env.tool()
+
+Register functions as callable tools:
+
+```python
+@env.tool()
+def count_letter(text: str, letter: str) -> int:
+    """Count occurrences of a letter in text."""
+    return text.lower().count(letter.lower())
+
+@env.tool()
+async def fetch_data(url: str) -> dict:
+    """Fetch JSON data from URL."""
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url)
+        return response.json()
+```
+
+Tools are automatically documented from type hints and docstrings.
+
+## Scripts
+
+Scripts define evaluation logic with two yields:
+
+```python
+@env.script("checkout")
+async def checkout_flow(product: str):
+    # First yield: send prompt, receive answer
+    answer = yield f"Add '{product}' to cart and checkout"
     
-    Args:
-        ctx: RequestContext with:
-            - ctx.meta: Client metadata dict
-            - ctx.session: MCP ServerSession
-    """
-    # Access metadata from agent (if provided)
-    if ctx.meta:
-        progress_token = ctx.meta.get("progressToken")
-        display_width = ctx.meta.get("display_width", 1920)
-        display_height = ctx.meta.get("display_height", 1080)
-        
-        # Send progress notifications
-        if progress_token:
-            await ctx.session.send_progress_notification(
-                progress_token=progress_token,
-                progress=50,
-                total=100,
-                message="Initializing environment..."
-            )
+    # Second yield: return reward based on result
+    order_exists = await check_order(product)
+    yield 1.0 if order_exists else 0.0
 ```
 
-#### @shutdown  
-
-Run cleanup on SIGTERM (container termination only):
+Create Evals from scripts:
 
 ```python
-@mcp.shutdown
-async def cleanup():
-    """Clean up resources on shutdown."""
-    if browser_provider:
-        browser_provider.close()
-    logger.info("Cleanup complete")
+eval = env("checkout", product="laptop")
+
+async with hud.eval(eval) as ctx:
+    await agent.run(ctx.prompt)
+    await ctx.submit(agent.response)
 ```
 
-### Tool Registration
+## Connectors
 
-Three ways to register tools:
+Connect to external services as tool sources.
+
+### connect_hub()
+
+Connect to a deployed HUD environment:
 
 ```python
-# 1. Decorator for simple functions
-@mcp.tool()
-async def my_tool(param: str) -> dict:
-    return {"result": param}
-
-# 2. Add BaseTool instances
-from hud.tools import BashTool
-bash = BashTool()
-mcp.add_tool(bash)  # Automatically uses bash.mcp internally
-
-# 3. Add non-BaseTool instances directly
-from custom import PlaywrightTool
-playwright = PlaywrightTool()
-mcp.add_tool(playwright)  # Added as-is
+env.connect_hub("my-org/browser", prefix="browser")
+# Tools available as browser_navigate, browser_click, etc.
 ```
 
-### Hub Pattern (mount)
+### connect_fastapi()
 
-Use BaseHub for organized tool namespaces:
+Import FastAPI routes as tools:
 
 ```python
-from hud.tools import BaseHub
+from fastapi import FastAPI
 
-# Create hub
-setup_hub = BaseHub("setup")
+api = FastAPI()
 
-# Add internal tools (hidden from agents)
-@setup_hub.tool("board")
-async def setup_board(size: int = 4):
-    game = setup_hub.env
-    game.reset(size=size)
-    return [TextContent(text=f"{size}x{size} board initialized")]
+@api.get("/users/{user_id}", operation_id="get_user")
+def get_user(user_id: int):
+    return {"id": user_id, "name": "Alice"}
 
-# Mount hub on server
-mcp.mount(setup_hub)
-
-# Agents call via dispatcher: setup(name="board", arguments={"size": 4})
+env.connect_fastapi(api)
+# Tool available as get_user
 ```
 
-### Resources
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `app` | `FastAPI` | FastAPI application | Required |
+| `name` | `str \| None` | Server name | `app.title` |
+| `prefix` | `str \| None` | Tool name prefix | `None` |
+| `include_hidden` | `bool` | Include routes with `include_in_schema=False` | `True` |
 
-Expose metadata via MCP resources:
+### connect_openapi()
+
+Import from OpenAPI spec:
 
 ```python
-@mcp.resource("telemetry://live")
-async def get_telemetry():
-    """Expose live telemetry data."""
-    return {
-        "provider": os.getenv("BROWSER_PROVIDER"),
-        "status": "running" if browser_provider else "stopped",
-        "live_url": browser_provider.get_live_view_url() if browser_provider else None,
-        "timestamp": datetime.now().isoformat()
+env.connect_openapi("https://api.example.com/openapi.json")
+```
+
+### connect_server()
+
+Mount an MCPServer or FastMCP directly:
+
+```python
+from fastmcp import FastMCP
+
+tools = FastMCP("tools")
+
+@tools.tool
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+
+env.connect_server(tools)
+```
+
+### connect_mcp_config()
+
+Connect via MCP config dict:
+
+```python
+env.connect_mcp_config({
+    "my-server": {
+        "command": "uvx",
+        "args": ["some-mcp-server"]
     }
+})
 ```
 
-### Running the Server
+### connect_image()
+
+Connect to a Docker image via stdio:
 
 ```python
-if __name__ == "__main__":
-    # Run with SIGTERM handling (stdio by default)
-    mcp.run()
-
-    # Or use development transports (HTTP/SSE)
-    mcp.run(transport="http", port=8765)
-    mcp.run(transport="sse", port=8080)
+env.connect_image("mcp/fetch")
 ```
 
-When using HTTP/SSE, HUD development helper endpoints are available:
+## Tool Formatting
 
-- `GET /hud` – overview
-- `GET /hud/tools` – list tools with schemas
-- `GET /hud/resources` – list resources
-- `GET /hud/prompts` – list prompts
+Convert tools to provider-specific formats.
 
-## Real Environment Examples
-
-### Minimal Environment
+### OpenAI
 
 ```python
-# src/hud_controller/server.py
-from hud.server import MCPServer
-from mcp.types import TextContent
-
-mcp = MCPServer(name="counter-env")
-counter = {"value": 0}
-
-@mcp.tool()
-async def setup(start_value: int = 0):
-    """Initialize counter."""
-    counter["value"] = start_value
-    return {"status": "ready", "counter": counter["value"]}
-
-@mcp.tool()
-async def increment():
-    """Increment counter."""
-    counter["value"] += 1
-    return [TextContent(text=f"Counter: {counter['value']}", type="text")]
-
-@mcp.tool()
-async def evaluate(target: int):
-    """Check if target reached."""
-    from hud.tools.types import EvaluationResult
-    return EvaluationResult(
-        reward=1.0 if counter["value"] >= target else 0.0,
-        done=counter["value"] >= target
-    )
-
-if __name__ == "__main__":
-    mcp.run()
-```
-
-### text_2048 Environment
-
-From `environments/text_2048/src/hud_controller/server.py`:
-
-```python
-from hud.server import MCPServer
-from .game import Game2048
-from .tools import MoveTool
-from .setup import setup as setup_hub
-from .evaluate import evaluate as evaluate_hub
-
-mcp = MCPServer(name="text-2048")
-game = None
-
-@mcp.initialize
-async def initialize_environment(ctx):
-    global game
-    
-    # Progress notifications
-    progress_token = getattr(ctx.meta, "progressToken", None) if ctx.meta else None
-    
-    async def send_progress(progress: int, message: str):
-        if progress_token:
-            await ctx.session.send_progress_notification(
-                progress_token=progress_token,
-                progress=progress,
-                total=100,
-                message=message
-            )
-    
-    await send_progress(0, "Starting 2048 game environment...")
-    
-    # Create game
-    game = Game2048()
-    game.reset()
-    
-    await send_progress(50, "Setting up game board...")
-    
-    # Set game on hubs
-    setup_hub.env = game
-    evaluate_hub.env = game
-    
-    # Mount hubs
-    mcp.mount(setup_hub)
-    mcp.mount(evaluate_hub)
-    
-    await send_progress(70, "Configuring tools...")
-    
-    # Add move tool
-    mcp.add_tool(MoveTool(env=game))
-    
-    await send_progress(100, "2048 environment ready")
-```
-
-### remote_browser Environment
-
-From `environments/remote_browser/src/hud_controller/server.py`:
-
-```python
-from hud.server import MCPServer
-from hud.tools.computer import HudComputerTool, AnthropicComputerTool, OpenAIComputerTool
-from .tools import PlaywrightToolWithMemory, BrowserExecutor
-from .setup import setup as setup_hub
-from .evaluate import evaluate as evaluate_hub
-from .providers import get_provider
-
-mcp = MCPServer(
-    name="HUD Remote Browser Environment",
-    instructions="""Remote browser automation environment..."""
+# Chat Completions API
+tools = env.as_openai_chat_tools()
+response = await client.chat.completions.create(
+    model="gpt-4o",
+    messages=messages,
+    tools=tools,
 )
 
-# Global state
-browser_provider = None
-playwright_tool = None
+# Responses API
+tools = env.as_openai_responses_tools()
 
-@mcp.resource("telemetry://live")
-async def get_telemetry_resource():
-    """MCP resource with live browser status."""
-    return {
-        "provider": os.getenv("BROWSER_PROVIDER", "unknown"),
-        "status": "running" if browser_provider else "stopped",
-        "live_url": browser_provider.get_live_view_url() if browser_provider else None,
-        "cdp_url": browser_provider.cdp_url if browser_provider else None
-    }
-
-@mcp.initialize
-async def initialize_environment(ctx):
-    global browser_provider, playwright_tool
-    
-    # Get metadata
-    metadata = ctx.meta
-    progress_token = metadata.get("progressToken", None)
-    
-    # Initialize provider
-    provider_name = os.getenv("BROWSER_PROVIDER")
-    provider_class = get_provider(provider_name)
-    browser_provider = provider_class(config)
-    
-    # Launch browser
-    cdp_url = await browser_provider.launch()
-    
-    # Create playwright tool
-    playwright_tool = PlaywrightToolWithMemory(cdp_url=cdp_url)
-    await playwright_tool._ensure_browser()
-    
-    # Add playwright tool (not a BaseTool, added directly)
-    mcp.add_tool(playwright_tool)
-    
-    # Create computer tools
-    executor = BrowserExecutor(playwright_tool)
-    tool_kwargs = {"executor": executor}
-    
-    # Add display dimensions from metadata
-    if metadata:
-        width = metadata.get("display_width")
-        height = metadata.get("display_height")
-        if width and height:
-            tool_kwargs["width"] = width
-            tool_kwargs["height"] = height
-    
-    # Add computer tools (all are BaseTool subclasses)
-    mcp.add_tool(HudComputerTool(**tool_kwargs))
-    mcp.add_tool(AnthropicComputerTool(**tool_kwargs))
-    mcp.add_tool(OpenAIComputerTool(**tool_kwargs))
-    
-    # Mount hubs
-    setup_hub.env = playwright_tool
-    evaluate_hub.env = playwright_tool
-    mcp.mount(setup_hub)
-    mcp.mount(evaluate_hub)
-
-@mcp.shutdown
-async def shutdown_environment():
-    """Cleanup browser resources."""
-    global browser_provider
-    if browser_provider:
-        browser_provider.close()
-    browser_provider = None
+# Agents SDK (requires openai-agents)
+tools = env.as_openai_agent_tools()
 ```
 
-## Standard Structure
-
-### Directory Layout
-
-```
-my-environment/
-├── Dockerfile
-├── pyproject.toml
-├── controller/                 # MCP controller (stdio)
-│   ├── __init__.py             # mcp = MCPServer()
-│   ├── __main__.py             # python -m controller → mcp.run()
-│   ├── hooks.py                # @mcp.initialize / @mcp.shutdown
-│   └── tools.py                # @mcp.tool(...)
-└── environment/                # Optional backend (HTTP/IPC)
-    └── server.py               # e.g., FastAPI app
-```
-
-### Dockerfile
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-# Copy and install
-COPY pyproject.toml ./
-COPY controller/ ./controller/
-COPY environment/ ./environment/
-RUN pip install --no-cache-dir -e .
-
-ENV ENV_SERVER_PORT=8005
-
-# Start optional backend, then MCP controller on stdio
-CMD ["sh", "-c", "uvicorn environment.server:app --host 0.0.0.0 --port $ENV_SERVER_PORT --log-level warning & python -m controller"]
-```
-
-### Hub Module Pattern
-
-Example from text_2048:
+### Anthropic/Claude
 
 ```python
-# src/hud_controller/setup/__init__.py
-from hud.tools.base import BaseHub
-
-setup = BaseHub("setup")
-
-# Import all setup functions to register them
-from . import board
-
-__all__ = ["setup"]
-
-# src/hud_controller/setup/board.py
-from . import setup
-
-@setup.tool("board")
-async def setup_board(board_size: int = 4):
-    """Initialize game board."""
-    game = setup.env  # Access environment from hub
-    game.reset(size=board_size)
-    return [TextContent(text=f"{board_size}x{board_size} game initialized")]
+tools = env.as_claude_tools()
+response = await client.messages.create(
+    model="claude-sonnet-4-5",
+    messages=messages,
+    tools=tools,
+)
 ```
 
-## Key Concepts
-
-### Environment State
-
-Three patterns for managing state:
-
-1. **Global variables** (simple environments):
-   ```python
-   game = None
-   
-   @mcp.initialize
-   async def initialize_environment(ctx):
-       global game
-       game = Game2048()
-   ```
-
-2. **Context class** (complex environments):
-   ```python
-   class EnvironmentContext:
-       def __init__(self):
-           self.browser = None
-           self.page = None
-   
-   env = EnvironmentContext()
-   ```
-
-3. **Hub env attribute** (for tool access):
-   ```python
-   setup_hub.env = game  # Tools access via hub.env
-   ```
-
-### Tool Lifecycle
-
-1. **Setup tools** - Hidden from agents, prepare environment state
-2. **Interaction tools** - Available to agents for control
-3. **Evaluate tools** - Hidden from agents, score performance
-
-### Progress Notifications
-
-Send [progress updates](https://modelcontextprotocol.io/specification/basic/utilities/progress) during long-running operations:
+### Gemini
 
 ```python
-async def send_progress(progress: int, message: str):
-    if progress_token:
-        await ctx.session.send_progress_notification(
-            progress_token=progress_token,
-            progress=progress,
-            total=100,
-            message=message
-        )
+tools = env.as_gemini_tools()
+config = env.as_gemini_tool_config()
 ```
 
-<Info>
-Progress notifications follow the [MCP progress specification](https://modelcontextprotocol.io/specification/basic/utilities/progress#progress-flow). The `progressToken` comes from the client's request [metadata](https://modelcontextprotocol.io/specification/basic/index#_meta).
-</Info>
-
-### Metadata Access
-
-Agent metadata flows through initialization:
+### LangChain
 
 ```python
-@mcp.initialize
-async def initialize_environment(ctx):
-    # From agent's metadata class variable
-    width = ctx.meta.get("display_width", 1920) if ctx.meta else 1920
-    height = ctx.meta.get("display_height", 1080) if ctx.meta else 1080
+# Requires langchain-core
+tools = env.as_langchain_tools()
 ```
 
-## Testing
+## Calling Tools
 
-```bash
-# CLI testing
-hud debug my-env:latest
-hud analyze my-env:latest
+### call_tool()
 
-# Python testing
-async def test():
-    from hud.clients import MCPClient
-    
-    client = MCPClient({
-        "env": {"command": "docker", "args": ["run", "-i", "my-env"]}
-    })
-    
-    async with client:
-        tools = await client.list_tools()
-        result = await client.call_tool("setup", {"value": 0})
+Execute tools with auto-format detection:
+
+```python
+# Simple call
+result = await env.call_tool("my_tool", arg="value")
+
+# From OpenAI tool call
+result = await env.call_tool(response.choices[0].message.tool_calls[0])
+
+# From Claude tool use
+result = await env.call_tool(response.content[0])  # tool_use block
+```
+
+Returns result in matching format (OpenAI tool call → OpenAI tool message, etc.).
+
+## Mock Mode
+
+Test without real connections:
+
+```python
+env.mock()  # Enable mock mode
+
+# Set specific mock outputs
+env.mock_tool("navigate", "Navigation successful")
+env.mock_tool("screenshot", b"fake_image_data")
+
+async with env:
+    result = await env.call_tool("navigate", url="https://example.com")
+    # Returns "Navigation successful" instead of actually navigating
+
+env.unmock()  # Disable mock mode
+```
+
+| Method | Description |
+|--------|-------------|
+| `mock(enable=True)` | Enable/disable mock mode |
+| `unmock()` | Disable mock mode |
+| `mock_tool(name, output)` | Set specific mock output |
+| `is_mock` | Check if mock mode is enabled |
+
+## Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | `str` | Environment name |
+| `prompt` | `str \| None` | Default prompt (set by connect_task) |
+| `is_connected` | `bool` | True if in context |
+| `connections` | `dict[str, Connector]` | Active connections |
+
+## Creating Evals
+
+Call the environment to create an Eval:
+
+```python
+# With script
+eval = env("checkout", product="laptop")
+
+# Without script (just the environment)
+eval = env()
+```
+
+Then run with `hud.eval()`:
+
+```python
+async with hud.eval(eval, variants={"model": ["gpt-4o"]}) as ctx:
+    ...
 ```
 
 ## See Also
 
-- [Build Environments](/build-environments) - Getting started guide
-- [Tools](/reference/tools) - Tool implementation reference
-- [Environment Spec](/build-environments/spec) - Technical specification and architecture
+- [Evals](/reference/evals) - hud.eval() reference
+- [MCPServer](/reference/mcpserver) - Building MCP servers
+- [Environments Guide](/quick-links/environments) - Getting started guide
+

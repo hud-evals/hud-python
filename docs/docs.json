@@ -49,43 +49,14 @@
             ]
           },
           {
-            "group": "Core Concepts",
-            "pages": [
-              "core-concepts/architecture",
-              "core-concepts/mcp-protocol",
-              "core-concepts/task-system"
-            ]
-          },
-          {
             "group": "SDK Reference",
             "pages": [
-              "reference/eval",
-              "reference/tools",
-              "reference/agents",
-              "reference/types",
+              "reference/evals",
               "reference/environments",
-              "reference/tasks"
-            ]
-          },
-          {
-            "group": "Environments",
-            "pages": [
-              "build-environments/index",
-              "build-environments/spec"
-            ]
-          },
-          {
-            "group": "Beta Features",
-            "pages": [
-              "beta/index",
-              "beta/rft"
-            ]
-          },
-          {
-            "group": "Agents",
-            "pages": [
-              "evaluate-agents/create-agents",
-              "evaluate-agents/benchmarks"
+              "reference/tools",
+              "reference/mcpserver",
+              "reference/agents",
+              "reference/types"
             ]
           },
           {
@@ -138,7 +109,7 @@
               "reference/tools",
               "reference/agents",
               "reference/types",
-              "reference/environments",
+              "reference/mcpserver",
               "reference/tasks"
             ]
           },

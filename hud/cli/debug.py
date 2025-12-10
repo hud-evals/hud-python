@@ -11,7 +11,6 @@ import time
 
 from rich.console import Console
 
-from hud.clients import MCPClient
 from hud.utils.hud_console import HUDConsole
 
 from .utils.logging import CaptureLogger, Colors, analyze_error_for_hints
@@ -246,6 +245,9 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
         logger.command(command)
         logger.info("Creating MCP client via hud...")
 
+        # Lazy import to avoid loading mcp_use on simple CLI commands
+        from hud.clients import MCPClient
+
         client = MCPClient(mcp_config=mcp_config, verbose=False, auto_trace=False)
         await client.initialize()
 
@@ -349,6 +351,9 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
         concurrent_clients = []
         try:
             logger.info("Creating 3 concurrent MCP clients...")
+
+            # Lazy import to avoid loading mcp_use on simple CLI commands
+            from hud.clients import MCPClient
 
             for i in range(3):
                 client_config = {

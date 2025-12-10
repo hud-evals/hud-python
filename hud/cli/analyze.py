@@ -12,7 +12,6 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.tree import Tree
 
-from hud.clients import MCPClient
 from hud.utils.hud_console import HUDConsole
 
 console = Console()
@@ -44,6 +43,9 @@ async def analyze_environment(docker_cmd: list[str], output_format: str, verbose
         console=console,
     ) as progress:
         task = progress.add_task("Initializing MCP client...", total=None)
+
+        # Lazy import to avoid loading mcp_use on simple CLI commands
+        from hud.clients import MCPClient
 
         client = MCPClient(mcp_config=mcp_config, verbose=verbose, auto_trace=False)
 
@@ -343,6 +345,9 @@ async def _analyze_with_config(
         console=console,
     ) as progress:
         task = progress.add_task("Initializing MCP client...", total=None)
+
+        # Lazy import to avoid loading mcp_use on simple CLI commands
+        from hud.clients import MCPClient
 
         client = MCPClient(mcp_config=mcp_config, verbose=verbose)
 
