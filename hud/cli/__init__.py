@@ -16,11 +16,6 @@ from rich.table import Table
 from hud.utils.hud_console import HUDConsole
 
 from . import list_func as list_module
-from .analyze import (
-    analyze_environment,
-    analyze_environment_from_config,
-    analyze_environment_from_mcp_config,
-)
 from .build import build_command
 from .clone import clone_repository, get_clone_message, print_error, print_tutorial
 from .debug import debug_mcp_stdio
@@ -103,6 +98,13 @@ def analyze(
         hud analyze --config mcp-config.json # From MCP config
         hud analyze --cursor text-2048-dev   # From Cursor config[/not dim]
     """
+    # Lazy import to avoid loading mcp_use on simple CLI commands
+    from .analyze import (
+        analyze_environment,
+        analyze_environment_from_config,
+        analyze_environment_from_mcp_config,
+    )
+
     if config:
         # Load config from JSON file (always live for configs)
         asyncio.run(analyze_environment_from_config(config, output_format, verbose))
