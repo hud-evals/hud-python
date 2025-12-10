@@ -476,7 +476,7 @@ class TestOpenAIAgent:
             ]
             response = await agent.get_response(messages)
 
-            assert response.reasoning == "Thinking: Let me think about this...\n"
+            assert response.reasoning == "Let me think about this..."
             assert response.content == "Final answer"
 
     @pytest.mark.asyncio

@@ -273,9 +273,7 @@ class OpenAIAgent(MCPAgent):
                 if text:
                     text_chunks.append(text)
             elif item.type == "reasoning":
-                reasoning_chunks.append(
-                    "".join(f"Thinking: {summary.text}\n" for summary in item.summary)
-                )
+                reasoning_chunks.append("".join(summary.text for summary in item.summary))
             else:
                 tool_call = self._extract_tool_call(item)
                 if tool_call is not None:

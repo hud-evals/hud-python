@@ -252,7 +252,7 @@ class TestGeminiAgent:
             response = await agent.get_response(messages)
 
             assert response.content == "Here is my answer"
-            assert response.reasoning == "Thinking: Let me reason through this...\n"
+            assert response.reasoning == "Let me reason through this..."
 
     @pytest.mark.asyncio
     async def test_convert_tools_for_gemini(self, mock_mcp_client, mock_gemini_client):

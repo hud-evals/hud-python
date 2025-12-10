@@ -310,7 +310,7 @@ class TestClaudeAgent:
             response = await agent.get_response(messages)
 
             assert response.content == "Here is the answer"
-            assert response.reasoning == "Thinking: Let me analyze this problem...\n"
+            assert response.reasoning == "Let me analyze this problem..."
 
     @pytest.mark.asyncio
     async def test_get_model_response_error(self, mock_mcp_client, mock_anthropic):

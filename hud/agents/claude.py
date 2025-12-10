@@ -200,7 +200,7 @@ class ClaudeAgent(MCPAgent):
             elif block.type == "text":
                 text_content += block.text
             elif hasattr(block, "type") and block.type == "thinking":
-                thinking_content += f"Thinking: {block.thinking}\n"
+                thinking_content += block.thinking
 
         result.content = text_content
         if thinking_content:

@@ -175,7 +175,7 @@ class GeminiAgent(MCPAgent):
                 elif part.text:
                     text_content += part.text
                 elif hasattr(part, "thought") and part.thought:
-                    thinking_content += f"Thinking: {part.thought}\n"
+                    thinking_content += part.thought
 
         # Assign collected tool calls and mark done status
         if collected_tool_calls:
