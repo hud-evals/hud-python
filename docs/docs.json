@@ -29,6 +29,90 @@
   "navigation": {
     "versions": [
       {
+        "version": "0.5.0",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "index",
+              "quickstart",
+              "llm-quickstart"
+            ]
+          },
+          {
+            "group": "Essentials",
+            "pages": [
+              "quick-links/gateway",
+              "quick-links/ab-testing",
+              "quick-links/environments",
+              "quick-links/deploy"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "core-concepts/architecture",
+              "core-concepts/mcp-protocol",
+              "core-concepts/task-system"
+            ]
+          },
+          {
+            "group": "SDK Reference",
+            "pages": [
+              "reference/eval",
+              "reference/tools",
+              "reference/agents",
+              "reference/types",
+              "reference/environments",
+              "reference/tasks"
+            ]
+          },
+          {
+            "group": "Environments",
+            "pages": [
+              "build-environments/index",
+              "build-environments/spec"
+            ]
+          },
+          {
+            "group": "Beta Features",
+            "pages": [
+              "beta/index",
+              "beta/rft"
+            ]
+          },
+          {
+            "group": "Agents",
+            "pages": [
+              "evaluate-agents/create-agents",
+              "evaluate-agents/benchmarks"
+            ]
+          },
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "reference/cli/overview",
+              "reference/cli/init",
+              "reference/cli/dev",
+              "reference/cli/build",
+              "reference/cli/push",
+              "reference/cli/analyze",
+              "reference/cli/debug",
+              "reference/cli/run",
+              "reference/cli/eval",
+              "reference/cli/rft",
+              "reference/cli/misc"
+            ]
+          },
+          {
+            "group": "Community",
+            "pages": [
+              "contributing"
+            ]
+          }
+        ]
+      },
+      {
         "version": "0.4.73",
         "groups": [
           {
@@ -68,7 +152,7 @@
           {
             "group": "HUD Gateway",
             "pages": [
-              "gateway/index"
+              "gateway/index-legacy"
             ]
           },
           {
