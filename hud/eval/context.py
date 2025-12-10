@@ -91,6 +91,8 @@ class EvalContext(Environment):
         code_snippet: str | None = None,
         env_config: dict[str, Any] | None = None,
         task: Task | None = None,
+        trace: bool = True,
+        quiet: bool = False,
         **env_kwargs: Any,
     ) -> None:
         """Initialize EvalContext.
@@ -106,6 +108,8 @@ class EvalContext(Environment):
             code_snippet: Code being evaluated (for reproducibility)
             env_config: Environment configuration dict
             task: Task definition (if loaded from slug)
+            trace: Whether to send trace data to backend (default True)
+            quiet: Whether to suppress printing links (default False)
             **env_kwargs: Additional kwargs passed to Environment.__init__
         """
         # Initialize Environment
@@ -130,8 +134,10 @@ class EvalContext(Environment):
         # Variant assignment
         self.variants: dict[str, Any] = variants or {}
 
-        # User-settable
+        # User-settable (per-run values, override Environment defaults)
+        self.prompt: str | None = None  # From script setup or task
         self.reward: float | None = None
+        self.answer: str | None = None  # Agent's submitted answer
 
         # Error tracking
         self.error: BaseException | None = None
@@ -156,7 +162,9 @@ class EvalContext(Environment):
         self._completed_at: datetime | None = None
         self._token: contextvars.Token[dict[str, str] | None] | None = None
         self._is_summary: bool = False  # True for summary contexts (skip trace)
-        self._suppress_link: bool = False  # True to suppress printing eval link
+        self._suppress_link: bool = quiet  # True to suppress printing eval link
+        self._trace_enabled: bool = trace  # Whether to send trace data to backend
+        self._script_name: str | None = None  # Current script name (for submit)
 
     def _apply_task(self, task: Task) -> None:
         """Apply a Task definition to this environment."""
@@ -198,6 +206,8 @@ class EvalContext(Environment):
         variants: dict[str, Any] | None = None,
         code_snippet: str | None = None,
         env_config: dict[str, Any] | None = None,
+        trace: bool = True,
+        quiet: bool = False,
     ) -> EvalContext:
         """Create an EvalContext that copies configuration from an existing Environment.
 
@@ -226,6 +236,8 @@ class EvalContext(Environment):
             variants=variants,
             code_snippet=code_snippet,
             env_config=env_config,
+            trace=trace,
+            quiet=quiet,
         )
 
         # Copy connections from parent - each connector is copied so parallel
@@ -234,6 +246,23 @@ class EvalContext(Environment):
         ctx._hub_configs = getattr(env, "_hub_configs", []).copy()
         ctx._setup_calls = env._setup_calls.copy()
         ctx._evaluate_calls = env._evaluate_calls.copy()
+
+        # Copy scripts (definitions) by reference - they don't change
+        ctx._scripts = getattr(env, "_scripts", {})
+        # Create fresh session state for this eval (parallel evals each need their own)
+        ctx._script_sessions = {}
+        ctx._script_latest = {}
+        ctx._script_answers = {}
+        
+        # Store source env name for remote script lookups
+        ctx._source_env_name = env.name
+
+        # Copy managers by reference (they hold local tools, prompts, resources)
+        # This allows ctx.call_tool(), ctx.get_prompt(), ctx.read_resource() to work
+        # for locally defined tools/scripts
+        ctx._tool_manager = env._tool_manager
+        ctx._prompt_manager = env._prompt_manager
+        ctx._resource_manager = env._resource_manager
 
         # Copy prompt
         if env.prompt:
@@ -254,6 +283,8 @@ class EvalContext(Environment):
         index: int = 0,
         variants: dict[str, Any] | None = None,
         code_snippet: str | None = None,
+        trace: bool = True,
+        quiet: bool = False,
     ) -> EvalContext:
         """Create an EvalContext from a Task definition.
 
@@ -270,6 +301,8 @@ class EvalContext(Environment):
             index: Index in parallel execution
             variants: Variant assignment
             code_snippet: Code being evaluated
+            trace: Whether to send trace data to backend
+            quiet: Whether to suppress printing links
         """
         import warnings
 
@@ -291,28 +324,27 @@ class EvalContext(Environment):
             variants=variants,
             code_snippet=code_snippet,
             task=task,
+            trace=trace,
+            quiet=quiet,
         )
 
     # =========================================================================
     # Summary Context - Attribute Access Control
     # =========================================================================
 
-    # Attributes accessible on summary context (everything else raises)
+    # Attributes accessible on summary context (everything else raises ParallelEvalComplete)
     _SUMMARY_ALLOWED = frozenset(
         {
             # Results and metadata
             "results",
             "reward",
             "error",
+            "success",
+            # IDs
             "trace_id",
             "job_id",
             "group_id",
             "index",
-            "variants",
-            "eval_name",
-            "duration",
-            "success",
-            "done"
             # Private attrs
             "_is_summary",
             "_suppress_link",
@@ -379,11 +411,10 @@ class EvalContext(Environment):
             env_config_model = EnvConfig(**self._eval_env_config)
 
         return EvalPayload(
-            task_name=self.eval_name,
+            job_name=self.eval_name,
             prompt=self.prompt,
             code_snippet=self.code_snippet,
             env_config=env_config_model,
-            all_hubs=self._all_hubs,
             job_id=self.job_id,
             group_id=self.group_id,
             variants=self.variants if self.variants else None,
@@ -405,8 +436,36 @@ class EvalContext(Environment):
         except Exception as e:
             logger.warning("Failed to log metrics: %s", e)
 
+    async def submit(self, answer: str) -> None:
+        """Submit the agent's answer for script evaluation.
+
+        Delegates to Environment.submit() with the current script name.
+        The answer will be passed to the script's evaluate phase via
+        `yield`, e.g.: `answer = yield "Do the task"`
+
+        Args:
+            answer: The agent's final answer/result to submit
+
+        Example:
+            async with env("checkout", product="laptop") as ctx:
+                response = await agent.run(ctx.prompt)
+                await ctx.submit(response)
+            # On exit, script's evaluate phase receives the answer
+        """
+        if not self._script_name:
+            logger.warning("submit() called but no script is running")
+            return
+
+        # Store answer on context for display
+        self.answer = answer
+
+        # Delegate to Environment.submit() which handles storage + broadcast
+        await super().submit(self._script_name, answer)
+
     async def _eval_enter(self) -> None:
         """Notify backend that eval has started."""
+        if not self._trace_enabled:
+            return
         api_key = self._get_eval_api_key()
         if not settings.telemetry_enabled or not api_key:
             return
@@ -424,6 +483,8 @@ class EvalContext(Environment):
 
     async def _eval_exit(self, error_message: str | None = None) -> None:
         """Notify backend that eval has completed."""
+        if not self._trace_enabled:
+            return
         api_key = self._get_eval_api_key()
         if not settings.telemetry_enabled or not api_key:
             return
@@ -454,20 +515,15 @@ class EvalContext(Environment):
     # =========================================================================
 
     async def __aenter__(self) -> Self:
-        """Enter eval context - start tracking and connect environment."""
-        # Summary contexts skip trace tracking (parallel results already tracked)
+        """Enter eval context - connect environment and set trace headers."""
         if self._is_summary:
             return self
 
-        # Start eval tracking
+        # Start tracking
         self._started_at = datetime.now(UTC)
         self._token = _current_trace_headers.set(self.headers)
 
-        # Notify backend
-        await self._eval_enter()
-        self._print_eval_link()
-
-        # Connect environment (parent class)
+        # Connect environment (MCP servers, tools)
         await super().__aenter__()
 
         return self
@@ -477,11 +533,12 @@ class EvalContext(Environment):
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
-    ) -> None:
+    ) -> bool:
         """Exit eval context - disconnect and report."""
         # Summary contexts skip trace tracking (parallel results already tracked)
+        # Suppress ParallelEvalComplete - it's expected for skipping body re-execution
         if self._is_summary:
-            return
+            return exc_type is ParallelEvalComplete
 
         self._completed_at = datetime.now(UTC)
 
@@ -501,6 +558,7 @@ class EvalContext(Environment):
 
         # Notify backend
         await self._eval_exit(error_msg)
+        return False
 
     def __repr__(self) -> str:
         return f"EvalContext({self.trace_id[:8]}..., name={self.eval_name!r}, reward={self.reward})"

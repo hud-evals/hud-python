@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from hud.environment.utils.schema import ensure_strict_schema
 
 if TYPE_CHECKING:
     import mcp.types as mcp_types
+    from openai.types.chat import ChatCompletionToolUnionParam
 
 __all__ = ["OpenAIMixin"]
 
@@ -42,7 +43,7 @@ class OpenAIMixin:
     # Format Conversion (no external deps)
     # =========================================================================
 
-    def as_openai_chat_tools(self, *, strict: bool = False) -> list[dict[str, Any]]:
+    def as_openai_chat_tools(self, *, strict: bool = False) -> list[ChatCompletionToolUnionParam]:
         """Convert to OpenAI Chat Completions tool format.
 
         Args:
@@ -67,7 +68,7 @@ class OpenAIMixin:
                 # results are {"role": "tool", "tool_call_id": ..., "content": ...}
             ```
         """
-        tools = []
+        tools: list[ChatCompletionToolUnionParam] = []
         for t in self.as_tools():
             schema = dict(t.inputSchema) if t.inputSchema else {"type": "object", "properties": {}}
 
@@ -75,15 +76,18 @@ class OpenAIMixin:
                 schema = ensure_strict_schema(schema)
 
             tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": t.name,
-                        "description": t.description or "",
-                        "parameters": schema,
-                        **({"strict": True} if strict else {}),
+                cast(
+                    "ChatCompletionToolUnionParam",
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": t.name,
+                            "description": t.description or "",
+                            "parameters": schema,
+                            **({"strict": True} if strict else {}),
+                        },
                     },
-                }
+                )
             )
         return tools
 

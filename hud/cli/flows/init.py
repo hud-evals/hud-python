@@ -7,7 +7,7 @@ from pathlib import Path
 
 from hud.utils.hud_console import HUDConsole
 
-from .templates import DOCKERFILE_HUD, HUD_PY, PYPROJECT_TOML
+from .templates import DOCKERFILE_HUD, ENV_PY, PYPROJECT_TOML
 
 # Files that indicate this might be an existing project
 PROJECT_INDICATORS = {
@@ -26,8 +26,24 @@ def _normalize_name(name: str) -> str:
     return "".join(c if c.isalnum() or c == "_" else "_" for c in name)
 
 
-def _add_hud_dependency(directory: Path) -> bool:
-    """Add hud-python using uv if available."""
+def _has_hud_dependency(directory: Path) -> bool:
+    """Check if hud-python is already in pyproject.toml."""
+    pyproject = directory / "pyproject.toml"
+    if not pyproject.exists():
+        return False
+    content = pyproject.read_text()
+    return "hud-python" in content or "hud_python" in content
+
+
+def _add_hud_dependency(directory: Path) -> str:
+    """Add hud-python using uv if available.
+    
+    Returns:
+        "exists" if already present, "added" if added, "failed" if failed
+    """
+    if _has_hud_dependency(directory):
+        return "exists"
+    
     try:
         result = subprocess.run(
             ["uv", "add", "hud-python", "openai"],  # noqa: S607
@@ -36,9 +52,11 @@ def _add_hud_dependency(directory: Path) -> bool:
             cwd=directory,
             check=False,
         )
-        return result.returncode == 0 or "already" in result.stderr.lower()
+        if result.returncode == 0 or "already" in result.stderr.lower():
+            return "added"
+        return "failed"
     except FileNotFoundError:
-        return False
+        return "failed"
 
 
 def _is_empty_or_trivial(directory: Path) -> bool:
@@ -72,7 +90,21 @@ def smart_init(
     - If directory has project files: add HUD files to existing project
     - Otherwise: create new HUD environment
     """
+    from hud.settings import settings
+    
     hud_console = HUDConsole()
+    
+    # Check for API key first
+    if not settings.api_key:
+        hud_console.error("HUD_API_KEY not found")
+        hud_console.info("")
+        hud_console.info("Set your API key:")
+        hud_console.info("  hud set HUD_API_KEY=your-key-here")
+        hud_console.info("  Or: export HUD_API_KEY=your-key")
+        hud_console.info("")
+        hud_console.info("Get your key at: https://hud.ai/settings/api-keys")
+        return
+    
     target = Path(directory).resolve()
 
     # If directory is empty, use preset selection
@@ -111,17 +143,20 @@ def smart_init(
     else:
         hud_console.warning("Dockerfile.hud exists, skipping (use --force)")
 
-    # Create hud.py
-    hud_py = target / "hud.py"
-    if not hud_py.exists() or force:
-        hud_py.write_text(HUD_PY.format(env_name=env_name))
-        created.append("hud.py")
+    # Create env.py
+    env_py = target / "env.py"
+    if not env_py.exists() or force:
+        env_py.write_text(ENV_PY.format(env_name=env_name))
+        created.append("env.py")
     else:
-        hud_console.warning("hud.py exists, skipping (use --force)")
+        hud_console.warning("env.py exists, skipping (use --force)")
 
     # Add dependency
-    if _add_hud_dependency(target):
+    dep_result = _add_hud_dependency(target)
+    if dep_result == "added":
         hud_console.success("Added hud-python dependency")
+    elif dep_result == "exists":
+        hud_console.info("hud-python already in dependencies")
     else:
         hud_console.info("Run manually: uv add hud-python openai")
 
@@ -132,23 +167,25 @@ def smart_init(
             hud_console.status_item(f, "✓")
 
     hud_console.section_title("Next Steps")
-    hud_console.info("1. Edit hud.py:")
-    hud_console.info("   - Add your tools with @env.tool()")
-    hud_console.info("   - Connect existing servers (FastAPI, MCP, OpenAPI)")
     hud_console.info("")
-    hud_console.info("2. Edit Dockerfile.hud:")
-    hud_console.info("   - Add system dependencies (apt-get install)")
-    hud_console.info("   - Set up data sources for production")
+    hud_console.info("1. Define your tools in env.py")
+    hud_console.info("   Tools are functions the agent can call. Wrap existing code")
+    hud_console.info("   with @env.tool() or connect FastAPI/OpenAPI servers.")
     hud_console.info("")
-    hud_console.command_example("python hud.py", "Test locally")
-    hud_console.command_example("hud dev hud:env", "Development server")
-    hud_console.command_example("hud build", "Build Docker image")
+    hud_console.info("2. Write scripts that test agent behavior")
+    hud_console.info("   Scripts define prompts and scoring. The agent runs between")
+    hud_console.info("   two yields: first sends the task, second scores the result.")
     hud_console.info("")
-    hud_console.section_title("Tips")
-    hud_console.info("• For production environments you want to mock locally,")
-    hud_console.info("  configure data sources in Dockerfile.hud before deploying")
-    hud_console.info("• For testing without real connections, use env.mock()")
-    hud_console.info("• See hud.py DEPLOYMENT section for remote deployment")
+    hud_console.info("3. Run locally to iterate")
+    hud_console.command_example("python env.py", "Run the test script")
+    hud_console.info("")
+    hud_console.info("4. Deploy for scale")
+    hud_console.info("   Push to GitHub, connect on hud.ai. Then run hundreds of")
+    hud_console.info("   evals in parallel and collect training data.")
+    hud_console.info("")
+    hud_console.section_title("Files")
+    hud_console.info("• env.py         Your tools, scripts, and test code")
+    hud_console.info("• Dockerfile.hud Container config for remote deployment")
 
 
 __all__ = ["smart_init"]

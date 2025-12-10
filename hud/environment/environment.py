@@ -27,6 +27,10 @@ __all__ = ["Environment"]
 
 logger = logging.getLogger(__name__)
 
+# Suppress verbose fastmcp logging
+logging.getLogger("fastmcp.server.server").setLevel(logging.WARNING)
+logging.getLogger("fastmcp.server.openapi").setLevel(logging.WARNING)
+
 # Type alias for async callables (no-arg functions that return awaitable)
 AsyncCallable = Callable[[], Awaitable[Any]]
 
@@ -132,7 +136,7 @@ class Environment(
         self._setup_calls: list[tuple[str, dict[str, Any]]] = []
         self._evaluate_calls: list[tuple[str, dict[str, Any]]] = []
 
-        # Task prompt - set by connect_task or manually
+        # Default prompt - set by connect_task (EvalContext has per-run prompt)
         self.prompt: str | None = None
 
         # Track which lifecycle tools we've warned about (only warn once per tool)
@@ -189,6 +193,58 @@ class Environment(
             name,
             phase,
         )
+
+    def _connections_with_tool(self, tool_name: str) -> set[str]:
+        """Get connection names that have a specific tool.
+        
+        Uses cached_tools from each Connector to check availability.
+        """
+        result = set()
+        for name, connector in self._connections.items():
+            tool_names = {t.name for t in connector.cached_tools}
+            if tool_name in tool_names:
+                result.add(name)
+        return result
+
+    async def _broadcast_tool(
+        self, 
+        tool_name: str, 
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Broadcast a tool call to all connections that have the tool.
+        
+        Automatically filters to only connections where the tool exists
+        (based on cached_tools from initial discovery).
+        
+        Args:
+            tool_name: Name of the tool to call
+            **kwargs: Arguments to pass to the tool
+            
+        Returns:
+            Dict mapping connection name to result (or exception)
+        """
+        import asyncio
+
+        # Only call connections that have this tool
+        targets = self._connections_with_tool(tool_name)
+        if not targets:
+            return {}
+            
+        results: dict[str, Any] = {}
+        
+        async def call_one(name: str) -> None:
+            connector = self._connections.get(name)
+            if not connector or not connector.client:
+                return
+            try:
+                results[name] = await connector.client.call_tool(tool_name, **kwargs)
+                logger.debug("Broadcast '%s' to '%s' succeeded", tool_name, name)
+            except Exception as e:
+                results[name] = e
+                logger.debug("Broadcast '%s' to '%s' failed: %s", tool_name, name, e)
+        
+        await asyncio.gather(*[call_one(n) for n in targets], return_exceptions=True)
+        return results
 
     async def call_tools(self, calls: Any) -> list[Any]:
         """Call multiple tools, returning results in matching formats."""
@@ -299,7 +355,10 @@ class Environment(
 
     async def _build_routing(self) -> None:
         """Build tool routing from local tools and connection caches."""
-        local_tools = await self._tool_manager.list_tools()
+        # Use get_tools() not list_tools() - it includes mounted servers without
+        # requiring MCP server communication (via_server=False)
+        local_tools_dict = await self._tool_manager.get_tools()
+        local_tools = list(local_tools_dict.values())
         self._router.build(
             local_tools=[t.to_mcp_tool() for t in local_tools],
             connections=self._connections,
@@ -526,7 +585,14 @@ class Environment(
     # Eval Creation
     # =========================================================================
 
-    def __call__(self, script: str | None = None, **args: Any) -> Eval:
+    def __call__(
+        self,
+        script: str | None = None,
+        *,
+        _trace: bool = True,
+        _quiet: bool = False,
+        **args: Any,
+    ) -> Eval:
         """Create an Eval from this environment.
 
         Returns an Eval that can be entered as a context manager or passed
@@ -534,6 +600,8 @@ class Environment(
 
         Args:
             script: Optional script name to run (from @env.script)
+            _trace: Whether to send trace data to backend (default True)
+            _quiet: Whether to suppress printing links (default False)
             **args: Arguments for the script
 
         Returns:
@@ -565,9 +633,11 @@ class Environment(
         from hud.eval.eval import Eval
 
         return Eval(
-            env_config=self._get_env_config(),
+            env=self,  # Pass live environment for local tools/scripts
             script=script,
             args=args,
+            _trace=_trace,
+            _quiet=_quiet,
         )
 
     @classmethod

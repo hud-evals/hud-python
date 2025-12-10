@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 
 
 class RemoteConnectorMixin(MCPConfigConnectorMixin):
-    """Mixin providing remote connection methods."""
+    """Mixin providing remote connection methods.
+    
+    Note: include_router() is inherited from MCPServer (via FastMCP).
+    """
 
     # Store hub configs for trace serialization
     _hub_configs: list[HubConfig]
-
-    def mount(self, server: Any, *, prefix: str | None = None) -> None:
-        raise NotImplementedError
 
     def connect_hub(
         self,
@@ -183,5 +183,5 @@ class RemoteConnectorMixin(MCPConfigConnectorMixin):
             client=client,
             name=name or "openapi",
         )
-        self.mount(mcp_server, prefix=prefix)
+        self.include_router(mcp_server, prefix=prefix) # type: ignore
         return self

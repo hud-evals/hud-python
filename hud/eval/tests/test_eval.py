@@ -25,7 +25,7 @@ class TestEvalDataclass:
     def test_init_with_config(self) -> None:
         """Eval can be initialized with env_config and script."""
         config = {"name": "test-env", "hubs": []}
-        ev = Eval(env_config=config, script="checkout", args={"user_id": "alice"})
+        ev = Eval(env=config, script="checkout", args={"user_id": "alice"})
 
         assert ev.env_config == config
         assert ev.script == "checkout"

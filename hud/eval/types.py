@@ -32,11 +32,10 @@ class ParallelEvalComplete(Exception):
 class EvalPayload(BaseModel):
     """Base payload for eval enter/exit."""
 
-    task_name: str
     prompt: str | None = None
     code_snippet: str | None = None
     env_config: EnvConfig | None = None
-    all_hubs: bool = False
+    job_name: str | None = None
     job_id: str | None = None
     group_id: str | None = None
     variants: dict[str, Any] | None = None

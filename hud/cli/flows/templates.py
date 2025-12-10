@@ -11,34 +11,52 @@ COPY pyproject.toml uv.lock* ./
 RUN pip install uv && uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
 COPY . .
 
-CMD ["uv", "run", "python", "-m", "hud", "dev", "hud:env", "--stdio"]
+# Most of the time this command should not change, except if you change your env path
+# or launch some other service before running the environment
+CMD ["uv", "run", "python", "-m", "hud", "dev", "env:env", "--stdio"]
 """
 
 # fmt: off
-HUD_PY = '''\
+ENV_PY = '''\
 """{env_name} - HUD Environment"""
 
 import asyncio
-import os
 
+import hud
+from hud.settings import settings
+from openai import AsyncOpenAI, Omit
 from hud.environment import Environment
 
 env = Environment("{env_name}")
 
 
 # =============================================================================
-# 1. ADD FUNCTIONS AS TOOLS
+# 1. TOOLS - Functions the agent can call
 # =============================================================================
-# Decorate any function with @env.tool() to expose it as a tool.
 
 @env.tool()
-def hud(query: str) -> str:
-    """A tool that returns the answer to any question."""
-    return f"Oh, I know the answer to '{{query}}', it's 42."
+def count_letter(text: str, letter: str) -> int:
+    """Count occurrences of a letter in text."""
+    return text.lower().count(letter.lower())
 
 
 # =============================================================================
-# 2. IMPORT FROM EXISTING SERVERS
+# 2. SCRIPTS - Define prompts and evaluation logic
+# =============================================================================
+
+@env.script("count")
+async def count_script(sentence: str, letter: str, fmt: str = "integer"):
+    """Agent must count a letter. We check if they got it right."""
+    # Yield the prompt, receive the agent's final answer
+    answer = yield f"How many times does '{{letter}}' appear in: '{{sentence}}'? Format: {{fmt}}."
+
+    # Score: 1.0 if correct, 0.0 otherwise
+    correct = str(sentence.lower().count(letter.lower()))
+    yield correct in answer
+
+
+# =============================================================================
+# 3. CONNECT EXISTING SERVERS (optional)
 # =============================================================================
 
 # --- FastAPI app ---
@@ -52,11 +70,6 @@ def hud(query: str) -> str:
 # --- OpenAPI spec (URL or file path) ---
 # env.connect_openapi("https://api.example.com/openapi.json")
 
-
-# =============================================================================
-# 3. CONNECT REMOTE SERVERS
-# =============================================================================
-
 # --- MCP config (stdio or SSE) ---
 # env.connect_mcp_config({{
 #     "my-server": {{"command": "uvx", "args": ["some-mcp-server"]}}
@@ -67,35 +80,35 @@ def hud(query: str) -> str:
 
 
 # =============================================================================
-# TEST - Run with: python hud.py
+# TEST - Run with: python env.py
 # =============================================================================
 
 async def test():
-    from openai import AsyncOpenAI
+    client = AsyncOpenAI(
+        base_url=settings.hud_gateway_url,
+        api_key=settings.api_key,
+    )
 
-    async with env.task("test") as ctx:
-        # 1. List tools
-        tools = await env.list_tools()
-        print(f"Tools: {{[t.name for t in tools]}}")
+    # Create an eval from the script
+    eval = env("count", sentence="Strawberry world", letter="r")
 
-        # 2. Call the hud tool
-        result = await env.call_tool("hud", query="What is HUD?")
-        print(f"HUD result: {{result}}")
-
-        # 3. Call inference.hud.ai
-        client = AsyncOpenAI(
-            base_url="https://inference.hud.ai/v1",
-            api_key=os.environ.get("HUD_API_KEY", ""),
-        )
+    # Test with and without tools
+    async with hud.eval(eval, variants={{"tools": [True, False]}}) as ctx:
         response = await client.chat.completions.create(
-            model="claude-sonnet-4-5",
-            messages=[{{"role": "user", "content": "Say hello in one word."}}],
+            model="gpt-4o-mini",
+            messages=[{{"role": "user", "content": ctx.prompt}}],
+            tools=ctx.as_openai_chat_tools() if ctx.variants["tools"] else Omit(),
         )
-        print(f"LLM: {{response.choices[0].message.content}}")
 
-        # 4. Assign reward
-        ctx.reward = 1.0 if "42" in str(result) else 0.0
-        print(f"Reward: {{ctx.reward}}")
+        # Handle tool calls if present
+        message = response.choices[0].message
+        if message.tool_calls:
+            result = await ctx.call_tool(message.tool_calls[0])
+            answer = str(result["content"])
+        else:
+            answer = message.content
+
+        await ctx.submit(answer or "")
 
 
 if __name__ == "__main__":

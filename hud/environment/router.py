@@ -63,16 +63,21 @@ class ToolRouter:
         """Build routing from local tools and connection caches.
 
         Local tools always have priority over remote tools.
+        Tools starting with '_' are internal and hidden from listing
+        (but still callable directly).
         """
         self.clear()
         seen: dict[str, str] = {}
 
         # Local tools first (always priority)
         for tool in local_tools:
+            # Always add to routing (so tool is callable)
             seen[tool.name] = LOCAL_CONNECTION
             self._routing[tool.name] = LOCAL_CONNECTION
             self._local_names.add(tool.name)
-            self._tools.append(tool)
+            # Only add to visible list if not internal (underscore prefix)
+            if not tool.name.startswith("_"):
+                self._tools.append(tool)
 
         # Remote connections in order
         for conn_name in connection_order:
@@ -88,9 +93,12 @@ class ToolRouter:
                         continue
                     self._tools = [t for t in self._tools if t.name != name]
 
+                # Always add to routing (so tool is callable)
                 seen[name] = conn_name
                 self._routing[name] = conn_name
-                self._tools.append(tool)
+                # Only add to visible list if not internal (underscore prefix)
+                if not name.startswith("_"):
+                    self._tools.append(tool)
 
         logger.debug("Router: %d tools (%d local)", len(self._tools), len(self._local_names))
 

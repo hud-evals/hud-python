@@ -34,9 +34,28 @@ if TYPE_CHECKING:
 
     from hud.eval.context import EvalContext
 
-__all__ = ["Eval"]
+__all__ = ["Eval", "build_eval_name"]
 
 logger = logging.getLogger(__name__)
+
+
+def build_eval_name(script: str | None, args: dict[str, Any] | None) -> str:
+    """Build descriptive name: 'script with val1, val2, ...'"""
+    if not script:
+        return "eval"
+    if not args:
+        return script
+    
+    val_parts = []
+    for v in list(args.values())[:3]:  # Max 3 values
+        v_str = repr(v) if isinstance(v, str) else str(v)
+        if len(v_str) > 25:
+            v_str = v_str[:22] + "..."
+        val_parts.append(v_str)
+    
+    if val_parts:
+        return f"{script} with {', '.join(val_parts)}"
+    return script
 
 
 @dataclass
@@ -44,20 +63,20 @@ class Eval:
     """A runnable evaluation unit (data class).
 
     Holds the configuration to create an EvalContext:
-    - env_config: How to create/connect the environment
+    - env: The environment (live instance or serialized config)
     - script: Optional script name to run (from @env.script)
     - args: Arguments for the script
 
     When entered as a context manager, creates an EvalContext.
 
     Attributes:
-        env_config: Serializable environment configuration
+        env: Environment instance (local) or EnvConfig dict (remote) or None (blank)
         script: Script name to run (None for env-only)
         args: Script arguments
     """
 
-    # Core config
-    env_config: dict[str, Any] | None = None
+    # Core config - env can be live Environment or serialized config
+    env: Any = None  # Environment | dict[str, Any] | None
     script: str | None = None
     args: dict[str, Any] = field(default_factory=dict)
 
@@ -70,14 +89,28 @@ class Eval:
     variants: dict[str, Any] = field(default_factory=dict, repr=False)
     code_snippet: str | None = field(default=None, repr=False)
     _suppress_link: bool = field(default=False, repr=False)
+    _trace: bool = field(default=True, repr=False)
+    _quiet: bool = field(default=False, repr=False)
 
     # Runtime state
     _ctx: EvalContext | None = field(default=None, repr=False)
 
+    # Backwards compat alias
+    @property
+    def env_config(self) -> dict[str, Any] | None:
+        """Get serializable env config (for backwards compat and backend)."""
+        from hud.environment import Environment
+
+        if isinstance(self.env, Environment):
+            return self.env._get_env_config()
+        elif isinstance(self.env, dict):
+            return self.env
+        return None
+
     def copy(self) -> Eval:
         """Create a copy of this Eval for parallel execution."""
         return Eval(
-            env_config=self.env_config,
+            env=self.env,  # Share reference - from_environment handles copying
             script=self.script,
             args=self.args.copy(),
             trace_id=None,  # Each copy gets unique trace_id
@@ -88,24 +121,59 @@ class Eval:
             variants=self.variants.copy(),
             code_snippet=self.code_snippet,
             _suppress_link=self._suppress_link,
+            _trace=self._trace,
+            _quiet=self._quiet,
         )
 
     def to_eval_context(self) -> EvalContext:
         """Convert this Eval to an EvalContext.
 
-        Creates an EvalContext with environment from env_config and
-        script info stored for setup/evaluate phases.
+        Creates an EvalContext from the environment (live or from config).
+        Also handles deprecated Task objects stored in _task attribute.
         """
         from hud.environment import Environment
         from hud.eval.context import EvalContext
 
-        # Create environment from config
-        env = Environment.from_config(self.env_config) if self.env_config else Environment("eval")
+        # Check for deprecated Task (backwards compat)
+        task = getattr(self, "_task", None)
+        if task is not None:
+            import warnings
+            warnings.warn(
+                "Task objects are deprecated. Use Eval from env() instead.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            ctx = EvalContext.from_task(
+                task=task,
+                api_key=self.api_key,
+                job_id=self.job_id,
+                group_id=self.group_id,
+                index=self.index,
+                variants=self.variants,
+                code_snippet=self.code_snippet,
+                trace=self._trace,
+                quiet=self._quiet,
+            )
+            ctx._suppress_link = self._suppress_link
+            return ctx
+
+        # Get or create environment
+        if isinstance(self.env, Environment):
+            # Local - use live environment (from_environment handles copying)
+            source_env = self.env
+        elif isinstance(self.env, dict):
+            # Remote/config - create fresh from config
+            source_env = Environment.from_config(self.env)
+        else:
+            # Blank
+            source_env = Environment("eval")
+
+        eval_name = build_eval_name(self.script, self.args)
 
         # Create EvalContext from environment
         ctx = EvalContext.from_environment(
-            env=env,
-            name=self.script or "eval",
+            env=source_env,
+            name=eval_name,
             trace_id=self.trace_id,
             api_key=self.api_key,
             job_id=self.job_id,
@@ -116,17 +184,30 @@ class Eval:
             env_config=self.env_config,
         )
         ctx._suppress_link = self._suppress_link
+        ctx._trace_enabled = self._trace
 
         return ctx
 
     async def __aenter__(self) -> EvalContext:
-        """Enter eval context - create EvalContext and enter it."""
+        """Enter eval context.
+        
+        Order of operations:
+        1. Create EvalContext from environment config
+        2. Connect environment (MCP servers, etc.)
+        3. Run script setup (if script) → sets ctx.prompt
+        4. Notify backend (with prompt now set)
+        5. Print trace link
+        """
         self._ctx = self.to_eval_context()
-        await self._ctx.__aenter__()
+        await self._ctx.__aenter__()  # Connect env, set trace headers
 
-        # If we have a script, run its setup phase
+        # Run script setup (sets prompt)
         if self.script:
             await self._run_script_setup()
+
+        # Notify backend with prompt included
+        await self._ctx._eval_enter()
+        self._ctx._print_eval_link()
 
         return self._ctx
 
@@ -153,95 +234,20 @@ class Eval:
         if self._ctx is None or self.script is None:
             return
 
-        # Check if script is registered locally
-        scripts = getattr(self._ctx, "_scripts", {})
-        if self.script in scripts:
-            # Local script - run setup via generator
-            import uuid
+        # Store script name on context for ctx.submit()
+        self._ctx._script_name = self.script
 
-            script_fn = scripts[self.script]
-            gen = script_fn(**self.args)
-
-            # Run setup phase (code before first yield)
-            prompt = await gen.__anext__()
-
-            # Store generator for evaluate phase
-            session_id = uuid.uuid4().hex[:8]
-            script_sessions = getattr(self._ctx, "_script_sessions", {})
-            script_latest = getattr(self._ctx, "_script_latest", {})
-            script_sessions[session_id] = gen
-            script_latest[self.script] = session_id
-
-            # Set prompt on context
-            self._ctx.prompt = str(prompt)
-
-            logger.debug(
-                "Script %s setup complete, session=%s",
-                self.script,
-                session_id,
-            )
-        else:
-            # Remote script - call via MCP prompt
-            # Format: {env_name}:{script_name}
-            env_name = self._ctx.name if self._ctx else "eval"
-            prompt_id = f"{env_name}:{self.script}"
-            try:
-                result = await self._ctx.get_prompt(prompt_id, self.args)
-                if result.messages:
-                    # Extract prompt from first message
-                    first_msg = result.messages[0]
-                    content = first_msg.content
-                    # Handle TextContent which has .text attribute
-                    if hasattr(content, "text") and isinstance(content.text, str):  # type: ignore[union-attr]
-                        self._ctx.prompt = content.text  # type: ignore[union-attr]
-                    elif isinstance(content, str):
-                        self._ctx.prompt = content
-            except Exception as e:
-                logger.warning("Failed to get script prompt: %s", e)
+        # Delegate to ScriptMixin.run_script_setup
+        prompt = await self._ctx.run_script_setup(self.script, self.args)
+        if prompt:
+            self._ctx.prompt = prompt
 
     async def _run_script_evaluate(self) -> None:
         """Run the script's evaluate phase (get reward)."""
         if self._ctx is None or self.script is None:
             return
 
-        # Check if we have a stored generator (local script)
-        script_latest = getattr(self._ctx, "_script_latest", {})
-        session_id = script_latest.get(self.script)
-        if session_id:
-            script_sessions = getattr(self._ctx, "_script_sessions", {})
-            gen = script_sessions.pop(session_id, None)
-            if gen:
-                try:
-                    reward = await gen.__anext__()
-                    self._ctx.reward = float(reward)
-                    logger.debug(
-                        "Script %s evaluate complete, reward=%s",
-                        self.script,
-                        reward,
-                    )
-                except StopAsyncIteration:
-                    # Generator ended without second yield - assume success
-                    self._ctx.reward = 1.0
-
-                # Clean up latest pointer
-                if script_latest.get(self.script) == session_id:
-                    del script_latest[self.script]
-                return
-
-        # Remote script - read via MCP resource
-        # Format: {env_name}:{script_name}
-        env_name = self._ctx.name if self._ctx else "eval"
-        resource_id = f"{env_name}:{self.script}"
-        try:
-            import json
-
-            contents = await self._ctx.read_resource(resource_id)
-            if contents:
-                first_content = contents[0]
-                # Handle TextResourceContents which has .text attribute
-                if hasattr(first_content, "text") and isinstance(first_content.text, str):  # type: ignore[union-attr]
-                    data = json.loads(first_content.text)  # type: ignore[union-attr]
-                    if "reward" in data:
-                        self._ctx.reward = float(data["reward"])
-        except Exception as e:
-            logger.warning("Failed to get script reward: %s", e)
+        # Delegate to ScriptMixin.run_script_evaluate
+        reward = await self._ctx.run_script_evaluate(self.script)
+        if reward is not None:
+            self._ctx.reward = reward

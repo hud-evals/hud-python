@@ -144,7 +144,8 @@ def print_eval_stats(
     if show_details and len(completed) <= 50:
         table = Table(title="Per-Eval Details", show_header=True, header_style="bold")
         table.add_column("#", style="dim", justify="right", width=4)
-        table.add_column("Variants", style="cyan", max_width=30)
+        table.add_column("Variants", style="cyan", max_width=35)
+        table.add_column("Answer", style="white", max_width=25)
         table.add_column("Reward", justify="right", style="green", width=8)
         table.add_column("Duration", justify="right", width=10)
         table.add_column("Status", justify="center", width=8)
@@ -152,6 +153,7 @@ def print_eval_stats(
         for ctx in completed:
             idx_str = str(ctx.index)
             variants_str = _format_variants(ctx.variants) if ctx.variants else "-"
+            answer_str = _truncate(ctx.answer, 30) if ctx.answer else "-"
             reward_str = f"{ctx.reward:.3f}" if ctx.reward is not None else "-"
             duration_str = f"{ctx.duration:.2f}s" if ctx.duration > 0 else "-"
 
@@ -162,7 +164,7 @@ def print_eval_stats(
             else:
                 status = "[yellow]○[/yellow]"
 
-            table.add_row(idx_str, variants_str, reward_str, duration_str, status)
+            table.add_row(idx_str, variants_str, answer_str, reward_str, duration_str, status)
 
         console.print(table)
 
@@ -179,7 +181,16 @@ def _format_variants(variants: dict[str, Any]) -> str:
         return "-"
     parts = [f"{k}={v}" for k, v in variants.items()]
     result = ", ".join(parts)
-    return result[:30] + "..." if len(result) > 30 else result
+    return result[:35] + "..." if len(result) > 35 else result
+
+
+def _truncate(text: str | None, max_len: int) -> str:
+    """Truncate text to max length."""
+    if not text:
+        return "-"
+    # Replace newlines with spaces for display
+    text = text.replace("\n", " ").strip()
+    return text[:max_len] + "..." if len(text) > max_len else text
 
 
 def _print_eval_stats_basic(

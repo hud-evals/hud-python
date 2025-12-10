@@ -486,7 +486,6 @@ class MCPServer(FastMCP):
         for key, prompt in router._prompt_manager._prompts.items():
             new_key = f"{prefix}_{key}" if prefix else key
             self._prompt_manager._prompts[new_key] = prompt
-        # await self.import_server(hidden_router, prefix=None, **kwargs)
 
     def _get_docker_logs(
         self,

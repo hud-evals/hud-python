@@ -23,11 +23,9 @@ class LocalConnectorMixin(MCPConfigConnectorMixin):
         connect_server(server) - Mount any MCPServer/FastMCP directly
 
     Inherits connect_mcp() from MCPConfigConnectorMixin.
-    """
 
-    def mount(self, server: Any, *, prefix: str | None = None) -> None:
-        """Mount method from MCPServer base class."""
-        raise NotImplementedError
+    Note: include_router() is inherited from MCPServer (via FastMCP).
+    """
 
     def connect_image(
         self,
@@ -87,10 +85,18 @@ class LocalConnectorMixin(MCPConfigConnectorMixin):
         *,
         name: str | None = None,
         prefix: str | None = None,
+        include_hidden: bool = True,
     ) -> Any:
-        """Mount a FastAPI application as an MCP server.
+        """Import a FastAPI application's routes as MCP tools.
 
-        Uses FastMCP's from_fastapi() to convert FastAPI endpoints to MCP tools.
+        Uses FastMCP's from_fastapi() to convert FastAPI endpoints to MCP tools,
+        then imports them synchronously so they're available immediately.
+
+        Args:
+            app: FastAPI application instance
+            name: Custom name for the server (defaults to app.title)
+            prefix: Optional prefix for tool names
+            include_hidden: If True (default), includes routes with include_in_schema=False
 
         Example:
             ```python
@@ -115,9 +121,29 @@ class LocalConnectorMixin(MCPConfigConnectorMixin):
         """
         from fastmcp import FastMCP
 
-        server_name = name or getattr(app, "title", None) or "fastapi"
-        mcp_server = FastMCP.from_fastapi(app=app, name=server_name)
-        self.mount(mcp_server, prefix=prefix)
+        # Temporarily enable hidden routes for OpenAPI generation
+        hidden_routes: list[Any] = []
+        if include_hidden:
+            for route in getattr(app, "routes", []):
+                if hasattr(route, "include_in_schema") and not route.include_in_schema:
+                    hidden_routes.append(route)
+                    route.include_in_schema = True
+            # Clear cached openapi schema so it regenerates
+            if hasattr(app, "openapi_schema"):
+                app.openapi_schema = None
+
+        try:
+            server_name = name or getattr(app, "title", None) or "fastapi"
+            mcp_server = FastMCP.from_fastapi(app=app, name=server_name)
+            # Use include_router for synchronous import (tools available immediately)
+            self.include_router(mcp_server, prefix=prefix)  # type: ignore
+        finally:
+            # Restore original states
+            for route in hidden_routes:
+                route.include_in_schema = False
+            if hidden_routes and hasattr(app, "openapi_schema"):
+                app.openapi_schema = None  # Clear cache again
+
         return self
 
     def connect_server(
@@ -126,7 +152,7 @@ class LocalConnectorMixin(MCPConfigConnectorMixin):
         *,
         prefix: str | None = None,
     ) -> Any:
-        """Mount an MCPServer or FastMCP instance directly.
+        """Import an MCPServer or FastMCP instance's tools directly.
 
         Example:
             ```python
@@ -147,5 +173,5 @@ class LocalConnectorMixin(MCPConfigConnectorMixin):
                 result = await env.call_tool("greet", name="World")
             ```
         """
-        self.mount(server, prefix=prefix)
+        self.include_router(server, prefix=prefix) # type: ignore
         return self

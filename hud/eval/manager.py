@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from hud.eval.display import print_complete, print_eval_stats, print_link
+from hud.eval.types import ParallelEvalComplete
 from hud.eval.parallel import (
     ASTExtractionError,
     expand_variants,
@@ -65,14 +66,13 @@ def _get_eval_name(
         tasks: List of Task objects (deprecated)
 
     Returns:
-        Name like "evalset", script name, or "eval" if no source
+        Name like "script with val1, val2" or "eval" if no source
     """
-    # If we have Eval objects, use first script name
-    if evals:
-        first_eval = evals[0]
-        if first_eval.script:
-            return first_eval.script
-        return "eval"
+    from hud.eval.eval import build_eval_name
+
+    # If we have Eval objects, derive name from first one
+    if evals and evals[0].script:
+        return build_eval_name(evals[0].script, evals[0].args)
 
     # Deprecated: If we have tasks with IDs, use first task ID
     if tasks:
@@ -189,7 +189,7 @@ def _eval_from_api(data: dict[str, Any]) -> Eval:
     from hud.eval.eval import Eval
 
     return Eval(
-        env_config=data.get("env_config"),
+        env=data.get("env_config"),  # Serialized config from backend
         script=data.get("script"),
         args=data.get("args", {}),
     )
@@ -205,6 +205,8 @@ async def run_eval(
     job_id: str | None = None,
     api_key: str | None = None,
     max_concurrent: int | None = None,
+    trace: bool = True,
+    quiet: bool = False,
 ) -> AsyncGenerator[EvalContext, None]:
     """Standalone eval context manager.
 
@@ -226,6 +228,8 @@ async def run_eval(
         job_id: Job ID to link to
         api_key: API key for backend calls
         max_concurrent: Maximum concurrent evals (None = unlimited)
+        trace: Whether to send trace data to backend (default True)
+        quiet: Whether to suppress printing links (default False)
 
     Yields:
         EvalContext: Environment with evaluation tracking
@@ -349,38 +353,45 @@ async def run_eval(
     from hud.eval.context import EvalContext
 
     if total_evals == 1:
-        # Simple case: single eval
+        # Simple case: single eval - always use Eval for consistent flow
         if evals:
-            # Single Eval object - enter it directly
             single_eval = evals[0]
-            single_eval.api_key = api_key
-            single_eval.job_id = job_id
-            single_eval.variants = variant_combos[0]
-            single_eval.code_snippet = code_snippet
-            async with single_eval as ctx:
-                yield ctx
         elif tasks:
-            # Single task
-            ctx = EvalContext.from_task(
-                task=tasks[0],
+            # Wrap deprecated Task in Eval
+            single_eval = Eval(
+                env=None,
+                script=None,
                 api_key=api_key,
                 job_id=job_id,
                 variants=variant_combos[0],
                 code_snippet=code_snippet,
+                _trace=trace,
+                _quiet=quiet,
             )
-            async with ctx:
-                yield ctx
+            single_eval._task = tasks[0]  # type: ignore[attr-defined]
         else:
             # Blank eval
-            ctx = EvalContext(
-                name="eval",
+            single_eval = Eval(
+                env=None,
+                script=None,
                 api_key=api_key,
                 job_id=job_id,
                 variants=variant_combos[0],
                 code_snippet=code_snippet,
+                _trace=trace,
+                _quiet=quiet,
             )
-            async with ctx:
-                yield ctx
+        
+        # Apply common settings
+        single_eval.api_key = api_key
+        single_eval.job_id = job_id
+        single_eval.variants = variant_combos[0]
+        single_eval.code_snippet = code_snippet
+        single_eval._trace = trace
+        single_eval._quiet = quiet
+        
+        async with single_eval as ctx:
+            yield ctx
 
     else:
         # Parallel execution: create implicit job to group traces
@@ -389,7 +400,8 @@ async def run_eval(
         job_url = f"https://hud.ai/jobs/{implicit_job_id}"
 
         # Print job URL (not individual trace URLs)
-        print_link(job_url, f"🚀 Job '{eval_name}'")
+        if not quiet:
+            print_link(job_url, f"🚀 {eval_name}")
 
         error_occurred = False
         try:
@@ -404,13 +416,15 @@ async def run_eval(
                 api_key=api_key,
                 code_snippet=code_snippet,
                 max_concurrent=max_concurrent,
+                trace=trace,
+                quiet=quiet,
             )
 
             # Create summary context (no trace, just aggregates results)
             if evals:
                 # Create summary from first eval's env_config
                 ctx = EvalContext(
-                    name=evals[0].script or "eval",
+                    name=eval_name,  # Use the same smart name
                     api_key=api_key,
                     job_id=implicit_job_id,
                     env_config=evals[0].env_config,
@@ -440,6 +454,9 @@ async def run_eval(
             error_occurred = any(e.error is not None for e in completed)
 
             yield ctx
+        except ParallelEvalComplete:
+            # Expected - body re-executed on summary context, skip it
+            pass
         except Exception:
             error_occurred = True
             raise
@@ -457,6 +474,8 @@ async def _run_parallel_eval(
     api_key: str | None,
     code_snippet: str | None,
     max_concurrent: int | None,
+    trace: bool = True,
+    quiet: bool = False,
 ) -> list[EvalContext]:
     """Run parallel evaluation.
 
@@ -495,7 +514,9 @@ async def _run_parallel_eval(
                     eval_copy.index = idx
                     eval_copy.variants = variant
                     eval_copy.code_snippet = code_snippet
-                    eval_copy._suppress_link = True
+                    eval_copy._suppress_link = True  # Individual traces don't print links
+                    eval_copy._trace = trace
+                    eval_copy._quiet = quiet
                     eval_objects.append(eval_copy)
                     idx += 1
     elif tasks:
@@ -505,7 +526,7 @@ async def _run_parallel_eval(
                 for _ in range(group):
                     # Convert Task to Eval (backwards compatibility)
                     task_eval = Eval(
-                        env_config=None,  # Task has its own mcp_config
+                        env=None,  # Task has its own mcp_config
                         script=None,
                         args={},
                         api_key=api_key,
@@ -515,6 +536,8 @@ async def _run_parallel_eval(
                         variants=variant,
                         code_snippet=code_snippet,
                         _suppress_link=True,
+                        _trace=trace,
+                        _quiet=quiet,
                     )
                     # Store task reference for EvalContext creation
                     task_eval._task = task  # type: ignore[attr-defined]
@@ -525,7 +548,7 @@ async def _run_parallel_eval(
         for variant in variant_combos:
             for _ in range(group):
                 blank_eval = Eval(
-                    env_config=None,
+                    env=None,
                     script=None,
                     args={},
                     api_key=api_key,
@@ -535,6 +558,8 @@ async def _run_parallel_eval(
                     variants=variant,
                     code_snippet=code_snippet,
                     _suppress_link=True,
+                    _trace=trace,
+                    _quiet=quiet,
                 )
                 eval_objects.append(blank_eval)
                 idx += 1
@@ -551,63 +576,18 @@ async def _run_parallel_eval(
 
     async def run_one(eval_obj: Eval) -> EvalContext:
         """Run a single Eval and return its EvalContext."""
-        # Check if this is a Task-based eval (backwards compat)
-        task = getattr(eval_obj, "_task", None)
-
         try:
-            if task is not None:
-                # Task-based: use EvalContext.from_task
-                ctx = EvalContext.from_task(
-                    task=task,
-                    api_key=eval_obj.api_key,
-                    job_id=eval_obj.job_id,
-                    group_id=eval_obj.group_id,
-                    index=eval_obj.index,
-                    variants=eval_obj.variants,
-                    code_snippet=eval_obj.code_snippet,
-                )
-                ctx._suppress_link = eval_obj._suppress_link
-
-                if sem:
-                    async with sem, ctx:
-                        await runner(ctx)
-                else:
-                    async with ctx:
-                        await runner(ctx)
-                return ctx
+            if sem:
+                async with sem, eval_obj as ctx:
+                    await runner(ctx)
             else:
-                # Eval-based: enter the Eval directly
-                if sem:
-                    async with sem, eval_obj as ctx:
-                        await runner(ctx)
-                else:
-                    async with eval_obj as ctx:
-                        await runner(ctx)
-                return ctx
+                async with eval_obj as ctx:
+                    await runner(ctx)
+            return ctx
         except Exception as e:
             logger.warning("Parallel eval %d failed: %s", eval_obj.index, e)
-            # Create a failed context
-            if task is not None:
-                ctx = EvalContext.from_task(
-                    task=task,
-                    api_key=eval_obj.api_key,
-                    job_id=eval_obj.job_id,
-                    group_id=eval_obj.group_id,
-                    index=eval_obj.index,
-                    variants=eval_obj.variants,
-                    code_snippet=eval_obj.code_snippet,
-                )
-            else:
-                ctx = EvalContext(
-                    name=eval_obj.script or "eval",
-                    api_key=eval_obj.api_key,
-                    job_id=eval_obj.job_id,
-                    group_id=eval_obj.group_id,
-                    index=eval_obj.index,
-                    variants=eval_obj.variants,
-                    code_snippet=eval_obj.code_snippet,
-                    env_config=eval_obj.env_config,
-                )
+            # Create a failed context from the eval
+            ctx = eval_obj.to_eval_context()
             ctx.error = e
             return ctx
 

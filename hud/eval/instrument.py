@@ -25,15 +25,19 @@ def _get_trace_headers() -> dict[str, str] | None:
 
 def _is_hud_url(url_str: str) -> bool:
     """Check if URL is a HUD service (inference or MCP)."""
-    # Extract hostnames from settings URLs
-    gateway_host = urlparse(settings.hud_gateway_url).netloc
-    mcp_host = urlparse(settings.hud_mcp_url).netloc
-
-    # Parse the request URL and check against known HUD hosts
     parsed = urlparse(url_str)
     request_host = parsed.netloc or url_str.split("/")[0]
-
-    return request_host in (gateway_host, mcp_host)
+    
+    # Check for known HUD domains (works for any subdomain)
+    if request_host.endswith((".hud.ai", ".hud.so")):
+        return True
+    
+    # Also check settings URLs
+    known_hosts = {
+        urlparse(settings.hud_gateway_url).netloc,
+        urlparse(settings.hud_mcp_url).netloc,
+    }
+    return request_host in known_hosts
 
 
 def _httpx_request_hook(request: Any) -> None:
