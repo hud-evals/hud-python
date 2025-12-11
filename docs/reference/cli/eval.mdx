@@ -101,7 +101,6 @@ On first run, a template is created:
 [eval]
 # source = "hud-evals/SheetBench-50"
 # agent = "claude"
-# model = "claude-sonnet-4-5"
 # full = false
 # max_concurrent = 30
 # max_steps = 10
@@ -114,16 +113,20 @@ On first run, a template is created:
 # disallowed_tools = []
 
 [claude]
+# model = "claude-sonnet-4-5"
 # max_tokens = 16384
 
 [openai]
+# model = "gpt-4o"
 # temperature = 0.7
 # max_output_tokens = 4096
 
 [gemini]
+# model = "gemini-2.5-pro"
 # temperature = 1.0
 
 [openai_compatible]
+# model = "my-model"
 # base_url = "http://localhost:8000/v1"
 ```
 
