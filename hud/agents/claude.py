@@ -159,16 +159,19 @@ class ClaudeAgent(MCPAgent):
 
         # Bedrock doesn't support .stream() - use create(stream=True) instead
         if isinstance(self.anthropic_client, AsyncAnthropicBedrock):
-            response = await self.anthropic_client.beta.messages.create(
-                model=self.config.checkpoint_name,
-                system=self.system_prompt if self.system_prompt is not None else Omit(),
-                max_tokens=self.max_tokens,
-                messages=messages_cached,
-                tools=self.claude_tools,
-                tool_choice={"type": "auto", "disable_parallel_tool_use": True},
-                betas=betas,
-            )
-            messages.append(BetaMessageParam(role="assistant", content=response.content))
+            try:
+                response = await self.anthropic_client.beta.messages.create(
+                    model=self.config.checkpoint_name,
+                    system=self.system_prompt if self.system_prompt is not None else Omit(),
+                    max_tokens=self.max_tokens,
+                    messages=messages_cached,
+                    tools=self.claude_tools,
+                    tool_choice={"type": "auto", "disable_parallel_tool_use": True},
+                    betas=betas,
+                )
+                messages.append(BetaMessageParam(role="assistant", content=response.content))
+            except ModuleNotFoundError:
+                raise ValueError("boto3 is required for AWS Bedrock. Use `pip install hud[bedrock]`")
         else:
             # Regular Anthropic client supports .stream()
             async with self.anthropic_client.beta.messages.stream(
