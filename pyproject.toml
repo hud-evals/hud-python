@@ -135,7 +135,7 @@ rl = [
 
 # AWS Bedrock support for ClaudeAgent
 bedrock = [
-    "boto3>=1.28.0",
+    "anthropic[bedrock]>=0.75",
 ]
 
 # Development dependencies - includes testing, linting, and automation tools

@@ -53,47 +53,6 @@ class ClaudeConfig(BaseAgentConfig):
     use_computer_beta: bool = True
     validate_api_key: bool = True
 
-    @model_validator(mode="after")
-    def _validate_config(self) -> ClaudeConfig:
-        if not self.validate_api_key:
-            return self
-
-        # Validate API key / credentials
-        if isinstance(self.model_client, AsyncAnthropic):
-            try:
-                Anthropic(api_key=self.model_client.api_key).models.list()
-            except Exception as e:
-                raise ValueError(f"Anthropic API key is invalid: {e}") from e
-        elif isinstance(self.model_client, AsyncAnthropicBedrock):
-            # Bedrock requires a specific ARN
-            bedrock_arn_pattern = r"^arn:aws:bedrock:[a-z0-9-]+:\d+:inference-profile/.+$"
-            if not re.match(bedrock_arn_pattern, self.checkpoint_name):
-                raise ValueError(
-                    f"`checkpoint_name` must be a valid Bedrock inference profile ARN, "
-                    f"got: {self.checkpoint_name!r}. Find this in the AWS console under "
-                    "Bedrock -> Cross-region inference -> Inference profile ARN column"
-                )
-            # Validate inference profile exists (free API call, no billing)
-            try:
-                import warnings
-
-                import boto3  # type: ignore[import-not-found]
-
-                warnings.filterwarnings("ignore", message="datetime.datetime.utcnow")
-
-                bedrock = boto3.client(
-                    "bedrock",
-                    aws_access_key_id=self.model_client.aws_access_key,
-                    aws_secret_access_key=self.model_client.aws_secret_key,
-                    aws_session_token=self.model_client.aws_session_token,
-                    region_name=self.model_client.aws_region,
-                )
-                bedrock.get_inference_profile(inferenceProfileIdentifier=self.checkpoint_name)
-            except Exception as e:
-                raise ValueError(f"Invalid Bedrock inference profile or credentials: {e}") from e
-
-        return self
-
 
 class ClaudeCreateParams(BaseCreateParams, ClaudeConfig):
     pass
