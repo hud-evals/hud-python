@@ -42,7 +42,7 @@ class OpenAIChatConfig(BaseAgentConfig):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    model_name: str = "OpenAI"
+    model_name: str = "OpenAI Chat"
     checkpoint_name: str = "gpt-5-mini"
     openai_client: AsyncOpenAI | None = None
     api_key: str | None = None

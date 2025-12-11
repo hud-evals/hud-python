@@ -78,7 +78,6 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 [eval]
 # source = "hud-evals/SheetBench-50"
 # agent = "claude"
-# model = ""
 # full = false
 # max_concurrent = 30
 # max_steps = 10
@@ -93,25 +92,29 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # disallowed_tools = []
 
 [claude]
+# model = "claude-sonnet-4-5"
 # max_tokens = 16384
 # use_computer_beta = true
 
 [openai]
+# model = "gpt-4o"
 # temperature = 0.7
 # max_output_tokens = 4096
 
 [gemini]
+# model = "gemini-2.5-pro"
 # temperature = 1.0
 # top_p = 0.95
 
 [gemini_cua]
+# model = "gemini-2.5-computer-use-preview"
 # temperature = 1.0
 # top_p = 0.95
 # excluded_predefined_functions = []
 
 [openai_compatible]
 # base_url = "http://localhost:8000/v1"
-# model_name = "my-model"
+# model = "my-model"
 """
 
 # Agent type -> (settings attr, env var name)
@@ -134,7 +137,6 @@ class EvalConfig(BaseModel):
     _EVAL_FIELDS: ClassVar[set[str]] = {
         "source",
         "agent_type",
-        "model",
         "task_ids",
         "full",
         "max_concurrent",
@@ -199,14 +201,12 @@ class EvalConfig(BaseModel):
             return
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
-            # Check both CLI --model and config file checkpoint_name
-            config_checkpoint = self.agent_config.get("openai_compatible", {}).get(
-                "checkpoint_name"
-            )
-            if not self.model and not config_checkpoint:
+            # Check both CLI --model and config file model
+            config_model = self.agent_config.get("openai_compatible", {}).get("model")
+            if not self.model and not config_model:
                 hud_console.error(
                     "Model name is required for OpenAI compatible agent. "
-                    "Use --model or set checkpoint_name in .hud_eval.toml"
+                    "Use --model or set model in [openai_compatible] section of .hud_eval.toml"
                 )
                 raise typer.Exit(1)
         elif self.agent_type in _API_KEY_REQUIREMENTS:
@@ -220,32 +220,37 @@ class EvalConfig(BaseModel):
             hud_console.warning("HUD_API_KEY not set. Some features may be limited.")
 
     def get_agent_kwargs(self) -> dict[str, Any]:
-        """Build agent kwargs from config."""
+        """Build agent kwargs from config.
+
+        Model precedence:
+        1. CLI --model (highest priority)
+        2. [agent_type].model in TOML (per-agent config)
+        """
         if self.agent_type is None:
             raise ValueError("agent_type must be set before calling get_agent_kwargs()")
 
         kwargs: dict[str, Any] = {}
-
-        if self.model:
-            kwargs["checkpoint_name"] = self.model
 
         if self.allowed_tools:
             kwargs["allowed_tools"] = self.allowed_tools
         if self.disallowed_tools:
             kwargs["disallowed_tools"] = self.disallowed_tools
 
+        # Apply agent-specific config
         agent_key = self.agent_type.value
         if agent_key in self.agent_config:
-            kwargs.update(self.agent_config[agent_key])
+            agent_cfg = dict(self.agent_config[agent_key])
+            # Map user-facing 'model' to internal 'checkpoint_name'
+            if "model" in agent_cfg:
+                agent_cfg["checkpoint_name"] = agent_cfg.pop("model")
+            kwargs.update(agent_cfg)
+
+        # CLI --model always wins
+        if self.model:
+            kwargs["checkpoint_name"] = self.model
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
             base_url = kwargs.get("base_url", "")
-            model_name = kwargs.get("model_name", "")
-            if model_name:
-                kwargs["model_name"] = model_name
-            else:
-                kwargs["model_name"] = "OpenAI Compatible"
-
             if "api_key" not in kwargs:
                 # Use HUD API key for gateway, otherwise fall back to OpenAI API key
                 if settings.hud_gateway_url in base_url:
@@ -478,14 +483,15 @@ class EvalConfig(BaseModel):
             for name in config_cls.model_fields:
                 if name in skip:
                     continue
-                # Always show checkpoint_name; other fields only if explicitly set (via CLI or TOML)
+                # Always show model (checkpoint_name)
                 if name == "checkpoint_name":
-                    value = (
-                        self.model
-                        or overrides.get("checkpoint_name")
-                        or getattr(defaults, "checkpoint_name", None)
-                    )
-                    table.add_row(f"  {name}", str(value) if value else "—")
+                    if self.model:
+                        value = self.model
+                    elif overrides.get("model"):
+                        value = overrides["model"]
+                    else:
+                        value = getattr(defaults, "checkpoint_name", None)
+                    table.add_row("  model", str(value) if value else "—")
                 elif name in overrides:
                     value = overrides[name]
                     if name in sensitive_fields and value:
