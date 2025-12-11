@@ -54,7 +54,7 @@ class ClaudeConfig(BaseAgentConfig):
     validate_api_key: bool = True
 
     @model_validator(mode="after")
-    def _validate_config(self) -> "ClaudeConfig":
+    def _validate_config(self) -> ClaudeConfig:
         if not self.validate_api_key:
             return self
 
@@ -65,17 +65,20 @@ class ClaudeConfig(BaseAgentConfig):
             except Exception as e:
                 raise ValueError(f"Anthropic API key is invalid: {e}") from e
         elif isinstance(self.model_client, AsyncAnthropicBedrock):
-            # Bedrock requires a specific ARN (e.g. arn:aws:bedrock:us-east-1:123456789:inference-profile/...)
+            # Bedrock requires a specific ARN
             bedrock_arn_pattern = r"^arn:aws:bedrock:[a-z0-9-]+:\d+:inference-profile/.+$"
             if not re.match(bedrock_arn_pattern, self.checkpoint_name):
                 raise ValueError(
-                    f"`checkpoint_name` must be a valid Bedrock inference profile ARN, got: {self.checkpoint_name!r}. "
-                    "Find this in the AWS console under Bedrock -> Cross-region inference -> Inference profile ARN column"
+                    f"`checkpoint_name` must be a valid Bedrock inference profile ARN, "
+                    f"got: {self.checkpoint_name!r}. Find this in the AWS console under "
+                    "Bedrock -> Cross-region inference -> Inference profile ARN column"
                 )
             # Validate inference profile exists (free API call, no billing)
             try:
                 import warnings
+
                 import boto3  # type: ignore[import-not-found]
+
                 warnings.filterwarnings("ignore", message="datetime.datetime.utcnow")
 
                 bedrock = boto3.client(

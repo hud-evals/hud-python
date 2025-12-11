@@ -33,6 +33,7 @@ def _is_bedrock_arn(model: str | None) -> bool:
     """Check if a model string is a Bedrock inference profile ARN."""
     return model is not None and bool(_BEDROCK_ARN_PATTERN.match(model))
 
+
 if TYPE_CHECKING:
     from hud.agents.base import MCPAgent
     from hud.types import Task
@@ -218,8 +219,16 @@ class EvalConfig(BaseModel):
                 )
                 raise typer.Exit(1)
         elif self.agent_type == AgentType.CLAUDE and _is_bedrock_arn(self.model):
-            if not settings.aws_access_key_id or not settings.aws_secret_access_key or not settings.aws_region:
-                hud_console.error("AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION are required for AWS Bedrock")
+            missing_aws = (
+                not settings.aws_access_key_id
+                or not settings.aws_secret_access_key
+                or not settings.aws_region
+            )
+            if missing_aws:
+                hud_console.error(
+                    "AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION "
+                    "are required for AWS Bedrock"
+                )
                 raise typer.Exit(1)
         elif self.agent_type in _API_KEY_REQUIREMENTS:
             attr, env_var = _API_KEY_REQUIREMENTS[self.agent_type]
@@ -267,8 +276,16 @@ class EvalConfig(BaseModel):
 
         # Auto-detect Bedrock when Claude is selected with a Bedrock ARN
         if self.agent_type == AgentType.CLAUDE and _is_bedrock_arn(self.model):
-            if not settings.aws_access_key_id or not settings.aws_secret_access_key or not settings.aws_region:
-                hud_console.error("AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION are required for AWS Bedrock")
+            missing_aws = (
+                not settings.aws_access_key_id
+                or not settings.aws_secret_access_key
+                or not settings.aws_region
+            )
+            if missing_aws:
+                hud_console.error(
+                    "AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION "
+                    "are required for AWS Bedrock"
+                )
                 raise typer.Exit(1)
 
             from anthropic import AsyncAnthropicBedrock
