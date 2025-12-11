@@ -143,8 +143,8 @@ def display_interactive(analysis: dict) -> None:
                     tool_node.add(f"[bright_black]{tool['description']}[/bright_black]")
 
                 # Show input schema if verbose
-                if analysis.get("verbose") and tool.get("input_schema"):
-                    schema_str = json.dumps(tool["input_schema"], indent=2)
+                if analysis.get("verbose") and tool.get("inputSchema"):
+                    schema_str = json.dumps(tool["inputSchema"], indent=2)
                     syntax = Syntax(schema_str, "json", theme="monokai", line_numbers=False)
                     tool_node.add(syntax)
 
@@ -169,6 +169,28 @@ def display_interactive(analysis: dict) -> None:
                 tool_node.add(syntax)
 
     console.print(tools_tree)
+
+    # Scenarios (Environment scripts exposed as prompt+resource)
+    if analysis.get("scenarios"):
+        hud_console.section_title("🎬 Scenarios")
+        scenarios_table = Table()
+        scenarios_table.add_column("Scenario", style="bright_white")
+        scenarios_table.add_column("Env", style="bright_black")
+        scenarios_table.add_column("Setup/Eval", style="bright_black")
+
+        for s in analysis["scenarios"][:20]:
+            setup = "✓" if s.get("has_setup_prompt") else "✗"
+            eval_ = "✓" if s.get("has_evaluate_resource") else "✗"
+            scenarios_table.add_row(
+                str(s.get("name", "")),
+                str(s.get("env", "")),
+                f"setup {setup} / eval {eval_}",
+            )
+
+        console.print(scenarios_table)
+        if len(analysis["scenarios"]) > 20:
+            remaining = len(analysis["scenarios"]) - 20
+            console.print(f"[bright_black]... and {remaining} more scenarios[/bright_black]")
 
     # Resources
     if analysis["resources"]:
@@ -283,6 +305,17 @@ def display_markdown(analysis: dict) -> None:
             name = resource.get("name", "")
             mime_type = resource.get("mime_type", "")
             md.extend([f"| {uri} | {name} | {mime_type} |"])
+        md.append("")
+
+    # Scenarios
+    if analysis.get("scenarios"):
+        md.append("## Scenarios\n")
+        for s in analysis["scenarios"]:
+            name = s.get("name", "")
+            env = s.get("env", "")
+            setup = "✓" if s.get("has_setup_prompt") else "✗"
+            eval_ = "✓" if s.get("has_evaluate_resource") else "✗"
+            md.append(f"- **{name}** ({env}) — setup {setup} / eval {eval_}")
         md.append("")
 
     # Telemetry (only for live analysis)

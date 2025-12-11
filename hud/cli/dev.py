@@ -189,9 +189,9 @@ async def run_mcp_module(
             logging.getLogger("mcp.server.streamable_http_manager").setLevel(logging.ERROR)
 
             # Suppress deprecation warnings on reload
-            import warnings
+            from hud.patches.warnings import apply_default_warning_filters
 
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            apply_default_warning_filters(verbose=False)
 
     # Ensure proper directory is in sys.path based on module name
     cwd = Path.cwd()

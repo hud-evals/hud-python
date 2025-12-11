@@ -173,6 +173,8 @@ async def analyze_from_metadata(reference: str, output_format: str, verbose: boo
         "tools": [],
         "resources": [],
         "prompts": [],
+        "scenarios": [],
+        "verbose": verbose,
     }
 
     # Add basic info
@@ -205,6 +207,73 @@ async def analyze_from_metadata(reference: str, output_format: str, verbose: boo
                     "inputSchema": tool.get("inputSchema", {}) if verbose else None,
                 }
             )
+
+    # Extract resources
+    if "resources" in lock_data:
+        for resource in lock_data["resources"]:
+            analysis["resources"].append(
+                {
+                    "uri": resource.get("uri", ""),
+                    "name": resource.get("name", ""),
+                    "description": resource.get("description", ""),
+                    "mime_type": resource.get("mimeType", resource.get("mime_type", "")),
+                }
+            )
+
+    # Extract prompts
+    if "prompts" in lock_data:
+        for prompt in lock_data["prompts"]:
+            analysis["prompts"].append(
+                {
+                    "name": prompt.get("name", ""),
+                    "description": prompt.get("description", ""),
+                    "arguments": prompt.get("arguments", []),
+                }
+            )
+
+    # Derive scenarios from script prompts/resources if present
+    scenarios_by_id: dict[str, dict] = {}
+    for p in analysis["prompts"]:
+        desc = (p.get("description") or "").strip()
+        if not desc.startswith("[Setup]"):
+            continue
+        scenario_id = p.get("name")
+        if not scenario_id:
+            continue
+        env_name, script_name = ([*scenario_id.split(":", 1), ""])[:2]
+        scenarios_by_id[scenario_id] = {
+            "id": scenario_id,
+            "env": env_name,
+            "name": script_name or scenario_id,
+            "setup_description": desc,
+            "arguments": p.get("arguments") or [],
+            "has_setup_prompt": True,
+            "has_evaluate_resource": False,
+        }
+    for r in analysis["resources"]:
+        desc = (r.get("description") or "").strip()
+        if not desc.startswith("[Evaluate]"):
+            continue
+        scenario_id = r.get("uri")
+        if not scenario_id:
+            continue
+        env_name, script_name = ([*scenario_id.split(":", 1), ""])[:2]
+        if scenario_id not in scenarios_by_id:
+            scenarios_by_id[scenario_id] = {
+                "id": scenario_id,
+                "env": env_name,
+                "name": script_name or scenario_id,
+                "arguments": [],
+                "has_setup_prompt": False,
+                "has_evaluate_resource": True,
+            }
+        scenarios_by_id[scenario_id]["evaluate_description"] = desc
+        scenarios_by_id[scenario_id]["has_evaluate_resource"] = True
+
+    analysis["scenarios"] = sorted(
+        scenarios_by_id.values(),
+        key=lambda s: (str(s.get("env") or ""), str(s.get("name") or "")),
+    )
 
     # Display results
     hud_console.info("")

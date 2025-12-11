@@ -262,6 +262,34 @@ class MCPUseHUDClient(BaseHUDClient):
                 continue
         return []
 
+    async def _list_prompts_impl(self) -> list[types.Prompt]:
+        """Implementation of prompt listing for MCP-use client (best-effort)."""
+        if self._client is None or not self._sessions:
+            raise ValueError("Client is not connected, call initialize() first")
+
+        all_prompts: list[types.Prompt] = []
+        for server_name, session in self._sessions.items():
+            try:
+                if not hasattr(session, "connector") or not hasattr(
+                    session.connector, "client_session"
+                ):
+                    continue
+                if session.connector.client_session is None:
+                    continue
+
+                if not hasattr(session.connector.client_session, "list_prompts"):
+                    continue
+
+                prompts_result = await session.connector.client_session.list_prompts()
+                all_prompts.extend(prompts_result.prompts)
+            except Exception as e:
+                if self.verbose:
+                    hud_console.debug(
+                        f"Could not list prompts from server '{server_name}': {e}"
+                    )
+                continue
+        return all_prompts
+
     async def read_resource(self, uri: str | AnyUrl) -> types.ReadResourceResult | None:
         """Read a resource by URI from any server that provides it."""
         if self._client is None or not self._sessions:

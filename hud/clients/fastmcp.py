@@ -124,6 +124,12 @@ class FastMCPHUDClient(BaseHUDClient):
             raise ValueError("Client is not connected, call initialize() first")
         return await self._client.list_tools()
 
+    async def _list_prompts_impl(self) -> list[types.Prompt]:
+        """List all available prompts (FastMCP supports this)."""
+        if self._client is None:
+            raise ValueError("Client is not connected, call initialize() first")
+        return await self._client.list_prompts()
+
     async def _call_tool(self, tool_call: MCPToolCall) -> MCPToolResult:
         """Execute a tool by name."""
         if self._client is None:

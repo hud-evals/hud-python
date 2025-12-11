@@ -804,7 +804,7 @@ def build_environment(
 
     # Create lock file content with images subsection at top
     lock_content = {
-        "version": "1.2",  # Lock file format version
+        "version": "1.3",  # Lock file format version
         "images": {
             "local": f"{base_name}:{new_version}",  # Local tag with version
             "full": None,  # Will be set with digest after build
