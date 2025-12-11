@@ -287,6 +287,9 @@ class TestRunDatasetToolFiltering:
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_client_instance),
             patch("hud.settings.settings.anthropic_api_key", "sk-test-key"),
+            # run_dataset() uses async_trace -> configure_telemetry(); disable telemetry so tests
+            # don't require HUD_API_KEY and don't attempt network calls.
+            patch("hud.settings.settings.telemetry_enabled", False),
         ):
             # Run the dataset
             await run_dataset(
@@ -356,6 +359,9 @@ class TestRunDatasetToolFiltering:
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_client_instance),
             patch("hud.settings.settings.anthropic_api_key", "sk-test-key"),
+            # run_dataset() uses async_trace -> configure_telemetry(); disable telemetry so tests
+            # don't require HUD_API_KEY and don't attempt network calls.
+            patch("hud.settings.settings.telemetry_enabled", False),
         ):
             # Run the dataset
             await run_dataset(
@@ -452,6 +458,9 @@ class TestSystemPromptHandling:
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_mcp_client),
             patch("hud.settings.settings.anthropic_api_key", "sk-test-key"),
+            # run_dataset() uses async_trace -> configure_telemetry(); disable telemetry so tests
+            # don't require HUD_API_KEY and don't attempt network calls.
+            patch("hud.settings.settings.telemetry_enabled", False),
         ):
             # Run the dataset
             await run_dataset(
@@ -504,6 +513,9 @@ class TestSystemPromptHandling:
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_mcp_client),
             patch("hud.settings.settings.anthropic_api_key", "sk-test-key"),
+            # run_dataset() uses async_trace -> configure_telemetry(); disable telemetry so tests
+            # don't require HUD_API_KEY and don't attempt network calls.
+            patch("hud.settings.settings.telemetry_enabled", False),
         ):
             # Run the dataset
             await run_dataset(
