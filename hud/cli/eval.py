@@ -251,12 +251,6 @@ class EvalConfig(BaseModel):
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
             base_url = kwargs.get("base_url", "")
-            model_name = kwargs.get("model_name", "")
-            if model_name:
-                kwargs["model_name"] = model_name
-            else:
-                kwargs["model_name"] = "OpenAI Compatible"
-
             if "api_key" not in kwargs:
                 # Use HUD API key for gateway, otherwise fall back to OpenAI API key
                 if settings.hud_gateway_url in base_url:
