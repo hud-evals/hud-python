@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from anthropic import AsyncAnthropic, BadRequestError
+from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, BadRequestError
 from mcp import types
 
 from hud.agents.claude import (
@@ -412,3 +412,112 @@ class TestClaudeAgent:
 
     #         assert result.content == "2 + 3 = 5"
     #         assert result.done is True
+
+
+class TestClaudeAgentBedrock:
+    """Test ClaudeAgent class with Bedrock."""
+
+    @pytest.fixture
+    def bedrock_client(self):
+        """Create a real AsyncAnthropicBedrock client and stub networked methods."""
+        client = AsyncAnthropicBedrock(
+            aws_access_key="AKIATEST",
+            aws_secret_key="secret",
+            aws_region="us-east-1",
+        )
+        # Stub the actual Bedrock call so tests are hermetic.
+        client.beta.messages.create = AsyncMock()
+        return client
+
+    @pytest.mark.asyncio
+    async def test_init(self, mock_mcp_client, bedrock_client):
+        """Test agent initialization."""
+        agent = ClaudeAgent.create(
+            mcp_client=mock_mcp_client,
+            model_client=bedrock_client,
+            checkpoint_name="test-model-arn",
+            validate_api_key=False,  # Skip validation in tests
+        )
+
+        assert agent.model_name == "Claude"
+        assert agent.config.checkpoint_name == "test-model-arn"
+        assert agent.anthropic_client == bedrock_client
+
+    @pytest.mark.asyncio
+    async def test_get_response_bedrock_uses_create_not_stream(
+        self, mock_mcp_client, bedrock_client
+    ):
+        """Bedrock path must call messages.create() (Bedrock doesn't support stream())."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = ClaudeAgent.create(
+                mcp_client=mock_mcp_client,
+                model_client=bedrock_client,
+                checkpoint_name="test-model-arn",
+                validate_api_key=False,
+            )
+
+            # Enable computer tool to verify betas list includes computer-use in Bedrock mode.
+            agent.has_computer_tool = True
+
+            mock_response = MagicMock()
+            text_block = MagicMock()
+            text_block.type = "text"
+            text_block.text = "Hello from Bedrock"
+            mock_response.content = [text_block]
+
+            bedrock_client.beta.messages.create.return_value = mock_response
+
+            messages = [
+                cast(
+                    "BetaMessageParam",
+                    {"role": "user", "content": [{"type": "text", "text": "Hi"}]},
+                )
+            ]
+            response = await agent.get_response(messages)
+
+            assert response.content == "Hello from Bedrock"
+            assert response.tool_calls == []
+
+            # Bedrock-specific behavior: uses create() and appends assistant message directly.
+            assert not hasattr(bedrock_client.beta.messages, "stream")
+            bedrock_client.beta.messages.create.assert_awaited_once()
+            assert len(messages) == 2
+            assert messages[-1]["role"] == "assistant"
+
+            # Ensure the Bedrock call shape is stable.
+            _, kwargs = bedrock_client.beta.messages.create.call_args
+            assert kwargs["model"] == "test-model-arn"
+            assert kwargs["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}
+            assert "fine-grained-tool-streaming-2025-05-14" in kwargs["betas"]
+            assert "computer-use-2025-01-24" in kwargs["betas"]
+
+    @pytest.mark.asyncio
+    async def test_get_response_bedrock_missing_boto3_raises_value_error(
+        self, mock_mcp_client, bedrock_client
+    ):
+        """If boto3 isn't installed, Bedrock client import path should raise a clear ValueError."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = ClaudeAgent.create(
+                mcp_client=mock_mcp_client,
+                model_client=bedrock_client,
+                checkpoint_name="test-model-arn",
+                validate_api_key=False,
+            )
+
+            bedrock_client.beta.messages.create.side_effect = ModuleNotFoundError("boto3")
+            messages = [{"role": "user", "content": [{"type": "text", "text": "Hi"}]}]
+
+            with pytest.raises(ValueError, match=r"boto3 is required for AWS Bedrock"):
+                await agent.get_response(messages)  # type: ignore
+
+    def test_init_with_bedrock_client_does_not_require_anthropic_api_key(
+        self, mock_mcp_client, bedrock_client
+    ) -> None:
+        """Providing model_client should bypass ANTHROPIC_API_KEY validation."""
+        with patch("hud.settings.settings.anthropic_api_key", None):
+            agent = ClaudeAgent.create(
+                mcp_client=mock_mcp_client,
+                model_client=bedrock_client,
+                validate_api_key=False,
+            )
+            assert agent.anthropic_client == bedrock_client
