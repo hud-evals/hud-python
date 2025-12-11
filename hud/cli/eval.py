@@ -275,7 +275,8 @@ class EvalConfig(BaseModel):
                     kwargs["api_key"] = settings.openai_api_key
 
         # Auto-detect Bedrock when Claude is selected with a Bedrock ARN
-        if self.agent_type == AgentType.CLAUDE and _is_bedrock_arn(self.model):
+        checkpoint_name = self.model or self.agent_config.get("claude", {}).get("checkpoint_name")
+        if self.agent_type == AgentType.CLAUDE and _is_bedrock_arn(checkpoint_name):
             missing_aws = (
                 not settings.aws_access_key_id
                 or not settings.aws_secret_access_key
