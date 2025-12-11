@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 from inspect import cleandoc
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
@@ -64,8 +65,27 @@ class ClaudeConfig(BaseAgentConfig):
             except Exception as e:
                 raise ValueError(f"Anthropic API key is invalid: {e}") from e
         elif isinstance(self.model_client, AsyncAnthropicBedrock):
-            # TODO: assert that model name is valid and the aws keys are valid
-            pass
+            # Bedrock requires a specific ARN (e.g. arn:aws:bedrock:us-east-1:123456789:inference-profile/...)
+            bedrock_arn_pattern = r"^arn:aws:bedrock:[a-z0-9-]+:\d+:inference-profile/.+$"
+            if not re.match(bedrock_arn_pattern, self.checkpoint_name):
+                raise ValueError(
+                    f"`checkpoint_name` must be a valid Bedrock inference profile ARN, got: {self.checkpoint_name!r}. "
+                    "Find this in the AWS console under Bedrock -> Cross-region inference -> Inference profile ARN column"
+                )
+            # Validate inference profile exists (free API call, no billing)
+            try:
+                import boto3  # type: ignore[import-not-found]
+
+                bedrock = boto3.client(
+                    "bedrock",
+                    aws_access_key_id=self.model_client.aws_access_key,
+                    aws_secret_access_key=self.model_client.aws_secret_key,
+                    aws_session_token=self.model_client.aws_session_token,
+                    region_name=self.model_client.aws_region,
+                )
+                bedrock.get_inference_profile(inferenceProfileIdentifier=self.checkpoint_name)
+            except Exception as e:
+                raise ValueError(f"Invalid Bedrock inference profile or credentials: {e}") from e
         elif self.model_client is None and self.validate_api_key:
             raise ValueError("Cannot validate api key if model client is None")
 
