@@ -280,6 +280,12 @@ class ScriptMixin:
             script_id = f"{safe_env_name}:{script_name}"
             script_desc = description or fn.__doc__ or f"Script: {script_name}"
 
+            # Capture source code for reproducibility
+            try:
+                source_code = inspect.getsource(fn)
+            except (OSError, TypeError):
+                source_code = None
+
             # Store the generator function
             self._scripts[script_name] = fn
 
@@ -321,6 +327,9 @@ class ScriptMixin:
             # to bypass the **kwargs validation in from_function()
             from fastmcp.prompts.prompt import FunctionPrompt, PromptArgument
 
+            # Build meta with source code
+            script_meta = {"code": source_code} if source_code else None
+
             prompt = FunctionPrompt(
                 name=script_id,
                 description=f"[Setup] {script_desc}",
@@ -329,6 +338,7 @@ class ScriptMixin:
                     for arg in prompt_args
                 ],
                 fn=prompt_handler,
+                meta=script_meta,
             )
             self._prompt_manager.add_prompt(prompt)
 
@@ -380,6 +390,7 @@ class ScriptMixin:
                 name=script_name,
                 description=f"[Evaluate] {script_desc}",
                 mime_type="application/json",
+                meta=script_meta,
             )
             self._resource_manager.add_resource(resource)
 
