@@ -217,6 +217,10 @@ class EvalConfig(BaseModel):
                     "Use --model or set checkpoint_name in .hud_eval.toml"
                 )
                 raise typer.Exit(1)
+        elif self.agent_type == AgentType.CLAUDE and _is_bedrock_arn(self.model):
+            if not settings.aws_access_key_id or not settings.aws_secret_access_key or not settings.aws_region:
+                hud_console.error("AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION are required for AWS Bedrock")
+                raise typer.Exit(1)
         elif self.agent_type in _API_KEY_REQUIREMENTS:
             attr, env_var = _API_KEY_REQUIREMENTS[self.agent_type]
             if not getattr(settings, attr, None):

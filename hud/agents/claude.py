@@ -88,8 +88,6 @@ class ClaudeConfig(BaseAgentConfig):
                 bedrock.get_inference_profile(inferenceProfileIdentifier=self.checkpoint_name)
             except Exception as e:
                 raise ValueError(f"Invalid Bedrock inference profile or credentials: {e}") from e
-        elif self.model_client is None and self.validate_api_key:
-            raise ValueError("Cannot validate api key if model client is None")
 
         return self
 
@@ -197,21 +195,35 @@ class ClaudeAgent(MCPAgent):
         if self.has_computer_tool:
             betas.append("computer-use-2025-01-24")
 
-        async with self.anthropic_client.beta.messages.stream(  # type: ignore[attr-defined] linter mad at bedrock
-            model=self.config.checkpoint_name,
-            system=self.system_prompt if self.system_prompt is not None else Omit(),
-            max_tokens=self.max_tokens,
-            messages=messages_cached,
-            tools=self.claude_tools,
-            tool_choice={"type": "auto", "disable_parallel_tool_use": True},
-            betas=betas,
-        ) as stream:
-            # allow backend to accumulate message content
-            async for _ in stream:
-                pass
-            # get final message
-            response = await stream.get_final_message()
+        # Bedrock doesn't support .stream() - use create(stream=True) instead
+        if isinstance(self.anthropic_client, AsyncAnthropicBedrock):
+            response = await self.anthropic_client.beta.messages.create(
+                model=self.config.checkpoint_name,
+                system=self.system_prompt if self.system_prompt is not None else Omit(),
+                max_tokens=self.max_tokens,
+                messages=messages_cached,
+                tools=self.claude_tools,
+                tool_choice={"type": "auto", "disable_parallel_tool_use": True},
+                betas=betas,
+            )
             messages.append(BetaMessageParam(role="assistant", content=response.content))
+        else:
+            # Regular Anthropic client supports .stream()
+            async with self.anthropic_client.beta.messages.stream(
+                model=self.config.checkpoint_name,
+                system=self.system_prompt if self.system_prompt is not None else Omit(),
+                max_tokens=self.max_tokens,
+                messages=messages_cached,
+                tools=self.claude_tools,
+                tool_choice={"type": "auto", "disable_parallel_tool_use": True},
+                betas=betas,
+            ) as stream:
+                # allow backend to accumulate message content
+                async for _ in stream:
+                    pass
+                # get final message
+                response = await stream.get_final_message()
+                messages.append(BetaMessageParam(role="assistant", content=response.content))
 
         # Process response
         result = AgentResponse(content="", tool_calls=[], done=True)
