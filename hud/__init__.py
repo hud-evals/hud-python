@@ -5,6 +5,9 @@ tools for building, evaluating, and training AI agents.
 
 from __future__ import annotations
 
+# Apply patches to third-party libraries early, before other imports
+from . import patches as _patches  # noqa: F401
+
 from .environment import Environment
 from .eval import EvalContext
 from .eval import run_eval as eval

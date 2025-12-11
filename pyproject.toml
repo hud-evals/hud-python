@@ -15,8 +15,8 @@ dependencies = [
     "pydantic>=2.6,<3",
     "pydantic-settings>=2.2,<3",
     # MCP dependencies
-    "hud-mcp-python-sdk>=3.13.2",
-    "hud-fastmcp-python-sdk>=0.1.2",
+    "mcp>1.21.1,<1.23",
+    "fastmcp==2.13.3",
     # CLI dependencies
     "typer>=0.9.0",
     "rich>=13.0.0",
@@ -108,8 +108,8 @@ packages = ["hud"]
 # Agent implementations, AI providers, datasets, and telemetry
 agents = [
     # MCP-use client (legacy)
-    "hud-mcp-use-python-sdk==2.3.20",
-    "langchain==0.3.27",  # Required by mcp-use
+    "mcp-use==1.5.0",
+    "langchain>=1.0.0",  # Required by mcp-use
     # AI providers
     "anthropic>=0.75",
     "openai>=2.8.1",
