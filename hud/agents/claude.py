@@ -74,7 +74,9 @@ class ClaudeConfig(BaseAgentConfig):
                 )
             # Validate inference profile exists (free API call, no billing)
             try:
+                import warnings
                 import boto3  # type: ignore[import-not-found]
+                warnings.filterwarnings("ignore", message="datetime.datetime.utcnow")
 
                 bedrock = boto3.client(
                     "bedrock",
