@@ -133,6 +133,11 @@ rl = [
     # Install separately with: uv pip install flash-attn --no-build-isolation
 ]
 
+# AWS Bedrock support for ClaudeAgent
+bedrock = [
+    "boto3>=1.28.0",
+]
+
 # Development dependencies - includes testing, linting, and automation tools
 dev = [
     # Include agent dependencies
