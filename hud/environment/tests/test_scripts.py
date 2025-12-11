@@ -163,3 +163,118 @@ class TestScriptWithArgs:
 
         assert received_args["user_id"] == "alice"
         assert received_args["amount"] == 50
+
+
+class TestScriptSubmit:
+    """Tests for script submit and answer flow."""
+
+    @pytest.mark.asyncio
+    async def test_submit_stores_answer(self) -> None:
+        """submit() stores answer for script."""
+        env = Environment("test-env")
+
+        @env.script("test")
+        async def test_script():
+            yield "What is 2+2?"
+            yield 1.0
+
+        # Run setup
+        prompt = env._prompt_manager._prompts.get("test-env:test")
+        assert prompt is not None
+        await prompt.render({})
+
+        # Submit answer
+        await env.submit("test", "4")
+
+        assert env._script_answers.get("test") == "4"
+
+    @pytest.mark.asyncio
+    async def test_script_receives_answer(self) -> None:
+        """Script receives submitted answer via yield."""
+        env = Environment("test-env")
+        received_answer = None
+
+        @env.script("qa")
+        async def qa_script():
+            nonlocal received_answer
+            answer = yield "What is 2+2?"
+            received_answer = answer
+            yield 1.0 if answer == "4" else 0.0
+
+        # Run setup
+        prompt = env._prompt_manager._prompts.get("test-env:qa")
+        assert prompt is not None
+        await prompt.render({})
+
+        # Submit answer
+        env._script_answers["qa"] = "4"
+
+        # Run evaluate
+        resource = env._resource_manager._resources.get("test-env:qa")
+        assert resource is not None
+        await resource.read()
+
+        assert received_answer == "4"
+
+    @pytest.mark.asyncio
+    async def test_script_evaluates_answer(self) -> None:
+        """Script evaluates answer and returns reward."""
+        env = Environment("test-env")
+
+        @env.script("grading")
+        async def grading_script():
+            answer = yield "What is the capital of France?"
+            yield 1.0 if "paris" in answer.lower() else 0.0
+
+        # Run setup
+        prompt = env._prompt_manager._prompts.get("test-env:grading")
+        assert prompt is not None
+        await prompt.render({})
+
+        # Submit correct answer
+        env._script_answers["grading"] = "Paris"
+
+        # Run evaluate
+        resource = env._resource_manager._resources.get("test-env:grading")
+        assert resource is not None
+        result = await resource.read()
+
+        import json
+
+        data = json.loads(result)
+        assert data["reward"] == 1.0
+
+
+class TestScriptMeta:
+    """Tests for script _meta containing code."""
+
+    def test_script_captures_source_code(self) -> None:
+        """@env.script captures function source in meta."""
+        env = Environment("test-env")
+
+        @env.script("example")
+        async def example_script(x: int):
+            yield f"Process {x}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:example")
+        assert prompt is not None
+        assert prompt.meta is not None
+        assert "code" in prompt.meta
+        assert "async def example_script" in prompt.meta["code"]
+        assert "yield" in prompt.meta["code"]
+
+    def test_script_meta_on_resource(self) -> None:
+        """Resource also has source code in meta."""
+        env = Environment("test-env")
+
+        @env.script("example")
+        async def example_script():
+            yield "Test"
+            yield 1.0
+
+        resource = env._resource_manager._resources.get("test-env:example")
+        assert resource is not None
+        assert resource.meta is not None
+        assert "code" in resource.meta
+        assert "async def example_script" in resource.meta["code"]

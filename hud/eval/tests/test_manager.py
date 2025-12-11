@@ -20,7 +20,7 @@ class TestRunEvalNoArgs:
             patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
             patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
         ):
-            async with run_eval() as ctx:
+            async with run_eval(quiet=True) as ctx:
                 assert isinstance(ctx, EvalContext)
                 assert ctx.eval_name == "eval"
 
@@ -31,7 +31,7 @@ class TestRunEvalNoArgs:
             patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
             patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
         ):
-            async with run_eval() as ctx:
+            async with run_eval(quiet=True) as ctx:
                 assert ctx.trace_id is not None
                 assert len(ctx.trace_id) == 36  # UUID format
 
@@ -45,7 +45,7 @@ class TestRunEvalNoArgs:
             # Before context, no headers
             assert get_current_trace_headers() is None
 
-            async with run_eval() as ctx:
+            async with run_eval(quiet=True) as ctx:
                 # Inside context, headers are set
                 headers = get_current_trace_headers()
                 assert headers is not None
@@ -61,7 +61,7 @@ class TestRunEvalNoArgs:
             patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
             patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
         ):
-            async with run_eval() as ctx:
+            async with run_eval(quiet=True) as ctx:
                 assert ctx.reward is None
                 ctx.reward = 0.95
 
@@ -74,7 +74,7 @@ class TestRunEvalNoArgs:
             patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
             patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock) as mock_exit,
         ):
-            async with run_eval() as ctx:
+            async with run_eval(quiet=True) as ctx:
                 ctx.reward = 0.85
 
             # _eval_exit should have been called (with no error)
@@ -87,7 +87,7 @@ class TestRunEvalNoArgs:
             patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
             patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
         ):
-            async with run_eval() as ctx:
+            async with run_eval(quiet=True) as ctx:
                 assert ctx.variants == {}
 
     @pytest.mark.asyncio
@@ -97,7 +97,7 @@ class TestRunEvalNoArgs:
             patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
             patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
         ):
-            async with run_eval() as ctx:
+            async with run_eval(quiet=True) as ctx:
                 headers = ctx.headers
                 assert "Trace-Id" in headers
                 assert headers["Trace-Id"] == ctx.trace_id
@@ -113,7 +113,7 @@ class TestRunEvalWithApiKey:
             patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
             patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
         ):
-            async with run_eval(api_key="test-key") as ctx:
+            async with run_eval(api_key="test-key", quiet=True) as ctx:
                 assert ctx._eval_api_key == "test-key"
 
 
@@ -127,7 +127,7 @@ class TestRunEvalWithJobId:
             patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
             patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
         ):
-            async with run_eval(job_id="job-123") as ctx:
+            async with run_eval(job_id="job-123", quiet=True) as ctx:
                 assert ctx.job_id == "job-123"
 
 
@@ -142,7 +142,7 @@ class TestRunEvalErrorHandling:
             patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock) as mock_exit,
         ):
             with pytest.raises(ValueError):
-                async with run_eval():
+                async with run_eval(quiet=True):
                     raise ValueError("test error")
 
             # _eval_exit should have been called with error message

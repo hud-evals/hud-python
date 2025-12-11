@@ -96,24 +96,24 @@ class TestConnectImage:
 class TestConnectServer:
     """Tests for LocalConnectorMixin.connect_server."""
 
-    def test_connect_server_calls_mount(self) -> None:
-        """connect_server calls mount with server and prefix."""
+    def test_connect_server_calls_include_router(self) -> None:
+        """connect_server calls include_router with server and prefix."""
         from hud.environment.connectors.local import LocalConnectorMixin
 
         class TestEnv(LocalConnectorMixin):
             def __init__(self) -> None:
                 self._connections: dict[str, Connector] = {}
-                self.mounted: list[tuple[Any, str | None]] = []
+                self.routers: list[tuple[Any, str | None]] = []
 
-            def mount(self, server: Any, *, prefix: str | None = None) -> None:
-                self.mounted.append((server, prefix))
+            def include_router(self, server: Any, *, prefix: str | None = None) -> None:
+                self.routers.append((server, prefix))
 
         env = TestEnv()
         mock_server = MagicMock()
         env.connect_server(mock_server, prefix="tools")
 
-        assert len(env.mounted) == 1
-        assert env.mounted[0] == (mock_server, "tools")
+        assert len(env.routers) == 1
+        assert env.routers[0] == (mock_server, "tools")
 
     def test_connect_server_returns_self(self) -> None:
         """connect_server returns self for chaining."""
@@ -123,7 +123,7 @@ class TestConnectServer:
             def __init__(self) -> None:
                 self._connections: dict[str, Connector] = {}
 
-            def mount(self, server: Any, *, prefix: str | None = None) -> None:
+            def include_router(self, server: Any, *, prefix: str | None = None) -> None:
                 pass
 
         env = TestEnv()
@@ -146,10 +146,10 @@ class TestConnectFastAPI:
         class TestEnv(LocalConnectorMixin):
             def __init__(self) -> None:
                 self._connections: dict[str, Connector] = {}
-                self.mounted: list[tuple[Any, str | None]] = []
+                self.routers: list[tuple[Any, str | None]] = []
 
-            def mount(self, server: Any, *, prefix: str | None = None) -> None:
-                self.mounted.append((server, prefix))
+            def include_router(self, server: Any, *, prefix: str | None = None) -> None:
+                self.routers.append((server, prefix))
 
         env = TestEnv()
         mock_app = MagicMock()
@@ -157,8 +157,8 @@ class TestConnectFastAPI:
         env.connect_fastapi(mock_app)
 
         mock_fastmcp.from_fastapi.assert_called_once_with(app=mock_app, name="My API")
-        assert len(env.mounted) == 1
-        assert env.mounted[0] == (mock_mcp_server, None)
+        assert len(env.routers) == 1
+        assert env.routers[0] == (mock_mcp_server, None)
 
     @patch("fastmcp.FastMCP")
     def test_connect_fastapi_with_custom_name(self, mock_fastmcp: MagicMock) -> None:
@@ -171,7 +171,7 @@ class TestConnectFastAPI:
             def __init__(self) -> None:
                 self._connections: dict[str, Connector] = {}
 
-            def mount(self, server: Any, *, prefix: str | None = None) -> None:
+            def include_router(self, server: Any, *, prefix: str | None = None) -> None:
                 pass
 
         env = TestEnv()
@@ -192,7 +192,7 @@ class TestConnectFastAPI:
             def __init__(self) -> None:
                 self._connections: dict[str, Connector] = {}
 
-            def mount(self, server: Any, *, prefix: str | None = None) -> None:
+            def include_router(self, server: Any, *, prefix: str | None = None) -> None:
                 pass
 
         env = TestEnv()

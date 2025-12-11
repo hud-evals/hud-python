@@ -17,45 +17,45 @@ class TestEvalContext:
 
     def test_init_generates_trace_id(self) -> None:
         """EvalContext generates trace_id if not provided."""
-        ctx = EvalContext(name="test-task")
+        ctx = EvalContext(name="test-task", quiet=True)
 
         assert ctx.trace_id is not None
         assert len(ctx.trace_id) == 36  # UUID format
 
     def test_init_uses_provided_trace_id(self) -> None:
         """EvalContext uses provided trace_id."""
-        ctx = EvalContext(name="test-task", trace_id="custom-id")
+        ctx = EvalContext(name="test-task", trace_id="custom-id", quiet=True)
 
         assert ctx.trace_id == "custom-id"
 
     def test_headers_contains_trace_id(self) -> None:
         """headers property returns dict with trace ID."""
-        ctx = EvalContext(name="test-task", trace_id="test-123")
+        ctx = EvalContext(name="test-task", trace_id="test-123", quiet=True)
 
         assert ctx.headers == {"Trace-Id": "test-123"}
 
     def test_success_true_when_no_error(self) -> None:
         """success property returns True when no error."""
-        ctx = EvalContext(name="test-task")
+        ctx = EvalContext(name="test-task", quiet=True)
 
         assert ctx.success is True
 
     def test_success_false_when_error(self) -> None:
         """success property returns False when error is set."""
-        ctx = EvalContext(name="test-task")
+        ctx = EvalContext(name="test-task", quiet=True)
         ctx.error = ValueError("test error")
 
         assert ctx.success is False
 
     def test_done_false_initially(self) -> None:
         """done property returns False initially."""
-        ctx = EvalContext(name="test-task")
+        ctx = EvalContext(name="test-task", quiet=True)
 
         assert ctx.done is False
 
     def test_variants_empty_by_default(self) -> None:
         """variants is empty dict by default."""
-        ctx = EvalContext(name="test-task")
+        ctx = EvalContext(name="test-task", quiet=True)
 
         assert ctx.variants == {}
 
@@ -64,6 +64,7 @@ class TestEvalContext:
         ctx = EvalContext(
             name="test-task",
             variants={"model": "gpt-4o", "temp": 0.7},
+            quiet=True,
         )
 
         assert ctx.variants == {"model": "gpt-4o", "temp": 0.7}
@@ -71,7 +72,7 @@ class TestEvalContext:
     @pytest.mark.asyncio
     async def test_context_manager_sets_headers(self) -> None:
         """Context manager sets trace headers in contextvar."""
-        ctx = EvalContext(name="test-task", trace_id="test-123")
+        ctx = EvalContext(name="test-task", trace_id="test-123", quiet=True)
 
         # Mock telemetry calls
         with (
@@ -97,7 +98,11 @@ class TestEvalContext:
 
     def test_repr(self) -> None:
         """__repr__ shows useful info."""
-        ctx = EvalContext(name="test-task", trace_id="abc12345-6789-0000-0000-000000000000")
+        ctx = EvalContext(
+            name="test-task",
+            trace_id="abc12345-6789-0000-0000-000000000000",
+            quiet=True,
+        )
         ctx.reward = 0.95
 
         repr_str = repr(ctx)
@@ -111,14 +116,14 @@ class TestEvalContextPrompt:
 
     def test_prompt_can_be_set(self) -> None:
         """EvalContext.prompt can be set."""
-        ctx = EvalContext(name="test-task")
+        ctx = EvalContext(name="test-task", quiet=True)
         ctx.prompt = "Test prompt"
 
         assert ctx.prompt == "Test prompt"
 
     def test_prompt_included_in_payload(self) -> None:
         """Prompt is included in eval payload."""
-        ctx = EvalContext(name="test-task")
+        ctx = EvalContext(name="test-task", quiet=True)
         ctx.prompt = "Test prompt"
 
         payload = ctx._build_base_payload()

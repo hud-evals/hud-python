@@ -112,6 +112,7 @@ class TestEvalContextManager:
             patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
             patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
             patch.object(EvalContext, "__aexit__", new_callable=AsyncMock),
+            patch.object(EvalContext, "_print_eval_link"),  # Suppress link printing
         ):
             ctx = await ev.__aenter__()
             assert isinstance(ctx, EvalContext)
@@ -129,6 +130,7 @@ class TestEvalContextManager:
             patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
             patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
             patch.object(EvalContext, "__aexit__", new_callable=AsyncMock),
+            patch.object(EvalContext, "_print_eval_link"),  # Suppress link printing
         ):
             await ev.__aenter__()
             assert ev._ctx is not None
@@ -148,6 +150,7 @@ class TestEvalContextManager:
             patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
             patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
             patch.object(EvalContext, "__aexit__", new_callable=AsyncMock),
+            patch.object(EvalContext, "_print_eval_link"),  # Suppress link printing
         ):
             ctx = await ev.__aenter__()
             ctx.reward = 0.95
