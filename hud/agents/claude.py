@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import copy
 import logging
-import re
 from inspect import cleandoc
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
-from anthropic import Anthropic, AsyncAnthropic, AsyncAnthropicBedrock, Omit
+from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, Omit
 from anthropic.types import CacheControlEphemeralParam
 from anthropic.types.beta import (
     BetaBase64ImageSourceParam,
@@ -30,7 +29,7 @@ if TYPE_CHECKING:
     from hud.datasets import Task
 
 import mcp.types as types
-from pydantic import ConfigDict, model_validator
+from pydantic import ConfigDict
 
 from hud.settings import settings
 from hud.tools.computer.settings import computer_settings
@@ -171,7 +170,9 @@ class ClaudeAgent(MCPAgent):
                 )
                 messages.append(BetaMessageParam(role="assistant", content=response.content))
             except ModuleNotFoundError:
-                raise ValueError("boto3 is required for AWS Bedrock. Use `pip install hud[bedrock]`")
+                raise ValueError(
+                    "boto3 is required for AWS Bedrock. Use `pip install hud[bedrock]`"
+                ) from None
         else:
             # Regular Anthropic client supports .stream()
             async with self.anthropic_client.beta.messages.stream(
