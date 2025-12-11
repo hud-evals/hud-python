@@ -7,11 +7,7 @@ from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-<<<<<<< HEAD
-from anthropic import AsyncAnthropic, BadRequestError
-=======
-from anthropic import AsyncAnthropicBedrock, BadRequestError
->>>>>>> 192cb9b7 (fix unit tests)
+from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, BadRequestError
 from mcp import types
 
 from hud.agents.claude import (
@@ -89,40 +85,19 @@ class TestClaudeAgent:
 
     @pytest.fixture
     def mock_anthropic(self):
-<<<<<<< HEAD
         """Create a stub AsyncAnthropic client and patch constructor."""
         client = AsyncAnthropic(api_key="test_key")
         client.__dict__["beta"] = SimpleNamespace(messages=AsyncMock())
         with patch("hud.agents.claude.AsyncAnthropic", return_value=client):
             yield client
-=======
-        """Create a mock Anthropic client."""
-        # Create mock instance with spec to make it behave like AsyncAnthropic
-        from anthropic import AsyncAnthropic
-
-        client = AsyncMock(spec=AsyncAnthropic)
-        # Add beta attribute with messages
-        client.beta = AsyncMock()
-        client.beta.messages = AsyncMock()
-        client.models = AsyncMock()
-        client.models.list = AsyncMock()
-        return client
->>>>>>> 192cb9b7 (fix unit tests)
 
     @pytest.mark.asyncio
     async def test_init(self, mock_mcp_client, mock_anthropic):
         """Test agent initialization."""
-<<<<<<< HEAD
         agent = ClaudeAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_anthropic,
             checkpoint_name="claude-3-opus-20240229",
-=======
-        agent = ClaudeAgent(
-            mcp_client=mock_mcp_client,
-            model_client=mock_anthropic,
-            model="claude-3-opus-20240229",
->>>>>>> 192cb9b7 (fix unit tests)
             max_tokens=1000,
             validate_api_key=False,  # Skip validation in tests
         )
@@ -147,11 +122,7 @@ class TestClaudeAgent:
     @pytest.mark.asyncio
     async def test_format_blocks(self, mock_mcp_client, mock_anthropic):
         """Test formatting content blocks into Claude messages."""
-<<<<<<< HEAD
         agent = ClaudeAgent.create(
-=======
-        agent = ClaudeAgent(
->>>>>>> 192cb9b7 (fix unit tests)
             mcp_client=mock_mcp_client,
             model_client=mock_anthropic,
             validate_api_key=False,  # Skip validation in tests
@@ -190,11 +161,7 @@ class TestClaudeAgent:
     @pytest.mark.asyncio
     async def test_format_tool_results_method(self, mock_mcp_client, mock_anthropic):
         """Test the agent's format_tool_results method."""
-<<<<<<< HEAD
         agent = ClaudeAgent.create(
-=======
-        agent = ClaudeAgent(
->>>>>>> 192cb9b7 (fix unit tests)
             mcp_client=mock_mcp_client,
             model_client=mock_anthropic,
             validate_api_key=False,  # Skip validation in tests
@@ -432,12 +399,13 @@ class TestClaudeAgentBedrock:
     @pytest.mark.asyncio
     async def test_init(self, mock_mcp_client, mock_anthropic):
         """Test agent initialization."""
-        agent = ClaudeAgent(
+        agent = ClaudeAgent.create(
             mcp_client=mock_mcp_client,
             model_client=mock_anthropic,
-            model="test-model-arn",
+            checkpoint_name="test-model-arn",
+            validate_api_key=False,  # Skip validation in tests
         )
 
         assert agent.model_name == "Claude"
-        assert agent.model == "test-model-arn"
+        assert agent.config.checkpoint_name == "test-model-arn"
         assert agent.anthropic_client == mock_anthropic

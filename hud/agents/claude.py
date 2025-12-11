@@ -7,7 +7,7 @@ import logging
 from inspect import cleandoc
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
-from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, Omit
+from anthropic import Anthropic, AsyncAnthropic, AsyncAnthropicBedrock, Omit
 from anthropic.types import CacheControlEphemeralParam
 from anthropic.types.beta import (
     BetaBase64ImageSourceParam,
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from hud.datasets import Task
 
 import mcp.types as types
-from pydantic import ConfigDict
+from pydantic import ConfigDict, model_validator
 
 from hud.settings import settings
 from hud.tools.computer.settings import computer_settings
@@ -47,10 +47,29 @@ class ClaudeConfig(BaseAgentConfig):
 
     model_name: str = "Claude"
     checkpoint_name: str = "claude-sonnet-4-5"
-    model_client: AsyncAnthropic | None = None
+    model_client: AsyncAnthropic | AsyncAnthropicBedrock | None = None
     max_tokens: int = 16384
     use_computer_beta: bool = True
     validate_api_key: bool = True
+
+    @model_validator(mode="after")
+    def _validate_config(self) -> "ClaudeConfig":
+        if not self.validate_api_key:
+            return self
+
+        # Validate API key / credentials
+        if isinstance(self.model_client, AsyncAnthropic):
+            try:
+                Anthropic(api_key=self.model_client.api_key).models.list()
+            except Exception as e:
+                raise ValueError(f"Anthropic API key is invalid: {e}") from e
+        elif isinstance(self.model_client, AsyncAnthropicBedrock):
+            # TODO: assert that model name is valid and the aws keys are valid
+            pass
+        elif self.model_client is None and self.validate_api_key:
+            raise ValueError("Cannot validate api key if model client is None")
+
+        return self
 
 
 class ClaudeCreateParams(BaseCreateParams, ClaudeConfig):
@@ -87,49 +106,10 @@ class ClaudeAgent(MCPAgent):
                 raise ValueError("Anthropic API key not found. Set ANTHROPIC_API_KEY.")
             model_client = AsyncAnthropic(api_key=api_key)
 
-        if self.config.validate_api_key:
-            try:
-                AsyncAnthropic(api_key=model_client.api_key).models.list()
-            except Exception as e:
-                raise ValueError(f"Anthropic API key is invalid: {e}") from e
-
         self.anthropic_client = model_client
         self.max_tokens = self.config.max_tokens
         self.use_computer_beta = self.config.use_computer_beta
         self.hud_console = HUDConsole(logger=logger)
-
-        # self.anthropic_client = model_client
-        # self.validate_api_key = self.config.validate_api_key
-        # self.max_tokens = max_tokens
-        # self.use_computer_beta = use_computer_beta
-        # self.hud_console = HUDConsole(logger=logger)
-
-        # if isinstance(self.anthropic_client, AsyncAnthropic):
-        #     self.model = model or "claude-sonnet-4-5"
-        # elif isinstance(self.anthropic_client, AsyncAnthropicBedrock):
-        #     if model is None:
-        #         raise ValueError(
-        #             "`model` field must be set for Bedrock because it requires "
-        #             "an account-specific ARN: find this in the AWS console under "
-        #             "Bedrock -> Cross-region inference -> Inference profile ARN column"
-        #         )
-        #     self.model = model
-        # self.model_name = "Claude"
-        # self.checkpoint_name = self.model
-        # if isinstance(self.anthropic_client, AsyncAnthropic):
-        #     self.model = model or "claude-sonnet-4-5"
-        # elif isinstance(self.anthropic_client, AsyncAnthropicBedrock):
-        #     if model is None:
-        #         raise ValueError(
-        #             "`model` field must be set for Bedrock because it requires "
-        #             "an account-specific ARN: find this in the AWS console under "
-        #             "Bedrock -> Cross-region inference -> Inference profile ARN column"
-        #         )
-        #     self.model = model
-        # else:
-        #     raise ValueError(f"Invalid model client: {type(self.anthropic_client)}")
-        # self.model_name = "Claude"
-        # self.checkpoint_name = self.model
 
         # these will be initialized in _convert_tools_for_claude
         self.has_computer_tool = False
@@ -195,7 +175,7 @@ class ClaudeAgent(MCPAgent):
         if self.has_computer_tool:
             betas.append("computer-use-2025-01-24")
 
-        async with self.anthropic_client.beta.messages.stream(
+        async with self.anthropic_client.beta.messages.stream(  # type: ignore[attr-defined] linter mad at bedrock
             model=self.config.checkpoint_name,
             system=self.system_prompt if self.system_prompt is not None else Omit(),
             max_tokens=self.max_tokens,
