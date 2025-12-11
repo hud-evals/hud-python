@@ -109,7 +109,7 @@ packages = ["hud"]
 agents = [
     # MCP-use client (legacy)
     "mcp-use==1.5.0",
-    "langchain>=1.0.0",  # Required by mcp-use
+    "langchain>=1.1.0",  # Required by mcp-use
     # AI providers
     "anthropic>=0.75",
     "openai>=2.8.1",
