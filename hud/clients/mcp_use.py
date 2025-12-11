@@ -71,6 +71,11 @@ class MCPUseHUDClient(BaseHUDClient):
             logger.warning("Client is already connected, cannot connect again")
             return
 
+        # Increase SSE read timeout to 15 minutes (900s) to support long-running tool calls.
+        for server_cfg in mcp_config.values():
+            if "sse_read_timeout" not in server_cfg:
+                server_cfg["sse_read_timeout"] = 900  # 15 minutes
+
         # If a server target matches HUD's MCP host and no auth is provided,
         # inject the HUD API key as a Bearer token to avoid OAuth browser flow.
         try:
