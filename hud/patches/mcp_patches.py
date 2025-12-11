@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 def patch_streamable_http_error_handling() -> None:
     """
     Patch StreamableHTTPTransport.post_writer to handle request errors properly.
-    
+
     The original implementation doesn't catch errors in handle_request_async,
     which can cause silent failures. This patch wraps the handler to send
     errors to the read stream so clients know the request failed.
@@ -103,7 +103,7 @@ def patch_streamable_http_error_handling() -> None:
 def patch_client_session_validation() -> None:
     """
     Patch ClientSession to skip structured output validation.
-    
+
     The original validation is strict and raises errors for non-conforming
     but usable responses. We replace it with a no-op.
     """
@@ -112,7 +112,6 @@ def patch_client_session_validation() -> None:
 
         async def noop_validate(self: Any, name: str, result: Any) -> None:
             """Skip structured output validation entirely."""
-            pass
 
         ClientSession._validate_tool_result = noop_validate
         logger.debug("Patched ClientSession._validate_tool_result to skip validation")
@@ -126,10 +125,10 @@ def patch_client_session_validation() -> None:
 def suppress_fastmcp_logging(level: int = logging.WARNING) -> None:
     """
     Suppress verbose fastmcp logging.
-    
+
     FastMCP logs a lot of INFO-level messages that clutter output.
     This sets all fastmcp loggers to the specified level.
-    
+
     Args:
         level: Logging level to set (default: WARNING)
     """
@@ -150,4 +149,3 @@ def apply_all_patches() -> None:
     patch_client_session_validation()
     suppress_fastmcp_logging()
     logger.debug("All MCP patches applied")
-

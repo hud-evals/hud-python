@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 class RemoteConnectorMixin(MCPConfigConnectorMixin):
     """Mixin providing remote connection methods.
-    
+
     Note: include_router() is inherited from MCPServer (via FastMCP).
     """
 
@@ -183,5 +183,5 @@ class RemoteConnectorMixin(MCPConfigConnectorMixin):
             client=client,
             name=name or "openapi",
         )
-        self.include_router(mcp_server, prefix=prefix) # type: ignore
+        self.include_router(mcp_server, prefix=prefix)  # type: ignore
         return self

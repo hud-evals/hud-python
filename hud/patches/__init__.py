@@ -11,4 +11,3 @@ from hud.patches.mcp_patches import apply_all_patches, suppress_fastmcp_logging
 apply_all_patches()
 
 __all__ = ["apply_all_patches", "suppress_fastmcp_logging"]
-

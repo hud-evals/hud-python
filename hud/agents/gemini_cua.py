@@ -249,7 +249,7 @@ class GeminiCUAAgent(GeminiAgent):
             # Map common argument shapes used by Gemini Computer Use
             # 1) Coordinate arrays → x/y
             coord = raw_args.get("coordinate") or raw_args.get("coordinates")
-            if isinstance(coord, (list, tuple)) and len(coord) >= 2:
+            if isinstance(coord, list | tuple) and len(coord) >= 2:
                 try:
                     normalized_args["x"] = int(coord[0])
                     normalized_args["y"] = int(coord[1])
@@ -263,7 +263,7 @@ class GeminiCUAAgent(GeminiAgent):
                 or raw_args.get("destination_coordinate")
                 or raw_args.get("destinationCoordinate")
             )
-            if isinstance(dest, (list, tuple)) and len(dest) >= 2:
+            if isinstance(dest, list | tuple) and len(dest) >= 2:
                 try:
                     normalized_args["destination_x"] = int(dest[0])
                     normalized_args["destination_y"] = int(dest[1])

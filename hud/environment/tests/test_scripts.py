@@ -59,6 +59,7 @@ class TestScriptDecorator:
         # Find the prompt
         prompt = env._prompt_manager._prompts.get("test-env:checkout")
         assert prompt is not None
+        assert prompt.arguments is not None
 
         # Check arguments
         arg_names = [arg.name for arg in prompt.arguments]
@@ -106,6 +107,7 @@ class TestScriptExecution:
 
         # Run setup via prompt - no need for context
         prompt = env._prompt_manager._prompts.get("test-env:test")
+        assert prompt is not None
         await prompt.render({})
 
         # Check session was stored
@@ -126,13 +128,15 @@ class TestScriptExecution:
 
         # Setup phase - no context needed for prompt/resource
         prompt = env._prompt_manager._prompts.get("test-env:test")
+        assert prompt is not None
         await prompt.render({})
         assert "setup" in phases
         assert "evaluate" not in phases
 
         # Evaluate phase
         resource = env._resource_manager._resources.get("test-env:test")
-        reward_result = await resource.read()
+        assert resource is not None
+        await resource.read()
         assert "evaluate" in phases
 
 
@@ -153,10 +157,9 @@ class TestScriptWithArgs:
             yield 1.0
 
         prompt = env._prompt_manager._prompts.get("test-env:checkout")
-
+        assert prompt is not None
         # No context needed for prompt render
         await prompt.render({"user_id": "alice", "amount": 50})
 
         assert received_args["user_id"] == "alice"
         assert received_args["amount"] == 50
-

@@ -63,7 +63,7 @@ class ScriptMixin:
         self._script_sessions = {}
         self._script_latest = {}
         self._script_answers = {}
-        
+
         # Register _hud_submit tool (underscore = hidden from agent)
         self._register_hud_submit_tool()
 
@@ -80,14 +80,17 @@ class ScriptMixin:
         Example:
             # Direct call with script name
             await env.submit("checkout", "Order completed successfully")
-            
+
             # Or via EvalContext (knows its own script)
             await ctx.submit("Order completed successfully")
         """
         # Store locally for our scripts
         self._script_answers[script] = answer
-        logger.debug("Stored answer for script '%s': %s...",
-                    script, answer[:50] if len(answer) > 50 else answer)
+        logger.debug(
+            "Stored answer for script '%s': %s...",
+            script,
+            answer[:50] if len(answer) > 50 else answer,
+        )
 
         # Broadcast to connections that have _hud_submit
         # Environment._broadcast_tool auto-filters to connections with the tool
@@ -99,7 +102,7 @@ class ScriptMixin:
 
     def _register_hud_submit_tool(self) -> None:
         """Register the _hud_submit tool for receiving agent answers.
-        
+
         Named with underscore prefix to hide from agent tool listings.
         """
         from fastmcp.tools import Tool
@@ -117,8 +120,11 @@ class ScriptMixin:
             """
             # Store locally (don't broadcast - we ARE the target)
             script_self._script_answers[script] = answer
-            logger.debug("_hud_submit received answer for script '%s': %s...",
-                        script, answer[:50] if len(answer) > 50 else answer)
+            logger.debug(
+                "_hud_submit received answer for script '%s': %s...",
+                script,
+                answer[:50] if len(answer) > 50 else answer,
+            )
             return f"Answer submitted for script '{script}'"
 
         # Register the tool with underscore name
@@ -128,14 +134,14 @@ class ScriptMixin:
 
     async def run_script_setup(self, script_name: str, args: dict[str, Any]) -> str | None:
         """Run a script's setup phase and return the prompt.
-        
+
         Handles both local scripts (registered via @env.script) and remote
         scripts (via MCP prompt).
-        
+
         Args:
             script_name: Name of the script to run
             args: Arguments to pass to the script
-            
+
         Returns:
             The prompt string from the script's setup phase, or None if failed
         """
@@ -180,13 +186,13 @@ class ScriptMixin:
 
     async def run_script_evaluate(self, script_name: str) -> float | None:
         """Run a script's evaluate phase and return the reward.
-        
+
         Uses the submitted answer (if any) via gen.asend().
         Handles both local and remote scripts.
-        
+
         Args:
             script_name: Name of the script to evaluate
-            
+
         Returns:
             The reward from the script's evaluate phase, or None if failed
         """
@@ -338,9 +344,7 @@ class ScriptMixin:
 
                 gen = script_self._script_sessions.pop(session_id, None)
                 if gen is None:
-                    raise ValueError(
-                        f"Session '{session_id}' not found or already evaluated."
-                    )
+                    raise ValueError(f"Session '{session_id}' not found or already evaluated.")
 
                 # Get submitted answer (if any)
                 answer = script_self._script_answers.pop(script_name_ref, None)
@@ -388,4 +392,3 @@ class ScriptMixin:
             return fn
 
         return decorator
-

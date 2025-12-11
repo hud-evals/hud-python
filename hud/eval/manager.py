@@ -12,7 +12,6 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from hud.eval.display import print_complete, print_eval_stats, print_link
-from hud.eval.types import ParallelEvalComplete
 from hud.eval.parallel import (
     ASTExtractionError,
     expand_variants,
@@ -20,6 +19,7 @@ from hud.eval.parallel import (
     get_with_block_body,
     resolve_group_ids,
 )
+from hud.eval.types import ParallelEvalComplete
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -118,7 +118,6 @@ def _load_evals_from_slugs(slugs: str | list[str]) -> list[Eval]:
     """
     import httpx
 
-    from hud.eval.eval import Eval
     from hud.settings import settings
 
     if isinstance(slugs, str):
@@ -381,7 +380,7 @@ async def run_eval(
                 _trace=trace,
                 _quiet=quiet,
             )
-        
+
         # Apply common settings
         single_eval.api_key = api_key
         single_eval.job_id = job_id
@@ -389,7 +388,7 @@ async def run_eval(
         single_eval.code_snippet = code_snippet
         single_eval._trace = trace
         single_eval._quiet = quiet
-        
+
         async with single_eval as ctx:
             yield ctx
 
@@ -485,7 +484,6 @@ async def _run_parallel_eval(
     import textwrap
 
     # Lazy import to avoid circular dependency
-    from hud.eval.context import EvalContext
     from hud.eval.eval import Eval
     from hud.eval.parallel import log_eval_stats
 

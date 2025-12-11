@@ -593,9 +593,9 @@ class MCPServer(FastMCP):
                     # Recursively serialize MCP objects
                     def serialize_obj(obj: Any) -> Any:
                         """Recursively serialize MCP objects to JSON-compatible format."""
-                        if obj is None or isinstance(obj, (str, int, float, bool)):
+                        if obj is None or isinstance(obj, str | int | float | bool):
                             return obj
-                        if isinstance(obj, (list, tuple)):
+                        if isinstance(obj, list | tuple):
                             return [serialize_obj(item) for item in obj]
                         if isinstance(obj, dict):
                             return {k: serialize_obj(v) for k, v in obj.items()}

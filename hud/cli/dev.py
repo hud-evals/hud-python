@@ -153,7 +153,7 @@ async def run_mcp_module(
     new_trace: bool = False,
 ) -> None:
     """Run an MCP module directly.
-    
+
     Args:
         module_spec: Module specification in format "module" or "module:attribute"
                     e.g., "server" (looks for mcp), "env:env" (looks for env)
@@ -164,7 +164,7 @@ async def run_mcp_module(
     else:
         module_name = module_spec
         attr_name = "mcp"  # Default attribute
-    
+
     # Check if this is a reload (not first run)
     is_reload = os.environ.get("_HUD_DEV_RELOAD") == "1"
 

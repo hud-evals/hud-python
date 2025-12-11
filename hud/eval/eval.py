@@ -45,14 +45,14 @@ def build_eval_name(script: str | None, args: dict[str, Any] | None) -> str:
         return "eval"
     if not args:
         return script
-    
+
     val_parts = []
     for v in list(args.values())[:3]:  # Max 3 values
         v_str = repr(v) if isinstance(v, str) else str(v)
         if len(v_str) > 25:
             v_str = v_str[:22] + "..."
         val_parts.append(v_str)
-    
+
     if val_parts:
         return f"{script} with {', '.join(val_parts)}"
     return script
@@ -138,6 +138,7 @@ class Eval:
         task = getattr(self, "_task", None)
         if task is not None:
             import warnings
+
             warnings.warn(
                 "Task objects are deprecated. Use Eval from env() instead.",
                 DeprecationWarning,
@@ -190,7 +191,7 @@ class Eval:
 
     async def __aenter__(self) -> EvalContext:
         """Enter eval context.
-        
+
         Order of operations:
         1. Create EvalContext from environment config
         2. Connect environment (MCP servers, etc.)

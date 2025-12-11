@@ -37,13 +37,13 @@ def _has_hud_dependency(directory: Path) -> bool:
 
 def _add_hud_dependency(directory: Path) -> str:
     """Add hud-python using uv if available.
-    
+
     Returns:
         "exists" if already present, "added" if added, "failed" if failed
     """
     if _has_hud_dependency(directory):
         return "exists"
-    
+
     try:
         result = subprocess.run(
             ["uv", "add", "hud-python", "openai"],  # noqa: S607
@@ -91,9 +91,9 @@ def smart_init(
     - Otherwise: create new HUD environment
     """
     from hud.settings import settings
-    
+
     hud_console = HUDConsole()
-    
+
     # Check for API key first
     if not settings.api_key:
         hud_console.error("HUD_API_KEY not found")
@@ -104,7 +104,7 @@ def smart_init(
         hud_console.info("")
         hud_console.info("Get your key at: https://hud.ai/settings/api-keys")
         return
-    
+
     target = Path(directory).resolve()
 
     # If directory is empty, use preset selection

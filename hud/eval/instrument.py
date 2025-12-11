@@ -27,11 +27,11 @@ def _is_hud_url(url_str: str) -> bool:
     """Check if URL is a HUD service (inference or MCP)."""
     parsed = urlparse(url_str)
     request_host = parsed.netloc or url_str.split("/")[0]
-    
+
     # Check for known HUD domains (works for any subdomain)
     if request_host.endswith((".hud.ai", ".hud.so")):
         return True
-    
+
     # Also check settings URLs
     known_hosts = {
         urlparse(settings.hud_gateway_url).netloc,

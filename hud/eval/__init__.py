@@ -36,11 +36,11 @@ from typing import TYPE_CHECKING
 # Auto-instrument httpx on import
 import hud.eval.instrument  # noqa: F401
 
-# run_eval is safe to import (uses lazy imports internally)
-from hud.eval.manager import run_eval
-
 # Eval is safe to import
 from hud.eval.eval import Eval
+
+# run_eval is safe to import (uses lazy imports internally)
+from hud.eval.manager import run_eval
 
 if TYPE_CHECKING:
     from hud.eval.context import EvalContext

@@ -173,5 +173,5 @@ class LocalConnectorMixin(MCPConfigConnectorMixin):
                 result = await env.call_tool("greet", name="World")
             ```
         """
-        self.include_router(server, prefix=prefix) # type: ignore
+        self.include_router(server, prefix=prefix)  # type: ignore
         return self

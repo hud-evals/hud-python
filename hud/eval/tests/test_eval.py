@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -34,7 +34,7 @@ class TestEvalDataclass:
     def test_copy_creates_new_instance(self) -> None:
         """copy() creates a new Eval instance."""
         original = Eval(
-            env_config={"name": "test"},
+            env={"name": "test"},
             script="checkout",
             args={"user_id": "alice"},
             variants={"model": "gpt-4o"},
@@ -42,7 +42,7 @@ class TestEvalDataclass:
         copied = original.copy()
 
         assert copied is not original
-        assert copied.env_config == original.env_config
+        assert copied.env == original.env
         assert copied.script == original.script
         assert copied.args == original.args
         assert copied.args is not original.args  # Deep copy
@@ -128,9 +128,9 @@ class TestEvalContextManager:
         with (
             patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
             patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
-            patch.object(EvalContext, "__aexit__", new_callable=AsyncMock) as mock_exit,
+            patch.object(EvalContext, "__aexit__", new_callable=AsyncMock),
         ):
-            ctx = await ev.__aenter__()
+            await ev.__aenter__()
             assert ev._ctx is not None
 
             # Manually call __aexit__ on Eval (which will call mocked ctx.__aexit__)
@@ -233,4 +233,3 @@ class TestEnvironmentCall:
         assert ev2.env_config is not None
         assert ev2.env_config["name"] == "test-env"
         assert len(ev2.env_config["setup_tools"]) == 1
-

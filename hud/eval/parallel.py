@@ -7,7 +7,6 @@ the same eval body N times concurrently.
 from __future__ import annotations
 
 import ast
-import asyncio
 import inspect
 import itertools
 import linecache

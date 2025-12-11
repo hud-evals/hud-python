@@ -196,7 +196,7 @@ class Environment(
 
     def _connections_with_tool(self, tool_name: str) -> set[str]:
         """Get connection names that have a specific tool.
-        
+
         Uses cached_tools from each Connector to check availability.
         """
         result = set()
@@ -207,19 +207,19 @@ class Environment(
         return result
 
     async def _broadcast_tool(
-        self, 
-        tool_name: str, 
+        self,
+        tool_name: str,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Broadcast a tool call to all connections that have the tool.
-        
+
         Automatically filters to only connections where the tool exists
         (based on cached_tools from initial discovery).
-        
+
         Args:
             tool_name: Name of the tool to call
             **kwargs: Arguments to pass to the tool
-            
+
         Returns:
             Dict mapping connection name to result (or exception)
         """
@@ -229,9 +229,9 @@ class Environment(
         targets = self._connections_with_tool(tool_name)
         if not targets:
             return {}
-            
+
         results: dict[str, Any] = {}
-        
+
         async def call_one(name: str) -> None:
             connector = self._connections.get(name)
             if not connector or not connector.client:
@@ -242,7 +242,7 @@ class Environment(
             except Exception as e:
                 results[name] = e
                 logger.debug("Broadcast '%s' to '%s' failed: %s", tool_name, name, e)
-        
+
         await asyncio.gather(*[call_one(n) for n in targets], return_exceptions=True)
         return results
 
@@ -611,10 +611,12 @@ class Environment(
             ```python
             env = Environment("my-env").connect_hub("browser")
 
+
             @env.script()
             async def checkout(user_id: str):
                 yield "Complete checkout"
                 yield 1.0
+
 
             # Simple use - Eval is context manager
             async with env("checkout", user_id="alice") as ctx:

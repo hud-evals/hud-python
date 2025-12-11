@@ -46,7 +46,7 @@ def _truncate_value(value: Any, max_len: int = 60) -> str:
         if len(value) > max_len:
             return value[:max_len] + "…"
         return value
-    elif isinstance(value, (dict, list)):
+    elif isinstance(value, dict | list):
         s = json.dumps(value, separators=(",", ":"))
         if len(s) > max_len:
             return s[:max_len] + "…"

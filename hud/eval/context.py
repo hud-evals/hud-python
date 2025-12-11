@@ -253,7 +253,7 @@ class EvalContext(Environment):
         ctx._script_sessions = {}
         ctx._script_latest = {}
         ctx._script_answers = {}
-        
+
         # Store source env name for remote script lookups
         ctx._source_env_name = env.name
 
