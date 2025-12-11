@@ -407,7 +407,7 @@ class Environment(
 
     async def list_resources(self) -> list[mcp_types.Resource]:
         """List all resources (local + remote)."""
-        local = await self._resource_manager.list_resources()
+        local = list((await self._resource_manager.get_resources()).values())
         resources: list[mcp_types.Resource] = [r.to_mcp_resource() for r in local]
 
         if self._connections:
@@ -456,7 +456,7 @@ class Environment(
 
     async def list_prompts(self) -> list[mcp_types.Prompt]:
         """List all prompts (local + remote)."""
-        local = await self._prompt_manager.list_prompts()
+        local = list((await self._prompt_manager.get_prompts()).values())
         prompts: list[mcp_types.Prompt] = [p.to_mcp_prompt() for p in local]
 
         if self._connections:

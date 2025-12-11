@@ -47,9 +47,9 @@ class TestOpenAIMixin:
 
         assert len(tools) == 1
         assert tools[0]["type"] == "function"
-        assert tools[0]["function"]["name"] == "navigate"
-        assert tools[0]["function"]["description"] == "Navigate to URL"
-        assert "url" in tools[0]["function"]["parameters"]["properties"]
+        assert tools[0]["function"]["name"] == "navigate"  # type: ignore[typeddict-item]
+        assert tools[0]["function"]["description"] == "Navigate to URL"  # type: ignore[typeddict-item]
+        assert "url" in tools[0]["function"]["parameters"]["properties"]  # type: ignore[typeddict-item, operator]
 
     def test_as_openai_chat_tools_strict_mode(self) -> None:
         """as_openai_chat_tools with strict=True adds strict flag."""
@@ -65,7 +65,7 @@ class TestOpenAIMixin:
         env = TestEnv()
         tools = env.as_openai_chat_tools(strict=True)
 
-        assert tools[0]["function"]["strict"] is True
+        assert tools[0]["function"]["strict"] is True  # type: ignore[typeddict-item]
 
     def test_as_openai_chat_tools_empty(self) -> None:
         """as_openai_chat_tools returns empty list when no tools."""

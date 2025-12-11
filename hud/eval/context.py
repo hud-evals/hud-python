@@ -165,6 +165,7 @@ class EvalContext(Environment):
         self._suppress_link: bool = quiet  # True to suppress printing eval link
         self._trace_enabled: bool = trace  # Whether to send trace data to backend
         self._script_name: str | None = None  # Current script name (for submit)
+        self._source_env_name: str | None = None  # Source env name for remote lookups
 
     def _apply_task(self, task: Task) -> None:
         """Apply a Task definition to this environment."""

@@ -68,12 +68,13 @@ async def run_single_task(
         group_id=group_id,
     )
 
+    result: Trace
     async with ctx:
         agent = agent_type.cls.create(**(agent_params or {}))
         result = await agent.run(task, max_steps=max_steps)
         # Transfer reward to context for tracking
         ctx.reward = result.reward
-        return result
+    return result
 
 
 async def run_tasks(

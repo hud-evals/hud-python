@@ -9,9 +9,8 @@ from urllib.parse import urlparse
 
 from mcp import Implementation, types
 from mcp.shared.exceptions import McpError
-from mcp_use.client import MCPClient as MCPUseClient
-from mcp_use.session import MCPSession as MCPUseSession
-from mcp_use.types.http import HttpOptions
+from mcp_use.client.client import MCPClient as MCPUseClient
+from mcp_use.client.session import MCPSession as MCPUseSession
 from pydantic import AnyUrl
 
 from hud.settings import settings
@@ -20,7 +19,6 @@ from hud.utils.hud_console import HUDConsole
 from hud.version import __version__ as hud_version
 
 from .base import BaseHUDClient
-from .utils.retry_transport import create_retry_httpx_client
 
 logger = logging.getLogger(__name__)
 hud_console = HUDConsole(logger=logger)
@@ -58,12 +56,6 @@ class MCPUseHUDClient(BaseHUDClient):
             str, tuple[str, types.Tool, types.Tool]
         ] = {}  # server_name, original_tool, prefixed_tool
         self._client: Any | None = None  # Will be MCPUseClient when available
-        # Transport options for MCP-use (disable_sse_fallback, httpx_client_factory, etc.)
-        # Default to retry-enabled HTTPX client if factory not provided
-        self._http_options: HttpOptions = HttpOptions(
-            httpx_client_factory=create_retry_httpx_client,
-            disable_sse_fallback=True,
-        )
 
     async def _connect(self, mcp_config: dict[str, dict[str, Any]]) -> None:
         """Create all sessions for MCP-use client."""
@@ -88,7 +80,7 @@ class MCPUseHUDClient(BaseHUDClient):
         config = {"mcpServers": mcp_config}
         if MCPUseClient is None:
             raise ImportError("MCPUseClient is not available")
-        self._client = MCPUseClient.from_dict(config, http_options=self._http_options)
+        self._client = MCPUseClient.from_dict(config)
         try:
             assert self._client is not None
             self._sessions = await self._client.create_all_sessions()
