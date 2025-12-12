@@ -208,6 +208,20 @@ config = env.as_gemini_tool_config()
 tools = env.as_langchain_tools()
 ```
 
+### LlamaIndex
+
+```python
+# Requires llama-index-core
+tools = env.as_llamaindex_tools()
+```
+
+### Google ADK
+
+```python
+# Requires google-adk
+tools = env.as_adk_tools()
+```
+
 ## Calling Tools
 
 ### call_tool()

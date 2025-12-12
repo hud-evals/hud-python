@@ -35,8 +35,7 @@
             "group": "Get Started",
             "pages": [
               "index",
-              "llm-quickstart",
-              "migration"
+              "llm-quickstart"
             ]
           },
           {
@@ -57,6 +56,13 @@
               "reference/mcpserver",
               "reference/agents",
               "reference/types"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/agent-frameworks",
+              "migration"
             ]
           },
           {
