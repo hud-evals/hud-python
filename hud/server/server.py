@@ -242,6 +242,7 @@ class MCPServer(FastMCP):
         old_notification_handlers = self._mcp_server.notification_handlers
 
         self._mcp_server = LowLevelServerWithInit(
+            self,  # Pass FastMCP instance as required by parent class
             name=self.name,
             version=self.version,
             instructions=self.instructions,
