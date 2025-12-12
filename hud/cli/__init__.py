@@ -16,17 +16,11 @@ from rich.table import Table
 from hud.utils.hud_console import HUDConsole
 
 from . import list_func as list_module
-from .analyze import (
-    analyze_environment,
-    analyze_environment_from_config,
-    analyze_environment_from_mcp_config,
-)
 from .build import build_command
 from .clone import clone_repository, get_clone_message, print_error, print_tutorial
 from .debug import debug_mcp_stdio
 from .dev import run_mcp_dev_server
 from .eval import eval_command
-from .init import create_environment
 from .pull import pull_command
 from .push import push_command
 from .remove import remove_command
@@ -104,6 +98,13 @@ def analyze(
         hud analyze --config mcp-config.json # From MCP config
         hud analyze --cursor text-2048-dev   # From Cursor config[/not dim]
     """
+    # Lazy import to avoid loading mcp_use on simple CLI commands
+    from .analyze import (
+        analyze_environment,
+        analyze_environment_from_config,
+        analyze_environment_from_mcp_config,
+    )
+
     if config:
         # Load config from JSON file (always live for configs)
         asyncio.run(analyze_environment_from_config(config, output_format, verbose))
@@ -363,6 +364,69 @@ def version() -> None:
         console.print(f"HUD CLI version: [cyan]{__version__}[/cyan]")
     except ImportError:
         console.print("HUD CLI version: [cyan]unknown[/cyan]")
+
+
+@app.command()
+def models(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """📋 List available models from HUD inference gateway.
+
+    [not dim]Shows models available via the HUD inference gateway at inference.hud.ai.
+
+    Examples:
+        hud models              # List all models
+        hud models --json       # Output as JSON[/not dim]
+    """
+    from hud.settings import settings
+
+    try:
+        response = httpx.get(
+            f"{settings.hud_gateway_url}/models",
+            headers={"Authorization": f"Bearer {settings.api_key}"} if settings.api_key else {},
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        if json_output:
+            console.print_json(json.dumps(data, indent=2))
+            return
+
+        # Parse and display models
+        models_list = data.get("data", data) if isinstance(data, dict) else data
+
+        if not models_list:
+            console.print("[yellow]No models found[/yellow]")
+            return
+
+        console.print(Panel.fit("📋 [bold cyan]Available Models[/bold cyan]", border_style="cyan"))
+
+        table = Table()
+        table.add_column("Name", style="cyan")
+        table.add_column("Model (API)", style="green")
+        table.add_column("Routes", style="yellow")
+
+        for model in models_list:
+            if isinstance(model, dict):
+                name = model.get("name", "-")
+                api_model = model.get("model", model.get("id", "-"))
+                routes = model.get("routes", [])
+                routes_str = ", ".join(routes) if routes else "-"
+                table.add_row(name, api_model, routes_str)
+            else:
+                table.add_row(str(model), "-", "-")
+
+        console.print(table)
+        console.print(f"\n[dim]Gateway: {settings.hud_gateway_url}[/dim]")
+
+    except httpx.HTTPStatusError as e:
+        console.print(f"[red]❌ API error: {e.response.status_code}[/red]")
+        console.print(f"[dim]{e.response.text}[/dim]")
+        raise typer.Exit(1) from e
+    except Exception as e:
+        console.print(f"[red]❌ Failed to fetch models: {e}[/red]")
+        raise typer.Exit(1) from e
 
 
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
@@ -826,31 +890,37 @@ def remove(
 
 @app.command()
 def init(
-    name: str = typer.Argument(None, help="Environment name (default: chosen preset name)"),
+    name: str = typer.Argument(None, help="Environment name (default: directory name)"),
+    directory: str = typer.Option(".", "--dir", "-d", help="Target directory"),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing files"),
     preset: str | None = typer.Option(
         None,
         "--preset",
         "-p",
-        help="Preset to use: blank, deep-research, browser, rubrics. If omitted, you'll choose interactively.",  # noqa: E501
+        help="Download a preset: blank, deep-research, browser, rubrics",
     ),
-    directory: str = typer.Option(".", "--dir", "-d", help="Parent directory for the environment"),
-    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing files"),
 ) -> None:
-    """🚀 Initialize a new HUD environment with minimal boilerplate.
+    """🚀 Initialize a HUD environment.
 
-    [not dim]Creates a working MCP environment with:
-    - Dockerfile for containerization
-    - pyproject.toml for dependencies
-    - Minimal MCP server with context
-    - Required setup/evaluate tools
+    [not dim]• Empty directory: Choose a preset interactively
+    • Existing project: Add Dockerfile.hud and hud.py
+
+    Use --preset to skip selection and download a specific template.
 
     Examples:
-        hud init                    # Choose preset interactively, create ./preset-name/
-        hud init my-env             # Create new directory ./my-env/
-        hud init my-env --dir /tmp  # Create in /tmp/my-env/[/not dim]
+        hud init                    # Auto-detect mode
+        hud init my-env             # Initialize with custom name
+        hud init --preset browser   # Download browser preset[/not dim]
 
     """
-    create_environment(name, directory, force, preset)
+    if preset:
+        from hud.cli.init import create_environment
+
+        create_environment(name, directory, force, preset)
+    else:
+        from hud.cli.flows.init import smart_init
+
+        smart_init(name, directory, force)
 
 
 @app.command()
@@ -895,100 +965,6 @@ def get(
         output=output,
         limit=limit,
         format=format,
-    )
-
-
-@app.command()
-def rl(
-    tasks_file: str | None = typer.Argument(
-        None,
-        help=(
-            "Path to tasks file (JSON/JSONL) or HuggingFace dataset name. "
-            "If not provided, looks for tasks.json or tasks.jsonl in current directory."
-        ),
-    ),
-    model: str | None = typer.Argument(
-        None,
-        help="Model to train from https://hud.ai/models (default: interactive selection)",
-    ),
-    config_file: Path | None = typer.Option(  # noqa: B008
-        None,
-        "--config",
-        "-c",
-        help="Path to existing configuration file",
-    ),
-    output_dir: str = typer.Option(
-        "checkpoints",
-        "--output-dir",
-        "-o",
-        help="Output directory for checkpoints",
-    ),
-    restart: bool = typer.Option(
-        False,
-        "--restart",
-        help="Restart the vLLM server before training",
-    ),
-    verbose: bool = typer.Option(
-        False,
-        "--verbose",
-        "-v",
-        help="Enable verbose output",
-    ),
-    local: bool = typer.Option(
-        False,
-        "--local",
-        help="Run training locally instead of using remote API server",
-    ),
-    no_ddp: bool = typer.Option(
-        False,
-        "--no-ddp",
-        help="Disable DDP even with multiple GPUs",
-    ),
-    ddp_gpus: str | None = typer.Option(
-        None,
-        "--ddp-gpus",
-        help="Specific GPUs for DDP (e.g., '0,1,2,3')",
-    ),
-    yes: bool = typer.Option(
-        False,
-        "--yes",
-        "-y",
-        help="Auto-accept all prompts and use defaults (lazy mode)",
-    ),
-    vllm_gpu: int | None = typer.Option(
-        None,
-        "--vllm-gpu",
-        help="Specific GPU for vLLM server",
-    ),
-    vllm_gpu_count: int = typer.Option(
-        1,
-        "--vllm-gpu-count",
-        help="Number of GPUs for vLLM server",
-    ),
-    skip_vllm_startup: bool = typer.Option(
-        False,
-        "--skip_vllm_startup",
-        help="Skip the vLLM server startup",
-    ),
-) -> None:
-    """🎯 Run GRPO reinforcement learning training on tasks."""
-    # Import from the rl module
-    from .rl import rl_command
-
-    rl_command(
-        tasks_file=tasks_file,
-        model=model,
-        config_file=config_file,
-        output_dir=output_dir,
-        restart=restart,
-        verbose=verbose,
-        local=local,
-        no_ddp=no_ddp,
-        ddp_gpus=ddp_gpus,
-        vllm_gpu=vllm_gpu,
-        vllm_gpu_count=vllm_gpu_count,
-        yes=yes,
-        skip_vllm_startup=skip_vllm_startup,
     )
 
 

@@ -1,7 +1,13 @@
 """HUD OpenTelemetry integration.
 
+.. deprecated::
+    The `hud.otel` module is deprecated and will be removed in a future version.
+    Use `env.trace()` from `hud.environment.Environment` instead.
+
+    This module requires the [agents] extra:
+        pip install hud-python[agents]
+
 This package provides the internal OpenTelemetry implementation for HUD telemetry.
-Users should interact with the telemetry APIs through hud.telemetry instead.
 
 Internal Components:
 - config: OpenTelemetry configuration and setup
@@ -14,6 +20,8 @@ Internal Components:
 
 from __future__ import annotations
 
+import warnings
+
 from .collector import enable_trace_collection
 from .config import configure_telemetry, is_telemetry_configured, shutdown_telemetry
 from .context import (
@@ -21,6 +29,14 @@ from .context import (
     is_root_trace,
     span_context,
     trace,
+)
+
+# Show deprecation warning when module is imported
+warnings.warn(
+    "The hud.otel module is deprecated. Use env.trace() instead. "
+    "This module requires pip install hud-python[agents].",
+    DeprecationWarning,
+    stacklevel=2,
 )
 
 __all__ = [

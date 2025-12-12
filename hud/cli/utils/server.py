@@ -138,9 +138,9 @@ class MCPServerManager:
             logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
             logging.getLogger("uvicorn.error").setLevel(logging.ERROR)
 
-            import warnings
+            from hud.patches.warnings import apply_default_warning_filters
 
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            apply_default_warning_filters(verbose=False)
 
         try:
             await proxy.run_async(

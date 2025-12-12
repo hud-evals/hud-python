@@ -105,6 +105,7 @@ class BaseHUDClient(AgentMCPClient):
         self._initialized = False
         self._telemetry_data = {}  # Initialize telemetry data
         self._cached_resources: list[types.Resource] = []  # Cache for resources
+        self._cached_prompts: list[types.Prompt] = []  # Cache for prompts
 
         if self.verbose:
             self._setup_verbose_logging()
@@ -172,6 +173,7 @@ class BaseHUDClient(AgentMCPClient):
             await self._disconnect()
             self._initialized = False
             self._cached_resources.clear()
+            self._cached_prompts.clear()
             hud_console.info("Environment Shutdown completed")
         else:
             hud_console.debug("Client was not initialized, skipping disconnect")
@@ -230,6 +232,23 @@ class BaseHUDClient(AgentMCPClient):
     async def _list_resources_impl(self) -> list[types.Resource]:
         """Implementation-specific resource listing. Subclasses must implement this."""
         raise NotImplementedError
+
+    async def list_prompts(self) -> list[types.Prompt]:
+        """List all available prompts.
+
+        Uses cached prompts if available, otherwise fetches from the server.
+        Prompts are optional in MCP; default implementation returns an empty list.
+        """
+        if not self._cached_prompts:
+            self._cached_prompts = await self._list_prompts_impl()
+        return self._cached_prompts
+
+    async def _list_prompts_impl(self) -> list[types.Prompt]:
+        """Implementation-specific prompt listing (optional).
+
+        Subclasses can override to support prompt discovery.
+        """
+        return []
 
     @abstractmethod
     async def _call_tool(self, tool_call: MCPToolCall) -> MCPToolResult:
@@ -347,6 +366,9 @@ class BaseHUDClient(AgentMCPClient):
             "hub_tools": {},
             "telemetry": self._telemetry_data,
             "resources": [],
+            "prompts": [],
+            "scenarios": [],
+            "verbose": self.verbose,
             "metadata": {
                 "servers": list(self._mcp_config.keys()),  # type: ignore
                 "initialized": self._initialized,
@@ -387,7 +409,81 @@ class BaseHUDClient(AgentMCPClient):
                 analysis["resources"].append(resource_info)
         except Exception as e:
             if self.verbose:
-                hud_console.debug(f"Could not list resources: {e}")
+                hud_console.debug("Could not list resources: " + str(e))
+
+        # Get all prompts (optional)
+        try:
+            prompts = await self.list_prompts()
+            for prompt in prompts:
+                raw_args = getattr(prompt, "arguments", []) or []
+                args: list[dict[str, Any]] = [
+                    {
+                        "name": getattr(a, "name", None),
+                        "required": getattr(a, "required", None),
+                        "description": getattr(a, "description", None),
+                    }
+                    for a in raw_args
+                ]
+
+                analysis["prompts"].append(
+                    {
+                        "name": prompt.name,
+                        "description": prompt.description,
+                        "arguments": args,
+                    }
+                )
+        except Exception as e:
+            if self.verbose:
+                hud_console.debug("Could not list prompts: " + str(e))
+
+        # Derive "scenarios" from Environment.@script prompts/resources.
+        # A scenario is exposed as:
+        # - Prompt: name "{env}:{script}" with description prefix "[Setup]"
+        # - Resource: uri "{env}:{script}" with description prefix "[Evaluate]"
+        scenarios_by_id: dict[str, dict[str, Any]] = {}
+
+        for p in analysis.get("prompts", []):
+            desc = (p.get("description") or "").strip()
+            if not desc.startswith("[Setup]"):
+                continue
+            scenario_id = p.get("name")
+            if not scenario_id:
+                continue
+            env_name, script_name = ([*scenario_id.split(":", 1), ""])[:2]
+            scenarios_by_id[scenario_id] = {
+                "id": scenario_id,
+                "env": env_name,
+                "name": script_name or scenario_id,
+                "setup_description": desc,
+                "arguments": p.get("arguments") or [],
+                "has_setup_prompt": True,
+                "has_evaluate_resource": False,
+            }
+
+        for r in analysis.get("resources", []):
+            desc = (r.get("description") or "").strip()
+            if not desc.startswith("[Evaluate]"):
+                continue
+            scenario_id = r.get("uri")
+            if not scenario_id:
+                continue
+            env_name, script_name = ([*scenario_id.split(":", 1), ""])[:2]
+            if scenario_id not in scenarios_by_id:
+                scenarios_by_id[scenario_id] = {
+                    "id": scenario_id,
+                    "env": env_name,
+                    "name": script_name or scenario_id,
+                    "arguments": [],
+                    "has_setup_prompt": False,
+                    "has_evaluate_resource": True,
+                }
+            scenarios_by_id[scenario_id]["evaluate_description"] = desc
+            scenarios_by_id[scenario_id]["has_evaluate_resource"] = True
+
+        analysis["scenarios"] = sorted(
+            scenarios_by_id.values(),
+            key=lambda s: (str(s.get("env") or ""), str(s.get("name") or "")),
+        )
 
         return analysis
 

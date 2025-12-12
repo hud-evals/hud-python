@@ -242,6 +242,7 @@ class MCPServer(FastMCP):
         old_notification_handlers = self._mcp_server.notification_handlers
 
         self._mcp_server = LowLevelServerWithInit(
+            self,  # Pass FastMCP instance as required by parent class
             name=self.name,
             version=self.version,
             instructions=self.instructions,
@@ -486,7 +487,6 @@ class MCPServer(FastMCP):
         for key, prompt in router._prompt_manager._prompts.items():
             new_key = f"{prefix}_{key}" if prefix else key
             self._prompt_manager._prompts[new_key] = prompt
-        # await self.import_server(hidden_router, prefix=None, **kwargs)
 
     def _get_docker_logs(
         self,
@@ -594,9 +594,9 @@ class MCPServer(FastMCP):
                     # Recursively serialize MCP objects
                     def serialize_obj(obj: Any) -> Any:
                         """Recursively serialize MCP objects to JSON-compatible format."""
-                        if obj is None or isinstance(obj, (str, int, float, bool)):
+                        if obj is None or isinstance(obj, str | int | float | bool):
                             return obj
-                        if isinstance(obj, (list, tuple)):
+                        if isinstance(obj, list | tuple):
                             return [serialize_obj(item) for item in obj]
                         if isinstance(obj, dict):
                             return {k: serialize_obj(v) for k, v in obj.items()}

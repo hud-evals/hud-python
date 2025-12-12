@@ -89,11 +89,12 @@ class LowLevelServerWithInit(_BaseLL):
 
     def __init__(
         self,
+        fastmcp: Any,
         *args: Any,
         init_fn: Callable[[RequestContext], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(*args, **kwargs)
+        super().__init__(fastmcp, *args, **kwargs)
         self._init_fn = init_fn
 
     async def run(

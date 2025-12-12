@@ -1,0 +1,107 @@
+---
+title: "Migrating from v4"
+description: "Transition from Task-based environments to the unified Environment class"
+icon: "arrow-right-arrow-left"
+---
+
+v4 separated environments (Docker containers) from evaluation logic (Task objects). v5 unifies everything in the `Environment` class—tools, setup, and scoring live together.
+
+## Good News: Your Code Still Works
+
+`Environment` inherits from `MCPServer`. Same API, same behavior. Just change the import:
+
+```python
+# Before
+from hud.server import MCPServer
+mcp = MCPServer("my-env")
+
+@mcp.tool()
+def my_tool(): ...
+
+mcp.run()
+```
+
+```python
+# After
+from hud import Environment
+env = Environment("my-env")
+
+@env.tool()
+def my_tool(): ...
+
+env.run()
+```
+
+That's it. Your Dockerfile, your tools, your `run()` call—all unchanged. Environment adds scripts, connectors, and integrations on top.
+
+## Recommended: Add Scripts
+
+v4 defined setup and evaluation externally in Task objects. v5 lets you define them inside the environment with `@env.script()`. This is optional but recommended—platform features like trace analysis and training work best with scripts.
+
+```python
+@env.script("checkout")
+async def checkout_flow(product: str):
+    # Setup: code before first yield
+    await env.call_tool("reset_cart")
+    
+    # Yield the prompt
+    answer = yield f"Add '{product}' to cart and checkout"
+    
+    # Evaluate: code after first yield, second yield returns reward
+    yield 1.0 if cart.contains(product) else 0.0
+```
+
+Your existing `setup_tool` and `evaluate_tool` definitions still work. Scripts just keep the logic with the environment instead of scattered across task files.
+
+## Recommended: Use env() for Evals
+
+v4 created Task objects:
+
+```python
+task = Task(prompt="...", mcp_config={...}, setup_tool={...}, evaluate_tool={...})
+```
+
+v5 creates Evals by calling the environment with a script name:
+
+```python
+eval = env("checkout", product="laptop")
+```
+
+Both work. But `env()` connects to scripts, which means setup/evaluate run automatically and you get structured traces.
+
+## Optional: Bring Your Own Agent
+
+v4 required using HUD's agent classes:
+
+```python
+agent = ClaudeAgent.create()
+result = await agent.run(task)
+```
+
+v5 gives you the `hud.eval()` context manager. Use any agent, any model, any framework:
+
+```python
+async with hud.eval(env("checkout", product="laptop")) as ctx:
+    # Use OpenAI, Anthropic, your own agent—whatever you want
+    response = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": ctx.prompt}],
+        tools=ctx.as_openai_chat_tools()
+    )
+    
+    # Handle tool calls, run your agent loop...
+    await ctx.submit(response.choices[0].message.content)
+
+print(ctx.reward)
+```
+
+The old `ClaudeAgent` and `OperatorAgent` still work—even with the new `hud.eval()` system. But now you're not locked into a specific agent spec. Pair with the [Gateway](/quick-links/gateway) to use any model through one API.
+
+## Quick Reference
+
+| v4 | v5 |
+|----|-----|
+| `MCPServer` | `Environment` (drop-in replacement) |
+| `setup_tool` / `evaluate_tool` | `@env.script()` (recommended) |
+| `Task(...)` | `env("script", ...)` (recommended) |
+| `agent.run(task)` | `hud.eval()` + any agent (optional) |

@@ -41,12 +41,10 @@ class TestHudInit:
         import hud
 
         expected_exports = [
-            "clear_trace",
-            "create_job",
-            "get_trace",
+            "Environment",
+            "EvalContext",
+            "eval",
             "instrument",
-            "job",
-            "trace",
         ]
 
         for export in expected_exports:

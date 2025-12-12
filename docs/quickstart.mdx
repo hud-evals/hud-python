@@ -55,7 +55,19 @@ Get up and running with HUD in minutes. Follow these four steps to install the C
 </Step>
 </Steps>
 
-## Environments/CLI Quick Reference
+## SDK Quick Reference
+
+```python
+import hud
+
+# Run evaluation with the new eval API
+async with hud.eval("hud-evals/SheetBench-50:0") as ctx:
+    agent = MyAgent()
+    result = await agent.run(ctx)
+    ctx.reward = result.reward
+```
+
+## CLI Quick Reference
 
 ```bash
 # Create sample environment

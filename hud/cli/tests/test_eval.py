@@ -280,9 +280,16 @@ class TestRunDatasetToolFiltering:
             "validate_api_key": False,
         }
 
+        # Create mock context
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
+        mock_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_ctx._suppress_link = False
+
         with (
-            patch("hud.job"),
-            patch("hud.trace"),
+            patch("hud.eval.context.EvalContext.from_task", return_value=mock_ctx),
+            patch("hud.eval.display.print_link"),
+            patch("hud.eval.display.print_complete"),
             patch.object(ClaudeAgent, "_run_context", mock_run_context),
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_client_instance),
@@ -352,9 +359,16 @@ class TestRunDatasetToolFiltering:
             "validate_api_key": False,
         }
 
+        # Create mock context
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
+        mock_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_ctx._suppress_link = False
+
         with (
-            patch("hud.job"),
-            patch("hud.trace"),
+            patch("hud.eval.context.EvalContext.from_task", return_value=mock_ctx),
+            patch("hud.eval.display.print_link"),
+            patch("hud.eval.display.print_complete"),
             patch.object(ClaudeAgent, "_run_context", mock_run_context),
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_client_instance),
@@ -451,9 +465,16 @@ class TestSystemPromptHandling:
         # Agent config with no custom system_prompt (will use default)
         agent_init_config = {"validate_api_key": False, "system_prompt": SYSTEM_PROMPT}
 
+        # Create mock context
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
+        mock_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_ctx._suppress_link = False
+
         with (
-            patch("hud.job"),
-            patch("hud.trace"),
+            patch("hud.eval.context.EvalContext.from_task", return_value=mock_ctx),
+            patch("hud.eval.display.print_link"),
+            patch("hud.eval.display.print_complete"),
             patch.object(ClaudeAgent, "_run_context", mock_run_context),
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_mcp_client),
@@ -506,9 +527,16 @@ class TestSystemPromptHandling:
             "validate_api_key": False,
         }
 
+        # Create mock context
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
+        mock_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_ctx._suppress_link = False
+
         with (
-            patch("hud.job"),
-            patch("hud.trace"),
+            patch("hud.eval.context.EvalContext.from_task", return_value=mock_ctx),
+            patch("hud.eval.display.print_link"),
+            patch("hud.eval.display.print_complete"),
             patch.object(ClaudeAgent, "_run_context", mock_run_context),
             patch.object(ClaudeAgent, "call_tools", mock_call_tools),
             patch("hud.clients.MCPClient", return_value=mock_mcp_client),

@@ -423,7 +423,9 @@ class TestApplyPatchTool:
         with tempfile.TemporaryDirectory() as tmpdir:
             tool = ApplyPatchTool(base_path=tmpdir)
             result = tool._validate_path("subdir/file.txt")
-            assert result == os.path.join(tmpdir, "subdir/file.txt")
+            # Normalize path separators for cross-platform compatibility
+            expected = os.path.normpath(os.path.join(tmpdir, "subdir/file.txt"))
+            assert result == expected
 
     @pytest.mark.asyncio
     async def test_call_missing_type(self):

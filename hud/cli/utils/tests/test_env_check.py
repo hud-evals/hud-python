@@ -50,7 +50,7 @@ def test_find_environment_dir_prefers_lock(tmp_path: Path):
     tasks.write_text("[]")
     env = tmp_path / "env"
     env.mkdir()
-    (env / "hud.lock.yaml").write_text("version: 1.0")
+    (env / "hud.lock.yaml").write_text("version: 1.3")
     # Set cwd to env so it's in the candidate list
     with patch("pathlib.Path.cwd", return_value=env):
         found = find_environment_dir(tasks)

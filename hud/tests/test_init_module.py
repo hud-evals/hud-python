@@ -21,15 +21,10 @@ class TestInitModule:
         import hud
 
         expected = [
-            "Trace",
-            "async_job",
-            "async_trace",
-            "clear_trace",
-            "create_job",
-            "get_trace",
+            "Environment",
+            "EvalContext",
+            "eval",
             "instrument",
-            "job",
-            "trace",
         ]
 
         assert set(hud.__all__) == set(expected)

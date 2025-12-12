@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import questionary
 from mcp.types import ImageContent, TextContent
@@ -13,8 +13,10 @@ from rich.prompt import Prompt
 from rich.syntax import Syntax
 from rich.tree import Tree
 
-from hud.clients import MCPClient
 from hud.utils.hud_console import HUDConsole
+
+if TYPE_CHECKING:
+    from hud.clients import MCPClient
 
 console = Console()
 
@@ -38,6 +40,9 @@ class InteractiveMCPTester:
     async def connect(self) -> bool:
         """Connect to the MCP server."""
         try:
+            # Lazy import to avoid loading mcp_use on simple CLI commands
+            from hud.clients import MCPClient
+
             # Create MCP config for HTTP transport
             # Note: We explicitly set auth to None to prevent OAuth discovery attempts
             config = {"server": {"url": self.server_url, "auth": None}}

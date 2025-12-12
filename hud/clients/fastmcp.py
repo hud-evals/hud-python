@@ -111,7 +111,7 @@ class FastMCPHUDClient(BaseHUDClient):
                     hasattr(self._client, "_session_state")
                     and self._client._session_state.session is not None
                 ):
-                    self._client._session_state.session._validate_structured_outputs = (
+                    self._client._session_state.session._validate_structured_outputs = (  # type: ignore[attr-defined]
                         self._strict_validation
                     )
             except ImportError:
@@ -124,6 +124,12 @@ class FastMCPHUDClient(BaseHUDClient):
         if self._client is None:
             raise ValueError("Client is not connected, call initialize() first")
         return await self._client.list_tools()
+
+    async def _list_prompts_impl(self) -> list[types.Prompt]:
+        """List all available prompts (FastMCP supports this)."""
+        if self._client is None:
+            raise ValueError("Client is not connected, call initialize() first")
+        return await self._client.list_prompts()
 
     async def _call_tool(self, tool_call: MCPToolCall) -> MCPToolResult:
         """Execute a tool by name."""

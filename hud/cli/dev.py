@@ -136,12 +136,15 @@ def auto_detect_module() -> tuple[str, Path | None] | tuple[None, None]:
 
 
 def should_use_docker_mode(cwd: Path) -> bool:
-    """Check if environment requires Docker mode (has Dockerfile in current dir)."""
-    return (cwd / "Dockerfile").exists()
+    """Check if environment requires Docker mode (has Dockerfile in current dir).
+
+    Checks for Dockerfile.hud first (HUD-specific), then falls back to Dockerfile.
+    """
+    return (cwd / "Dockerfile.hud").exists() or (cwd / "Dockerfile").exists()
 
 
 async def run_mcp_module(
-    module_name: str,
+    module_spec: str,
     transport: str,
     port: int,
     verbose: bool,
@@ -149,7 +152,19 @@ async def run_mcp_module(
     interactive: bool,
     new_trace: bool = False,
 ) -> None:
-    """Run an MCP module directly."""
+    """Run an MCP module directly.
+
+    Args:
+        module_spec: Module specification in format "module" or "module:attribute"
+                    e.g., "server" (looks for mcp), "env:env" (looks for env)
+    """
+    # Parse module:attribute format (like uvicorn/gunicorn)
+    if ":" in module_spec:
+        module_name, attr_name = module_spec.rsplit(":", 1)
+    else:
+        module_name = module_spec
+        attr_name = "mcp"  # Default attribute
+
     # Check if this is a reload (not first run)
     is_reload = os.environ.get("_HUD_DEV_RELOAD") == "1"
 
@@ -162,8 +177,10 @@ async def run_mcp_module(
         # Suppress tracebacks in logs unless verbose
         logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(message)s")
 
-        # Suppress FastMCP's verbose error logging
+        # Suppress FastMCP's verbose logging
         logging.getLogger("fastmcp.tools.tool_manager").setLevel(logging.WARNING)
+        logging.getLogger("fastmcp.server.server").setLevel(logging.WARNING)
+        logging.getLogger("fastmcp.server.openapi").setLevel(logging.WARNING)
 
         # On reload, suppress most startup logs
         if is_reload:
@@ -172,9 +189,9 @@ async def run_mcp_module(
             logging.getLogger("mcp.server.streamable_http_manager").setLevel(logging.ERROR)
 
             # Suppress deprecation warnings on reload
-            import warnings
+            from hud.patches.warnings import apply_default_warning_filters
 
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            apply_default_warning_filters(verbose=False)
 
     # Ensure proper directory is in sys.path based on module name
     cwd = Path.cwd()
@@ -208,8 +225,7 @@ async def run_mcp_module(
             hud_console.info(traceback.format_exc())
         sys.exit(1)
 
-    # Look for 'mcp' attribute - check module __dict__ directly
-    # Debug: print what's in the module
+    # Look for the specified attribute
     if verbose:
         hud_console.info(f"Module attributes: {dir(module)}")
         module_dict = module.__dict__ if hasattr(module, "__dict__") else {}
@@ -217,22 +233,22 @@ async def run_mcp_module(
 
     mcp_server = None
 
-    # Try different ways to access the mcp variable
-    if hasattr(module, "mcp"):
-        mcp_server = module.mcp
-    elif hasattr(module, "__dict__") and "mcp" in module.__dict__:
-        mcp_server = module.__dict__["mcp"]
+    # Try different ways to access the attribute
+    if hasattr(module, attr_name):
+        mcp_server = getattr(module, attr_name)
+    elif hasattr(module, "__dict__") and attr_name in module.__dict__:
+        mcp_server = module.__dict__[attr_name]
 
     if mcp_server is None:
-        hud_console.error(f"Module '{module_name}' does not have 'mcp' defined")
+        hud_console.error(f"Module '{module_name}' does not have '{attr_name}' defined")
         hud_console.info("")
         available = [k for k in dir(module) if not k.startswith("_")]
         hud_console.info(f"Available in module: {available}")
         hud_console.info("")
         hud_console.info("[bold cyan]Expected structure:[/bold cyan]")
-        hud_console.info("  from hud.server import MCPServer")
-        hud_console.info("  mcp = MCPServer(name='my-server')")
-        raise AttributeError(f"Module '{module_name}' must define 'mcp'")
+        hud_console.info("  from hud.environment import Environment")
+        hud_console.info(f"  {attr_name} = Environment('my-env')")
+        raise AttributeError(f"Module '{module_name}' must define '{attr_name}'")
 
     # Only show full header on first run, brief message on reload
     if is_reload:

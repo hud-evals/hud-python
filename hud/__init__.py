@@ -5,28 +5,18 @@ tools for building, evaluating, and training AI agents.
 
 from __future__ import annotations
 
-from .telemetry import (
-    Trace,
-    async_job,
-    async_trace,
-    clear_trace,
-    create_job,
-    get_trace,
-    instrument,
-    job,
-    trace,
-)
+# Apply patches to third-party libraries early, before other imports
+from . import patches as _patches  # noqa: F401
+from .environment import Environment
+from .eval import EvalContext
+from .eval import run_eval as eval
+from .telemetry.instrument import instrument
 
 __all__ = [
-    "Trace",
-    "async_job",
-    "async_trace",
-    "clear_trace",
-    "create_job",
-    "get_trace",
+    "Environment",
+    "EvalContext",
+    "eval",
     "instrument",
-    "job",
-    "trace",
 ]
 
 try:

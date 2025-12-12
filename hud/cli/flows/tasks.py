@@ -449,7 +449,7 @@ def convert_tasks_to_remote(tasks_file: str) -> str:
             "prompt": t.prompt,
             "mcp_config": {
                 "hud": {
-                    "url": "https://mcp.hud.ai/v3/mcp",
+                    "url": settings.hud_mcp_url,
                     "headers": {
                         "Authorization": "Bearer ${HUD_API_KEY}",
                         "Mcp-Image": remote_image,

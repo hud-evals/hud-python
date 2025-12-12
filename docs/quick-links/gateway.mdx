@@ -1,0 +1,128 @@
+---
+title: "Gateway"
+description: "One endpoint for every model. One API key. Full observability."
+icon: "server"
+---
+
+Stop juggling API keys. HUD Gateway routes to Anthropic, OpenAI, Gemini, xAI, and more through a single OpenAI-compatible endpoint—with built-in telemetry. Swap `model="gpt-4o"` for `model="claude-sonnet-4-5"` and you're [A/B testing](/quick-links/ab-testing) across providers. Continuous RL from production coming soon.
+
+## Quick Start
+
+Point any OpenAI-compatible client at `inference.hud.ai`:
+
+<CodeGroup>
+
+```python Python
+from openai import AsyncOpenAI
+import os
+
+client = AsyncOpenAI(
+    base_url="https://inference.hud.ai",
+    api_key=os.environ["HUD_API_KEY"]
+)
+
+response = await client.chat.completions.create(
+    model="claude-sonnet-4-5",  # or gpt-4o, gemini-2.5-pro, grok-4-1-fast...
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
+
+```bash curl
+curl -X POST https://inference.hud.ai/chat/completions \
+  -H "Authorization: Bearer $HUD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4-5",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+</CodeGroup>
+
+## Supported Models
+
+Full list at [hud.ai/models](https://hud.ai/models).
+
+<Accordion title="Anthropic">
+| Model | Routes |
+|-------|--------|
+| `claude-sonnet-4-5` | chat, messages |
+| `claude-haiku-4-5` | chat, messages |
+| `claude-opus-4-5` | chat, messages |
+| `claude-opus-4-1` | chat, messages |
+</Accordion>
+
+<Accordion title="OpenAI">
+| Model | Routes |
+|-------|--------|
+| `gpt-5.1` | chat, responses |
+| `gpt-5-mini` | chat, responses |
+| `gpt-4o` | chat, responses |
+| `gpt-4o-mini` | chat, responses |
+| `operator` | responses |
+</Accordion>
+
+<Accordion title="Google Gemini">
+| Model | Routes |
+|-------|--------|
+| `gemini-3-pro-preview` | chat |
+| `gemini-2.5-pro` | chat |
+| `gemini-2.5-computer-use-preview` | gemini |
+</Accordion>
+
+<Accordion title="xAI & Others">
+| Model | Routes |
+|-------|--------|
+| `grok-4-1-fast` | chat |
+| `z-ai/glm-4.5v` | chat |
+</Accordion>
+
+## Telemetry
+
+Wrap code in a plain `hud.eval()` to group inference calls. In the trace you'll see the full conversation in sequence, not scattered API calls.
+
+```python
+async with hud.eval():
+    response = await client.chat.completions.create(
+        model="claude-sonnet-4-5",
+        messages=[{"role": "user", "content": "Hello!"}]
+    )
+```
+
+Or inject a trace ID manually if you're not using `hud.eval()`. Generate a UUID and pass it with each request in a task:
+
+<CodeGroup>
+
+```python Python
+import uuid
+
+trace_id = str(uuid.uuid4())  # e.g. "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+response = await client.chat.completions.create(
+    model="claude-sonnet-4-5",
+    messages=[{"role": "user", "content": "Hello!"}],
+    extra_headers={"Trace-Id": trace_id}
+)
+```
+
+```bash curl
+curl -X POST https://inference.hud.ai/chat/completions \
+  -H "Authorization: Bearer $HUD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Trace-Id: a1b2c3d4-e5f6-7890-abcd-ef1234567890" \
+  -d '{
+    "model": "claude-sonnet-4-5",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+</CodeGroup>
+
+View traces at [hud.ai/home](https://hud.ai/home).
+
+## Routes
+
+- **chat** — `/chat/completions` (OpenAI-compatible)
+- **messages** — `/messages` (Anthropic-compatible)
+- **responses** — `/responses` (OpenAI Responses API)
+- **gemini** — Google Gemini native API

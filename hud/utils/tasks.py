@@ -4,8 +4,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from datasets import Dataset
-
 from hud.types import Task
 from hud.utils.hud_console import HUDConsole
 
@@ -182,5 +180,7 @@ def save_tasks(
 
         data.append(row)
 
-    dataset = Dataset.from_list(data)
-    dataset.push_to_hub(repo_id, **kwargs)
+    from datasets import Dataset
+
+    ds = Dataset.from_list(data)
+    ds.push_to_hub(repo_id, **kwargs)
