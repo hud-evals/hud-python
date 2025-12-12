@@ -519,6 +519,11 @@ async def analyze_mcp_environment(
         }
         if hub_map:
             result["hub_tools"] = hub_map
+        # Include prompts and resources from analysis
+        if full_analysis.get("prompts"):
+            result["prompts"] = full_analysis["prompts"]
+        if full_analysis.get("resources"):
+            result["resources"] = full_analysis["resources"]
         return result
     except TimeoutError:
         from hud.shared.exceptions import HudException
@@ -753,8 +758,18 @@ def build_environment(
     finally:
         loop.close()
 
-    # Show analysis results including hub tools
-    tool_msg = f"Analyzed environment: {analysis['toolCount']} tools found"
+    # Show analysis results including hub tools, prompts, resources
+    tool_count = analysis["toolCount"]
+    prompt_count = len(analysis.get("prompts") or [])
+    resource_count = len(analysis.get("resources") or [])
+
+    parts = [f"{tool_count} tools"]
+    if prompt_count:
+        parts.append(f"{prompt_count} prompts")
+    if resource_count:
+        parts.append(f"{resource_count} resources")
+
+    tool_msg = f"Analyzed environment: {', '.join(parts)} found"
     hud_console.success(tool_msg)
 
     # Extract environment variables from Dockerfile
@@ -884,6 +899,16 @@ def build_environment(
     hub_tools = analysis.get("hub_tools") or analysis.get("hubTools")
     if hub_tools:
         lock_content["hubTools"] = hub_tools
+
+    # Add prompts if present
+    prompts = analysis.get("prompts")
+    if prompts:
+        lock_content["prompts"] = prompts
+
+    # Add resources if present
+    resources = analysis.get("resources")
+    if resources:
+        lock_content["resources"] = resources
 
     # Write lock file
     lock_path = env_dir / "hud.lock.yaml"
