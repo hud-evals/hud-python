@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
 from hud.environment.utils.schema import schema_to_pydantic
+from hud.environment.utils.tool_wrappers import create_tool_fns
 
 if TYPE_CHECKING:
     import mcp.types as mcp_types
@@ -68,44 +68,15 @@ class LangChainMixin:
 
         tools = []
         for t in self.as_tools():
-            tool = _create_structured_tool(self, t, StructuredTool)
+            schema = t.inputSchema or {"type": "object", "properties": {}}
+            sync_fn, async_fn = create_tool_fns(self, t)
+
+            tool = StructuredTool(
+                name=t.name,
+                description=t.description or "",
+                func=sync_fn,
+                coroutine=async_fn,
+                args_schema=schema_to_pydantic(t.name, schema),
+            )
             tools.append(tool)
         return tools
-
-
-def _create_structured_tool(env: LangChainMixin, tool: mcp_types.Tool, StructuredTool: type) -> Any:
-    """Create a StructuredTool that calls back to the environment."""
-    import asyncio
-
-    schema = tool.inputSchema or {"type": "object", "properties": {}}
-
-    def sync_invoke(**kwargs: Any) -> str:
-        """Synchronous wrapper for the tool."""
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, env.call_tool(tool.name, **kwargs))
-                result = future.result()
-        else:
-            result = loop.run_until_complete(env.call_tool(tool.name, **kwargs))
-
-        if isinstance(result, str):
-            return result
-        return json.dumps(result) if result else ""
-
-    async def async_invoke(**kwargs: Any) -> str:
-        """Async wrapper for the tool."""
-        result = await env.call_tool(tool.name, **kwargs)
-        if isinstance(result, str):
-            return result
-        return json.dumps(result) if result else ""
-
-    return StructuredTool(
-        name=tool.name,
-        description=tool.description or "",
-        func=sync_invoke,
-        coroutine=async_invoke,
-        args_schema=schema_to_pydantic(tool.name, schema),
-    )

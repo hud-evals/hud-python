@@ -1,8 +1,10 @@
 """Provider integrations - format conversion and framework tools."""
 
+from hud.environment.integrations.adk import ADKMixin
 from hud.environment.integrations.anthropic import AnthropicMixin
 from hud.environment.integrations.gemini import GeminiMixin
 from hud.environment.integrations.langchain import LangChainMixin
+from hud.environment.integrations.llamaindex import LlamaIndexMixin
 from hud.environment.integrations.openai import OpenAIMixin
 
 __all__ = ["IntegrationsMixin"]
@@ -13,6 +15,8 @@ class IntegrationsMixin(
     AnthropicMixin,
     GeminiMixin,
     LangChainMixin,
+    LlamaIndexMixin,
+    ADKMixin,
 ):
     """Combined integration mixin for all providers.
 
@@ -30,6 +34,12 @@ class IntegrationsMixin(
         as_gemini_tools() - Gemini format
         as_gemini_tool_config() - Tool config
 
+    Google ADK:
+        as_adk_tools() - ADK FunctionTool objects (requires google-adk)
+
     LangChain:
         as_langchain_tools() - StructuredTools (requires langchain-core)
+
+    LlamaIndex:
+        as_llamaindex_tools() - FunctionTools (requires llama-index-core)
     """

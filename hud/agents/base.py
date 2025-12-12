@@ -19,6 +19,8 @@ from hud.utils.mcp import MCPConfigPatch, patch_mcp_config, setup_hud_telemetry
 
 if TYPE_CHECKING:
     from hud.datasets import Task
+    from hud.environment import Environment
+    from hud.eval.context import EvalContext
 
 
 logger = logging.getLogger(__name__)
@@ -209,24 +211,66 @@ class MCPAgent(ABC):
             f"Agent initialized with {len(self.get_available_tools())} tools: {', '.join([t.name for t in self.get_available_tools()])}"  # noqa: E501
         )
 
-    async def run(self, prompt_or_task: str | Task | dict[str, Any], max_steps: int = 10) -> Trace:
+    async def run(
+        self,
+        prompt_or_task: str | Task | EvalContext | Environment | dict[str, Any],
+        max_steps: int = 10,
+    ) -> Trace:
         """
-        Run the agent with the given prompt or task.
+        Run the agent with the given prompt, task, or environment.
 
         Args:
-            prompt_or_task: Either a string prompt for simple execution or a Task object
+            prompt_or_task: One of:
+                - str: Simple text prompt
+                - Task: Task object with mcp_config, setup_tool, evaluate_tool
+                - EvalContext: From hud.eval() - uses ctx.prompt, ctx.call_tool, ctx.submit
+                - Environment: Connected environment to use for tool calls
+                - dict: Task-like dict (converted to Task)
             max_steps: Maximum number of steps (-1 for infinite)
 
         Returns:
             Trace with reward, done, content, isError fields and trace steps
+
+        Example:
+            # With EvalContext from hud.eval
+            async with hud.eval(evals) as ctx:
+                result = await agent.run(ctx)
+                # result.reward comes from script evaluate
         """
         # Import here to avoid circular imports
         from hud.datasets import Task
+        from hud.environment import Environment
+        from hud.eval.context import EvalContext
+
+        # Handle EvalContext - delegate to run_eval
+        if isinstance(prompt_or_task, EvalContext):
+            return await self.run_eval(prompt_or_task, max_steps=max_steps)
+
+        # Handle Environment (non-eval) - wrap with EnvironmentClient
+        if isinstance(prompt_or_task, Environment) and not isinstance(prompt_or_task, EvalContext):
+            from hud.clients.environment import EnvironmentClient
+
+            env = prompt_or_task
+            if not env.prompt:
+                raise ValueError("Environment.prompt is not set")
+
+            client = EnvironmentClient(env)
+            self.mcp_client = client
+
+            try:
+                await self.initialize(env.prompt)
+                result = await self._run_context(text_to_blocks(env.prompt), max_steps=max_steps)
+                return result
+            finally:
+                self.mcp_client = None
 
         if isinstance(prompt_or_task, dict):
             prompt_or_task = Task(**prompt_or_task)
         elif not isinstance(prompt_or_task, str) and not isinstance(prompt_or_task, Task):
-            raise TypeError(f"prompt_or_task must be str or Task, got {type(prompt_or_task)}")
+            raise TypeError(
+                f"prompt_or_task must be str, Task, EvalContext, or Environment, "
+                f"got {type(prompt_or_task)}"
+            )
 
         try:
             # Establish the connection with the MCP server/Environment
@@ -375,6 +419,54 @@ class MCPAgent(ABC):
         prompt_result.task = task
 
         return prompt_result
+
+    async def run_eval(self, ctx: EvalContext, *, max_steps: int = 10) -> Trace:
+        """
+        Run the agent with an EvalContext from hud.eval().
+
+        This method integrates with the hud.eval framework:
+        - Uses ctx.prompt as the starting prompt
+        - Uses ctx for tool calls via EnvironmentClient adapter
+        - Calls ctx.submit(response) when the agent finishes
+        - Reward is available on ctx.reward after the hud.eval block exits
+
+        Args:
+            ctx: EvalContext from hud.eval() - already connected and has prompt set
+            max_steps: Maximum number of agent steps (-1 for infinite)
+
+        Returns:
+            Trace with agent output. Note: ctx.reward is set by script evaluate
+            phase which runs when the hud.eval block exits.
+
+        Example:
+            ```python
+            async with hud.eval(evals) as ctx:
+                result = await agent.run_eval(ctx)
+            # ctx.reward is now set by the script's evaluate phase
+            print(f"Reward: {ctx.reward}")
+            ```
+        """
+        from hud.clients.environment import EnvironmentClient
+        from hud.eval.context import EvalContext
+
+        if not isinstance(ctx, EvalContext):
+            raise TypeError(f"ctx must be EvalContext, got {type(ctx)}")
+
+        if not ctx.prompt:
+            raise ValueError("EvalContext.prompt is not set - did the script setup run?")
+
+        self.mcp_client = EnvironmentClient(ctx)
+        try:
+            await self.initialize(ctx.prompt)
+            result = await self._run_context(text_to_blocks(ctx.prompt), max_steps=max_steps)
+            if result.content:
+                await ctx.submit(result.content)
+            return result
+        except Exception as e:
+            logger.exception("Error running agent with EvalContext:")
+            return Trace(reward=0.0, done=True, content=str(e), isError=True)
+        finally:
+            self.mcp_client = None
 
     async def _run_context(
         self, context: list[types.ContentBlock], *, max_steps: int = 10
