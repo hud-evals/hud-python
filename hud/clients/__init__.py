@@ -6,7 +6,7 @@ from .base import AgentMCPClient, BaseHUDClient
 from .fastmcp import FastMCPHUDClient
 from .mcp_use import MCPUseHUDClient
 
-# Default to MCP-use for new features
+# Default to MCP-use for agents (has multi-server session support)
 MCPClient = MCPUseHUDClient
 
 __all__ = [
@@ -14,4 +14,5 @@ __all__ = [
     "BaseHUDClient",
     "FastMCPHUDClient",
     "MCPClient",
+    "MCPUseHUDClient",
 ]

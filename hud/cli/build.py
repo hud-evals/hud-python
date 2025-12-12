@@ -450,11 +450,11 @@ async def analyze_mcp_environment(
     mcp_config = parse_docker_command(docker_cmd)
 
     # Initialize client and measure timing
-    # Lazy import to avoid loading mcp_use on simple CLI commands
-    from hud.clients import MCPClient
+    # Use FastMCP client directly - no mcp_use deprecation warnings
+    from hud.clients.fastmcp import FastMCPHUDClient
 
     start_time = time.time()
-    client = MCPClient(mcp_config=mcp_config, verbose=verbose, auto_trace=False)
+    client = FastMCPHUDClient(mcp_config=mcp_config, verbose=verbose, auto_trace=False)
     initialized = False
 
     try:

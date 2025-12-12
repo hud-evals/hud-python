@@ -44,10 +44,10 @@ async def analyze_environment(docker_cmd: list[str], output_format: str, verbose
     ) as progress:
         task = progress.add_task("Initializing MCP client...", total=None)
 
-        # Lazy import to avoid loading mcp_use on simple CLI commands
-        from hud.clients import MCPClient
+        # Use FastMCP client directly - no mcp_use deprecation warnings
+        from hud.clients.fastmcp import FastMCPHUDClient
 
-        client = MCPClient(mcp_config=mcp_config, verbose=verbose, auto_trace=False)
+        client = FastMCPHUDClient(mcp_config=mcp_config, verbose=verbose, auto_trace=False)
 
         try:
             await client.initialize()
@@ -379,10 +379,10 @@ async def _analyze_with_config(
     ) as progress:
         task = progress.add_task("Initializing MCP client...", total=None)
 
-        # Lazy import to avoid loading mcp_use on simple CLI commands
-        from hud.clients import MCPClient
+        # Use FastMCP client directly - no mcp_use deprecation warnings
+        from hud.clients.fastmcp import FastMCPHUDClient
 
-        client = MCPClient(mcp_config=mcp_config, verbose=verbose)
+        client = FastMCPHUDClient(mcp_config=mcp_config, verbose=verbose)
 
         try:
             await client.initialize()
