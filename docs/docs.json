@@ -48,6 +48,14 @@
             ]
           },
           {
+            "group": "Guides",
+            "pages": [
+              "guides/integrations",
+              "guides/sandboxing",
+              "migration"
+            ]
+          },
+          {
             "group": "SDK Reference",
             "pages": [
               "reference/evals",
@@ -56,13 +64,6 @@
               "reference/mcpserver",
               "reference/agents",
               "reference/types"
-            ]
-          },
-          {
-            "group": "Guides",
-            "pages": [
-              "guides/agent-frameworks",
-              "migration"
             ]
           },
           {
