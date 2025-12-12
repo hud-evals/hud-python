@@ -6,6 +6,10 @@ icon: "cube"
 
 An environment is everything an agent can interact with—your APIs, services, databases, wrapped as tools. But it's more than that: the environment also defines how agents are *evaluated* through **scripts**. When you deploy an environment, you're creating a sandbox that agents can learn from at scale.
 
+## Why Environments, Not API Servers?
+
+Your production API is a single live instance with shared state—you can't run 500 tests against it in parallel without causing chaos. Environments spin up fresh for every evaluation: isolated, deterministic, reproducible. Run thousands in parallel, each starting from the exact state you define, each generating training data. An API server is a live system you observe. An environment is a sandbox you control.
+
 ## Tools
 
 Start with `hud init` to scaffold an environment—works with existing codebases or from scratch:
