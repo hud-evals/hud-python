@@ -72,13 +72,18 @@ _AGENT_PRESETS: list[AgentPreset] = [
         "Grok 4-1 Fast (xAI)",
         AgentType.OPENAI_COMPATIBLE,
         "grok-4-1-fast",
-        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "Grok"}},
+        {
+            "openai_compatible": {
+                "base_url": settings.hud_gateway_url,
+                "model_name": "Grok 4-1 Fast",
+            }
+        },
     ),
     AgentPreset(
         "GLM-4.5V (Z-AI)",
         AgentType.OPENAI_COMPATIBLE,
         "z-ai/glm-4.5v",
-        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "GLM"}},
+        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "GLM-4.5V"}},
     ),
 ]
 
@@ -513,6 +518,7 @@ class EvalConfig(BaseModel):
             overrides = self.agent_config.get(self.agent_type.value, {})
             skip = {
                 "model_client",
+                "model_name",
                 "validate_api_key",
                 "model_config",
                 "allowed_tools",

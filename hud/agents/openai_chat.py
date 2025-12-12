@@ -287,7 +287,7 @@ class OpenAIChatAgent(MCPAgent):
 
         return AgentResponse(
             content=msg.content or "",
-            reasoning=msg.reasoning_content,
+            reasoning=getattr(msg, "reasoning_content", None),
             tool_calls=tool_calls,
             done=done,
             raw=response,
