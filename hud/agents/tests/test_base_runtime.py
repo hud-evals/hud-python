@@ -174,6 +174,7 @@ async def test_call_tools_error_paths() -> None:
 @pytest.mark.asyncio
 async def test_call_tools_timeout_raises() -> None:
     """Test call_tools raises TimeoutError."""
+
     def handler(tool_call: MCPToolCall) -> MCPToolResult:
         raise TimeoutError("timeout")
 

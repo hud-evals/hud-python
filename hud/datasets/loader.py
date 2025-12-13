@@ -49,7 +49,7 @@ def _task_from_dict(item: dict[str, Any]) -> Task:
         validation = None
         if item.get("validation"):
             validation = [MCPToolCall(**v) for v in item["validation"]]
-        
+
         return Task(
             id=item.get("id"),
             env=item.get("env"),  # EnvConfig dict: {"name": "browser", "include": [...], ...}

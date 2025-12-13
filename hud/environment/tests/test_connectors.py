@@ -216,5 +216,3 @@ class TestRemoteConnectorMixin:
 
         # connect_hub creates a connection named "hud" (the server name)
         assert "hud" in env._connections
-
-

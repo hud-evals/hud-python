@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
 
@@ -24,7 +22,6 @@ class TestEnvironmentPrompt:
         env = Environment("test")
         env.prompt = "Navigate to google.com"
         assert env.prompt == "Navigate to google.com"
-
 
 
 class TestEnvironmentContextManager:

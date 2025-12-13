@@ -15,7 +15,6 @@ from openai.types.responses import (
     ResponseReasoningItem,
 )
 from openai.types.responses.response_reasoning_item import Summary
-from pydantic import AnyUrl
 
 from hud.agents.openai import OpenAIAgent
 from hud.eval.context import EvalContext

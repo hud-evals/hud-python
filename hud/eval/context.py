@@ -23,7 +23,6 @@ from hud.telemetry.job import get_current_job
 if TYPE_CHECKING:
     from types import TracebackType
 
-    from hud.types import LegacyTask
 
 from hud.eval.types import EvalExitPayload, EvalPayload, ParallelEvalComplete
 
@@ -153,7 +152,6 @@ class EvalContext(Environment):
         self._trace_enabled: bool = trace  # Whether to send trace data to backend
         self._scenario_name: str | None = None  # Current scenario name (for submit)
         self._source_env_name: str | None = None  # Source env name for remote lookups
-
 
     @classmethod
     def from_environment(

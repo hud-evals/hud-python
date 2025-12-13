@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from google import genai
-from google.genai import types as genai_types
 from mcp import types
 
 from hud.agents.gemini import GeminiAgent

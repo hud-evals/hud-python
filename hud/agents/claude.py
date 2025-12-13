@@ -5,8 +5,9 @@ from __future__ import annotations
 import copy
 import logging
 from inspect import cleandoc
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
+from typing import Any, ClassVar, Literal, cast
 
+import mcp.types as types
 from anthropic import Anthropic, AsyncAnthropic, Omit
 from anthropic.types import CacheControlEphemeralParam
 from anthropic.types.beta import (
@@ -22,15 +23,9 @@ from anthropic.types.beta import (
     BetaToolTextEditor20250728Param,
     BetaToolUnionParam,
 )
-
-import hud
-
-if TYPE_CHECKING:
-    from hud.datasets import LegacyTask
-
-import mcp.types as types
 from pydantic import ConfigDict
 
+import hud
 from hud.settings import settings
 from hud.tools.computer.settings import computer_settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult

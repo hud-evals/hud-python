@@ -303,9 +303,10 @@ async def _run_parallel_eval(
     import asyncio
     import textwrap
 
+    from hud.eval.parallel import log_eval_stats
+
     # Lazy import to avoid circular dependency
     from hud.eval.task import Task
-    from hud.eval.parallel import log_eval_stats
 
     # Find user code frame and extract the with block body
     caller_frame = find_user_frame()

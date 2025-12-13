@@ -36,18 +36,18 @@ from typing import TYPE_CHECKING
 # Auto-instrument httpx on import
 import hud.eval.instrument  # noqa: F401
 
-# Task is safe to import
-from hud.eval.task import Task
-
 # run_eval is safe to import (uses lazy imports internally)
 from hud.eval.manager import run_eval
+
+# Task is safe to import
+from hud.eval.task import Task
 
 if TYPE_CHECKING:
     from hud.eval.context import EvalContext
 
 __all__ = [
-    "Task",
     "EvalContext",
+    "Task",
     "run_eval",
 ]
 

@@ -381,9 +381,12 @@ def display_results(
             for i, (stat, task) in enumerate(zip(results, tasks, strict=False)):
                 task_id = (task.id or "")[:20]
                 # Handle both v4 (prompt attr) and v5 (prompt in args) tasks
-                raw_prompt = getattr(task, "prompt", None) or (
-                    task.args.get("prompt") if hasattr(task, "args") else None
-                ) or task.scenario or ""
+                raw_prompt = (
+                    getattr(task, "prompt", None)
+                    or (task.args.get("prompt") if hasattr(task, "args") else None)
+                    or task.scenario
+                    or ""
+                )
                 prompt = raw_prompt[:40]
                 if len(raw_prompt) > 40:
                     prompt += "..."
@@ -433,9 +436,12 @@ def display_results(
                 task = tasks[i]
                 task_id = (task.id or "")[:20]
                 # Handle both v4 (prompt attr) and v5 (prompt in args) tasks
-                raw_prompt = getattr(task, "prompt", None) or (
-                    task.args.get("prompt") if hasattr(task, "args") else None
-                ) or getattr(task, "scenario", None) or ""
+                raw_prompt = (
+                    getattr(task, "prompt", None)
+                    or (task.args.get("prompt") if hasattr(task, "args") else None)
+                    or getattr(task, "scenario", None)
+                    or ""
+                )
                 prompt = raw_prompt[:40]
                 if len(raw_prompt) > 40:
                     prompt += "..."

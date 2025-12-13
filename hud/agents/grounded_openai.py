@@ -140,9 +140,7 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
         if not has_image:
             if self.ctx is None:
                 raise ValueError("ctx is not initialized")
-            screenshot_result = await self.ctx.call_tool(
-                ("computer", {"action": "screenshot"})
-            )
+            screenshot_result = await self.ctx.call_tool(("computer", {"action": "screenshot"}))
 
             for block in screenshot_result.content:
                 # Check for ImageContent type from MCP

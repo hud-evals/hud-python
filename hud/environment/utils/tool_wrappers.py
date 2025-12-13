@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import mcp.types as mcp_types
 
 __all__ = [
-    "create_sync_tool_fn",
     "create_async_tool_fn",
-    "stringify_result",
+    "create_sync_tool_fn",
     "create_tool_fns",
+    "stringify_result",
 ]
 
 

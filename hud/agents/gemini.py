@@ -3,19 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import Any, ClassVar, cast
 
+import mcp.types as types
 from google import genai
 from google.genai import types as genai_types
 from pydantic import ConfigDict
 
 import hud
-
-if TYPE_CHECKING:
-    from hud.datasets import LegacyTask
-
-import mcp.types as types
-
 from hud.settings import settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole

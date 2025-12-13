@@ -284,9 +284,7 @@ class MCPUseHUDClient(BaseHUDClient):
                 all_prompts.extend(prompts_result.prompts)
             except Exception as e:
                 if self.verbose:
-                    hud_console.debug(
-                        f"Could not list prompts from server '{server_name}': {e}"
-                    )
+                    hud_console.debug(f"Could not list prompts from server '{server_name}': {e}")
                 continue
         return all_prompts
 

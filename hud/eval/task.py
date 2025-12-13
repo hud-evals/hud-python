@@ -35,7 +35,6 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from hud.environment import Environment
-    from hud.environment.types import EnvConfig
     from hud.eval.context import EvalContext
 
 __all__ = ["Task", "build_eval_name"]
@@ -52,9 +51,7 @@ def _warn_local_mcp(mcp_config: dict[str, Any] | None) -> None:
         return
 
     has_local = any(
-        isinstance(server_cfg, dict)
-        and "command" in server_cfg
-        and not server_cfg.get("url")
+        isinstance(server_cfg, dict) and "command" in server_cfg and not server_cfg.get("url")
         for server_cfg in mcp_config.values()
         if isinstance(server_cfg, dict)
     )
@@ -112,16 +109,16 @@ class Task:
     Example (v5 format):
         ```python
         from hud.eval import Task
-        
+
         # Pass dict - auto-converts to Environment
         task = Task(
             env={"name": "browser", "include": ["navigate", "screenshot"]},
             scenario="checkout",
             args={"user_id": "alice"},
-            validation=[{"name": "check_cart", "arguments": {}}]
+            validation=[{"name": "check_cart", "arguments": {}}],
         )
         # task.env is now Environment connected to browser hub!
-        
+
         # Or pass live Environment directly
         env = Environment("my-env").connect_hub("browser")
         task = Task(env=env, scenario="checkout", args={"user_id": "alice"})
@@ -161,7 +158,7 @@ class Task:
 
     def __post_init__(self) -> None:
         """Validate and normalize env and validation fields after initialization.
-        
+
         Auto-converts dict or EnvConfig to Environment by connecting to the hub.
         Auto-converts validation dicts to MCPToolCall objects.
         """
@@ -202,8 +199,7 @@ class Task:
                     converted_validation.append(item)
                 else:
                     raise TypeError(
-                        f"validation items must be dict or MCPToolCall, "
-                        f"got {type(item).__name__}"
+                        f"validation items must be dict or MCPToolCall, got {type(item).__name__}"
                     )
             self.validation = converted_validation
 
@@ -235,12 +231,14 @@ class Task:
             task = Task.from_v4(legacy_task)
 
             # From dict (e.g., loaded from JSON file)
-            task = Task.from_v4({
-                "prompt": "Navigate to google.com",
-                "mcp_config": {"hud": {...}},
-                "setup_tool": {"name": "navigate", "arguments": {"url": "..."}},
-                "evaluate_tool": {"name": "check_url", "arguments": {}}
-            })
+            task = Task.from_v4(
+                {
+                    "prompt": "Navigate to google.com",
+                    "mcp_config": {"hud": {...}},
+                    "setup_tool": {"name": "navigate", "arguments": {"url": "..."}},
+                    "evaluate_tool": {"name": "check_url", "arguments": {}},
+                }
+            )
 
             # Use with hud.eval() or as context manager
             async with task as ctx:

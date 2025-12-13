@@ -509,10 +509,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
     if cfg.task_ids:
         id_set = set(cfg.task_ids)
         # Match by task.id or index
-        filtered = [
-            t for i, t in enumerate(tasks)
-            if t.id in id_set or str(i) in id_set
-        ]
+        filtered = [t for i, t in enumerate(tasks) if t.id in id_set or str(i) in id_set]
         if not filtered:
             hud_console.error(f"No tasks found matching IDs: {', '.join(cfg.task_ids)}")
             raise typer.Exit(1)

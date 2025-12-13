@@ -45,7 +45,7 @@ class ADKMixin:
                     name="assistant",
                     model="gemini-2.0-flash",
                     instruction="You are a helpful assistant.",
-                    tools=env.as_adk_tools()
+                    tools=env.as_adk_tools(),
                 )
                 runner = Runner(agent=agent)
                 result = await runner.run("Find information about Python")

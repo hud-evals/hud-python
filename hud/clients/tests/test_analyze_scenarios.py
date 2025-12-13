@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from mcp import types
 from pydantic import AnyUrl
 
 from hud.clients.base import BaseHUDClient
-from hud.types import MCPToolCall, MCPToolResult
+
+if TYPE_CHECKING:
+    from hud.types import MCPToolCall, MCPToolResult
 
 
 class _MockClient(BaseHUDClient):
@@ -21,7 +23,9 @@ class _MockClient(BaseHUDClient):
         prompts: list[types.Prompt],
         resources: list[types.Resource],
     ) -> None:
-        super().__init__(mcp_config={"test": {"url": "mock://test"}}, verbose=True, auto_trace=False)
+        super().__init__(
+            mcp_config={"test": {"url": "mock://test"}}, verbose=True, auto_trace=False
+        )
         self._mock_prompts = prompts
         self._mock_resources = resources
         # Skip initialize() (which fetches telemetry); we just need analyze_environment().
@@ -133,20 +137,24 @@ async def checkout(product_id: str):
 """
     # Use model_validate with _meta alias (Pydantic alias for the meta field)
     prompts = [
-        types.Prompt.model_validate({
-            "name": "my-env:checkout",
-            "description": "[Setup] Checkout flow",
-            "arguments": [{"name": "product_id", "required": True}],
-            "_meta": {"code": scenario_code},
-        })
+        types.Prompt.model_validate(
+            {
+                "name": "my-env:checkout",
+                "description": "[Setup] Checkout flow",
+                "arguments": [{"name": "product_id", "required": True}],
+                "_meta": {"code": scenario_code},
+            }
+        )
     ]
     resources = [
-        types.Resource.model_validate({
-            "uri": "my-env:checkout",
-            "name": "checkout",
-            "description": "[Evaluate] Checkout flow",
-            "_meta": {"code": scenario_code},
-        })
+        types.Resource.model_validate(
+            {
+                "uri": "my-env:checkout",
+                "name": "checkout",
+                "description": "[Evaluate] Checkout flow",
+                "_meta": {"code": scenario_code},
+            }
+        )
     ]
 
     client = _MockClient(prompts=prompts, resources=resources)
@@ -166,20 +174,24 @@ async def test_analyze_environment_extracts_meta_on_prompts_and_resources() -> N
     meta_data = {"code": "test code", "extra": "value"}
     # Use model_validate with _meta alias (Pydantic alias for the meta field)
     prompts = [
-        types.Prompt.model_validate({
-            "name": "test-prompt",
-            "description": "A test prompt",
-            "arguments": [],
-            "_meta": meta_data,
-        })
+        types.Prompt.model_validate(
+            {
+                "name": "test-prompt",
+                "description": "A test prompt",
+                "arguments": [],
+                "_meta": meta_data,
+            }
+        )
     ]
     resources = [
-        types.Resource.model_validate({
-            "uri": "file:///test",
-            "name": "test-resource",
-            "description": "A test resource",
-            "_meta": meta_data,
-        })
+        types.Resource.model_validate(
+            {
+                "uri": "file:///test",
+                "name": "test-resource",
+                "description": "A test resource",
+                "_meta": meta_data,
+            }
+        )
     ]
 
     client = _MockClient(prompts=prompts, resources=resources)
@@ -194,4 +206,3 @@ async def test_analyze_environment_extracts_meta_on_prompts_and_resources() -> N
     assert len(analysis["resources"]) == 1
     assert "meta" in analysis["resources"][0]
     assert analysis["resources"][0]["meta"] == meta_data
-

@@ -10,7 +10,9 @@ from hud.utils.hud_console import HUDConsole
 hud_console = HUDConsole()
 
 
-def load_tasks(tasks_input: str | list[dict], *, raw: bool = False) -> list[LegacyTask] | list[dict]:
+def load_tasks(
+    tasks_input: str | list[dict], *, raw: bool = False
+) -> list[LegacyTask] | list[dict]:
     """Load tasks from various sources.
 
     Args:

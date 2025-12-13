@@ -52,5 +52,3 @@ def suppress_mcp_use_import_warnings() -> Iterator[None]:
             )
 
         yield
-
-

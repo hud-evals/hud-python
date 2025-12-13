@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from anthropic import AsyncAnthropic
@@ -109,9 +109,10 @@ class TestClaudeAgent:
     @pytest.fixture
     def mock_anthropic(self) -> AsyncAnthropic:
         """Create a stub Anthropic client."""
-        with patch("hud.agents.claude.AsyncAnthropic") as mock_class, patch(
-            "hud.agents.claude.Anthropic"
-        ) as mock_sync:
+        with (
+            patch("hud.agents.claude.AsyncAnthropic") as mock_class,
+            patch("hud.agents.claude.Anthropic") as mock_sync,
+        ):
             # Mock the sync client's models.list() for validation
             mock_sync.return_value.models.list.return_value = []
 

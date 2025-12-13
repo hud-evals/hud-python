@@ -22,8 +22,8 @@ from .utils import (
 
 __all__ = [
     "BatchRequest",
-    "SingleTaskRequest",
     "LegacyTask",
+    "SingleTaskRequest",
     "calculate_group_stats",
     "display_results",
     "load_dataset",

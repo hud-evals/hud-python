@@ -57,9 +57,7 @@ class MockEvalContext(EvalContext):
     def __init__(self, prompt: str = "Test prompt", tools: list[types.Tool] | None = None) -> None:
         # Skip parent __init__, just set what we need
         self.prompt = prompt
-        self._tools = tools or [
-            types.Tool(name="test_tool", description="Test", inputSchema={})
-        ]
+        self._tools = tools or [types.Tool(name="test_tool", description="Test", inputSchema={})]
         self._submitted: str | None = None
         self.reward: float | None = None
         self._initialized = True

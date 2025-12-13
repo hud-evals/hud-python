@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -49,7 +49,9 @@ class TestTaskExtended:
             MCPToolCall(name="configure", arguments={"mode": "test"}),
         ]
 
-        task = LegacyTask(prompt="Multi-setup task", mcp_config={"test": True}, setup_tool=setup_tools)
+        task = LegacyTask(
+            prompt="Multi-setup task", mcp_config={"test": True}, setup_tool=setup_tools
+        )
 
         assert isinstance(task.setup_tool, list)
         assert len(task.setup_tool) == 2
@@ -177,10 +179,9 @@ class TestRunDatasetExtended:
         mock_agent = AsyncMock(spec=MCPAgent)
         mock_agent.run.return_value = Trace(reward=1.0, done=True)
 
-        # Create mock tasks (with mocked Environment to avoid real connections)
-        mock_env = MagicMock()
-        mock_env.name = "test"
-        
+        # Create mock tasks with env as dict (to avoid real connections)
+        mock_env = {"name": "test"}
+
         tasks = [
             Task(env=mock_env, scenario="test1"),
             Task(env=mock_env, scenario="test2"),
@@ -212,7 +213,7 @@ class TestRunDatasetExtended:
         mock_agent = AsyncMock(spec=MCPAgent)
         mock_agent.run.return_value = Trace(reward=1.0, done=True)
 
-        mock_env = MagicMock()
+        mock_env = {"name": "test"}
         mock_tasks = [Task(env=mock_env, scenario="loaded")]
 
         mock_ctx = AsyncMock()
@@ -240,7 +241,7 @@ class TestRunDatasetExtended:
         mock_agent = AsyncMock(spec=MCPAgent)
         mock_agent.run.return_value = Trace(reward=1.0, done=True)
 
-        mock_env = MagicMock()
+        mock_env = {"name": "test"}
         tasks = [Task(env=mock_env, scenario="test")]
 
         mock_ctx = AsyncMock()
@@ -250,13 +251,7 @@ class TestRunDatasetExtended:
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            await run_dataset(
-                tasks, 
-                mock_agent, 
-                max_steps=25, 
-                max_concurrent=10, 
-                group_size=3
-            )
+            await run_dataset(tasks, mock_agent, max_steps=25, max_concurrent=10, group_size=3)
 
             # Verify hud.eval was called with correct params
             mock_eval.assert_called_once_with(

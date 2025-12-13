@@ -425,11 +425,15 @@ class Trace(BaseModel):
                 self.trace = collected_trace.trace
 
 
+# Re-export Task for backwards compatibility (after module defs to avoid circular import)
+from hud.eval.task import Task  # noqa: E402
+
 __all__ = [
     "AgentResponse",
     "AgentType",
     "MCPToolCall",
     "MCPToolResult",
+    "Task",
     "Trace",
     "TraceStep",
 ]

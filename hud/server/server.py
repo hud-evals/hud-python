@@ -17,6 +17,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from hud.datasets import run_tasks
+from hud.eval.task import Task
 from hud.server.low_level import LowLevelServerWithInit
 from hud.types import LegacyTask
 
@@ -753,10 +754,10 @@ class MCPServer(FastMCP):
                         )
 
                     # Add MCP config to each task and validate basic structure
-                    task_objects: list[Task] = []
+                    task_objects: list[LegacyTask] = []
                     for task_data in eval_request.tasks:
                         task_data["mcp_config"] = docker_config
-                        task_objects.append(Task.model_validate(task_data))
+                        task_objects.append(LegacyTask.model_validate(task_data))
 
                     agent_params: dict[str, Any] = {}
                     if eval_request.model:
@@ -765,7 +766,7 @@ class MCPServer(FastMCP):
                     # Fire and forget - launch evaluation in background
                     async def run_eval_background() -> None:
                         await run_tasks(
-                            task_objects,
+                            [Task.from_v4(task) for task in task_objects],
                             agent_type=agent_type,
                             agent_params=agent_params,
                             max_steps=eval_request.max_steps,

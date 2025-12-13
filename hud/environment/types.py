@@ -9,9 +9,9 @@ __all__ = ["EnvConfig"]
 
 class EnvConfig(BaseModel):
     """Environment configuration for Tasks.
-    
+
     Specifies which hub to connect to and optional tool filtering.
-    
+
     Attributes:
         name: Hub name to connect via connect_hub() (e.g., "browser", "sheets")
         include: Optional whitelist of tool names to include

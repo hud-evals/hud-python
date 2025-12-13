@@ -222,4 +222,3 @@ class TestLoadDataset:
         assert tasks[0].id == "task-1"
         assert tasks[0].env is None
         assert tasks[0].args == {}
-

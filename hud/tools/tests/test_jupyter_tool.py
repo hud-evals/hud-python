@@ -5,12 +5,12 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from mcp.types import TextContent
 
 # Import tornado modules before tests to avoid forward reference issues with mocking
-import tornado.httpclient  # noqa: F401
-import tornado.ioloop  # noqa: F401
+import tornado.httpclient
+import tornado.ioloop
 import tornado.websocket  # noqa: F401
+from mcp.types import TextContent
 
 from hud.tools.jupyter import JupyterTool, strip_ansi
 

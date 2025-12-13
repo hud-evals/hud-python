@@ -165,8 +165,6 @@ class TestTaskContextManager:
             # Context reference is cleared but reward was set on the actual context
 
 
-
-
 class TestEnvironmentCall:
     """Tests for Environment.__call__ returning Task."""
 
@@ -203,7 +201,7 @@ class TestEnvironmentCall:
 
         env = Environment("test-env")
         task = env()
-        
+
         # Task has reference to the Environment
         assert task.env is env
 
@@ -240,10 +238,12 @@ class TestTaskFromV4:
 
     def test_from_v4_with_dict(self) -> None:
         """Task.from_v4() accepts dict with LegacyTask fields."""
-        task = Task.from_v4({
-            "prompt": "Navigate to google.com",
-            "mcp_config": {"hud": {"url": "https://mcp.hud.ai"}},
-        })
+        task = Task.from_v4(
+            {
+                "prompt": "Navigate to google.com",
+                "mcp_config": {"hud": {"url": "https://mcp.hud.ai"}},
+            }
+        )
 
         assert isinstance(task, Task)
         assert task.env is not None
@@ -265,11 +265,13 @@ class TestTaskFromV4:
 
     def test_from_v4_with_setup_tool(self) -> None:
         """Task.from_v4() preserves setup_tool via env._setup_calls."""
-        task = Task.from_v4({
-            "prompt": "Check URL",
-            "mcp_config": {"hud": {"url": "https://mcp.hud.ai"}},
-            "setup_tool": {"name": "navigate", "arguments": {"url": "https://google.com"}},
-        })
+        task = Task.from_v4(
+            {
+                "prompt": "Check URL",
+                "mcp_config": {"hud": {"url": "https://mcp.hud.ai"}},
+                "setup_tool": {"name": "navigate", "arguments": {"url": "https://google.com"}},
+            }
+        )
 
         # setup_tool is converted to env._setup_calls
         assert len(task.env._setup_calls) == 1
@@ -277,11 +279,13 @@ class TestTaskFromV4:
 
     def test_from_v4_with_evaluate_tool(self) -> None:
         """Task.from_v4() preserves evaluate_tool via env._evaluate_calls."""
-        task = Task.from_v4({
-            "prompt": "Check URL",
-            "mcp_config": {"hud": {"url": "https://mcp.hud.ai"}},
-            "evaluate_tool": {"name": "check_url", "arguments": {"expected": "google"}},
-        })
+        task = Task.from_v4(
+            {
+                "prompt": "Check URL",
+                "mcp_config": {"hud": {"url": "https://mcp.hud.ai"}},
+                "evaluate_tool": {"name": "check_url", "arguments": {"expected": "google"}},
+            }
+        )
 
         # evaluate_tool is converted to env._evaluate_calls
         assert len(task.env._evaluate_calls) == 1
@@ -305,10 +309,12 @@ class TestTaskFromV4:
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            Task.from_v4({
-                "prompt": "test",
-                "mcp_config": {"hud": {}},
-            })
+            Task.from_v4(
+                {
+                    "prompt": "test",
+                    "mcp_config": {"hud": {}},
+                }
+            )
 
         # Should not trigger deprecation warning since we're migrating
         legacy_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]

@@ -65,7 +65,7 @@ async def main() -> None:
     )
 
     # Display results
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"Completed {len(results)} tasks")
     for i, ctx in enumerate(results):
         reward = ctx.reward if hasattr(ctx, "reward") else "N/A"
