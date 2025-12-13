@@ -24,16 +24,16 @@ env.connect_hub("my-org/my-env")
 
 Once deployed, create evals on [hud.ai](https://hud.ai) from your scripts. Each eval is a frozen configuration—same prompt, same scoring, every time.
 
-Your script might take arguments:
+Your scenario might take arguments:
 
 ```python
-@env.script("checkout")
+@env.scenario("checkout")
 async def checkout_flow(product_name: str, apply_coupon: bool = False):
     yield f"Complete checkout for {product_name}" + (" with coupon" if apply_coupon else "")
     yield 1.0 if order_confirmed() else 0.0
 ```
 
-On the platform, click **New Eval** → select your script → fill in the arguments. Create multiple evals from the same script:
+On the platform, click **New Eval** → select your scenario → fill in the arguments. Create multiple evals from the same scenario:
 
 | Eval Name | Arguments |
 |-----------|-----------|

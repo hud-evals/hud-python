@@ -38,7 +38,7 @@ HUD runs each eval in its own container—isolated, reproducible, safe. But your
 **Databases.** Each agent needs its own sandbox. Use in-memory SQLite (fast, resets per eval), transaction rollback, or seed fresh data at start:
 
 ```python
-@env.script("update-order")
+@env.scenario("update-order")
 async def update_order(order_id: str):
     await db.seed_from("fixtures/orders.sql")
     
@@ -83,17 +83,17 @@ For grading, you also need to observe what happened. If the agent creates a data
 
 ### Deterministic Setup
 
-Each eval should seed the state it needs. HUD handles container isolation—you handle making sure your script sets up the right data before the agent runs.
+Each eval should seed the state it needs. HUD handles container isolation—you handle making sure your scenario sets up the right data before the agent runs.
 
 ```python
 # ❌ Bad: Depends on whatever state exists
-@env.script("find-user")
+@env.scenario("find-user")
 async def find_user(name: str):
     answer = yield f"Find the user named {name}"
     yield 1.0 if name in answer else 0.0
 
 # ✅ Good: Seeds known state before eval
-@env.script("find-user")
+@env.scenario("find-user")
 async def find_user(name: str):
     await db.clear()
     await db.insert("users", name=name, email=f"{name}@example.com")
@@ -150,13 +150,13 @@ If the prompt says "create a document with a Japanese car brand", check for any 
 
 ```python
 # ❌ Bad: Too strict—only accepts one answer
-@env.script("add-car")
+@env.scenario("add-car")
 async def add_car():
     answer = yield "Add a Japanese car brand to the document"
     yield 1.0 if answer == "Toyota" else 0.0
 
 # ✅ Good: Accepts any valid answer
-@env.script("add-car")
+@env.scenario("add-car")
 async def add_car():
     answer = yield "Add a Japanese car brand to the document"
     japanese_brands = ["toyota", "honda", "nissan", "mazda", "subaru"]
@@ -168,7 +168,7 @@ async def add_car():
 Partial grades help you see where agents fail. Did they add to cart but not checkout? That's useful signal. Break complex grading into sub-checks with weighted grades:
 
 ```python
-@env.script("checkout")
+@env.scenario("checkout")
 async def checkout(product: str):
     answer = yield f"Add {product} to cart and checkout"
     

@@ -57,7 +57,7 @@ def search(query: str) -> str:
     """Search the knowledge base."""
     return db.search(query)
 
-@env.script("find-answer")
+@env.scenario("find-answer")
 async def find_answer(question: str):
     answer = yield f"Find the answer to: {question}"
     yield 1.0 if "correct" in answer.lower() else 0.0
@@ -69,14 +69,14 @@ Scripts define the prompt (first yield) and the scoring logic (second yield). Th
 
 ## 3. Evals: Test and Improve
 
-Run your script with different models. Compare results:
+Run your scenario with different models. Compare results:
 
 ```python
 import hud
 
-eval = env("find-answer", question="What is 2+2?")
+task = env("find-answer", question="What is 2+2?")
 
-async with hud.eval(eval, variants={"model": ["gpt-4o", "claude-sonnet-4-5"]}, group=5) as ctx:
+async with hud.eval(task, variants={"model": ["gpt-4o", "claude-sonnet-4-5"]}, group=5) as ctx:
     response = await client.chat.completions.create(
         model=ctx.variants["model"],
         messages=[{"role": "user", "content": ctx.prompt}]

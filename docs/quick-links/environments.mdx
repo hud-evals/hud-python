@@ -50,7 +50,7 @@ async with env() as ctx:
 To evaluate an agent, you need two things: what to tell it, and how to score what it did. Scripts capture both with two `yield` statements:
 
 ```python
-@env.script("checkout")
+@env.scenario("checkout")
 async def checkout_flow(product_name: str):
     # Yield the prompt, receive the agent's final answer
     answer = yield f"Add '{product_name}' to cart and complete checkout"
@@ -64,12 +64,12 @@ The agent runs between the yields. First yield sends the prompt and returns the 
 
 ## Evals
 
-Call the environment with a script name and arguments to create an eval:
+Call the environment with a scenario name and arguments to create a task:
 
 ```python
-eval = env("checkout", product_name="Laptop")
+task = env("checkout", product_name="Laptop")
 
-async with hud.eval(eval, group=4) as ctx:
+async with hud.eval(task, group=4) as ctx:
     # Connect your agent here. Handle tool calls, run agent loop...
     response = await client.chat.completions.create(
         model="gpt-4o",

@@ -6,7 +6,7 @@ icon: "code"
 
 Core types used throughout the HUD SDK.
 
-## Eval
+## Task
 
 Created by calling an Environment. Holds configuration for running an evaluation.
 
@@ -14,13 +14,13 @@ Created by calling an Environment. Holds configuration for running an evaluation
 from hud import Environment
 
 env = Environment("my-env")
-eval = env("script_name", arg1="value")  # Returns Eval
+task = env("scenario_name", arg1="value")  # Returns Task
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `env` | `Environment \| dict \| None` | Source environment |
-| `script` | `str \| None` | Script name to run |
+| `scenario` | `str \| None` | Scenario name to run |
 | `args` | `dict[str, Any]` | Script arguments |
 | `trace_id` | `str \| None` | Trace identifier |
 | `job_id` | `str \| None` | Parent job ID |
@@ -33,7 +33,7 @@ eval = env("script_name", arg1="value")  # Returns Eval
 Returned by `hud.eval()`. Extends Environment with evaluation tracking.
 
 ```python
-async with hud.eval(eval) as ctx:
+async with hud.eval(task) as ctx:
     print(ctx.prompt)      # Task prompt
     print(ctx.variants)    # Current variant
     ctx.reward = 1.0       # Set reward

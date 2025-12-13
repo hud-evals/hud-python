@@ -21,7 +21,7 @@ async with hud.eval() as ctx:
 
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
-| `source` | `Eval \| list[Eval] \| str \| None` | Eval objects from `env()`, task slugs, or None | `None` |
+| `source` | `Task \| list[Task] \| str \| None` | Task objects from `env()`, task slugs, or None | `None` |
 | `variants` | `dict[str, Any] \| None` | A/B test configuration (lists expand to combinations) | `None` |
 | `group` | `int` | Runs per variant for statistical significance | `1` |
 | `group_ids` | `list[str] \| None` | Custom group IDs for parallel runs | `None` |
@@ -40,19 +40,19 @@ The `source` parameter accepts:
 async with hud.eval() as ctx:
     ctx.reward = compute_reward()
 
-# 2. Eval from Environment (recommended)
+# 2. Task from Environment (recommended)
 env = Environment("my-env")
-eval = env("checkout", product="laptop")  # Creates Eval from script
-async with hud.eval(eval) as ctx:
+task = env("checkout", product="laptop")  # Creates Task from scenario
+async with hud.eval(task) as ctx:
     await agent.run(ctx.prompt)
 
 # 3. Task slug (loads from platform)
 async with hud.eval("my-org/browser-task") as ctx:
     await agent.run(ctx)
 
-# 4. Multiple evals
-evals = [env("checkout", product="laptop"), env("checkout", product="phone")]
-async with hud.eval(evals) as ctx:
+# 4. Multiple tasks
+tasks = [env("checkout", product="laptop"), env("checkout", product="phone")]
+async with hud.eval(tasks) as ctx:
     await agent.run(ctx.prompt)
 ```
 
@@ -111,7 +111,7 @@ async with hud.eval(
 |----------|------|-------------|
 | `trace_id` | `str` | Unique trace identifier |
 | `eval_name` | `str` | Evaluation name |
-| `prompt` | `str \| None` | Task prompt (from script or task) |
+| `prompt` | `str \| None` | Task prompt (from scenario or task) |
 | `variants` | `dict[str, Any]` | Current variant assignment |
 | `reward` | `float \| None` | Evaluation reward (settable) |
 | `answer` | `str \| None` | Submitted answer |
@@ -127,7 +127,7 @@ async with hud.eval(
 All `Environment` methods are available, plus:
 
 ```python
-# Submit answer (passes to script for evaluation)
+# Submit answer (passes to scenario for evaluation)
 await ctx.submit(answer)
 
 # Set reward directly
@@ -167,17 +167,17 @@ env = Environment("my-env")
 def count_letter(text: str, letter: str) -> int:
     return text.lower().count(letter.lower())
 
-@env.script("count")
-async def count_script(sentence: str, letter: str):
+@env.scenario("count")
+async def count_scenario(sentence: str, letter: str):
     answer = yield f"How many '{letter}' in '{sentence}'?"
     correct = str(sentence.lower().count(letter.lower()))
     yield correct in answer
 
-# Create an Eval from the script
-eval = env("count", sentence="Strawberry", letter="r")
+# Create a Task from the scenario
+task = env("count", sentence="Strawberry", letter="r")
 
 # Run with variants
-async with hud.eval(eval, variants={"model": ["gpt-4o", "claude"]}) as ctx:
+async with hud.eval(task, variants={"model": ["gpt-4o", "claude"]}) as ctx:
     response = await client.chat.completions.create(
         model=ctx.variants["model"],
         messages=[{"role": "user", "content": ctx.prompt}],

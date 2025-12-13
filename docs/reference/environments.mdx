@@ -59,7 +59,7 @@ Tools are automatically documented from type hints and docstrings.
 Scripts define evaluation logic with two yields:
 
 ```python
-@env.script("checkout")
+@env.scenario("checkout")
 async def checkout_flow(product: str):
     # First yield: send prompt, receive answer
     answer = yield f"Add '{product}' to cart and checkout"
@@ -69,12 +69,12 @@ async def checkout_flow(product: str):
     yield 1.0 if order_exists else 0.0
 ```
 
-Create Evals from scripts:
+Create Tasks from scripts:
 
 ```python
-eval = env("checkout", product="laptop")
+task = env("checkout", product="laptop")
 
-async with hud.eval(eval) as ctx:
+async with hud.eval(task) as ctx:
     await agent.run(ctx.prompt)
     await ctx.submit(agent.response)
 ```
@@ -271,26 +271,26 @@ env.unmock()  # Disable mock mode
 | Property | Type | Description |
 |----------|------|-------------|
 | `name` | `str` | Environment name |
-| `prompt` | `str \| None` | Default prompt (set by connect_task) |
+| `prompt` | `str \| None` | Default prompt (set by scenarios or agent code) |
 | `is_connected` | `bool` | True if in context |
 | `connections` | `dict[str, Connector]` | Active connections |
 
-## Creating Evals
+## Creating Tasks
 
-Call the environment to create an Eval:
+Call the environment to create a Task:
 
 ```python
-# With script
-eval = env("checkout", product="laptop")
+# With scenario
+task = env("checkout", product="laptop")
 
-# Without script (just the environment)
-eval = env()
+# Without scenario (just the environment)
+task = env()
 ```
 
 Then run with `hud.eval()`:
 
 ```python
-async with hud.eval(eval, variants={"model": ["gpt-4o"]}) as ctx:
+async with hud.eval(task, variants={"model": ["gpt-4o"]}) as ctx:
     ...
 ```
 

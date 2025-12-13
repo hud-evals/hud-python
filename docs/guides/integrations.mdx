@@ -22,14 +22,14 @@ def lookup_ceo(company: str) -> str:
     """Look up the CEO of a company."""
     return CEOS.get(company.lower(), "Unknown")
 
-@env.script("initials")
+@env.scenario("initials")
 async def find_initials(company: str):
     answer = yield f"What are the initials of the CEO of {company}?"
     ceo = CEOS.get(company.lower())
     correct = "".join(word[0] for word in ceo.split()) if ceo else None
     yield 1.0 if answer and correct and correct in answer.upper() else 0.0
 
-eval = env("initials", company="HUD")
+task = env("initials", company="HUD")
 ```
 
 ---
@@ -336,7 +336,7 @@ async with hud.eval(eval) as ctx:
         llm=llm
     )
     
-    task = Task(
+    task = LegacyTask(
         description=ctx.prompt,
         expected_output="The initials of the CEO",
         agent=researcher
