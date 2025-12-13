@@ -120,3 +120,78 @@ async def test_analyze_environment_scenario_from_evaluate_only() -> None:
     assert scenario["has_setup_prompt"] is False
     assert scenario["has_evaluate_resource"] is True
 
+
+@pytest.mark.asyncio
+async def test_analyze_environment_extracts_scenario_code_from_meta() -> None:
+    """Test that scenario code is extracted from the meta field."""
+    scenario_code = """@env.scenario()
+async def checkout(product_id: str):
+    await env.call_tool("navigate", url="/checkout")
+    yield "Complete the checkout"
+    result = await env.call_tool("check_order")
+    yield 1.0 if result else 0.0
+"""
+    # Use model_validate with _meta alias (Pydantic alias for the meta field)
+    prompts = [
+        types.Prompt.model_validate({
+            "name": "my-env:checkout",
+            "description": "[Setup] Checkout flow",
+            "arguments": [{"name": "product_id", "required": True}],
+            "_meta": {"code": scenario_code},
+        })
+    ]
+    resources = [
+        types.Resource.model_validate({
+            "uri": "my-env:checkout",
+            "name": "checkout",
+            "description": "[Evaluate] Checkout flow",
+            "_meta": {"code": scenario_code},
+        })
+    ]
+
+    client = _MockClient(prompts=prompts, resources=resources)
+    analysis = await client.analyze_environment()
+
+    assert len(analysis["scenarios"]) == 1
+    scenario = analysis["scenarios"][0]
+    assert scenario["id"] == "my-env:checkout"
+    assert "code" in scenario
+    assert scenario["code"] == scenario_code
+    assert "async def checkout" in scenario["code"]
+
+
+@pytest.mark.asyncio
+async def test_analyze_environment_extracts_meta_on_prompts_and_resources() -> None:
+    """Test that meta field is included in prompts and resources analysis."""
+    meta_data = {"code": "test code", "extra": "value"}
+    # Use model_validate with _meta alias (Pydantic alias for the meta field)
+    prompts = [
+        types.Prompt.model_validate({
+            "name": "test-prompt",
+            "description": "A test prompt",
+            "arguments": [],
+            "_meta": meta_data,
+        })
+    ]
+    resources = [
+        types.Resource.model_validate({
+            "uri": "file:///test",
+            "name": "test-resource",
+            "description": "A test resource",
+            "_meta": meta_data,
+        })
+    ]
+
+    client = _MockClient(prompts=prompts, resources=resources)
+    analysis = await client.analyze_environment()
+
+    # Check prompts have meta
+    assert len(analysis["prompts"]) == 1
+    assert "meta" in analysis["prompts"][0]
+    assert analysis["prompts"][0]["meta"] == meta_data
+
+    # Check resources have meta
+    assert len(analysis["resources"]) == 1
+    assert "meta" in analysis["resources"][0]
+    assert analysis["resources"][0]["meta"] == meta_data
+

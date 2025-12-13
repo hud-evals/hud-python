@@ -400,12 +400,16 @@ class BaseHUDClient(AgentMCPClient):
         try:
             resources = await self.list_resources()
             for resource in resources:
-                resource_info = {
+                resource_info: dict[str, Any] = {
                     "uri": str(resource.uri),
                     "name": resource.name,
                     "description": resource.description,
                     "mime_type": getattr(resource, "mimeType", None),
                 }
+                # Include meta field if present (contains scenario source code)
+                meta = getattr(resource, "meta", None)
+                if meta:
+                    resource_info["meta"] = meta
                 analysis["resources"].append(resource_info)
         except Exception as e:
             if self.verbose:
@@ -425,13 +429,16 @@ class BaseHUDClient(AgentMCPClient):
                     for a in raw_args
                 ]
 
-                analysis["prompts"].append(
-                    {
-                        "name": prompt.name,
-                        "description": prompt.description,
-                        "arguments": args,
-                    }
-                )
+                prompt_info: dict[str, Any] = {
+                    "name": prompt.name,
+                    "description": prompt.description,
+                    "arguments": args,
+                }
+                # Include meta field if present (contains scenario source code)
+                meta = getattr(prompt, "meta", None)
+                if meta:
+                    prompt_info["meta"] = meta
+                analysis["prompts"].append(prompt_info)
         except Exception as e:
             if self.verbose:
                 hud_console.debug("Could not list prompts: " + str(e))
@@ -440,6 +447,7 @@ class BaseHUDClient(AgentMCPClient):
         # A scenario is exposed as:
         # - Prompt: name "{env}:{scenario}" with description prefix "[Setup]"
         # - Resource: uri "{env}:{scenario}" with description prefix "[Evaluate]"
+        # Both prompt and resource contain meta.code with the scenario source code
         scenarios_by_id: dict[str, dict[str, Any]] = {}
 
         for p in analysis.get("prompts", []):
@@ -450,7 +458,7 @@ class BaseHUDClient(AgentMCPClient):
             if not scenario_id:
                 continue
             env_name, scenario_name = ([*scenario_id.split(":", 1), ""])[:2]
-            scenarios_by_id[scenario_id] = {
+            scenario_info: dict[str, Any] = {
                 "id": scenario_id,
                 "env": env_name,
                 "name": scenario_name or scenario_id,
@@ -459,6 +467,11 @@ class BaseHUDClient(AgentMCPClient):
                 "has_setup_prompt": True,
                 "has_evaluate_resource": False,
             }
+            # Extract code from meta field if present
+            meta = p.get("meta")
+            if meta and isinstance(meta, dict) and "code" in meta:
+                scenario_info["code"] = meta["code"]
+            scenarios_by_id[scenario_id] = scenario_info
 
         for r in analysis.get("resources", []):
             desc = (r.get("description") or "").strip()
@@ -479,6 +492,15 @@ class BaseHUDClient(AgentMCPClient):
                 }
             scenarios_by_id[scenario_id]["evaluate_description"] = desc
             scenarios_by_id[scenario_id]["has_evaluate_resource"] = True
+            # Extract code from meta field if not already present (from prompt)
+            meta = r.get("meta")
+            if (
+                meta
+                and isinstance(meta, dict)
+                and "code" in meta
+                and "code" not in scenarios_by_id[scenario_id]
+            ):
+                scenarios_by_id[scenario_id]["code"] = meta["code"]
 
         analysis["scenarios"] = sorted(
             scenarios_by_id.values(),
