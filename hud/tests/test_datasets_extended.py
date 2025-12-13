@@ -220,7 +220,7 @@ class TestRunDatasetExtended:
         mock_ctx.results = None
 
         with (
-            patch("hud.datasets.runner.load_dataset", return_value=mock_tasks) as mock_load,
+            patch("hud.datasets.loader.load_dataset", return_value=mock_tasks) as mock_load,
             patch("hud.datasets.runner.hud.eval") as mock_eval,
         ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)

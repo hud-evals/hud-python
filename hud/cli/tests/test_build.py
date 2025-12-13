@@ -206,7 +206,7 @@ RUN pip install fastmcp
 class TestAnalyzeMcpEnvironment:
     """Test analyzing MCP environment."""
 
-    @mock.patch("hud.cli.build.MCPClient")
+    @mock.patch("hud.clients.fastmcp.FastMCPHUDClient")
     async def test_analyze_success(self, mock_client_class):
         """Test successful environment analysis."""
         # Setup mock client
@@ -240,7 +240,7 @@ class TestAnalyzeMcpEnvironment:
         assert result["tools"][0]["name"] == "test_tool"
         assert "initializeMs" in result
 
-    @mock.patch("hud.cli.build.MCPClient")
+    @mock.patch("hud.clients.fastmcp.FastMCPHUDClient")
     async def test_analyze_failure(self, mock_client_class):
         """Test failed environment analysis."""
         # Setup mock client to fail
@@ -253,7 +253,7 @@ class TestAnalyzeMcpEnvironment:
         with pytest.raises(HudException, match="Connection failed"):
             await analyze_mcp_environment("test:latest")
 
-    @mock.patch("hud.cli.build.MCPClient")
+    @mock.patch("hud.clients.fastmcp.FastMCPHUDClient")
     async def test_analyze_verbose_mode(self, mock_client_class):
         """Test analysis in verbose mode."""
         mock_client = mock.AsyncMock()

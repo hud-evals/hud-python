@@ -44,16 +44,20 @@ def _task_from_dict(item: dict[str, Any]) -> Task:
         # v4 LegacyTask format - convert via Task.from_v4()
         return Task.from_v4(item)
     else:
-        # v5 format - env is EnvConfig dict with name, include, exclude
+        # v5 format - env is required, scenario is optional
+        env = item.get("env")
+        if env is None:
+            raise ValueError(f"Task missing required 'env' field: {item}")
+
         # Convert validation dicts to MCPToolCall objects
         validation = None
         if item.get("validation"):
             validation = [MCPToolCall(**v) for v in item["validation"]]
 
         return Task(
-            id=item.get("id"),
-            env=item.get("env"),  # EnvConfig dict: {"name": "browser", "include": [...], ...}
+            env=env,  # EnvConfig dict: {"name": "browser", "include": [...], ...}
             scenario=item.get("scenario"),
+            id=item.get("id"),
             args=item.get("args", {}),
             validation=validation,
         )
@@ -107,7 +111,7 @@ def _load_from_api(dataset_name: str) -> list[Task]:
 
     with httpx.Client() as client:
         response = client.get(
-            f"{settings.hud_api_url}/evals/{dataset_name}",
+            f"{settings.hud_api_url}/tasks/evalset/{dataset_name}",
             headers=headers,
             params={"all": "true"},
         )

@@ -167,10 +167,16 @@ class ScenarioMixin:
             return str(prompt)
         else:
             # Remote scenario - call via MCP prompt
-            # Format: {env_name}:{scenario_name} (use source env name if available)
-            env_name = getattr(self, "_source_env_name", None) or self.name
-            safe_env_name = env_name.replace("_", "-")
-            prompt_id = f"{safe_env_name}:{scenario_name}"
+            # If scenario_name already contains ":", it's already namespaced - use directly
+            # Otherwise, prefix with env name: {env_name}:{scenario_name}
+            if ":" in scenario_name:
+                prompt_id = scenario_name
+                logger.debug("Remote scenario (already namespaced): prompt_id=%s", prompt_id)
+            else:
+                env_name = getattr(self, "_source_env_name", None) or self.name
+                safe_env_name = env_name.replace("_", "-")
+                prompt_id = f"{safe_env_name}:{scenario_name}"
+                logger.debug("Remote scenario (adding namespace): prompt_id=%s", prompt_id)
             try:
                 result = await self.get_prompt(prompt_id, args)  # type: ignore[attr-defined]
                 if result.messages:
@@ -222,10 +228,14 @@ class ScenarioMixin:
                     if self._scenario_latest.get(scenario_name) == session_id:
                         del self._scenario_latest[scenario_name]
 
-        # Remote scenario - read via MCP resource (use source env name if available)
-        env_name = getattr(self, "_source_env_name", None) or self.name
-        safe_env_name = env_name.replace("_", "-")
-        resource_id = f"{safe_env_name}:{scenario_name}"
+        # Remote scenario - read via MCP resource
+        # If scenario_name already contains ":", it's already namespaced - use directly
+        if ":" in scenario_name:
+            resource_id = scenario_name
+        else:
+            env_name = getattr(self, "_source_env_name", None) or self.name
+            safe_env_name = env_name.replace("_", "-")
+            resource_id = f"{safe_env_name}:{scenario_name}"
         try:
             contents = await self.read_resource(resource_id)  # type: ignore[attr-defined]
             if contents:
@@ -283,7 +293,12 @@ class ScenarioMixin:
             # Capture source code for reproducibility
             try:
                 source_code = inspect.getsource(fn)
-            except (OSError, TypeError):
+            except (OSError, TypeError) as e:
+                logger.warning(
+                    "Could not capture source code for scenario '%s': %s",
+                    scenario_name,
+                    e,
+                )
                 source_code = None
 
             # Store the generator function
@@ -302,7 +317,7 @@ class ScenarioMixin:
             scenario_fn = fn
             scenario_name_ref = scenario_name
 
-            async def prompt_handler(**handler_args: Any) -> list[dict[str, Any]]:
+            async def prompt_handler(**handler_args: Any) -> list[str]:
                 # Create generator instance
                 gen = scenario_fn(**handler_args)
 
@@ -321,7 +336,9 @@ class ScenarioMixin:
                     prompt_text[:50] if isinstance(prompt_text, str) else prompt_text,
                 )
 
-                return [{"role": "user", "content": str(prompt_text)}]
+                # Return just the string - FastMCP wraps it in PromptMessage
+                # Don't return dict or it gets JSON-serialized as text content
+                return [str(prompt_text)]
 
             # Register prompt using FastMCP - create FunctionPrompt directly
             # to bypass the **kwargs validation in from_function()

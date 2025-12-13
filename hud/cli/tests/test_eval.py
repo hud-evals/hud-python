@@ -61,8 +61,8 @@ class TestRunDataset:
         from hud.eval.task import Task
 
         tasks = [
-            Task(id="task1", scenario="test"),
-            Task(id="task2", scenario="test"),
+            Task(env={"name": "test"}, id="task1", scenario="test"),
+            Task(env={"name": "test"}, id="task2", scenario="test"),
         ]
         agent = MockAgent()
 
@@ -92,12 +92,12 @@ class TestRunDataset:
         """Test run_dataset with a string source (loads via load_dataset)."""
         from hud.eval.task import Task
 
-        mock_tasks = [Task(id="loaded_task", scenario="loaded")]
+        mock_tasks = [Task(env={"name": "test"}, id="loaded_task", scenario="loaded")]
         agent = MockAgent()
         mock_ctx = MockEvalContext()
 
         with (
-            patch("hud.datasets.runner.load_dataset", return_value=mock_tasks) as mock_load,
+            patch("hud.datasets.loader.load_dataset", return_value=mock_tasks) as mock_load,
             patch("hud.datasets.runner.hud.eval") as mock_eval,
         ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
@@ -115,7 +115,7 @@ class TestRunDataset:
         """Test run_dataset raises ValueError for empty tasks."""
         agent = MockAgent()
 
-        with patch("hud.datasets.runner.load_dataset", return_value=[]):
+        with patch("hud.datasets.loader.load_dataset", return_value=[]):
             from hud.datasets.runner import run_dataset
 
             with pytest.raises(ValueError, match="No tasks to run"):
@@ -126,7 +126,7 @@ class TestRunDataset:
         """Test run_dataset passes group_size to hud.eval."""
         from hud.eval.task import Task
 
-        tasks = [Task(id="task1", scenario="test")]
+        tasks = [Task(env={"name": "test"}, id="task1", scenario="test")]
         agent = MockAgent()
         mock_ctx = MockEvalContext()
 
@@ -146,7 +146,7 @@ class TestRunDataset:
         """Test run_dataset passes max_concurrent to hud.eval."""
         from hud.eval.task import Task
 
-        tasks = [Task(id="task1", scenario="test")]
+        tasks = [Task(env={"name": "test"}, id="task1", scenario="test")]
         agent = MockAgent()
         mock_ctx = MockEvalContext()
 
@@ -166,7 +166,7 @@ class TestRunDataset:
         """Test run_dataset returns EvalContext results."""
         from hud.eval.task import Task
 
-        tasks = [Task(id="task1", scenario="test")]
+        tasks = [Task(env={"name": "test"}, id="task1", scenario="test")]
         agent = MockAgent()
         mock_ctx = MockEvalContext()
 
@@ -187,7 +187,7 @@ class TestRunDataset:
         """Test run_dataset returns ctx.results for parallel execution."""
         from hud.eval.task import Task
 
-        tasks = [Task(id="task1", scenario="test")]
+        tasks = [Task(env={"name": "test"}, id="task1", scenario="test")]
         agent = MockAgent()
 
         # Create mock context with results (parallel execution)

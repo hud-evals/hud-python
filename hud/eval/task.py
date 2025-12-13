@@ -32,10 +32,8 @@ from typing import TYPE_CHECKING, Any
 from hud.types import MCPToolCall
 
 if TYPE_CHECKING:
-    from types import TracebackType
-
     from hud.environment import Environment
-    from hud.eval.context import EvalContext
+    from hud.environment.types import EnvConfig
 
 __all__ = ["Task", "build_eval_name"]
 
@@ -133,28 +131,13 @@ class Task:
         task = Task.from_v4({"prompt": "...", "mcp_config": {...}, ...})
         ```
     """
-
-    # Core v5 task definition
-    id: str | None = None
-    env: Environment | None = None
+    # Required
+    env: Environment | EnvConfig | dict[str, Any]
+    # Optional
     scenario: str | None = None
+    id: str | None = None
     args: dict[str, Any] = field(default_factory=dict)
     validation: list[MCPToolCall] | None = None
-
-    # EvalContext creation params (set by hud.eval for parallel execution)
-    trace_id: str | None = field(default=None, repr=False)
-    api_key: str | None = field(default=None, repr=False)
-    job_id: str | None = field(default=None, repr=False)
-    group_id: str | None = field(default=None, repr=False)
-    index: int = field(default=0, repr=False)
-    variants: dict[str, Any] = field(default_factory=dict, repr=False)
-    code_snippet: str | None = field(default=None, repr=False)
-    _suppress_link: bool = field(default=False, repr=False)
-    _trace: bool = field(default=True, repr=False)
-    _quiet: bool = field(default=False, repr=False)
-
-    # Runtime state
-    _ctx: EvalContext | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         """Validate and normalize env and validation fields after initialization.
@@ -165,9 +148,8 @@ class Task:
         from hud.environment import Environment
         from hud.environment.types import EnvConfig
 
-        # Convert env field
-        if not isinstance(self.env, (Environment, type(None))):
-            # Convert dict to EnvConfig first (with validation)
+        # Convert env field (dict/EnvConfig -> Environment)
+        if not isinstance(self.env, Environment):
             if isinstance(self.env, dict):
                 try:
                     config = EnvConfig(**self.env)
@@ -180,7 +162,7 @@ class Task:
                 config = self.env
             else:
                 raise TypeError(
-                    f"Task.env must be Environment, EnvConfig, dict, or None. "
+                    f"Task.env must be Environment, EnvConfig, or dict. "
                     f"Got {type(self.env).__name__}"
                 )
 
@@ -312,124 +294,19 @@ class Task:
         )
 
         return cls(
-            id=legacy_task.id,
             env=env,  # Live Environment with mcp_config, setup_tool, evaluate_tool
-            scenario=None,  # No scenario - uses prompt directly
+            scenario=None,  # v4 tasks use prompt directly, not scenarios
+            id=legacy_task.id,
             args={},
             validation=None,
         )
 
-    # Backwards compat alias
-
     def copy(self) -> Task:
-        """Create a copy of this Task for parallel execution."""
+        """Create a copy of this Task config."""
         return Task(
+            id=self.id,
             env=self.env,  # Share reference - from_environment handles copying
             scenario=self.scenario,
             args=self.args.copy(),
-            trace_id=None,  # Each copy gets unique trace_id
-            api_key=self.api_key,
-            job_id=self.job_id,
-            group_id=self.group_id,
-            index=self.index,
-            variants=self.variants.copy(),
-            code_snippet=self.code_snippet,
-            _suppress_link=self._suppress_link,
-            _trace=self._trace,
-            _quiet=self._quiet,
+            validation=self.validation,
         )
-
-    def to_eval_context(self) -> EvalContext:
-        """Convert this Task to an EvalContext.
-
-        Creates an EvalContext from the environment (live or from config).
-        If env is EnvConfig or dict, creates Environment by connecting to the hub.
-        """
-        from hud.environment import Environment
-        from hud.eval.context import EvalContext
-
-        # Get environment (or create blank if None)
-        source_env = self.env if self.env is not None else Environment("eval")
-
-        eval_name = build_eval_name(self.scenario, self.args)
-
-        # Create EvalContext from environment
-        ctx = EvalContext.from_environment(
-            env=source_env,
-            name=eval_name,
-            trace_id=self.trace_id,
-            api_key=self.api_key,
-            job_id=self.job_id,
-            group_id=self.group_id,
-            index=self.index,
-            variants=self.variants,
-            code_snippet=self.code_snippet,
-        )
-        ctx._suppress_link = self._suppress_link
-        ctx._trace_enabled = self._trace
-
-        return ctx
-
-    async def __aenter__(self) -> EvalContext:
-        """Enter eval context.
-
-        Order of operations:
-        1. Create EvalContext from environment config
-        2. Connect environment (MCP servers, etc.)
-        3. Run scenario setup (if scenario) → sets ctx.prompt
-        4. Notify backend (with prompt now set)
-        5. Print trace link
-        """
-        self._ctx = self.to_eval_context()
-        await self._ctx.__aenter__()  # Connect env, set trace headers
-
-        # Run scenario setup (sets prompt)
-        if self.scenario:
-            await self._run_scenario_setup()
-
-        # Notify backend with prompt included
-        await self._ctx._eval_enter()
-        self._ctx._print_eval_link()
-
-        return self._ctx
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        """Exit eval context - run scenario evaluate and exit EvalContext."""
-        if self._ctx is None:
-            return
-
-        # If we have a scenario and no error, run its evaluate phase
-        if self.scenario and exc_type is None:
-            await self._run_scenario_evaluate()
-
-        # Exit the EvalContext
-        await self._ctx.__aexit__(exc_type, exc_val, exc_tb)
-        self._ctx = None
-
-    async def _run_scenario_setup(self) -> None:
-        """Run the scenario's setup phase (get prompt)."""
-        if self._ctx is None or self.scenario is None:
-            return
-
-        # Store scenario name on context for ctx.submit()
-        self._ctx._scenario_name = self.scenario
-
-        # Delegate to ScenarioMixin.run_scenario_setup
-        prompt = await self._ctx.run_scenario_setup(self.scenario, self.args)
-        if prompt:
-            self._ctx.prompt = prompt
-
-    async def _run_scenario_evaluate(self) -> None:
-        """Run the scenario's evaluate phase (get reward)."""
-        if self._ctx is None or self.scenario is None:
-            return
-
-        # Delegate to ScenarioMixin.run_scenario_evaluate
-        reward = await self._ctx.run_scenario_evaluate(self.scenario)
-        if reward is not None:
-            self._ctx.reward = reward

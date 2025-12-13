@@ -332,9 +332,6 @@ class MCPAgent(ABC):
         }
         trace_result = Trace(**trace_params)
 
-        # Populate trace steps from current context
-        trace_result.populate_from_context()
-
         return trace_result
 
     async def call_tools(

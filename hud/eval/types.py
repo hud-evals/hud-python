@@ -32,10 +32,10 @@ class EvalPayload(BaseModel):
 
     prompt: str | None = None
     code_snippet: str | None = None
-    job_name: str | None = None
     job_id: str | None = None
     group_id: str | None = None
     variants: dict[str, Any] | None = None
+    task_version_id: str | None = None
 
 
 class EvalExitPayload(EvalPayload):
@@ -46,8 +46,17 @@ class EvalExitPayload(EvalPayload):
     error_message: str | None = None
 
 
+class JobEnterPayload(BaseModel):
+    """Payload for job/{job_id}/enter - sent once at job start."""
+
+    name: str | None = None
+    variants: dict[str, Any] | None = None  # Full variant config
+    group: int | None = None
+
+
 __all__ = [
     "EvalExitPayload",
     "EvalPayload",
+    "JobEnterPayload",
     "ParallelEvalComplete",
 ]

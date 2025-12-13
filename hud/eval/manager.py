@@ -56,6 +56,40 @@ def _get_eval_name(tasks: list[Task] | None = None) -> str:
     return "eval"
 
 
+def _send_job_enter(
+    job_id: str,
+    name: str,
+    variants: dict[str, Any] | None,
+    group: int,
+    api_key: str | None,
+) -> None:
+    """Send job enter payload (sync request before traces start)."""
+    import httpx
+
+    from hud.eval.types import JobEnterPayload
+    from hud.settings import settings
+
+    api_key = api_key or settings.api_key
+    if not settings.telemetry_enabled or not api_key:
+        return
+
+    payload = JobEnterPayload(
+        name=name,
+        variants=variants,
+        group=group,
+    )
+
+    try:
+        httpx.post(
+            f"{settings.hud_api_url}/trace/job/{job_id}/enter",
+            json=payload.model_dump(exclude_none=True),
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10.0,
+        )
+    except Exception as e:
+        logger.warning("Failed to send job enter: %s", e)
+
+
 @asynccontextmanager
 async def run_eval(
     source: Task | list[Task] | None = None,
@@ -194,38 +228,47 @@ async def run_eval(
     from hud.eval.context import EvalContext
 
     if total_evals == 1:
-        # Simple case: single eval - always use Task for consistent flow
         if tasks:
-            single_task = tasks[0]
-        else:
-            # Blank eval
-            single_task = Task(
-                env=None,
-                scenario=None,
+            # Single task - use EvalContext.from_task()
+            ctx = EvalContext.from_task(
+                tasks[0],
                 api_key=api_key,
                 job_id=job_id,
                 variants=variant_combos[0],
                 code_snippet=code_snippet,
-                _trace=trace,
-                _quiet=quiet,
+                trace=trace,
+                quiet=quiet,
             )
-
-        # Apply common settings
-        single_task.api_key = api_key
-        single_task.job_id = job_id
-        single_task.variants = variant_combos[0]
-        single_task.code_snippet = code_snippet
-        single_task._trace = trace
-        single_task._quiet = quiet
-
-        async with single_task as ctx:
-            yield ctx
+            async with ctx:
+                yield ctx
+        else:
+            # Blank eval - use EvalContext directly
+            ctx = EvalContext(
+                name="eval",
+                api_key=api_key,
+                job_id=job_id,
+                variants=variant_combos[0],
+                code_snippet=code_snippet,
+                trace=trace,
+                quiet=quiet,
+            )
+            async with ctx:
+                yield ctx
 
     else:
         # Parallel execution: create implicit job to group traces
         eval_name = _get_eval_name(tasks=tasks)
         implicit_job_id = job_id or str(uuid.uuid4())
         job_url = f"https://hud.ai/jobs/{implicit_job_id}"
+
+        # Send job enter (sync request before traces start)
+        _send_job_enter(
+            job_id=implicit_job_id,
+            name=eval_name,
+            variants=variants,
+            group=group,
+            api_key=api_key,
+        )
 
         # Print job URL (not individual trace URLs)
         if not quiet:
@@ -305,9 +348,6 @@ async def _run_parallel_eval(
 
     from hud.eval.parallel import log_eval_stats
 
-    # Lazy import to avoid circular dependency
-    from hud.eval.task import Task
-
     # Find user code frame and extract the with block body
     caller_frame = find_user_frame()
     body_source, captured_locals, context_var = get_with_block_body(caller_frame)
@@ -317,46 +357,42 @@ async def _run_parallel_eval(
     total_evals = base_count * len(variant_combos) * group
     resolved_group_ids = resolve_group_ids(group_ids, total_evals)
 
-    # Create Task objects for parallel execution
-    task_objects: list[Task] = []
+    # Build list of (task_or_none, runtime_params) for each parallel eval
+    from hud.eval.context import EvalContext
+
+    eval_configs: list[tuple[Task | None, dict[str, Any]]] = []
     idx = 0
 
     if tasks:
-        # Create Task for each (task, variant, run) combination
         for base_task in tasks:
             for variant in variant_combos:
                 for _ in range(group):
-                    task_copy = base_task.copy()
-                    task_copy.api_key = api_key
-                    task_copy.job_id = job_id
-                    task_copy.group_id = resolved_group_ids[idx]
-                    task_copy.index = idx
-                    task_copy.variants = variant
-                    task_copy.code_snippet = code_snippet
-                    task_copy._suppress_link = True  # Individual traces don't print links
-                    task_copy._trace = trace
-                    task_copy._quiet = quiet
-                    task_objects.append(task_copy)
+                    runtime_params = {
+                        "api_key": api_key,
+                        "job_id": job_id,
+                        "group_id": resolved_group_ids[idx],
+                        "index": idx,
+                        "variants": variant,
+                        "code_snippet": code_snippet,
+                        "trace": trace,
+                        "quiet": True,  # Individual traces don't print links
+                    }
+                    eval_configs.append((base_task, runtime_params))
                     idx += 1
     else:
-        # Blank tasks for each (variant, run) combination
         for variant in variant_combos:
             for _ in range(group):
-                blank_task = Task(
-                    env=None,
-                    scenario=None,
-                    args={},
-                    api_key=api_key,
-                    job_id=job_id,
-                    group_id=resolved_group_ids[idx],
-                    index=idx,
-                    variants=variant,
-                    code_snippet=code_snippet,
-                    _suppress_link=True,
-                    _trace=trace,
-                    _quiet=quiet,
-                )
-                task_objects.append(blank_task)
+                runtime_params = {
+                    "api_key": api_key,
+                    "job_id": job_id,
+                    "group_id": resolved_group_ids[idx],
+                    "index": idx,
+                    "variants": variant,
+                    "code_snippet": code_snippet,
+                    "trace": trace,
+                    "quiet": True,
+                }
+                eval_configs.append((None, runtime_params))
                 idx += 1
 
     # Create runner function using the actual variable name from the 'as' clause
@@ -369,33 +405,40 @@ async def _run_parallel_eval(
     # Create semaphore for concurrency control
     sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
-    async def run_one(task_obj: Task) -> EvalContext:
-        """Run a single Task and return its EvalContext."""
+    async def run_one(config: tuple[Task | None, dict[str, Any]]) -> EvalContext:
+        """Run a single eval and return its EvalContext."""
+        task, params = config
+        idx = params["index"]
+
+        # Create context from task or blank
+        if task is not None:
+            ctx = EvalContext.from_task(task, **params)
+        else:
+            ctx = EvalContext(name="eval", **params)
+
         try:
             if sem:
-                async with sem, task_obj as ctx:
+                async with sem, ctx:
                     await runner(ctx)
             else:
-                async with task_obj as ctx:
+                async with ctx:
                     await runner(ctx)
             return ctx
         except Exception as e:
-            logger.warning("Parallel eval %d failed: %s", task_obj.index, e)
-            # Create a failed context from the task
-            ctx = task_obj.to_eval_context()
+            logger.warning("Parallel eval %d failed: %s", idx, e)
             ctx.error = e
             return ctx
 
     # Run in parallel
     logger.info(
-        "Running %d tasks (%d base x %d variants x %d runs)%s",
-        len(task_objects),
+        "Running %d evals (%d base x %d variants x %d runs)%s",
+        len(eval_configs),
         base_count,
         len(variant_combos),
         group,
         f", max_concurrent={max_concurrent}" if max_concurrent else "",
     )
-    completed = await asyncio.gather(*[run_one(t) for t in task_objects])
+    completed = await asyncio.gather(*[run_one(cfg) for cfg in eval_configs])
 
     # Log and print stats
     eval_name = completed[0].eval_name if completed else "eval"

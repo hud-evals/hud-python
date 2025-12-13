@@ -199,13 +199,13 @@ class TestLoadDataset:
     def test_load_dataset_missing_fields(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
-        """load_dataset() handles tasks with missing optional fields."""
+        """load_dataset() handles tasks with missing optional fields (but env is required)."""
         mock_settings.hud_api_url = "https://api.hud.ai"
         mock_settings.api_key = "test_key"
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
-            "tasks": {"task-1": {"scenario": "test"}},
+            "tasks": {"task-1": {"env": {"name": "test-env"}, "scenario": "test"}},
         }
         mock_response.raise_for_status = MagicMock()
 
@@ -220,5 +220,4 @@ class TestLoadDataset:
         assert len(tasks) == 1
         assert tasks[0].scenario == "test"
         assert tasks[0].id == "task-1"
-        assert tasks[0].env is None
         assert tasks[0].args == {}

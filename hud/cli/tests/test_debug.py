@@ -207,7 +207,7 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.cli.debug.MCPClient") as MockClient,
+            patch("hud.clients.MCPClient") as MockClient,
         ):
             mock_client = MockClient.return_value
             mock_client.initialize = AsyncMock()
@@ -240,7 +240,7 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.cli.debug.MCPClient") as MockClient,
+            patch("hud.clients.MCPClient") as MockClient,
         ):
             mock_client = MockClient.return_value
             mock_client.initialize = AsyncMock()
@@ -277,7 +277,7 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.cli.debug.MCPClient") as MockClient,
+            patch("hud.clients.MCPClient") as MockClient,
         ):
             mock_client = MockClient.return_value
             mock_client.initialize = AsyncMock()
@@ -311,7 +311,7 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.cli.debug.MCPClient") as MockClient,
+            patch("hud.clients.MCPClient") as MockClient,
         ):
             mock_client = MockClient.return_value
             mock_client.initialize = AsyncMock()
@@ -349,7 +349,7 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.cli.debug.MCPClient") as MockClient,
+            patch("hud.clients.MCPClient") as MockClient,
         ):
             # Create different mock instances for each client
             mock_clients = []
@@ -393,7 +393,7 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.cli.debug.MCPClient") as MockClient,
+            patch("hud.clients.MCPClient") as MockClient,
         ):
             # Set up for phase 1-4 success first
             test_tool = Mock()

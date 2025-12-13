@@ -23,6 +23,8 @@ from hud.telemetry.job import get_current_job
 if TYPE_CHECKING:
     from types import TracebackType
 
+    from hud.eval.task import Task
+
 
 from hud.eval.types import EvalExitPayload, EvalPayload, ParallelEvalComplete
 
@@ -152,6 +154,7 @@ class EvalContext(Environment):
         self._trace_enabled: bool = trace  # Whether to send trace data to backend
         self._scenario_name: str | None = None  # Current scenario name (for submit)
         self._source_env_name: str | None = None  # Source env name for remote lookups
+        self._task: Task | None = None  # Task config (set by from_task)
 
     @classmethod
     def from_environment(
@@ -226,6 +229,77 @@ class EvalContext(Environment):
             ctx.prompt = env.prompt
 
         return ctx
+
+    @classmethod
+    def from_task(
+        cls,
+        task: Task,
+        *,
+        trace_id: str | None = None,
+        api_key: str | None = None,
+        job_id: str | None = None,
+        group_id: str | None = None,
+        index: int = 0,
+        variants: dict[str, Any] | None = None,
+        code_snippet: str | None = None,
+        trace: bool = True,
+        quiet: bool = False,
+    ) -> EvalContext:
+        """Create an EvalContext from a Task config.
+
+        Args:
+            task: Task config (env, scenario, args)
+            trace_id: Unique trace ID
+            api_key: API key for backend calls
+            job_id: Job ID to link to
+            group_id: Group ID for parallel evaluations
+            index: Index in parallel execution
+            variants: Variant assignment
+            code_snippet: Code being evaluated
+            trace: Whether to send traces to backend
+            quiet: Whether to suppress output
+        """
+        from hud.eval.task import build_eval_name
+
+        eval_name = build_eval_name(task.scenario, task.args)
+
+        ctx = cls.from_environment(
+            env=task.env,
+            name=eval_name,
+            trace_id=trace_id,
+            api_key=api_key,
+            job_id=job_id,
+            group_id=group_id,
+            index=index,
+            variants=variants,
+            code_snippet=code_snippet,
+            trace=trace,
+            quiet=quiet,
+        )
+
+        # Store task info for scenario execution
+        ctx._task = task
+
+        return ctx
+
+    async def _run_task_scenario_setup(self) -> None:
+        """Run the task's scenario setup phase (if scenario provided)."""
+        if self._task is None or self._task.scenario is None:
+            return
+
+        self._scenario_name = self._task.scenario
+        prompt = await self.run_scenario_setup(self._task.scenario, self._task.args)
+        if prompt:
+            self.prompt = prompt
+
+    async def _run_task_scenario_evaluate(self) -> None:
+        """Run the task's scenario evaluate phase (if scenario provided)."""
+        if self._task is None or self._task.scenario is None:
+            return
+
+        reward = await self.run_scenario_evaluate(self._task.scenario)
+        if reward is not None:
+            self.reward = reward
 
     # =========================================================================
     # Summary Context - Attribute Access Control
@@ -306,12 +380,12 @@ class EvalContext(Environment):
     def _build_base_payload(self) -> EvalPayload:
         """Build the base payload for enter/exit."""
         return EvalPayload(
-            job_name=self.eval_name,
             prompt=self.prompt,
             code_snippet=self.code_snippet,
             job_id=self.job_id,
             group_id=self.group_id,
             variants=self.variants if self.variants else None,
+            task_version_id=self._task.id if self._task else None,
         )
 
     async def log(self, metrics: dict[str, Any]) -> None:
@@ -420,6 +494,13 @@ class EvalContext(Environment):
         # Connect environment (MCP servers, tools)
         await super().__aenter__()
 
+        # Run task scenario setup (if created from_task with scenario)
+        await self._run_task_scenario_setup()
+
+        # Notify backend and print link
+        await self._eval_enter()
+        self._print_eval_link()
+
         return self
 
     async def __aexit__(
@@ -435,6 +516,10 @@ class EvalContext(Environment):
             return exc_type is ParallelEvalComplete
 
         self._completed_at = datetime.now(UTC)
+
+        # Run task scenario evaluate (if no error and has scenario)
+        if exc_type is None:
+            await self._run_task_scenario_evaluate()
 
         # Track error
         error_msg: str | None = None

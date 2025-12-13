@@ -533,21 +533,15 @@ class Environment(
 
     def __call__(
         self,
-        scenario: str | None = None,
-        *,
-        _trace: bool = True,
-        _quiet: bool = False,
+        scenario: str,
         **args: Any,
     ) -> Task:
         """Create a Task from this environment.
 
-        Returns a Task that can be entered as a context manager or passed
-        to hud.eval() for orchestration.
+        Returns a Task that can be passed to hud.eval() for orchestration.
 
         Args:
-            scenario: Optional scenario name to run (from @env.scenario)
-            _trace: Whether to send trace data to backend (default True)
-            _quiet: Whether to suppress printing links (default False)
+            scenario: Scenario name to run (from @env.scenario)
             **args: Arguments for the scenario
 
         Returns:
@@ -564,15 +558,11 @@ class Environment(
                 yield 1.0
 
 
-            # Simple use - Task is context manager
-            async with env("checkout", user_id="alice") as ctx:
+            # Single task via hud.eval
+            async with hud.eval(env("checkout", user_id="alice")) as ctx:
                 await agent.run(ctx.prompt)
 
-            # Empty - just env
-            async with env() as ctx:
-                await ctx.call_tool("navigate", url="...")
-
-            # Orchestrated via hud.eval
+            # Multiple tasks with variants
             tasks = [env("checkout", user_id="alice"), env("checkout", user_id="bob")]
             async with hud.eval(tasks, variants={"model": ["gpt-4o"]}, group=4) as ctx:
                 ...
@@ -581,9 +571,7 @@ class Environment(
         from hud.eval.task import Task
 
         return Task(
-            env=self,  # Pass live environment for local tools/scenarios
+            env=self,
             scenario=scenario,
             args=args,
-            _trace=_trace,
-            _quiet=_quiet,
         )
