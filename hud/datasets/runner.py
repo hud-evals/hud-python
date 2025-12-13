@@ -5,353 +5,78 @@ Requires the [agents] extra: pip install hud-python[agents]
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-import uuid
-import warnings
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
-from hud.datasets.utils import calculate_group_stats, submit_rollouts
-from hud.types import AgentType, Task, Trace
+import hud
 
 if TYPE_CHECKING:
-    from datasets import Dataset
-
     from hud.agents import MCPAgent
+    from hud.eval.context import EvalContext
+    from hud.eval.task import Task
 
 logger = logging.getLogger("hud.datasets")
 
 
-async def run_single_task(
-    task: Task,
-    agent_type: AgentType,
-    agent_params: dict[str, Any] | None = None,
-    max_steps: int = 10,
-    job_id: str | None = None,
-    task_id: str | None = None,
-    group_id: str | None = None,
-    trace_id: str | None = None,
-    trace_name: str | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> Trace:
-    """Execute a single task with tracing.
-
-    This is the core execution primitive for running a single task.
-
-    Args:
-        task: Task to execute
-        agent_type: Agent type to use
-        agent_params: Parameters passed to agent.create(). Should include fields
-            from BaseCreateParams (auto_trace, auto_respond, verbose) plus
-            agent-specific config fields (e.g., use_computer_beta for ClaudeConfig).
-        max_steps: Maximum steps for agent execution
-        job_id: Job ID for telemetry grouping
-        task_id: Task ID for telemetry
-        group_id: Group ID for variance estimation runs
-        trace_id: Trace ID for telemetry (auto-generated if not provided)
-        trace_name: Name for the trace (defaults to task prompt)
-        metadata: Additional trace metadata
-
-    Returns:
-        Trace result from agent execution
-    """
-    from hud.eval.context import EvalContext
-
-    name = trace_name or task.prompt or task_id or "task"
-
-    ctx = EvalContext.from_task(
-        task=task,
-        name=name,
-        trace_id=trace_id,
-        job_id=job_id,
-        group_id=group_id,
-    )
-
-    result: Trace
-    async with ctx:
-        agent = agent_type.cls.create(**(agent_params or {}))
-        result = await agent.run(task, max_steps=max_steps)
-        # Transfer reward to context for tracking
-        ctx.reward = result.reward
-    return result
-
-
-async def run_tasks(
-    tasks: list[Task],
-    agent_type: AgentType,
-    agent_params: dict[str, Any] | None = None,
+async def run_dataset(
+    tasks: str | list[Task],
+    agent: MCPAgent,
     *,
-    name: str = "Evaluation",
-    max_concurrent: int = 30,
-    metadata: dict[str, Any] | None = None,
     max_steps: int = 10,
+    max_concurrent: int = 30,
     group_size: int = 1,
-    remote: bool = False,
-) -> list[Any]:
-    """Run a list of tasks with automatic job and telemetry tracking.
+) -> list[EvalContext]:
+    """Run an agent on a dataset of tasks.
 
-    This is the core evaluation function. Use this when you have a list of tasks
-    to run, whether loaded from a dataset, filtered, or constructed programmatically.
+    This is the primary entry point for running evaluations programmatically.
 
     Args:
-        tasks: List of Task objects
-        agent_type: AgentType specifying which agent to use
-        agent_params: Parameters passed to agent.create(). Should include fields
-            from BaseCreateParams (auto_trace, auto_respond, verbose) plus
-            agent-specific config fields (e.g., checkpoint_name for ClaudeConfig).
-        name: Name for the job
-        max_concurrent: Maximum concurrent tasks
-        metadata: Optional job metadata
-        max_steps: Maximum steps per task
-        group_size: Number of times to run each task (for variance estimation)
-        remote: If True, submit tasks to HUD platform for remote execution
+        tasks: Either a source string (file path, API slug) or list of Task objects.
+            If a string, tasks are loaded via load_dataset().
+        agent: The agent instance to run.
+        max_steps: Maximum steps per task.
+        max_concurrent: Maximum concurrent tasks (for parallel execution).
+        group_size: Number of times to run each task (for variance estimation).
 
     Returns:
-        If remote: Empty list (fire-and-forget submission)
-        If group_size == 1: List of Trace results in task order.
-        If group_size > 1: List of statistics dicts for each task group.
+        List of EvalContext results from each task execution. Access `.reward` on each.
 
     Example:
-        # Run specific tasks locally
-        all_tasks = load_tasks("hud-evals/SheetBench-50")
-        selected = [t for t in all_tasks if t.id in ["task_1", "task_5"]]
-        results = await run_tasks(selected, AgentType.CLAUDE, {"checkpoint_name": "..."})
+        ```python
+        from hud.agents import ClaudeAgent
+        from hud.datasets import load_dataset, run_dataset
 
-        # Run with variance estimation
-        stats = await run_tasks(tasks, AgentType.CLAUDE, group_size=3)
+        # Load tasks
+        tasks = load_dataset("my-tasks.json")
 
-        # Submit for remote execution
-        await run_tasks(tasks, AgentType.CLAUDE, remote=True)
+        # Create agent
+        agent = ClaudeAgent.create(checkpoint_name="claude-sonnet-4-20250514")
+
+        # Run evaluation
+        results = await run_dataset(tasks, agent, max_steps=50)
+        for ctx in results:
+            print(f"Reward: {ctx.reward}")
+        ```
     """
-    from hud.eval.display import print_complete, print_link
-    from hud.utils.hud_console import HUDConsole
+    from hud.datasets.loader import load_dataset
 
-    job_metadata = metadata or {}
-    job_metadata["agent_params"] = json.dumps(agent_params or {})
-    job_metadata["agent_type"] = agent_type.value
-    if group_size > 1:
-        job_metadata["group_size"] = group_size
-        job_metadata["total_episodes"] = len(tasks) * group_size
+    # Load tasks if string provided
+    task_list = load_dataset(tasks) if isinstance(tasks, str) else tasks
 
-    if remote:
-        from hud.telemetry.job import create_job
+    if not task_list:
+        raise ValueError("No tasks to run")
 
-        hud_console = HUDConsole()
+    # Use hud.eval() for both single and parallel execution
+    async with hud.eval(
+        task_list,
+        group=group_size,
+        max_concurrent=max_concurrent,
+    ) as ctx:
+        result = await agent.run(ctx, max_steps=max_steps)
+        ctx.reward = result.reward
 
-        job = create_job(name, metadata=job_metadata)
-        job.update_status_sync("created")
+    # For parallel execution, results are collected via ctx.results
+    if hasattr(ctx, "results") and ctx.results:
+        return ctx.results
 
-        await submit_rollouts(
-            tasks=tasks,
-            job_id=job.id,
-            agent_type=agent_type,
-            agent_params=agent_params,
-            max_steps=max_steps,
-            group_size=group_size,
-            metadata=metadata,
-        )
-        hud_console.success(f"Submitted {len(tasks) * group_size} rollouts for remote execution")
-        hud_console.info(f"Monitor progress at: https://hud.ai/jobs/{job.id}")
-        return []
-
-    # Local execution using new eval system
-    agent_class = agent_type.cls
-    job_id = str(uuid.uuid4())
-    job_url = f"https://hud.ai/jobs/{job_id}"
-
-    # Print job URL
-    print_link(job_url, f"🚀 Job '{name}'")
-
-    error_occurred = False
-    try:
-        results = await _run_tasks_with_eval(
-            tasks=tasks,
-            agent_class=agent_class,
-            agent_params=agent_params,
-            max_concurrent=max_concurrent,
-            max_steps=max_steps,
-            group_size=group_size,
-            job_id=job_id,
-        )
-        error_occurred = any(r is None or (isinstance(r, Trace) and r.isError) for r in results)
-        return results
-    except Exception:
-        error_occurred = True
-        raise
-    finally:
-        print_complete(job_url, name, error=error_occurred)
-
-
-async def _run_tasks_with_eval(
-    tasks: list[Task],
-    agent_class: type[MCPAgent],
-    agent_params: dict[str, Any] | None,
-    max_concurrent: int,
-    max_steps: int,
-    group_size: int,
-    job_id: str,
-) -> list[Any]:
-    """Run tasks using the new EvalContext system."""
-    from hud.eval.context import EvalContext
-
-    sem = asyncio.Semaphore(max_concurrent)
-    params = agent_params or {}
-
-    # Generate group IDs for each task (used for telemetry grouping)
-    group_ids = {i: str(uuid.uuid4()) for i in range(len(tasks))}
-
-    # Expand tasks: each task runs group_size times
-    expanded: list[tuple[int, int, Task]] = []  # (flat_idx, task_idx, task)
-    for task_idx, task in enumerate(tasks):
-        for _ in range(group_size):
-            expanded.append((len(expanded), task_idx, task))
-
-    traces: list[Trace | None] = [None] * len(expanded)
-
-    async def worker(flat_idx: int, task_idx: int, run_idx: int, task: Task) -> None:
-        async with sem:
-            try:
-                base_task_id = str(task.id) if task.id is not None else f"task_{task_idx}"
-                trace_name = task.prompt or base_task_id
-
-                # Create EvalContext for this task run
-                ctx = EvalContext.from_task(
-                    task=task,
-                    name=trace_name,
-                    job_id=job_id,
-                    group_id=group_ids[task_idx] if group_size > 1 else None,
-                )
-                ctx._suppress_link = True  # Don't print individual trace links
-
-                async with ctx:
-                    agent = agent_class.create(**params)
-                    result = await agent.run(task, max_steps=max_steps)
-                    ctx.reward = result.reward
-                    traces[flat_idx] = result
-
-            except Exception as e:
-                if group_size == 1:
-                    logger.exception("Task %s failed: %s", task_idx, e)
-                    traces[flat_idx] = None
-                else:
-                    logger.warning("Episode %s failed: %s", flat_idx, e)
-                    traces[flat_idx] = Trace(isError=True, content=str(e), reward=0.0, done=True)
-
-    await asyncio.gather(
-        *[
-            worker(flat_idx, task_idx, flat_idx % group_size, task)
-            for flat_idx, task_idx, task in expanded
-        ],
-        return_exceptions=True,
-    )
-
-    # Return format depends on group_size
-    if group_size == 1:
-        return list(traces)
-    else:
-        return calculate_group_stats(tasks, traces, group_size, group_ids)
-
-
-async def run_dataset(
-    name: str,
-    dataset: str | Dataset | list[dict[str, Any]],
-    agent_class: type[MCPAgent],
-    agent_config: dict[str, Any] | None = None,
-    max_concurrent: int = 30,
-    metadata: dict[str, Any] | None = None,
-    max_steps: int = 10,
-    split: str = "train",
-    auto_respond: bool = False,
-    group_size: int = 1,
-) -> list[Any]:
-    """Load and run all tasks from a dataset.
-
-    .. deprecated::
-        Use `run_tasks()` for new code. This function remains for backwards
-        compatibility but `run_tasks()` offers more flexibility (filtering,
-        custom task lists, etc.).
-
-    Args:
-        name: Name for the job
-        dataset: HuggingFace dataset identifier, Dataset object, or list of dicts
-        agent_class: Agent class to instantiate
-        agent_config: Configuration kwargs for agent initialization
-        max_concurrent: Maximum concurrent tasks
-        metadata: Optional job metadata
-        max_steps: Maximum steps per task
-        split: Dataset split to use when loading from string
-        auto_respond: Whether to use auto-response agent
-        group_size: Number of times to run each task (for variance estimation)
-
-    Returns:
-        If group_size == 1: List of results from agent.run() in dataset order.
-        If group_size > 1: List of statistics dicts for each task group.
-    """
-    from datasets import Dataset as HFDataset
-    from datasets import load_dataset
-
-    from hud.eval.display import print_complete, print_link
-
-    warnings.warn(
-        "run_dataset() is deprecated. Use run_tasks() instead for more flexibility.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-    # Load dataset and convert to Task objects
-    task_dicts: list[dict[str, Any]]
-    dataset_link: str | None = None
-
-    if isinstance(dataset, str):
-        logger.info("Loading dataset %s from HuggingFace...", dataset)
-        dataset_link = dataset
-        loaded = cast("HFDataset", load_dataset(dataset, split=split))
-        task_dicts = cast("list[dict[str, Any]]", list(loaded))
-    elif isinstance(dataset, HFDataset):
-        task_dicts = cast("list[dict[str, Any]]", list(dataset))
-        # Try to extract dataset link
-        try:
-            general_info = next(iter(dataset.info.__dict__["download_checksums"].keys())).split("/")
-            dataset_link = f"{general_info[3]}/{general_info[4].split('@')[0]}"
-        except Exception:  # noqa: S110
-            pass
-    else:
-        task_dicts = dataset
-
-    # Convert dicts to Task objects
-    tasks = [Task(**d) for d in task_dicts]
-
-    # Add dataset link to metadata
-    job_metadata = metadata or {}
-    job_metadata["agent_config"] = agent_config or {}
-    if dataset_link:
-        job_metadata["dataset_link"] = dataset_link
-    if group_size > 1:
-        job_metadata["group_size"] = group_size
-        job_metadata["total_episodes"] = len(tasks) * group_size
-
-    # Use new eval system
-    job_id = str(uuid.uuid4())
-    job_url = f"https://hud.ai/jobs/{job_id}"
-
-    print_link(job_url, f"🚀 Job '{name}'")
-
-    error_occurred = False
-    try:
-        results = await _run_tasks_with_eval(
-            tasks=tasks,
-            agent_class=agent_class,
-            agent_params=agent_config,
-            max_concurrent=max_concurrent,
-            max_steps=max_steps,
-            group_size=group_size,
-            job_id=job_id,
-        )
-        error_occurred = any(r is None or (isinstance(r, Trace) and r.isError) for r in results)
-        return results
-    except Exception:
-        error_occurred = True
-        raise
-    finally:
-        print_complete(job_url, name, error=error_occurred)
+    return [ctx]

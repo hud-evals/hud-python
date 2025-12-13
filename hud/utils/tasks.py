@@ -4,13 +4,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from hud.types import Task
+from hud.types import LegacyTask
 from hud.utils.hud_console import HUDConsole
 
 hud_console = HUDConsole()
 
 
-def load_tasks(tasks_input: str | list[dict], *, raw: bool = False) -> list[Task] | list[dict]:
+def load_tasks(tasks_input: str | list[dict], *, raw: bool = False) -> list[LegacyTask] | list[dict]:
     """Load tasks from various sources.
 
     Args:
@@ -22,10 +22,10 @@ def load_tasks(tasks_input: str | list[dict], *, raw: bool = False) -> list[Task
         raw: If True, return raw dicts without validation or env substitution
 
     Returns:
-        - If raw=False (default): list[Task]
+        - If raw=False (default): list[LegacyTask]
         - If raw=True: list[dict]
     """
-    tasks: list[Task] | list[dict] = []
+    tasks: list[LegacyTask] | list[dict] = []
 
     if isinstance(tasks_input, list):
         # Direct list of task dicts
@@ -33,7 +33,7 @@ def load_tasks(tasks_input: str | list[dict], *, raw: bool = False) -> list[Task
         if raw:
             return [item for item in tasks_input if isinstance(item, dict)]
         for item in tasks_input:
-            task = Task(**item)
+            task = LegacyTask(**item)
             tasks.append(task)
 
     elif isinstance(tasks_input, str):
@@ -52,7 +52,7 @@ def load_tasks(tasks_input: str | list[dict], *, raw: bool = False) -> list[Task
                     if raw:
                         return [item for item in data if isinstance(item, dict)]
                     for item in data:
-                        task = Task(**item)
+                        task = LegacyTask(**item)
                         tasks.append(task)
 
                 # Handle JSONL files (one task per line)
@@ -74,7 +74,7 @@ def load_tasks(tasks_input: str | list[dict], *, raw: bool = False) -> list[Task
                     if raw:
                         return raw_items
                     for it in raw_items:
-                        task = Task(**it)
+                        task = LegacyTask(**it)
                         tasks.append(task)
 
         # Check if it's a HuggingFace dataset
@@ -107,7 +107,7 @@ def load_tasks(tasks_input: str | list[dict], *, raw: bool = False) -> list[Task
                 if raw:
                     return raw_rows
                 for row in raw_rows:
-                    task = Task(**row)
+                    task = LegacyTask(**row)
                     tasks.append(task)
 
             except ImportError as e:
@@ -147,18 +147,18 @@ def save_tasks(
         **kwargs: Extra kwargs forwarded to `Dataset.push_to_hub`.
     """
 
-    if tasks and isinstance(tasks[0], Task):
+    if tasks and isinstance(tasks[0], LegacyTask):
         raise ValueError(
-            "save_tasks expects dictionaries, not Task objects. "
-            "Task objects have resolved environment variables which would expose secrets. "
+            "save_tasks expects dictionaries, not LegacyTask objects. "
+            "LegacyTask objects have resolved environment variables which would expose secrets. "
             "Please pass raw dictionaries with template strings like '${HUD_API_KEY}' preserved."
         )
 
     data: list[dict[str, Any]] = []
     for index, task_dict in enumerate(tasks):
-        if isinstance(task_dict, Task):
+        if isinstance(task_dict, LegacyTask):
             raise ValueError(
-                f"Item {index} is a Task object, not a dictionary. "
+                f"Item {index} is a LegacyTask object, not a dictionary. "
                 "This would expose resolved environment variables. "
                 "Please convert to dictionary format with template strings preserved."
             )

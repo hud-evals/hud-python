@@ -193,9 +193,9 @@ def rft_command(
     # Load and validate tasks
     try:
         # Load tasks with env vars already resolved
-        from hud.types import Task  # noqa: TC001
+        from hud.types import LegacyTask  # noqa: TC001
 
-        tasks_objects: list[Task] = load_tasks(tasks_file)  # type: ignore[assignment]
+        tasks_objects: list[LegacyTask] = load_tasks(tasks_file)  # type: ignore[assignment]
         # Convert to dicts for patching and serialization
         tasks: list[dict[str, Any]] = [t.model_dump() for t in tasks_objects]
         if not tasks:

@@ -25,31 +25,6 @@ class TestEnvironmentPrompt:
         env.prompt = "Navigate to google.com"
         assert env.prompt == "Navigate to google.com"
 
-    def test_prompt_set_from_task(self) -> None:
-        """connect_task sets prompt from task.prompt."""
-        from hud.environment.connection import Connector  # noqa: TC001
-        from hud.environment.connectors.task import TaskConnectorMixin
-        from hud.types import Task
-
-        class TestEnv(TaskConnectorMixin):
-            def __init__(self) -> None:
-                self._connections: dict[str, Connector] = {}
-                self.prompt: str | None = None
-
-            def setup_tool(self, call: Any, /, **kwargs: Any) -> Any:
-                return self
-
-            def evaluate_tool(self, call: Any, /, **kwargs: Any) -> Any:
-                return self
-
-            def connect_mcp_config(self, config: dict) -> Any:
-                return self
-
-        env = TestEnv()
-        task = Task(prompt="Test prompt", mcp_config={})
-        env._apply_task(task)
-
-        assert env.prompt == "Test prompt"
 
 
 class TestEnvironmentContextManager:

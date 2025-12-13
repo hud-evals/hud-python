@@ -10,7 +10,7 @@ import httpx
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from hud.settings import settings
-from hud.types import AgentType, Task, Trace
+from hud.types import AgentType, LegacyTask, Trace
 from hud.utils.hud_console import HUDConsole
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ class SingleTaskRequest(BaseModel):
     """Request to run a single task remotely - mirrors run_single_task() args."""
 
     task: dict[str, Any] = Field(
-        description="Task definition compatible with hud.types.Task.",
+        description="Task definition compatible with hud.types.LegacyTask.",
     )
     agent_type: AgentType = Field(description="Agent type to execute the task.")
     agent_params: dict[str, Any] = Field(
@@ -43,7 +43,7 @@ class SingleTaskRequest(BaseModel):
     @model_validator(mode="after")
     def _validate_task(self) -> SingleTaskRequest:
         try:
-            Task(**self.task)
+            LegacyTask(**self.task)
         except Exception as exc:
             raise ValueError(f"Invalid task payload: {exc}") from exc
         return self
@@ -67,7 +67,7 @@ class BatchRequest(BaseModel):
 
 
 async def submit_rollouts(
-    tasks: list[Task],
+    tasks: list[LegacyTask],
     job_id: str,
     agent_type: AgentType,
     agent_params: dict[str, Any] | None = None,
@@ -259,7 +259,7 @@ async def cancel_all_jobs() -> dict[str, Any]:
 
 
 def calculate_group_stats(
-    tasks: list[Task],
+    tasks: list[LegacyTask],
     traces: list[Trace | None],
     group_size: int,
     group_ids: dict[int, str],
@@ -328,15 +328,15 @@ def calculate_group_stats(
 def display_results(
     results: list[Any],
     *,
-    tasks: list[Task],
+    tasks: list[Any],
     elapsed: float | None = None,
     show_details: bool = True,
 ) -> None:
     """Display evaluation results in a formatted table.
 
     Args:
-        results: List of Trace objects or grouped statistics dicts
-        tasks: List of Task objects corresponding to results
+        results: List of EvalContext objects or grouped statistics dicts
+        tasks: List of Task or LegacyTask objects corresponding to results
         elapsed: Optional elapsed time in seconds
         show_details: Whether to show per-task details table
     """
@@ -380,8 +380,12 @@ def display_results(
 
             for i, (stat, task) in enumerate(zip(results, tasks, strict=False)):
                 task_id = (task.id or "")[:20]
-                prompt = (task.prompt or "")[:40]
-                if len(task.prompt or "") > 40:
+                # Handle both v4 (prompt attr) and v5 (prompt in args) tasks
+                raw_prompt = getattr(task, "prompt", None) or (
+                    task.args.get("prompt") if hasattr(task, "args") else None
+                ) or task.scenario or ""
+                prompt = raw_prompt[:40]
+                if len(raw_prompt) > 40:
                     prompt += "..."
                 table.add_row(
                     str(i + 1),
@@ -428,8 +432,12 @@ def display_results(
             for i, r in enumerate(results):
                 task = tasks[i]
                 task_id = (task.id or "")[:20]
-                prompt = (task.prompt or "")[:40]
-                if len(task.prompt or "") > 40:
+                # Handle both v4 (prompt attr) and v5 (prompt in args) tasks
+                raw_prompt = getattr(task, "prompt", None) or (
+                    task.args.get("prompt") if hasattr(task, "args") else None
+                ) or getattr(task, "scenario", None) or ""
+                prompt = raw_prompt[:40]
+                if len(raw_prompt) > 40:
                     prompt += "..."
 
                 if r is None:

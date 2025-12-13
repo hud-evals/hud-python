@@ -1,12 +1,12 @@
 """HUD Eval - Evaluation context and management.
 
 This module provides:
-- Eval: A runnable evaluation unit (from env())
+- Task: A runnable evaluation unit (from env())
 - EvalContext: Environment with evaluation tracking (trace_id, reward, etc.)
 - eval(): Standalone context manager for task-based evaluation
 
 Usage:
-    # Using env() to create Eval
+    # Using env() to create Task
     env = Environment("my-env").connect_hub("browser")
 
     async with env() as ctx:
@@ -19,9 +19,9 @@ Usage:
     async with hud.eval("my-org/task:1") as ctx:
         await agent.run(ctx)
 
-    # Orchestrated with Eval objects
-    evals = [env("checkout", user_id="alice"), env("checkout", user_id="bob")]
-    async with hud.eval(evals, variants={"model": ["gpt-4o"]}, group=4) as ctx:
+    # Orchestrated with Task objects
+    tasks = [env("checkout", user_id="alice"), env("checkout", user_id="bob")]
+    async with hud.eval(tasks, variants={"model": ["gpt-4o"]}, group=4) as ctx:
         await agent.run(ctx.prompt)
 
     # Blank eval for manual reward
@@ -36,8 +36,8 @@ from typing import TYPE_CHECKING
 # Auto-instrument httpx on import
 import hud.eval.instrument  # noqa: F401
 
-# Eval is safe to import
-from hud.eval.eval import Eval
+# Task is safe to import
+from hud.eval.task import Task
 
 # run_eval is safe to import (uses lazy imports internally)
 from hud.eval.manager import run_eval
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from hud.eval.context import EvalContext
 
 __all__ = [
-    "Eval",
+    "Task",
     "EvalContext",
     "run_eval",
 ]

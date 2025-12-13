@@ -25,178 +25,40 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from hud.eval.context import EvalContext
-    from hud.eval.eval import Eval
-    from hud.types import Task
+    from hud.eval.task import Task
 
 logger = logging.getLogger(__name__)
 
 
-# Type alias for eval source: slug strings, Eval objects, or deprecated Task objects
-EvalSource = "str | list[str] | Eval | list[Eval] | Task | list[Task] | None"
-
-
-def _parse_slug(slug: str) -> tuple[str, str | None]:
-    """Parse a task slug into (base_slug, index_or_wildcard).
-
-    Args:
-        slug: Task slug like "my-org/task", "my-org/task:1", or "my-org/task:*"
-
-    Returns:
-        Tuple of (base_slug, index_str or None)
-        - "my-org/task" -> ("my-org/task", None)
-        - "my-org/task:1" -> ("my-org/task", "1")
-        - "my-org/task:*" -> ("my-org/task", "*")
-    """
-    if ":" in slug:
-        parts = slug.rsplit(":", 1)
-        return parts[0], parts[1]
-    return slug, None
-
-
-def _get_eval_name(
-    source: str | list[str] | None = None,
-    evals: list[Eval] | None = None,
-    tasks: list[Task] | None = None,  # Deprecated
-) -> str:
+def _get_eval_name(tasks: list[Task] | None = None) -> str:
     """Extract a nice name for job display.
 
     Args:
-        source: Single slug or list of slugs (if string-based)
-        evals: List of Eval objects (primary path)
-        tasks: List of Task objects (deprecated)
+        tasks: List of Task objects
 
     Returns:
-        Name like "script with val1, val2" or "eval" if no source
+        Name like "scenario with val1, val2" or "eval" if no tasks
     """
-    from hud.eval.eval import build_eval_name
+    from hud.eval.task import build_eval_name
 
-    # If we have Eval objects, derive name from first one
-    if evals and evals[0].script:
-        return build_eval_name(evals[0].script, evals[0].args)
-
-    # Deprecated: If we have tasks with IDs, use first task ID
+    # If we have Task objects, derive name from first one
     if tasks:
-        first_task = tasks[0]
-        if first_task.id:
-            # Extract name from task ID (might be "evalset/task_name")
-            task_id = str(first_task.id)
-            if "/" in task_id:
-                return task_id.rsplit("/", 1)[1]
-            return task_id
-        # Fall back to prompt excerpt
-        if first_task.prompt:
-            return first_task.prompt[:30].strip()
-
-    # If we have string slugs
-    if source is not None:
-        # Get the first slug
-        first_slug = source if isinstance(source, str) else source[0]
-
-        # Remove index/wildcard suffix (":1" or ":*")
-        base_slug, _ = _parse_slug(first_slug)
-
-        # Extract the evalset name (part after last "/")
-        if "/" in base_slug:
-            return base_slug.rsplit("/", 1)[1]
-
-        return base_slug
+        if tasks[0].scenario:
+            return build_eval_name(tasks[0].scenario, tasks[0].args)
+        # Fall back to env name or prompt
+        if tasks[0].env and hasattr(tasks[0].env, "name"):
+            return tasks[0].env.name
+        if tasks[0].env and hasattr(tasks[0].env, "prompt") and tasks[0].env.prompt:
+            return tasks[0].env.prompt[:30].strip()
+        if tasks[0].id:
+            return tasks[0].id
 
     return "eval"
 
 
-def _load_evals_from_slugs(slugs: str | list[str]) -> list[Eval]:
-    """Load Eval configs from platform by slugs.
-
-    Args:
-        slugs: Single slug or list of slugs. Slugs can be:
-            - "my-org/eval" - single eval
-            - "my-org/eval:N" - eval at index N
-            - "my-org/eval:*" - all evals matching pattern
-
-    Returns:
-        List of Eval objects
-    """
-    import httpx
-
-    from hud.settings import settings
-
-    if isinstance(slugs, str):
-        slugs = [slugs]
-
-    evals: list[Eval] = []
-
-    headers = {}
-    if settings.api_key:
-        headers["Authorization"] = f"Bearer {settings.api_key}"
-
-    with httpx.Client() as client:
-        for slug in slugs:
-            base_slug, index_str = _parse_slug(slug)
-
-            if index_str == "*":
-                # Fetch all evals for this evalset
-                logger.info("Loading all evals for: %s", base_slug)
-                response = client.get(
-                    f"{settings.hud_api_url}/evals/{base_slug}",
-                    headers=headers,
-                    params={"all": "true"},
-                )
-                response.raise_for_status()
-                data = response.json()
-
-                if isinstance(data, list):
-                    evals.extend(_eval_from_api(item) for item in data)
-                else:
-                    evals.append(_eval_from_api(data))
-
-            elif index_str is not None:
-                # Fetch specific eval by index
-                logger.info("Loading eval: %s (index %s)", base_slug, index_str)
-                response = client.get(
-                    f"{settings.hud_api_url}/evals/{base_slug}",
-                    headers=headers,
-                    params={"index": index_str},
-                )
-                response.raise_for_status()
-                data = response.json()
-                evals.append(_eval_from_api(data))
-
-            else:
-                # Fetch single eval
-                logger.info("Loading eval: %s", slug)
-                response = client.get(
-                    f"{settings.hud_api_url}/evals/{slug}",
-                    headers=headers,
-                )
-                response.raise_for_status()
-                data = response.json()
-                evals.append(_eval_from_api(data))
-
-    return evals
-
-
-def _eval_from_api(data: dict[str, Any]) -> Eval:
-    """Convert API response to Eval object.
-
-    Expected API response format:
-    {
-        "env_config": {...},  # EnvConfig dict
-        "script": "script_name",  # Optional
-        "args": {...},  # Script arguments
-    }
-    """
-    from hud.eval.eval import Eval
-
-    return Eval(
-        env=data.get("env_config"),  # Serialized config from backend
-        script=data.get("script"),
-        args=data.get("args", {}),
-    )
-
-
 @asynccontextmanager
 async def run_eval(
-    source: str | list[str] | Task | list[Task] | Eval | list[Eval] | None = None,
+    source: Task | list[Task] | None = None,
     *,
     variants: dict[str, Any] | None = None,
     group: int = 1,
@@ -209,18 +71,16 @@ async def run_eval(
 ) -> AsyncGenerator[EvalContext, None]:
     """Standalone eval context manager.
 
-    Creates an EvalContext for evaluation, optionally loading task configuration
-    from slugs, using Task objects, or using Eval objects directly.
+    Creates an EvalContext for evaluation using Task objects (or deprecated LegacyTask).
+    For loading tasks from datasets, use load_dataset() first.
 
     Args:
-        source: Eval source. Can be:
+        source: Task source. Can be:
             - None: Create blank eval context
-            - str: Task slug like "my-org/task", "my-org/task:N", "my-org/task:*"
-            - list[str]: Multiple task slugs
-            - Task: Single Task object (for backwards compat with run_tasks)
-            - list[Task]: List of Task objects (for backwards compat with run_tasks)
-            - Eval: Single Eval object (from env())
-            - list[Eval]: List of Eval objects (from env())
+            - Task: Single Task object (from env() or load_dataset())
+            - list[Task]: List of Task objects
+            - LegacyTask: Single LegacyTask object (deprecated, use Task.from_v4())
+            - list[LegacyTask]: List of LegacyTask objects (deprecated)
         variants: A/B test configuration (dict with list values expanded)
         group: Runs per variant for statistical significance
         group_ids: Optional list of group IDs
@@ -235,32 +95,26 @@ async def run_eval(
 
     Example:
         ```python
+        from hud.datasets import load_dataset
+
         # Blank eval (for manual reward)
         async with hud.eval() as ctx:
             ctx.reward = compute_reward()
 
-        # With task slug
-        async with hud.eval("my-org/browser-task:1") as ctx:
-            await agent.run(ctx)
-            ctx.reward = result.reward
-
-        # Multiple tasks
-        async with hud.eval(["task:1", "task:2"]) as ctx:
-            await agent.run(ctx)
-
-        # All tasks in evalset
-        async with hud.eval("my-org/evalset:*") as ctx:
-            await agent.run(ctx)
-
-        # With Eval objects (from env())
+        # With Task objects (from env())
         env = Environment("my-env").connect_hub("browser")
-        evals = [env("checkout", user_id="alice"), env("checkout", user_id="bob")]
-        async with hud.eval(evals, variants={"model": ["gpt-4o"]}, group=4) as ctx:
+        tasks = [env("checkout", user_id="alice"), env("checkout", user_id="bob")]
+        async with hud.eval(tasks, variants={"model": ["gpt-4o"]}, group=4) as ctx:
             await agent.run(ctx.prompt)
+
+        # Load tasks from dataset first
+        tasks = load_dataset("hud-evals/SheetBench-50")
+        async with hud.eval(tasks) as ctx:
+            await agent.run(ctx)
 
         # With variants and group
         async with hud.eval(
-            "task",
+            tasks,
             variants={"model": ["gpt-4o", "claude"]},
             group=3,
         ) as ctx:
@@ -269,7 +123,7 @@ async def run_eval(
             ctx.reward = evaluate()
 
         # With concurrency limit
-        async with hud.eval("my-org/evalset:*", max_concurrent=10) as ctx:
+        async with hud.eval(tasks, max_concurrent=10) as ctx:
             await agent.run(ctx)
 
         # Access results after parallel run
@@ -277,10 +131,8 @@ async def run_eval(
             print(f"{e.variants}: reward={e.reward}")
         ```
     """
-    import warnings
-
-    from hud.eval.eval import Eval
-    from hud.types import Task
+    from hud.eval.task import Task
+    from hud.types import LegacyTask
 
     if group <= 0:
         raise ValueError("group must be >= 1")
@@ -288,50 +140,40 @@ async def run_eval(
     # Expand variants
     variant_combos = expand_variants(variants)
 
-    # Parse source into evals list (or deprecated tasks list)
-    evals: list[Eval] = []
-    tasks: list[Task] = []  # Deprecated path
-    slugs: str | list[str] | None = None  # Track if we had string slugs (for naming)
+    # Parse source into tasks list - only Task objects accepted
+    tasks: list[Task] = []
 
     if source is not None:
-        if isinstance(source, Eval):
-            # Single Eval object
-            evals = [source]
-        elif isinstance(source, list) and source and isinstance(source[0], Eval):
-            # List of Eval objects
-            evals = source  # type: ignore[assignment]
-        elif isinstance(source, Task):
-            # Single Task object (deprecated)
-            warnings.warn(
-                "Passing Task objects to hud.eval() is deprecated. "
-                "Use Eval objects from env() or string slugs instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+        if isinstance(source, Task):
+            # Single Task object
             tasks = [source]
         elif isinstance(source, list) and source and isinstance(source[0], Task):
-            # List of Task objects (deprecated)
-            warnings.warn(
-                "Passing Task objects to hud.eval() is deprecated. "
-                "Use Eval objects from env() or string slugs instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+            # List of Task objects
             tasks = source  # type: ignore[assignment]
+        elif isinstance(source, LegacyTask) or (
+            isinstance(source, list) and source and isinstance(source[0], LegacyTask)
+        ):
+            # LegacyTask no longer accepted - user must convert first
+            raise TypeError(
+                "LegacyTask is no longer accepted by hud.eval(). "
+                "Convert first with Task.from_v4(legacy_task), or use load_dataset()."
+            )
         elif isinstance(source, str):
-            # String slug - load as Eval
-            slugs = source
-            evals = _load_evals_from_slugs(source)
+            # String slugs no longer supported - use load_dataset()
+            raise TypeError(
+                f"String slugs are no longer supported in hud.eval(). "
+                f"Use load_dataset('{source}') first, then pass the tasks list."
+            )
         elif isinstance(source, list) and source and isinstance(source[0], str):
-            # List of string slugs - load as Eval
-            slugs = source  # type: ignore[assignment]
-            evals = _load_evals_from_slugs(source)  # type: ignore[arg-type]
+            # List of string slugs no longer supported
+            raise TypeError(
+                "String slugs are no longer supported in hud.eval(). "
+                "Use load_dataset() first, then pass the tasks list."
+            )
 
     # Calculate total evaluations
-    # If we have evals, each eval gets (variants x group) runs
-    # If we have tasks, each task gets (variants x group) runs
-    # If neither, we have a single blank eval with (variants x group) runs
-    base_count = len(evals) or len(tasks) or 1
+    # Each task gets (variants x group) runs; no tasks = single blank eval
+    base_count = len(tasks) or 1
     total_evals = base_count * len(variant_combos) * group
 
     # Capture code snippet for parallel execution
@@ -352,27 +194,14 @@ async def run_eval(
     from hud.eval.context import EvalContext
 
     if total_evals == 1:
-        # Simple case: single eval - always use Eval for consistent flow
-        if evals:
-            single_eval = evals[0]
-        elif tasks:
-            # Wrap deprecated Task in Eval
-            single_eval = Eval(
-                env=None,
-                script=None,
-                api_key=api_key,
-                job_id=job_id,
-                variants=variant_combos[0],
-                code_snippet=code_snippet,
-                _trace=trace,
-                _quiet=quiet,
-            )
-            single_eval._task = tasks[0]  # type: ignore[attr-defined]
+        # Simple case: single eval - always use Task for consistent flow
+        if tasks:
+            single_task = tasks[0]
         else:
             # Blank eval
-            single_eval = Eval(
+            single_task = Task(
                 env=None,
-                script=None,
+                scenario=None,
                 api_key=api_key,
                 job_id=job_id,
                 variants=variant_combos[0],
@@ -382,19 +211,19 @@ async def run_eval(
             )
 
         # Apply common settings
-        single_eval.api_key = api_key
-        single_eval.job_id = job_id
-        single_eval.variants = variant_combos[0]
-        single_eval.code_snippet = code_snippet
-        single_eval._trace = trace
-        single_eval._quiet = quiet
+        single_task.api_key = api_key
+        single_task.job_id = job_id
+        single_task.variants = variant_combos[0]
+        single_task.code_snippet = code_snippet
+        single_task._trace = trace
+        single_task._quiet = quiet
 
-        async with single_eval as ctx:
+        async with single_task as ctx:
             yield ctx
 
     else:
         # Parallel execution: create implicit job to group traces
-        eval_name = _get_eval_name(source=slugs, evals=evals, tasks=tasks)
+        eval_name = _get_eval_name(tasks=tasks)
         implicit_job_id = job_id or str(uuid.uuid4())
         job_url = f"https://hud.ai/jobs/{implicit_job_id}"
 
@@ -406,7 +235,6 @@ async def run_eval(
         try:
             # Run parallel evals with job_id
             completed = await _run_parallel_eval(
-                evals=evals,
                 tasks=tasks,
                 variant_combos=variant_combos,
                 group=group,
@@ -420,17 +248,10 @@ async def run_eval(
             )
 
             # Create summary context (no trace, just aggregates results)
-            if evals:
-                # Create summary from first eval's env_config
+            if tasks:
+                # Create summary from first task
                 ctx = EvalContext(
                     name=eval_name,  # Use the same smart name
-                    api_key=api_key,
-                    job_id=implicit_job_id,
-                    env_config=evals[0].env_config,
-                )
-            elif tasks:
-                ctx = EvalContext.from_task(
-                    task=tasks[0],
                     api_key=api_key,
                     job_id=implicit_job_id,
                 )
@@ -464,7 +285,6 @@ async def run_eval(
 
 
 async def _run_parallel_eval(
-    evals: list[Eval],
     tasks: list[Task],
     variant_combos: list[dict[str, Any]],
     group: int,
@@ -478,13 +298,13 @@ async def _run_parallel_eval(
 ) -> list[EvalContext]:
     """Run parallel evaluation.
 
-    Creates EvalContexts from Evals, tasks (or blank) and runs them in parallel.
+    Creates EvalContexts from Tasks (or blank) and runs them in parallel.
     """
     import asyncio
     import textwrap
 
     # Lazy import to avoid circular dependency
-    from hud.eval.eval import Eval
+    from hud.eval.task import Task
     from hud.eval.parallel import log_eval_stats
 
     # Find user code frame and extract the with block body
@@ -492,62 +312,38 @@ async def _run_parallel_eval(
     body_source, captured_locals, context_var = get_with_block_body(caller_frame)
 
     # Calculate total evals and resolve group IDs
-    base_count = len(evals) or len(tasks) or 1
+    base_count = len(tasks) or 1
     total_evals = base_count * len(variant_combos) * group
     resolved_group_ids = resolve_group_ids(group_ids, total_evals)
 
-    # Create Eval objects for parallel execution
-    eval_objects: list[Eval] = []
+    # Create Task objects for parallel execution
+    task_objects: list[Task] = []
     idx = 0
 
-    if evals:
-        # Create Eval for each (eval, variant, run) combination
-        for base_eval in evals:
+    if tasks:
+        # Create Task for each (task, variant, run) combination
+        for base_task in tasks:
             for variant in variant_combos:
                 for _ in range(group):
-                    eval_copy = base_eval.copy()
-                    eval_copy.api_key = api_key
-                    eval_copy.job_id = job_id
-                    eval_copy.group_id = resolved_group_ids[idx]
-                    eval_copy.index = idx
-                    eval_copy.variants = variant
-                    eval_copy.code_snippet = code_snippet
-                    eval_copy._suppress_link = True  # Individual traces don't print links
-                    eval_copy._trace = trace
-                    eval_copy._quiet = quiet
-                    eval_objects.append(eval_copy)
-                    idx += 1
-    elif tasks:
-        # Create Eval from Task for each (task, variant, run) combination
-        for task in tasks:
-            for variant in variant_combos:
-                for _ in range(group):
-                    # Convert Task to Eval (backwards compatibility)
-                    task_eval = Eval(
-                        env=None,  # Task has its own mcp_config
-                        script=None,
-                        args={},
-                        api_key=api_key,
-                        job_id=job_id,
-                        group_id=resolved_group_ids[idx],
-                        index=idx,
-                        variants=variant,
-                        code_snippet=code_snippet,
-                        _suppress_link=True,
-                        _trace=trace,
-                        _quiet=quiet,
-                    )
-                    # Store task reference for EvalContext creation
-                    task_eval._task = task  # type: ignore[attr-defined]
-                    eval_objects.append(task_eval)
+                    task_copy = base_task.copy()
+                    task_copy.api_key = api_key
+                    task_copy.job_id = job_id
+                    task_copy.group_id = resolved_group_ids[idx]
+                    task_copy.index = idx
+                    task_copy.variants = variant
+                    task_copy.code_snippet = code_snippet
+                    task_copy._suppress_link = True  # Individual traces don't print links
+                    task_copy._trace = trace
+                    task_copy._quiet = quiet
+                    task_objects.append(task_copy)
                     idx += 1
     else:
-        # Blank evals for each (variant, run) combination
+        # Blank tasks for each (variant, run) combination
         for variant in variant_combos:
             for _ in range(group):
-                blank_eval = Eval(
+                blank_task = Task(
                     env=None,
-                    script=None,
+                    scenario=None,
                     args={},
                     api_key=api_key,
                     job_id=job_id,
@@ -559,7 +355,7 @@ async def _run_parallel_eval(
                     _trace=trace,
                     _quiet=quiet,
                 )
-                eval_objects.append(blank_eval)
+                task_objects.append(blank_task)
                 idx += 1
 
     # Create runner function using the actual variable name from the 'as' clause
@@ -572,33 +368,33 @@ async def _run_parallel_eval(
     # Create semaphore for concurrency control
     sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
 
-    async def run_one(eval_obj: Eval) -> EvalContext:
-        """Run a single Eval and return its EvalContext."""
+    async def run_one(task_obj: Task) -> EvalContext:
+        """Run a single Task and return its EvalContext."""
         try:
             if sem:
-                async with sem, eval_obj as ctx:
+                async with sem, task_obj as ctx:
                     await runner(ctx)
             else:
-                async with eval_obj as ctx:
+                async with task_obj as ctx:
                     await runner(ctx)
             return ctx
         except Exception as e:
-            logger.warning("Parallel eval %d failed: %s", eval_obj.index, e)
-            # Create a failed context from the eval
-            ctx = eval_obj.to_eval_context()
+            logger.warning("Parallel eval %d failed: %s", task_obj.index, e)
+            # Create a failed context from the task
+            ctx = task_obj.to_eval_context()
             ctx.error = e
             return ctx
 
     # Run in parallel
     logger.info(
-        "Running %d evals (%d base x %d variants x %d runs)%s",
-        len(eval_objects),
+        "Running %d tasks (%d base x %d variants x %d runs)%s",
+        len(task_objects),
         base_count,
         len(variant_combos),
         group,
         f", max_concurrent={max_concurrent}" if max_concurrent else "",
     )
-    completed = await asyncio.gather(*[run_one(e) for e in eval_objects])
+    completed = await asyncio.gather(*[run_one(t) for t in task_objects])
 
     # Log and print stats
     eval_name = completed[0].eval_name if completed else "eval"

@@ -16,7 +16,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Self
 
 from hud.environment import Environment
-from hud.environment.types import EnvConfig
 from hud.settings import settings
 from hud.shared import make_request
 from hud.telemetry.job import get_current_job
@@ -24,7 +23,7 @@ from hud.telemetry.job import get_current_job
 if TYPE_CHECKING:
     from types import TracebackType
 
-    from hud.types import Task
+    from hud.types import LegacyTask
 
 from hud.eval.types import EvalExitPayload, EvalPayload, ParallelEvalComplete
 
@@ -89,8 +88,6 @@ class EvalContext(Environment):
         index: int = 0,
         variants: dict[str, Any] | None = None,
         code_snippet: str | None = None,
-        env_config: dict[str, Any] | None = None,
-        task: Task | None = None,
         trace: bool = True,
         quiet: bool = False,
         **env_kwargs: Any,
@@ -106,8 +103,6 @@ class EvalContext(Environment):
             index: Index in parallel execution
             variants: Variant assignment for A/B testing
             code_snippet: Code being evaluated (for reproducibility)
-            env_config: Environment configuration dict
-            task: Task definition (if loaded from slug)
             trace: Whether to send trace data to backend (default True)
             quiet: Whether to suppress printing links (default False)
             **env_kwargs: Additional kwargs passed to Environment.__init__
@@ -135,7 +130,7 @@ class EvalContext(Environment):
         self.variants: dict[str, Any] = variants or {}
 
         # User-settable (per-run values, override Environment defaults)
-        self.prompt: str | None = None  # From script setup or task
+        self.prompt: str | None = None  # From scenario setup or task
         self.reward: float | None = None
         self.answer: str | None = None  # Agent's submitted answer
 
@@ -145,16 +140,8 @@ class EvalContext(Environment):
         # Parallel results
         self.results: list[EvalContext] | None = None
 
-        # Code and config
+        # Code snippet for reproducibility
         self.code_snippet: str | None = code_snippet
-        self._eval_env_config: dict[str, Any] | None = env_config
-
-        # Task definition (if loaded from slug)
-        self.task: Task | None = task
-
-        # Apply task configuration
-        if task:
-            self._apply_task(task)
 
         # Private state for eval tracking
         self._eval_api_key = api_key
@@ -164,34 +151,9 @@ class EvalContext(Environment):
         self._is_summary: bool = False  # True for summary contexts (skip trace)
         self._suppress_link: bool = quiet  # True to suppress printing eval link
         self._trace_enabled: bool = trace  # Whether to send trace data to backend
-        self._script_name: str | None = None  # Current script name (for submit)
+        self._scenario_name: str | None = None  # Current scenario name (for submit)
         self._source_env_name: str | None = None  # Source env name for remote lookups
 
-    def _apply_task(self, task: Task) -> None:
-        """Apply a Task definition to this environment."""
-        # Set prompt
-        if task.prompt:
-            self.prompt = task.prompt
-
-        # Connect MCP servers
-        if task.mcp_config:
-            self.connect_mcp_config(task.mcp_config)
-
-        # Configure setup tool calls
-        if task.setup_tool:
-            setup_calls = task.setup_tool
-            if not isinstance(setup_calls, list):
-                setup_calls = [setup_calls]
-            for call in setup_calls:
-                self.setup_tool(call.name, **(call.arguments or {}))
-
-        # Configure evaluate tool calls
-        if task.evaluate_tool:
-            eval_calls = task.evaluate_tool
-            if not isinstance(eval_calls, list):
-                eval_calls = [eval_calls]
-            for call in eval_calls:
-                self.evaluate_tool(call.name, **(call.arguments or {}))
 
     @classmethod
     def from_environment(
@@ -206,7 +168,6 @@ class EvalContext(Environment):
         index: int = 0,
         variants: dict[str, Any] | None = None,
         code_snippet: str | None = None,
-        env_config: dict[str, Any] | None = None,
         trace: bool = True,
         quiet: bool = False,
     ) -> EvalContext:
@@ -225,7 +186,6 @@ class EvalContext(Environment):
             index: Index in parallel execution
             variants: Variant assignment
             code_snippet: Code being evaluated
-            env_config: Environment configuration
         """
         ctx = cls(
             name=name,
@@ -236,7 +196,6 @@ class EvalContext(Environment):
             index=index,
             variants=variants,
             code_snippet=code_snippet,
-            env_config=env_config,
             trace=trace,
             quiet=quiet,
         )
@@ -244,23 +203,22 @@ class EvalContext(Environment):
         # Copy connections from parent - each connector is copied so parallel
         # execution gets fresh client instances
         ctx._connections = {name: connector.copy() for name, connector in env._connections.items()}
-        ctx._hub_configs = getattr(env, "_hub_configs", []).copy()
         ctx._setup_calls = env._setup_calls.copy()
         ctx._evaluate_calls = env._evaluate_calls.copy()
 
-        # Copy scripts (definitions) by reference - they don't change
-        ctx._scripts = getattr(env, "_scripts", {})
+        # Copy scenarios (definitions) by reference - they don't change
+        ctx._scenarios = getattr(env, "_scenarios", {})
         # Create fresh session state for this eval (parallel evals each need their own)
-        ctx._script_sessions = {}
-        ctx._script_latest = {}
-        ctx._script_answers = {}
+        ctx._scenario_sessions = {}
+        ctx._scenario_latest = {}
+        ctx._scenario_answers = {}
 
-        # Store source env name for remote script lookups
+        # Store source env name for remote scenario lookups
         ctx._source_env_name = env.name
 
         # Copy managers by reference (they hold local tools, prompts, resources)
         # This allows ctx.call_tool(), ctx.get_prompt(), ctx.read_resource() to work
-        # for locally defined tools/scripts
+        # for locally defined tools/scenarios
         ctx._tool_manager = env._tool_manager
         ctx._prompt_manager = env._prompt_manager
         ctx._resource_manager = env._resource_manager
@@ -270,64 +228,6 @@ class EvalContext(Environment):
             ctx.prompt = env.prompt
 
         return ctx
-
-    @classmethod
-    def from_task(
-        cls,
-        task: Task,
-        name: str | None = None,
-        *,
-        trace_id: str | None = None,
-        api_key: str | None = None,
-        job_id: str | None = None,
-        group_id: str | None = None,
-        index: int = 0,
-        variants: dict[str, Any] | None = None,
-        code_snippet: str | None = None,
-        trace: bool = True,
-        quiet: bool = False,
-    ) -> EvalContext:
-        """Create an EvalContext from a Task definition.
-
-        .. deprecated:: 0.5.0
-            Use Eval objects from env() instead of Task objects.
-
-        Args:
-            task: Task definition
-            name: Evaluation name (defaults to task.id or "eval")
-            trace_id: Unique trace ID
-            api_key: API key for backend calls
-            job_id: Job ID to link to
-            group_id: Group ID for parallel evaluations
-            index: Index in parallel execution
-            variants: Variant assignment
-            code_snippet: Code being evaluated
-            trace: Whether to send trace data to backend
-            quiet: Whether to suppress printing links
-        """
-        import warnings
-
-        warnings.warn(
-            "EvalContext.from_task() is deprecated. Use Eval objects from env() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
-        eval_name = name or task.id or "eval"
-
-        return cls(
-            name=eval_name,
-            trace_id=trace_id,
-            api_key=api_key,
-            job_id=job_id,
-            group_id=group_id,
-            index=index,
-            variants=variants,
-            code_snippet=code_snippet,
-            task=task,
-            trace=trace,
-            quiet=quiet,
-        )
 
     # =========================================================================
     # Summary Context - Attribute Access Control
@@ -407,15 +307,10 @@ class EvalContext(Environment):
 
     def _build_base_payload(self) -> EvalPayload:
         """Build the base payload for enter/exit."""
-        env_config_model: EnvConfig | None = None
-        if self._eval_env_config:
-            env_config_model = EnvConfig(**self._eval_env_config)
-
         return EvalPayload(
             job_name=self.eval_name,
             prompt=self.prompt,
             code_snippet=self.code_snippet,
-            env_config=env_config_model,
             job_id=self.job_id,
             group_id=self.group_id,
             variants=self.variants if self.variants else None,
@@ -438,10 +333,10 @@ class EvalContext(Environment):
             logger.warning("Failed to log metrics: %s", e)
 
     async def submit(self, answer: str) -> None:
-        """Submit the agent's answer for script evaluation.
+        """Submit the agent's answer for scenario evaluation.
 
-        Delegates to Environment.submit() with the current script name.
-        The answer will be passed to the script's evaluate phase via
+        Delegates to Environment.submit() with the current scenario name.
+        The answer will be passed to the scenario's evaluate phase via
         `yield`, e.g.: `answer = yield "Do the task"`
 
         Args:
@@ -451,17 +346,17 @@ class EvalContext(Environment):
             async with env("checkout", product="laptop") as ctx:
                 response = await agent.run(ctx.prompt)
                 await ctx.submit(response)
-            # On exit, script's evaluate phase receives the answer
+            # On exit, scenario's evaluate phase receives the answer
         """
-        if not self._script_name:
-            logger.warning("submit() called but no script is running")
+        if not self._scenario_name:
+            logger.warning("submit() called but no scenario is running")
             return
 
         # Store answer on context for display
         self.answer = answer
 
         # Delegate to Environment.submit() which handles storage + broadcast
-        await super().submit(self._script_name, answer)
+        await super().submit(self._scenario_name, answer)
 
     async def _eval_enter(self) -> None:
         """Notify backend that eval has started."""

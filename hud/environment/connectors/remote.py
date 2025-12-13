@@ -12,8 +12,6 @@ if TYPE_CHECKING:
 
     from fastmcp.tools.tool import Tool
 
-    from hud.environment.types import HubConfig
-
 __all__ = ["RemoteConnectorMixin"]
 
 logger = logging.getLogger(__name__)
@@ -24,9 +22,6 @@ class RemoteConnectorMixin(MCPConfigConnectorMixin):
 
     Note: include_router() is inherited from MCPServer (via FastMCP).
     """
-
-    # Store hub configs for trace serialization
-    _hub_configs: list[HubConfig]
 
     def connect_hub(
         self,
@@ -40,55 +35,36 @@ class RemoteConnectorMixin(MCPConfigConnectorMixin):
     ) -> Any:
         """Connect to a HUD Hub environment.
 
-        Fetches mcp_config from api.hud.so immediately and creates connectors.
+        Creates an MCP connection to the HUD API with the hub slug in headers.
 
         Example:
             ```python
             env = Environment("my-env")
-            env.connect_hub("hud/browser")
+            env.connect_hub("browser")
 
             async with env:
                 await env.call_tool("navigate", url="https://google.com")
             ```
         """
-        import httpx
-
-        from hud.environment.types import HubConfig
         from hud.settings import settings
 
-        # Store hub config for trace serialization
-        hub_config = HubConfig(
-            slug=slug,
-            alias=alias,
-            prefix=prefix,
-            include=include,
-            exclude=exclude,
-        )
+        logger.info("Connecting to hub environment: %s", slug)
 
-        if not hasattr(self, "_hub_configs"):
-            self._hub_configs = []
-        self._hub_configs.append(hub_config)
+        # Create mcp_config with standard MCP URL and hub slug in headers
+        mcp_config = {
+            "hud": {
+                "url": settings.hud_mcp_url,
+                "headers": {
+                    "Authorization": f"Bearer {settings.api_key}",
+                    "Environment-Name": slug,
+                },
+            }
+        }
 
-        # Fetch mcp_config synchronously
-        logger.info("Loading hub environment: %s", slug)
-
-        headers = {}
-        if settings.api_key:
-            headers["Authorization"] = f"Bearer {settings.api_key}"
-
-        with httpx.Client() as client:
-            response = client.get(
-                f"{settings.hud_api_url}/environments/{slug}/mcp-config",
-                headers=headers,
-            )
-            response.raise_for_status()
-            data = response.json()
-
-        mcp_config: dict[str, dict[str, Any]] = data.get("mcp_config", data)
         self.connect_mcp_config(
             mcp_config, prefix=prefix, include=include, exclude=exclude, transform=transform
         )
-        logger.info("Hub connected: %s (%d servers)", slug, len(mcp_config))
+        logger.info("Hub connected: %s", slug)
         return self
 
     def connect_url(

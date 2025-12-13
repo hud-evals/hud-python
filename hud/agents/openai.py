@@ -106,9 +106,8 @@ class OpenAIAgent(MCPAgent):
         self.last_response_id: str | None = None
         self._message_cursor = 0
 
-    async def initialize(self, task: Any | None = None) -> None:
-        """Initialize agent and build tool metadata."""
-        await super().initialize(task)
+    def _on_tools_ready(self) -> None:
+        """Build OpenAI-specific tool mappings after tools are discovered."""
         self._convert_tools_for_openai()
 
     def _to_openai_tool(

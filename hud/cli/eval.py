@@ -19,14 +19,12 @@ from pydantic import BaseModel, Field, field_validator
 from rich import box
 from rich.table import Table
 
-from hud.cli.utils.env_check import ensure_built, find_environment_dir
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
     from hud.agents.base import MCPAgent
-    from hud.types import Task
 
 logger = logging.getLogger(__name__)
 hud_console = HUDConsole()
@@ -488,92 +486,33 @@ class EvalConfig(BaseModel):
 
 
 # =============================================================================
-# Task loading
-# =============================================================================
-
-
-def _load_tasks_from_source(source: str) -> list[Task]:
-    """Load tasks from file or HuggingFace dataset."""
-    from hud.utils.tasks import load_tasks
-
-    path = Path(source)
-    if path.exists() and path.suffix in {".json", ".jsonl"}:
-        hud_console.info("📊 Loading task file…")
-        tasks = load_tasks(str(path))
-        try:
-            env_dir = find_environment_dir(path)
-            if env_dir is not None:
-                ensure_built(env_dir, interactive=False)
-        except Exception as exc:
-            hud_console.debug(f"Eval preflight env check skipped: {exc}")
-    else:
-        hud_console.info(f"📊 Loading tasks from: {source}…")
-        tasks = load_tasks(source)
-
-    if not tasks:
-        hud_console.error(f"No tasks found in: {source}")
-        raise typer.Exit(1)
-
-    return tasks  # type: ignore[return-value]
-
-
-def _warn_local_mcp(tasks: list[Task], source: str) -> None:
-    """Warn user if tasks use local MCP configs."""
-    try:
-        has_local = any(
-            isinstance(server_cfg, dict) and "command" in server_cfg and not server_cfg.get("url")
-            for t in tasks
-            for server_cfg in (getattr(t, "mcp_config", {}) or {}).values()
-            if isinstance(getattr(t, "mcp_config", {}), dict)
-        )
-
-        if not has_local:
-            return
-
-        hud_console.warning("Detected local MCP configurations (uses 'command' instead of 'url').")
-        hud_console.info("When running concurrently, exposed host ports from Docker may conflict.")
-
-        if not hud_console.confirm("Proceed with local MCP servers?", default=True):
-            hint_file = Path(source).name if Path(source).exists() else "<tasks_file>"
-            hud_console.hint(f"Convert to remote: hud convert {hint_file}")
-            raise typer.Exit(1)
-
-        hint_file = Path(source).name if Path(source).exists() else "<tasks_file>"
-        hud_console.hint(f"Convert to remote to avoid port conflicts: hud convert {hint_file}")
-
-    except typer.Exit:
-        raise
-    except Exception as e:
-        hud_console.debug(f"Local MCP check skipped: {e}")
-
-
-# =============================================================================
 # Evaluation runner
 # =============================================================================
 
 
-async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
-    """Run evaluation with the given config."""
-    from hud.datasets import run_single_task, run_tasks
+async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
+    """Run evaluation with the given config using run_dataset()."""
+    from hud.datasets import load_dataset, run_dataset
 
     if cfg.source is None or cfg.agent_type is None:
         raise ValueError("source and agent_type must be set")
 
-    tasks = _load_tasks_from_source(cfg.source)
+    # Load tasks using unified loader (handles v4→v5 conversion automatically)
+    hud_console.info(f"📊 Loading tasks from: {cfg.source}…")
+    tasks = load_dataset(cfg.source)
 
-    if not cfg.remote and (cfg.group_size > 1 or cfg.full):
-        _warn_local_mcp(tasks, cfg.source)
-
-    agent_kwargs = cfg.get_agent_kwargs()
-
-    path = Path(cfg.source)
-    dataset_name = path.name if path.exists() else cfg.source.split("/")[-1]
-    max_steps = cfg.max_steps or (100 if cfg.full else 10)
+    if not tasks:
+        hud_console.error(f"No tasks found in: {cfg.source}")
+        raise typer.Exit(1)
 
     # Filter by task IDs if provided
     if cfg.task_ids:
         id_set = set(cfg.task_ids)
-        filtered = [t for t in tasks if str(getattr(t, "id", "")) in id_set]
+        # Match by task.id or index
+        filtered = [
+            t for i, t in enumerate(tasks)
+            if t.id in id_set or str(i) in id_set
+        ]
         if not filtered:
             hud_console.error(f"No tasks found matching IDs: {', '.join(cfg.task_ids)}")
             raise typer.Exit(1)
@@ -584,57 +523,51 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
         tasks = [tasks[0]]
         hud_console.info("Using first task (run with --full or --task-ids for more)…")
 
-    auto_respond = cfg.auto_respond if cfg.auto_respond is not None else cfg.full
+    hud_console.info(f"Loaded {len(tasks)} task(s)")
 
+    # Prepare agent kwargs
+    agent_kwargs = cfg.get_agent_kwargs()
+    auto_respond = cfg.auto_respond if cfg.auto_respond is not None else cfg.full
     if auto_respond:
         agent_kwargs = {**agent_kwargs, "auto_respond": True}
 
-    if cfg.remote:
-        hud_console.info(f"🚀 Submitting {len(tasks)} tasks for remote execution…")
-        await run_tasks(
-            tasks=tasks,
-            agent_type=cfg.agent_type,
-            agent_params=agent_kwargs,
-            name=f"Evaluation {dataset_name}",
-            metadata={"dataset": cfg.source},
-            max_steps=max_steps,
-            group_size=cfg.group_size,
-            remote=True,
-        )
-        return [], tasks
+    max_steps = cfg.max_steps or (100 if cfg.full else 10)
 
+    # Remote execution not yet supported in new flow
+    if cfg.remote:
+        hud_console.error("Remote execution not yet supported. Use local execution.")
+        raise typer.Exit(1)
+
+    # Create agent
+    agent = cfg.agent_type.cls.create(**agent_kwargs)
+
+    # Single task mode - show extra info
     if len(tasks) == 1 and cfg.group_size == 1:
-        task = tasks[0]
         logging.getLogger("hud.agents").setLevel(logging.INFO)
         logging.getLogger("hud.agents.base").setLevel(logging.INFO)
-
-        hud_console.info(task.prompt)
-        result = await run_single_task(
-            task=task,
-            agent_type=cfg.agent_type,
-            agent_params=agent_kwargs,
-            max_steps=max_steps,
-            trace_name=task.prompt,
+        # Get prompt from args (v4 tasks) or show scenario name
+        prompt = tasks[0].args.get("prompt") if tasks[0].args else tasks[0].scenario
+        if prompt:
+            hud_console.info(f"Prompt: {prompt}")
+    else:
+        hud_console.info(
+            f"🚀 Running evaluation (max_concurrent: {cfg.max_concurrent}, "
+            f"group_size: {cfg.group_size})…"
         )
-        hud_console.success(f"Reward: {result.reward}")
-        return [result], tasks
 
-    # Local batch execution
-    hud_console.info(
-        f"🚀 Running evaluation (max_concurrent: {cfg.max_concurrent}, "
-        f"group_size: {cfg.group_size})…"
-    )
-
-    results = await run_tasks(
-        tasks=tasks,
-        agent_type=cfg.agent_type,
-        agent_params=agent_kwargs,
-        name=f"Evaluation {dataset_name}",
-        max_concurrent=cfg.max_concurrent,
-        metadata={"dataset": cfg.source},
+    # Run using run_dataset
+    results = await run_dataset(
+        tasks,
+        agent,
         max_steps=max_steps,
+        max_concurrent=cfg.max_concurrent,
         group_size=cfg.group_size,
     )
+
+    # Show reward for single task
+    if len(tasks) == 1 and cfg.group_size == 1 and results:
+        hud_console.success(f"Reward: {results[0].reward}")
+
     return results, tasks
 
 

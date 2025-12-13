@@ -1,4 +1,4 @@
-"""Script decorator for Environment - defines setup/evaluate phases."""
+"""Scenario decorator for Environment - defines setup/evaluate phases."""
 
 from __future__ import annotations
 
@@ -15,29 +15,29 @@ if TYPE_CHECKING:
     from fastmcp.resources import ResourceManager
     from fastmcp.tools import ToolManager
 
-__all__ = ["ScriptMixin"]
+__all__ = ["ScenarioMixin"]
 
 logger = logging.getLogger(__name__)
 
 
-class ScriptMixin:
-    """Mixin providing @env.script decorator for setup/evaluate phases.
+class ScenarioMixin:
+    """Mixin providing @env.scenario decorator for setup/evaluate phases.
 
-    Scripts are async generators that yield twice:
+    Scenarios are async generators that yield twice:
     - First yield: prompt string (setup phase)
     - Second yield: reward float (evaluate phase)
 
-    The script can receive the agent's answer via yield:
+    The scenario can receive the agent's answer via yield:
         answer = yield "Do the task"
         yield 1.0 if "success" in answer else 0.0
 
     The answer is passed via the hud_submit tool or ctx.submit().
 
     The decorator registers both an MCP prompt and resource with the same
-    identifier ({env_name}:{script_name}), linked by session state.
+    identifier ({env_name}:{scenario_name}), linked by session state.
 
     Example:
-        @env.script()
+        @env.scenario()
         async def search_cats(url: str):
             await env.call_tool("navigate", url=url)
             answer = yield "Find all cat images on the page"
@@ -51,44 +51,44 @@ class ScriptMixin:
     _resource_manager: ResourceManager
     _tool_manager: ToolManager
 
-    # Script state
-    _scripts: dict[str, Callable[..., AsyncGenerator[Any, Any]]]
-    _script_sessions: dict[str, AsyncGenerator[Any, Any]]  # session_id -> generator
-    _script_latest: dict[str, str]  # script_name -> latest session_id
-    _script_answers: dict[str, str]  # script_name -> submitted answer
+    # Scenario state
+    _scenarios: dict[str, Callable[..., AsyncGenerator[Any, Any]]]
+    _scenario_sessions: dict[str, AsyncGenerator[Any, Any]]  # session_id -> generator
+    _scenario_latest: dict[str, str]  # scenario_name -> latest session_id
+    _scenario_answers: dict[str, str]  # scenario_name -> submitted answer
 
-    def _init_scripts(self) -> None:
-        """Initialize script state. Called from Environment.__init__."""
-        self._scripts = {}
-        self._script_sessions = {}
-        self._script_latest = {}
-        self._script_answers = {}
+    def _init_scenarios(self) -> None:
+        """Initialize scenario state. Called from Environment.__init__."""
+        self._scenarios = {}
+        self._scenario_sessions = {}
+        self._scenario_latest = {}
+        self._scenario_answers = {}
 
         # Register _hud_submit tool (underscore = hidden from agent)
         self._register_hud_submit_tool()
 
-    async def submit(self, script: str, answer: str) -> None:
-        """Submit the agent's answer for a script's evaluate phase.
+    async def submit(self, scenario: str, answer: str) -> None:
+        """Submit the agent's answer for a scenario's evaluate phase.
 
         This stores the answer locally and broadcasts to connected hubs
         that have the _hud_submit tool (auto-detected by Environment).
 
         Args:
-            script: Name of the script (without env prefix)
+            scenario: Name of the scenario (without env prefix)
             answer: The agent's answer/result to submit
 
         Example:
-            # Direct call with script name
+            # Direct call with scenario name
             await env.submit("checkout", "Order completed successfully")
 
-            # Or via EvalContext (knows its own script)
+            # Or via EvalContext (knows its own scenario)
             await ctx.submit("Order completed successfully")
         """
-        # Store locally for our scripts
-        self._script_answers[script] = answer
+        # Store locally for our scenarios
+        self._scenario_answers[scenario] = answer
         logger.debug(
-            "Stored answer for script '%s': %s...",
-            script,
+            "Stored answer for scenario '%s': %s...",
+            scenario,
             answer[:50] if len(answer) > 50 else answer,
         )
 
@@ -96,7 +96,7 @@ class ScriptMixin:
         # Environment._broadcast_tool auto-filters to connections with the tool
         await self._broadcast_tool(  # type: ignore[attr-defined]
             "_hud_submit",
-            script=script,
+            scenario=scenario,
             answer=answer,
         )
 
@@ -107,70 +107,70 @@ class ScriptMixin:
         """
         from fastmcp.tools import Tool
 
-        script_self = self
+        scenario_self = self
 
-        async def _hud_submit(script: str, answer: str) -> str:
-            """Submit the agent's answer for a script's evaluate phase.
+        async def _hud_submit(scenario: str, answer: str) -> str:
+            """Submit the agent's answer for a scenario's evaluate phase.
 
             Internal tool - called by Environment.submit() on connected hubs.
 
             Args:
-                script: Name of the script (without env prefix)
+                scenario: Name of the scenario (without env prefix)
                 answer: The agent's answer/result to submit
             """
             # Store locally (don't broadcast - we ARE the target)
-            script_self._script_answers[script] = answer
+            scenario_self._scenario_answers[scenario] = answer
             logger.debug(
-                "_hud_submit received answer for script '%s': %s...",
-                script,
+                "_hud_submit received answer for scenario '%s': %s...",
+                scenario,
                 answer[:50] if len(answer) > 50 else answer,
             )
-            return f"Answer submitted for script '{script}'"
+            return f"Answer submitted for scenario '{scenario}'"
 
         # Register the tool with underscore name
         tool = Tool.from_function(_hud_submit)
         self._tool_manager.add_tool(tool)
         logger.debug("Registered _hud_submit tool")
 
-    async def run_script_setup(self, script_name: str, args: dict[str, Any]) -> str | None:
-        """Run a script's setup phase and return the prompt.
+    async def run_scenario_setup(self, scenario_name: str, args: dict[str, Any]) -> str | None:
+        """Run a scenario's setup phase and return the prompt.
 
-        Handles both local scripts (registered via @env.script) and remote
-        scripts (via MCP prompt).
+        Handles both local scenarios (registered via @env.scenario) and remote
+        scenarios (via MCP prompt).
 
         Args:
-            script_name: Name of the script to run
-            args: Arguments to pass to the script
+            scenario_name: Name of the scenario to run
+            args: Arguments to pass to the scenario
 
         Returns:
-            The prompt string from the script's setup phase, or None if failed
+            The prompt string from the scenario's setup phase, or None if failed
         """
-        # Check if script is registered locally
-        if script_name in self._scripts:
-            # Local script - run setup via generator
-            script_fn = self._scripts[script_name]
-            gen = script_fn(**args)
+        # Check if scenario is registered locally
+        if scenario_name in self._scenarios:
+            # Local scenario - run setup via generator
+            scenario_fn = self._scenarios[scenario_name]
+            gen = scenario_fn(**args)
 
             # Run setup phase (code before first yield)
             prompt = await gen.__anext__()
 
             # Store generator for evaluate phase
             session_id = uuid.uuid4().hex[:8]
-            self._script_sessions[session_id] = gen
-            self._script_latest[script_name] = session_id
+            self._scenario_sessions[session_id] = gen
+            self._scenario_latest[scenario_name] = session_id
 
             logger.debug(
-                "Script %s setup complete, session=%s",
-                script_name,
+                "Scenario %s setup complete, session=%s",
+                scenario_name,
                 session_id,
             )
             return str(prompt)
         else:
-            # Remote script - call via MCP prompt
-            # Format: {env_name}:{script_name} (use source env name if available)
+            # Remote scenario - call via MCP prompt
+            # Format: {env_name}:{scenario_name} (use source env name if available)
             env_name = getattr(self, "_source_env_name", None) or self.name
             safe_env_name = env_name.replace("_", "-")
-            prompt_id = f"{safe_env_name}:{script_name}"
+            prompt_id = f"{safe_env_name}:{scenario_name}"
             try:
                 result = await self.get_prompt(prompt_id, args)  # type: ignore[attr-defined]
                 if result.messages:
@@ -181,35 +181,35 @@ class ScriptMixin:
                     elif isinstance(content, str):
                         return content
             except Exception as e:
-                logger.warning("Failed to get script prompt: %s", e)
+                logger.warning("Failed to get scenario prompt: %s", e)
             return None
 
-    async def run_script_evaluate(self, script_name: str) -> float | None:
-        """Run a script's evaluate phase and return the reward.
+    async def run_scenario_evaluate(self, scenario_name: str) -> float | None:
+        """Run a scenario's evaluate phase and return the reward.
 
         Uses the submitted answer (if any) via gen.asend().
-        Handles both local and remote scripts.
+        Handles both local and remote scenarios.
 
         Args:
-            script_name: Name of the script to evaluate
+            scenario_name: Name of the scenario to evaluate
 
         Returns:
-            The reward from the script's evaluate phase, or None if failed
+            The reward from the scenario's evaluate phase, or None if failed
         """
-        # Check if we have a stored generator (local script)
-        session_id = self._script_latest.get(script_name)
+        # Check if we have a stored generator (local scenario)
+        session_id = self._scenario_latest.get(scenario_name)
         if session_id:
-            gen = self._script_sessions.pop(session_id, None)
+            gen = self._scenario_sessions.pop(session_id, None)
             if gen:
                 # Get submitted answer (if any)
-                answer = self._script_answers.pop(script_name, None)
+                answer = self._scenario_answers.pop(scenario_name, None)
 
                 try:
-                    # Use asend to pass the answer to the script
+                    # Use asend to pass the answer to the scenario
                     reward = await gen.asend(answer)
                     logger.debug(
-                        "Script %s evaluate complete, answer=%s, reward=%s",
-                        script_name,
+                        "Scenario %s evaluate complete, answer=%s, reward=%s",
+                        scenario_name,
                         answer[:50] if answer and len(answer) > 50 else answer,
                         reward,
                     )
@@ -219,13 +219,13 @@ class ScriptMixin:
                     return 1.0
                 finally:
                     # Clean up latest pointer
-                    if self._script_latest.get(script_name) == session_id:
-                        del self._script_latest[script_name]
+                    if self._scenario_latest.get(scenario_name) == session_id:
+                        del self._scenario_latest[scenario_name]
 
-        # Remote script - read via MCP resource (use source env name if available)
+        # Remote scenario - read via MCP resource (use source env name if available)
         env_name = getattr(self, "_source_env_name", None) or self.name
         safe_env_name = env_name.replace("_", "-")
-        resource_id = f"{safe_env_name}:{script_name}"
+        resource_id = f"{safe_env_name}:{scenario_name}"
         try:
             contents = await self.read_resource(resource_id)  # type: ignore[attr-defined]
             if contents:
@@ -235,10 +235,10 @@ class ScriptMixin:
                     if "reward" in data:
                         return float(data["reward"])
         except Exception as e:
-            logger.warning("Failed to get script reward: %s", e)
+            logger.warning("Failed to get scenario reward: %s", e)
         return None
 
-    def script(
+    def scenario(
         self,
         name: str | None = None,
         description: str | None = None,
@@ -246,19 +246,19 @@ class ScriptMixin:
         [Callable[..., AsyncGenerator[Any, None]]],
         Callable[..., AsyncGenerator[Any, None]],
     ]:
-        """Decorator to register a script with setup and evaluate phases.
+        """Decorator to register a scenario with setup and evaluate phases.
 
-        Creates both a prompt and resource with identifier script:{name}.
-        The script function should yield twice:
+        Creates both a prompt and resource with identifier scenario:{name}.
+        The scenario function should yield twice:
         - First yield: the prompt string (returned from prompt)
         - Second yield: the reward float (returned from resource)
 
         Args:
-            name: Optional name for the script (defaults to function name)
-            description: Optional description of what the script does
+            name: Optional name for the scenario (defaults to function name)
+            description: Optional description of what the scenario does
 
         Example:
-            @env.script()
+            @env.scenario()
             async def search_cats(url: str):
                 await env.call_tool("navigate", url=url)
                 yield "Find cat images"
@@ -274,11 +274,11 @@ class ScriptMixin:
         def decorator(
             fn: Callable[..., AsyncGenerator[Any, None]],
         ) -> Callable[..., AsyncGenerator[Any, None]]:
-            script_name = name or fn.__name__
+            scenario_name = name or fn.__name__
             # Sanitize env name for URI scheme (no underscores allowed)
             safe_env_name = self.name.replace("_", "-")
-            script_id = f"{safe_env_name}:{script_name}"
-            script_desc = description or fn.__doc__ or f"Script: {script_name}"
+            scenario_id = f"{safe_env_name}:{scenario_name}"
+            scenario_desc = description or fn.__doc__ or f"Scenario: {scenario_name}"
 
             # Capture source code for reproducibility
             try:
@@ -287,7 +287,7 @@ class ScriptMixin:
                 source_code = None
 
             # Store the generator function
-            self._scripts[script_name] = fn
+            self._scenarios[scenario_name] = fn
 
             # Get function signature for prompt arguments
             sig = inspect.signature(fn)
@@ -298,25 +298,25 @@ class ScriptMixin:
 
             # Register PROMPT - runs setup, returns prompt messages
             # We need a reference to self and the outer variables
-            script_self = self
-            script_fn = fn
-            script_name_ref = script_name
+            scenario_self = self
+            scenario_fn = fn
+            scenario_name_ref = scenario_name
 
             async def prompt_handler(**handler_args: Any) -> list[dict[str, Any]]:
                 # Create generator instance
-                gen = script_fn(**handler_args)
+                gen = scenario_fn(**handler_args)
 
                 # Run setup phase (code before first yield)
                 prompt_text = await gen.__anext__()
 
                 # Store generator with session ID
                 session_id = uuid.uuid4().hex[:8]
-                script_self._script_sessions[session_id] = gen
-                script_self._script_latest[script_name_ref] = session_id
+                scenario_self._scenario_sessions[session_id] = gen
+                scenario_self._scenario_latest[scenario_name_ref] = session_id
 
                 logger.debug(
-                    "Script %s setup complete, session=%s, prompt=%s",
-                    script_name_ref,
+                    "Scenario %s setup complete, session=%s, prompt=%s",
+                    scenario_name_ref,
                     session_id,
                     prompt_text[:50] if isinstance(prompt_text, str) else prompt_text,
                 )
@@ -328,36 +328,36 @@ class ScriptMixin:
             from fastmcp.prompts.prompt import FunctionPrompt, PromptArgument
 
             # Build meta with source code
-            script_meta = {"code": source_code} if source_code else None
+            scenario_meta = {"code": source_code} if source_code else None
 
             prompt = FunctionPrompt(
-                name=script_id,
-                description=f"[Setup] {script_desc}",
+                name=scenario_id,
+                description=f"[Setup] {scenario_desc}",
                 arguments=[
                     PromptArgument(name=arg["name"], required=arg["required"])
                     for arg in prompt_args
                 ],
                 fn=prompt_handler,
-                meta=script_meta,
+                meta=scenario_meta,
             )
             self._prompt_manager.add_prompt(prompt)
 
             # Register RESOURCE - runs evaluate, returns reward
             async def resource_handler() -> str:
-                # Get latest session for this script
-                session_id = script_self._script_latest.get(script_name_ref)
+                # Get latest session for this scenario
+                session_id = scenario_self._scenario_latest.get(scenario_name_ref)
                 if not session_id:
                     raise ValueError(
-                        f"No active session for script '{script_name_ref}'. "
+                        f"No active session for scenario '{scenario_name_ref}'. "
                         "Call the prompt first to run setup."
                     )
 
-                gen = script_self._script_sessions.pop(session_id, None)
+                gen = scenario_self._scenario_sessions.pop(session_id, None)
                 if gen is None:
                     raise ValueError(f"Session '{session_id}' not found or already evaluated.")
 
                 # Get submitted answer (if any)
-                answer = script_self._script_answers.pop(script_name_ref, None)
+                answer = scenario_self._scenario_answers.pop(scenario_name_ref, None)
 
                 # Run evaluate phase (code after first yield)
                 # Use asend to pass the answer (or None if not submitted)
@@ -368,36 +368,36 @@ class ScriptMixin:
                     reward = 1.0
 
                 logger.debug(
-                    "Script %s evaluate complete, session=%s, answer=%s, reward=%s",
-                    script_name_ref,
+                    "Scenario %s evaluate complete, session=%s, answer=%s, reward=%s",
+                    scenario_name_ref,
                     session_id,
                     answer[:50] if answer and len(answer) > 50 else answer,
                     reward,
                 )
 
                 # Clean up latest pointer if it matches
-                if script_self._script_latest.get(script_name_ref) == session_id:
-                    del script_self._script_latest[script_name_ref]
+                if scenario_self._scenario_latest.get(scenario_name_ref) == session_id:
+                    del scenario_self._scenario_latest[scenario_name_ref]
 
                 return json.dumps({"reward": float(reward)})
 
-            # Register as resource with same script: URI
+            # Register as resource with same scenario: URI
             from fastmcp.resources.resource import FunctionResource
 
             resource = FunctionResource.from_function(
                 fn=resource_handler,
-                uri=script_id,
-                name=script_name,
-                description=f"[Evaluate] {script_desc}",
+                uri=scenario_id,
+                name=scenario_name,
+                description=f"[Evaluate] {scenario_desc}",
                 mime_type="application/json",
-                meta=script_meta,
+                meta=scenario_meta,
             )
             self._resource_manager.add_resource(resource)
 
             logger.debug(
-                "Registered script '%s' as prompt and resource: %s",
-                script_name,
-                script_id,
+                "Registered scenario '%s' as prompt and resource: %s",
+                scenario_name,
+                scenario_id,
             )
 
             return fn

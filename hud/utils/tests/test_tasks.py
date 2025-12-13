@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hud.types import Task
+from hud.types import LegacyTask
 from hud.utils.tasks import load_tasks, save_tasks
 
 
@@ -21,7 +21,7 @@ def test_load_tasks_from_list():
     tasks = load_tasks(task_dicts)
 
     assert len(tasks) == 2
-    assert all(isinstance(t, Task) for t in tasks)
+    assert all(isinstance(t, LegacyTask) for t in tasks)
     assert tasks[0].prompt == "Test task 1"  # type: ignore
     assert tasks[1].prompt == "Test task 2"  # type: ignore
 
@@ -55,7 +55,7 @@ def test_load_tasks_from_json_file():
         tasks = load_tasks(temp_path)
 
         assert len(tasks) == 2
-        assert all(isinstance(t, Task) for t in tasks)
+        assert all(isinstance(t, LegacyTask) for t in tasks)
         assert tasks[0].prompt == "Test task 1"  # type: ignore
     finally:
         Path(temp_path).unlink()
@@ -99,7 +99,7 @@ def test_load_tasks_from_jsonl_file():
         tasks = load_tasks(temp_path)
 
         assert len(tasks) == 2
-        assert all(isinstance(t, Task) for t in tasks)
+        assert all(isinstance(t, LegacyTask) for t in tasks)
         assert tasks[0].prompt == "Test task 1"  # type: ignore
     finally:
         Path(temp_path).unlink()
@@ -124,7 +124,7 @@ def test_load_tasks_from_jsonl_file_with_empty_lines():
         tasks = load_tasks(temp_path)
 
         assert len(tasks) == 2
-        assert all(isinstance(t, Task) for t in tasks)
+        assert all(isinstance(t, LegacyTask) for t in tasks)
     finally:
         Path(temp_path).unlink()
 
@@ -143,7 +143,7 @@ def test_load_tasks_from_jsonl_file_with_list():
         tasks = load_tasks(temp_path)
 
         assert len(tasks) == 2
-        assert all(isinstance(t, Task) for t in tasks)
+        assert all(isinstance(t, LegacyTask) for t in tasks)
     finally:
         Path(temp_path).unlink()
 
@@ -293,21 +293,21 @@ def test_save_tasks_with_other_type():
 
 
 def test_save_tasks_rejects_task_objects():
-    """Test save_tasks raises error for Task objects."""
-    task = Task(prompt="test", mcp_config={})
+    """Test save_tasks raises error for LegacyTask objects."""
+    task = LegacyTask(prompt="test", mcp_config={})
 
-    with pytest.raises(ValueError, match="expects dictionaries, not Task objects"):
+    with pytest.raises(ValueError, match="expects dictionaries, not LegacyTask objects"):
         save_tasks([task], "test/repo")  # type: ignore
 
 
 def test_save_tasks_rejects_task_objects_in_list():
-    """Test save_tasks raises error when Task object is in the list."""
+    """Test save_tasks raises error when LegacyTask object is in the list."""
     tasks = [
         {"id": "1", "prompt": "test", "mcp_config": {}},
-        Task(prompt="test2", mcp_config={}),  # Task object
+        LegacyTask(prompt="test2", mcp_config={}),  # LegacyTask object
     ]
 
-    with pytest.raises(ValueError, match="Item 1 is a Task object"):
+    with pytest.raises(ValueError, match="Item 1 is a LegacyTask object"):
         save_tasks(tasks, "test/repo")  # type: ignore
 
 

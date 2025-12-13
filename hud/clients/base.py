@@ -436,10 +436,10 @@ class BaseHUDClient(AgentMCPClient):
             if self.verbose:
                 hud_console.debug("Could not list prompts: " + str(e))
 
-        # Derive "scenarios" from Environment.@script prompts/resources.
+        # Derive "scenarios" from Environment.@scenario prompts/resources.
         # A scenario is exposed as:
-        # - Prompt: name "{env}:{script}" with description prefix "[Setup]"
-        # - Resource: uri "{env}:{script}" with description prefix "[Evaluate]"
+        # - Prompt: name "{env}:{scenario}" with description prefix "[Setup]"
+        # - Resource: uri "{env}:{scenario}" with description prefix "[Evaluate]"
         scenarios_by_id: dict[str, dict[str, Any]] = {}
 
         for p in analysis.get("prompts", []):
@@ -449,11 +449,11 @@ class BaseHUDClient(AgentMCPClient):
             scenario_id = p.get("name")
             if not scenario_id:
                 continue
-            env_name, script_name = ([*scenario_id.split(":", 1), ""])[:2]
+            env_name, scenario_name = ([*scenario_id.split(":", 1), ""])[:2]
             scenarios_by_id[scenario_id] = {
                 "id": scenario_id,
                 "env": env_name,
-                "name": script_name or scenario_id,
+                "name": scenario_name or scenario_id,
                 "setup_description": desc,
                 "arguments": p.get("arguments") or [],
                 "has_setup_prompt": True,
@@ -467,12 +467,12 @@ class BaseHUDClient(AgentMCPClient):
             scenario_id = r.get("uri")
             if not scenario_id:
                 continue
-            env_name, script_name = ([*scenario_id.split(":", 1), ""])[:2]
+            env_name, scenario_name = ([*scenario_id.split(":", 1), ""])[:2]
             if scenario_id not in scenarios_by_id:
                 scenarios_by_id[scenario_id] = {
                     "id": scenario_id,
                     "env": env_name,
-                    "name": script_name or scenario_id,
+                    "name": scenario_name or scenario_id,
                     "arguments": [],
                     "has_setup_prompt": False,
                     "has_evaluate_resource": True,

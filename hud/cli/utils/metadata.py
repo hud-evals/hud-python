@@ -231,7 +231,7 @@ async def analyze_from_metadata(reference: str, output_format: str, verbose: boo
                 }
             )
 
-    # Derive scenarios from script prompts/resources if present
+    # Derive scenarios from scenario prompts/resources if present
     scenarios_by_id: dict[str, dict] = {}
     for p in analysis["prompts"]:
         desc = (p.get("description") or "").strip()
@@ -240,11 +240,11 @@ async def analyze_from_metadata(reference: str, output_format: str, verbose: boo
         scenario_id = p.get("name")
         if not scenario_id:
             continue
-        env_name, script_name = ([*scenario_id.split(":", 1), ""])[:2]
+        env_name, scenario_name = ([*scenario_id.split(":", 1), ""])[:2]
         scenarios_by_id[scenario_id] = {
             "id": scenario_id,
             "env": env_name,
-            "name": script_name or scenario_id,
+            "name": scenario_name or scenario_id,
             "setup_description": desc,
             "arguments": p.get("arguments") or [],
             "has_setup_prompt": True,
@@ -257,12 +257,12 @@ async def analyze_from_metadata(reference: str, output_format: str, verbose: boo
         scenario_id = r.get("uri")
         if not scenario_id:
             continue
-        env_name, script_name = ([*scenario_id.split(":", 1), ""])[:2]
+        env_name, scenario_name = ([*scenario_id.split(":", 1), ""])[:2]
         if scenario_id not in scenarios_by_id:
             scenarios_by_id[scenario_id] = {
                 "id": scenario_id,
                 "env": env_name,
-                "name": script_name or scenario_id,
+                "name": scenario_name or scenario_id,
                 "arguments": [],
                 "has_setup_prompt": False,
                 "has_evaluate_resource": True,

@@ -39,7 +39,7 @@ configure_telemetry(
 import hud
 from hud.agents import ClaudeAgent
 from hud.clients import MCPClient
-from hud.datasets import Task
+from hud.datasets import LegacyTask
 
 
 async def main():
@@ -59,23 +59,27 @@ async def main():
             "arguments": {"name": "max_number"},
         },
     }
-    task = Task(**task_dict)
+    task = LegacyTask(**task_dict)
 
     # Create client and agent
-    mcp_client = MCPClient(mcp_config=task.mcp_config)
     # Create agent - its methods are already instrumented with @hud.instrument
-    agent = ClaudeAgent.create(
-        mcp_client=mcp_client,
-    )
+    agent = ClaudeAgent.create()
 
-    # Run with hud.trace() - this creates the root span in Jaeger
+    # Convert to v5 Task and run with hud.eval()
+    from hud.eval.task import Task
+
+    v5_task = Task.from_v4(task)
+
+    # Run with hud.trace() and hud.eval() - this creates spans in Jaeger
     with hud.trace("play_2048_game"):
         print(f"🎮 Starting 2048 game")
 
-        # Agent will play the game with setup and evaluate phases
-        # Each call to get_model_response() and execute_tools()
-        # will create child spans in Jaeger automatically
-        result = await agent.run(task, max_steps=20)
+        # Use Task as context manager to get EvalContext
+        async with v5_task as ctx:
+            # Agent will play the game with setup and evaluate phases
+            # Each call to get_model_response() and execute_tools()
+            # will create child spans in Jaeger automatically
+            result = await agent.run(ctx, max_steps=20)
 
         print(f"\n🏁 Game finished!")
         print(f"   Final reward: {result.reward}")

@@ -54,7 +54,7 @@ async def main():
 
         try:
             # Create a task with MCP config
-            from hud.datasets import Task
+            from hud.datasets import LegacyTask
 
             form_url = "https://hb.cran.dev/forms/post"
 
@@ -68,7 +68,7 @@ async def main():
             6. Submit the form
             """
 
-            task = Task(
+            legacy_task = LegacyTask(
                 prompt=form_prompt,
                 mcp_config=mcp_config,
                 setup_tool={
@@ -80,7 +80,12 @@ async def main():
             print(f"📋 Task: Form interaction")
             print(f"🚀 Running grounded agent...\n")
 
-            result = await agent.run(task, max_steps=10)
+            # Convert LegacyTask to Task and run with hud.eval()
+            from hud.eval.task import Task
+
+            task = Task.from_v4(legacy_task)
+            async with task as ctx:
+                result = await agent.run(ctx, max_steps=10)
             print(f"Result: {result.content}\n")
 
         except Exception as e:

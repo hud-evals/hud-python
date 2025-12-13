@@ -12,7 +12,7 @@ from pydantic import ConfigDict
 import hud
 
 if TYPE_CHECKING:
-    from hud.datasets import Task
+    from hud.datasets import LegacyTask
 
 import mcp.types as types
 
@@ -89,10 +89,8 @@ class GeminiAgent(MCPAgent):
         self._gemini_to_mcp_tool_map: dict[str, str] = {}
         self.gemini_tools: genai_types.ToolListUnion = []
 
-    async def initialize(self, task: str | Task | None = None) -> None:
-        """Initialize the agent and build tool mappings."""
-        await super().initialize(task)
-        # Build tool mappings after tools are discovered
+    def _on_tools_ready(self) -> None:
+        """Build Gemini-specific tool mappings after tools are discovered."""
         self._convert_tools_for_gemini()
 
     async def get_system_messages(self) -> list[Any]:

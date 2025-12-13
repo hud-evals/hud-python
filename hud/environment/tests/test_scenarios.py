@@ -1,4 +1,4 @@
-"""Tests for Environment script decorator."""
+"""Tests for Environment scenario decorator."""
 
 from __future__ import annotations
 
@@ -7,26 +7,26 @@ import pytest
 from hud.environment import Environment
 
 
-class TestScriptDecorator:
-    """Tests for @env.script decorator."""
+class TestScenarioDecorator:
+    """Tests for @env.scenario decorator."""
 
-    def test_script_registers_function(self) -> None:
-        """@env.script registers the function."""
+    def test_scenario_registers_function(self) -> None:
+        """@env.scenario registers the function."""
         env = Environment("test-env")
 
-        @env.script("greet")
-        async def greet_script(name: str):
+        @env.scenario("greet")
+        async def greet_scenario(name: str):
             yield f"Hello, {name}!"
             yield 1.0
 
-        assert "greet" in env._scripts
+        assert "greet" in env._scenarios
 
-    def test_script_creates_mcp_prompt(self) -> None:
-        """@env.script creates an MCP prompt."""
+    def test_scenario_creates_mcp_prompt(self) -> None:
+        """@env.scenario creates an MCP prompt."""
         env = Environment("test-env")
 
-        @env.script("greet", description="Greeting script")
-        async def greet_script(name: str):
+        @env.scenario("greet", description="Greeting scenario")
+        async def greet_scenario(name: str):
             yield f"Hello, {name}!"
             yield 1.0
 
@@ -34,12 +34,12 @@ class TestScriptDecorator:
         prompt_names = list(env._prompt_manager._prompts.keys())
         assert "test-env:greet" in prompt_names
 
-    def test_script_creates_mcp_resource(self) -> None:
-        """@env.script creates an MCP resource."""
+    def test_scenario_creates_mcp_resource(self) -> None:
+        """@env.scenario creates an MCP resource."""
         env = Environment("test-env")
 
-        @env.script("greet")
-        async def greet_script(name: str):
+        @env.scenario("greet")
+        async def greet_scenario(name: str):
             yield f"Hello, {name}!"
             yield 1.0
 
@@ -47,12 +47,12 @@ class TestScriptDecorator:
         resource_uris = list(env._resource_manager._resources.keys())
         assert "test-env:greet" in resource_uris
 
-    def test_script_extracts_arguments(self) -> None:
-        """@env.script extracts function arguments for prompt."""
+    def test_scenario_extracts_arguments(self) -> None:
+        """@env.scenario extracts function arguments for prompt."""
         env = Environment("test-env")
 
-        @env.script("checkout")
-        async def checkout_script(user_id: str, amount: int = 100):
+        @env.scenario("checkout")
+        async def checkout_scenario(user_id: str, amount: int = 100):
             yield f"Checkout for {user_id}: ${amount}"
             yield 1.0
 
@@ -67,17 +67,17 @@ class TestScriptDecorator:
         assert "amount" in arg_names
 
 
-class TestScriptExecution:
-    """Tests for script execution flow."""
+class TestScenarioExecution:
+    """Tests for scenario execution flow."""
 
     @pytest.mark.asyncio
-    async def test_script_setup_phase(self) -> None:
-        """Script setup phase yields prompt."""
+    async def test_scenario_setup_phase(self) -> None:
+        """Scenario setup phase yields prompt."""
         env = Environment("test-env")
         setup_ran = False
 
-        @env.script("test")
-        async def test_script():
+        @env.scenario("test")
+        async def test_scenario():
             nonlocal setup_ran
             setup_ran = True
             yield "Test prompt"
@@ -96,12 +96,12 @@ class TestScriptExecution:
         assert "Test prompt" in str(result[0].content)
 
     @pytest.mark.asyncio
-    async def test_script_stores_session(self) -> None:
-        """Script stores generator in session for evaluate phase."""
+    async def test_scenario_stores_session(self) -> None:
+        """Scenario stores generator in session for evaluate phase."""
         env = Environment("test-env")
 
-        @env.script("test")
-        async def test_script():
+        @env.scenario("test")
+        async def test_scenario():
             yield "Test prompt"
             yield 1.0
 
@@ -111,16 +111,16 @@ class TestScriptExecution:
         await prompt.render({})
 
         # Check session was stored
-        assert "test" in env._script_latest
+        assert "test" in env._scenario_latest
 
     @pytest.mark.asyncio
-    async def test_script_full_flow(self) -> None:
-        """Script runs setup and evaluate phases correctly."""
+    async def test_scenario_full_flow(self) -> None:
+        """Scenario runs setup and evaluate phases correctly."""
         env = Environment("test-env")
         phases = []
 
-        @env.script("test")
-        async def test_script():
+        @env.scenario("test")
+        async def test_scenario():
             phases.append("setup")
             yield "Test prompt"
             phases.append("evaluate")
@@ -140,17 +140,17 @@ class TestScriptExecution:
         assert "evaluate" in phases
 
 
-class TestScriptWithArgs:
-    """Tests for scripts with arguments."""
+class TestScenarioWithArgs:
+    """Tests for scenarios with arguments."""
 
     @pytest.mark.asyncio
-    async def test_script_receives_args(self) -> None:
-        """Script receives arguments from prompt call."""
+    async def test_scenario_receives_args(self) -> None:
+        """Scenario receives arguments from prompt call."""
         env = Environment("test-env")
         received_args = {}
 
-        @env.script("checkout")
-        async def checkout_script(user_id: str, amount: int = 100):
+        @env.scenario("checkout")
+        async def checkout_scenario(user_id: str, amount: int = 100):
             received_args["user_id"] = user_id
             received_args["amount"] = amount
             yield f"Checkout {user_id}: ${amount}"
@@ -165,16 +165,16 @@ class TestScriptWithArgs:
         assert received_args["amount"] == 50
 
 
-class TestScriptSubmit:
-    """Tests for script submit and answer flow."""
+class TestScenarioSubmit:
+    """Tests for scenario submit and answer flow."""
 
     @pytest.mark.asyncio
     async def test_submit_stores_answer(self) -> None:
-        """submit() stores answer for script."""
+        """submit() stores answer for scenario."""
         env = Environment("test-env")
 
-        @env.script("test")
-        async def test_script():
+        @env.scenario("test")
+        async def test_scenario():
             yield "What is 2+2?"
             yield 1.0
 
@@ -186,16 +186,16 @@ class TestScriptSubmit:
         # Submit answer
         await env.submit("test", "4")
 
-        assert env._script_answers.get("test") == "4"
+        assert env._scenario_answers.get("test") == "4"
 
     @pytest.mark.asyncio
-    async def test_script_receives_answer(self) -> None:
-        """Script receives submitted answer via yield."""
+    async def test_scenario_receives_answer(self) -> None:
+        """Scenario receives submitted answer via yield."""
         env = Environment("test-env")
         received_answer = None
 
-        @env.script("qa")
-        async def qa_script():
+        @env.scenario("qa")
+        async def qa_scenario():
             nonlocal received_answer
             answer = yield "What is 2+2?"
             received_answer = answer
@@ -207,7 +207,7 @@ class TestScriptSubmit:
         await prompt.render({})
 
         # Submit answer
-        env._script_answers["qa"] = "4"
+        env._scenario_answers["qa"] = "4"
 
         # Run evaluate
         resource = env._resource_manager._resources.get("test-env:qa")
@@ -217,12 +217,12 @@ class TestScriptSubmit:
         assert received_answer == "4"
 
     @pytest.mark.asyncio
-    async def test_script_evaluates_answer(self) -> None:
-        """Script evaluates answer and returns reward."""
+    async def test_scenario_evaluates_answer(self) -> None:
+        """Scenario evaluates answer and returns reward."""
         env = Environment("test-env")
 
-        @env.script("grading")
-        async def grading_script():
+        @env.scenario("grading")
+        async def grading_scenario():
             answer = yield "What is the capital of France?"
             yield 1.0 if "paris" in answer.lower() else 0.0
 
@@ -232,7 +232,7 @@ class TestScriptSubmit:
         await prompt.render({})
 
         # Submit correct answer
-        env._script_answers["grading"] = "Paris"
+        env._scenario_answers["grading"] = "Paris"
 
         # Run evaluate
         resource = env._resource_manager._resources.get("test-env:grading")
@@ -245,15 +245,15 @@ class TestScriptSubmit:
         assert data["reward"] == 1.0
 
 
-class TestScriptMeta:
-    """Tests for script _meta containing code."""
+class TestScenarioMeta:
+    """Tests for scenario _meta containing code."""
 
-    def test_script_captures_source_code(self) -> None:
-        """@env.script captures function source in meta."""
+    def test_scenario_captures_source_code(self) -> None:
+        """@env.scenario captures function source in meta."""
         env = Environment("test-env")
 
-        @env.script("example")
-        async def example_script(x: int):
+        @env.scenario("example")
+        async def example_scenario(x: int):
             yield f"Process {x}"
             yield 1.0
 
@@ -261,15 +261,15 @@ class TestScriptMeta:
         assert prompt is not None
         assert prompt.meta is not None
         assert "code" in prompt.meta
-        assert "async def example_script" in prompt.meta["code"]
+        assert "async def example_scenario" in prompt.meta["code"]
         assert "yield" in prompt.meta["code"]
 
-    def test_script_meta_on_resource(self) -> None:
+    def test_scenario_meta_on_resource(self) -> None:
         """Resource also has source code in meta."""
         env = Environment("test-env")
 
-        @env.script("example")
-        async def example_script():
+        @env.scenario("example")
+        async def example_scenario():
             yield "Test"
             yield 1.0
 
@@ -277,4 +277,4 @@ class TestScriptMeta:
         assert resource is not None
         assert resource.meta is not None
         assert "code" in resource.meta
-        assert "async def example_script" in resource.meta["code"]
+        assert "async def example_scenario" in resource.meta["code"]

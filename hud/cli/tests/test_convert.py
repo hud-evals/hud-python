@@ -8,7 +8,7 @@ import pytest
 import typer
 
 from hud.cli.flows.tasks import convert_tasks_to_remote
-from hud.types import Task
+from hud.types import LegacyTask
 
 
 class TestConvertCommand:
@@ -84,7 +84,7 @@ class TestConvertCommand:
         # Mock derive remote image
         mock_derive_remote.return_value = "registry.hud.ai/test-org/test-env:v1.0.0"
 
-        task = Task(
+        task = LegacyTask(
             prompt="Test task",
             mcp_config={
                 "local": {"command": "docker", "args": ["run", "--rm", "-i", "test-image:latest"]}
@@ -133,7 +133,7 @@ class TestConvertCommand:
         mock_find_env.return_value = None  # No env dir needed for remote tasks
 
         # Create task that's already remote
-        task = Task(
+        task = LegacyTask(
             prompt="Test task",
             mcp_config={
                 "remote": {
@@ -159,7 +159,7 @@ class TestConvertCommand:
         mock_settings.api_key = "test-api-key"
         mock_find_env.return_value = None
 
-        task = Task(
+        task = LegacyTask(
             prompt="Test task",
             mcp_config={
                 "local": {"command": "docker", "args": ["run", "--rm", "-i", "test-image:latest"]}
@@ -209,7 +209,7 @@ class TestConvertCommand:
         env_file = mock_env_dir / ".env"
         env_file.write_text("OPENAI_API_KEY=sk-test123\nANTHROPIC_API_KEY=sk-ant456")
 
-        task = Task(
+        task = LegacyTask(
             prompt="Test task",
             mcp_config={
                 "local": {

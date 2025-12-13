@@ -16,7 +16,7 @@ from hud.datasets.utils import (
     display_results,
     submit_rollouts,
 )
-from hud.types import AgentType, Task, Trace
+from hud.types import AgentType, LegacyTask, Trace
 
 
 class TestSingleTaskRequest:
@@ -161,8 +161,8 @@ class TestCalculateGroupStats:
     def test_basic_stats(self):
         """Test basic group statistics calculation."""
         tasks = [
-            Task(prompt="Task 1", mcp_config={}),
-            Task(prompt="Task 2", mcp_config={}),
+            LegacyTask(prompt="Task 1", mcp_config={}),
+            LegacyTask(prompt="Task 2", mcp_config={}),
         ]
         traces: list[Trace | None] = [
             Trace(reward=0.8, done=True),
@@ -180,7 +180,7 @@ class TestCalculateGroupStats:
 
     def test_all_none_traces(self):
         """Test when all traces are None."""
-        tasks = [Task(prompt="Task 1", mcp_config={})]
+        tasks = [LegacyTask(prompt="Task 1", mcp_config={})]
         traces: list[Trace | None] = [None, None]
         group_ids = {0: "group-0"}
 
@@ -192,7 +192,7 @@ class TestCalculateGroupStats:
 
     def test_mixed_success_failure(self):
         """Test with mixed success and failure traces."""
-        tasks = [Task(prompt="Task 1", mcp_config={})]
+        tasks = [LegacyTask(prompt="Task 1", mcp_config={})]
         traces: list[Trace | None] = [
             Trace(reward=1.0, done=True),
             Trace(reward=0.0, done=True, isError=True),
@@ -211,8 +211,8 @@ class TestDisplayResults:
     def test_display_with_traces(self):
         """Test displaying single-run trace results."""
         tasks = [
-            Task(id="t1", prompt="Test task 1", mcp_config={}),
-            Task(id="t2", prompt="Test task 2", mcp_config={}),
+            LegacyTask(id="t1", prompt="Test task 1", mcp_config={}),
+            LegacyTask(id="t2", prompt="Test task 2", mcp_config={}),
         ]
         results = [
             Trace(reward=0.9, done=True),
@@ -225,7 +225,7 @@ class TestDisplayResults:
     def test_display_with_group_stats(self):
         """Test displaying group statistics."""
         tasks = [
-            Task(id="t1", prompt="Test task 1", mcp_config={}),
+            LegacyTask(id="t1", prompt="Test task 1", mcp_config={}),
         ]
         results = [
             {
@@ -246,7 +246,7 @@ class TestDisplayResults:
 
     def test_display_empty_results(self):
         """Test displaying when no valid results."""
-        tasks = [Task(prompt="Test", mcp_config={})]
+        tasks = [LegacyTask(prompt="Test", mcp_config={})]
         results: list[Trace | None] = [None]
 
         # Should not raise
@@ -259,7 +259,7 @@ class TestSubmitRollouts:
     @pytest.mark.asyncio
     async def test_submit_single_task(self):
         """Test submitting a single task."""
-        tasks = [Task(id="task-1", prompt="Test prompt", mcp_config={})]
+        tasks = [LegacyTask(id="task-1", prompt="Test prompt", mcp_config={})]
 
         with patch("hud.datasets.utils.httpx.AsyncClient") as mock_client_cls:
             mock_response = MagicMock()
@@ -288,7 +288,7 @@ class TestSubmitRollouts:
     @pytest.mark.asyncio
     async def test_submit_with_group_size(self):
         """Test submitting with group_size > 1 creates multiple requests per task."""
-        tasks = [Task(id="task-1", prompt="Test prompt", mcp_config={})]
+        tasks = [LegacyTask(id="task-1", prompt="Test prompt", mcp_config={})]
 
         with patch("hud.datasets.utils.httpx.AsyncClient") as mock_client_cls:
             mock_response = MagicMock()

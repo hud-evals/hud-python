@@ -50,7 +50,7 @@ class _MockClient(BaseHUDClient):
 
 
 @pytest.mark.asyncio
-async def test_analyze_environment_derives_scenarios_from_script_prompt_and_resource() -> None:
+async def test_analyze_environment_derives_scenarios_from_scenario_prompt_and_resource() -> None:
     prompts = [
         types.Prompt(
             name="my-env:checkout",

@@ -2,140 +2,100 @@
 """
 Complete Agent Lifecycle Example
 
-This example demonstrates the full agent lifecycle:
-- Task definition with setup and evaluation tools
-- Agent initialization
-- Setup phase
-- Agent execution loop
-- Tool call handling
-- Evaluation phase
-- Cleanup
+This example demonstrates the full agent lifecycle using Task.from_v4():
+- Task definition with setup and evaluation tools (v4 LegacyTask format)
+- Conversion to v5 Task using Task.from_v4()
+- hud.eval() context for connection and tracing
+- Agent initialization and execution
+- Automatic setup/evaluate tool execution
+- Result collection
 
-The entire flow is wrapped in hud.trace() to provide RUN_ID context.
+For simpler usage, just use `await agent.run(ctx)` which handles everything.
+This example shows what happens under the hood.
 """
 
 import asyncio
 import hud
-from hud.datasets import Task
-from hud.clients import MCPClient
-from hud.agents.claude import ClaudeAgent
-from hud.agents.base import find_reward, find_content
+from hud.datasets import LegacyTask
+from hud.eval.task import Task
+from hud.agents import ClaudeAgent
 
 
 async def main():
-    # Wrap everything in trace to provide RUN_ID for the task
-    with hud.trace("Agent Lifecycle Demo"):
-        # Define a complete task with setup and evaluation
-        task_dict = {
-            "prompt": "Create a new todo item with the title 'Buy groceries' and description 'Milk, eggs, bread'",
-            "mcp_config": {
-                "hud": {
-                    "url": "https://mcp.hud.ai/v3/mcp",
-                    "headers": {
-                        "Authorization": "Bearer ${HUD_API_KEY}",  # Automatically filled from env
-                        "Mcp-Image": "hudevals/hud-browser:latest",
-                    },
-                }
-            },
-            "setup_tool": {"name": "launch_app", "arguments": {"app_name": "todo"}},
-            "evaluate_tool": {
-                "name": "evaluate",
-                "arguments": {"name": "todo_exists", "arguments": {"title": "Buy groceries"}},
-            },
-        }
-        task = Task(**task_dict)
+    print("🚀 Agent Lifecycle Example")
+    print("=" * 50)
 
-        # Create MCP client with resolved config
-        client = MCPClient(mcp_config=task.mcp_config)
+    # Phase 1: Define task in v4 LegacyTask format
+    # This format includes setup_tool and evaluate_tool
+    print("📋 Defining task...")
+    legacy_task = LegacyTask(
+        prompt="Create a new todo item with the title 'Buy groceries' and description 'Milk, eggs, bread'",
+        mcp_config={
+            "hud": {
+                "url": "https://mcp.hud.ai/v3/mcp",
+                "headers": {
+                    "Authorization": "Bearer ${HUD_API_KEY}",  # Auto-resolved from env
+                    "Mcp-Image": "hudevals/hud-browser:latest",
+                },
+            }
+        },
+        setup_tool={"name": "launch_app", "arguments": {"app_name": "todo"}},
+        evaluate_tool={
+            "name": "evaluate",
+            "arguments": {"name": "todo_exists", "arguments": {"title": "Buy groceries"}},
+        },
+    )
 
-        # Create agent
-        agent = ClaudeAgent.create(
-            mcp_client=client,
-            checkpoint_name="claude-sonnet-4-5",
-            allowed_tools=["anthropic_computer"],
-            initial_screenshot=True,
-        )
+    # Phase 2: Convert to v5 Task
+    # Task.from_v4() creates an Environment with:
+    # - mcp_config connection (connects on context entry)
+    # - setup_tool calls (run on context entry)
+    # - evaluate_tool calls (run on context exit)
+    print("🔄 Converting to v5 Task...")
+    task = Task.from_v4(legacy_task)
 
-        try:
-            # Phase 1: Initialize agent with task context
-            print("🔧 Initializing agent...")
-            await agent.initialize(task)
+    # Phase 3: Create agent
+    print("🤖 Creating Claude agent...")
+    agent = ClaudeAgent.create(
+        checkpoint_name="claude-sonnet-4-5",
+        allowed_tools=["anthropic_computer"],
+        initial_screenshot=True,
+    )
 
-            # Phase 2: Run setup tool
-            print("📋 Running setup...")
-            setup_result = await agent.call_tools(task.setup_tool)
-            setup_content = setup_result[0].content
-            print("✅ Setup complete")
+    # Phase 4: Enter eval context and run agent
+    # The context manager handles:
+    # - Environment connection (MCP servers start)
+    # - Setup tools execution (launch_app)
+    # - Trace creation for telemetry
+    print("🔧 Entering eval context...")
+    async with task as ctx:
+        print(f"   ✅ Environment connected")
+        print(f"   ✅ Setup tools executed")
+        print(f"   📝 Prompt: {ctx.prompt[:50]}...")
 
-            # Phase 3: Add context and first messages
-            print(f"\n🤖 Running task: {task.prompt}")
-            messages = await agent.get_system_messages()
+        # Phase 5: Run the agent
+        # agent.run() handles the agentic loop:
+        # - Gets system messages
+        # - Sends prompt to model
+        # - Processes tool calls
+        # - Continues until done or max_steps
+        print("\n🏃 Running agent loop...")
+        result = await agent.run(ctx, max_steps=10)
 
-            # Add context
-            context = await agent.format_message(
-                [
-                    *setup_content,
-                    task.prompt,
-                ]
-            )
+        print(f"\n   Agent finished:")
+        print(f"   - Done: {result.done}")
+        print(f"   - Has error: {result.isError}")
+        if result.content:
+            print(f"   - Response: {result.content[:100]}...")
 
-            messages.extend(context)
-            print(f"Messages: {messages}")
-
-            # Phase 4: Run agent loop
-            done = False
-            steps = 0
-            max_steps = 10
-
-            # Use messages as the state for the agent
-            while not done and steps < max_steps:
-                # Get model response
-                response = await agent.get_response(messages)
-                print(f"\n   Step {steps + 1}:")
-
-                if response.content:
-                    print(f"   💭 Agent: {response.content[:100]}...")
-
-                if response.tool_calls:
-                    # Execute tool calls
-                    tool_results = await agent.call_tools(response.tool_calls)
-
-                    # Format results back into messages
-                    messages.extend(
-                        await agent.format_tool_results(response.tool_calls, tool_results)
-                    )
-                else:
-                    # No more tool calls, we're done
-                    done = True
-
-                steps += 1
-
-            # Phase 4: Run evaluation
-            print("\n📊 Running evaluation...")
-            eval_result = await agent.call_tools(task.evaluate_tool)
-
-            if eval_result[0].isError:
-                print(f"❌ Evaluation failed: {eval_result[0].content}")
-            else:
-                reward = find_reward(eval_result[0])
-                eval_content = find_content(eval_result[0])
-                print(f"✅ Evaluation complete - Reward: {reward}")
-                print(f"✅ Evaluation complete - Content: {eval_content}")
-
-            # Summary
-            print("\n📈 Summary:")
-            print(f"   Total steps: {steps}")
-            print(f"   Task completed: {done}")
-
-        finally:
-            # Phase 5: Cleanup
-            print("\n🧹 Cleaning up...")
-            await client.shutdown()
+    # Phase 6: After exit, evaluate_tool was automatically called
+    # and ctx.reward is set based on the evaluation
+    print("\n📊 Evaluation complete (via evaluate_tool)")
+    print(f"   Reward: {ctx.reward}")
+    print(f"   Success: {ctx.success}")
 
     print("\n✨ Agent lifecycle demo complete!")
 
 
 if __name__ == "__main__":
-    print("🚀 Agent Lifecycle Example")
-    print("=" * 50)
     asyncio.run(main())

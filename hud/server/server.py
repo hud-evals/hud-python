@@ -18,7 +18,7 @@ from starlette.responses import JSONResponse, Response
 
 from hud.datasets import run_tasks
 from hud.server.low_level import LowLevelServerWithInit
-from hud.types import Task
+from hud.types import LegacyTask
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable

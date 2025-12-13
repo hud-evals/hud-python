@@ -26,7 +26,7 @@ from anthropic.types.beta import (
 import hud
 
 if TYPE_CHECKING:
-    from hud.datasets import Task
+    from hud.datasets import LegacyTask
 
 import mcp.types as types
 from pydantic import ConfigDict
@@ -103,10 +103,8 @@ class ClaudeAgent(MCPAgent):
         self.tool_mapping: dict[str, str] = {}
         self.claude_tools: list[BetaToolUnionParam] = []
 
-    async def initialize(self, task: str | Task | None = None) -> None:
-        """Initialize the agent and build tool mappings."""
-        await super().initialize(task)
-        # Build tool mappings after tools are discovered
+    def _on_tools_ready(self) -> None:
+        """Build Claude-specific tool mappings after tools are discovered."""
         self._convert_tools_for_claude()
 
     async def get_system_messages(self) -> list[Any]:

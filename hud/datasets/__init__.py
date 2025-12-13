@@ -7,10 +7,11 @@ Provides data models, utilities, and execution functions for working with HUD da
 # Execution functions
 from __future__ import annotations
 
-from hud.types import Task
+from hud.types import LegacyTask
 from hud.utils.tasks import save_tasks
 
-from .runner import run_dataset, run_single_task, run_tasks
+from .loader import load_dataset
+from .runner import run_dataset
 from .utils import (
     BatchRequest,
     SingleTaskRequest,
@@ -22,12 +23,11 @@ from .utils import (
 __all__ = [
     "BatchRequest",
     "SingleTaskRequest",
-    "Task",
+    "LegacyTask",
     "calculate_group_stats",
     "display_results",
+    "load_dataset",
     "run_dataset",
-    "run_single_task",
-    "run_tasks",
     "save_tasks",
     "submit_rollouts",
 ]

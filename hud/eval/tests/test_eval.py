@@ -1,4 +1,4 @@
-"""Tests for hud.eval.eval module (Eval class)."""
+"""Tests for hud.eval.task module (Task class)."""
 
 from __future__ import annotations
 
@@ -6,36 +6,42 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from hud.eval.eval import Eval
+from hud.eval.task import Task
 
 
-class TestEvalDataclass:
-    """Tests for Eval as a data class."""
+class TestTaskDataclass:
+    """Tests for Task as a data class."""
 
     def test_init_defaults(self) -> None:
-        """Eval initializes with sensible defaults."""
-        ev = Eval()
+        """Task initializes with sensible defaults."""
+        task = Task()
 
-        assert ev.env_config is None
-        assert ev.script is None
-        assert ev.args == {}
-        assert ev.variants == {}
-        assert ev.index == 0
+        assert task.env is None
+        assert task.scenario is None
+        assert task.args == {}
+        assert task.variants == {}
+        assert task.index == 0
 
-    def test_init_with_config(self) -> None:
-        """Eval can be initialized with env_config and script."""
-        config = {"name": "test-env", "hubs": []}
-        ev = Eval(env=config, script="checkout", args={"user_id": "alice"})
+    def test_init_with_env_dict(self) -> None:
+        """Task auto-converts env dict to Environment in __post_init__."""
+        from hud.environment import Environment
 
-        assert ev.env_config == config
-        assert ev.script == "checkout"
-        assert ev.args == {"user_id": "alice"}
+        task = Task(
+            env={"name": "browser", "include": ["navigate"]},
+            scenario="checkout",
+            args={"user_id": "alice"},
+        )
+
+        # env dict is auto-converted to Environment
+        assert isinstance(task.env, Environment)
+        assert task.scenario == "checkout"
+        assert task.args == {"user_id": "alice"}
 
     def test_copy_creates_new_instance(self) -> None:
-        """copy() creates a new Eval instance."""
-        original = Eval(
+        """copy() creates a new Task instance."""
+        original = Task(
             env={"name": "test"},
-            script="checkout",
+            scenario="checkout",
             args={"user_id": "alice"},
             variants={"model": "gpt-4o"},
         )
@@ -43,7 +49,7 @@ class TestEvalDataclass:
 
         assert copied is not original
         assert copied.env == original.env
-        assert copied.script == original.script
+        assert copied.scenario == original.scenario
         assert copied.args == original.args
         assert copied.args is not original.args  # Deep copy
         assert copied.variants == original.variants
@@ -51,36 +57,36 @@ class TestEvalDataclass:
 
     def test_copy_clears_trace_id(self) -> None:
         """copy() clears trace_id for fresh instance."""
-        original = Eval(trace_id="original-trace")
+        original = Task(trace_id="original-trace")
         copied = original.copy()
 
         assert copied.trace_id is None
 
 
-class TestEvalToEvalContext:
-    """Tests for Eval.to_eval_context()."""
+class TestTaskToEvalContext:
+    """Tests for Task.to_eval_context()."""
 
     def test_creates_eval_context(self) -> None:
         """to_eval_context() creates an EvalContext."""
         from hud.eval.context import EvalContext
 
-        ev = Eval(script="checkout")
-        ctx = ev.to_eval_context()
+        task = Task(scenario="checkout")
+        ctx = task.to_eval_context()
 
         assert isinstance(ctx, EvalContext)
         assert ctx.eval_name == "checkout"
 
-    def test_uses_eval_as_name_when_no_script(self) -> None:
-        """to_eval_context() uses 'eval' as name when no script."""
-        ev = Eval()
-        ctx = ev.to_eval_context()
+    def test_uses_eval_as_name_when_no_scenario(self) -> None:
+        """to_eval_context() uses 'eval' as name when no scenario."""
+        task = Task()
+        ctx = task.to_eval_context()
 
         assert ctx.eval_name == "eval"
 
     def test_passes_through_properties(self) -> None:
         """to_eval_context() passes through properties."""
-        ev = Eval(
-            script="checkout",
+        task = Task(
+            scenario="checkout",
             trace_id="test-trace",
             api_key="test-key",
             job_id="test-job",
@@ -88,7 +94,7 @@ class TestEvalToEvalContext:
             index=5,
             variants={"model": "gpt-4o"},
         )
-        ctx = ev.to_eval_context()
+        ctx = task.to_eval_context()
 
         assert ctx.trace_id == "test-trace"
         assert ctx._eval_api_key == "test-key"
@@ -98,15 +104,15 @@ class TestEvalToEvalContext:
         assert ctx.variants == {"model": "gpt-4o"}
 
 
-class TestEvalContextManager:
-    """Tests for Eval as async context manager."""
+class TestTaskContextManager:
+    """Tests for Task as async context manager."""
 
     @pytest.mark.asyncio
     async def test_aenter_returns_eval_context(self) -> None:
         """__aenter__ returns an EvalContext."""
         from hud.eval.context import EvalContext
 
-        ev = Eval()  # No script to avoid script lookup
+        task = Task()  # No scenario to avoid scenario lookup
 
         with (
             patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
@@ -114,17 +120,17 @@ class TestEvalContextManager:
             patch.object(EvalContext, "__aexit__", new_callable=AsyncMock),
             patch.object(EvalContext, "_print_eval_link"),  # Suppress link printing
         ):
-            ctx = await ev.__aenter__()
+            ctx = await task.__aenter__()
             assert isinstance(ctx, EvalContext)
             # Clean up manually since we patched __aexit__
-            ev._ctx = None
+            task._ctx = None
 
     @pytest.mark.asyncio
     async def test_context_clears_on_exit(self) -> None:
         """__aexit__ clears internal context reference."""
         from hud.eval.context import EvalContext
 
-        ev = Eval()
+        task = Task()
 
         with (
             patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
@@ -132,19 +138,19 @@ class TestEvalContextManager:
             patch.object(EvalContext, "__aexit__", new_callable=AsyncMock),
             patch.object(EvalContext, "_print_eval_link"),  # Suppress link printing
         ):
-            await ev.__aenter__()
-            assert ev._ctx is not None
+            await task.__aenter__()
+            assert task._ctx is not None
 
-            # Manually call __aexit__ on Eval (which will call mocked ctx.__aexit__)
-            await ev.__aexit__(None, None, None)
-            assert ev._ctx is None
+            # Manually call __aexit__ on Task (which will call mocked ctx.__aexit__)
+            await task.__aexit__(None, None, None)
+            assert task._ctx is None
 
     @pytest.mark.asyncio
     async def test_reward_accessible_after_exit(self) -> None:
         """Reward set in context is accessible after exit."""
         from hud.eval.context import EvalContext
 
-        ev = Eval()
+        task = Task()
 
         with (
             patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
@@ -152,87 +158,158 @@ class TestEvalContextManager:
             patch.object(EvalContext, "__aexit__", new_callable=AsyncMock),
             patch.object(EvalContext, "_print_eval_link"),  # Suppress link printing
         ):
-            ctx = await ev.__aenter__()
+            ctx = await task.__aenter__()
             ctx.reward = 0.95
 
-            await ev.__aexit__(None, None, None)
+            await task.__aexit__(None, None, None)
             # Context reference is cleared but reward was set on the actual context
 
 
-class TestEvalFromApi:
-    """Tests for _eval_from_api helper."""
-
-    def test_creates_eval_from_api_response(self) -> None:
-        """_eval_from_api creates Eval from API response."""
-        from hud.eval.manager import _eval_from_api
-
-        data = {
-            "env_config": {"name": "test-env", "hubs": []},
-            "script": "checkout",
-            "args": {"user_id": "alice"},
-        }
-
-        ev = _eval_from_api(data)
-
-        assert ev.env_config == {"name": "test-env", "hubs": []}
-        assert ev.script == "checkout"
-        assert ev.args == {"user_id": "alice"}
-
-    def test_handles_missing_optional_fields(self) -> None:
-        """_eval_from_api handles missing optional fields."""
-        from hud.eval.manager import _eval_from_api
-
-        data = {}  # Minimal response
-
-        ev = _eval_from_api(data)
-
-        assert ev.env_config is None
-        assert ev.script is None
-        assert ev.args == {}
 
 
 class TestEnvironmentCall:
-    """Tests for Environment.__call__ returning Eval."""
+    """Tests for Environment.__call__ returning Task."""
 
-    def test_call_returns_eval(self) -> None:
-        """Environment() returns an Eval object."""
+    def test_call_returns_task(self) -> None:
+        """Environment() returns a Task object."""
         from hud.environment import Environment
 
         env = Environment("test-env")
-        ev = env()
+        task = env()
 
-        assert isinstance(ev, Eval)
+        assert isinstance(task, Task)
 
-    def test_call_with_script_sets_script(self) -> None:
-        """Environment(script) sets script name."""
+    def test_call_with_scenario_sets_scenario(self) -> None:
+        """Environment(scenario) sets scenario name."""
         from hud.environment import Environment
 
         env = Environment("test-env")
-        ev = env("checkout")
+        task = env("checkout")
 
-        assert ev.script == "checkout"
+        assert task.scenario == "checkout"
 
     def test_call_with_args_sets_args(self) -> None:
-        """Environment(script, **args) sets args."""
+        """Environment(scenario, **args) sets args."""
         from hud.environment import Environment
 
         env = Environment("test-env")
-        ev = env("checkout", user_id="alice", amount=100)
+        task = env("checkout", user_id="alice", amount=100)
 
-        assert ev.args == {"user_id": "alice", "amount": 100}
+        assert task.args == {"user_id": "alice", "amount": 100}
 
-    def test_call_captures_env_config_when_configured(self) -> None:
-        """Environment() captures env config when there's something to store."""
+    def test_call_returns_task_with_env(self) -> None:
+        """Environment() returns Task with env reference."""
         from hud.environment import Environment
 
-        # Plain env has no config (nothing to reconstruct)
         env = Environment("test-env")
-        ev = env()
-        assert ev.env_config is None  # Nothing to store
+        task = env()
+        
+        # Task has reference to the Environment
+        assert task.env is env
 
-        # Env with setup_tool has config
+        # With setup_tool (v4 legacy)
         env2 = Environment("test-env").setup_tool("navigate", url="https://example.com")
-        ev2 = env2()
-        assert ev2.env_config is not None
-        assert ev2.env_config["name"] == "test-env"
-        assert len(ev2.env_config["setup_tools"]) == 1
+        task2 = env2()
+        assert task2.env is env2
+        assert len(task2.env._setup_calls) == 1
+
+
+class TestTaskFromV4:
+    """Tests for Task.from_v4() migration helper."""
+
+    def test_from_v4_with_legacy_task(self) -> None:
+        """Task.from_v4() accepts LegacyTask object."""
+        import warnings
+
+        # Suppress the deprecation warning from LegacyTask
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            from hud.types import LegacyTask
+
+            legacy = LegacyTask(
+                prompt="Navigate to google.com",
+                mcp_config={"hud": {"url": "https://mcp.hud.ai"}},
+            )
+
+        task = Task.from_v4(legacy)
+
+        assert isinstance(task, Task)
+        assert task.env is not None
+        assert task.env.prompt == "Navigate to google.com"
+        assert task.scenario is None  # Uses setup/evaluate_tool, not scenarios
+
+    def test_from_v4_with_dict(self) -> None:
+        """Task.from_v4() accepts dict with LegacyTask fields."""
+        task = Task.from_v4({
+            "prompt": "Navigate to google.com",
+            "mcp_config": {"hud": {"url": "https://mcp.hud.ai"}},
+        })
+
+        assert isinstance(task, Task)
+        assert task.env is not None
+        assert task.env.prompt == "Navigate to google.com"
+
+    def test_from_v4_with_json_string(self) -> None:
+        """Task.from_v4() accepts JSON string."""
+        import json
+
+        data = {
+            "prompt": "Navigate to google.com",
+            "mcp_config": {"hud": {"url": "https://mcp.hud.ai"}},
+        }
+        task = Task.from_v4(json.dumps(data))
+
+        assert isinstance(task, Task)
+        assert task.env is not None
+        assert task.env.prompt == "Navigate to google.com"
+
+    def test_from_v4_with_setup_tool(self) -> None:
+        """Task.from_v4() preserves setup_tool via env._setup_calls."""
+        task = Task.from_v4({
+            "prompt": "Check URL",
+            "mcp_config": {"hud": {"url": "https://mcp.hud.ai"}},
+            "setup_tool": {"name": "navigate", "arguments": {"url": "https://google.com"}},
+        })
+
+        # setup_tool is converted to env._setup_calls
+        assert len(task.env._setup_calls) == 1
+        assert task.env._setup_calls[0] == ("navigate", {"url": "https://google.com"})
+
+    def test_from_v4_with_evaluate_tool(self) -> None:
+        """Task.from_v4() preserves evaluate_tool via env._evaluate_calls."""
+        task = Task.from_v4({
+            "prompt": "Check URL",
+            "mcp_config": {"hud": {"url": "https://mcp.hud.ai"}},
+            "evaluate_tool": {"name": "check_url", "arguments": {"expected": "google"}},
+        })
+
+        # evaluate_tool is converted to env._evaluate_calls
+        assert len(task.env._evaluate_calls) == 1
+        assert task.env._evaluate_calls[0] == ("check_url", {"expected": "google"})
+
+    def test_from_v4_with_invalid_type_raises(self) -> None:
+        """Task.from_v4() raises TypeError for invalid input."""
+        with pytest.raises(TypeError, match="expects LegacyTask, dict, or JSON string"):
+            Task.from_v4(12345)  # type: ignore[arg-type]
+
+    def test_from_v4_with_invalid_json_raises(self) -> None:
+        """Task.from_v4() raises HudConfigError for invalid JSON."""
+        from hud.shared.exceptions import HudConfigError
+
+        with pytest.raises(HudConfigError, match="Invalid JSON string"):
+            Task.from_v4("not valid json")
+
+    def test_from_v4_does_not_warn_on_use(self) -> None:
+        """Task.from_v4() suppresses LegacyTask deprecation warning."""
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            Task.from_v4({
+                "prompt": "test",
+                "mcp_config": {"hud": {}},
+            })
+
+        # Should not trigger deprecation warning since we're migrating
+        legacy_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
+        assert len(legacy_warnings) == 0

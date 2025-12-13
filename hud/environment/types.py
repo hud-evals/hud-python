@@ -2,27 +2,22 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from hud.types import MCPToolCall
-
-__all__ = ["EnvConfig", "HubConfig"]
-
-
-class HubConfig(BaseModel):
-    """Configuration for a single hub connection."""
-
-    slug: str
-    alias: str | None = None
-    prefix: str | None = None
-    include: list[str] | None = None
-    exclude: list[str] | None = None
+__all__ = ["EnvConfig"]
 
 
 class EnvConfig(BaseModel):
-    """Environment configuration for trace reproducibility."""
+    """Environment configuration for Tasks.
+    
+    Specifies which hub to connect to and optional tool filtering.
+    
+    Attributes:
+        name: Hub name to connect via connect_hub() (e.g., "browser", "sheets")
+        include: Optional whitelist of tool names to include
+        exclude: Optional blacklist of tool names to exclude
+    """
 
-    name: str
-    hubs: list[HubConfig] = []
-    setup_tools: list[MCPToolCall] = []
-    evaluate_tools: list[MCPToolCall] = []
+    name: str = Field(description="Hub name to connect to")
+    include: list[str] | None = Field(default=None, description="Whitelist of tool names")
+    exclude: list[str] | None = Field(default=None, description="Blacklist of tool names")

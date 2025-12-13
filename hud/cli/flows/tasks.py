@@ -17,7 +17,7 @@ from hud.utils.hud_console import hud_console
 from hud.utils.tasks import load_tasks
 
 if TYPE_CHECKING:
-    from hud.types import Task
+    from hud.types import LegacyTask
 
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ def _is_remote_url(url: str) -> bool:
     return bool(re.match(r"^(https?:\/\/)?(www\.)?[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}(\/\S*)?$", url))
 
 
-def _validate_tasks(tasks: list[Task]) -> bool:
+def _validate_tasks(tasks: list[LegacyTask]) -> bool:
     """Validate the tasks file: return True if tasks already reference a remote MCP URL.
 
     A task is considered remote if any "url" field anywhere inside mcp_config
@@ -115,7 +115,7 @@ def _derive_remote_image(lock_data: dict[str, Any]) -> str:
     raise typer.Exit(1)
 
 
-def _extract_existing_images(tasks: list[Task]) -> set[str]:
+def _extract_existing_images(tasks: list[LegacyTask]) -> set[str]:
     """Extract all Mcp-Image references from tasks."""
     images = set()
 
@@ -268,7 +268,7 @@ def convert_tasks_to_remote(tasks_file: str) -> str:
     tasks_path = Path(tasks_file).resolve()
 
     # Load validated tasks for decision-making (may resolve env vars)
-    tasks: list[Task] = load_tasks(str(tasks_path))  # type: ignore[assignment]
+    tasks: list[LegacyTask] = load_tasks(str(tasks_path))  # type: ignore[assignment]
 
     # Load raw tasks to preserve placeholders when writing back to disk
     raw_tasks: list[dict[str, Any]] = load_tasks(str(tasks_path), raw=True)  # type: ignore[assignment]

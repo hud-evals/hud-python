@@ -13,7 +13,7 @@ from hud.environment.connectors import ConnectorsMixin
 from hud.environment.integrations import IntegrationsMixin
 from hud.environment.mock import MockMixin
 from hud.environment.router import ConflictResolution, ToolRouter
-from hud.environment.scripts import ScriptMixin
+from hud.environment.scenarios import ScenarioMixin
 from hud.server.server import MCPServer
 from hud.types import MCPToolResult
 
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     import types
 
     from hud.environment.connection import Connector
-    from hud.eval.eval import Eval
+    from hud.eval.task import Task
 
 __all__ = ["Environment"]
 
@@ -39,7 +39,7 @@ class Environment(
     ConnectorsMixin,
     IntegrationsMixin,
     MockMixin,
-    ScriptMixin,
+    ScenarioMixin,
     MCPServer,
 ):
     """Unified MCP environment that acts as both server and client.
@@ -57,7 +57,6 @@ class Environment(
         connect_url(url) - MCP server via URL
         connect_mcp(config) - Single mcp_config server
         connect_mcp_config(mcp_config) - Multiple mcp_config servers
-        connect_task(slug) - Load task from platform by slug
         connect_image(image) - Docker image via stdio
         connect_fastapi(app) - Mount FastAPI app as MCP server
         connect_openapi(spec) - Mount OpenAPI spec as MCP server
@@ -136,7 +135,7 @@ class Environment(
         self._setup_calls: list[tuple[str, dict[str, Any]]] = []
         self._evaluate_calls: list[tuple[str, dict[str, Any]]] = []
 
-        # Default prompt - set by connect_task (EvalContext has per-run prompt)
+        # Default prompt (EvalContext has per-run prompt)
         self.prompt: str | None = None
 
         # Track which lifecycle tools we've warned about (only warn once per tool)
@@ -145,8 +144,8 @@ class Environment(
         # Initialize mock state
         self._init_mock()
 
-        # Initialize script state
-        self._init_scripts()
+        # Initialize scenario state
+        self._init_scenarios()
 
     # =========================================================================
     # Core Methods
@@ -525,100 +524,47 @@ class Environment(
         """Names of local (non-parallelizable) connections."""
         return [name for name, conn in self._connections.items() if conn.is_local]
 
-    def _get_env_config(self) -> dict[str, Any] | None:
-        """Get serializable environment configuration for trace storage.
-
-        Returns EnvConfig-compatible dict with:
-        - name: Environment name
-        - hubs: List of hub configs (connect_hub calls)
-        - setup_tools: Tools to run after connection (MCPToolCall format)
-        - evaluate_tools: Tools to run before disconnection (MCPToolCall format)
-        """
-        hub_configs = getattr(self, "_hub_configs", [])
-
-        # Convert setup/evaluate calls to MCPToolCall format
-        setup_tools = [{"name": name, "arguments": args} for name, args in self._setup_calls]
-        evaluate_tools = [{"name": name, "arguments": args} for name, args in self._evaluate_calls]
-
-        # Only return config if there's something to store
-        if not hub_configs and not setup_tools and not evaluate_tools:
-            return None
-
-        return {
-            "name": self.name,
-            "hubs": [h.model_dump() for h in hub_configs],
-            "setup_tools": setup_tools,
-            "evaluate_tools": evaluate_tools,
-        }
-
-    @property
-    def _all_hubs(self) -> bool:
-        """True if all tools came from connect_hub (fully reproducible).
-
-        Returns False if there are:
-        - Local tools (@env.tool, connect_fastapi, connect_openapi, connect_server)
-        - Non-hub connections (connect_url, connect_mcp, connect_image, etc.)
-        """
-        hub_configs = getattr(self, "_hub_configs", [])
-
-        # Check for local tools (mounted servers, @env.tool)
-        # _tool_manager comes from MCPServer base class
-        local_tool_count = len(self._tool_manager._tools) if hasattr(self, "_tool_manager") else 0
-        if local_tool_count > 0:
-            return False
-
-        # No hubs and no connections = trivially all hubs (empty env)
-        if not hub_configs and not self._connections:
-            return True
-
-        # Has connections but no hubs = not all hubs
-        if not hub_configs:
-            return False
-
-        # Compare hub count to connection count
-        return len(hub_configs) >= len(self._connections)
-
     def __repr__(self) -> str:
         return f"Environment({self.name!r}, connections={list(self._connections.keys())})"
 
     # =========================================================================
-    # Eval Creation
+    # Task Creation
     # =========================================================================
 
     def __call__(
         self,
-        script: str | None = None,
+        scenario: str | None = None,
         *,
         _trace: bool = True,
         _quiet: bool = False,
         **args: Any,
-    ) -> Eval:
-        """Create an Eval from this environment.
+    ) -> Task:
+        """Create a Task from this environment.
 
-        Returns an Eval that can be entered as a context manager or passed
+        Returns a Task that can be entered as a context manager or passed
         to hud.eval() for orchestration.
 
         Args:
-            script: Optional script name to run (from @env.script)
+            scenario: Optional scenario name to run (from @env.scenario)
             _trace: Whether to send trace data to backend (default True)
             _quiet: Whether to suppress printing links (default False)
-            **args: Arguments for the script
+            **args: Arguments for the scenario
 
         Returns:
-            Eval: A runnable evaluation unit
+            Task: A runnable evaluation unit
 
         Example:
             ```python
             env = Environment("my-env").connect_hub("browser")
 
 
-            @env.script()
+            @env.scenario()
             async def checkout(user_id: str):
                 yield "Complete checkout"
                 yield 1.0
 
 
-            # Simple use - Eval is context manager
+            # Simple use - Task is context manager
             async with env("checkout", user_id="alice") as ctx:
                 await agent.run(ctx.prompt)
 
@@ -627,59 +573,18 @@ class Environment(
                 await ctx.call_tool("navigate", url="...")
 
             # Orchestrated via hud.eval
-            evals = [env("checkout", user_id="alice"), env("checkout", user_id="bob")]
-            async with hud.eval(evals, variants={"model": ["gpt-4o"]}, group=4) as ctx:
+            tasks = [env("checkout", user_id="alice"), env("checkout", user_id="bob")]
+            async with hud.eval(tasks, variants={"model": ["gpt-4o"]}, group=4) as ctx:
                 ...
             ```
         """
-        from hud.eval.eval import Eval
+        from hud.eval.task import Task
 
-        return Eval(
-            env=self,  # Pass live environment for local tools/scripts
-            script=script,
+        return Task(
+            env=self,  # Pass live environment for local tools/scenarios
+            scenario=scenario,
             args=args,
             _trace=_trace,
             _quiet=_quiet,
         )
 
-    @classmethod
-    def from_config(cls, config: dict[str, Any] | None) -> Environment:
-        """Create an Environment from a configuration dict.
-
-        Args:
-            config: EnvConfig-compatible dict with:
-                - name: Environment name
-                - hubs: List of hub configs (HubConfig dicts)
-                - setup_tools: Tools to run after connection
-                - evaluate_tools: Tools to run before disconnection
-
-        Returns:
-            Environment: Configured environment instance
-        """
-        if config is None:
-            return cls("eval")
-
-        env = cls(name=config.get("name", "eval"))
-
-        # Connect hubs
-        for hub in config.get("hubs", []):
-            if isinstance(hub, dict):
-                env.connect_hub(
-                    hub.get("slug", ""),
-                    alias=hub.get("alias"),
-                    prefix=hub.get("prefix"),
-                    include=hub.get("include"),
-                    exclude=hub.get("exclude"),
-                )
-
-        # Add setup tools
-        for tool in config.get("setup_tools", []):
-            if isinstance(tool, dict):
-                env.setup_tool(tool.get("name", ""), **(tool.get("arguments") or {}))
-
-        # Add evaluate tools
-        for tool in config.get("evaluate_tools", []):
-            if isinstance(tool, dict):
-                env.evaluate_tool(tool.get("name", ""), **(tool.get("arguments") or {}))
-
-        return env

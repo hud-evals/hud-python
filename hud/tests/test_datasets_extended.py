@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from hud.datasets import (
-    Task,
+    LegacyTask,
     run_dataset,
 )
 from hud.types import MCPToolCall
@@ -16,14 +16,14 @@ from hud.utils.tasks import save_tasks
 
 
 class TestTaskExtended:
-    """Extended tests for Task functionality."""
+    """Extended tests for LegacyTask functionality."""
 
     def test_taskconfig_with_all_fields(self):
-        """Test Task with all possible fields."""
+        """Test LegacyTask with all possible fields."""
         setup_tool = MCPToolCall(name="setup", arguments={"board_size": 4})
         evaluate_tool = MCPToolCall(name="evaluate", arguments={"metric": "score"})
 
-        task = Task(
+        task = LegacyTask(
             id="test-123",
             prompt="Play the game",
             mcp_config={
@@ -43,13 +43,13 @@ class TestTaskExtended:
         assert task.metadata["version"] == 2
 
     def test_taskconfig_list_tools(self):
-        """Test Task with list of tools."""
+        """Test LegacyTask with list of tools."""
         setup_tools = [
             MCPToolCall(name="init", arguments={}),
             MCPToolCall(name="configure", arguments={"mode": "test"}),
         ]
 
-        task = Task(prompt="Multi-setup task", mcp_config={"test": True}, setup_tool=setup_tools)
+        task = LegacyTask(prompt="Multi-setup task", mcp_config={"test": True}, setup_tool=setup_tools)
 
         assert isinstance(task.setup_tool, list)
         assert len(task.setup_tool) == 2
@@ -77,7 +77,7 @@ class TestTaskExtended:
                 "hud_telemetry_url": "https://api.example.com",
             }
 
-            task = Task(
+            task = LegacyTask(
                 prompt="Complex env test",
                 mcp_config={
                     "auth": {
@@ -104,7 +104,7 @@ class TestTaskExtended:
 
     def test_non_string_values_preserved(self):
         """Test that non-string values are preserved during env resolution."""
-        task = Task(
+        task = LegacyTask(
             prompt="Test non-strings",
             mcp_config={
                 "string": "${MISSING}",
@@ -139,13 +139,13 @@ class TestDatasetOperations:
             mock_instance.push_to_hub.assert_called_once_with("test-org/empty-dataset")
 
     def test_save_taskconfigs_mixed_rejection(self):
-        """Test that mixing dicts and Task objects is rejected."""
+        """Test that mixing dicts and LegacyTask objects is rejected."""
         valid_dict = {"prompt": "Dict task", "mcp_config": {"test": True}}
 
-        task_object = Task(prompt="Object task", mcp_config={"resolved": "${SOME_VAR}"})
+        task_object = LegacyTask(prompt="Object task", mcp_config={"resolved": "${SOME_VAR}"})
 
         # First item is dict, second is object
-        with pytest.raises(ValueError, match="Item 1 is a Task object"):
+        with pytest.raises(ValueError, match="Item 1 is a LegacyTask object"):
             save_tasks([valid_dict, task_object], "test-org/mixed")  # type: ignore
 
 
@@ -154,178 +154,113 @@ class TestRunDatasetExtended:
 
     @pytest.mark.asyncio
     async def test_run_dataset_empty(self):
-        """Test running empty dataset."""
-        with (
-            patch("hud.clients.MCPClient"),
-            patch("hud.eval.display.print_link"),
-            patch("hud.eval.display.print_complete"),
-        ):
-            # Create a mock agent class with proper type
-            from hud.agents import MCPAgent
-
-            mock_agent_class = type("MockAgent", (MCPAgent,), {})
-
-            results = await run_dataset(
-                "empty_run",
-                [],  # Empty task list
-                mock_agent_class,
-            )
-
-            assert results == []
-
-    @pytest.mark.asyncio
-    async def test_run_dataset_with_metadata(self):
-        """Test run_dataset with custom metadata."""
+        """Test running empty dataset raises ValueError."""
         from hud.agents import MCPAgent
         from hud.types import Trace
 
-        # Create a proper mock agent class
-        mock_agent_instance = AsyncMock()
-        mock_agent_instance.run.return_value = Trace(reward=1.0, done=True)
+        # Create mock agent
+        mock_agent = AsyncMock(spec=MCPAgent)
+        mock_agent.run.return_value = Trace(reward=1.0, done=True)
 
-        mock_agent_class = type(
-            "MockAgent",
-            (MCPAgent,),
-            {
-                "__init__": lambda self, **kwargs: None,
-                "__new__": lambda cls, **kwargs: mock_agent_instance,
-            },
-        )
+        # Empty task list should raise ValueError
+        with pytest.raises(ValueError, match="No tasks to run"):
+            await run_dataset([], mock_agent)
 
-        tasks = [{"prompt": "Task 1", "mcp_config": {"url": "test1"}}]
+    @pytest.mark.asyncio
+    async def test_run_dataset_with_task_list(self):
+        """Test run_dataset with Task objects."""
+        from hud.agents import MCPAgent
+        from hud.eval.task import Task
+        from hud.types import Trace
 
-        # Mock EvalContext to avoid actual MCP connections
+        # Create mock agent
+        mock_agent = AsyncMock(spec=MCPAgent)
+        mock_agent.run.return_value = Trace(reward=1.0, done=True)
+
+        # Create mock tasks (with mocked Environment to avoid real connections)
+        mock_env = MagicMock()
+        mock_env.name = "test"
+        
+        tasks = [
+            Task(env=mock_env, scenario="test1"),
+            Task(env=mock_env, scenario="test2"),
+        ]
+
+        # Mock hud.eval to avoid real eval context
         mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
-        mock_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_ctx.results = None
+        mock_ctx.reward = None
+
+        with patch("hud.datasets.runner.hud.eval") as mock_eval:
+            mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
+            mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            results = await run_dataset(tasks, mock_agent, max_steps=5)
+
+            # Should return list with ctx
+            assert len(results) == 1
+            mock_agent.run.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_dataset_from_source_string(self):
+        """Test run_dataset with source string calls load_dataset."""
+        from hud.agents import MCPAgent
+        from hud.eval.task import Task
+        from hud.types import Trace
+
+        # Create mock agent
+        mock_agent = AsyncMock(spec=MCPAgent)
+        mock_agent.run.return_value = Trace(reward=1.0, done=True)
+
+        mock_env = MagicMock()
+        mock_tasks = [Task(env=mock_env, scenario="loaded")]
+
+        mock_ctx = AsyncMock()
+        mock_ctx.results = None
 
         with (
-            patch("hud.clients.MCPClient"),
-            patch("hud.eval.context.EvalContext.from_task", return_value=mock_ctx),
-            patch("hud.eval.display.print_link"),
-            patch("hud.eval.display.print_complete"),
+            patch("hud.datasets.runner.load_dataset", return_value=mock_tasks) as mock_load,
+            patch("hud.datasets.runner.hud.eval") as mock_eval,
         ):
-            # Should run without error
+            mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
+            mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            await run_dataset("test-org/dataset", mock_agent)
+
+            # Should call load_dataset with the source string
+            mock_load.assert_called_once_with("test-org/dataset")
+
+    @pytest.mark.asyncio
+    async def test_run_dataset_passes_parameters(self):
+        """Test that run_dataset passes parameters correctly to hud.eval."""
+        from hud.agents import MCPAgent
+        from hud.eval.task import Task
+        from hud.types import Trace
+
+        mock_agent = AsyncMock(spec=MCPAgent)
+        mock_agent.run.return_value = Trace(reward=1.0, done=True)
+
+        mock_env = MagicMock()
+        tasks = [Task(env=mock_env, scenario="test")]
+
+        mock_ctx = AsyncMock()
+        mock_ctx.results = None
+
+        with patch("hud.datasets.runner.hud.eval") as mock_eval:
+            mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
+            mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
+
             await run_dataset(
-                "metadata_run",
-                tasks,
-                mock_agent_class,  # type: ignore
-                {"verbose": True},
+                tasks, 
+                mock_agent, 
+                max_steps=25, 
+                max_concurrent=10, 
+                group_size=3
             )
 
-    @pytest.mark.asyncio
-    async def test_run_dataset_exception_handling(self):
-        """Test exception handling during task execution."""
-        from hud.types import Trace
-
-        # Track execution by task index
-        executed_task_indices: set[int] = set()
-
-        # Create a mock agent class where behavior depends on the task being run
-        def create_mock_agent(**kwargs):
-            agent = AsyncMock()
-
-            async def mock_run(task, **run_kwargs):
-                # Extract task index from prompt "Task {i}"
-                task_idx = int(task.prompt.split()[-1])
-                executed_task_indices.add(task_idx)
-
-                if task_idx == 1:  # Second task (index 1) should fail
-                    raise RuntimeError("Task 2 failed")
-                return Trace(reward=1.0, done=True, content=f"success-{task_idx + 1}")
-
-            agent.run = mock_run
-            return agent
-
-        # Mock the agent class itself - runner calls agent_class.create()
-        mock_agent_class = MagicMock()
-        mock_agent_class.create = MagicMock(side_effect=create_mock_agent)
-        mock_agent_class.__name__ = "MockAgent"
-
-        tasks = [{"prompt": f"Task {i}", "mcp_config": {"url": f"test{i}"}} for i in range(3)]
-
-        # Create mock contexts for each task
-        def create_mock_ctx(*args, **kwargs):
-            ctx = AsyncMock()
-            ctx.__aenter__ = AsyncMock(return_value=ctx)
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            ctx._suppress_link = False
-            return ctx
-
-        with (
-            patch("hud.clients.MCPClient"),
-            patch("hud.eval.context.EvalContext.from_task", side_effect=create_mock_ctx),
-            patch("hud.eval.display.print_link"),
-            patch("hud.eval.display.print_complete"),
-        ):
-            # Should complete without raising
-            results = await run_dataset("error_run", tasks, mock_agent_class)  # type: ignore
-
-            # All tasks should be attempted
-            assert len(executed_task_indices) == 3
-            assert executed_task_indices == {0, 1, 2}
-
-            # Second result should be None due to exception
-            assert results[1] is None
-
-    @pytest.mark.asyncio
-    async def test_run_dataset_client_cleanup(self):
-        """Test that run_dataset completes successfully."""
-        from hud.agents import MCPAgent
-        from hud.types import Trace
-
-        mock_agent_instance = AsyncMock()
-        mock_agent_instance.run.return_value = Trace(reward=1.0, done=True)
-
-        mock_agent_class = type(
-            "MockAgent",
-            (MCPAgent,),
-            {
-                "__init__": lambda self, **kwargs: None,
-                "__new__": lambda cls, **kwargs: mock_agent_instance,
-            },
-        )
-
-        tasks = [{"prompt": f"Task {i}", "mcp_config": {"url": f"test{i}"}} for i in range(3)]
-
-        # Create mock contexts
-        def create_mock_ctx(*args, **kwargs):
-            ctx = AsyncMock()
-            ctx.__aenter__ = AsyncMock(return_value=ctx)
-            ctx.__aexit__ = AsyncMock(return_value=None)
-            ctx._suppress_link = False
-            return ctx
-
-        with (
-            patch("hud.clients.MCPClient"),
-            patch("hud.eval.context.EvalContext.from_task", side_effect=create_mock_ctx),
-            patch("hud.eval.display.print_link"),
-            patch("hud.eval.display.print_complete"),
-        ):
-            results = await run_dataset("cleanup_run", tasks, mock_agent_class)  # type: ignore
-
-            # Verify results were returned
-            assert len(results) == 3
-
-    @pytest.mark.asyncio
-    async def test_run_dataset_validation_error(self):
-        """Test that tasks without required fields cause validation errors."""
-        from pydantic import ValidationError
-
-        from hud.agents import MCPAgent
-
-        # Create a task without mcp_config (required field)
-        task: dict[str, Any] = {
-            "prompt": "Test task",
-            # No mcp_config - should cause validation error during Task(**task_dict)
-        }
-
-        mock_agent_class = type("MockAgent", (MCPAgent,), {})
-
-        # Validation errors should be raised immediately when Task objects are created
-        with pytest.raises(ValidationError):
-            await run_dataset(
-                "validation_run",
-                [task],  # Pass the task directly
-                mock_agent_class,  # type: ignore
+            # Verify hud.eval was called with correct params
+            mock_eval.assert_called_once_with(
+                tasks,
+                group=3,
+                max_concurrent=10,
             )

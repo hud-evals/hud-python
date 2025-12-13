@@ -24,7 +24,7 @@ from openai import AsyncOpenAI
 
 import hud
 from hud.agents.openai_chat import OpenAIChatAgent
-from hud.datasets import Task
+from hud.datasets import LegacyTask
 
 
 def _system_prompt(mode: Literal["text", "browser"]) -> str:
@@ -66,7 +66,7 @@ def _system_prompt(mode: Literal["text", "browser"]) -> str:
     )
 
 
-def _task_for_mode(mode: Literal["text", "browser"], target: int) -> Task:
+def _task_for_mode(mode: Literal["text", "browser"], target: int) -> LegacyTask:
     if mode == "browser":
         mcp_config = {
             "local": {
@@ -100,7 +100,7 @@ def _task_for_mode(mode: Literal["text", "browser"], target: int) -> Task:
             "arguments": {"name": "max_number", "arguments": {"target": target}},
         }
 
-    return Task(
+    return LegacyTask(
         prompt=prompt,
         mcp_config=mcp_config,
         setup_tool=setup_tool,  # type: ignore[arg-type]
@@ -136,20 +136,23 @@ async def run_example(mode: Literal["text", "browser"], target: int) -> None:
     )
 
     title = "OpenAI 2048 Game (Browser)" if mode == "browser" else "OpenAI 2048 Game (Text)"
-    async with hud.async_job(title, metadata={"model": checkpoint, "mode": mode}) as job:
-        print("🎮 Starting 2048 game with OpenAI-compatible agent...")
-        print(f"🤖 Model: {agent.config.checkpoint_name}")
-        print(f"🧩 Mode: {mode}")
-        print("=" * 50)
+    print("🎮 Starting 2048 game with OpenAI-compatible agent...")
+    print(f"🤖 Model: {agent.config.checkpoint_name}")
+    print(f"🧩 Mode: {mode}")
+    print("=" * 50)
 
-        async with hud.async_trace("Game Execution", job_id=job.id):
-            result = await agent.run(task, max_steps=100)
+    # Use hud.eval() with Task.from_v4() for legacy task format
+    from hud.eval.task import Task
 
-        print("=" * 50)
-        print("✅ Game completed!")
-        print(f"🏆 Final Score/Max Tile: {result.reward}")
-        if result.info:
-            print(f"📊 Game Stats: {result.info}")
+    v5_task = Task.from_v4(task)
+    async with hud.eval(v5_task, variants={"model": checkpoint, "mode": mode}) as ctx:
+        result = await agent.run(ctx, max_steps=100)
+
+    print("=" * 50)
+    print("✅ Game completed!")
+    print(f"🏆 Final Score/Max Tile: {result.reward}")
+    if result.info:
+        print(f"📊 Game Stats: {result.info}")
 
 
 def _parse_args() -> argparse.Namespace:

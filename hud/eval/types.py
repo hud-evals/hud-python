@@ -9,8 +9,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from hud.environment.types import EnvConfig
-
 # =============================================================================
 # Exceptions
 # =============================================================================
@@ -34,7 +32,6 @@ class EvalPayload(BaseModel):
 
     prompt: str | None = None
     code_snippet: str | None = None
-    env_config: EnvConfig | None = None
     job_name: str | None = None
     job_id: str | None = None
     group_id: str | None = None

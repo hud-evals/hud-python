@@ -55,23 +55,28 @@ class AgentType(str, Enum):
 
 
 class BaseAgentConfig(BaseModel):
-    """Standard agent configuration that tasks can override.
-    Provider-specific configs should not be included here.
+    """Agent configuration for LLM-specific settings.
+
+    Note: allowed_tools, disallowed_tools, append_setup_output, and initial_screenshot
+    are kept for backwards compatibility with v4 task configs but are no longer applied
+    at the agent level. These should be configured on the Environment/Task instead.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
+    # LLM-specific setting
+    system_prompt: str | None = None
+
+    # Deprecated: kept for backwards compat with v4 task configs, not applied by agent
     allowed_tools: list[str] | None = None
     disallowed_tools: list[str] | None = None
-    response_tool_name: str | None = None
-    system_prompt: str | None = None
     append_setup_output: bool = True
     initial_screenshot: bool = True
 
 
-class Task(BaseModel):
+class LegacyTask(BaseModel):
     """
-    DEPRECATED: Use Eval from env() instead.
+    DEPRECATED: Use Task from env() instead.
 
     A task configuration that can be used to create a task.
 
@@ -79,10 +84,18 @@ class Task(BaseModel):
     template placeholders in the format ${VAR_NAME} or ${VAR_NAME:default_value}.
 
     .. deprecated:: 0.5.0
-        Task is deprecated. Use `env("script_name", **args)` to create Eval objects,
-        or use string slugs with `hud.eval("org/evalset:*")`.
+        LegacyTask is deprecated in v0.5.0 and will be removed in v0.6.0
+        (no earlier than March 1st, 2025).
 
-    Example:
+        Use one of these migration paths:
+
+        1. Quick conversion: ``Task.from_v4(legacy_task)`` converts LegacyTask to Task
+        2. Full migration: Use ``@env.scenario()`` with setup code before first yield
+           and evaluate code after first yield
+
+        See https://docs.hud.ai/migration for the full migration guide.
+
+    Example (deprecated):
         mcp_config: {
             "hud": {
                 "url": "${HUD_MCP_URL:https://mcp.hud.ai/v3/mcp}",
@@ -104,12 +117,14 @@ class Task(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def __init__(self, **data: Any) -> None:
-        """Initialize Task with deprecation warning."""
+        """Initialize LegacyTask with deprecation warning."""
         import warnings
 
         warnings.warn(
-            "Task is deprecated. Use env('script_name', **args) to create Eval objects, "
-            "or use string slugs with hud.eval('org/evalset:*').",
+            "LegacyTask is deprecated in v0.5.0 and will be removed in v0.6.0 "
+            "(no earlier than March 1st, 2025). "
+            "Use Task.from_v4() for quick conversion, or migrate to @env.scenario(). "
+            "See https://docs.hud.ai/migration for details.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -378,7 +393,7 @@ class Trace(BaseModel):
     isError: bool = Field(default=False)
 
     # Metadata
-    task: Task | None = Field(default=None)
+    task: LegacyTask | None = Field(default=None)
 
     # Trace
     trace: list[TraceStep] = Field(default_factory=list)

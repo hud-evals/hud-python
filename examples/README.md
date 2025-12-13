@@ -35,21 +35,24 @@ python examples/03_browser_agent_loop.py --app todo
 
 ## Core Patterns
 
-### 02_agent_lifecycle.py
+### 01_agent_lifecycle.py
 Demonstrates the full agent lifecycle with telemetry and state management.
-- Task creation and configuration
+- Task creation using LegacyTask format
 - Trace context for debugging
-- State persistence between runs
+- Setup and evaluation tool calls
 
 ### run_evaluation.py
-Generic dataset evaluation runner supporting multiple agents.
+Generic dataset evaluation runner using the programmatic API.
 
 ```bash
-# Run single task
+# Run all tasks
 python examples/run_evaluation.py hud-evals/SheetBench-50
 
-# Run full dataset
-python examples/run_evaluation.py hud-evals/SheetBench-50 --full
+# Run specific tasks by index
+python examples/run_evaluation.py hud-evals/SheetBench-50 --task-ids 0 1 2
+
+# Use different agent
+python examples/run_evaluation.py hud-evals/OSWorld-Verified-Gold --agent operator
 ```
 
 ## Integration Examples

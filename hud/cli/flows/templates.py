@@ -44,7 +44,7 @@ def count_letter(text: str, letter: str) -> int:
 # 2. SCRIPTS - Define prompts and evaluation logic
 # =============================================================================
 
-@env.script("count")
+@env.scenario("count")
 async def count_script(sentence: str, letter: str, fmt: str = "integer"):
     """Agent must count a letter. We check if they got it right."""
     # Yield the prompt, receive the agent's final answer
@@ -89,11 +89,11 @@ async def test():
         api_key=settings.api_key,
     )
 
-    # Create an eval from the script
-    eval = env("count", sentence="Strawberry world", letter="r")
+    # Create a task from the scenario
+    task = env("count", sentence="Strawberry world", letter="r")
 
     # Test with and without tools
-    async with hud.eval(eval, variants={{"tools": [True, False]}}) as ctx:
+    async with hud.eval(task, variants={{"tools": [True, False]}}) as ctx:
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{{"role": "user", "content": ctx.prompt}}],

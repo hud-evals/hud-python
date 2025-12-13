@@ -20,7 +20,7 @@ from openai import AsyncOpenAI
 
 from hud import instrument
 from hud.agents.base import MCPAgent
-from hud.datasets import Task
+from hud.datasets import LegacyTask
 from hud.settings import settings
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
@@ -207,7 +207,7 @@ async def main():
     )
 
     # Define a task with HUD MCP environment
-    task = Task(
+    legacy_task = LegacyTask(
         prompt="Go to example.com and tell me the page title",
         mcp_config={
             "hud": {
@@ -220,9 +220,15 @@ async def main():
         },
     )
 
+    # Convert to v5 Task and run with context manager
+    from hud.eval.task import Task
+
+    task = Task.from_v4(legacy_task)
+
     # Run the agent - traces are automatically captured
     print("Running agent with HUD Gateway inference...")
-    result = await agent.run(task, max_steps=5)
+    async with task as ctx:
+        result = await agent.run(ctx, max_steps=5)
 
     print("\n=== Results ===")
     print(f"Done: {result.done}")
