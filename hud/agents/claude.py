@@ -96,6 +96,9 @@ class ClaudeAgent(MCPAgent):
         self.anthropic_client = model_client
         self.max_tokens = self.config.max_tokens
         self.use_computer_beta = self.config.use_computer_beta
+        
+        # Log model configuration
+        logger.warning(f"🧠 ClaudeAgent: model={self.config.checkpoint_name}, max_tokens={self.max_tokens}")
         self.hud_console = HUDConsole(logger=logger)
 
         # these will be initialized in _convert_tools_for_claude

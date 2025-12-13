@@ -1,0 +1,106 @@
+[
+  {
+    "id": "task-school-math-scores",
+    "prompt": "The document 'school_math_scores' lists Mathematics test scores for 150 students.\n\nCompare these scores with the actual data in Supabase (school_student_scores table, subject='Mathematics').\n\nFind all students where the score in the document differs from their actual score in the database.\n\nFormat: \"{student_id}: {first_name} {last_name}, document says {doc_score}, actual {db_score}\"\nSort by student_id (A-Z).\nSeparate entries with \"; \"\n\nNote: Scores are decimal numbers. A difference of even 0.01 counts as a contradiction.\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables: school_student_scores, school_students\nDocument: doc_id 'school_math_scores'\n\nStore result with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "STU-000032: Sofia Young, document says 75.87, actual 58.94; STU-000050: Sofia Gonzalez, document says 91.54, actual 72.8; STU-000060: Riley Garcia, document says 150.11, actual 156.15; STU-000164: Victoria Martin, document says 77.91, actual 74.79; STU-000239: Sophia Brown, document says 107.98, actual 115.94"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "local_read_document", "local_search_document", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-school-membership-dedup",
+    "prompt": "The document 'school_club_membership_status' lists club memberships with their status (ACTIVE/INACTIVE).\n\nThis document has TWO types of problems:\n1. STATUS CONTRADICTIONS: Some membership statuses are wrong compared to the database\n2. DUPLICATE ENTRIES: Some memberships appear twice in the document\n\nFind ALL problems and format your answer as:\n\"CONTRADICTIONS: {id1}: {name}, {club}, document says {doc_status}, actual {db_status}; {id2}: ...; DUPLICATES: {id1}: {name}, {club}; {id2}: ...\"\n\nSort each section by membership_id (A-Z).\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables: school_club_memberships, school_students, school_clubs\nDocument: doc_id 'school_club_membership_status'\n\nStore result with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "CONTRADICTIONS: MEM-000056: Jack Martin, Basketball Club, document says INACTIVE, actual ACTIVE; MEM-000058: David White, Photography Club, document says INACTIVE, actual ACTIVE; MEM-000060: Lily Jackson, Baseball Club, document says INACTIVE, actual ACTIVE; MEM-000096: Joseph Walker, Cooking Club, document says INACTIVE, actual ACTIVE. DUPLICATES: MEM-000050: James Brown, Debate Team; MEM-000106: Hannah Rivera, Cultural Club; MEM-000118: Liam Lee, Environmental Club"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "local_read_document", "local_search_document", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-people-heights-scattered",
+    "prompt": "Height data is scattered across TWO documents:\n- 'personnel_records_q4' contains heights for IDs 1-50 (in Section 3)\n- 'personnel_supplemental' contains heights for IDs 51-100 (in Section 2)\n\nIMPORTANT: Section numbers in the table of contents do NOT equal page numbers. You must read the actual sections.\n\nCompare ALL height measurements from BOTH documents against the actual data in Supabase (table: 'people heights and weights').\n\nFind all people where the documented height differs from the database.\n\nFormat: \"ID-{id}: {full_name}, document says {doc_height}cm, actual {db_height}cm\"\nSort by ID number (ascending).\nSeparate entries with \"; \"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTable: 'people heights and weights'\nDocuments: 'personnel_records_q4', 'personnel_supplemental'\n\nStore result with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "ID-062: Maria Hernandez, document says 156cm, actual 150cm; ID-082: Aaliya Abubakar, document says 162cm, actual 168cm; ID-091: Michael Abubakar, document says 170cm, actual 164cm"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "local_read_document", "local_search_document", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-people-weights-scattered",
+    "prompt": "Weight data is scattered across ONE document in TWO different sections:\n- 'personnel_supplemental' Section 1: Weights for IDs 1-50\n- 'personnel_supplemental' Section 4: Weights for IDs 51-100\n\nIMPORTANT: You must read BOTH sections from the document to get all weight data.\n\nCompare ALL weight measurements against the actual data in Supabase (table: 'people heights and weights').\n\nFind all people where the documented weight differs from the database.\n\nFormat: \"ID-{id}: {full_name}, document says {doc_weight}kg, actual {db_weight}kg\"\nSort by ID number (ascending).\nSeparate entries with \"; \"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTable: 'people heights and weights'\nDocument: 'personnel_supplemental'\n\nStore result with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "ID-005: Aaliya Russo, document says 71.0kg, actual 72.7kg; ID-018: Emma Nielsen, document says 53.4kg, actual 56.4kg; ID-064: Ahmed Fischer, document says 60.6kg, actual 57.5kg"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "local_read_document", "local_search_document", "supabase_execute_sql"]
+    }
+  }
+]

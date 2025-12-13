@@ -1,0 +1,112 @@
+[
+  {
+    "id": "task-exa-transformer-training",
+    "prompt": "Find the original 2017 Transformer paper ('Attention Is All You Need').\n\nExtract these SPECIFIC training details (NOT in the abstract - you must read the full paper):\n1. The number of warmup_steps used\n2. The dropout rate (Pdrop) for the base model\n3. The label smoothing value (ls)\n\nFormat: \"warmup_steps={X}, Pdrop={Y}, label_smoothing={Z}\"\n\nThese values are in sections 5.3 and 5.4 of the paper, NOT the abstract.\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "warmup_steps=4000, Pdrop=0.1, label_smoothing=0.1"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["scratchpad_write", "scratchpad_read", "search", "fetch"]
+    }
+  },
+  {
+    "id": "task-exa-transformer-optimizer",
+    "prompt": "Find the original Transformer paper and extract the EXACT optimizer hyperparameters:\n\n1. Which optimizer was used?\n2. What was the β1 value?\n3. What was the β2 value?\n4. What was the ε (epsilon) value?\n\nFormat: \"optimizer={name}, beta1={X}, beta2={Y}, epsilon={Z}\"\n\nNote: The epsilon should be written in scientific notation like '1e-9' not as a decimal.\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "optimizer=Adam, beta1=0.9, beta2=0.98, epsilon=1e-9"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["scratchpad_write", "scratchpad_read", "search", "fetch"]
+    }
+  },
+  {
+    "id": "task-exa-gpt3-model-sizes",
+    "prompt": "Find the GPT-3 paper ('Language Models are Few-Shot Learners').\n\nFrom the model size table, extract details for GPT-3 XL specifically:\n1. Number of parameters\n2. Number of layers (nlayers)\n3. Model dimension (dmodel)\n4. Learning rate\n\nFormat: \"GPT-3 XL: {params}B params, {layers} layers, {dim} dmodel, LR={lr}\"\n\nNote: Express learning rate in scientific notation like '2.0e-4'\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "GPT-3 XL: 1.3B params, 24 layers, 2048 dmodel, LR=2.0e-4"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["scratchpad_write", "scratchpad_read", "search", "fetch"]
+    }
+  },
+  {
+    "id": "task-exa-gpt3-training-data",
+    "prompt": "Find the GPT-3 paper and extract:\n1. The total number of tokens the models were trained on\n2. The context window size (nctx)\n\nThen find the GPT-2 paper and extract:\n3. The context window size for GPT-2\n\nCalculate: How many times larger is GPT-3's training data compared to GPT-2's (GPT-2 used ~40 billion tokens)?\n\nFormat your answer as:\n\"GPT-3: {X} billion tokens, context={Y}; GPT-2: context={Z}; Training ratio: {R}x\"\n\nRound the ratio to nearest integer.\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "GPT-3: 300 billion tokens, context=2048; GPT-2: context=1024; Training ratio: 8x"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["scratchpad_write", "scratchpad_read", "search", "fetch"]
+    }
+  },
+  {
+    "id": "task-exa-resnet-hyperparams",
+    "prompt": "Find the ResNet paper ('Deep Residual Learning for Image Recognition' by He et al.).\n\nExtract the EXACT training hyperparameters used:\n1. Batch size\n2. Weight decay\n3. Momentum\n4. Initial learning rate\n\nFormat: \"batch_size={X}, weight_decay={Y}, momentum={Z}, initial_lr={W}\"\n\nNote: Weight decay should be in decimal form (e.g., 0.0001 not 1e-4).\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "batch_size=256, weight_decay=0.0001, momentum=0.9, initial_lr=0.1"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["scratchpad_write", "scratchpad_read", "search", "fetch"]
+    }
+  }
+]

@@ -323,8 +323,12 @@ class ByteDanceAgent(OpenAIChatAgent):
         base_messages = await super().get_system_messages()
 
         # Append think mode prompt to system message
-        if base_messages and self._mode_prompt:
-            base_messages[0]["content"] += f"\n\n{self._mode_prompt}"
+        if self._mode_prompt:
+            if base_messages:
+                base_messages[0]["content"] += f"\n\n{self._mode_prompt}"
+            else:
+                # If no base system prompt, create one with just the think mode prompt
+                base_messages = [{"role": "system", "content": self._mode_prompt}]
 
         return base_messages
 

@@ -1,0 +1,137 @@
+STUDENT ENROLLMENT VERIFICATION REPORT
+======================================
+Greater Boston School District
+Academic Year 2024-2025
+
+This report lists student enrollment records for verification purposes.
+Each entry shows the student and their enrolled school.
+
+ENROLLMENT RECORDS
+------------------
+
+STU-000046: Zoey Scott - Tyler Institute
+STU-000049: Abigail Adams - Tyler Institute
+STU-000161: Jack Brown - Tyler Institute
+STU-000201: Luke Torres - Tyler Institute
+STU-000221: Owen Clark - Tyler Institute
+STU-000223: Mia Adams - Kennedy High
+STU-000238: Benjamin Wilson - Tyler Institute
+STU-000379: Avery Allen - Washington Academy
+STU-000412: Mia Lopez - Madison Prep
+STU-000511: Grace Jackson - Harrison Academy
+STU-000527: Harper Thompson - Harrison Academy
+STU-000597: Emma Rodriguez - Adams Institute
+STU-000635: Charlotte Taylor - Washington Academy
+STU-000661: Lillian Martinez - Harrison Academy
+STU-000688: Harper Johnson - Hamilton High
+STU-000695: Liam Campbell - Taylor High
+STU-000766: Harper Torres - Adams Institute
+STU-000874: Ethan Ramirez - Franklin Academy
+STU-000995: Aubrey Mitchell - Franklin Academy
+STU-001046: Ethan Robinson - Madison Prep
+STU-001093: Luke Campbell - Lincoln High School
+STU-001112: Mia Garcia - Kennedy High
+STU-001134: Owen White - Harrison Academy
+STU-001208: Amelia Anderson - Hamilton High
+STU-001209: Riley Harris - Monroe Secondary
+STU-001236: Amelia Miller - Tyler Institute
+STU-001252: Abigail Lopez - Kennedy High
+STU-001304: Scarlett Torres - Monroe Secondary
+STU-001353: William Brown - Franklin Academy
+STU-001441: Lily Thomas - Madison Prep
+STU-001489: James Sanchez - Adams Institute
+STU-001593: Harper Thompson - Monroe Secondary
+STU-001632: Daniel Adams - Franklin Academy
+STU-001695: Zoey Nguyen - Madison Prep
+STU-001753: Emily King - Lincoln High School
+STU-001793: Lillian Wilson - Kennedy High
+STU-001798: Charlotte Campbell - Adams Institute
+STU-001807: David Hall - Monroe Secondary
+STU-001841: Liam Nguyen - Taylor High
+STU-001895: Samuel Brown - Harrison Academy
+STU-001921: Lily Scott - Washington Academy
+STU-001925: Luke Lee - Lincoln High School
+STU-001960: Evelyn Thomas - Monroe Secondary
+STU-001999: Owen Garcia - Jefferson Prep
+STU-002006: Ethan Wright - Taylor High
+STU-002026: Sophia Campbell - Lincoln High School
+STU-002042: Riley Wright - Harrison Academy
+STU-002124: Ava Rodriguez - Lincoln High School
+STU-002226: John Williams - Polk Prep
+STU-002236: Sophia Hall - Tyler Institute
+STU-002250: Ella Jackson - Kennedy High
+STU-002272: Owen Gonzalez - Lincoln High School
+STU-002325: Sophia Mitchell - Polk Prep
+STU-002341: Emma Sanchez - Polk Prep
+STU-002447: Benjamin Jackson - Hamilton High
+STU-002543: Daniel Torres - Hamilton High
+STU-002600: Michael Nguyen - Lincoln High School
+STU-002620: Chloe Rodriguez - Lincoln High School
+STU-002711: Mia Lee - Polk Prep
+STU-002746: Chloe Martinez - Polk Prep
+STU-002752: Charlotte Scott - Jackson High School
+STU-002754: Matthew Garcia - Tyler Institute
+STU-002882: Olivia Wright - Madison Prep
+STU-003117: Daniel Miller - Washington Academy
+STU-003138: Abigail Adams - Taylor High
+STU-003146: Sebastian Martin - Jackson High School
+STU-003186: Evelyn Lee - Kennedy High
+STU-003191: Noah Garcia - Polk Prep
+STU-003195: Victoria Rodriguez - Hamilton High
+STU-003228: Jack Robinson - Lincoln High School
+STU-003274: Matthew Brown - Madison Prep
+STU-003313: Ava Mitchell - Hamilton High
+STU-003340: Grace Harris - Monroe Secondary
+STU-003396: Harper Martin - Hamilton High
+STU-003399: Sophia Johnson - Kennedy High
+STU-003407: Ethan Clark - Madison Prep
+STU-003433: William Perez - Roosevelt Secondary
+STU-003442: Liam Flores - Hamilton High
+STU-003483: Emily Martinez - Washington Academy
+STU-003496: Samuel Hall - Jackson High School
+STU-003512: Michael Hill - Washington Academy
+STU-003571: Carter Young - Polk Prep
+STU-003604: Chloe Moore - Franklin Academy
+STU-003626: Mason Jackson - Polk Prep
+STU-003653: William Martinez - Tyler Institute
+STU-003687: Avery Adams - Jefferson Prep
+STU-003731: Ella Perez - Roosevelt Secondary
+STU-003740: Ella Ramirez - Monroe Secondary
+STU-003783: Isabella Hall - Franklin Academy
+STU-003806: Owen Hill - Roosevelt Secondary
+STU-003807: Lillian Garcia - Harrison Academy
+STU-003817: Logan Harris - Jackson High School
+STU-003829: Mia Ramirez - Lincoln High School
+STU-003889: Samuel Rodriguez - Harrison Academy
+STU-003893: Liam Garcia - Washington Academy
+STU-003908: Aria Wilson - Washington Academy
+STU-003970: Henry Nguyen - Tyler Institute
+STU-003979: Henry Thomas - Jackson High School
+STU-004000: Samuel Martin - Tyler Institute
+STU-004050: Jackson Gonzalez - Polk Prep
+STU-004136: Amelia Anderson - Taylor High
+STU-004223: Victoria Baker - Madison Prep
+STU-004244: Evelyn Walker - Polk Prep
+STU-004271: Mason Jones - Lincoln High School
+STU-004352: Daniel Wilson - Jackson High School
+STU-004376: Alexander Green - Kennedy High
+STU-004410: David Young - Harrison Academy
+STU-004425: Aubrey Allen - Roosevelt Secondary
+STU-004446: Scarlett Jones - Kennedy High
+STU-004474: William Harris - Jackson High School
+STU-004489: Benjamin Rodriguez - Washington Academy
+STU-004567: Zoey Davis - Lincoln High School
+STU-004579: Abigail Johnson - Jefferson Prep
+STU-004624: Lily Clark - Taylor High
+STU-004716: Grace Torres - Washington Academy
+STU-004717: William Smith - Franklin Academy
+STU-004785: Hannah Mitchell - Jackson High School
+STU-004849: Jackson Baker - Monroe Secondary
+STU-004878: Michael Hill - Polk Prep
+STU-004942: Jacob Mitchell - Tyler Institute
+
+------------------
+Total Records: 120
+
+For enrollment changes, contact your school's registrar.
+Report generated: December 2024

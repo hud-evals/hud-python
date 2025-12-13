@@ -1,0 +1,48 @@
+[
+    {
+    "id": "task-exa-blazar-reference-chain",
+    "prompt": "One of the references in 2501.00094 reports a Gamma-ray fractional variability of 66.03%. From that referenced paper, extract the Swift-XRT Fvar (%), ASAS-SN g band Fvar (%), Doppler factor during Flare, and Ne during Flare - all without error values.\n\nAlso, what is the redshift of 4FGL J2026.0-2845 from the first paper?\n\nStore 'answer': \"SwiftXRT_Fvar=XX.XX, ASASSN_g_Fvar=XXX.XX, Doppler_Flare=XX.XX, Ne_Flare=XXX.XX\"\nStore 'answer2': X.XX\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "SwiftXRT_Fvar=51.57, ASASSN_g_Fvar=144.33, Doppler_Flare=26.97, Ne_Flare=239.17",
+          "answer2": "0.88"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["search", "fetch", "scratchpad_write", "scratchpad_read"]
+    }
+  },
+  {
+    "id": "task-exa-needle-in-haystack",
+    "prompt": "One of these 10 arXiv papers reports a Gamma-ray fractional variability (Fvar) of exactly 66.03%:\n\n2509.07660, 2210.16329, 2504.18927, 2304.13044, 2406.03658, 2511.13317, 2311.08749, 2310.05096, 2411.10140, 1702.02504\n\nFind which paper contains this value. From that paper, extract the Doppler factor during the Flare state and the magnetic field B during the Flare state.\n\nStore 'answer': the arXiv ID (e.g. \"2310.05096\")\nStore 'answer2': \"Doppler=XX.XX, B=X.XX\"\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "2310.05096",
+          "answer2": "Doppler=26.97, B=0.29"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["search", "fetch", "scratchpad_write", "scratchpad_read"]
+    }
+  }
+]

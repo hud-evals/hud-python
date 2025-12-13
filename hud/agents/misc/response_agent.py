@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 from openai import AsyncOpenAI
 
 from hud.settings import settings
+
+logger = logging.getLogger(__name__)
 
 ResponseType = Literal["STOP", "CONTINUE"]
 
@@ -37,7 +40,7 @@ class ResponseAgent:
 
     def __init__(
         self,
-        model: str = "openai/gpt-4o",
+        model: str = "xai/grok-4-1-fast",
         system_prompt: str | None = None,
     ) -> None:
         """
@@ -71,6 +74,18 @@ class ResponseAgent:
         Returns:
             ResponseType: Either "STOP" or "CONTINUE"
         """
+        # First check for explicit completion phrases
+        agent_message_lower = agent_message.lower().strip()
+        completion_phrases = [
+            "task completed",
+            "task is completed", 
+            "task complete",
+        ]
+        if any(phrase in agent_message_lower for phrase in completion_phrases):
+            logger.debug(f"ResponseAgent: Detected completion phrase, returning STOP")
+            return "STOP"
+        
+        logger.debug(f"ResponseAgent: Querying model for decision on: {agent_message[:100]}")
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -87,15 +102,20 @@ class ResponseAgent:
 
             response_text = response.choices[0].message.content
             if not response_text:
+                logger.warning("ResponseAgent: Model returned empty response, defaulting to CONTINUE")
                 return "CONTINUE"
 
             response_text = response_text.strip().upper()
+            logger.debug(f"ResponseAgent: Model response: {response_text}")
 
             # Validate the response
             if "STOP" in response_text:
+                logger.debug("ResponseAgent: Model said STOP")
                 return "STOP"
             else:
+                logger.debug("ResponseAgent: Model said CONTINUE")
                 return "CONTINUE"
 
-        except Exception:
+        except Exception as e:
+            logger.warning(f"ResponseAgent: Error determining response: {e}, defaulting to CONTINUE")
             return "CONTINUE"  # Default to continue on error

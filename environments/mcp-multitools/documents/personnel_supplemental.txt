@@ -1,0 +1,176 @@
+PERSONNEL RECORDS - SUPPLEMENTAL DATA
+==================================================
+
+TABLE OF CONTENTS:
+  Section 1: Weight Records (IDs 1-50)
+  Section 2: Height Measurements (IDs 51-100)
+  Section 3: Office Location Assignments
+  Section 4: Weight Records (IDs 51-100)
+
+==================================================
+
+SECTION 1: WEIGHT RECORDS (IDs 1-50)
+------------------------------
+
+ID-001: David Anderson - 52.6 kg
+ID-002: Stefan Santos - 60.3 kg
+ID-003: Sarah Novak - 45 kg
+ID-004: Pierre Wang - 77.5 kg
+ID-005: Aaliya Russo - 71.0 kg
+ID-006: Dmitri Davis - 89 kg
+ID-007: Sakura Smith - 91.2 kg
+ID-008: Chioma Kowalski - 45 kg
+ID-009: Ananya Nguyen - 64.4 kg
+ID-010: Kofi Andersson - 73.2 kg
+ID-011: Isabella Schmidt - 61 kg
+ID-012: Sophia Ivanov - 55.8 kg
+ID-013: Aaliya Oliveira - 91.9 kg
+ID-014: Lars Novak - 58.5 kg
+ID-015: Mohammed Brown - 45 kg
+ID-016: Hans Miller - 47.1 kg
+ID-017: Mohammed Singh - 72.1 kg
+ID-018: Emma Nielsen - 53.4 kg
+ID-019: Hans Hansen - 49.9 kg
+ID-020: Olivia Brown - 55.1 kg
+ID-021: Nadia Kowalski - 66.2 kg
+ID-022: Juan Okonkwo - 80.2 kg
+ID-023: Mei Abubakar - 53.1 kg
+ID-024: Carlos Miller - 53.8 kg
+ID-025: Mohammed Kowalski - 70.9 kg
+ID-026: Sophia Tanaka - 47 kg
+ID-027: Stefan Nielsen - 81.6 kg
+ID-028: Maria Taylor - 70.6 kg
+ID-029: Chen Silva - 91.5 kg
+ID-030: Hiroshi Johnson - 45 kg
+ID-031: Emma Müller - 72.1 kg
+ID-032: Maria Tanaka - 68.7 kg
+ID-033: Dmitri Gupta - 81.3 kg
+ID-034: Pierre Anderson - 45 kg
+ID-035: Sakura Martinez - 73.3 kg
+ID-036: David Novak - 54.3 kg
+ID-037: Ivan Garcia - 66.2 kg
+ID-038: Keiko Fischer - 59.3 kg
+ID-039: Fatima Okonkwo - 89.4 kg
+ID-040: Keiko Tanaka - 61.1 kg
+ID-041: Hiroshi Abubakar - 48.4 kg
+ID-042: Hiroshi Weber - 51.9 kg
+ID-043: Priya Singh - 55.4 kg
+ID-044: Mei Petrov - 65.6 kg
+ID-045: Mei Santos - 66.8 kg
+ID-046: Kofi Petrov - 48 kg
+ID-047: Sakura Kowalski - 70 kg
+ID-048: Ananya Silva - 61.8 kg
+ID-049: Ling Weber - 74.3 kg
+ID-050: Ingrid Okonkwo - 45.3 kg
+
+SECTION 2: HEIGHT MEASUREMENTS (IDs 51-100)
+------------------------------
+
+ID-051: David Tanaka - 166 cm
+ID-052: Olivia Patel - 177 cm
+ID-053: Tariq Petrov - 174 cm
+ID-054: Emma Singh - 150 cm
+ID-055: Boris Thomas - 200 cm
+ID-056: Marco Williams - 177 cm
+ID-057: Lars Petrov - 169 cm
+ID-058: Lars Jackson - 166 cm
+ID-059: Juan Singh - 175 cm
+ID-060: Sakura Mensah - 180 cm
+ID-061: Yuki Oliveira - 173 cm
+ID-062: Maria Hernandez - 156 cm
+ID-063: Marco Wang - 174 cm
+ID-064: Ahmed Fischer - 177 cm
+ID-065: Yuki Johnson - 165 cm
+ID-066: Chioma Hansen - 168 cm
+ID-067: Maria Schmidt - 175 cm
+ID-068: Raj Nguyen - 168 cm
+ID-069: Elena Silva - 176 cm
+ID-070: Mohammed Nielsen - 180 cm
+ID-071: Sarah Suzuki - 173 cm
+ID-072: Marco Silva - 169 cm
+ID-073: Ivan Anderson - 190 cm
+ID-074: Ling Nielsen - 177 cm
+ID-075: Mohammed Russo - 166 cm
+ID-076: Tariq Mensah - 178 cm
+ID-077: David Brown - 179 cm
+ID-078: Michael Wang - 176 cm
+ID-079: Marco Lee - 159 cm
+ID-080: Zara Santos - 156 cm
+ID-081: Ingrid Brown - 200 cm
+ID-082: Aaliya Abubakar - 162 cm
+ID-083: Priya Gupta - 170 cm
+ID-084: Juan Lee - 171 cm
+ID-085: Priya Anderson - 172 cm
+ID-086: Robert Oliveira - 174 cm
+ID-087: Tariq Sharma - 159 cm
+ID-088: Sakura Miller - 164 cm
+ID-089: Ling Hansen - 170 cm
+ID-090: Hans Brown - 176 cm
+ID-091: Michael Abubakar - 170 cm
+ID-092: Keiko Oliveira - 156 cm
+ID-093: Sophia Johnson - 169 cm
+ID-094: Leila Tanaka - 168 cm
+ID-095: Olga Gupta - 150 cm
+ID-096: Yuki Wang - 176 cm
+ID-097: Ahmed Miller - 169 cm
+ID-098: Ahmed Silva - 191 cm
+ID-099: Leila Singh - 162 cm
+ID-100: Andreas Ali - 151 cm
+
+SECTION 3: OFFICE LOCATION ASSIGNMENTS
+------------------------------
+Office assignments available in separate system.
+
+SECTION 4: WEIGHT RECORDS (IDs 51-100)
+------------------------------
+
+ID-051: David Tanaka - 67.8 kg
+ID-052: Olivia Patel - 60.5 kg
+ID-053: Tariq Petrov - 66.6 kg
+ID-054: Emma Singh - 45 kg
+ID-055: Boris Thomas - 98.2 kg
+ID-056: Marco Williams - 79.5 kg
+ID-057: Lars Petrov - 61.5 kg
+ID-058: Lars Jackson - 51.9 kg
+ID-059: Juan Singh - 66.4 kg
+ID-060: Sakura Mensah - 62.9 kg
+ID-061: Yuki Oliveira - 58 kg
+ID-062: Maria Hernandez - 51.6 kg
+ID-063: Marco Wang - 61.1 kg
+ID-064: Ahmed Fischer - 60.6 kg
+ID-065: Yuki Johnson - 62.3 kg
+ID-066: Chioma Hansen - 71.9 kg
+ID-067: Maria Schmidt - 53.2 kg
+ID-068: Raj Nguyen - 51.1 kg
+ID-069: Elena Silva - 88.6 kg
+ID-070: Mohammed Nielsen - 78.9 kg
+ID-071: Sarah Suzuki - 74.9 kg
+ID-072: Marco Silva - 51.3 kg
+ID-073: Ivan Anderson - 85.1 kg
+ID-074: Ling Nielsen - 68.4 kg
+ID-075: Mohammed Russo - 55.9 kg
+ID-076: Tariq Mensah - 80.9 kg
+ID-077: David Brown - 70.6 kg
+ID-078: Michael Wang - 61.7 kg
+ID-079: Marco Lee - 53.5 kg
+ID-080: Zara Santos - 53.2 kg
+ID-081: Ingrid Brown - 81.9 kg
+ID-082: Aaliya Abubakar - 63.7 kg
+ID-083: Priya Gupta - 58.4 kg
+ID-084: Juan Lee - 58.8 kg
+ID-085: Priya Anderson - 59.8 kg
+ID-086: Robert Oliveira - 56.6 kg
+ID-087: Tariq Sharma - 59.5 kg
+ID-088: Sakura Miller - 64.7 kg
+ID-089: Ling Hansen - 68.8 kg
+ID-090: Hans Brown - 54.2 kg
+ID-091: Michael Abubakar - 56.6 kg
+ID-092: Keiko Oliveira - 52.4 kg
+ID-093: Sophia Johnson - 52.4 kg
+ID-094: Leila Tanaka - 57.4 kg
+ID-095: Olga Gupta - 45 kg
+ID-096: Yuki Wang - 61.7 kg
+ID-097: Ahmed Miller - 68.2 kg
+ID-098: Ahmed Silva - 86.2 kg
+ID-099: Leila Singh - 50.2 kg
+ID-100: Andreas Ali - 45 kg

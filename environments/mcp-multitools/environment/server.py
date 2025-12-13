@@ -188,6 +188,8 @@ class SearchRequest(BaseModel):
 
 class FetchRequest(BaseModel):
     url: str
+    start_char: int = 0  # Starting character position
+    max_chars: int = 10000  # Characters to return per call (default 10k, max 50k)
 
 
 class SupabaseQueryRequest(BaseModel):
@@ -354,27 +356,46 @@ async def exa_search(req: SearchRequest) -> List[Dict[str, str]]:
 
 
 @app.post("/exa/fetch")
-async def exa_fetch(req: FetchRequest) -> Dict[str, str]:
+async def exa_fetch(req: FetchRequest) -> Dict[str, Any]:
+    """Fetch content from a URL with pagination support."""
     api_key = os.getenv("EXA_API_KEY")
     if not api_key:
         raise HTTPException(status_code=400, detail="EXA_API_KEY not set")
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    # Fetch up to 50000 chars from Exa (allows pagination through content)
+    async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(
             "https://api.exa.ai/contents",
             headers={"x-api-key": api_key, "Content-Type": "application/json"},
             json={
                 "urls": [req.url],
-                "text": {"maxCharacters": 5000},
+                "text": {"maxCharacters": 1000000000},  # No practical limit - Exa returns what it has
             },
         )
         response.raise_for_status()
         data = response.json()
 
     results = data.get("results", [])
-    if results:
-        return {"content": results[0].get("text", "No content available")}
-    return {"content": "No content available"}
+    if not results:
+        return {"content": "No content available", "total_chars": 0, "start_char": 0, "end_char": 0}
+    
+    full_text = results[0].get("text", "")
+    total_chars = len(full_text)
+    
+    # Apply pagination (cap max_chars at 50k per request)
+    capped_max_chars = min(req.max_chars, 50000)
+    start = min(req.start_char, total_chars)
+    end = min(start + capped_max_chars, total_chars)
+    content_slice = full_text[start:end]
+    
+    return {
+        "content": content_slice,
+        "total_chars": total_chars,
+        "start_char": start,
+        "end_char": end,
+        "has_more": end < total_chars,
+        "remaining_chars": total_chars - end
+    }
 
 
 # ===========================================

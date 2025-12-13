@@ -156,17 +156,29 @@ async def search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
 
 
 @mcp.tool()
-async def fetch(url: str) -> str:
-    """Fetch content from a URL using Exa.
+async def fetch(url: str, start_char: int = 0, max_chars: int = 10000) -> Dict[str, Any]:
+    """Fetch content from a URL (web pages, PDFs, papers).
     
     Args:
-        url: The URL to fetch content from.
+        url: The URL to fetch.
+        start_char: Where to start reading (default: 0).
+        max_chars: Chars to return (default: 10000, max: 50000).
+    
+    Returns: content, total_chars, start_char, end_char, has_more, remaining_chars.
+    
+    Example - reading a 120k char paper:
+        fetch(url, max_chars=50000)                      # chars 0-50k
+        fetch(url, start_char=50000, max_chars=50000)    # chars 50k-100k  
+        fetch(url, start_char=100000, max_chars=50000)   # chars 100k-120k
     """
-    resp = await http_client.post("/exa/fetch", json={"url": url})
+    resp = await http_client.post("/exa/fetch", json={
+        "url": url,
+        "start_char": start_char,
+        "max_chars": max_chars
+    })
     if resp.status_code != 200:
-        return f"Fetch failed: {resp.text}"
-    data = resp.json()
-    return data.get("content", "No content available")
+        return {"error": f"Fetch failed: {resp.text}"}
+    return resp.json()
 
 
 # ===========================================

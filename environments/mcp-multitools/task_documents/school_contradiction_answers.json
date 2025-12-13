@@ -1,0 +1,8 @@
+{
+  "task-school-honor-contradictions": "STU-000238: Benjamin Wilson, GPA 3.15; STU-000468: Ava Torres, GPA 3.25; STU-004089: John Williams, GPA 2.88",
+  "task-school-active-contradictions": "MEM-001045: Jack Williams, Chess Club; MEM-001099: Lucas Rivera, Band; MEM-001397: Owen Gonzalez, Cultural Club; MEM-001694: Noah Adams, Yearbook Committee; MEM-003041: Harper Garcia, Dance Club",
+  "task-school-schedule-contradictions": "CLB-000030: Cultural Club, document says Monday, actual Wednesday; CLB-000031: Language Club, document says Thursday, actual Monday; CLB-000032: Cooking Club, document says Thursday, actual Wednesday",
+  "task-school-directory-contradictions": "SCH-000008: Hamilton High, document says 1985, actual 1991",
+  "task-school-enrollment-contradictions": "STU-001112: Mia Garcia, document says Kennedy High, actual Jackson High School; STU-001489: James Sanchez, document says Adams Institute, actual Hamilton High; STU-003512: Michael Hill, document says Washington Academy, actual Lincoln High School; STU-003783: Isabella Hall, document says Franklin Academy, actual Polk Prep",
+  "task-school-leadership-contradictions": "MEM-000022: John Ramirez, History Club; MEM-000094: William Harris, Literature Club; MEM-000111: Zoey Clark, Art Club; MEM-000115: Aubrey Wright, Cultural Club"
+}

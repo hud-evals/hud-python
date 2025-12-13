@@ -1,0 +1,91 @@
+GREATER BOSTON SCHOOL DISTRICT
+OFFICIAL SCHOOL DIRECTORY
+==========================
+
+District Office: 100 Education Way, Boston, MA 02101
+Superintendent: Dr. Margaret Chen
+
+MEMBER SCHOOLS
+--------------
+
+SCH-000006: Adams Institute
+    Founded: 1995
+    Rating: 2.99/5.0
+    Size: 26237 sq meters, 1 floors
+
+SCH-000007: Franklin Academy
+    Founded: 1955
+    Rating: 3.99/5.0
+    Size: 19973 sq meters, 3 floors
+
+SCH-000008: Hamilton High
+    Founded: 1985
+    Rating: 3.08/5.0
+    Size: 45497 sq meters, 2 floors
+
+SCH-000012: Harrison Academy
+    Founded: 1955
+    Rating: 3.58/5.0
+    Size: 24347 sq meters, 1 floors
+
+SCH-000011: Jackson High School
+    Founded: 1969
+    Rating: 4.7/5.0
+    Size: 5901 sq meters, 1 floors
+
+SCH-000003: Jefferson Prep
+    Founded: 1995
+    Rating: 3.76/5.0
+    Size: 45640 sq meters, 2 floors
+
+SCH-000005: Kennedy High
+    Founded: 2010
+    Rating: 2.98/5.0
+    Size: 43351 sq meters, 1 floors
+
+SCH-000001: Lincoln High School
+    Founded: 1977
+    Rating: 3.19/5.0
+    Size: 34181 sq meters, 3 floors
+
+SCH-000009: Madison Prep
+    Founded: 1953
+    Rating: 3.88/5.0
+    Size: 40000 sq meters, 2 floors
+
+SCH-000010: Monroe Secondary
+    Founded: 1955
+    Rating: 3.43/5.0
+    Size: 46383 sq meters, 3 floors
+
+SCH-000014: Polk Prep
+    Founded: 1961
+    Rating: 3.25/5.0
+    Size: 16073 sq meters, 4 floors
+
+SCH-000004: Roosevelt Secondary
+    Founded: 1998
+    Rating: 3.97/5.0
+    Size: 44652 sq meters, 5 floors
+
+SCH-000015: Taylor High
+    Founded: 1977
+    Rating: 2.69/5.0
+    Size: 21226 sq meters, 1 floors
+
+SCH-000013: Tyler Institute
+    Founded: 1969
+    Rating: 2.89/5.0
+    Size: 28448 sq meters, 4 floors
+
+SCH-000002: Washington Academy
+    Founded: 1997
+    Rating: 2.7/5.0
+    Size: 29659 sq meters, 3 floors
+
+
+--------------
+Total Schools: 15
+
+This directory is updated annually.
+For corrections, contact: records@gbsd.edu

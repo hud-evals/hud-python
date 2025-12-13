@@ -1,0 +1,37 @@
+[
+  {
+    "id": "task-school-inline-gpa-verification",
+    "prompt": "Below is a list of 100 students with their reported GPAs. Compare these GPAs with the actual data in Supabase (school_students table, gpa column).\n\nFind all students where the listed GPA differs from their actual GPA in the database.\n\nFormat: \"{student_id}: {first_name} {last_name}, list says {listed_gpa}, actual {db_gpa}\"\nSort by student_id (A-Z).\nSeparate entries with \"; \"\n\nExample (match this structure exactly): \"STU-999999: John Smith, list says 3.25, actual 2.80; STU-999998: Jane Doe, list says 2.15, actual 2.62\"\n\nNote: GPAs should match to 2 decimal places. Even 0.01 difference counts.\n\nSTUDENT GPA LIST:\nSTU-000054: Daniel Lee - GPA 3.9\nSTU-000205: Chloe Green - GPA 2.25\nSTU-000218: Jack Green - GPA 2.67\nSTU-000245: Abigail Anderson - GPA 3.68\nSTU-000261: Wyatt Baker - GPA 3.89\nSTU-000263: Aiden Adams - GPA 3.87\nSTU-000356: Aria Johnson - GPA 3.97\nSTU-000376: Jackson Garcia - GPA 3.66\nSTU-000459: Elizabeth Rivera - GPA 2.95\nSTU-000543: Benjamin Hall - GPA 3.12\nSTU-000570: Hannah Baker - GPA 3.41\nSTU-000585: Liam Flores - GPA 2.28\nSTU-000646: Hannah White - GPA 2.99\nSTU-000654: Lucas Young - GPA 3.15\nSTU-000713: Mason Young - GPA 3.05\nSTU-000760: Lily Anderson - GPA 2.63\nSTU-000768: Liam Sanchez - GPA 2.18\nSTU-000793: Avery Mitchell - GPA 3.93\nSTU-000828: Owen Davis - GPA 2.43\nSTU-000838: Owen Ramirez - GPA 2.43\nSTU-000840: Aria Thompson - GPA 2.57\nSTU-000913: Wyatt Smith - GPA 2.69\nSTU-001023: Noah Moore - GPA 3.38\nSTU-001144: William Gonzalez - GPA 2.61\nSTU-001171: Sebastian Torres - GPA 2.06\nSTU-001274: Evelyn White - GPA 2.86\nSTU-001308: Joseph Nguyen - GPA 3.29\nSTU-001333: Daniel Lewis - GPA 2.82\nSTU-001339: Sophia Thomas - GPA 3.52\nSTU-001402: James Torres - GPA 3.81\nSTU-001576: Sebastian Taylor - GPA 2.25\nSTU-001629: Olivia Scott - GPA 2.41\nSTU-001717: Sofia Martin - GPA 3.09\nSTU-001729: Liam Clark - GPA 3.98\nSTU-001742: Hannah Scott - GPA 3.03\nSTU-001764: Aria Hall - GPA 3.83\nSTU-001792: Benjamin Anderson - GPA 3.14\nSTU-001800: Wyatt Lewis - GPA 2.37\nSTU-001806: John Mitchell - GPA 3.96\nSTU-001829: Sophia Miller - GPA 2.92\nSTU-001867: Lucas Lewis - GPA 3.34\nSTU-001877: Benjamin Gonzalez - GPA 3.8\nSTU-001906: Lily Hernandez - GPA 2.94\nSTU-001908: Owen Jones - GPA 3.83\nSTU-002006: Ethan Wright - GPA 2.51\nSTU-002007: Luke Thompson - GPA 3.86\nSTU-002021: Hannah Smith - GPA 2.01\nSTU-002167: Zoey Moore - GPA 2.67\nSTU-002170: Lucas Green - GPA 2.63\nSTU-002188: Michael Nguyen - GPA 3.15\nSTU-002194: Alexander Lee - GPA 2.19\nSTU-002212: Ava Campbell - GPA 3.45\nSTU-002254: Michael Torres - GPA 3.9\nSTU-002277: Ella Rivera - GPA 2.54\nSTU-002278: Aubrey Jackson - GPA 3.39\nSTU-002279: Victoria Lee - GPA 2.88\nSTU-002371: James Walker - GPA 2.46\nSTU-002402: Grace Rodriguez - GPA 4.0\nSTU-002578: Sofia Sanchez - GPA 3.63\nSTU-002585: David Nelson - GPA 3.12\nSTU-002657: Aubrey Young - GPA 4.38\nSTU-002758: Lily Wright - GPA 2.7\nSTU-002788: Amelia Green - GPA 3.72\nSTU-002818: Evelyn Walker - GPA 2.39\nSTU-002911: Lily Anderson - GPA 2.89\nSTU-002941: Carter Johnson - GPA 3.82\nSTU-002963: Zoey Adams - GPA 3.47\nSTU-002989: Emily Scott - GPA 2.0\nSTU-003033: Sophia Lopez - GPA 2.65\nSTU-003101: Owen Lewis - GPA 3.23\nSTU-003109: Aiden Flores - GPA 3.81\nSTU-003113: Evelyn Davis - GPA 2.61\nSTU-003114: Victoria Scott - GPA 2.64\nSTU-003242: Isabella Lewis - GPA 3.64\nSTU-003287: Carter Hernandez - GPA 3.44\nSTU-003437: Michael Walker - GPA 3.22\nSTU-003457: Avery Campbell - GPA 2.71\nSTU-003463: Olivia Walker - GPA 2.89\nSTU-003680: Owen Moore - GPA 2.02\nSTU-003715: Abigail Baker - GPA 3.22\nSTU-003759: Luke Robinson - GPA 3.74\nSTU-003764: Alexander Anderson - GPA 2.66\nSTU-003787: Hannah Lee - GPA 2.4\nSTU-004090: Harper Campbell - GPA 3.62\nSTU-004140: Victoria Taylor - GPA 2.28\nSTU-004376: Alexander Green - GPA 3.34\nSTU-004393: Samuel Walker - GPA 3.86\nSTU-004465: Logan Thompson - GPA 3.35\nSTU-004468: William Ramirez - GPA 2.16\nSTU-004523: Charlotte Torres - GPA 2.79\nSTU-004563: Henry Scott - GPA 3.05\nSTU-004598: Aiden Hall - GPA 2.87\nSTU-004599: Elizabeth Baker - GPA 3.81\nSTU-004647: Jack Perez - GPA 2.17\nSTU-004730: Charlotte Perez - GPA 2.12\nSTU-004828: Lucas Lewis - GPA 2.57\nSTU-004838: Emily Hall - GPA 3.5\nSTU-004932: Alexander Scott - GPA 3.75\nSTU-004946: Aubrey Brown - GPA 3.12\nSTU-004991: William Scott - GPA 3.79\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTable: school_students\n\nStore result with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "STU-000760: Lily Anderson, list says 2.63, actual 2.16; STU-001764: Aria Hall, list says 3.83, actual 3.36; STU-002657: Aubrey Young, list says 4.38, actual 3.91; STU-004376: Alexander Green, list says 3.34, actual 2.87"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "supabase_execute_sql"
+      ]
+    }
+  }
+]

@@ -1,0 +1,139 @@
+CLUB MEMBERSHIP VERIFICATION REPORT
+=======================================================
+Greater Boston School District - December 2024
+
+This report lists club memberships and their status.
+Status: ACTIVE or INACTIVE
+
+NOTE: Data entry may have introduced duplicate entries.
+Please verify and report any issues.
+
+MEMBERSHIP RECORDS
+-------------------------------------------------------
+
+001 | MEM-000001 | Isabella Scott | Yearbook Committee | INACTIVE
+002 | MEM-000002 | John Perez | Art Club | ACTIVE
+003 | MEM-000003 | James Jackson | Yearbook Committee | ACTIVE
+004 | MEM-000004 | Lily Jackson | Cooking Club | INACTIVE
+005 | MEM-000005 | Lily Jackson | Student Council | ACTIVE
+006 | MEM-000006 | Lillian Hill | Yearbook Committee | ACTIVE
+007 | MEM-000007 | Riley Robinson | Track & Field | INACTIVE
+008 | MEM-000008 | Avery Wilson | Art Club | ACTIVE
+009 | MEM-000009 | Noah Sanchez | Environmental Club | ACTIVE
+010 | MEM-000010 | Noah Sanchez | Yearbook Committee | ACTIVE
+011 | MEM-000011 | Zoey Moore | Art Club | ACTIVE
+012 | MEM-000012 | Zoey Moore | Orchestra | ACTIVE
+013 | MEM-000013 | Liam Smith | Art Club | ACTIVE
+014 | MEM-000014 | Isabella Mitchell | Language Club | ACTIVE
+015 | MEM-000015 | Ella Martinez | History Club | ACTIVE
+016 | MEM-000016 | Emily Perez | Student Council | ACTIVE
+017 | MEM-000017 | Daniel Allen | Computer Science Club | ACTIVE
+018 | MEM-000018 | Hannah Flores | Community Service | ACTIVE
+019 | MEM-000019 | Hannah Flores | Tennis Club | ACTIVE
+020 | MEM-000020 | Joseph Jones | Literature Club | ACTIVE
+021 | MEM-000021 | Joseph Jones | Dance Club | INACTIVE
+022 | MEM-000022 | John Ramirez | History Club | ACTIVE
+023 | MEM-000023 | John Ramirez | Swimming Club | ACTIVE
+024 | MEM-000024 | Daniel Rivera | Photography Club | ACTIVE
+025 | MEM-000025 | Sebastian Lewis | Baseball Club | ACTIVE
+026 | MEM-000026 | Sofia Gonzalez | Dance Club | ACTIVE
+027 | MEM-000027 | Amelia Allen | Chess Club | ACTIVE
+028 | MEM-000028 | Henry Williams | Debate Team | ACTIVE
+029 | MEM-000029 | Henry Williams | Photography Club | INACTIVE
+030 | MEM-000030 | Riley Garcia | Model UN | ACTIVE
+031 | MEM-000031 | Riley Garcia | Debate Team | ACTIVE
+032 | MEM-000032 | Henry Taylor | Orchestra | ACTIVE
+033 | MEM-000033 | John Flores | Model UN | ACTIVE
+034 | MEM-000034 | Mason Davis | Band | ACTIVE
+035 | MEM-000035 | Aria Moore | Language Club | ACTIVE
+036 | MEM-000036 | John Flores | Baseball Club | ACTIVE
+037 | MEM-000037 | James Perez | History Club | ACTIVE
+038 | MEM-000038 | James Perez | Orchestra | ACTIVE
+039 | MEM-000039 | Joseph Nelson | Baseball Club | ACTIVE
+040 | MEM-000040 | Isabella Ramirez | Yearbook Committee | ACTIVE
+041 | MEM-000041 | Sebastian Davis | Environmental Club | ACTIVE
+042 | MEM-000042 | Sebastian Davis | Science Olympiad | ACTIVE
+043 | MEM-000043 | Sebastian Davis | Band | ACTIVE
+044 | MEM-000044 | Henry Wright | Soccer Club | ACTIVE
+045 | MEM-000045 | Aria Torres | Orchestra | ACTIVE
+046 | MEM-000046 | Aria Torres | Art Club | ACTIVE
+047 | MEM-000047 | Aria Torres | Band | ACTIVE
+048 | MEM-000048 | James Brown | Music Club | ACTIVE
+049 | MEM-000049 | James Brown | Science Olympiad | ACTIVE
+050 | MEM-000050 | James Brown | Debate Team | ACTIVE
+051 | MEM-000050 | James Brown | Debate Team | ACTIVE
+052 | MEM-000051 | Lily Green | Film Club | ACTIVE
+053 | MEM-000052 | Lily Green | Computer Science Club | ACTIVE
+054 | MEM-000053 | Noah Harris | Cooking Club | ACTIVE
+055 | MEM-000054 | Noah Harris | Tennis Club | ACTIVE
+056 | MEM-000055 | Jack Martin | History Club | ACTIVE
+057 | MEM-000056 | Jack Martin | Basketball Club | INACTIVE
+058 | MEM-000057 | David White | Science Olympiad | ACTIVE
+059 | MEM-000058 | David White | Photography Club | INACTIVE
+060 | MEM-000059 | Lily Jackson | Chess Club | ACTIVE
+061 | MEM-000060 | Lily Jackson | Baseball Club | INACTIVE
+062 | MEM-000061 | James Davis | Computer Science Club | ACTIVE
+063 | MEM-000062 | James Davis | Cultural Club | ACTIVE
+064 | MEM-000063 | James Davis | Model UN | ACTIVE
+065 | MEM-000064 | Olivia Williams | Literature Club | ACTIVE
+066 | MEM-000065 | Michael Jackson | Orchestra | ACTIVE
+067 | MEM-000066 | Michael Jackson | Chess Club | ACTIVE
+068 | MEM-000067 | Michael Jackson | Student Council | ACTIVE
+069 | MEM-000068 | David Walker | Chess Club | ACTIVE
+070 | MEM-000069 | Abigail King | Orchestra | ACTIVE
+071 | MEM-000070 | Hannah Lewis | Environmental Club | ACTIVE
+072 | MEM-000071 | Hannah Lewis | Computer Science Club | ACTIVE
+073 | MEM-000072 | Charlotte Mitchell | Dance Club | ACTIVE
+074 | MEM-000073 | Lily Lopez | Student Council | ACTIVE
+075 | MEM-000074 | Elizabeth Flores | Science Olympiad | ACTIVE
+076 | MEM-000075 | Elizabeth Flores | Volleyball Club | ACTIVE
+077 | MEM-000076 | Ava Adams | Volleyball Club | ACTIVE
+078 | MEM-000077 | Ava Adams | Track & Field | ACTIVE
+079 | MEM-000078 | Luke Johnson | Dance Club | ACTIVE
+080 | MEM-000079 | Luke Johnson | Art Club | ACTIVE
+081 | MEM-000080 | Evelyn Nguyen | Debate Team | ACTIVE
+082 | MEM-000081 | Jacob Rodriguez | Debate Team | ACTIVE
+083 | MEM-000082 | Jacob Rodriguez | Math Club | INACTIVE
+084 | MEM-000083 | Lily Moore | Model UN | ACTIVE
+085 | MEM-000084 | Benjamin Walker | Basketball Club | ACTIVE
+086 | MEM-000085 | Sophia Anderson | Baseball Club | ACTIVE
+087 | MEM-000086 | Joseph Adams | Music Club | ACTIVE
+088 | MEM-000087 | Joseph Adams | Baseball Club | ACTIVE
+089 | MEM-000088 | Joseph Adams | Cultural Club | ACTIVE
+090 | MEM-000089 | Scarlett Hernandez | Soccer Club | ACTIVE
+091 | MEM-000090 | Scarlett Hernandez | Swimming Club | INACTIVE
+092 | MEM-000091 | Scarlett Hernandez | History Club | ACTIVE
+093 | MEM-000092 | William Harris | Photography Club | INACTIVE
+094 | MEM-000093 | William Harris | Band | ACTIVE
+095 | MEM-000094 | William Harris | Literature Club | ACTIVE
+096 | MEM-000095 | Joseph Walker | Language Club | ACTIVE
+097 | MEM-000096 | Joseph Walker | Cooking Club | INACTIVE
+098 | MEM-000097 | Mia Brown | Chess Club | ACTIVE
+099 | MEM-000098 | Mia Brown | Baseball Club | ACTIVE
+100 | MEM-000099 | Mia Brown | Computer Science Club | ACTIVE
+101 | MEM-000100 | Jack Brown | Literature Club | ACTIVE
+102 | MEM-000101 | Victoria Martin | Film Club | ACTIVE
+103 | MEM-000102 | Victoria Martin | Basketball Club | ACTIVE
+104 | MEM-000103 | Victoria Martin | Student Council | ACTIVE
+105 | MEM-000104 | Owen Scott | Student Council | INACTIVE
+106 | MEM-000105 | Owen Scott | Cultural Club | ACTIVE
+107 | MEM-000106 | Hannah Rivera | Cultural Club | ACTIVE
+108 | MEM-000106 | Hannah Rivera | Cultural Club | ACTIVE
+109 | MEM-000107 | Grace Harris | Swimming Club | ACTIVE
+110 | MEM-000108 | Hannah Nguyen | Robotics Club | ACTIVE
+111 | MEM-000109 | Hannah Nguyen | Photography Club | ACTIVE
+112 | MEM-000110 | Liam Sanchez | Orchestra | ACTIVE
+113 | MEM-000111 | Zoey Clark | Art Club | ACTIVE
+114 | MEM-000112 | Emma Jackson | Soccer Club | ACTIVE
+115 | MEM-000113 | Sebastian Moore | Cooking Club | ACTIVE
+116 | MEM-000114 | Sebastian Moore | Environmental Club | ACTIVE
+117 | MEM-000115 | Aubrey Wright | Cultural Club | ACTIVE
+118 | MEM-000116 | Liam Lee | Photography Club | ACTIVE
+119 | MEM-000117 | Liam Lee | Computer Science Club | ACTIVE
+120 | MEM-000118 | Liam Lee | Environmental Club | INACTIVE
+121 | MEM-000118 | Liam Lee | Environmental Club | INACTIVE
+122 | MEM-000119 | Benjamin Flores | Baseball Club | ACTIVE
+123 | MEM-000120 | Owen Torres | Music Club | ACTIVE
+
+-------------------------------------------------------
+Total Records: 123

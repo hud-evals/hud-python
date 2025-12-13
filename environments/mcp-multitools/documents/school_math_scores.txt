@@ -1,0 +1,165 @@
+MATHEMATICS ASSESSMENT RESULTS
+==================================================
+Greater Boston School District
+Academic Year 2024-2025 - Fall Semester
+
+This report contains verified Mathematics test scores.
+All scores are out of 200 points maximum.
+
+STUDENT SCORES
+--------------------------------------------------
+
+STU-000003: John Perez - 79.52
+STU-000004: Wyatt Lopez - 46.09
+STU-000005: Zoey Campbell - 79.88
+STU-000006: Sophia Brown - 120.96
+STU-000011: Sophia Clark - 143.1
+STU-000014: Riley Robinson - 59.85
+STU-000015: Logan Lewis - 32.72
+STU-000016: Joseph Nguyen - 184.88
+STU-000021: David White - 119.19
+STU-000026: Ella Martinez - 58.88
+STU-000027: William Torres - 194.23
+STU-000030: Emily Perez - 132.01
+STU-000031: Zoey Sanchez - 35.78
+STU-000032: Sofia Young - 75.87
+STU-000033: Isabella Davis - 46.35
+STU-000037: Grace Jackson - 34.99
+STU-000038: Matthew Rodriguez - 70.84
+STU-000039: Amelia Campbell - 145.17
+STU-000041: Hannah Flores - 51.37
+STU-000043: Carter Jones - 121.44
+STU-000044: John Ramirez - 193.4
+STU-000046: Zoey Scott - 68.14
+STU-000050: Sofia Gonzalez - 91.54
+STU-000053: Henry Williams - 56.26
+STU-000054: Daniel Lee - 111.12
+STU-000056: Mason Rivera - 42.32
+STU-000058: Sophia Miller - 189.39
+STU-000060: Riley Garcia - 150.11
+STU-000062: Isabella Thompson - 43.4
+STU-000064: Wyatt Baker - 38.88
+STU-000065: Mason Nelson - 159.27
+STU-000066: Evelyn Torres - 163.43
+STU-000067: Lucas Wilson - 38.97
+STU-000068: Ava Hill - 85.93
+STU-000073: John Flores - 30.42
+STU-000074: Jack Jackson - 45.6
+STU-000076: Mason Davis - 80.48
+STU-000079: John Flores - 98.33
+STU-000080: Noah Clark - 39.64
+STU-000088: Aria Rodriguez - 67.13
+STU-000089: Victoria Wilson - 162.56
+STU-000093: Hannah Martin - 142.03
+STU-000096: Isabella Ramirez - 54.39
+STU-000100: Aria Torres - 35.92
+STU-000101: Grace Anderson - 39.7
+STU-000105: Chloe Sanchez - 76.1
+STU-000106: James Brown - 90.33
+STU-000107: Lily Green - 91.02
+STU-000108: Noah Harris - 55.65
+STU-000109: Luke Jones - 139.42
+STU-000112: Sofia Gonzalez - 109.29
+STU-000116: Aiden Johnson - 29.46
+STU-000119: Olivia Williams - 39.92
+STU-000123: Abigail King - 102.03
+STU-000128: Charlotte Mitchell - 104.41
+STU-000129: Hannah Martin - 85.86
+STU-000133: Wyatt Martinez - 115.63
+STU-000134: Chloe Wright - 61.82
+STU-000136: Elizabeth Flores - 32.31
+STU-000137: Ava Adams - 36.71
+STU-000138: Sophia Walker - 138.61
+STU-000145: Lily Moore - 40.58
+STU-000146: Emma Harris - 41.67
+STU-000153: Jacob White - 82.8
+STU-000156: Jack Thomas - 180.71
+STU-000159: Liam Sanchez - 145.48
+STU-000162: Samuel Moore - 36.1
+STU-000163: Jackson Gonzalez - 76.81
+STU-000164: Victoria Martin - 77.91
+STU-000165: Owen Scott - 82.96
+STU-000166: Hannah Rivera - 172.56
+STU-000169: Avery Clark - 98.5
+STU-000170: Olivia Young - 166.63
+STU-000171: Lucas Wright - 151.55
+STU-000172: Samuel King - 158.02
+STU-000173: Hannah Nguyen - 48.24
+STU-000174: Lillian Mitchell - 111.31
+STU-000177: Ethan Hall - 53.42
+STU-000179: Daniel Johnson - 38.26
+STU-000180: Olivia Sanchez - 102.38
+STU-000181: Emma Jackson - 38.46
+STU-000182: Logan Mitchell - 51.93
+STU-000190: Riley Miller - 91.6
+STU-000191: Benjamin Flores - 120.82
+STU-000192: Owen Torres - 45.74
+STU-000194: Harper Torres - 85.7
+STU-000195: Isabella Flores - 29.68
+STU-000197: Luke Perez - 102.95
+STU-000199: Sophia Hall - 27.17
+STU-000208: Charlotte Allen - 124.42
+STU-000211: William Thomas - 50.47
+STU-000215: William Hernandez - 45.28
+STU-000217: Lillian Torres - 51.42
+STU-000219: Grace Robinson - 137.38
+STU-000220: Aubrey Young - 34.43
+STU-000224: Mason Johnson - 78.72
+STU-000225: Ethan Davis - 33.63
+STU-000228: Liam Brown - 43.44
+STU-000229: Mason Harris - 57.4
+STU-000231: Wyatt Smith - 94.85
+STU-000234: Avery Thompson - 198.26
+STU-000235: Victoria Thompson - 26.06
+STU-000237: Owen Moore - 182.06
+STU-000238: Benjamin Wilson - 141.29
+STU-000239: Sophia Brown - 107.98
+STU-000241: Ethan Walker - 34.57
+STU-000246: Scarlett Lopez - 33.03
+STU-000248: Emma Ramirez - 37.71
+STU-000250: Sebastian Mitchell - 80.21
+STU-000252: Ella Young - 77.17
+STU-000262: Owen Wilson - 67.6
+STU-000264: Riley Flores - 35.31
+STU-000265: Ava Rivera - 40.66
+STU-000267: Noah Green - 39.56
+STU-000268: David Perez - 87.87
+STU-000269: David Harris - 169.45
+STU-000270: Carter Lopez - 152.55
+STU-000271: Noah Martinez - 71.08
+STU-000273: Lily Miller - 47.34
+STU-000275: Daniel Taylor - 48.81
+STU-000278: Victoria Williams - 134.89
+STU-000280: Liam Sanchez - 28.54
+STU-000283: Wyatt Miller - 157.74
+STU-000287: Carter Flores - 198.44
+STU-000288: Victoria Torres - 81.25
+STU-000290: Owen Martin - 41.21
+STU-000293: Mia Hall - 134.37
+STU-000294: Harper Hernandez - 27.41
+STU-000295: Hannah Lopez - 148.46
+STU-000296: Daniel Campbell - 37.41
+STU-000297: Daniel Davis - 180.22
+STU-000298: Samuel Young - 198.53
+STU-000299: Evelyn Lewis - 98.54
+STU-000300: Michael Campbell - 176.72
+STU-000301: Owen Williams - 89.33
+STU-000303: Ava Wilson - 44.02
+STU-000304: James Garcia - 127.69
+STU-000307: Alexander Hall - 95.98
+STU-000308: Ella Nelson - 160.19
+STU-000310: Logan Lee - 154.88
+STU-000312: Ethan Hill - 180.26
+STU-000316: Luke Baker - 87.91
+STU-000317: Victoria Garcia - 153.21
+STU-000318: Lily Garcia - 98.49
+STU-000321: Logan Jackson - 92.44
+STU-000323: Elizabeth Jackson - 142.39
+STU-000325: Lucas Robinson - 151.35
+STU-000328: Zoey Brown - 103.44
+STU-000330: Mia Moore - 31.34
+STU-000334: Sebastian Scott - 105.11
+
+--------------------------------------------------
+Total Students: 150
+Report generated: December 2024

@@ -96,6 +96,9 @@ class OpenAIAgent(MCPAgent):
         self.max_output_tokens = self.config.max_output_tokens
         self.temperature = self.config.temperature
         self.reasoning = self.config.reasoning
+        
+        # Log model configuration
+        logger.warning(f"🧠 OpenAIAgent: model={self.model}, max_tokens={self.max_output_tokens}, reasoning={self.reasoning}")
         self.tool_choice: ToolChoice | None = self.config.tool_choice
         self.parallel_tool_calls = self.config.parallel_tool_calls
         self.truncation: Literal["auto", "disabled"] | None = self.config.truncation

@@ -1,0 +1,50 @@
+{
+  "answer": "CONTRADICTIONS: MEM-000056: Jack Martin, Basketball Club, document says INACTIVE, actual ACTIVE; MEM-000058: David White, Photography Club, document says INACTIVE, actual ACTIVE; MEM-000060: Lily Jackson, Baseball Club, document says INACTIVE, actual ACTIVE; MEM-000096: Joseph Walker, Cooking Club, document says INACTIVE, actual ACTIVE. DUPLICATES: MEM-000050: James Brown, Debate Team; MEM-000106: Hannah Rivera, Cultural Club; MEM-000118: Liam Lee, Environmental Club",
+  "contradictions": [
+    {
+      "membership_id": "MEM-000056",
+      "name": "Jack Martin",
+      "club": "Basketball Club",
+      "doc_status": "INACTIVE",
+      "actual_status": "ACTIVE"
+    },
+    {
+      "membership_id": "MEM-000058",
+      "name": "David White",
+      "club": "Photography Club",
+      "doc_status": "INACTIVE",
+      "actual_status": "ACTIVE"
+    },
+    {
+      "membership_id": "MEM-000060",
+      "name": "Lily Jackson",
+      "club": "Baseball Club",
+      "doc_status": "INACTIVE",
+      "actual_status": "ACTIVE"
+    },
+    {
+      "membership_id": "MEM-000096",
+      "name": "Joseph Walker",
+      "club": "Cooking Club",
+      "doc_status": "INACTIVE",
+      "actual_status": "ACTIVE"
+    }
+  ],
+  "duplicates": [
+    {
+      "membership_id": "MEM-000050",
+      "name": "James Brown",
+      "club": "Debate Team"
+    },
+    {
+      "membership_id": "MEM-000106",
+      "name": "Hannah Rivera",
+      "club": "Cultural Club"
+    },
+    {
+      "membership_id": "MEM-000118",
+      "name": "Liam Lee",
+      "club": "Environmental Club"
+    }
+  ]
+}

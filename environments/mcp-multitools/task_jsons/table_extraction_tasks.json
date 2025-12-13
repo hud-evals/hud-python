@@ -1,0 +1,90 @@
+[
+  {
+    "id": "task-exa-table-superglue",
+    "prompt": "Find the NeurIPS 2019 paper that introduced a benchmark designed to be harder than GLUE (the word 'Stickier' appears in its title). From the table showing baseline performance on test sets, extract: BERT's CB F1 score, CBoW's ReCoRD Exact Match score, and Human's MultiRC Exact Match score.\n\nFORMAT: \"BERT_CB_F1=X.X, CBoW_ReCoRD_EM=X.X, Human_MultiRC_EM=X.X\"\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "BERT_CB_F1=75.7, CBoW_ReCoRD_EM=13.6, Human_MultiRC_EM=51.9"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["search", "fetch", "scratchpad_write", "scratchpad_read"]
+    }
+  },
+  {
+    "id": "task-exa-table-t5",
+    "prompt": "Find the T5 paper ('Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer'). From the table comparing pre-training on different data sets, extract: WebText-like's GLUE score, Wikipedia + TBC's SQuAD score, RealNews-like's SGLUE score, and C4 unfiltered's EnFr BLEU score.\n\nFORMAT: \"WebText_GLUE=X.XX, Wikipedia_TBC_SQuAD=X.XX, RealNews_SGLUE=X.XX, C4_unfiltered_EnFr=X.XX\"\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "WebText_GLUE=84.03, Wikipedia_TBC_SQuAD=82.08, RealNews_SGLUE=72.38, C4_unfiltered_EnFr=39.34"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["search", "fetch", "scratchpad_write", "scratchpad_read"]
+    }
+  },
+  {
+    "id": "task-exa-multi-paper-glue",
+    "prompt": "Find GLUE scores from these 4 papers (read each paper to find the exact value):\n\n1. BERT paper (Devlin et al.) - find the GLUE score mentioned in the abstract\n2. RoBERTa paper (Liu et al.) - find their GLUE leaderboard score mentioned in the results\n3. ALBERT paper (Lan et al.) - find their best GLUE score from the results\n4. T5 paper (Raffel et al.) - find the baseline encoder-decoder model GLUE score from Table 1\n\nOrder them highest to lowest.\n\nFORMAT: \"MODEL1=XX.X, MODEL2=XX.X, MODEL3=XX.X, MODEL4=XX.X\"\nUse names: ALBERT, RoBERTa, T5, BERT. Use exact decimal values from papers.\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "ALBERT=89.4, RoBERTa=88.5, T5=83.28, BERT=80.5"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["search", "fetch", "scratchpad_write", "scratchpad_read"]
+    }
+  },
+  {
+    "id": "task-exa-reference-chain",
+    "prompt": "MULTI-HOP REFERENCE TASK:\n\n1. Find the SuperGLUE paper (NeurIPS 2019, has 'Stickier' in title)\n2. One of the tasks in SuperGLUE is ReCoRD. Find the original ReCoRD dataset paper by Zhang et al.\n3. In the ReCoRD paper, find Table 4 which shows model performance on the test set\n4. Extract these 3 values from Table 4:\n   - Human EM (Exact Match) score\n   - Human F1 score\n   - DocQA with ELMo EM score\n\nFORMAT: \"Human_EM=XX.XX, Human_F1=XX.XX, DocQA_ELMo_EM=XX.XX\"\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "Human_EM=91.31, Human_F1=91.69, DocQA_ELMo_EM=45.44"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["search", "fetch", "scratchpad_write", "scratchpad_read"]
+    }
+  }
+]

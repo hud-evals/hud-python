@@ -1,0 +1,44 @@
+{
+  "height_answer": "ID-062: Maria Hernandez, document says 156cm, actual 150cm; ID-082: Aaliya Abubakar, document says 162cm, actual 168cm; ID-091: Michael Abubakar, document says 170cm, actual 164cm",
+  "weight_answer": "ID-005: Aaliya Russo, document says 71.0kg, actual 72.7kg; ID-018: Emma Nielsen, document says 53.4kg, actual 56.4kg; ID-064: Ahmed Fischer, document says 60.6kg, actual 57.5kg",
+  "height_errors": [
+    {
+      "id": 62,
+      "name": "Maria Hernandez",
+      "doc_height": 156,
+      "actual_height": 150
+    },
+    {
+      "id": 82,
+      "name": "Aaliya Abubakar",
+      "doc_height": 162,
+      "actual_height": 168
+    },
+    {
+      "id": 91,
+      "name": "Michael Abubakar",
+      "doc_height": 170,
+      "actual_height": 164
+    }
+  ],
+  "weight_errors": [
+    {
+      "id": 5,
+      "name": "Aaliya Russo",
+      "doc_weight": 71.0,
+      "actual_weight": 72.7
+    },
+    {
+      "id": 18,
+      "name": "Emma Nielsen",
+      "doc_weight": 53.4,
+      "actual_weight": 56.4
+    },
+    {
+      "id": 64,
+      "name": "Ahmed Fischer",
+      "doc_weight": 60.6,
+      "actual_weight": 57.5
+    }
+  ]
+}

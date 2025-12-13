@@ -395,7 +395,7 @@
       "name": "local_evaluate",
       "arguments": {
         "exact_values": {
-          "answer": "960"
+          "answer": "990"
         }
       }
     },
@@ -828,7 +828,7 @@
       "name": "local_evaluate",
       "arguments": {
         "exact_values": {
-          "answer": "Elizabeth Nguyen: Kennedy High, 194.85, 3.04; Daniel King: Monroe Secondary, 186.39, 2.12; Carter Flores: Harrison Academy, 175.88, 2.31; Alexander Lopez: Taylor High, 171.37, 2.10; Amelia Sanchez: Tyler Institute, 156.40, 2.05; Scarlett Green: Roosevelt Secondary, 138.54, 3.12; Riley Lee: Jackson High School, 137.03, 2.38; Jacob Young: Jackson High School, 134.44, 2.42; Lily Green: Kennedy High, 123.79, 2.51; Elizabeth Williams: Washington Academy, 122.50, 3.93; Logan Torres: Tyler Institute, 120.90, 2.99; Emily Rivera: Taylor High, 119.91, 3.71; Liam Thomas: Roosevelt Secondary, 119.44, 2.85; Chloe Nguyen: Taylor High, 115.91, 2.19; Mia Lopez: Harrison Academy, 111.51, 2.82; Evelyn Smith: Adams Institute, 106.25, 3.34; Owen Taylor: Jefferson Prep, 92.85, 3.13; Logan Jackson: Monroe Secondary, 92.44, 3.63; Luke Baker: Taylor High, 87.91, 2.04; Evelyn Walker: Jackson High School, 84.92, 2.98; Michael Perez: Lincoln High School, 84.03, 3.80; Elizabeth Lewis: Lincoln High School, 82.66, 2.08; Hannah Rodriguez: Lincoln High School, 81.40, 3.28; Isabella Lee: Kennedy High, 77.78, 2.48; Olivia Robinson: Lincoln High School, 77.26, 3.05; Matthew Sanchez: Madison Prep, 73.70, 3.19; Scarlett Flores: Franklin Academy, 71.01, 3.98; Lucas Baker: Jackson High School, 68.78, 3.59; Mason Campbell: Jefferson Prep, 60.64, 4.00; Owen Harris: Lincoln High School, 58.86, 3.50; Matthew Scott: Jackson High School, 58.68, 2.24; Evelyn Flores: Roosevelt Secondary, 58.49, 2.39; Owen Williams: Monroe Secondary, 57.33, 3.19; Aubrey Martinez: Hamilton High, 55.04, 2.55; Isabella Wright: Franklin Academy, 53.32, 3.27; Abigail Rivera: Washington Academy, 49.89, 3.77; Henry Brown: Kennedy High, 46.93, 3.78; Matthew Mitchell: Polk Prep, 45.63, 2.36; Henry Hernandez: Washington Academy, 44.73, 3.99; Aiden Mitchell: Polk Prep, 42.44, 3.66; Logan Garcia: Lincoln High School, 38.67, 2.49; Aubrey Nelson: Roosevelt Secondary, 38.67, 2.35; Elizabeth Adams: Tyler Institute, 37.50, 2.62; Abigail White: Kennedy High, 36.12, 2.28; Sofia Miller: Taylor High, 33.68, 2.72; Ethan Davis: Taylor High, 33.63, 3.36; Riley White: Tyler Institute, 27.96, 2.99; Charlotte Lopez: Lincoln High School, 27.74, 2.88; Aubrey Robinson: Kennedy High, 27.64, 2.96; Luke Clark: Jefferson Prep, 26.55, 3.67"
+          "answer": "Elizabeth Nguyen: Kennedy High, 194.85, 3.04; Daniel King: Monroe Secondary, 186.39, 2.12; Carter Flores: Harrison Academy, 175.88, 2.31; Alexander Lopez: Taylor High, 171.37, 2.10; Amelia Sanchez: Tyler Institute, 156.41, 2.05; Scarlett Green: Roosevelt Secondary, 138.54, 3.12; Riley Lee: Jackson High School, 137.03, 2.38; Jacob Young: Jackson High School, 134.44, 2.42; Lily Green: Kennedy High, 123.79, 2.51; Elizabeth Williams: Washington Academy, 122.50, 3.93; Logan Torres: Tyler Institute, 120.90, 2.99; Emily Rivera: Taylor High, 119.91, 3.71; Liam Thomas: Roosevelt Secondary, 119.44, 2.85; Chloe Nguyen: Taylor High, 115.91, 2.19; Mia Lopez: Harrison Academy, 111.51, 2.82; Evelyn Smith: Adams Institute, 106.25, 3.34; Owen Taylor: Jefferson Prep, 92.85, 3.13; Logan Jackson: Monroe Secondary, 92.44, 3.63; Luke Baker: Taylor High, 87.91, 2.04; Evelyn Walker: Jackson High School, 84.92, 2.98; Michael Perez: Lincoln High School, 84.03, 3.80; Elizabeth Lewis: Lincoln High School, 82.66, 2.08; Hannah Rodriguez: Lincoln High School, 81.40, 3.28; Isabella Lee: Kennedy High, 77.78, 2.48; Olivia Robinson: Lincoln High School, 77.26, 3.05; Matthew Sanchez: Madison Prep, 73.70, 3.19; Scarlett Flores: Franklin Academy, 71.01, 3.98; Lucas Baker: Jackson High School, 68.78, 3.59; Mason Campbell: Jefferson Prep, 60.64, 4.00; Owen Harris: Lincoln High School, 58.86, 3.50; Matthew Scott: Jackson High School, 58.68, 2.24; Evelyn Flores: Roosevelt Secondary, 58.49, 2.39; Owen Williams: Monroe Secondary, 57.33, 3.19; Aubrey Martinez: Hamilton High, 55.04, 2.55; Isabella Wright: Franklin Academy, 53.32, 3.27; Abigail Rivera: Washington Academy, 49.89, 3.77; Henry Brown: Kennedy High, 46.93, 3.78; Matthew Mitchell: Polk Prep, 45.63, 2.36; Henry Hernandez: Washington Academy, 44.73, 3.99; Aiden Mitchell: Polk Prep, 42.44, 3.66; Logan Garcia: Lincoln High School, 38.67, 2.49; Aubrey Nelson: Roosevelt Secondary, 38.67, 2.35; Elizabeth Adams: Tyler Institute, 37.50, 2.62; Abigail White: Kennedy High, 36.12, 2.28; Sofia Miller: Taylor High, 33.68, 2.72; Ethan Davis: Taylor High, 33.63, 3.36; Riley White: Tyler Institute, 27.96, 2.99; Charlotte Lopez: Lincoln High School, 27.74, 2.88; Aubrey Robinson: Kennedy High, 27.64, 2.96; Luke Clark: Jefferson Prep, 26.55, 3.67"
         }
       }
     },
@@ -1712,7 +1712,7 @@
       "name": "local_evaluate",
       "arguments": {
         "exact_values": {
-          "answer": "Alexander Yamamoto: 33, 5, 71; Yolanda Brown: 30, 9, 69; Eleanor Edwards: 29, 8, 66; Gabriel Ishikawa: 30, 6, 66; Bridget Yang: 29, 7, 65; Rebecca Fernandez: 29, 5, 63; Daniel Morrison: 27, 8, 62; James Chen: 29, 2, 60; Helena Kowalski: 27, 5, 59; James Chen: 25, 8, 58; Aaron Valdez: 27, 3, 57; Thomas Harris: 27, 3, 57; Oscar Zhang: 26, 3, 55; James Chen: 24, 6, 54; Uma King: 25, 3, 53; Xavier Yoshida: 21, 11, 53; Quinn Castillo: 23, 6, 52; Raymond Davis: 23, 5, 51; Isaac Mueller: 24, 2, 50; Wendy Ortiz: 24, 2, 50; Alexander Petrov: 21, 4, 46; Ulrich Olsen: 20, 5, 45; Connor Baker: 19, 6, 44; William Vargas: 19, 6, 44; Xander Richardson: 19, 3, 41; Tiffany Castillo: 0, 12, 12; Georgia Gonzalez: 0, 11, 11; James Jensen: 0, 11, 11; Nicole Quinn: 0, 10, 10; Oliver Svensson: 0, 10, 10; Benjamin Blackwood: 0, 9, 9; Danielle Xiao: 0, 9, 9; Kevin Martinez: 0, 9, 9; Victor Garcia: 0, 9, 9; Fiona Anderson: 0, 7, 7; Gregory Chen: 0, 7, 7; Jennifer King: 0, 7, 7; Zoe Olsen: 0, 7, 7; Charlotte Chen: 0, 6, 6; Daniel Dimitrov: 0, 6, 6; George Davis: 0, 6, 6; Hannah Edwards: 1, 4, 6; Lydia Morrison: 0, 6, 6; Quentin Wagner: 0, 6, 6; Rachel Yang: 0, 6, 6; Teresa Diaz: 0, 6, 6; Benjamin Anderson: 0, 5, 5; Christian Vargas: 0, 5, 5; Harrison Harrison: 0, 5, 5; Linda Ortiz: 0, 5, 5; Samuel Adler: 0, 5, 5; Edward Zhang: 0, 4, 4; Ursula Eriksson: 0, 4, 4; Daniel Edwards: 0, 3, 3; Eleanor Gonzalez: 0, 3, 3; Rosa Yamamoto: 0, 3, 3; Bianca Torres: 0, 2, 2; Isabella Ivanovic: 0, 2, 2; Martin Richardson: 0, 2, 2; Walter Ishikawa: 0, 2, 2"
+          "answer": "Alexander Yamamoto: 33, 5, 71; Gregory Chen: 31, 7, 69; Yolanda Brown: 30, 9, 69; Eleanor Edwards: 29, 8, 66; Gabriel Ishikawa: 30, 6, 66; Nicole Quinn: 28, 10, 66; Bridget Yang: 29, 7, 65; Tiffany Castillo: 26, 12, 64; Fiona Anderson: 28, 7, 63; Rebecca Fernandez: 29, 5, 63; Daniel Morrison: 27, 8, 62; James Chen: 29, 2, 60; Helena Kowalski: 27, 5, 59; Victor Garcia: 25, 9, 59; James Chen: 25, 8, 58; Lydia Morrison: 26, 6, 58; Oliver Svensson: 24, 10, 58; Aaron Valdez: 27, 3, 57; Samuel Adler: 26, 5, 57; Thomas Harris: 27, 3, 57; Hannah Edwards: 26, 4, 56; Oscar Zhang: 26, 3, 55; James Chen: 24, 6, 54; Uma King: 25, 3, 53; Xavier Yoshida: 21, 11, 53; Connor Baker: 23, 6, 52; Quentin Wagner: 23, 6, 52; Quinn Castillo: 23, 6, 52; Ursula Eriksson: 24, 4, 52; Raymond Davis: 23, 5, 51; Isaac Mueller: 24, 2, 50; Wendy Ortiz: 24, 2, 50; Rosa Yamamoto: 23, 3, 49; Alexander Petrov: 21, 4, 46; Ulrich Olsen: 20, 5, 45; Walter Ishikawa: 21, 2, 44; William Vargas: 19, 6, 44; Xander Richardson: 19, 3, 41; Georgia Gonzalez: 0, 11, 11; James Jensen: 0, 11, 11; Benjamin Blackwood: 0, 9, 9; Danielle Xiao: 0, 9, 9; Kevin Martinez: 0, 9, 9; Jennifer King: 0, 7, 7; Zoe Olsen: 0, 7, 7; Charlotte Chen: 0, 6, 6; Daniel Dimitrov: 0, 6, 6; George Davis: 0, 6, 6; Rachel Yang: 0, 6, 6; Teresa Diaz: 0, 6, 6; Benjamin Anderson: 0, 5, 5; Christian Vargas: 0, 5, 5; Harrison Harrison: 0, 5, 5; Linda Ortiz: 0, 5, 5; Edward Zhang: 0, 4, 4; Daniel Edwards: 0, 3, 3; Eleanor Gonzalez: 0, 3, 3; Bianca Torres: 0, 2, 2; Isabella Ivanovic: 0, 2, 2; Martin Richardson: 0, 2, 2"
         }
       }
     },
@@ -2396,7 +2396,7 @@
       "name": "evaluate",
       "arguments": {
         "exact_values": {
-          "answer": "Deep Dive: 48.7; Keynote: 39.1; Lightning Talk: 40.6; Panel: 50.3; Tutorial: 43.8; Workshop: 46.4"
+          "answer": "Deep Dive: 68.8; Keynote: 48.6; Lightning Talk: 40.6; Panel: 50.3; Tutorial: 43.8; Workshop: 65.8"
         }
       }
     },
@@ -3516,6 +3516,67 @@
         "scratchpad_read",
         "read_document",
         "search_document"
+      ]
+    }
+  },
+  {
+    "id": "task-school-enrollment-contradictions",
+    "prompt": "The document 'school_enrollment_report' lists which school each student is enrolled in.\n\nCompare this document with the actual enrollment data in Supabase (school_student_enrollments table joined with school_schools).\n\nFind all students where the school listed in the document differs from their actual enrolled school in the database.\n\nFormat: \"{student_id}: {first_name} {last_name}, document says {doc_school}, actual {db_school}\"\nSort by student_id (A-Z).\nSeparate entries with \"; \"\n\nExample: \"STU-000123: John Smith, document says Lincoln High, actual Washington Academy\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables: school_student_enrollments, school_schools, school_students\nDocument: doc_id 'school_enrollment_report'\n\nStore result with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "STU-001112: Mia Garcia, document says Kennedy High, actual Jackson High School; STU-001489: James Sanchez, document says Adams Institute, actual Hamilton High; STU-003512: Michael Hill, document says Washington Academy, actual Lincoln High School; STU-003783: Isabella Hall, document says Franklin Academy, actual Polk Prep"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "local_read_document", "local_search_document", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-school-inline-gpa-verification",
+    "prompt": "Below is a list of 100 students with their reported GPAs. Compare these GPAs with the actual data in Supabase (school_students table, gpa column).\n\nFind all students where the listed GPA differs from their actual GPA in the database.\n\nFormat: \"{student_id}: {first_name} {last_name}, list says {listed_gpa}, actual {db_gpa}\"\nSort by student_id (A-Z).\nSeparate entries with \"; \"\n\nExample (match this structure exactly): \"STU-999999: John Smith, list says 3.25, actual 2.80; STU-999998: Jane Doe, list says 2.15, actual 2.62\"\n\nNote: GPAs should match to 2 decimal places. Even 0.01 difference counts.\n\nSTUDENT GPA LIST:\nSTU-000054: Daniel Lee - GPA 3.9\nSTU-000205: Chloe Green - GPA 2.25\nSTU-000218: Jack Green - GPA 2.67\nSTU-000245: Abigail Anderson - GPA 3.68\nSTU-000261: Wyatt Baker - GPA 3.89\nSTU-000263: Aiden Adams - GPA 3.87\nSTU-000356: Aria Johnson - GPA 3.97\nSTU-000376: Jackson Garcia - GPA 3.66\nSTU-000459: Elizabeth Rivera - GPA 2.95\nSTU-000543: Benjamin Hall - GPA 3.12\nSTU-000570: Hannah Baker - GPA 3.41\nSTU-000585: Liam Flores - GPA 2.28\nSTU-000646: Hannah White - GPA 2.99\nSTU-000654: Lucas Young - GPA 3.15\nSTU-000713: Mason Young - GPA 3.05\nSTU-000760: Lily Anderson - GPA 2.63\nSTU-000768: Liam Sanchez - GPA 2.18\nSTU-000793: Avery Mitchell - GPA 3.93\nSTU-000828: Owen Davis - GPA 2.43\nSTU-000838: Owen Ramirez - GPA 2.43\nSTU-000840: Aria Thompson - GPA 2.57\nSTU-000913: Wyatt Smith - GPA 2.69\nSTU-001023: Noah Moore - GPA 3.38\nSTU-001144: William Gonzalez - GPA 2.61\nSTU-001171: Sebastian Torres - GPA 2.06\nSTU-001274: Evelyn White - GPA 2.86\nSTU-001308: Joseph Nguyen - GPA 3.29\nSTU-001333: Daniel Lewis - GPA 2.82\nSTU-001339: Sophia Thomas - GPA 3.52\nSTU-001402: James Torres - GPA 3.81\nSTU-001576: Sebastian Taylor - GPA 2.25\nSTU-001629: Olivia Scott - GPA 2.41\nSTU-001717: Sofia Martin - GPA 3.09\nSTU-001729: Liam Clark - GPA 3.98\nSTU-001742: Hannah Scott - GPA 3.03\nSTU-001764: Aria Hall - GPA 3.83\nSTU-001792: Benjamin Anderson - GPA 3.14\nSTU-001800: Wyatt Lewis - GPA 2.37\nSTU-001806: John Mitchell - GPA 3.96\nSTU-001829: Sophia Miller - GPA 2.92\nSTU-001867: Lucas Lewis - GPA 3.34\nSTU-001877: Benjamin Gonzalez - GPA 3.8\nSTU-001906: Lily Hernandez - GPA 2.94\nSTU-001908: Owen Jones - GPA 3.83\nSTU-002006: Ethan Wright - GPA 2.51\nSTU-002007: Luke Thompson - GPA 3.86\nSTU-002021: Hannah Smith - GPA 2.01\nSTU-002167: Zoey Moore - GPA 2.67\nSTU-002170: Lucas Green - GPA 2.63\nSTU-002188: Michael Nguyen - GPA 3.15\nSTU-002194: Alexander Lee - GPA 2.19\nSTU-002212: Ava Campbell - GPA 3.45\nSTU-002254: Michael Torres - GPA 3.9\nSTU-002277: Ella Rivera - GPA 2.54\nSTU-002278: Aubrey Jackson - GPA 3.39\nSTU-002279: Victoria Lee - GPA 2.88\nSTU-002371: James Walker - GPA 2.46\nSTU-002402: Grace Rodriguez - GPA 4.0\nSTU-002578: Sofia Sanchez - GPA 3.63\nSTU-002585: David Nelson - GPA 3.12\nSTU-002657: Aubrey Young - GPA 4.38\nSTU-002758: Lily Wright - GPA 2.7\nSTU-002788: Amelia Green - GPA 3.72\nSTU-002818: Evelyn Walker - GPA 2.39\nSTU-002911: Lily Anderson - GPA 2.89\nSTU-002941: Carter Johnson - GPA 3.82\nSTU-002963: Zoey Adams - GPA 3.47\nSTU-002989: Emily Scott - GPA 2.0\nSTU-003033: Sophia Lopez - GPA 2.65\nSTU-003101: Owen Lewis - GPA 3.23\nSTU-003109: Aiden Flores - GPA 3.81\nSTU-003113: Evelyn Davis - GPA 2.61\nSTU-003114: Victoria Scott - GPA 2.64\nSTU-003242: Isabella Lewis - GPA 3.64\nSTU-003287: Carter Hernandez - GPA 3.44\nSTU-003437: Michael Walker - GPA 3.22\nSTU-003457: Avery Campbell - GPA 2.71\nSTU-003463: Olivia Walker - GPA 2.89\nSTU-003680: Owen Moore - GPA 2.02\nSTU-003715: Abigail Baker - GPA 3.22\nSTU-003759: Luke Robinson - GPA 3.74\nSTU-003764: Alexander Anderson - GPA 2.66\nSTU-003787: Hannah Lee - GPA 2.4\nSTU-004090: Harper Campbell - GPA 3.62\nSTU-004140: Victoria Taylor - GPA 2.28\nSTU-004376: Alexander Green - GPA 3.34\nSTU-004393: Samuel Walker - GPA 3.86\nSTU-004465: Logan Thompson - GPA 3.35\nSTU-004468: William Ramirez - GPA 2.16\nSTU-004523: Charlotte Torres - GPA 2.79\nSTU-004563: Henry Scott - GPA 3.05\nSTU-004598: Aiden Hall - GPA 2.87\nSTU-004599: Elizabeth Baker - GPA 3.81\nSTU-004647: Jack Perez - GPA 2.17\nSTU-004730: Charlotte Perez - GPA 2.12\nSTU-004828: Lucas Lewis - GPA 2.57\nSTU-004838: Emily Hall - GPA 3.5\nSTU-004932: Alexander Scott - GPA 3.75\nSTU-004946: Aubrey Brown - GPA 3.12\nSTU-004991: William Scott - GPA 3.79\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTable: school_students\n\nStore result with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {
+          "Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"
+        }
+      }
+    },
+    "setup_tool": {
+      "name": "local_setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "STU-000760: Lily Anderson, list says 2.63, actual 2.16; STU-001764: Aria Hall, list says 3.83, actual 3.36; STU-002657: Aubrey Young, list says 4.38, actual 3.91; STU-004376: Alexander Green, list says 3.34, actual 2.87"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "local_scratchpad_write",
+        "local_scratchpad_read",
+        "supabase_execute_sql"
       ]
     }
   }

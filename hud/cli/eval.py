@@ -6,6 +6,7 @@ Config Override Order: CLI arguments > .hud_eval.toml > defaults
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import tomllib
@@ -234,7 +235,13 @@ class EvalConfig(BaseModel):
             kwargs.update(self.agent_config[agent_key])
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
-            base_url = kwargs.get("base_url", "")
+            base_url = kwargs.get("base_url")
+            if not base_url:
+                # Default to HUD Gateway if no base_url provided
+                base_url = f"{settings.hud_gateway_url}/v1"
+                kwargs["base_url"] = base_url
+                hud_console.info(f"Using default HUD Gateway URL: {base_url}")
+
             if "api_key" not in kwargs:
                 # Use HUD API key for gateway, otherwise fall back to OpenAI API key
                 if settings.hud_gateway_url in base_url:
@@ -344,18 +351,28 @@ class EvalConfig(BaseModel):
                     value = value.strip()
 
                     # Parse value
-                    if value.lower() == "true":
-                        parsed_value: Any = True
-                    elif value.lower() == "false":
-                        parsed_value = False
-                    else:
-                        try:
-                            parsed_value = int(value)
-                        except ValueError:
+                    parsed_value: Any = value
+                    is_json = False
+                    try:
+                        if value.strip().startswith("{") or value.strip().startswith("["):
+                            parsed_value = json.loads(value)
+                            is_json = True
+                    except json.JSONDecodeError:
+                        pass
+
+                    if not is_json:
+                        if value.lower() == "true":
+                            parsed_value = True
+                        elif value.lower() == "false":
+                            parsed_value = False
+                        else:
                             try:
-                                parsed_value = float(value)
+                                parsed_value = int(value)
                             except ValueError:
-                                parsed_value = value
+                                try:
+                                    parsed_value = float(value)
+                                except ValueError:
+                                    parsed_value = value
 
                     # Handle namespaced keys (e.g., claude.max_tokens)
                     if "." in key:
@@ -365,11 +382,18 @@ class EvalConfig(BaseModel):
                         merged_agent_config[agent_name][param] = parsed_value
                     else:
                         # Non-namespaced: apply to current agent if set
-                        if self.agent_type:
-                            agent_name = self.agent_type.value
-                            if agent_name not in merged_agent_config:
-                                merged_agent_config[agent_name] = {}
-                            merged_agent_config[agent_name][key] = parsed_value
+                        target_agent = overrides.get("agent_type")
+                        if not target_agent and self.agent_type:
+                            target_agent = self.agent_type
+
+                        if target_agent:
+                            # Handle Enum or string
+                            if hasattr(target_agent, "value"):
+                                target_agent = target_agent.value
+
+                            if target_agent not in merged_agent_config:
+                                merged_agent_config[target_agent] = {}
+                            merged_agent_config[target_agent][key] = parsed_value
 
             overrides["agent_config"] = merged_agent_config
 

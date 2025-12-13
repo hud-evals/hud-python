@@ -1,0 +1,39 @@
+[
+    {
+    "id": "task-report-tool-docs",
+    "prompt": "DO NOT USE ANY TOOLS YET.\n\nFirst, report EXACTLY what you see for the 'search_document' tool:\n1. The tool name\n2. The full description/docstring\n3. All parameters and their descriptions\n4. Any notes, warnings, or limits mentioned\n\nCopy the text VERBATIM - do not paraphrase.\n\nAlso report: What thinking mode are you using? Do you see any instructions about thinking modes in your system prompt? If so, copy them verbatim.\n\nAfter reporting, store the string 'reported' as 'answer' and say 'Task completed.'",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "reported"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "scratchpad_write",
+        "scratchpad_read",
+        "read_document",
+        "search_document"
+      ]
+    }
+  }
+]

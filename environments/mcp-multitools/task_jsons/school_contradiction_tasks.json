@@ -1,0 +1,158 @@
+[
+  {
+    "id": "task-school-enrollment-contradictions",
+    "prompt": "The document 'school_enrollment_report' lists which school each student is enrolled in.\n\nCompare this document with the actual enrollment data in Supabase (school_student_enrollments table joined with school_schools).\n\nFind all students where the school listed in the document differs from their actual enrolled school in the database.\n\nFormat: \"{student_id}: {first_name} {last_name}, document says {doc_school}, actual {db_school}\"\nSort by student_id (A-Z).\nSeparate entries with \"; \"\n\nExample: \"STU-000123: John Smith, document says Lincoln High, actual Washington Academy\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables: school_student_enrollments, school_schools, school_students\nDocument: doc_id 'school_enrollment_report'\n\nStore result with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "STU-001112: Mia Garcia, document says Kennedy High, actual Jackson High School; STU-001489: James Sanchez, document says Adams Institute, actual Hamilton High; STU-003512: Michael Hill, document says Washington Academy, actual Lincoln High School; STU-003783: Isabella Hall, document says Franklin Academy, actual Polk Prep"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "local_read_document", "local_search_document", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-school-active-contradictions",
+    "prompt": "The document 'school_active_members' lists students who are supposedly ACTIVE members of school clubs.\n\nCompare this document with the actual membership data in Supabase (school_club_memberships table, is_active column).\n\nFind all memberships that are listed as active in the document but have is_active = false in the database.\n\nFormat: \"{membership_id}: {first_name} {last_name}, {club_name}\"\nSort by membership_id (A-Z).\nSeparate entries with \"; \"\n\nExample: \"MEM-000123: John Smith, Chess Club; MEM-000456: Jane Doe, Drama Club\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables: school_club_memberships, school_students, school_clubs\nDocument: doc_id 'school_active_members'\n\nStore result with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "MEM-001045: Jack Williams, Chess Club; MEM-001099: Lucas Rivera, Band; MEM-001397: Owen Gonzalez, Cultural Club; MEM-001694: Noah Adams, Yearbook Committee; MEM-003041: Harper Garcia, Dance Club"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "local_read_document", "local_search_document", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-school-honor-contradictions",
+    "prompt": "The document 'school_honor_roll' lists students who supposedly achieved Honor Roll status (GPA >= 3.5).\n\nCompare this document with the actual student data in Supabase (school_students table).\n\nFind all students who are listed in the honor roll document but actually have GPA < 3.5 in the database.\n\nFormat: \"{student_id}: {first_name} {last_name}, GPA {actual_gpa}\"\nSort by student_id (A-Z).\nSeparate entries with \"; \"\n\nExample: \"STU-000123: John Smith, GPA 3.25; STU-000456: Jane Doe, GPA 2.90\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nDocument: doc_id 'school_honor_roll'\n\nStore result with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "STU-000238: Benjamin Wilson, GPA 3.15; STU-000468: Ava Torres, GPA 3.25; STU-004089: John Williams, GPA 2.88"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "local_read_document", "local_search_document", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-school-schedule-contradictions",
+    "prompt": "The document 'school_club_schedule' lists the weekly meeting day for each club.\n\nCompare this document with the actual club data in Supabase (school_clubs table, meeting_day column).\n\nFind all clubs where the meeting day in the document differs from the actual meeting_day in the database.\n\nFormat: \"{club_id}: {club_name}, document says {doc_day}, actual {db_day}\"\nSort by club_id (A-Z).\nSeparate entries with \"; \"\n\nExample: \"CLB-000010: Math Club, document says Monday, actual Tuesday\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTable: school_clubs\nDocument: doc_id 'school_club_schedule'\n\nStore result with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "CLB-000030: Cultural Club, document says Monday, actual Wednesday; CLB-000031: Language Club, document says Thursday, actual Monday; CLB-000032: Cooking Club, document says Thursday, actual Wednesday"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "local_read_document", "local_search_document", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-school-directory-contradictions",
+    "prompt": "The document 'school_directory' lists information about each school, including founding year.\n\nCompare this document with the actual school data in Supabase (school_schools table, founded_year column).\n\nFind all schools where the founding year in the document differs from the actual founded_year in the database.\n\nFormat: \"{school_id}: {school_name}, document says {doc_year}, actual {db_year}\"\nSort by school_id (A-Z).\nSeparate entries with \"; \"\n\nExample: \"SCH-000005: Kennedy High, document says 2005, actual 2010\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTable: school_schools\nDocument: doc_id 'school_directory'\n\nStore result with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "SCH-000008: Hamilton High, document says 1985, actual 1991"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "local_read_document", "local_search_document", "supabase_execute_sql"]
+    }
+  },
+  {
+    "id": "task-school-leadership-contradictions",
+    "prompt": "The document 'school_club_leaders' lists students who supposedly hold leadership positions (President, Vice President, Captain, Leader) in clubs.\n\nCompare this document with the actual membership data in Supabase (school_club_memberships table, role column).\n\nFind all entries where the document claims someone is a leader (President) but their actual role in the database is just 'member'.\n\nFormat: \"{membership_id}: {first_name} {last_name}, {club_name}\"\nSort by membership_id (A-Z).\nSeparate entries with \"; \"\n\nExample: \"MEM-000123: John Smith, Chess Club; MEM-000456: Jane Doe, Drama Club\"\n\nDatabase: supabase_execute_sql (project_id: 'qgubrffqclddzehyyvbt')\nTables: school_club_memberships, school_students, school_clubs\nDocument: doc_id 'school_club_leaders'\n\nStore result with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      },
+      "supabase": {
+        "url": "https://mcp.supabase.com/mcp?read_only=true",
+        "headers": {"Authorization": "Bearer sbp_6db19bff28d413a387bb9999cf989201887e5bdd"}
+      }
+    },
+    "setup_tool": {"name": "local_setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "local_evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "MEM-000022: John Ramirez, History Club; MEM-000094: William Harris, Literature Club; MEM-000111: Zoey Clark, Art Club; MEM-000115: Aubrey Wright, Cultural Club"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["local_scratchpad_write", "local_scratchpad_read", "local_read_document", "local_search_document", "supabase_execute_sql"]
+    }
+  }
+]

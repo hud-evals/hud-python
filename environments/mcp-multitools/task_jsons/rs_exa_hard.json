@@ -1,0 +1,81 @@
+[
+  {
+    "id": "task-exa-space-multi-source",
+    "prompt": "Go to Wikipedia page 'List of missions to the Moon' and extract lunar mission data.\n\nIMPORTANT: Use the scratchpad_write tool to store your answers with the specified keys.\n\nPART 1 - WIKIPEDIA (3 eras):\nExtract ALL lunar missions from these year ranges:\n- Years 1966, 1967, 1968, 1969 → store as 'era_1960s'\n- Years 1990-1999 → store as 'era_1990s'\n- Years 2019-2025 → store as 'era_2020s'\n\nORDERING: Chronological order by launch date, exactly as they appear in the Wikipedia table (earliest first).\n\nFORMAT: {Mission}: {Year}, {Operator}, {Outcome}\nSEPARATOR: Exactly '; ' (semicolon + one space). ALL entries on ONE line.\n\nFORMATTING RULES:\n- Mission: Copy EXACTLY as shown in table, including:\n  - Parenthetical codes: 'Luna 9 (E-6 No.13)', 'Clementine (DSPSE)'\n  - Apostrophes (use straight '): \"Chang'e 5\"\n  - Slashes in names: 'DRO A/B'\n- Year: 4-digit only (1966, 2023)\n- Operator: Copy exactly. Joint missions use slash, NO spaces: 'ISAS/NASA'\n- Outcome: EXACTLY one of these 5 values:\n  Success | Launch failure | Spacecraft failure | Partial failure | Operational\n\nEXAMPLES:\nApollo 15: 1971, NASA, Success; SMART-1: 2003, ESA, Success; Chandrayaan-1: 2008, ISRO, Success\n\nPART 2 - EXTERNAL LAUNCH DATABASE:\nIn Wikipedia's 'External links' or 'See also', find Gunter's Space Page. Navigate to their 2023 orbital launches page.\n\nExtract the FIRST 100 launches.\n\nORDERING: Sequential by Launch ID (2023-001, 2023-002, ... with failures like 2023-F01 interspersed by date).\n\nFORMAT: {LaunchID}: {Date}, {Rocket}\nSEPARATOR: Exactly '; ' (semicolon + one space). ALL entries on ONE line.\n\nFORMATTING RULES:\n- LaunchID: Format '2023-NNN' or '2023-FNN' for failures. Examples: '2023-001', '2023-F01'\n- Date: DD.MM.YYYY exactly as shown. Example: '03.01.2023' (NOT '3.1.2023')\n- Rocket: Copy EXACTLY including all parentheses and spacing:\n  - 'Falcon-9 v1.2 (Block 5)'\n  - 'Falcon-Heavy (Block 5)(px)' ← note: no space before (px)\n  - 'Ceres-1 (3) (Gushenxing-1 (3))'\n  - 'CZ-7A'\n\nDO NOT include satellite/mission names - only the rocket.\n\nStore as 'launches_2023'.\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "era_1960s": "Luna 9 (E-6 No.13): 1966, Lavochkin, Success; Kosmos 111 (E-6S No.204): 1966, Lavochkin, Launch failure; Luna 10 (E-6S No.206): 1966, Lavochkin, Success; Surveyor 1: 1966, NASA, Success; Explorer 33 (AIMP-D): 1966, NASA, Launch failure; Lunar Orbiter 1: 1966, NASA, Partial failure; Luna 11 (E-6LF No.101): 1966, Lavochkin, Partial failure; Surveyor 2: 1966, NASA, Spacecraft failure; Luna 12 (E-6LF No.102): 1966, Lavochkin, Success; Lunar Orbiter 2: 1966, NASA, Success; Luna 13 (E-6M No.205): 1966, Lavochkin, Success; Lunar Orbiter 3: 1967, NASA, Success; Surveyor 3: 1967, NASA, Success; Lunar Orbiter 4: 1967, NASA, Success; Surveyor 4: 1967, NASA, Spacecraft failure; Explorer 35(AIMP-E): 1967, NASA, Success; Lunar Orbiter 5: 1967, NASA, Success; Surveyor 5: 1967, NASA, Success; Soyuz 7K-L1 No.4L: 1967, Lavochkin, Spacecraft failure; Surveyor 6: 1967, NASA, Success; Soyuz 7K-L1 No.5L: 1967, Lavochkin, Launch failure; Surveyor 7: 1968, NASA, Success; Luna E-6LS No.112: 1968, Lavochkin, Launch failure; Luna 14 (E-6LS No.113): 1968, Lavochkin, Success; Soyuz 7K-L1 No.7L: 1968, Lavochkin, Launch failure; Zond 5 (7K-L1 No.9L): 1968, Lavochkin, Success; Zond 6 (7K-L1 No.12L): 1968, Lavochkin, Spacecraft failure; Apollo 8: 1968, NASA, Success; Soyuz 7K-L1 No.13L: 1969, Lavochkin, Launch failure; Luna E-8 No.201: 1969, Lavochkin, Launch failure; Soyuz 7K-L1S No.3: 1969, OKB-1, Launch failure; Apollo 10: 1969, NASA, Success; Luna E-8-5 No.402: 1969, Lavochkin, Launch failure; Soyuz 7K-L1S No.5: 1969, OKB-1, Launch failure; Luna 15 (E-8-5 No.401): 1969, Lavochkin, Spacecraft failure; Apollo 11: 1969, NASA, Success; Zond 7 (7K-L1 No.11L): 1969, Lavochkin, Success; Kosmos 300 (E-8-5 No.403): 1969, Lavochkin, Launch failure; Kosmos 305 (E-8-5 No.404): 1969, Lavochkin, Launch failure; Apollo 12: 1969, NASA, Success",
+          "era_1990s": "Hiten (MUSES-A): 1990, ISAS, Success; Geotail: 1992, ISAS/NASA, Success; WIND: 1994, NASA, Success; Clementine (DSPSE): 1994, USAF/NASA, Success; HGS-1: 1997, Hughes, Success; Lunar Prospector (Discovery 3): 1998, NASA, Success; Nozomi (PLANET-B): 1998, ISAS, Success",
+          "era_2020s": "Beresheet: 2019, SpaceIL, Spacecraft failure; Chandrayaan-2: 2019, ISRO, Operational; Chang'e 5: 2020, CNSA, Operational; CAPSTONE: 2022, NASA, Operational; Danuri: 2022, KARI, Operational; Artemis I: 2022, NASA, Success; Hakuto-R Mission 1: 2022, ispace, Spacecraft failure; Jupiter Icy Moons Explorer: 2023, ESA, Success; Chandrayaan-3: 2023, ISRO, Success; Luna 25: 2023, Roscosmos, Spacecraft failure; SLIM: 2023, JAXA, Success; Peregrine Mission One: 2024, Astrobotic Technology, Spacecraft failure; IM-1: 2024, Intuitive Machines, Success; DRO A/B: 2024, CAS, Operational; Queqiao-2: 2024, CNSA, Operational; Chang'e 6: 2024, CNSA, Success; Blue Ghost M1: 2025, Firefly Aerospace, Success; Hakuto-R Mission 2: 2025, ispace, Spacecraft failure; Lunar Trailblazer: 2025, NASA, Spacecraft failure; Brokkr-2: 2025, AstroForge, Spacecraft failure; Chimera-1: 2025, Epic Aerospace, Success; IM-2: 2025, Intuitive Machines, Partial failure",
+          "launches_2023": "2023-001: 03.01.2023, Falcon-9 v1.2 (Block 5); 2023-002: 08.01.2023, CZ-7A; 2023-003: 09.01.2023, Ceres-1 (3) (Gushenxing-1 (3)); 2023-F01: 09.01.2023, LauncherOne; 2023-004: 10.01.2023, Falcon-9 v1.2 (Block 5); 2023-F02: 10.01.2023, RS1 (Block 1); 2023-005: 12.01.2023, CZ-2C (3); 2023-006: 13.01.2023, CZ-2D (2); 2023-007: 15.01.2023, CZ-2D (2); 2023-008: 15.01.2023, Falcon-Heavy (Block 5)(px); 2023-009: 18.01.2023, Falcon-9 v1.2 (Block 5); 2023-010: 19.01.2023, Falcon-9 v1.2 (Block 5); 2023-011: 24.01.2023, Electron KS; 2023-012: 26.01.2023, H-2A-202; 2023-013: 26.01.2023, Falcon-9 v1.2 (Block 5); 2023-014: 31.01.2023, Falcon-9 v1.2 (Block 5); 2023-015: 02.02.2023, Falcon-9 v1.2 (Block 5); 2023-016: 05.02.2023, Proton-M Blok-DM-03; 2023-017: 07.02.2023, Falcon-9 v1.2 (Block 5); 2023-018: 09.02.2023, Soyuz-2-1a; 2023-019: 10.02.2023, SSLV; 2023-020: 12.02.2023, Falcon-9 v1.2 (Block 5); 2023-021: 17.02.2023, Falcon-9 v1.2 (Block 5); 2023-022: 18.02.2023, Falcon-9 v1.2 (Block 5); 2023-023: 23.02.2023, CZ-3B/G2; 2023-024: 24.02.2023, Soyuz-2-1a; 2023-025: 24.02.2023, CZ-2C (3); 2023-026: 27.02.2023, Falcon-9 v1.2 (Block 5); 2023-027: 02.03.2023, Falcon-9 v1.2 (Block 5); 2023-028: 03.03.2023, Falcon-9 v1.2 (Block 5); 2023-F03: 04.03.2023, Qaem-100; 2023-F04: 06.03.2023, H-3-22S; 2023-029: 09.03.2023, Falcon-9 v1.2 (Block 5); 2023-030: 09.03.2023, CZ-4C; 2023-031: 12.03.2023, Proton-M Briz-M (Ph.3); 2023-032: 13.03.2023, CZ-2C (3); 2023-033: 15.03.2023, Falcon-9 v1.2 (Block 5); 2023-034: 15.03.2023, CZ-11; 2023-035: 16.03.2023, Electron KS; 2023-036: 17.03.2023, CZ-3B/G3; 2023-037: 17.03.2023, Falcon-9 v1.2 (Block 5); 2023-038: 17.03.2023, Falcon-9 v1.2 (Block 5); 2023-039: 22.03.2023, Kuaizhou-1A; 2023-F05: 23.03.2023, Terran-1 (Block 1); 2023-040: 23.03.2023, Soyuz-2-1a; 2023-041: 24.03.2023, Electron KS (R); 2023-042: 24.03.2023, Falcon-9 v1.2 (Block 5); 2023-043: 26.03.2023, LVM3 (2); 2023-044: 28.03.2023, Shavit-2; 2023-045: 29.03.2023, Soyuz-2-1v; 2023-046: 29.03.2023, Falcon-9 v1.2 (Block 5); 2023-047: 30.03.2023, CZ-2D (2); 2023-048: 31.03.2023, CZ-4C; 2023-049: 02.04.2023, Tianlong-2; 2023-050: 02.04.2023, Falcon-9 v1.2 (Block 5); 2023-051: 07.04.2023, Hyperbola-1(2) (Shuang Quxian-1(2)); 2023-052: 07.04.2023, Falcon-9 v1.2 (Block 5); 2023-053: 14.04.2023, Ariane-5ECA+; 2023-054: 15.04.2023, Falcon-9 v1.2 (Block 5); 2023-055: 16.04.2023, CZ-4B; 2023-056: 19.04.2023, Falcon-9 v1.2 (Block 5); 2023-F06: 20.04.2023, Starship v1.1; 2023-057: 22.04.2023, PSLV-CA (2); 2023-058: 27.04.2023, Falcon-9 v1.2 (Block 5); 2023-059: 28.04.2023, Falcon-9 v1.2 (Block 5); 2023-060: 01.05.2023, Falcon-Heavy (Block 5)(ex); 2023-061: 04.05.2023, Falcon-9 v1.2 (Block 5); 2023-062: 08.05.2023, Electron KS; 2023-063: 10.05.2023, CZ-7; 2023-064: 10.05.2023, Falcon-9 v1.2 (Block 5); 2023-065: 14.05.2023, Falcon-9 v1.2 (Block 5); 2023-066: 17.05.2023, CZ-3B/G3; 2023-067: 19.05.2023, Falcon-9 v1.2 (Block 5); 2023-068: 20.05.2023, Falcon-9 v1.2 (Block 5); 2023-069: 21.05.2023, CZ-2C (3); 2023-070: 21.05.2023, Falcon-9 v1.2 (Block 5); 2023-071: 24.05.2023, Soyuz-2-1a; 2023-072: 25.05.2023, Nuri (KSLV-2); 2023-073: 26.05.2023, Electron KS; 2023-074: 26.05.2023, Soyuz-2-1a Fregat; 2023-075: 27.05.2023, Falcon-9 v1.2 (Block 5); 2023-076: 29.05.2023, GSLV Mk.2(4); 2023-077: 30.05.2023, CZ-2F/G; 2023-F07: 30.05.2023, Chollima-1; 2023-078: 31.05.2023, Falcon-9 v1.2 (Block 5); 2023-079: 04.06.2023, Falcon-9 v1.2 (Block 5); 2023-080: 04.06.2023, Falcon-9 v1.2 (Block 5); 2023-081: 07.06.2023, Lijian-1 (Kinetica-1); 2023-082: 09.06.2023, Kuaizhou-1A; 2023-083: 12.06.2023, Falcon-9 v1.2 (Block 5); 2023-084: 12.06.2023, Falcon-9 v1.2 (Block 5); 2023-085: 15.06.2023, CZ-2D (2); 2023-086: 18.06.2023, Falcon-9 v1.2 (Block 5); 2023-087: 20.06.2023, CZ-6; 2023-088: 22.06.2023, Falcon-9 v1.2 (Block 5); 2023-089: 22.06.2023, Delta-4H (upg.); 2023-090: 23.06.2023, Falcon-9 v1.2 (Block 5); 2023-091: 27.06.2023, Soyuz-2-1b Fregat; 2023-092: 01.07.2023, Falcon-9 v1.2 (Block 5); 2023-093: 05.07.2023, Ariane-5ECA+"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "search",
+        "fetch",
+        "scratchpad_write",
+        "scratchpad_read"
+      ]
+    }
+  },
+  {
+    "id": "task-exa-reference-chain",
+    "prompt": "Go to Wikipedia's 'List of presidents of the United States'.\n\nIMPORTANT: Use the scratchpad_write tool to store your answers with the specified keys.\n\nPART A - EXACT VALUE:\nFind the exact start date of the 32nd president's first term.\nStore as 'president_32_start'.\nFormat: Month D, YYYY (e.g., January 20, 2021 - no leading zeros on day).\n\nPART B - MAIN TABLE (5 entries):\nExtract presidents #30 through #34 with their party affiliation.\n\nFORMAT: {Number}. {Name}, {Party}\nSEPARATOR: Exactly '; ' (semicolon + one space). ALL entries on ONE line.\nStore as 'presidents_30_34'.\n\nFORMATTING RULES:\n- Number: Just the number, then period, then space: '30. ', '31. '\n- Name: As shown in Wikipedia. Some have middle initials, some don't:\n  - 'Calvin Coolidge' (no middle initial)\n  - 'Herbert Hoover' (no middle initial)\n  - 'Franklin D. Roosevelt' (with middle initial + period)\n  - 'Harry S. Truman' (with middle initial + period)\n  - 'Dwight D. Eisenhower' (with middle initial + period)\n- Party: Exactly 'Republican' or 'Democratic'\n\nEXAMPLE: 16. Abraham Lincoln, Republican; 44. Barack Obama, Democratic\n\nPART C - REFERENCE CHAIN (3 levels, 10 entries):\nFollow this chain - you MUST visit each page to find the next link:\n1. Click on the 35th president's name\n2. On their page, find who served as their VICE PRESIDENT and click on that person's name\n3. On the VP's Wikipedia page, find a link to their PRESIDENCY page (or cabinet section)\n4. Extract the first 10 DIFFERENT cabinet positions from the table. For each position, take ONLY the FIRST person listed (earliest start year)\n\nFORMAT: {Name}: {Position}, {Years}\nSEPARATOR: Exactly '; ' (semicolon + one space). ALL entries on ONE line.\nStore as 'vp_cabinet'.\n\nFORMATTING RULES:\n- Name: As shown in table. Some have initials, some don't:\n  - 'Dean Rusk' (no initials)\n  - 'C. Douglas Dillon' (initial + period at start)\n  - 'Robert F. Kennedy' (middle initial + period)\n  - 'W. Willard Wirtz' (initial at start)\n- Position: Short form, no 'United States' prefix:\n  - 'Secretary of State'\n  - 'Secretary of the Treasury'\n  - 'Attorney General'\n  - 'Secretary of Health, Education, and Welfare' ← has commas, keep them\n- Years: YYYY-YYYY with regular hyphen (-), not en-dash. Example: '1963-1969'\n\nEXAMPLE: Hillary Clinton: Secretary of State, 2009-2013; Timothy Geithner: Secretary of the Treasury, 2009-2013\n\nSay 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--env-file",
+          "/home/rs/projects/hud-python/.env",
+          "mcp-multitools:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {}
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "president_32_start": "March 4, 1933",
+          "presidents_30_34": "30. Calvin Coolidge, Republican; 31. Herbert Hoover, Republican; 32. Franklin D. Roosevelt, Democratic; 33. Harry S. Truman, Democratic; 34. Dwight D. Eisenhower, Republican",
+          "vp_cabinet": "Dean Rusk: Secretary of State, 1963-1969; C. Douglas Dillon: Secretary of the Treasury, 1963-1965; Robert McNamara: Secretary of Defense, 1963-1968; Robert F. Kennedy: Attorney General, 1963-1964; John A. Gronouski: Postmaster General, 1963-1965; Stewart Udall: Secretary of the Interior, 1963-1969; Orville Freeman: Secretary of Agriculture, 1963-1969; Luther H. Hodges: Secretary of Commerce, 1963-1965; W. Willard Wirtz: Secretary of Labor, 1963-1969; Anthony J. Celebrezze: Secretary of Health, Education, and Welfare, 1963-1965"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": [
+        "search",
+        "fetch",
+        "scratchpad_write",
+        "scratchpad_read"
+      ]
+    }
+  }
+]

@@ -1,0 +1,51 @@
+CLUB LEADERSHIP ROSTER
+=====================
+Greater Boston School District
+Academic Year 2024-2025
+
+The following students hold leadership positions in school clubs.
+Leadership roles include: President, Vice President, Captain, Leader.
+
+CLUB LEADERS
+------------
+
+MEM-000111: Zoey Clark - Art Club (President)
+MEM-002274: Benjamin Taylor - Art Club (Vice_President)
+MEM-000550: William Lewis - Band (President)
+MEM-000102: Victoria Martin - Basketball Club (Vice_President)
+MEM-000700: John Ramirez - Basketball Club (President)
+MEM-000235: Luke Garcia - Chess Club (President)
+MEM-001548: Benjamin Davis - Chess Club (Vice_President)
+MEM-000052: Lily Green - Computer Science Club (Vice_President)
+MEM-000975: William Davis - Computer Science Club (President)
+MEM-001250: Aria Wilson - Cooking Club (President)
+MEM-000088: Joseph Adams - Cultural Club (Vice_President)
+MEM-000115: Aubrey Wright - Cultural Club (President)
+MEM-001091: Aubrey King - Cultural Club (President)
+MEM-002040: Jack Gonzalez - Dance Club (President)
+MEM-000473: Samuel Wright - Drama Club (President)
+MEM-000907: Scarlett Lopez - Drama Club (Vice_President)
+MEM-001524: Abigail Johnson - Film Club (President)
+MEM-000022: John Ramirez - History Club (President)
+MEM-000094: William Harris - Literature Club (President)
+MEM-002312: John Hall - Model UN (President)
+MEM-000193: Ava Scott - Newspaper Club (President)
+MEM-000065: Michael Jackson - Orchestra (Vice_President)
+MEM-001002: Victoria Lopez - Orchestra (President)
+MEM-001819: Lily Williams - Orchestra (Vice_President)
+MEM-001131: Wyatt Hill - Photography Club (Vice_President)
+MEM-002309: Lucas Jones - Robotics Club (President)
+MEM-001605: Benjamin Jones - Science Olympiad (Vice_President)
+MEM-000073: Lily Lopez - Student Council (Vice_President)
+MEM-001737: Emma Baker - Student Council (Vice_President)
+MEM-000958: Matthew Sanchez - Swimming Club (Vice_President)
+MEM-001106: Benjamin Anderson - Tennis Club (Vice_President)
+MEM-000948: Aria Taylor - Volleyball Club (President)
+MEM-002248: Evelyn Nelson - Volleyball Club (President)
+MEM-002649: Chloe Young - Volleyball Club (Vice_President)
+
+------------
+Total Leaders: 34
+
+Leadership positions are reviewed each semester.
+Contact: student-leadership@gbsd.edu

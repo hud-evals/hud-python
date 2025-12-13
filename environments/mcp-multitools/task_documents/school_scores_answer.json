@@ -1,0 +1,35 @@
+{
+  "answer": "STU-000032: Sofia Young, document says 75.87, actual 58.94; STU-000050: Sofia Gonzalez, document says 91.54, actual 72.8; STU-000060: Riley Garcia, document says 150.11, actual 156.15; STU-000164: Victoria Martin, document says 77.91, actual 74.79; STU-000239: Sophia Brown, document says 107.98, actual 115.94",
+  "contradictions": [
+    {
+      "student_id": "STU-000032",
+      "name": "Sofia Young",
+      "doc_score": 75.87,
+      "actual_score": 58.94
+    },
+    {
+      "student_id": "STU-000050",
+      "name": "Sofia Gonzalez",
+      "doc_score": 91.54,
+      "actual_score": 72.8
+    },
+    {
+      "student_id": "STU-000060",
+      "name": "Riley Garcia",
+      "doc_score": 150.11,
+      "actual_score": 156.15
+    },
+    {
+      "student_id": "STU-000164",
+      "name": "Victoria Martin",
+      "doc_score": 77.91,
+      "actual_score": 74.79
+    },
+    {
+      "student_id": "STU-000239",
+      "name": "Sophia Brown",
+      "doc_score": 107.98,
+      "actual_score": 115.94
+    }
+  ]
+}

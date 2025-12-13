@@ -1,0 +1,179 @@
+[
+  {
+    "id": "task-exa-crossref-convs2s",
+    "prompt": "MULTI-HOP CROSS-REFERENCE TASK:\n\nStep 1: Find the original 'Attention Is All You Need' (Transformer) paper.\nStep 2: In Table 2, find reference [9] - the ConvS2S model. Note its EN-DE BLEU score.\nStep 3: Find the ConvS2S paper (reference [9]: 'Convolutional sequence to sequence learning').\nStep 4: In that paper, find the architecture used for WMT'14 English-German translation.\n\nAnswer these TWO questions:\n- Q1: How many encoder layers does the ConvS2S best model use for EN-DE?\n- Q2: How many decoder layers?\n\nFORMAT: \"encoder_layers=X, decoder_layers=Y\" where X and Y are numbers. Example: \"encoder_layers=20, decoder_layers=20\"\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "encoder_layers=15, decoder_layers=15"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["scratchpad_write", "scratchpad_read", "search", "fetch"]
+    }
+  },
+  {
+    "id": "task-exa-crossref-squad2",
+    "prompt": "MULTI-HOP CROSS-REFERENCE TASK:\n\nStep 1: Find the BERT paper ('BERT: Pre-training of Deep Bidirectional Transformers').\nStep 2: Find the SQuAD 2.0 results mentioned. The paper references 'Know What You Don't Know' for SQuAD 2.0.\nStep 3: Find that SQuAD 2.0 paper and extract: How many UNANSWERABLE questions were added to create SQuAD 2.0?\n\nThe paper states the exact number in the body text (not just the approximate 'over 50,000' from the abstract).\n\nFORMAT: Just the exact number, no commas. Example: \"53775\"\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "53775"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["scratchpad_write", "scratchpad_read", "search", "fetch"]
+    }
+  },
+  {
+    "id": "task-exa-transformer-flops",
+    "prompt": "DEEP TABLE LOOKUP:\n\nFind the Transformer paper ('Attention Is All You Need').\n\nIn Table 2, find the Training Cost (FLOPs) column for the EN-FR translation task.\n\nQuestion: What is the training cost in FLOPs for the 'ConvS2S' model on EN-FR?\n\nThe value will be in scientific notation like X.Y × 10^Z.\n\nFORMAT: Express as \"X.YeZ\" (e.g., \"1.5e20\" for 1.5 × 10^20)\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "1.5e20"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["scratchpad_write", "scratchpad_read", "search", "fetch"]
+    }
+  },
+  {
+    "id": "task-exa-gpt3-winogrande",
+    "prompt": "SPECIFIC MODEL + BENCHMARK LOOKUP:\n\nFind the GPT-3 paper ('Language Models are Few-Shot Learners').\n\nIn Table 3.5, find the Winogrande (XL) benchmark results.\n\nWhat is the EXACT accuracy for GPT-3 in the FEW-SHOT setting on Winogrande (XL)?\n\nFORMAT: Just the number with one decimal place. Example: \"77.7\"\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "77.7"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["scratchpad_write", "scratchpad_read", "search", "fetch"]
+    }
+  },
+  {
+    "id": "task-exa-hellaswag-human",
+    "prompt": "CROSS-REFERENCE + SPECIFIC VALUE:\n\nStep 1: Find the GPT-3 paper. Note it mentions HellaSwag benchmark.\nStep 2: Find the HellaSwag paper ('HellaSwag: Can a Machine Really Finish Your Sentence?').\nStep 3: Find the HUMAN accuracy on the HellaSwag benchmark.\n\nWhat is the human accuracy percentage on HellaSwag?\n\nFORMAT: Just the number with one decimal place. Example: \"95.6\"\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "95.6"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["scratchpad_write", "scratchpad_read", "search", "fetch"]
+    }
+  },
+  {
+    "id": "task-exa-bert-glue-score",
+    "prompt": "SPECIFIC BENCHMARK VALUE:\n\nFind the BERT paper ('BERT: Pre-training of Deep Bidirectional Transformers').\n\nFind the overall GLUE benchmark score achieved by BERT.\n\nThe paper reports this as a percentage point improvement over prior work.\n\nWhat is the ABSOLUTE GLUE score (not the improvement, but the actual score) that BERT achieved?\n\nFORMAT: Just the number with one decimal place. Example: \"80.5\"\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "80.5"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["scratchpad_write", "scratchpad_read", "search", "fetch"]
+    }
+  },
+  {
+    "id": "task-exa-convs2s-hidden-units",
+    "prompt": "ARCHITECTURE DEEP DIVE:\n\nFind the ConvS2S paper ('Convolutional sequence to sequence learning' by Gehring et al.).\n\nFor the WMT'14 English-French model architecture:\n\nThe paper states the encoder/decoder have 15 layers each with VARYING hidden unit sizes across layers.\n\nWhat hidden dimension is used in the FIRST FIVE layers of the encoder?\n\nFORMAT: Just the number. Example: \"512\"\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "512"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["scratchpad_write", "scratchpad_read", "search", "fetch"]
+    }
+  },
+  {
+    "id": "task-exa-gpt3-trivia-zeroshot",
+    "prompt": "SPECIFIC BENCHMARK + SETTING:\n\nFind the GPT-3 paper.\n\nFind the TriviaQA benchmark results in the closed-book setting.\n\nWhat is the EXACT accuracy for GPT-3 175B in the ZERO-SHOT setting on TriviaQA (closed-book)?\n\nThe paper explicitly states this value in the text (not just in a figure).\n\nFORMAT: Just the number with one decimal place. Example: \"64.3\"\n\nStore answer with key 'answer'. Say 'Task completed.' when done.",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "--env-file", "/home/rs/projects/hud-python/.env", "mcp-multitools:latest"]
+      }
+    },
+    "setup_tool": {"name": "setup", "arguments": {}},
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "exact_values": {
+          "answer": "64.3"
+        }
+      }
+    },
+    "agent_config": {
+      "allowed_tools": ["scratchpad_write", "scratchpad_read", "search", "fetch"]
+    }
+  }
+]
+
