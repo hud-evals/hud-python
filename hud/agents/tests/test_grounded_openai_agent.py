@@ -70,20 +70,20 @@ class DummyGroundedTool:
 
 @pytest.mark.asyncio
 async def test_call_tools_injects_screenshot_and_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Agent with fake OpenAI client and fake MCP client
+    # Agent with fake OpenAI client
     grounder_cfg = GrounderConfig(api_base="http://example", model="qwen")
     fake_openai = AsyncOpenAI(api_key="test")
     agent = GroundedOpenAIChatAgent.create(
         grounder_config=grounder_cfg,
         openai_client=fake_openai,
         checkpoint_name="gpt-4o-mini",
-        mcp_client=FakeMCPClient(),
         initial_screenshot=False,
     )
 
     # Inject a dummy grounded tool to observe args without full initialization
     dummy_tool = DummyGroundedTool()
     agent.grounded_tool = dummy_tool  # type: ignore
+    agent._initialized = True  # Mark as initialized to skip context initialization
 
     # Seed conversation history with a user image
     png_b64 = (

@@ -6,9 +6,10 @@ Requires the [agents] extra: pip install hud-python[agents]
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import hud
+from hud.types import AgentType
 
 if TYPE_CHECKING:
     from hud.agents import MCPAgent
@@ -16,6 +17,45 @@ if TYPE_CHECKING:
     from hud.eval.task import Task
 
 logger = logging.getLogger("hud.datasets")
+
+
+async def run_tasks(
+    tasks: list[Task],
+    *,
+    agent_type: str,
+    agent_params: dict[str, Any] | None = None,
+    max_steps: int = 10,
+    max_concurrent: int = 30,
+    group_size: int = 1,
+) -> list[EvalContext]:
+    """Run tasks with an agent created from type and parameters.
+
+    This is a convenience wrapper around run_dataset that creates the agent
+    from a type string and parameters dictionary.
+
+    Args:
+        tasks: List of Task objects to run.
+        agent_type: Type of agent to create (e.g., "claude", "openai", "gemini").
+        agent_params: Parameters to pass to agent.create().
+        max_steps: Maximum steps per task.
+        max_concurrent: Maximum concurrent tasks.
+        group_size: Number of times to run each task.
+
+    Returns:
+        List of EvalContext results from each task execution.
+    """
+    # Use AgentType enum to get the agent class (same pattern as CLI)
+    agent_type_enum = AgentType(agent_type)
+    agent_cls = agent_type_enum.cls
+    agent = agent_cls.create(**(agent_params or {}))
+
+    return await run_dataset(
+        tasks,
+        agent,
+        max_steps=max_steps,
+        max_concurrent=max_concurrent,
+        group_size=group_size,
+    )
 
 
 async def run_dataset(

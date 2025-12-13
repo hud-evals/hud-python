@@ -114,11 +114,14 @@ def _load_from_api(dataset_name: str) -> list[Task]:
         response.raise_for_status()
         data = response.json()
 
+        # Extract tasks dict from response
+        tasks_dict = data.get("tasks", {})
+
         tasks: list[Task] = []
-        if isinstance(data, list):
-            tasks = [_task_from_dict(item) for item in data]
-        else:
-            tasks = [_task_from_dict(data)]
+        for task_id, task_data in tasks_dict.items():
+            if task_data.get("id") is None:
+                task_data["id"] = task_id
+            tasks.append(_task_from_dict(task_data))
 
         return tasks
 

@@ -150,7 +150,10 @@ class TestOpenAIAgent:
 
         messages = await agent.format_blocks([])
         assert len(messages) == 1
-        assert messages[0]["content"] == []
+        # Empty blocks produce a single empty text item
+        assert len(messages[0]["content"]) == 1
+        assert messages[0]["content"][0]["type"] == "input_text"
+        assert messages[0]["content"][0]["text"] == ""
 
     @pytest.mark.asyncio
     async def test_format_tool_results_text(self, mock_openai: AsyncOpenAI) -> None:
@@ -172,7 +175,9 @@ class TestOpenAIAgent:
         assert len(messages) == 1
         assert messages[0]["type"] == "function_call_output"
         assert messages[0]["call_id"] == "call_123"
-        assert messages[0]["output"] == "Tool output"
+        # Output is a list of content items
+        assert len(messages[0]["output"]) == 1
+        assert messages[0]["output"][0]["text"] == "Tool output"
 
     @pytest.mark.asyncio
     async def test_format_tool_results_with_error(self, mock_openai: AsyncOpenAI) -> None:
@@ -192,21 +197,23 @@ class TestOpenAIAgent:
 
         messages = await agent.format_tool_results(tool_calls, tool_results)
         assert len(messages) == 1
-        assert "Error message" in messages[0]["output"]
+        # Output is a list; first item is error indicator, second is the message
+        output = messages[0]["output"]
+        assert any(item.get("text") == "[tool_error] true" for item in output)
+        assert any(item.get("text") == "Error message" for item in output)
 
     @pytest.mark.asyncio
     async def test_get_system_messages(self, mock_openai: AsyncOpenAI) -> None:
-        """Test getting system messages."""
+        """Test getting system messages - OpenAI uses instructions field instead."""
         agent = OpenAIAgent.create(
             model_client=mock_openai,
             system_prompt="You are a helpful assistant.",
             validate_api_key=False,
         )
 
+        # OpenAI agent returns empty list - system prompt is passed via instructions
         messages = await agent.get_system_messages()
-        assert len(messages) == 1
-        assert messages[0]["type"] == "message"
-        assert messages[0]["role"] == "developer"
+        assert len(messages) == 0
 
     @pytest.mark.asyncio
     async def test_convert_tools_for_openai(self, mock_openai: AsyncOpenAI) -> None:
@@ -229,9 +236,9 @@ class TestOpenAIAgent:
         await agent._initialize_from_ctx(ctx)
 
         # Check that tools were converted
-        assert len(agent.openai_tools) >= 1
+        assert len(agent._openai_tools) >= 1
         # Find our tool
-        tool = next((t for t in agent.openai_tools if t.get("name") == "my_tool"), None)
+        tool = next((t for t in agent._openai_tools if t.get("name") == "my_tool"), None)
         assert tool is not None
         assert tool["type"] == "function"
 
@@ -266,7 +273,7 @@ class TestOpenAIAgent:
                 type="message",
                 role="assistant",
                 status="completed",
-                content=[ResponseOutputText(type="output_text", text="Hello!")],
+                content=[ResponseOutputText(type="output_text", text="Hello!", annotations=[])],
             )
         ]
         mock_openai.responses.create = AsyncMock(return_value=mock_response)
@@ -276,7 +283,7 @@ class TestOpenAIAgent:
             validate_api_key=False,
         )
         # Set empty tools to avoid needing initialization
-        agent.openai_tools = []
+        agent._openai_tools = []
         agent._initialized = True
 
         response = await agent.get_response([])
@@ -288,21 +295,14 @@ class TestOpenAIAgent:
     async def test_get_response_with_tool_call(self, mock_openai: AsyncOpenAI) -> None:
         """Test getting response with tool call."""
         mock_response = AsyncMock()
+        # Tool calls come as separate output items, not inside message content
         mock_response.output = [
-            ResponseOutputMessage(
-                id="msg_123",
-                type="message",
-                role="assistant",
-                status="completed",
-                content=[
-                    ResponseFunctionToolCall(
-                        id="call_123",
-                        type="function_call",
-                        call_id="call_123",
-                        name="my_tool",
-                        arguments='{"x": "value"}',
-                    )
-                ],
+            ResponseFunctionToolCall(
+                id="call_123",
+                type="function_call",
+                call_id="call_123",
+                name="my_tool",
+                arguments='{"x": "value"}',
             )
         ]
         mock_openai.responses.create = AsyncMock(return_value=mock_response)
@@ -311,8 +311,8 @@ class TestOpenAIAgent:
             model_client=mock_openai,
             validate_api_key=False,
         )
-        agent.openai_tools = []
-        agent.tool_mapping = {"my_tool": "my_tool"}
+        agent._openai_tools = []
+        agent._tool_name_map = {"my_tool": "my_tool"}
         agent._initialized = True
 
         response = await agent.get_response([])
@@ -336,7 +336,7 @@ class TestOpenAIAgent:
                 type="message",
                 role="assistant",
                 status="completed",
-                content=[ResponseOutputText(type="output_text", text="Answer!")],
+                content=[ResponseOutputText(type="output_text", text="Answer!", annotations=[])],
             ),
         ]
         mock_openai.responses.create = AsyncMock(return_value=mock_response)
@@ -345,12 +345,13 @@ class TestOpenAIAgent:
             model_client=mock_openai,
             validate_api_key=False,
         )
-        agent.openai_tools = []
+        agent._openai_tools = []
         agent._initialized = True
 
         response = await agent.get_response([])
-        assert "Thinking about it..." in (response.reasoning or "")
-        assert response.content == "Answer!"
+        # Reasoning is prepended to content in OpenAI agent
+        assert "Thinking about it..." in response.content
+        assert "Answer!" in response.content
 
 
 class TestOpenAIToolConversion:
@@ -385,12 +386,12 @@ class TestOpenAIToolConversion:
         await agent._initialize_from_ctx(ctx)
 
         # Check for native shell tool
-        shell_tool = next((t for t in agent.openai_tools if t.get("type") == "shell"), None)
+        shell_tool = next((t for t in agent._openai_tools if t.get("type") == "shell"), None)
         assert shell_tool is not None
 
     @pytest.mark.asyncio
     async def test_computer_tool_conversion(self, mock_openai: AsyncOpenAI) -> None:
-        """Test that computer tool is converted to native format."""
+        """Test that computer tool is converted to function format."""
         tools = [
             types.Tool(
                 name="computer",
@@ -407,9 +408,10 @@ class TestOpenAIToolConversion:
         agent.ctx = ctx
         await agent._initialize_from_ctx(ctx)
 
-        # Check for native computer tool
+        # Computer tool is converted to a regular function tool
         computer_tool = next(
-            (t for t in agent.openai_tools if t.get("type") == "computer_use_preview"),
+            (t for t in agent._openai_tools if t.get("name") == "computer"),
             None,
         )
         assert computer_tool is not None
+        assert computer_tool.get("type") == "function"

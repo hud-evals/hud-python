@@ -174,7 +174,8 @@ class TestGeminiAgent:
 
         # Check that tools were converted
         assert len(agent.gemini_tools) == 1
-        assert agent.gemini_tools[0]["name"] == "my_tool"
+        # Gemini tools have function_declarations
+        assert agent.gemini_tools[0].function_declarations[0].name == "my_tool"
 
 
 class TestGeminiToolConversion:
@@ -215,17 +216,19 @@ class TestGeminiToolConversion:
 
         assert len(agent.gemini_tools) == 1
         tool = agent.gemini_tools[0]
-        assert tool["name"] == "search"
-        assert "parameters" in tool
+        # Gemini tools have function_declarations
+        assert tool.function_declarations[0].name == "search"
+        assert tool.function_declarations[0].parameters_json_schema is not None
 
     @pytest.mark.asyncio
     async def test_tool_without_schema(self, mock_gemini_client: genai.Client) -> None:
-        """Test tool without input schema raises error."""
+        """Test tool without description raises error."""
+        # Create a tool with inputSchema but no description
         tools = [
             types.Tool(
                 name="incomplete",
                 description=None,
-                inputSchema=None,
+                inputSchema={"type": "object"},
             )
         ]
         ctx = MockEvalContext(tools=tools)

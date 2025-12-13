@@ -214,6 +214,7 @@ class TestRemoteConnectorMixin:
 
             env.connect_hub("hud/browser")
 
-        assert "browser" in env._connections
+        # connect_hub creates a connection named "hud" (the server name)
+        assert "hud" in env._connections
 
 

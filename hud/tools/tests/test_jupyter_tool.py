@@ -7,6 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from mcp.types import TextContent
 
+# Import tornado modules before tests to avoid forward reference issues with mocking
+import tornado.httpclient  # noqa: F401
+import tornado.ioloop  # noqa: F401
+import tornado.websocket  # noqa: F401
+
 from hud.tools.jupyter import JupyterTool, strip_ansi
 
 

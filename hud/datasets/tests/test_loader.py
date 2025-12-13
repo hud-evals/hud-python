@@ -12,8 +12,8 @@ from hud.datasets.loader import load_dataset
 class TestLoadDataset:
     """Tests for load_dataset() function."""
 
-    @patch("hud.datasets.loader.httpx.Client")
-    @patch("hud.datasets.loader.settings")
+    @patch("httpx.Client")
+    @patch("hud.settings.settings")
     def test_load_dataset_success(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
@@ -22,10 +22,23 @@ class TestLoadDataset:
         mock_settings.api_key = "test_key"
 
         mock_response = MagicMock()
-        mock_response.json.return_value = [
-            {"env": {"name": "test"}, "scenario": "checkout", "args": {"user": "alice"}},
-            {"env": {"name": "test"}, "scenario": "login", "args": {"user": "bob"}},
-        ]
+        # New EvalsetTasksResponse format: tasks keyed by task ID
+        mock_response.json.return_value = {
+            "evalset_id": "evalset-123",
+            "evalset_name": "test-dataset",
+            "tasks": {
+                "task-1": {
+                    "env": {"name": "test"},
+                    "scenario": "checkout",
+                    "args": {"user": "alice"},
+                },
+                "task-2": {
+                    "env": {"name": "test"},
+                    "scenario": "login",
+                    "args": {"user": "bob"},
+                },
+            },
+        }
         mock_response.raise_for_status = MagicMock()
 
         mock_client = MagicMock()
@@ -37,29 +50,38 @@ class TestLoadDataset:
         tasks = load_dataset("test-org/test-dataset")
 
         assert len(tasks) == 2
-        assert tasks[0].scenario == "checkout"
-        assert tasks[0].args == {"user": "alice"}
-        assert tasks[1].scenario == "login"
+        # Tasks are keyed by ID in dict, order may vary
+        scenarios = {t.scenario for t in tasks}
+        assert scenarios == {"checkout", "login"}
+        # Check task IDs are set from dict keys
+        task_ids = {t.id for t in tasks}
+        assert task_ids == {"task-1", "task-2"}
         mock_client.get.assert_called_once_with(
             "https://api.hud.ai/evals/test-org/test-dataset",
             headers={"Authorization": "Bearer test_key"},
             params={"all": "true"},
         )
 
-    @patch("hud.datasets.loader.httpx.Client")
-    @patch("hud.datasets.loader.settings")
+    @patch("httpx.Client")
+    @patch("hud.settings.settings")
     def test_load_dataset_single_task(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
-        """load_dataset() handles single task (non-list) response."""
+        """load_dataset() handles single task in EvalsetTasksResponse."""
         mock_settings.hud_api_url = "https://api.hud.ai"
         mock_settings.api_key = "test_key"
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
-            "env": {"name": "test"},
-            "scenario": "checkout",
-            "args": {"user": "alice"},
+            "evalset_id": "evalset-123",
+            "evalset_name": "test-dataset",
+            "tasks": {
+                "task-1": {
+                    "env": {"name": "test"},
+                    "scenario": "checkout",
+                    "args": {"user": "alice"},
+                },
+            },
         }
         mock_response.raise_for_status = MagicMock()
 
@@ -73,9 +95,10 @@ class TestLoadDataset:
 
         assert len(tasks) == 1
         assert tasks[0].scenario == "checkout"
+        assert tasks[0].id == "task-1"
 
-    @patch("hud.datasets.loader.httpx.Client")
-    @patch("hud.datasets.loader.settings")
+    @patch("httpx.Client")
+    @patch("hud.settings.settings")
     def test_load_dataset_no_api_key(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
@@ -84,7 +107,11 @@ class TestLoadDataset:
         mock_settings.api_key = None
 
         mock_response = MagicMock()
-        mock_response.json.return_value = []
+        mock_response.json.return_value = {
+            "evalset_id": "evalset-123",
+            "evalset_name": "test-dataset",
+            "tasks": {},
+        }
         mock_response.raise_for_status = MagicMock()
 
         mock_client = MagicMock()
@@ -95,14 +122,15 @@ class TestLoadDataset:
 
         tasks = load_dataset("test-org/test-dataset")
 
+        assert len(tasks) == 0
         mock_client.get.assert_called_once_with(
             "https://api.hud.ai/evals/test-org/test-dataset",
             headers={},
             params={"all": "true"},
         )
 
-    @patch("hud.datasets.loader.httpx.Client")
-    @patch("hud.datasets.loader.settings")
+    @patch("httpx.Client")
+    @patch("hud.settings.settings")
     def test_load_dataset_http_error(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
@@ -121,8 +149,8 @@ class TestLoadDataset:
         with pytest.raises(ValueError, match="Failed to load dataset"):
             load_dataset("test-org/test-dataset")
 
-    @patch("hud.datasets.loader.httpx.Client")
-    @patch("hud.datasets.loader.settings")
+    @patch("httpx.Client")
+    @patch("hud.settings.settings")
     def test_load_dataset_json_error(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
@@ -140,11 +168,11 @@ class TestLoadDataset:
         mock_client.__exit__.return_value = None
         mock_client_class.return_value = mock_client
 
-        with pytest.raises(ValueError, match="Error processing dataset"):
+        with pytest.raises(ValueError, match="Failed to load dataset"):
             load_dataset("test-org/test-dataset")
 
-    @patch("hud.datasets.loader.httpx.Client")
-    @patch("hud.datasets.loader.settings")
+    @patch("httpx.Client")
+    @patch("hud.settings.settings")
     def test_load_dataset_empty(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
@@ -153,7 +181,7 @@ class TestLoadDataset:
         mock_settings.api_key = "test_key"
 
         mock_response = MagicMock()
-        mock_response.json.return_value = []
+        mock_response.json.return_value = {"tasks": {}}
         mock_response.raise_for_status = MagicMock()
 
         mock_client = MagicMock()
@@ -166,8 +194,8 @@ class TestLoadDataset:
 
         assert len(tasks) == 0
 
-    @patch("hud.datasets.loader.httpx.Client")
-    @patch("hud.datasets.loader.settings")
+    @patch("httpx.Client")
+    @patch("hud.settings.settings")
     def test_load_dataset_missing_fields(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
@@ -176,9 +204,9 @@ class TestLoadDataset:
         mock_settings.api_key = "test_key"
 
         mock_response = MagicMock()
-        mock_response.json.return_value = [
-            {"scenario": "test"},  # Missing env and args
-        ]
+        mock_response.json.return_value = {
+            "tasks": {"task-1": {"scenario": "test"}},
+        }
         mock_response.raise_for_status = MagicMock()
 
         mock_client = MagicMock()
@@ -191,6 +219,7 @@ class TestLoadDataset:
 
         assert len(tasks) == 1
         assert tasks[0].scenario == "test"
+        assert tasks[0].id == "task-1"
         assert tasks[0].env is None
         assert tasks[0].args == {}
 
