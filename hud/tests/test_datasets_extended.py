@@ -9,7 +9,6 @@ import pytest
 
 from hud.datasets import run_dataset
 from hud.types import LegacyTask, MCPToolCall
-from hud.utils.tasks import save_tasks
 
 
 class TestTaskExtended:
@@ -120,32 +119,6 @@ class TestTaskExtended:
         assert task.mcp_config["null"] is None
         assert task.mcp_config["nested"]["list"] == [1, 2, "", 4]
         assert task.mcp_config["nested"]["dict"]["num"] == 123
-
-
-class TestDatasetOperations:
-    """Test dataset conversion and operations."""
-
-    def test_save_taskconfigs_empty_list(self):
-        """Test saving empty task list."""
-        with patch("datasets.Dataset") as MockDataset:
-            mock_instance = MagicMock()
-            MockDataset.from_list.return_value = mock_instance
-            mock_instance.push_to_hub.return_value = None
-
-            save_tasks([], "test-org/empty-dataset")
-
-            MockDataset.from_list.assert_called_once_with([])
-            mock_instance.push_to_hub.assert_called_once_with("test-org/empty-dataset")
-
-    def test_save_taskconfigs_mixed_rejection(self):
-        """Test that mixing dicts and LegacyTask objects is rejected."""
-        valid_dict = {"prompt": "Dict task", "mcp_config": {"test": True}}
-
-        task_object = LegacyTask(prompt="Object task", mcp_config={"resolved": "${SOME_VAR}"})
-
-        # First item is dict, second is object
-        with pytest.raises(ValueError, match="Item 1 is a LegacyTask object"):
-            save_tasks([valid_dict, task_object], "test-org/mixed")  # type: ignore
 
 
 class TestRunDatasetExtended:

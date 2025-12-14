@@ -13,7 +13,6 @@ Supports both v4 (LegacyTask) and v5 (Task) formats with automatic conversion.
 from __future__ import annotations
 
 from hud.eval.display import display_results
-from hud.utils.tasks import save_tasks
 
 from .loader import load_dataset
 from .runner import run_dataset, run_single_task
@@ -30,6 +29,5 @@ __all__ = [
     "load_dataset",
     "run_dataset",
     "run_single_task",
-    "save_tasks",
     "submit_rollouts",
 ]

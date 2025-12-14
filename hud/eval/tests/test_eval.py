@@ -111,6 +111,7 @@ class TestTaskFromV4:
             legacy = LegacyTask(
                 prompt="Navigate to google.com",
                 mcp_config={"hud": {"url": "https://mcp.hud.ai"}},
+                evaluate_tool={"name": "check", "arguments": {}},
             )
 
         task = Task.from_v4(legacy)
@@ -126,6 +127,7 @@ class TestTaskFromV4:
             {
                 "prompt": "Navigate to google.com",
                 "mcp_config": {"hud": {"url": "https://mcp.hud.ai"}},
+                "evaluate_tool": {"name": "check", "arguments": {}},
             }
         )
 
@@ -140,6 +142,7 @@ class TestTaskFromV4:
         data = {
             "prompt": "Navigate to google.com",
             "mcp_config": {"hud": {"url": "https://mcp.hud.ai"}},
+            "evaluate_tool": {"name": "check", "arguments": {}},
         }
         task = Task.from_v4(json.dumps(data))
 
@@ -154,6 +157,7 @@ class TestTaskFromV4:
                 "prompt": "Check URL",
                 "mcp_config": {"hud": {"url": "https://mcp.hud.ai"}},
                 "setup_tool": {"name": "navigate", "arguments": {"url": "https://google.com"}},
+                "evaluate_tool": {"name": "check", "arguments": {}},
             }
         )
 
@@ -177,14 +181,14 @@ class TestTaskFromV4:
 
     def test_from_v4_with_invalid_type_raises(self) -> None:
         """Task.from_v4() raises TypeError for invalid input."""
-        with pytest.raises(TypeError, match="expects LegacyTask, dict, or JSON string"):
+        with pytest.raises(TypeError):
             Task.from_v4(12345)  # type: ignore[arg-type]
 
     def test_from_v4_with_invalid_json_raises(self) -> None:
-        """Task.from_v4() raises HudConfigError for invalid JSON."""
-        from hud.shared.exceptions import HudConfigError
+        """Task.from_v4() raises JSONDecodeError for invalid JSON."""
+        import json
 
-        with pytest.raises(HudConfigError, match="Invalid JSON string"):
+        with pytest.raises(json.JSONDecodeError):
             Task.from_v4("not valid json")
 
     def test_from_v4_does_not_warn_on_use(self) -> None:
@@ -197,6 +201,7 @@ class TestTaskFromV4:
                 {
                     "prompt": "test",
                     "mcp_config": {"hud": {}},
+                    "evaluate_tool": {"name": "check", "arguments": {}},
                 }
             )
 

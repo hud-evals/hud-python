@@ -227,6 +227,9 @@ class TestShutdown:
 
     def test_shutdown_flushes_pending(self):
         """Test that shutdown flushes pending spans."""
+        # Clear any leftover state from previous tests
+        _pending_spans.clear()
+
         uploaded: list[str] = []
 
         def mock_upload(
@@ -241,6 +244,7 @@ class TestShutdown:
         with (
             patch("hud.settings.settings") as mock_settings,
             patch("hud.telemetry.exporter._do_upload", side_effect=mock_upload),
+            patch("hud.telemetry.exporter._get_api_key", return_value="test-key"),
         ):
             mock_settings.api_key = "test-key"
             mock_settings.telemetry_enabled = True
