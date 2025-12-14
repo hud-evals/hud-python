@@ -248,3 +248,6 @@ asyncio_mode = "auto"
 testpaths = ["hud", "examples"]
 # Ignore the dev folder and other non-test directories
 addopts = "--ignore=dev --ignore=ref --ignore=test_env --ignore=environments"
+markers = [
+    "integration: marks tests as integration tests (require HUD_API_KEY, network access)",
+]
