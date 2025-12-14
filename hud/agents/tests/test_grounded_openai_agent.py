@@ -149,8 +149,19 @@ async def test_get_response_with_reasoning() -> None:
         agent.oai.chat.completions.create = AsyncMock(return_value=mock_response)
         agent._initialized = True  # Mark as initialized to skip context initialization
 
+        # Include an image so get_response doesn't try to take a screenshot via ctx
+        png_b64 = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQAB"
+            "J2n0mQAAAABJRU5ErkJggg=="
+        )
         agent.conversation_history = [
-            {"role": "user", "content": [{"type": "text", "text": "Hard question"}]}
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{png_b64}"}},
+                    {"type": "text", "text": "Hard question"},
+                ],
+            }
         ]
 
         response = await agent.get_response(agent.conversation_history)

@@ -98,7 +98,7 @@ class TestRunDataset:
         with (
             patch("hud.datasets.loader.load_tasks", return_value=mock_tasks) as mock_load,
             patch("hud.datasets.runner.hud.eval") as mock_eval,
-            patch("hud.agents.openai.OpenAIAgent", mock_agent_cls),
+            patch("hud.agents.OpenAIAgent", mock_agent_cls),
         ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)

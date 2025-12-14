@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import cast
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -152,10 +152,10 @@ class TestRunDatasetExtended:
         mock_ctx.results = None
         mock_ctx.reward = None
 
-        # Create mock agent class and instance
+        # Create mock agent class and instance (use MagicMock since create() is sync)
         mock_agent_instance = AsyncMock()
         mock_agent_instance.run.return_value = Trace(reward=1.0, done=True)
-        mock_agent_cls = AsyncMock()
+        mock_agent_cls = MagicMock()
         mock_agent_cls.create.return_value = mock_agent_instance
 
         with (
@@ -183,16 +183,16 @@ class TestRunDatasetExtended:
         mock_ctx = AsyncMock()
         mock_ctx.results = None
 
-        # Create mock agent class and instance
+        # Create mock agent class and instance (use MagicMock since create() is sync)
         mock_agent_instance = AsyncMock()
         mock_agent_instance.run.return_value = Trace(reward=1.0, done=True)
-        mock_agent_cls = AsyncMock()
+        mock_agent_cls = MagicMock()
         mock_agent_cls.create.return_value = mock_agent_instance
 
         with (
             patch("hud.datasets.loader.load_tasks", return_value=mock_tasks) as mock_load,
             patch("hud.datasets.runner.hud.eval") as mock_eval,
-            patch("hud.agents.openai.OpenAIAgent", mock_agent_cls),
+            patch("hud.agents.OpenAIAgent", mock_agent_cls),
         ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -214,10 +214,10 @@ class TestRunDatasetExtended:
         mock_ctx = AsyncMock()
         mock_ctx.results = None
 
-        # Create mock agent class and instance
+        # Create mock agent class and instance (use MagicMock since create() is sync)
         mock_agent_instance = AsyncMock()
         mock_agent_instance.run.return_value = Trace(reward=1.0, done=True)
-        mock_agent_cls = AsyncMock()
+        mock_agent_cls = MagicMock()
         mock_agent_cls.create.return_value = mock_agent_instance
 
         with (

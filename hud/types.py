@@ -96,7 +96,7 @@ class LegacyTask(BaseModel):
 
     .. deprecated:: 0.5.0
         LegacyTask is deprecated in v0.5.0 and will be removed in v0.6.0
-        (no earlier than March 1st, 2025).
+        (no earlier than March 1st, 2026).
 
         Use one of these migration paths:
 
@@ -133,7 +133,7 @@ class LegacyTask(BaseModel):
 
         warnings.warn(
             "LegacyTask is deprecated in v0.5.0 and will be removed in v0.6.0 "
-            "(no earlier than March 1st, 2025). "
+            "(no earlier than March 1st, 2026). "
             "Use Task.from_v4() for quick conversion, or migrate to @env.scenario(). "
             "See https://docs.hud.ai/migration for details.",
             DeprecationWarning,
