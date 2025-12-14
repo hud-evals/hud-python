@@ -48,11 +48,7 @@ class MockMCPAgent(MCPAgent):
         return []
 
     async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
-        return [
-            {"type": "text", "text": getattr(b, "text")}
-            for b in blocks
-            if hasattr(b, "text")
-        ]
+        return [{"type": "text", "text": getattr(b, "text")} for b in blocks if hasattr(b, "text")]
 
 
 class MockEvalContext(EvalContext):

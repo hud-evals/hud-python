@@ -596,14 +596,12 @@ class Environment(
                 "prompt": self.prompt,
                 "mcp_config": self._mcp_config,
                 "evaluate_tool": [
-                    {"name": name, "arguments": args}
-                    for name, args in self._evaluate_calls
+                    {"name": name, "arguments": args} for name, args in self._evaluate_calls
                 ],
             }
             if self._setup_calls:
                 config["setup_tool"] = [
-                    {"name": name, "arguments": args}
-                    for name, args in self._setup_calls
+                    {"name": name, "arguments": args} for name, args in self._setup_calls
                 ]
             return config
 

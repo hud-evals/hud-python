@@ -69,7 +69,6 @@ class SingleTaskRequest(BaseModel):
 
         # Neither v4 nor v5
         raise ValueError("Task must have 'env' (v5) or 'prompt'+'mcp_config'+'evaluate_tool' (v4)")
-    
 
     @field_validator("job_id")
     @classmethod
@@ -290,5 +289,3 @@ async def cancel_all_jobs() -> dict[str, Any]:
         )
         response.raise_for_status()
         return response.json()
-
-

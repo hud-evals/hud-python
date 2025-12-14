@@ -79,10 +79,7 @@ async def run_dataset(
         task_list = [Task.from_v4(tasks)]
     else:
         # Sequence of TaskInput - convert each to Task
-        task_list = [
-            t if isinstance(t, Task) else Task.from_v4(t)
-            for t in tasks
-        ]
+        task_list = [t if isinstance(t, Task) else Task.from_v4(t) for t in tasks]
 
     if not task_list:
         raise ValueError("No tasks to run")

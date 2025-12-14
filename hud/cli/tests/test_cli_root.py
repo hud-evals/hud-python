@@ -9,6 +9,7 @@ import hud.cli as cli
 
 # Import the function directly from the __init__ module to avoid namespace conflict with analyze.py
 import hud.cli.__init__ as cli_init
+
 analyze_fn = cli_init.analyze
 
 if TYPE_CHECKING:

@@ -8,8 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from hud.datasets import run_dataset
-from hud.types import LegacyTask
-from hud.types import MCPToolCall
+from hud.types import LegacyTask, MCPToolCall
 from hud.utils.tasks import save_tasks
 
 

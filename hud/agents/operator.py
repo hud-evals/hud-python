@@ -11,7 +11,6 @@ from openai.types.responses import (
     FunctionShellToolParam,
     FunctionToolParam,
     ResponseComputerToolCallOutputScreenshotParam,
-    ResponseInputParam,
 )
 from openai.types.responses.response_input_param import (
     ComputerCallOutput,

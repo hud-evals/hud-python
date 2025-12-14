@@ -58,6 +58,7 @@ class TaskAgentConfig(BaseModel):
         description="Custom system prompt to pass to the agent",
     )
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -182,9 +183,7 @@ class Task(BaseModel):
 
     @field_validator("env", mode="before")
     @classmethod
-    def convert_env(
-        cls, v: Environment | EnvConfig | dict[str, Any] | None
-    ) -> Environment | None:
+    def convert_env(cls, v: Environment | EnvConfig | dict[str, Any] | None) -> Environment | None:
         """Auto-convert dict/EnvConfig to Environment.
 
         Format: {"name": "browser", "include": [...], "exclude": [...]}
@@ -211,9 +210,7 @@ class Task(BaseModel):
             env = Environment(v.name)
             env.connect_hub(v.name, include=v.include, exclude=v.exclude)
             return env
-        raise TypeError(
-            f"Task.env must be Environment, EnvConfig, or dict. Got {type(v).__name__}"
-        )
+        raise TypeError(f"Task.env must be Environment, EnvConfig, or dict. Got {type(v).__name__}")
 
     @field_validator("validation", mode="before")
     @classmethod
@@ -247,7 +244,8 @@ class Task(BaseModel):
 
     @model_serializer(mode="wrap")
     def _serialize_task(
-        self, handler: Any  # SerializerFunctionWrapHandler
+        self,
+        handler: Any,  # SerializerFunctionWrapHandler
     ) -> dict[str, Any]:
         """Custom serializer for v4 format flattening.
 
@@ -266,8 +264,7 @@ class Task(BaseModel):
             # Map validation → integration_test_tool
             if self.validation:
                 result["integration_test_tool"] = [
-                    {"name": v.name, "arguments": v.arguments or {}}
-                    for v in self.validation
+                    {"name": v.name, "arguments": v.arguments or {}} for v in self.validation
                 ]
 
             # Preserve agent_config

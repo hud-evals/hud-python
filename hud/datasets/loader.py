@@ -148,9 +148,7 @@ def load_dataset(source: str, *, raw: bool = False) -> list[Task]: ...
 def load_dataset(source: str, *, raw: bool = True) -> list[dict[str, Any]]: ...
 
 
-def load_dataset(
-    source: str, *, raw: bool = False
-) -> list[Task] | list[dict[str, Any]]:
+def load_dataset(source: str, *, raw: bool = False) -> list[Task] | list[dict[str, Any]]:
     """Load tasks from a dataset source.
 
     Supports multiple sources with auto-detection:

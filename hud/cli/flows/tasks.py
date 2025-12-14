@@ -16,7 +16,6 @@ from hud.cli.utils.registry import extract_name_and_tag
 from hud.datasets import load_dataset
 from hud.utils.hud_console import hud_console
 
-
 logger = logging.getLogger(__name__)
 
 

@@ -183,7 +183,9 @@ class TestGeminiAgent:
 
             mock_gemini_client.models.generate_content = MagicMock(return_value=mock_response)
 
-            messages = [genai_types.Content(role="user", parts=[genai_types.Part.from_text(text="Status?")])]
+            messages = [
+                genai_types.Content(role="user", parts=[genai_types.Part.from_text(text="Status?")])
+            ]
             response = await agent.get_response(messages)
 
             assert response.content == "Task completed successfully"
@@ -223,7 +225,9 @@ class TestGeminiAgent:
             mock_gemini_client.models.generate_content = MagicMock(return_value=mock_response)
 
             messages = [
-                genai_types.Content(role="user", parts=[genai_types.Part.from_text(text="Hard question")])
+                genai_types.Content(
+                    role="user", parts=[genai_types.Part.from_text(text="Hard question")]
+                )
             ]
             response = await agent.get_response(messages)
 

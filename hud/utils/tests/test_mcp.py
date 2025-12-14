@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from hud.utils.mcp import MCPConfigPatch, patch_mcp_config
 
 

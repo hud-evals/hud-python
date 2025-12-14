@@ -14,12 +14,9 @@ import contextlib
 import logging
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from hud.shared import make_request_sync
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 

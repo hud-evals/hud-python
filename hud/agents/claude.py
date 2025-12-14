@@ -8,7 +8,7 @@ from inspect import cleandoc
 from typing import Any, ClassVar, Literal, cast
 
 import mcp.types as types
-from anthropic import Anthropic, AsyncAnthropic, AsyncAnthropicBedrock, Omit
+from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, Omit
 from anthropic.types import CacheControlEphemeralParam
 from anthropic.types.beta import (
     BetaBase64ImageSourceParam,

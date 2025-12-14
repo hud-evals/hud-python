@@ -45,5 +45,3 @@ def patch_mcp_config(mcp_config: dict[str, dict[str, Any]], patch: MCPConfigPatc
             for key, value in patch.meta.items():
                 meta = server_cfg.setdefault("meta", {})
                 meta.setdefault(key, value)
-
-

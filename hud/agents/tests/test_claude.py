@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, BadRequestError
+from anthropic import AsyncAnthropic, AsyncAnthropicBedrock
 from mcp import types
 
 from hud.agents.claude import (

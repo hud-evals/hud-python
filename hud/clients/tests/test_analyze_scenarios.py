@@ -23,9 +23,7 @@ class _MockClient(BaseHUDClient):
         prompts: list[types.Prompt],
         resources: list[types.Resource],
     ) -> None:
-        super().__init__(
-            mcp_config={"test": {"url": "mock://test"}}, verbose=True
-        )
+        super().__init__(mcp_config={"test": {"url": "mock://test"}}, verbose=True)
         self._mock_prompts = prompts
         self._mock_resources = resources
         # Skip initialize() (which fetches telemetry); we just need analyze_environment().

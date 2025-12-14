@@ -175,4 +175,3 @@ def _warn_local_mcp(mcp_config: dict[str, Any] | None) -> None:
             UserWarning,
             stacklevel=4,
         )
-

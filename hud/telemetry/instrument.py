@@ -37,6 +37,7 @@ def _get_trace_id() -> str | None:
 
     return get_current_trace_id()
 
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from typing import ParamSpec
