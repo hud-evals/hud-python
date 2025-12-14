@@ -78,7 +78,7 @@ class MCPAgent(ABC):
         self.ctx: EvalContext | Environment | None = params.ctx
 
         self.model_name: str = getattr(params, "model_name", "MCPAgent")
-        self.checkpoint_name: str = getattr(params, "checkpoint_name", "unknown")
+        self.model: str = getattr(params, "model", None) or "unknown"
         self.auto_respond = params.auto_respond
 
         self.console = HUDConsole(logger=logger)

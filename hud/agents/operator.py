@@ -56,7 +56,7 @@ class OperatorConfig(OpenAIConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "Operator"
-    checkpoint_name: str = "computer-use-preview"
+    model: str = "computer-use-preview"
     environment: Literal["windows", "mac", "linux", "ubuntu", "browser"] = "linux"
 
 

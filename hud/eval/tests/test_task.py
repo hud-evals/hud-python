@@ -90,6 +90,7 @@ class TestTaskSerialization:
         # Roundtrip
         task2 = Task(**data)
         assert task2.agent_config is not None
+        assert isinstance(task2.agent_config, TaskAgentConfig)
         assert task2.agent_config.system_prompt == "Custom system prompt"
 
     def test_v4_preserves_metadata(self) -> None:

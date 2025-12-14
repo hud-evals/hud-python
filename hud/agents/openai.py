@@ -48,7 +48,7 @@ class OpenAIConfig(BaseAgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "OpenAI"
-    checkpoint_name: str = "gpt-5.1"
+    model: str = "gpt-5.1"
     model_client: AsyncOpenAI | None = None
     max_output_tokens: int | None = None
     temperature: float | None = None
@@ -92,7 +92,7 @@ class OpenAIAgent(MCPAgent):
                 raise ValueError(f"OpenAI API key is invalid: {exc}") from exc
 
         self.openai_client = model_client
-        self.model = self.config.checkpoint_name
+        self._model = self.config.model
         self.max_output_tokens = self.config.max_output_tokens
         self.temperature = self.config.temperature
         self.reasoning = self.config.reasoning
@@ -240,7 +240,7 @@ class OpenAIAgent(MCPAgent):
                 return AgentResponse(content="", tool_calls=[], done=True)
 
         response = await self.openai_client.responses.create(
-            model=self.model,
+            model=self._model,
             input=new_items,
             instructions=self.system_prompt,
             max_output_tokens=self.max_output_tokens,

@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from hud.datasets import load_dataset
+from hud.datasets import load_tasks
 from hud.settings import settings
 from hud.utils.hud_console import HUDConsole
 
@@ -193,7 +193,7 @@ def rft_command(
     # Load and validate tasks
     try:
         # Load tasks as raw dicts for patching and serialization
-        tasks: list[dict[str, Any]] = load_dataset(tasks_file, raw=True)  # type: ignore[assignment]
+        tasks: list[dict[str, Any]] = load_tasks(tasks_file, raw=True)  # type: ignore[assignment]
         if not tasks:
             hud_console.error(f"No tasks found in {tasks_file}")
             raise typer.Exit(1)

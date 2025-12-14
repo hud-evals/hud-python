@@ -45,7 +45,7 @@ class OpenAIChatConfig(BaseAgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "OpenAI Chat"
-    checkpoint_name: str = "gpt-5-mini"
+    model: str = "gpt-5-mini"
     openai_client: AsyncOpenAI | None = None
     api_key: str | None = None
     base_url: str | None = None
@@ -221,7 +221,7 @@ class OpenAIChatAgent(MCPAgent):
             raise ValueError("openai_client is required for OpenAIChatAgent")
         # default transport = OpenAI SDK
         return await self.oai.chat.completions.create(
-            model=self.config.checkpoint_name,
+            model=self.config.model,
             messages=messages,
             tools=tools,  # type: ignore ready ChatCompletionToolParam-shaped
             **extra,

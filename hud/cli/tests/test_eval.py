@@ -9,7 +9,7 @@ import pytest
 from mcp import types
 
 from hud.eval.context import EvalContext
-from hud.types import MCPToolResult
+from hud.types import AgentType, MCPToolResult, Trace
 
 
 class MockEvalContext(EvalContext):
@@ -39,17 +39,13 @@ class MockEvalContext(EvalContext):
         self._submitted = answer
 
 
-class MockAgent:
-    """Mock agent for testing run_dataset."""
-
-    def __init__(self) -> None:
-        self.run_count = 0
-
-    async def run(self, ctx: EvalContext, *, max_steps: int = 10) -> Any:
-        self.run_count += 1
-        ctx.reward = 1.0
-        # Return a mock Trace-like object
-        return MagicMock(reward=1.0, done=True, content="Done")
+def _create_mock_agent_cls() -> tuple[MagicMock, MagicMock]:
+    """Create a mock agent class and instance for testing."""
+    mock_agent_instance = MagicMock()
+    mock_agent_instance.run = AsyncMock(return_value=Trace(reward=1.0, done=True))
+    mock_agent_cls = MagicMock()
+    mock_agent_cls.create.return_value = mock_agent_instance
+    return mock_agent_cls, mock_agent_instance
 
 
 class TestRunDataset:
@@ -64,19 +60,22 @@ class TestRunDataset:
             Task(env={"name": "test"}, id="task1", scenario="test"),
             Task(env={"name": "test"}, id="task2", scenario="test"),
         ]
-        agent = MockAgent()
+        mock_agent_cls, mock_agent_instance = _create_mock_agent_cls()
 
         # Mock hud.eval to return our mock context
         mock_ctx = MockEvalContext()
 
-        with patch("hud.datasets.runner.hud.eval") as mock_eval:
+        with (
+            patch("hud.datasets.runner.hud.eval") as mock_eval,
+            patch.object(AgentType.CLAUDE, "cls", mock_agent_cls),
+        ):
             # Set up the async context manager
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
 
             from hud.datasets.runner import run_dataset
 
-            await run_dataset(tasks, agent, max_steps=5)  # type: ignore[arg-type]
+            await run_dataset(tasks, agent_type="claude", max_steps=5)
 
             # Verify hud.eval was called with correct params
             mock_eval.assert_called_once()
@@ -85,7 +84,7 @@ class TestRunDataset:
             assert call_kwargs["max_concurrent"] == 30
 
             # Agent should have run
-            assert agent.run_count == 1
+            mock_agent_instance.run.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_run_dataset_with_string_source(self) -> None:
@@ -93,19 +92,20 @@ class TestRunDataset:
         from hud.eval.task import Task
 
         mock_tasks = [Task(env={"name": "test"}, id="loaded_task", scenario="loaded")]
-        agent = MockAgent()
+        mock_agent_cls, _ = _create_mock_agent_cls()
         mock_ctx = MockEvalContext()
 
         with (
-            patch("hud.datasets.loader.load_dataset", return_value=mock_tasks) as mock_load,
+            patch("hud.datasets.runner.load_tasks", return_value=mock_tasks) as mock_load,
             patch("hud.datasets.runner.hud.eval") as mock_eval,
+            patch.object(AgentType.OPENAI, "cls", mock_agent_cls),
         ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
 
             from hud.datasets.runner import run_dataset
 
-            await run_dataset("my-tasks.json", agent)  # type: ignore[arg-type]
+            await run_dataset("my-tasks.json", agent_type="openai")
 
             # Verify load_dataset was called
             mock_load.assert_called_once_with("my-tasks.json")
@@ -113,13 +113,11 @@ class TestRunDataset:
     @pytest.mark.asyncio
     async def test_run_dataset_empty_tasks_raises(self) -> None:
         """Test run_dataset raises ValueError for empty tasks."""
-        agent = MockAgent()
-
         with patch("hud.datasets.loader.load_dataset", return_value=[]):
             from hud.datasets.runner import run_dataset
 
             with pytest.raises(ValueError, match="No tasks to run"):
-                await run_dataset([], agent)  # type: ignore[arg-type]
+                await run_dataset([], agent_type=AgentType.CLAUDE)
 
     @pytest.mark.asyncio
     async def test_run_dataset_with_group_size(self) -> None:
@@ -127,16 +125,19 @@ class TestRunDataset:
         from hud.eval.task import Task
 
         tasks = [Task(env={"name": "test"}, id="task1", scenario="test")]
-        agent = MockAgent()
+        mock_agent_cls, _ = _create_mock_agent_cls()
         mock_ctx = MockEvalContext()
 
-        with patch("hud.datasets.runner.hud.eval") as mock_eval:
+        with (
+            patch("hud.datasets.runner.hud.eval") as mock_eval,
+            patch.object(AgentType.CLAUDE, "cls", mock_agent_cls),
+        ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
 
             from hud.datasets.runner import run_dataset
 
-            await run_dataset(tasks, agent, group_size=3)  # type: ignore[arg-type]
+            await run_dataset(tasks, agent_type="claude", group_size=3)
 
             call_kwargs = mock_eval.call_args[1]
             assert call_kwargs["group"] == 3
@@ -147,16 +148,19 @@ class TestRunDataset:
         from hud.eval.task import Task
 
         tasks = [Task(env={"name": "test"}, id="task1", scenario="test")]
-        agent = MockAgent()
+        mock_agent_cls, _ = _create_mock_agent_cls()
         mock_ctx = MockEvalContext()
 
-        with patch("hud.datasets.runner.hud.eval") as mock_eval:
+        with (
+            patch("hud.datasets.runner.hud.eval") as mock_eval,
+            patch.object(AgentType.CLAUDE, "cls", mock_agent_cls),
+        ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
 
             from hud.datasets.runner import run_dataset
 
-            await run_dataset(tasks, agent, max_concurrent=10)  # type: ignore[arg-type]
+            await run_dataset(tasks, agent_type="claude", max_concurrent=10)
 
             call_kwargs = mock_eval.call_args[1]
             assert call_kwargs["max_concurrent"] == 10
@@ -167,16 +171,19 @@ class TestRunDataset:
         from hud.eval.task import Task
 
         tasks = [Task(env={"name": "test"}, id="task1", scenario="test")]
-        agent = MockAgent()
+        mock_agent_cls, _ = _create_mock_agent_cls()
         mock_ctx = MockEvalContext()
 
-        with patch("hud.datasets.runner.hud.eval") as mock_eval:
+        with (
+            patch("hud.datasets.runner.hud.eval") as mock_eval,
+            patch.object(AgentType.CLAUDE, "cls", mock_agent_cls),
+        ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
 
             from hud.datasets.runner import run_dataset
 
-            results = await run_dataset(tasks, agent)  # type: ignore[arg-type]
+            results = await run_dataset(tasks, agent_type="claude")
 
             # Should return list with the context
             assert len(results) == 1
@@ -188,7 +195,7 @@ class TestRunDataset:
         from hud.eval.task import Task
 
         tasks = [Task(env={"name": "test"}, id="task1", scenario="test")]
-        agent = MockAgent()
+        mock_agent_cls, _ = _create_mock_agent_cls()
 
         # Create mock context with results (parallel execution)
         mock_result1 = MockEvalContext(prompt="result1")
@@ -199,13 +206,16 @@ class TestRunDataset:
         mock_ctx = MockEvalContext()
         mock_ctx.results = [mock_result1, mock_result2]
 
-        with patch("hud.datasets.runner.hud.eval") as mock_eval:
+        with (
+            patch("hud.datasets.runner.hud.eval") as mock_eval,
+            patch.object(AgentType.CLAUDE, "cls", mock_agent_cls),
+        ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
 
             from hud.datasets.runner import run_dataset
 
-            results = await run_dataset(tasks, agent)  # type: ignore[arg-type]
+            results = await run_dataset(tasks, agent_type="claude")
 
             # Should return the parallel results
             assert len(results) == 2

@@ -41,7 +41,7 @@ class ClaudeConfig(BaseAgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "Claude"
-    checkpoint_name: str = "claude-sonnet-4-5"
+    model: str = "claude-sonnet-4-5"
     model_client: AsyncAnthropic | AsyncAnthropicBedrock | None = None
     max_tokens: int = 16384
     use_computer_beta: bool = True
@@ -153,7 +153,7 @@ class ClaudeAgent(MCPAgent):
         if isinstance(self.anthropic_client, AsyncAnthropicBedrock):
             try:
                 response = await self.anthropic_client.beta.messages.create(
-                    model=self.config.checkpoint_name,
+                    model=self.config.model,
                     system=self.system_prompt if self.system_prompt is not None else Omit(),
                     max_tokens=self.max_tokens,
                     messages=messages_cached,
@@ -169,7 +169,7 @@ class ClaudeAgent(MCPAgent):
         else:
             # Regular Anthropic client supports .stream()
             async with self.anthropic_client.beta.messages.stream(
-                model=self.config.checkpoint_name,
+                model=self.config.model,
                 system=self.system_prompt if self.system_prompt is not None else Omit(),
                 max_tokens=self.max_tokens,
                 messages=messages_cached,

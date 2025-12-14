@@ -36,7 +36,7 @@ async def run_dataset(
 
     Args:
         tasks: Tasks to run. Can be:
-            - A source string (file path, API slug) - loaded via load_dataset()
+            - A source string (file path, API slug) - loaded via load_tasks()
             - A single TaskInput (Task, LegacyTask, or dict)
             - A list of TaskInput objects
         agent_type: Type of agent to create (e.g., "claude", "openai", AgentType.CLAUDE).
@@ -50,10 +50,10 @@ async def run_dataset(
 
     Example:
         ```python
-        from hud.datasets import load_dataset, run_dataset
+        from hud.datasets import load_tasks, run_dataset
 
         # Load tasks and run
-        tasks = load_dataset("my-tasks.json")
+        tasks = load_tasks("my-tasks.json")
         results = await run_dataset(
             tasks,
             agent_type="claude",
@@ -65,13 +65,13 @@ async def run_dataset(
             print(f"Reward: {ctx.reward}")
         ```
     """
-    from hud.datasets.loader import load_dataset
+    from hud.datasets.loader import load_tasks
     from hud.eval.task import Task
 
     # Normalize tasks to list[Task]
     task_list: list[Task]
     if isinstance(tasks, str):
-        task_list = load_dataset(tasks)
+        task_list = load_tasks(tasks)
     elif isinstance(tasks, Task):
         task_list = [tasks]
     elif isinstance(tasks, LegacyTask | dict):
@@ -128,7 +128,7 @@ async def run_single_task(
     trace/job/group IDs. Used by remote execution workers.
 
     Args:
-        task: Task object to run. Use Task.from_v4() or load_dataset() to create.
+        task: Task object to run. Use Task.from_v4() or load_tasks() to create.
         agent_type: AgentType enum specifying the agent to use.
         agent_params: Parameters passed to agent.create(). Should include
             pre-configured model_client for inference gateway usage.

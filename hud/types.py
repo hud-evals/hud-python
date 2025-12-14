@@ -62,7 +62,11 @@ class BaseAgentConfig(BaseModel):
     at the agent level. These should be configured on the Environment/Task instead.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", populate_by_name=True)
+
+    # Model identifier - use 'model' (preferred) or 'checkpoint_name' (alias)
+    model: str | None = Field(default=None, validation_alias="checkpoint_name")
+    model_name: str = "Agent"  # Human-readable display name
 
     # LLM-specific setting
     system_prompt: str | None = None
@@ -72,6 +76,11 @@ class BaseAgentConfig(BaseModel):
     disallowed_tools: list[str] | None = None
     append_setup_output: bool = True
     initial_screenshot: bool = True
+
+    @property
+    def checkpoint_name(self) -> str | None:
+        """Alias for model (for backwards compatibility)."""
+        return self.model
 
 
 class LegacyTask(BaseModel):

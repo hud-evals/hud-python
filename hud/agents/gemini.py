@@ -27,7 +27,7 @@ class GeminiConfig(BaseAgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "Gemini"
-    checkpoint_name: str = "gemini-3-pro-preview"
+    model: str = "gemini-3-pro-preview"
     model_client: genai.Client | None = None
     temperature: float = 1.0
     top_p: float = 0.95
@@ -135,7 +135,7 @@ class GeminiAgent(MCPAgent):
 
         # Make API call
         response = self.gemini_client.models.generate_content(
-            model=self.config.checkpoint_name,
+            model=self.config.model,
             contents=cast("Any", messages),
             config=generate_config,
         )

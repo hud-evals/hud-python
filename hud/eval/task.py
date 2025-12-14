@@ -137,7 +137,8 @@ class Task(BaseModel):
     validation: list[MCPToolCall] | None = None
 
     # Agent config - settings passed to agent (system_prompt, etc.)
-    agent_config: TaskAgentConfig | None = None
+    # Accepts TaskAgentConfig or dict (auto-converted via validator)
+    agent_config: TaskAgentConfig | dict[str, Any] | None = None
 
     # Task metadata - for tracking/filtering, not used by agent
     metadata: dict[str, Any] = Field(default_factory=dict)

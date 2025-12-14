@@ -62,7 +62,7 @@ class GeminiCUAConfig(GeminiConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "GeminiCUA"
-    checkpoint_name: str = "gemini-2.5-computer-use-preview"
+    model: str = "gemini-2.5-computer-use-preview"
     excluded_predefined_functions: list[str] = Field(default_factory=list)
 
 

@@ -1,6 +1,6 @@
-"""Dataset loading utilities for HUD.
+"""Task loading utilities for HUD.
 
-Unified interface for loading evaluation datasets from:
+Unified interface for loading evaluation tasks from:
 - HUD API (v5 format)
 - Local JSON/JSONL files (v4 LegacyTask format, auto-converted)
 - HuggingFace datasets (v4 LegacyTask format, auto-converted)
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["load_dataset"]
+__all__ = ["load_dataset", "load_tasks", "save_tasks"]
 
 
 def _load_raw_from_file(path: Path) -> list[dict[str, Any]]:
@@ -141,15 +142,15 @@ def _load_from_api(dataset_name: str) -> list[Task]:
 
 
 @overload
-def load_dataset(source: str, *, raw: bool = False) -> list[Task]: ...
+def load_tasks(source: str, *, raw: bool = False) -> list[Task]: ...
 
 
 @overload
-def load_dataset(source: str, *, raw: bool = True) -> list[dict[str, Any]]: ...
+def load_tasks(source: str, *, raw: bool = True) -> list[dict[str, Any]]: ...
 
 
-def load_dataset(source: str, *, raw: bool = False) -> list[Task] | list[dict[str, Any]]:
-    """Load tasks from a dataset source.
+def load_tasks(source: str, *, raw: bool = False) -> list[Task] | list[dict[str, Any]]:
+    """Load tasks from a source.
 
     Supports multiple sources with auto-detection:
     - Local file path (JSON or JSONL)
@@ -159,7 +160,7 @@ def load_dataset(source: str, *, raw: bool = False) -> list[Task] | list[dict[st
     Automatically detects and converts v4 LegacyTask format to v5 Task.
 
     Args:
-        source: Dataset source. Can be:
+        source: Task source. Can be:
             - Path to a local JSON/JSONL file
             - HUD API dataset slug (e.g., "hud-evals/SheetBench-50")
             - HuggingFace dataset name (e.g., "hud-evals/tasks" or "hud-evals/tasks:train")
@@ -173,19 +174,19 @@ def load_dataset(source: str, *, raw: bool = False) -> list[Task] | list[dict[st
     Example:
         ```python
         import hud
-        from hud.datasets import load_dataset
+        from hud.datasets import load_tasks
 
         # Load from HUD API
-        tasks = load_dataset("hud-evals/SheetBench-50")
+        tasks = load_tasks("hud-evals/SheetBench-50")
 
         # Load from local file (v4 format auto-converted)
-        tasks = load_dataset("./my-tasks.json")
+        tasks = load_tasks("./my-tasks.json")
 
         # Load from HuggingFace
-        tasks = load_dataset("hud-evals/benchmark:test")
+        tasks = load_tasks("hud-evals/benchmark:test")
 
         # Load raw dicts (preserves env var placeholders)
-        raw_tasks = load_dataset("./tasks.json", raw=True)
+        raw_tasks = load_tasks("./tasks.json", raw=True)
 
         # Run evaluation
         async with hud.eval(tasks) as ctx:
@@ -193,7 +194,7 @@ def load_dataset(source: str, *, raw: bool = False) -> list[Task] | list[dict[st
         ```
 
     Raises:
-        ValueError: If dataset loading fails
+        ValueError: If task loading fails
     """
     # Check if it's a local file
     path = Path(source)
@@ -220,8 +221,103 @@ def load_dataset(source: str, *, raw: bool = False) -> list[Task] | list[dict[st
         return items
     except ImportError:
         raise ValueError(
-            f"Failed to load dataset '{source}'. "
+            f"Failed to load tasks from '{source}'. "
             "Install 'datasets' package for HuggingFace support."
         ) from None
     except Exception as hf_error:
-        raise ValueError(f"Failed to load dataset '{source}': {hf_error}") from hf_error
+        raise ValueError(f"Failed to load tasks from '{source}': {hf_error}") from hf_error
+
+
+def save_tasks(
+    name: str,
+    tasks: list[Task],
+    *,
+    description: str | None = None,
+) -> str:
+    """Save tasks to the HUD API.
+
+    Creates or updates an evalset with the given tasks.
+
+    Args:
+        name: Evalset name/slug (e.g., "my-evals/benchmark-v1").
+            If no org prefix, uses user's default org.
+        tasks: List of Task objects (v5 format) to save.
+        description: Optional description for the evalset.
+
+    Returns:
+        The evalset ID of the created/updated evalset.
+
+    Example:
+        ```python
+        from hud.datasets import save_tasks, load_tasks
+        from hud.eval.task import Task
+        from hud.environment import Environment
+
+        # Create tasks
+        env = Environment("my-env")
+        tasks = [
+            Task(env=env, scenario="checkout", args={"user": "alice"}),
+            Task(env=env, scenario="checkout", args={"user": "bob"}),
+        ]
+
+        # Save to HUD API
+        evalset_id = save_tasks("my-evals/benchmark-v1", tasks)
+
+        # Later, load them back
+        loaded = load_tasks("my-evals/benchmark-v1")
+        ```
+
+    Raises:
+        ValueError: If API key is not set or save fails
+    """
+    import httpx
+
+    from hud.settings import settings
+
+    if not settings.api_key:
+        raise ValueError("HUD_API_KEY is required to save tasks")
+
+    # Convert tasks to dicts (Task is a Pydantic model)
+    task_dicts = [task.model_dump(mode="json", exclude_none=True) for task in tasks]
+
+    # Build request payload
+    payload: dict[str, Any] = {
+        "name": name,
+        "tasks": task_dicts,
+    }
+    if description:
+        payload["description"] = description
+
+    headers = {"Authorization": f"Bearer {settings.api_key}"}
+
+    try:
+        with httpx.Client(timeout=60) as client:
+            response = client.post(
+                f"{settings.hud_api_url}/tasks/evalset",
+                json=payload,
+                headers=headers,
+            )
+            response.raise_for_status()
+            data = response.json()
+            evalset_id = data.get("evalset_id") or data.get("id") or name
+            logger.info("Saved %d tasks to evalset: %s", len(tasks), evalset_id)
+            return evalset_id
+    except httpx.HTTPStatusError as e:
+        raise ValueError(f"Failed to save tasks: {e.response.text}") from e
+    except Exception as e:
+        raise ValueError(f"Failed to save tasks: {e}") from e
+
+
+# Deprecated alias for backwards compatibility
+def load_dataset(source: str, *, raw: bool = False) -> list[Task] | list[dict[str, Any]]:
+    """Deprecated: Use load_tasks() instead.
+
+    .. deprecated:: 0.6.0
+        load_dataset() is deprecated. Use load_tasks() instead.
+    """
+    warnings.warn(
+        "load_dataset() is deprecated. Use load_tasks() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return load_tasks(source, raw=raw)

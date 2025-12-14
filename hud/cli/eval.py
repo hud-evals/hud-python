@@ -559,14 +559,14 @@ class EvalConfig(BaseModel):
 
 async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
     """Run evaluation with the given config using run_dataset()."""
-    from hud.datasets import load_dataset, run_dataset
+    from hud.datasets import load_tasks, run_dataset
 
     if cfg.source is None or cfg.agent_type is None:
         raise ValueError("source and agent_type must be set")
 
     # Load tasks using unified loader (handles v4→v5 conversion automatically)
     hud_console.info(f"📊 Loading tasks from: {cfg.source}…")
-    tasks = load_dataset(cfg.source)
+    tasks = load_tasks(cfg.source)
 
     if not tasks:
         hud_console.error(f"No tasks found in: {cfg.source}")

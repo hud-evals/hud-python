@@ -6,18 +6,18 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hud.datasets.loader import load_dataset
+from hud.datasets.loader import load_tasks
 
 
-class TestLoadDataset:
-    """Tests for load_dataset() function."""
+class TestLoadTasks:
+    """Tests for load_tasks() function."""
 
     @patch("httpx.Client")
     @patch("hud.settings.settings")
-    def test_load_dataset_success(
+    def test_load_tasks_success(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
-        """load_dataset() successfully loads tasks from API."""
+        """load_tasks() successfully loads tasks from API."""
         mock_settings.hud_api_url = "https://api.hud.ai"
         mock_settings.api_key = "test_key"
 
@@ -47,7 +47,7 @@ class TestLoadDataset:
         mock_client.__exit__.return_value = None
         mock_client_class.return_value = mock_client
 
-        tasks = load_dataset("test-org/test-dataset")
+        tasks = load_tasks("test-org/test-dataset")
 
         assert len(tasks) == 2
         # Tasks are keyed by ID in dict, order may vary
@@ -64,10 +64,10 @@ class TestLoadDataset:
 
     @patch("httpx.Client")
     @patch("hud.settings.settings")
-    def test_load_dataset_single_task(
+    def test_load_tasks_single_task(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
-        """load_dataset() handles single task in EvalsetTasksResponse."""
+        """load_tasks() handles single task in EvalsetTasksResponse."""
         mock_settings.hud_api_url = "https://api.hud.ai"
         mock_settings.api_key = "test_key"
 
@@ -91,7 +91,7 @@ class TestLoadDataset:
         mock_client.__exit__.return_value = None
         mock_client_class.return_value = mock_client
 
-        tasks = load_dataset("test-org/test-dataset")
+        tasks = load_tasks("test-org/test-dataset")
 
         assert len(tasks) == 1
         assert tasks[0].scenario == "checkout"
@@ -99,10 +99,10 @@ class TestLoadDataset:
 
     @patch("httpx.Client")
     @patch("hud.settings.settings")
-    def test_load_dataset_no_api_key(
+    def test_load_tasks_no_api_key(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
-        """load_dataset() works without API key."""
+        """load_tasks() works without API key."""
         mock_settings.hud_api_url = "https://api.hud.ai"
         mock_settings.api_key = None
 
@@ -120,7 +120,7 @@ class TestLoadDataset:
         mock_client.__exit__.return_value = None
         mock_client_class.return_value = mock_client
 
-        tasks = load_dataset("test-org/test-dataset")
+        tasks = load_tasks("test-org/test-dataset")
 
         assert len(tasks) == 0
         mock_client.get.assert_called_once_with(
@@ -131,10 +131,10 @@ class TestLoadDataset:
 
     @patch("httpx.Client")
     @patch("hud.settings.settings")
-    def test_load_dataset_http_error(
+    def test_load_tasks_http_error(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
-        """load_dataset() raises ValueError on HTTP error."""
+        """load_tasks() raises ValueError on HTTP error."""
         import httpx
 
         mock_settings.hud_api_url = "https://api.hud.ai"
@@ -146,15 +146,15 @@ class TestLoadDataset:
         mock_client.__exit__.return_value = None
         mock_client_class.return_value = mock_client
 
-        with pytest.raises(ValueError, match="Failed to load dataset"):
-            load_dataset("test-org/test-dataset")
+        with pytest.raises(ValueError, match="Failed to load tasks"):
+            load_tasks("test-org/test-dataset")
 
     @patch("httpx.Client")
     @patch("hud.settings.settings")
-    def test_load_dataset_json_error(
+    def test_load_tasks_json_error(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
-        """load_dataset() raises ValueError on JSON processing error."""
+        """load_tasks() raises ValueError on JSON processing error."""
         mock_settings.hud_api_url = "https://api.hud.ai"
         mock_settings.api_key = "test_key"
 
@@ -168,15 +168,13 @@ class TestLoadDataset:
         mock_client.__exit__.return_value = None
         mock_client_class.return_value = mock_client
 
-        with pytest.raises(ValueError, match="Failed to load dataset"):
-            load_dataset("test-org/test-dataset")
+        with pytest.raises(ValueError, match="Failed to load tasks"):
+            load_tasks("test-org/test-dataset")
 
     @patch("httpx.Client")
     @patch("hud.settings.settings")
-    def test_load_dataset_empty(
-        self, mock_settings: MagicMock, mock_client_class: MagicMock
-    ) -> None:
-        """load_dataset() handles empty dataset."""
+    def test_load_tasks_empty(self, mock_settings: MagicMock, mock_client_class: MagicMock) -> None:
+        """load_tasks() handles empty dataset."""
         mock_settings.hud_api_url = "https://api.hud.ai"
         mock_settings.api_key = "test_key"
 
@@ -190,16 +188,16 @@ class TestLoadDataset:
         mock_client.__exit__.return_value = None
         mock_client_class.return_value = mock_client
 
-        tasks = load_dataset("test-org/test-dataset")
+        tasks = load_tasks("test-org/test-dataset")
 
         assert len(tasks) == 0
 
     @patch("httpx.Client")
     @patch("hud.settings.settings")
-    def test_load_dataset_missing_fields(
+    def test_load_tasks_missing_fields(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
-        """load_dataset() handles tasks with missing optional fields (but env is required)."""
+        """load_tasks() handles tasks with missing optional fields (but env is required)."""
         mock_settings.hud_api_url = "https://api.hud.ai"
         mock_settings.api_key = "test_key"
 
@@ -215,7 +213,7 @@ class TestLoadDataset:
         mock_client.__exit__.return_value = None
         mock_client_class.return_value = mock_client
 
-        tasks = load_dataset("test-org/test-dataset")
+        tasks = load_tasks("test-org/test-dataset")
 
         assert len(tasks) == 1
         assert tasks[0].scenario == "test"

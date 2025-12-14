@@ -13,7 +13,7 @@ from hud.cli.push import push_environment
 from hud.cli.utils.docker import require_docker_running
 from hud.cli.utils.env_check import find_environment_dir
 from hud.cli.utils.registry import extract_name_and_tag
-from hud.datasets import load_dataset
+from hud.datasets import load_tasks
 from hud.utils.hud_console import hud_console
 
 logger = logging.getLogger(__name__)
@@ -266,7 +266,7 @@ def convert_tasks_to_remote(tasks_file: str) -> str:
 
     # Load raw tasks - we work with dicts directly to preserve placeholders
     # when writing back to disk (e.g., ${HUD_API_KEY})
-    raw_tasks: list[dict[str, Any]] = load_dataset(str(tasks_path), raw=True)  # type: ignore[assignment]
+    raw_tasks: list[dict[str, Any]] = load_tasks(str(tasks_path), raw=True)  # type: ignore[assignment]
 
     # Use the same raw tasks for validation (they have mcp_config structure)
     tasks = raw_tasks

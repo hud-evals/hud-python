@@ -38,7 +38,7 @@ class GroundedOpenAIConfig(OpenAIChatConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     grounder_config: GrounderConfig
-    checkpoint_name: str = "gpt-4o-mini"
+    model: str = "gpt-4o-mini"
     allowed_tools: list[str] | None = None  # Default set in validator
     append_setup_output: bool = False
     system_prompt: str | None = DEFAULT_GROUNDED_PROMPT
@@ -164,7 +164,7 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
         extra = {k: v for k, v in (self.completion_kwargs or {}).items() if k not in protected_keys}
 
         response = await self.oai.chat.completions.create(  # type: ignore
-            model=self.config.checkpoint_name,
+            model=self.config.model,
             messages=messages,
             tools=tool_schemas,
             parallel_tool_calls=False,

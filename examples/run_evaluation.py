@@ -28,11 +28,11 @@ async def main() -> None:
     args = parser.parse_args()
 
     # Import here to avoid import errors if agents not installed
-    from hud.datasets import load_dataset, run_dataset
+    from hud.datasets import load_tasks, run_dataset
 
-    # Load dataset as Task objects
+    # Load tasks from file or API
     print(f"Loading {args.dataset}...")
-    tasks = load_dataset(args.dataset)
+    tasks = load_tasks(args.dataset)
 
     # Filter by index if specified
     if args.task_ids:

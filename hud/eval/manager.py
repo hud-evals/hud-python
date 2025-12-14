@@ -109,12 +109,12 @@ async def run_eval(
     """Standalone eval context manager.
 
     Creates an EvalContext for evaluation using Task objects (or deprecated LegacyTask).
-    For loading tasks from datasets, use load_dataset() first.
+    For loading tasks from datasets, use load_tasks() first.
 
     Args:
         source: Task source. Can be:
             - None: Create blank eval context
-            - Task: Single Task object (from env() or load_dataset())
+            - Task: Single Task object (from env() or load_tasks())
             - list[Task]: List of Task objects
             - LegacyTask: Single LegacyTask object (deprecated, use Task.from_v4())
             - list[LegacyTask]: List of LegacyTask objects (deprecated)
@@ -135,7 +135,7 @@ async def run_eval(
 
     Example:
         ```python
-        from hud.datasets import load_dataset
+        from hud.datasets import load_tasks
 
         # Blank eval (for manual reward)
         async with hud.eval() as ctx:
@@ -147,8 +147,8 @@ async def run_eval(
         async with hud.eval(tasks, variants={"model": ["gpt-4o"]}, group=4) as ctx:
             await agent.run(ctx.prompt)
 
-        # Load tasks from dataset first
-        tasks = load_dataset("hud-evals/SheetBench-50")
+        # Load tasks from file or API
+        tasks = load_tasks("hud-evals/SheetBench-50")
         async with hud.eval(tasks) as ctx:
             await agent.run(ctx)
 
@@ -196,19 +196,19 @@ async def run_eval(
             # LegacyTask no longer accepted - user must convert first
             raise TypeError(
                 "LegacyTask is no longer accepted by hud.eval(). "
-                "Convert first with Task.from_v4(legacy_task), or use load_dataset()."
+                "Convert first with Task.from_v4(legacy_task), or use load_tasks()."
             )
         elif isinstance(source, str):
             # String slugs no longer supported - use load_dataset()
             raise TypeError(
                 f"String slugs are no longer supported in hud.eval(). "
-                f"Use load_dataset('{source}') first, then pass the tasks list."
+                f"Use load_tasks('{source}') first, then pass the tasks list."
             )
         elif isinstance(source, list) and source and isinstance(source[0], str):
             # List of string slugs no longer supported
             raise TypeError(
                 "String slugs are no longer supported in hud.eval(). "
-                "Use load_dataset() first, then pass the tasks list."
+                "Use load_tasks() first, then pass the tasks list."
             )
 
     # Calculate total evaluations

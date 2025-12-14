@@ -25,6 +25,7 @@ class TestInitModule:
             "EvalContext",
             "eval",
             "instrument",
+            "trace",  # Deprecated alias for eval
         ]
 
         assert set(hud.__all__) == set(expected)
