@@ -10,6 +10,7 @@ import pytest
 
 from hud.telemetry.exporter import (
     _do_upload,
+    _pending_futures,
     _pending_spans,
     flush,
     queue_span,
@@ -18,11 +19,13 @@ from hud.telemetry.exporter import (
 
 
 @pytest.fixture(autouse=True)
-def clear_pending_spans():
-    """Clear pending spans before and after each test."""
+def clear_pending_state():
+    """Clear pending spans and futures before and after each test."""
     _pending_spans.clear()
+    _pending_futures.clear()
     yield
     _pending_spans.clear()
+    _pending_futures.clear()
 
 
 class TestDoUpload:
@@ -227,9 +230,6 @@ class TestShutdown:
 
     def test_shutdown_flushes_pending(self):
         """Test that shutdown flushes pending spans."""
-        # Clear any leftover state from previous tests
-        _pending_spans.clear()
-
         uploaded: list[str] = []
 
         def mock_upload(

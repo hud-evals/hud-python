@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,6 +19,8 @@ from hud.eval.context import EvalContext
 from hud.types import MCPToolCall, MCPToolResult
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from anthropic.types.beta import BetaImageBlockParam, BetaMessageParam, BetaTextBlockParam
 
 

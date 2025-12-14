@@ -107,9 +107,7 @@ def _has_mcp_or_env(content: str) -> bool:
     if "mcp" in content and ("= MCPServer" in content or "= FastMCP" in content):
         return True
     # Check for env = Environment(...)
-    if "env" in content and "= Environment" in content:
-        return True
-    return False
+    return "env" in content and "= Environment" in content
 
 
 def auto_detect_module() -> tuple[str, Path | None] | tuple[None, None]:

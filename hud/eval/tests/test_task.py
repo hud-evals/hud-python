@@ -125,11 +125,13 @@ class TestTaskValidation:
         from hud.eval.utils import validate_v4_task
 
         with pytest.raises(ValueError, match="evaluate_tool"):
-            validate_v4_task({
-                "prompt": "test",
-                "mcp_config": {"server": {}},
-                # Missing evaluate_tool
-            })
+            validate_v4_task(
+                {
+                    "prompt": "test",
+                    "mcp_config": {"server": {}},
+                    # Missing evaluate_tool
+                }
+            )
 
     def test_agent_config_accepts_dict(self) -> None:
         """agent_config can be provided as dict and gets converted."""
@@ -137,7 +139,6 @@ class TestTaskValidation:
             env={"name": "browser"},
             agent_config={"system_prompt": "Hello"},
         )
-        
+
         assert isinstance(task.agent_config, TaskAgentConfig)
         assert task.agent_config.system_prompt == "Hello"
-

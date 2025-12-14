@@ -11,15 +11,17 @@ import pytest
 import hud
 from hud.environment import Environment
 from hud.eval import Task
-from hud.telemetry.exporter import _pending_spans
+from hud.telemetry.exporter import _pending_futures, _pending_spans
 
 
 @pytest.fixture(autouse=True)
-def clear_pending_spans():
-    """Clear pending spans before and after each test."""
+def clear_pending_state():
+    """Clear pending spans and futures before and after each test."""
     _pending_spans.clear()
+    _pending_futures.clear()
     yield
     _pending_spans.clear()
+    _pending_futures.clear()
 
 
 class TestEvalContextTelemetry:

@@ -427,6 +427,10 @@ async def _run_parallel_eval(
         else:
             ctx = EvalContext(name="eval", **params)
 
+        # Remove sensitive data from params after context creation to prevent
+        # accidental logging if an exception includes local variables
+        params.pop("api_key", None)
+
         try:
             if sem:
                 async with sem, ctx:

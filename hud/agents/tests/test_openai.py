@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -20,6 +19,9 @@ from openai.types.responses.response_reasoning_item import Summary
 from hud.agents.openai import OpenAIAgent
 from hud.eval.context import EvalContext
 from hud.types import MCPToolCall, MCPToolResult
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 
 class MockEvalContext(EvalContext):
