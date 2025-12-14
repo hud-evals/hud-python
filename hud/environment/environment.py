@@ -533,7 +533,7 @@ class Environment(
 
     def __call__(
         self,
-        scenario: str,
+        scenario: str | None = None,
         **args: Any,
     ) -> Task:
         """Create a Task from this environment.
@@ -541,7 +541,7 @@ class Environment(
         Returns a Task that can be passed to hud.eval() for orchestration.
 
         Args:
-            scenario: Scenario name to run (from @env.scenario)
+            scenario: Scenario name to run (from @env.scenario). Optional for v4 legacy.
             **args: Arguments for the scenario
 
         Returns:

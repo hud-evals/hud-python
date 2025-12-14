@@ -1,4 +1,4 @@
-"""Task - A runnable evaluation unit (data class).
+"""Task - A runnable evaluation unit (Pydantic model).
 
 A Task holds the configuration needed to run an evaluation:
 - Environment configuration (how to create/connect)
@@ -26,8 +26,9 @@ Usage:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from hud.types import MCPToolCall
 
@@ -85,9 +86,8 @@ def build_eval_name(scenario: str | None, args: dict[str, Any] | None) -> str:
     return scenario
 
 
-@dataclass
-class Task:
-    """A runnable evaluation unit (data class).
+class Task(BaseModel):
+    """A runnable evaluation unit (Pydantic model).
 
     Simplified v5 Task format:
     - env: Environment instance OR EnvConfig with hub name + filters
@@ -97,9 +97,9 @@ class Task:
 
     When entered as a context manager, creates an EvalContext.
 
-        Attributes:
+    Attributes:
         id: Optional task identifier for filtering/tracking
-        env: Environment instance (auto-created from dict/EnvConfig in __post_init__)
+        env: Environment instance (auto-created from dict/EnvConfig via validator)
         scenario: Scenario name to run (from @env.scenario)
         args: Scenario arguments
         validation: Optional list of MCPToolCall objects representing successful completion
@@ -131,59 +131,67 @@ class Task:
         task = Task.from_v4({"prompt": "...", "mcp_config": {...}, ...})
         ```
     """
-    # Required
-    env: Environment | EnvConfig | dict[str, Any]
-    # Optional
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    # Fields - env accepts Environment | EnvConfig | dict, auto-converts to Environment
+    env: Any = Field(default=None)  # Typed as Any for input flexibility, validated below
     scenario: str | None = None
     id: str | None = None
-    args: dict[str, Any] = field(default_factory=dict)
+    args: dict[str, Any] = Field(default_factory=dict)
     validation: list[MCPToolCall] | None = None
 
-    def __post_init__(self) -> None:
-        """Validate and normalize env and validation fields after initialization.
-
-        Auto-converts dict or EnvConfig to Environment by connecting to the hub.
-        Auto-converts validation dicts to MCPToolCall objects.
-        """
+    @field_validator("env", mode="before")
+    @classmethod
+    def convert_env(
+        cls, v: Environment | EnvConfig | dict[str, Any] | None
+    ) -> Environment | None:
+        """Auto-convert dict/EnvConfig to Environment."""
         from hud.environment import Environment
         from hud.environment.types import EnvConfig
 
-        # Convert env field (dict/EnvConfig -> Environment)
-        if not isinstance(self.env, Environment):
-            if isinstance(self.env, dict):
-                try:
-                    config = EnvConfig(**self.env)
-                except Exception as e:
-                    raise ValueError(
-                        f"Invalid env config: {e}. Expected fields: name (str), "
-                        f"include (list[str] | None), exclude (list[str] | None)"
-                    ) from e
-            elif isinstance(self.env, EnvConfig):
-                config = self.env
+        if v is None:
+            return None
+        if isinstance(v, Environment):
+            return v
+        if isinstance(v, dict):
+            try:
+                v = EnvConfig(**v)
+            except Exception as e:
+                raise ValueError(
+                    f"Invalid env config: {e}. Expected fields: name (str), "
+                    f"include (list[str] | None), exclude (list[str] | None)"
+                ) from e
+        if isinstance(v, EnvConfig):
+            env = Environment(v.name)
+            env.connect_hub(v.name, include=v.include, exclude=v.exclude)
+            return env
+        raise TypeError(
+            f"Task.env must be Environment, EnvConfig, or dict. Got {type(v).__name__}"
+        )
+
+    @field_validator("validation", mode="before")
+    @classmethod
+    def convert_validation(
+        cls, v: list[MCPToolCall | dict[str, Any]] | None
+    ) -> list[MCPToolCall] | None:
+        """Auto-convert validation dicts to MCPToolCall objects."""
+        if v is None:
+            return None
+        if not isinstance(v, list):
+            raise TypeError(f"validation must be a list, got {type(v).__name__}")
+
+        converted = []
+        for item in v:
+            if isinstance(item, dict):
+                converted.append(MCPToolCall(**item))
+            elif isinstance(item, MCPToolCall):
+                converted.append(item)
             else:
                 raise TypeError(
-                    f"Task.env must be Environment, EnvConfig, or dict. "
-                    f"Got {type(self.env).__name__}"
+                    f"validation items must be dict or MCPToolCall, got {type(item).__name__}"
                 )
-
-            # Convert EnvConfig to Environment
-            env = Environment(config.name)
-            env.connect_hub(config.name, include=config.include, exclude=config.exclude)
-            self.env = env
-
-        # Convert validation dicts to MCPToolCall objects
-        if self.validation and isinstance(self.validation, list):
-            converted_validation = []
-            for item in self.validation:
-                if isinstance(item, dict):
-                    converted_validation.append(MCPToolCall(**item))
-                elif isinstance(item, MCPToolCall):
-                    converted_validation.append(item)
-                else:
-                    raise TypeError(
-                        f"validation items must be dict or MCPToolCall, got {type(item).__name__}"
-                    )
-            self.validation = converted_validation
+        return converted
 
     @classmethod
     def from_v4(
@@ -302,11 +310,15 @@ class Task:
         )
 
     def copy(self) -> Task:
-        """Create a copy of this Task config."""
+        """Create a copy of this Task config.
+
+        Note: env is shared (not deep copied) since Environment instances
+        should be reused. Args and validation are deep copied.
+        """
         return Task(
             id=self.id,
-            env=self.env,  # Share reference - from_environment handles copying
+            env=self.env,  # Share reference
             scenario=self.scenario,
-            args=self.args.copy(),
-            validation=self.validation,
+            args=self.args.copy() if self.args else {},
+            validation=self.validation.copy() if self.validation else None,
         )

@@ -101,10 +101,23 @@ def show_dev_server_info(
     return cursor_deeplink
 
 
+def _has_mcp_or_env(content: str) -> bool:
+    """Check if file content defines an mcp or env variable."""
+    # Check for mcp = MCPServer(...) or mcp = FastMCP(...)
+    if "mcp" in content and ("= MCPServer" in content or "= FastMCP" in content):
+        return True
+    # Check for env = Environment(...)
+    if "env" in content and "= Environment" in content:
+        return True
+    return False
+
+
 def auto_detect_module() -> tuple[str, Path | None] | tuple[None, None]:
     """Auto-detect MCP module in current directory.
 
-    Looks for 'mcp' defined in either __init__.py or server.py.
+    Looks for 'mcp' or 'env' defined in either __init__.py or main.py.
+    - 'mcp' with MCPServer or FastMCP
+    - 'env' with Environment
 
     Returns:
         Tuple of (module_name, parent_dir_to_add_to_path) or (None, None)
@@ -116,7 +129,7 @@ def auto_detect_module() -> tuple[str, Path | None] | tuple[None, None]:
     if init_file.exists():
         try:
             content = init_file.read_text(encoding="utf-8")
-            if "mcp" in content and ("= MCPServer" in content or "= FastMCP" in content):
+            if _has_mcp_or_env(content):
                 return (cwd.name, None)
         except Exception:  # noqa: S110
             pass
@@ -126,7 +139,7 @@ def auto_detect_module() -> tuple[str, Path | None] | tuple[None, None]:
     if main_file.exists() and init_file.exists():
         try:
             content = main_file.read_text(encoding="utf-8")
-            if "mcp" in content and ("= MCPServer" in content or "= FastMCP" in content):
+            if _has_mcp_or_env(content):
                 # Need to import as package.main, add parent to sys.path
                 return (f"{cwd.name}.main", cwd.parent)
         except Exception:  # noqa: S110
@@ -899,11 +912,11 @@ def run_mcp_dev_server(
     if module is None:
         module, extra_path = auto_detect_module()
         if module is None:
-            hud_console.error("Could not auto-detect MCP module in current directory")
+            hud_console.error("Could not auto-detect module in current directory")
             hud_console.info("")
             hud_console.info("[bold cyan]Expected:[/bold cyan]")
             hud_console.info("  • __init__.py file in current directory")
-            hud_console.info("  • Module must define 'mcp' variable")
+            hud_console.info("  • Module must define 'mcp' or 'env' variable")
             hud_console.info("")
             hud_console.info("[bold cyan]Examples:[/bold cyan]")
             hud_console.info("  hud dev controller")
