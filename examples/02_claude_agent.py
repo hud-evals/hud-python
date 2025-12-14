@@ -13,18 +13,16 @@ multi-step reasoning tasks.
 """
 
 import asyncio
+
 import hud
-from hud.agents import ClaudeAgent
-from hud.datasets import LegacyTask
+from hud.agents.claude import ClaudeAgent
 from hud.eval.task import Task
-from hud.settings import settings
 
 
-async def main():
-    # For any environment, you can run :
+async def main() -> None:
+    # For any environment, you can run:
     # hud debug <IMAGE_NAME> to see the logs
-    # hud analyze <IMAGE_NAME> to get a report about its capabilities (tools, resources, etc.)
-    # e.g. hud analyze hudpython/hud-remote-browser:latest
+    # hud analyze <IMAGE_NAME> to get a report about its capabilities
 
     initial_url = "https://httpbin.org/forms/post"
 
@@ -41,43 +39,31 @@ async def main():
     9. Verify the submission was successful
     """
 
-    # Create LegacyTask with mcp_config and setup
-    legacy_task = LegacyTask(
-        prompt=prompt,
-        mcp_config={
-            "hud": {
-                "url": "https://mcp.hud.ai/v3/mcp",
-                "headers": {
-                    "Authorization": f"Bearer {settings.api_key}",
-                    "Mcp-Image": "hudpython/hud-remote-browser:latest",
-                },
-            }
-        },
-        setup_tool={
-            "name": "setup",
-            "arguments": {"name": "navigate_to_url", "arguments": {"url": initial_url}},
-        },
+    # Create v5 Task with Environment config
+    task = Task(
+        env={"name": "browser"},  # Connect to browser hub
+        scenario="form_fill",  # Scenario name
+        args={"url": initial_url},  # Scenario args
+        agent_config={"system_prompt": prompt},  # Pass prompt via agent config
     )
-
-    # Convert to v5 Task
-    task = Task.from_v4(legacy_task)
 
     # Create Claude-specific agent
     agent = ClaudeAgent.create(
-        checkpoint_name="claude-sonnet-4-5",
+        checkpoint_name="claude-sonnet-4-20250514",
         allowed_tools=["anthropic_computer"],
         initial_screenshot=True,
     )
 
-    print(f"📋 Task: Multi-step form interaction")
-    print(f"🚀 Running Claude agent...\n")
+    print("📋 Task: Multi-step form interaction")
+    print("🚀 Running Claude agent...\n")
 
     # Run with hud.eval() context
-    async with task as ctx:
+    async with hud.eval(task, name="claude-form-demo") as ctx:
         result = await agent.run(ctx, max_steps=15)
 
     print("\n✨ Claude agent demo complete!")
     print(f"   Reward: {result.reward}")
+    print(f"   Done: {result.done}")
 
 
 if __name__ == "__main__":

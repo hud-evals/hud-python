@@ -3,8 +3,8 @@
 OpenAI-compatible Chat Agent playing 2048 (text or browser).
 
 Usage:
-  python examples/openai_compatible_agent.py --mode text    # default
-  python examples/openai_compatible_agent.py --mode browser
+  python examples/03_openai_compatible_agent.py --mode text    # default
+  python examples/03_openai_compatible_agent.py --mode browser
 
 Requirements:
 - pip install openai
@@ -24,7 +24,7 @@ from openai import AsyncOpenAI
 
 import hud
 from hud.agents.openai_chat import OpenAIChatAgent
-from hud.datasets import LegacyTask
+from hud.eval.task import Task
 
 
 def _system_prompt(mode: Literal["text", "browser"]) -> str:
@@ -46,7 +46,7 @@ def _system_prompt(mode: Literal["text", "browser"]) -> str:
             "- Continue until target or game ends; no confirmations needed.\n\n"
             "Strategy: keep highest tiles in a corner; maintain order; avoid random moves."
         )
-    # text
+    # text mode
     return (
         "You are an expert 2048 game player. Your goal is to reach the tile specified by the user.\n\n"
         "HOW 2048 WORKS:\n"
@@ -66,46 +66,29 @@ def _system_prompt(mode: Literal["text", "browser"]) -> str:
     )
 
 
-def _task_for_mode(mode: Literal["text", "browser"], target: int) -> LegacyTask:
+def _create_task(mode: Literal["text", "browser"], target: int) -> Task:
+    """Create a v5 Task for the 2048 game."""
     if mode == "browser":
-        mcp_config = {
-            "local": {
-                "command": "docker",
-                "args": ["run", "--rm", "-i", "-p", "8080:8080", "hudevals/hud-browser:0.1.3"],
-            }
-        }
-        prompt = (
-            "Play the browser-based 2048 game and try to reach the target tile. "
-            "Start by taking a screenshot, then make strategic moves using arrow keys."
+        # Use local Docker environment for browser mode
+        env = hud.Environment("2048-browser")
+        env.connect_image(
+            "hudevals/hud-browser:0.1.3",
+            docker_args=["-p", "8080:8080"],
         )
-        setup_tool = {"name": "launch_app", "arguments": {"app_name": "2048"}}
-        evaluate_tool = {
-            "name": "evaluate",
-            "arguments": {"name": "game_2048_max_number", "arguments": {"target": target}},
-        }
+        return Task(
+            env=env,
+            scenario="game_2048",
+            args={"target": target},
+        )
     else:
-        mcp_config = {
-            "local": {
-                "command": "docker",
-                "args": ["run", "--rm", "-i", "hudevals/hud-text-2048:0.1.6"],
-            }
-        }
-        prompt = f"Aim for the {target} tile (at least a score of 800!)"
-        setup_tool = {
-            "name": "setup",
-            "arguments": {"name": "board", "arguments": {"board_size": 4}},
-        }
-        evaluate_tool = {
-            "name": "evaluate",
-            "arguments": {"name": "max_number", "arguments": {"target": target}},
-        }
-
-    return LegacyTask(
-        prompt=prompt,
-        mcp_config=mcp_config,
-        setup_tool=setup_tool,  # type: ignore[arg-type]
-        evaluate_tool=evaluate_tool,  # type: ignore[arg-type]
-    )
+        # Use local Docker environment for text mode
+        env = hud.Environment("2048-text")
+        env.connect_image("hudevals/hud-text-2048:0.1.6")
+        return Task(
+            env=env,
+            scenario="max_number",
+            args={"target": target},
+        )
 
 
 async def run_example(mode: Literal["text", "browser"], target: int) -> None:
@@ -118,10 +101,10 @@ async def run_example(mode: Literal["text", "browser"], target: int) -> None:
         api_key=api_key,
     )
 
-    task = _task_for_mode(mode, target)
+    task = _create_task(mode, target)
     system_prompt = _system_prompt(mode)
 
-    checkpoint = "gpt-5-mini"  # Replace with your model checkpoint
+    checkpoint = "gpt-4o-mini"  # Replace with your model checkpoint
 
     # Allowed tools differ by mode
     allowed_tools = ["computer"] if mode == "browser" else ["move"]
@@ -135,17 +118,13 @@ async def run_example(mode: Literal["text", "browser"], target: int) -> None:
         system_prompt=system_prompt,
     )
 
-    title = "OpenAI 2048 Game (Browser)" if mode == "browser" else "OpenAI 2048 Game (Text)"
     print("🎮 Starting 2048 game with OpenAI-compatible agent...")
     print(f"🤖 Model: {agent.config.checkpoint_name}")
     print(f"🧩 Mode: {mode}")
     print("=" * 50)
 
-    # Use hud.eval() with Task.from_v4() for legacy task format
-    from hud.eval.task import Task
-
-    v5_task = Task.from_v4(task)
-    async with hud.eval(v5_task, variants={"model": checkpoint, "mode": mode}) as ctx:
+    # Use hud.eval() for the task
+    async with hud.eval(task, variants={"model": checkpoint, "mode": mode}) as ctx:
         result = await agent.run(ctx, max_steps=100)
 
     print("=" * 50)

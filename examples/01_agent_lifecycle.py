@@ -2,12 +2,11 @@
 """
 Complete Agent Lifecycle Example
 
-This example demonstrates the full agent lifecycle using Task.from_v4():
-- Task definition with setup and evaluation tools (v4 LegacyTask format)
-- Conversion to v5 Task using Task.from_v4()
+This example demonstrates the full agent lifecycle using the v5 Task format:
+- Task definition with Environment and scenario
 - hud.eval() context for connection and tracing
 - Agent initialization and execution
-- Automatic setup/evaluate tool execution
+- Automatic scenario setup/evaluation
 - Result collection
 
 For simpler usage, just use `await agent.run(ctx)` which handles everything.
@@ -15,65 +14,49 @@ This example shows what happens under the hood.
 """
 
 import asyncio
+
 import hud
-from hud.datasets import LegacyTask
+from hud.agents.claude import ClaudeAgent
 from hud.eval.task import Task
-from hud.agents import ClaudeAgent
 
 
-async def main():
+async def main() -> None:
     print("🚀 Agent Lifecycle Example")
     print("=" * 50)
 
-    # Phase 1: Define task in v4 LegacyTask format
-    # This format includes setup_tool and evaluate_tool
+    # Phase 1: Define task using v5 Task format
+    # The Task holds environment config and scenario info
     print("📋 Defining task...")
-    legacy_task = LegacyTask(
-        prompt="Create a new todo item with the title 'Buy groceries' and description 'Milk, eggs, bread'",
-        mcp_config={
-            "hud": {
-                "url": "https://mcp.hud.ai/v3/mcp",
-                "headers": {
-                    "Authorization": "Bearer ${HUD_API_KEY}",  # Auto-resolved from env
-                    "Mcp-Image": "hudevals/hud-browser:latest",
-                },
-            }
-        },
-        setup_tool={"name": "launch_app", "arguments": {"app_name": "todo"}},
-        evaluate_tool={
-            "name": "evaluate",
-            "arguments": {"name": "todo_exists", "arguments": {"title": "Buy groceries"}},
-        },
+    task = Task(
+        # Environment config - connects to HUD browser hub
+        env={"name": "browser"},
+        # Scenario to run (defined on the environment)
+        scenario="checkout",
+        # Scenario arguments
+        args={"product": "laptop", "quantity": 1},
+        # Optional: agent configuration
+        agent_config={"system_prompt": "You are a helpful shopping assistant."},
     )
 
-    # Phase 2: Convert to v5 Task
-    # Task.from_v4() creates an Environment with:
-    # - mcp_config connection (connects on context entry)
-    # - setup_tool calls (run on context entry)
-    # - evaluate_tool calls (run on context exit)
-    print("🔄 Converting to v5 Task...")
-    task = Task.from_v4(legacy_task)
-
-    # Phase 3: Create agent
+    # Phase 2: Create agent
     print("🤖 Creating Claude agent...")
     agent = ClaudeAgent.create(
-        checkpoint_name="claude-sonnet-4-5",
+        checkpoint_name="claude-sonnet-4-20250514",
         allowed_tools=["anthropic_computer"],
         initial_screenshot=True,
     )
 
-    # Phase 4: Enter eval context and run agent
+    # Phase 3: Enter eval context and run agent
     # The context manager handles:
     # - Environment connection (MCP servers start)
-    # - Setup tools execution (launch_app)
+    # - Scenario setup execution
     # - Trace creation for telemetry
     print("🔧 Entering eval context...")
-    async with task as ctx:
-        print(f"   ✅ Environment connected")
-        print(f"   ✅ Setup tools executed")
-        print(f"   📝 Prompt: {ctx.prompt[:50]}...")
+    async with hud.eval(task, name="agent-lifecycle-demo") as ctx:
+        print("   ✅ Environment connected")
+        print(f"   📝 Prompt: {ctx.prompt[:50] if ctx.prompt else 'N/A'}...")
 
-        # Phase 5: Run the agent
+        # Phase 4: Run the agent
         # agent.run() handles the agentic loop:
         # - Gets system messages
         # - Sends prompt to model
@@ -88,9 +71,9 @@ async def main():
         if result.content:
             print(f"   - Response: {result.content[:100]}...")
 
-    # Phase 6: After exit, evaluate_tool was automatically called
+    # Phase 5: After exit, scenario evaluation was automatically called
     # and ctx.reward is set based on the evaluation
-    print("\n📊 Evaluation complete (via evaluate_tool)")
+    print("\n📊 Evaluation complete")
     print(f"   Reward: {ctx.reward}")
     print(f"   Success: {ctx.success}")
 

@@ -59,9 +59,15 @@ class TestSingleTaskRequest:
 
     def test_incomplete_v4_task_rejected(self):
         """Test that incomplete v4 task (missing evaluate_tool) is rejected."""
+        # When prompt + mcp_config is present but evaluate_tool is missing,
+        # it's detected as v4 format but fails validation
         with pytest.raises(ValueError, match="v4 task missing required fields"):
             SingleTaskRequest(
-                task={"prompt": "test", "mcp_config": {}},  # Missing evaluate_tool
+                task={
+                    "prompt": "test",
+                    "mcp_config": {"server": {"url": "http://localhost"}},
+                    # Missing evaluate_tool
+                },
                 agent_type=AgentType.CLAUDE,
                 job_id="job-123",
                 task_id="task-1",
@@ -244,8 +250,10 @@ class TestSubmitRollouts:
 
     @pytest.mark.asyncio
     async def test_submit_single_task(self):
-        """Test submitting a single task."""
-        tasks = [LegacyTask(id="task-1", prompt="Test prompt", mcp_config={})]
+        """Test submitting a single task (v5 format)."""
+        from hud.eval.task import Task
+
+        tasks = [Task(env={"name": "browser"}, scenario="test", id="task-1")]
 
         with patch("hud.datasets.utils.httpx.AsyncClient") as mock_client_cls:
             mock_response = MagicMock()
@@ -274,7 +282,9 @@ class TestSubmitRollouts:
     @pytest.mark.asyncio
     async def test_submit_with_group_size(self):
         """Test submitting with group_size > 1 creates multiple requests per task."""
-        tasks = [LegacyTask(id="task-1", prompt="Test prompt", mcp_config={})]
+        from hud.eval.task import Task
+
+        tasks = [Task(env={"name": "browser"}, scenario="test", id="task-1")]
 
         with patch("hud.datasets.utils.httpx.AsyncClient") as mock_client_cls:
             mock_response = MagicMock()

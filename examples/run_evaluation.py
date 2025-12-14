@@ -28,7 +28,7 @@ async def main() -> None:
     args = parser.parse_args()
 
     # Import here to avoid import errors if agents not installed
-    from hud.datasets import load_dataset, run_dataset, display_results
+    from hud.datasets import load_dataset, run_dataset
 
     # Load dataset as Task objects
     print(f"Loading {args.dataset}...")
@@ -40,25 +40,21 @@ async def main() -> None:
         tasks = [tasks[i] for i in indices if i < len(tasks)]
         print(f"Filtered to {len(tasks)} tasks at indices: {args.task_ids}")
 
-    # Create agent instance based on type
+    # Determine agent type and params
     if args.agent == "operator":
-        from hud.agents import OperatorAgent
-
-        agent = OperatorAgent.create(
-            checkpoint_name=args.model or "computer-use-preview",
-        )
+        agent_type = "operator"
+        agent_params = {"checkpoint_name": args.model or "computer-use-preview"}
     else:
-        from hud.agents import ClaudeAgent
+        agent_type = "claude"
+        agent_params = {"checkpoint_name": args.model or "claude-sonnet-4-20250514"}
 
-        agent = ClaudeAgent.create(
-            checkpoint_name=args.model or "claude-sonnet-4-5",
-        )
-
-    # Run evaluation
+    # Run evaluation using run_dataset
+    # Note: run_dataset creates agents fresh per task for proper tool initialization
     print(f"Running {len(tasks)} tasks with {args.agent} agent...")
     results = await run_dataset(
         tasks=tasks,
-        agent=agent,
+        agent_type=agent_type,
+        agent_params=agent_params,
         max_steps=args.max_steps,
         max_concurrent=args.max_concurrent,
         group_size=args.group_size,

@@ -7,21 +7,21 @@ This demonstrates building a custom MCPAgent that:
 3. Works with any model available via the gateway
 
 Usage:
-    HUD_API_KEY=sk-hud-... python examples/custom_gateway_agent.py
+    HUD_API_KEY=sk-hud-... python examples/05_custom_agent.py
 """
 
 import asyncio
 import json
-import os
 from typing import Any
 
 import mcp.types as types
 from openai import AsyncOpenAI
 
-from hud import instrument
+import hud
 from hud.agents.base import MCPAgent
-from hud.datasets import LegacyTask
+from hud.eval.task import Task
 from hud.settings import settings
+from hud.telemetry.instrument import instrument
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 
 
@@ -100,7 +100,7 @@ class MyAgent(MCPAgent):
             response = await self.client.chat.completions.create(
                 model=self.checkpoint_name,
                 messages=messages,
-                tools=tools if tools else None,  # type: ignore
+                tools=tools if tools else None,  # type: ignore[arg-type]
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
             )
@@ -195,7 +195,7 @@ class MyAgent(MCPAgent):
         return messages
 
 
-async def main():
+async def main() -> None:
     """Example usage of MyAgent."""
 
     # Create agent with Claude via Gateway
@@ -206,28 +206,17 @@ async def main():
         verbose=True,
     )
 
-    # Define a task with HUD MCP environment
-    legacy_task = LegacyTask(
-        prompt="Go to example.com and tell me the page title",
-        mcp_config={
-            "hud": {
-                "url": "https://mcp.hud.ai/v3/mcp",
-                "headers": {
-                    "Authorization": f"Bearer {os.environ.get('HUD_API_KEY', '')}",
-                    "Mcp-Image": "hudpython/hud-remote-browser:latest",
-                },
-            }
-        },
+    # Create v5 Task with HUD hub environment
+    task = Task(
+        env={"name": "browser"},  # Connect to browser hub
+        scenario="navigate",
+        args={"url": "https://example.com"},
+        agent_config={"system_prompt": "Go to example.com and tell me the page title"},
     )
-
-    # Convert to v5 Task and run with context manager
-    from hud.eval.task import Task
-
-    task = Task.from_v4(legacy_task)
 
     # Run the agent - traces are automatically captured
     print("Running agent with HUD Gateway inference...")
-    async with task as ctx:
+    async with hud.eval(task, name="custom-agent-demo") as ctx:
         result = await agent.run(ctx, max_steps=5)
 
     print("\n=== Results ===")

@@ -57,7 +57,7 @@ class TestLoadDataset:
         task_ids = {t.id for t in tasks}
         assert task_ids == {"task-1", "task-2"}
         mock_client.get.assert_called_once_with(
-            "https://api.hud.ai/evals/test-org/test-dataset",
+            "https://api.hud.ai/tasks/evalset/test-org/test-dataset",
             headers={"Authorization": "Bearer test_key"},
             params={"all": "true"},
         )
@@ -124,7 +124,7 @@ class TestLoadDataset:
 
         assert len(tasks) == 0
         mock_client.get.assert_called_once_with(
-            "https://api.hud.ai/evals/test-org/test-dataset",
+            "https://api.hud.ai/tasks/evalset/test-org/test-dataset",
             headers={},
             params={"all": "true"},
         )

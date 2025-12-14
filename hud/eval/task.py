@@ -32,6 +32,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    field_serializer,
     field_validator,
     model_serializer,
     model_validator,
@@ -140,6 +141,22 @@ class Task(BaseModel):
     # Task metadata - for tracking/filtering, not used by agent
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("agent_config", mode="before")
+    @classmethod
+    def convert_agent_config(
+        cls, v: TaskAgentConfig | dict[str, Any] | None
+    ) -> TaskAgentConfig | None:
+        """Auto-convert dict to TaskAgentConfig."""
+        if v is None:
+            return None
+        if isinstance(v, TaskAgentConfig):
+            return v
+        if isinstance(v, dict):
+            return TaskAgentConfig(**v)
+        raise TypeError(
+            f"Task.agent_config must be TaskAgentConfig or dict. Got {type(v).__name__}"
+        )
+
     @model_validator(mode="before")
     @classmethod
     def detect_v4_format(cls, data: Any) -> Any:
@@ -221,54 +238,51 @@ class Task(BaseModel):
                 )
         return converted
 
+    @field_serializer("env")
+    def serialize_env(self, env: Environment | None) -> dict[str, Any] | None:
+        """Serialize Environment to config dict via to_config()."""
+        if env is None:
+            return None
+        return env.to_config()
+
     @model_serializer(mode="wrap")
     def _serialize_task(
         self, handler: Any  # SerializerFunctionWrapHandler
     ) -> dict[str, Any]:
-        """Custom serializer that converts Environment to config dict.
+        """Custom serializer for v4 format flattening.
 
-        For v5 tasks: outputs {"env": {"name": "browser", ...}, "scenario": ...}
-        For v4 tasks: outputs {"prompt": ..., "mcp_config": ..., "evaluate_tool": ...}
-
-        Raises ValueError if environment has local tools/scenarios.
+        For v5 tasks: uses default serialization (env field handled by field_serializer)
+        For v4 tasks: flattens {"prompt": ..., "mcp_config": ..., "evaluate_tool": ...}
         """
-        from hud.environment import Environment
-
-        # Get default serialization
+        # Get default serialization (env is already converted by field_serializer)
         data = handler(self)
 
-        # Convert Environment to serializable config
-        if isinstance(self.env, Environment):
-            env_config = self.env.to_config()
+        # Check if this is a v4 task (env config has mcp_config)
+        env_config = data.get("env")
+        if env_config and isinstance(env_config, dict) and "mcp_config" in env_config:
+            # v4 format - flatten into top-level dict
+            result = env_config.copy()
 
-            # Detect v4 format (has mcp_config) vs v5 format (has name)
-            if "mcp_config" in env_config:
-                # v4 format - merge env_config with Task fields
-                result = env_config.copy()
+            # Map validation → integration_test_tool
+            if self.validation:
+                result["integration_test_tool"] = [
+                    {"name": v.name, "arguments": v.arguments or {}}
+                    for v in self.validation
+                ]
 
-                # Map validation → integration_test_tool
-                if self.validation:
-                    result["integration_test_tool"] = [
-                        {"name": v.name, "arguments": v.arguments or {}}
-                        for v in self.validation
-                    ]
+            # Preserve agent_config
+            if data.get("agent_config"):
+                result["agent_config"] = data["agent_config"]
 
-                # Preserve agent_config (with system_prompt)
-                if self.agent_config and self.agent_config.system_prompt:
-                    result["agent_config"] = {"system_prompt": self.agent_config.system_prompt}
+            # Preserve metadata
+            if data.get("metadata"):
+                result["metadata"] = data["metadata"]
 
-                # Preserve metadata
-                if self.metadata:
-                    result["metadata"] = self.metadata
+            # Preserve id
+            if data.get("id"):
+                result["id"] = data["id"]
 
-                # Preserve id
-                if self.id:
-                    result["id"] = self.id
-
-                return result
-            else:
-                # v5 format - env config goes in env field
-                data["env"] = env_config
+            return result
 
         return data
 
