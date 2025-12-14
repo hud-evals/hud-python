@@ -94,10 +94,13 @@ def _send_job_enter(
 async def run_eval(
     source: Task | list[Task] | None = None,
     *,
+    name: str | None = None,
     variants: dict[str, Any] | None = None,
     group: int = 1,
     group_ids: list[str] | None = None,
     job_id: str | None = None,
+    group_id: str | None = None,
+    trace_id: str | None = None,
     api_key: str | None = None,
     max_concurrent: int | None = None,
     trace: bool = True,
@@ -115,10 +118,13 @@ async def run_eval(
             - list[Task]: List of Task objects
             - LegacyTask: Single LegacyTask object (deprecated, use Task.from_v4())
             - list[LegacyTask]: List of LegacyTask objects (deprecated)
+        name: Optional name for the eval (used in trace)
         variants: A/B test configuration (dict with list values expanded)
         group: Runs per variant for statistical significance
         group_ids: Optional list of group IDs
         job_id: Job ID to link to
+        group_id: Group ID for parallel evaluations
+        trace_id: Pre-assigned trace ID (auto-generated if not provided)
         api_key: API key for backend calls
         max_concurrent: Maximum concurrent evals (None = unlimited)
         trace: Whether to send trace data to backend (default True)
@@ -232,8 +238,11 @@ async def run_eval(
             # Single task - use EvalContext.from_task()
             ctx = EvalContext.from_task(
                 tasks[0],
+                name=name,
+                trace_id=trace_id,
                 api_key=api_key,
                 job_id=job_id,
+                group_id=group_id,
                 variants=variant_combos[0],
                 code_snippet=code_snippet,
                 trace=trace,
@@ -244,9 +253,11 @@ async def run_eval(
         else:
             # Blank eval - use EvalContext directly
             ctx = EvalContext(
-                name="eval",
+                name=name or "eval",
+                trace_id=trace_id,
                 api_key=api_key,
                 job_id=job_id,
+                group_id=group_id,
                 variants=variant_combos[0],
                 code_snippet=code_snippet,
                 trace=trace,

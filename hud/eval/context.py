@@ -57,7 +57,7 @@ class EvalContext(Environment):
         variants: Variant assignment dict (for A/B testing)
         reward: Reward value (user-settable)
         error: Exception if failed
-        results: All eval results (for parallel execution)
+        results: All eval results (populated for parallel execution, empty for single)
         task: Task definition (if loaded from slug)
 
     Example:
@@ -138,8 +138,8 @@ class EvalContext(Environment):
         # Error tracking
         self.error: BaseException | None = None
 
-        # Parallel results
-        self.results: list[EvalContext] | None = None
+        # Parallel results (empty list for single evals, populated for parallel)
+        self.results: list[EvalContext] = []
 
         # Code snippet for reproducibility
         self.code_snippet: str | None = code_snippet
@@ -235,6 +235,7 @@ class EvalContext(Environment):
         cls,
         task: Task,
         *,
+        name: str | None = None,
         trace_id: str | None = None,
         api_key: str | None = None,
         job_id: str | None = None,
@@ -249,6 +250,7 @@ class EvalContext(Environment):
 
         Args:
             task: Task config (env, scenario, args)
+            name: Override for eval/trace name (defaults to task scenario/args)
             trace_id: Unique trace ID
             api_key: API key for backend calls
             job_id: Job ID to link to
@@ -259,9 +261,13 @@ class EvalContext(Environment):
             trace: Whether to send traces to backend
             quiet: Whether to suppress output
         """
+        from hud.environment import Environment
         from hud.eval.task import build_eval_name
 
-        eval_name = build_eval_name(task.scenario, task.args)
+        eval_name = name or build_eval_name(task.scenario, task.args)
+
+        # task.env is guaranteed to be Environment after Task.__post_init__
+        assert isinstance(task.env, Environment), "Task.env should be Environment"
 
         ctx = cls.from_environment(
             env=task.env,

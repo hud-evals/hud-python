@@ -21,7 +21,7 @@ class SingleTaskRequest(BaseModel):
     """Request to run a single task remotely - mirrors run_single_task() args."""
 
     task: dict[str, Any] = Field(
-        description="Task definition compatible with hud.types.LegacyTask.",
+        description="Task definition (v4 LegacyTask or v5 Task format).",
     )
     agent_type: AgentType = Field(description="Agent type to execute the task.")
     agent_params: dict[str, Any] = Field(
@@ -32,20 +32,29 @@ class SingleTaskRequest(BaseModel):
     )
     max_steps: int = Field(default=10, description="Maximum steps allowed for the agent.")
     job_id: str = Field(description="HUD job identifier for telemetry association.")
-    task_id: str = Field(description="Task identifier.")
-    trace_name: str = Field(description="Trace name.")
+    task_id: str | None = Field(default=None, description="Task identifier.")
+    trace_name: str | None = Field(default=None, description="Trace name.")
     group_id: str | None = Field(default=None, description="Optional HUD group identifier.")
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional metadata to inject into the trace context.",
     )
+    trace_id: str | None = Field(default=None, description="Pre-assigned trace ID.")
 
     @model_validator(mode="after")
     def _validate_task(self) -> SingleTaskRequest:
-        try:
-            LegacyTask(**self.task)
-        except Exception as exc:
-            raise ValueError(f"Invalid task payload: {exc}") from exc
+        """Validate task is either v4 LegacyTask or v5 Task format."""
+        from hud.datasets.loader import _is_legacy_task_format
+
+        # v4 format: prompt + mcp_config
+        if _is_legacy_task_format(self.task):
+            try:
+                LegacyTask(**self.task)
+            except Exception as exc:
+                raise ValueError(f"Invalid legacy task payload: {exc}") from exc
+        # v5 format: env required
+        elif "env" not in self.task:
+            raise ValueError("Task must have 'env' (v5) or 'prompt'+'mcp_config' (v4)")
         return self
 
     @field_validator("job_id")

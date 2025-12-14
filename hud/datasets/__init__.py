@@ -11,7 +11,7 @@ from hud.types import LegacyTask
 from hud.utils.tasks import save_tasks
 
 from .loader import load_dataset
-from .runner import run_dataset, run_tasks
+from .runner import run_dataset, run_single_task, run_tasks
 from .utils import (
     BatchRequest,
     SingleTaskRequest,
@@ -28,6 +28,7 @@ __all__ = [
     "display_results",
     "load_dataset",
     "run_dataset",
+    "run_single_task",
     "run_tasks",
     "save_tasks",
     "submit_rollouts",

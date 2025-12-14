@@ -6,6 +6,7 @@ through the existing :class:`hud.agent.MCPAgent` scaffolding.
 
 Key points:
 - Stateless, no special server-side conversation state is assumed.
+- Defaults to HUD inference gateway (inference.hud.ai) when HUD_API_KEY is set
 - Accepts an :class:`openai.AsyncOpenAI` client, caller can supply their own
   base_url / api_key (e.g. llama.cpp, together.ai, …)
 - All HUD features (step_count, OTel spans, tool filtering, screenshots, …)
@@ -24,6 +25,7 @@ from openai import AsyncOpenAI
 from pydantic import ConfigDict, Field
 
 from hud import instrument
+from hud.settings import settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
@@ -73,10 +75,16 @@ class OpenAIChatAgent(MCPAgent):
             self.oai = self.config.openai_client
         elif self.config.api_key is not None or self.config.base_url is not None:
             self.oai = AsyncOpenAI(api_key=self.config.api_key, base_url=self.config.base_url)
+        elif settings.api_key:
+            # Default to HUD inference gateway
+            self.oai = AsyncOpenAI(
+                api_key=settings.api_key,
+                base_url=settings.hud_gateway_url,
+            )
         else:
             raise ValueError(
-                "Either openai_client or api_key must be provided. "
-                "Set OPENAI_API_KEY environment variable or pass api_key explicitly."
+                "No API key found. Set HUD_API_KEY for HUD gateway, "
+                "or provide api_key/base_url/openai_client explicitly."
             )
 
         self.completion_kwargs = dict(self.config.completion_kwargs)
