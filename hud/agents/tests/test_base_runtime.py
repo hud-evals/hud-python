@@ -14,7 +14,7 @@ from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 
 class DummyConfig(BaseAgentConfig):
     model_name: str = "DummyAgent"
-    checkpoint_name: str = "dummy-model"
+    model: str = "dummy-model"
 
 
 class DummyCreateParams(BaseCreateParams, DummyConfig):

@@ -67,7 +67,7 @@ class TestRunDataset:
 
         with (
             patch("hud.datasets.runner.hud.eval") as mock_eval,
-            patch.object(AgentType.CLAUDE, "cls", mock_agent_cls),
+            patch("hud.agents.claude.ClaudeAgent", mock_agent_cls),
         ):
             # Set up the async context manager
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
@@ -98,7 +98,7 @@ class TestRunDataset:
         with (
             patch("hud.datasets.loader.load_tasks", return_value=mock_tasks) as mock_load,
             patch("hud.datasets.runner.hud.eval") as mock_eval,
-            patch.object(AgentType.OPENAI, "cls", mock_agent_cls),
+            patch("hud.agents.openai.OpenAIAgent", mock_agent_cls),
         ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -130,7 +130,7 @@ class TestRunDataset:
 
         with (
             patch("hud.datasets.runner.hud.eval") as mock_eval,
-            patch.object(AgentType.CLAUDE, "cls", mock_agent_cls),
+            patch("hud.agents.claude.ClaudeAgent", mock_agent_cls),
         ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -153,7 +153,7 @@ class TestRunDataset:
 
         with (
             patch("hud.datasets.runner.hud.eval") as mock_eval,
-            patch.object(AgentType.CLAUDE, "cls", mock_agent_cls),
+            patch("hud.agents.claude.ClaudeAgent", mock_agent_cls),
         ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -176,7 +176,7 @@ class TestRunDataset:
 
         with (
             patch("hud.datasets.runner.hud.eval") as mock_eval,
-            patch.object(AgentType.CLAUDE, "cls", mock_agent_cls),
+            patch("hud.agents.claude.ClaudeAgent", mock_agent_cls),
         ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -208,7 +208,7 @@ class TestRunDataset:
 
         with (
             patch("hud.datasets.runner.hud.eval") as mock_eval,
-            patch.object(AgentType.CLAUDE, "cls", mock_agent_cls),
+            patch("hud.agents.claude.ClaudeAgent", mock_agent_cls),
         ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)

@@ -137,7 +137,7 @@ class TestRunDatasetExtended:
     async def test_run_dataset_with_task_list(self):
         """Test run_dataset with Task objects."""
         from hud.eval.task import Task
-        from hud.types import AgentType, Trace
+        from hud.types import Trace
 
         # Create mock tasks with env as dict (to avoid real connections)
         mock_env = {"name": "test"}
@@ -160,7 +160,7 @@ class TestRunDatasetExtended:
 
         with (
             patch("hud.datasets.runner.hud.eval") as mock_eval,
-            patch.object(AgentType.CLAUDE, "cls", mock_agent_cls),
+            patch("hud.agents.claude.ClaudeAgent", mock_agent_cls),
         ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -175,7 +175,7 @@ class TestRunDatasetExtended:
     async def test_run_dataset_from_source_string(self):
         """Test run_dataset with source string calls load_tasks."""
         from hud.eval.task import Task
-        from hud.types import AgentType, Trace
+        from hud.types import Trace
 
         mock_env = {"name": "test"}
         mock_tasks = [Task(env=mock_env, scenario="loaded")]  # type: ignore[arg-type]
@@ -192,7 +192,7 @@ class TestRunDatasetExtended:
         with (
             patch("hud.datasets.loader.load_tasks", return_value=mock_tasks) as mock_load,
             patch("hud.datasets.runner.hud.eval") as mock_eval,
-            patch.object(AgentType.OPENAI, "cls", mock_agent_cls),
+            patch("hud.agents.openai.OpenAIAgent", mock_agent_cls),
         ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -222,7 +222,7 @@ class TestRunDatasetExtended:
 
         with (
             patch("hud.datasets.runner.hud.eval") as mock_eval,
-            patch.object(AgentType.CLAUDE, "cls", mock_agent_cls),
+            patch("hud.agents.claude.ClaudeAgent", mock_agent_cls),
         ):
             mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             mock_eval.return_value.__aexit__ = AsyncMock(return_value=None)
