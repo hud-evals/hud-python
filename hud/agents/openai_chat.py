@@ -48,6 +48,8 @@ class OpenAIChatConfig(BaseAgentConfig):
     api_key: str | None = None
     base_url: str | None = None
     completion_kwargs: dict[str, Any] = Field(default_factory=dict)
+    # Timeout in seconds for API requests (default 30 minutes for reasoning models)
+    timeout: float = 1800.0
 
 
 class OpenAIChatCreateParams(BaseCreateParams, OpenAIChatConfig):
@@ -72,7 +74,11 @@ class OpenAIChatAgent(MCPAgent):
         if self.config.openai_client is not None:
             self.oai = self.config.openai_client
         elif self.config.api_key is not None or self.config.base_url is not None:
-            self.oai = AsyncOpenAI(api_key=self.config.api_key, base_url=self.config.base_url)
+            self.oai = AsyncOpenAI(
+                api_key=self.config.api_key, 
+                base_url=self.config.base_url,
+                timeout=self.config.timeout
+            )
         else:
             raise ValueError(
                 "Either openai_client or api_key must be provided. "
@@ -255,6 +261,20 @@ class OpenAIChatAgent(MCPAgent):
 
         choice = response.choices[0]
         msg = choice.message
+        
+        # Check for truncation (response hit token limit)
+        if choice.finish_reason == "length":
+            logger.warning("⚠️  Response truncated (finish_reason=length)!")
+            return AgentResponse(
+                content="[SYSTEM] Your response was truncated because it exceeded the output token limit. "
+                        "The content was cut off and not delivered. You may continue from where you left off, "
+                        "but note that very long responses will be truncated again. "
+                        "Consider being more concise or splitting your work across multiple tool calls.",
+                tool_calls=[],
+                done=False,  # Let model continue
+                isError=True,
+            )
+        
         assistant_msg: dict[str, Any] = {"role": "assistant"}
 
         if msg.content:
@@ -277,19 +297,13 @@ class OpenAIChatAgent(MCPAgent):
         if msg.tool_calls:
             for tc in msg.tool_calls:
                 if tc.function.name is not None:  # type: ignore
-                    # _oai_to_mcp returns a single MCPToolCall; append it
-                    tool_calls.append(self._oai_to_mcp(tc))  # noqa: PERF401
-
-        # Only stop on length (token limit), never on "stop"
-        done = choice.finish_reason == "length"
-        if done:
-            self.hud_console.info_log(f"Done decision: finish_reason={choice.finish_reason}")
+                    tool_calls.append(self._oai_to_mcp(tc))
 
         return AgentResponse(
             content=msg.content or "",
             tool_calls=tool_calls,
-            done=done,
-            raw=response,  # Include raw response for access to Choice objects
+            done=False,  # Let agent loop decide when to stop
+            raw=response,
         )
 
     async def format_tool_results(

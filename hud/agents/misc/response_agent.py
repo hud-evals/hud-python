@@ -74,16 +74,16 @@ class ResponseAgent:
         Returns:
             ResponseType: Either "STOP" or "CONTINUE"
         """
-        # First check for explicit completion phrases
-        agent_message_lower = agent_message.lower().strip()
-        completion_phrases = [
-            "task completed",
-            "task is completed", 
-            "task complete",
-        ]
-        if any(phrase in agent_message_lower for phrase in completion_phrases):
-            logger.debug(f"ResponseAgent: Detected completion phrase, returning STOP")
-            return "STOP"
+        # # First check for explicit completion phrases
+        # agent_message_lower = agent_message.lower().strip()
+        # completion_phrases = [
+        #     "task completed",
+        #     "task is completed", 
+        #     "task complete",
+        # ]
+        # if any(phrase in agent_message_lower for phrase in completion_phrases):
+        #     logger.debug(f"ResponseAgent: Detected completion phrase, returning STOP")
+        #     return "STOP"
         
         logger.debug(f"ResponseAgent: Querying model for decision on: {agent_message[:100]}")
         try:

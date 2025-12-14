@@ -57,6 +57,8 @@ class OpenAIConfig(BaseAgentConfig):
     truncation: Literal["auto", "disabled"] | None = None
     parallel_tool_calls: bool | None = None
     validate_api_key: bool = True
+    # Timeout in seconds for API requests (default 30 minutes for reasoning models)
+    timeout: float = 1800.0
 
 
 class OpenAICreateParams(BaseCreateParams, OpenAIConfig):
@@ -83,7 +85,8 @@ class OpenAIAgent(MCPAgent):
             api_key = settings.openai_api_key
             if not api_key:
                 raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY.")
-            model_client = AsyncOpenAI(api_key=api_key)
+            # Use configured timeout (default 1200s = 20 min for reasoning models)
+            model_client = AsyncOpenAI(api_key=api_key, timeout=self.config.timeout)
 
         if self.config.validate_api_key:
             try:
@@ -261,6 +264,35 @@ class OpenAIAgent(MCPAgent):
 
         self.last_response_id = response.id
         self._message_cursor = len(messages)
+
+        # Check for truncation (response hit token limit)
+        # The Responses API uses 'status' field: 'completed', 'incomplete', 'failed'
+        response_status = getattr(response, 'status', 'completed')
+        if response_status == 'incomplete':
+            reason = getattr(response, 'incomplete_details', {})
+            logger.warning(f"⚠️  Response truncated (status=incomplete)! Reason: {reason}.")
+            return AgentResponse(
+                content="[SYSTEM] Your response was truncated because it exceeded the output token limit. "
+                        "The content was cut off and not delivered. You may continue from where you left off, "
+                        "but note that very long responses will be truncated again. "
+                        "Consider being more concise or splitting your work across multiple tool calls.",
+                tool_calls=[],
+                done=False,  # Let model continue
+                isError=True,
+            )
+        
+        # Also check stop_reason for legacy/alternate truncation signals
+        stop_reason = getattr(response, 'stop_reason', None)
+        if stop_reason == 'max_output_tokens':
+            logger.warning(f"⚠️  Response truncated (stop_reason=max_output_tokens)!")
+            return AgentResponse(
+                content="[SYSTEM] Your response was truncated because it exceeded the output token limit. "
+                        "The content was cut off and not delivered. You may continue from where you left off, "
+                        "but note that very long responses will be truncated again.",
+                tool_calls=[],
+                done=False,
+                isError=True,
+            )
 
         agent_response = AgentResponse(content="", tool_calls=[], done=True)
         text_chunks: list[str] = []
