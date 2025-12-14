@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import ConfigDict, field_validator
 
-from hud import instrument
 from hud.tools.grounding import GroundedComputerTool, Grounder, GrounderConfig
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 from hud.utils.types import with_signature
@@ -104,11 +103,6 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
             return []
         return [self.grounded_tool.get_openai_tool_schema()]
 
-    @instrument(
-        span_type="agent",
-        record_args=False,
-        record_result=True,
-    )
     async def get_response(self, messages: Any) -> AgentResponse:
         """Get response from the planning model and handle grounded tool calls.
 

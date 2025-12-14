@@ -25,7 +25,6 @@ from anthropic.types.beta import (
 )
 from pydantic import ConfigDict
 
-import hud
 from hud.settings import settings
 from hud.tools.computer.settings import computer_settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
@@ -134,11 +133,6 @@ class ClaudeAgent(MCPAgent):
 
         return [BetaMessageParam(role="user", content=anthropic_blocks)]
 
-    @hud.instrument(
-        span_type="agent",
-        record_args=False,  # Messages can be large
-        record_result=True,
-    )
     async def get_response(self, messages: list[BetaMessageParam]) -> AgentResponse:
         """Get response from Claude including any tool calls."""
 

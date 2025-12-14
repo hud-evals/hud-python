@@ -10,7 +10,6 @@ from google import genai
 from google.genai import types as genai_types
 from pydantic import ConfigDict
 
-import hud
 from hud.settings import settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
@@ -115,11 +114,6 @@ class GeminiAgent(MCPAgent):
 
         return [genai_types.Content(role="user", parts=gemini_parts)]
 
-    @hud.instrument(
-        span_type="agent",
-        record_args=False,  # Messages can be large
-        record_result=True,
-    )
     async def get_response(self, messages: list[genai_types.Content]) -> AgentResponse:
         """Get response from Gemini including any tool calls."""
 

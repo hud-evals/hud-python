@@ -24,7 +24,6 @@ import mcp.types as types
 from openai import AsyncOpenAI
 from pydantic import ConfigDict, Field
 
-from hud import instrument
 from hud.settings import settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
@@ -227,11 +226,6 @@ class OpenAIChatAgent(MCPAgent):
             **extra,
         )  # type: ignore
 
-    @instrument(
-        span_type="agent",
-        record_args=False,
-        record_result=True,
-    )
     async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
         """Send chat request to OpenAI and convert the response."""
 

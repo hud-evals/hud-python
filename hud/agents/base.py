@@ -376,8 +376,6 @@ class MCPAgent(ABC):
         """
         Get response from the model including any tool calls.
 
-        NOTE: Subclasses should decorate this method with:
-            @hud.instrument(span_type="agent", record_args=False, record_result=True)
 
         Args:
             messages: Current conversation messages

@@ -31,7 +31,6 @@ from openai.types.responses.response_input_param import FunctionCallOutput, Mess
 from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 from pydantic import ConfigDict
 
-import hud
 from hud.settings import settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
 from hud.utils.strict_schema import ensure_strict_json_schema
@@ -220,11 +219,6 @@ class OpenAIAgent(MCPAgent):
             content.append(ResponseInputTextParam(type="input_text", text=""))
         return [Message(role="user", content=content)]
 
-    @hud.instrument(
-        span_type="agent",
-        record_args=False,
-        record_result=True,
-    )
     async def get_response(self, messages: ResponseInputParam) -> AgentResponse:
         """Send the latest input items to OpenAI's Responses API."""
         new_items: ResponseInputParam = messages[self._message_cursor :]

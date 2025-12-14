@@ -165,12 +165,16 @@ def display_results(
 
         # Check if we have variants (grouped parallel runs)
         has_variants = any(getattr(r, "variants", None) for r in results if r)
+        has_prompts = any(getattr(r, "prompt", None) for r in results if r)
         has_answers = any(getattr(r, "answer", None) for r in results if r)
 
         if has_variants:
             table.add_column("Variants", style="cyan", max_width=30)
         elif tasks:
             table.add_column("Task", style="cyan", max_width=30)
+
+        if has_prompts:
+            table.add_column("Prompt", style="dim", max_width=35)
 
         if has_answers:
             table.add_column("Answer", style="dim", max_width=35)
@@ -189,6 +193,7 @@ def display_results(
             error = getattr(r, "error", None)
             duration = getattr(r, "duration", 0)
             variants = getattr(r, "variants", None)
+            prompt = getattr(r, "prompt", None)
             answer = getattr(r, "answer", None)
 
             # Status icon
@@ -208,6 +213,10 @@ def display_results(
                 task = tasks[i]
                 task_label = _get_task_label(task, i)
                 row.append(task_label[:30])
+
+            # Prompt column
+            if has_prompts:
+                row.append(_truncate(prompt, 35))
 
             # Answer column
             if has_answers:

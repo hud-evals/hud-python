@@ -9,7 +9,6 @@ import re
 
 from openai import AsyncOpenAI
 
-from hud import instrument
 from hud.tools.grounding.config import GrounderConfig  # noqa: TC001
 
 logger = logging.getLogger(__name__)
@@ -182,12 +181,6 @@ class Grounder:
 
         return (final_x, final_y)
 
-    @instrument(
-        name="Grounding.predict_click",
-        span_type="agent",
-        record_args=True,
-        record_result=True,
-    )
     async def predict_click(
         self, *, image_b64: str, instruction: str, max_retries: int = 3
     ) -> tuple[int, int] | None:
