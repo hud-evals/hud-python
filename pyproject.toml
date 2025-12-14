@@ -1,6 +1,6 @@
 [project]
 name = "hud-python"
-version = "0.4.73"
+version = "0.4.74"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
@@ -126,6 +126,11 @@ agents = [
     "pillow>=11.1.0",
     # Jupyter kernel support
     "tornado>=6.5.2",
+]
+
+# AWS Bedrock support for ClaudeAgent
+bedrock = [
+    "anthropic[bedrock]>=0.75",
 ]
 
 # Development dependencies - includes testing, linting, and automation tools

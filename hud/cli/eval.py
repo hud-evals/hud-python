@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 import tomllib
 from dataclasses import dataclass
@@ -21,7 +22,17 @@ from rich.table import Table
 
 from hud.settings import settings
 from hud.types import AgentType
+from hud.utils.env import resolve_env_vars
 from hud.utils.hud_console import HUDConsole
+
+# Pattern to detect AWS Bedrock inference profile ARNs
+_BEDROCK_ARN_PATTERN = re.compile(r"^arn:aws:bedrock:[a-z0-9-]+:\d+:inference-profile/.+$")
+
+
+def _is_bedrock_arn(model: str | None) -> bool:
+    """Check if a model string is a Bedrock inference profile ARN."""
+    return model is not None and bool(_BEDROCK_ARN_PATTERN.match(model))
+
 
 if TYPE_CHECKING:
     from hud.agents.base import MCPAgent
@@ -59,13 +70,18 @@ _AGENT_PRESETS: list[AgentPreset] = [
         "Grok 4-1 Fast (xAI)",
         AgentType.OPENAI_COMPATIBLE,
         "grok-4-1-fast",
-        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "Grok"}},
+        {
+            "openai_compatible": {
+                "base_url": settings.hud_gateway_url,
+                "model_name": "Grok 4-1 Fast",
+            }
+        },
     ),
     AgentPreset(
         "GLM-4.5V (Z-AI)",
         AgentType.OPENAI_COMPATIBLE,
         "z-ai/glm-4.5v",
-        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "GLM"}},
+        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "GLM-4.5V"}},
     ),
 ]
 
@@ -75,7 +91,6 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 [eval]
 # source = "hud-evals/SheetBench-50"
 # agent = "claude"
-# model = ""
 # full = false
 # max_concurrent = 30
 # max_steps = 10
@@ -90,25 +105,29 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # disallowed_tools = []
 
 [claude]
+# model = "claude-sonnet-4-5"
 # max_tokens = 16384
 # use_computer_beta = true
 
 [openai]
+# model = "gpt-4o"
 # temperature = 0.7
 # max_output_tokens = 4096
 
 [gemini]
+# model = "gemini-2.5-pro"
 # temperature = 1.0
 # top_p = 0.95
 
 [gemini_cua]
+# model = "gemini-2.5-computer-use-preview"
 # temperature = 1.0
 # top_p = 0.95
 # excluded_predefined_functions = []
 
 [openai_compatible]
 # base_url = "http://localhost:8000/v1"
-# model_name = "my-model"
+# model = "my-model"
 """
 
 # Agent type -> (settings attr, env var name)
@@ -131,7 +150,6 @@ class EvalConfig(BaseModel):
     _EVAL_FIELDS: ClassVar[set[str]] = {
         "source",
         "agent_type",
-        "model",
         "task_ids",
         "full",
         "max_concurrent",
@@ -196,14 +214,24 @@ class EvalConfig(BaseModel):
             return
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
-            # Check both CLI --model and config file checkpoint_name
-            config_checkpoint = self.agent_config.get("openai_compatible", {}).get(
-                "checkpoint_name"
-            )
-            if not self.model and not config_checkpoint:
+            # Check both CLI --model and config file model
+            config_model = self.agent_config.get("openai_compatible", {}).get("model")
+            if not self.model and not config_model:
                 hud_console.error(
                     "Model name is required for OpenAI compatible agent. "
-                    "Use --model or set checkpoint_name in .hud_eval.toml"
+                    "Use --model or set model in [openai_compatible] section of .hud_eval.toml"
+                )
+                raise typer.Exit(1)
+        elif self.agent_type == AgentType.CLAUDE and _is_bedrock_arn(self.model):
+            missing_aws = (
+                not settings.aws_access_key_id
+                or not settings.aws_secret_access_key
+                or not settings.aws_region
+            )
+            if missing_aws:
+                hud_console.error(
+                    "AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION "
+                    "are required for AWS Bedrock"
                 )
                 raise typer.Exit(1)
         elif self.agent_type in _API_KEY_REQUIREMENTS:
@@ -217,38 +245,66 @@ class EvalConfig(BaseModel):
             hud_console.warning("HUD_API_KEY not set. Some features may be limited.")
 
     def get_agent_kwargs(self) -> dict[str, Any]:
-        """Build agent kwargs from config."""
+        """Build agent kwargs from config.
+
+        Model precedence:
+        1. CLI --model (highest priority)
+        2. [agent_type].model in TOML (per-agent config)
+        """
         if self.agent_type is None:
             raise ValueError("agent_type must be set before calling get_agent_kwargs()")
 
         kwargs: dict[str, Any] = {}
-
-        if self.model:
-            kwargs["checkpoint_name"] = self.model
 
         if self.allowed_tools:
             kwargs["allowed_tools"] = self.allowed_tools
         if self.disallowed_tools:
             kwargs["disallowed_tools"] = self.disallowed_tools
 
+        # Apply agent-specific config
         agent_key = self.agent_type.value
         if agent_key in self.agent_config:
-            kwargs.update(self.agent_config[agent_key])
+            agent_cfg = dict(self.agent_config[agent_key])
+            # Map user-facing 'model' to internal 'checkpoint_name'
+            if "model" in agent_cfg:
+                agent_cfg["checkpoint_name"] = agent_cfg.pop("model")
+            kwargs.update(agent_cfg)
+
+        # CLI --model always wins
+        if self.model:
+            kwargs["checkpoint_name"] = self.model
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
             base_url = kwargs.get("base_url", "")
-            model_name = kwargs.get("model_name", "")
-            if model_name:
-                kwargs["model_name"] = model_name
-            else:
-                kwargs["model_name"] = "OpenAI Compatible"
-
             if "api_key" not in kwargs:
                 # Use HUD API key for gateway, otherwise fall back to OpenAI API key
                 if settings.hud_gateway_url in base_url:
                     kwargs["api_key"] = settings.api_key
                 elif settings.openai_api_key:
                     kwargs["api_key"] = settings.openai_api_key
+
+        # Auto-detect Bedrock when Claude is selected with a Bedrock ARN
+        if self.agent_type == AgentType.CLAUDE and _is_bedrock_arn(kwargs.get("checkpoint_name")):
+            missing_aws = (
+                not settings.aws_access_key_id
+                or not settings.aws_secret_access_key
+                or not settings.aws_region
+            )
+            if missing_aws:
+                hud_console.error(
+                    "AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION "
+                    "are required for AWS Bedrock"
+                )
+                raise typer.Exit(1)
+
+            from anthropic import AsyncAnthropicBedrock
+
+            kwargs["model_client"] = AsyncAnthropicBedrock(
+                aws_access_key=settings.aws_access_key_id,
+                aws_secret_key=settings.aws_secret_access_key,
+                aws_region=settings.aws_region or "us-east-1",
+            )
+            hud_console.info("🔧 Using AWS Bedrock (detected ARN in model)")
 
         kwargs["verbose"] = self.verbose or self.very_verbose
 
@@ -278,6 +334,8 @@ class EvalConfig(BaseModel):
         except Exception as e:
             hud_console.warning(f"Failed to parse {path}: {e}")
             return cls()
+
+        toml_data = resolve_env_vars(toml_data)
 
         # Extract sections
         eval_section = toml_data.get("eval", {})
@@ -458,6 +516,7 @@ class EvalConfig(BaseModel):
             overrides = self.agent_config.get(self.agent_type.value, {})
             skip = {
                 "model_client",
+                "model_name",
                 "validate_api_key",
                 "model_config",
                 "allowed_tools",
@@ -468,19 +527,27 @@ class EvalConfig(BaseModel):
                 "initial_screenshot",
             }
 
+            sensitive_fields = {"api_key", "api_secret", "token", "password", "secret"}
+
             for name in config_cls.model_fields:
                 if name in skip:
                     continue
-                # Always show checkpoint_name; other fields only if explicitly set (via CLI or TOML)
+                # Always show model (checkpoint_name)
                 if name == "checkpoint_name":
-                    value = (
-                        self.model
-                        or overrides.get("checkpoint_name")
-                        or getattr(defaults, "checkpoint_name", None)
-                    )
-                    table.add_row(f"  {name}", str(value) if value else "—")
+                    if self.model:
+                        value = self.model
+                    elif overrides.get("model"):
+                        value = overrides["model"]
+                    else:
+                        value = getattr(defaults, "checkpoint_name", None)
+                    table.add_row("  model", str(value) if value else "—")
                 elif name in overrides:
-                    table.add_row(f"  {name}", str(overrides[name]))
+                    value = overrides[name]
+                    if name in sensitive_fields and value:
+                        display_value = f"{str(value)[:4]}****" if len(str(value)) > 4 else "****"
+                    else:
+                        display_value = str(value)
+                    table.add_row(f"  {name}", display_value)
 
         hud_console.console.print(table)
 

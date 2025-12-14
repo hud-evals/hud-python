@@ -12,6 +12,7 @@ from fastmcp import Client as FastMCPClient
 from mcp import Implementation, types
 from mcp.shared.exceptions import McpError
 
+from hud.settings import settings
 from hud.types import MCPToolCall, MCPToolResult
 from hud.version import __version__ as hud_version
 
@@ -73,7 +74,7 @@ class FastMCPHUDClient(BaseHUDClient):
             return
 
         # Create FastMCP client with the custom transport
-        timeout = 10 * 60  # 5 minutes
+        timeout = settings.client_timeout
         os.environ["FASTMCP_CLIENT_INIT_TIMEOUT"] = str(timeout)
 
         # Create custom transport with retry support for HTTP servers

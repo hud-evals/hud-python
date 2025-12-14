@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from google import genai
+from google.genai import types as genai_types
 from mcp import types
 
 from hud.agents.gemini import GeminiAgent
@@ -151,6 +152,81 @@ class TestGeminiAgent:
         messages = await agent.get_system_messages()
         # Gemini doesn't use system messages in the message list
         assert messages == []
+
+    @pytest.mark.asyncio
+    async def test_get_response_text_only(self, mock_gemini_client: genai.Client) -> None:
+        """Test getting text-only response."""
+        # Disable telemetry for this test
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = GeminiAgent.create(
+                model_client=mock_gemini_client,
+                validate_api_key=False,
+            )
+            # Set up agent as initialized (no tools needed for this test)
+            agent.gemini_tools = []
+            agent._initialized = True
+
+            # Mock the API response with text only
+            mock_response = MagicMock()
+            mock_candidate = MagicMock()
+
+            text_part = MagicMock()
+            text_part.text = "Task completed successfully"
+            text_part.function_call = None
+
+            mock_candidate.content = MagicMock()
+            mock_candidate.content.parts = [text_part]
+
+            mock_response.candidates = [mock_candidate]
+
+            mock_gemini_client.models.generate_content = MagicMock(return_value=mock_response)
+
+            messages = [genai_types.Content(role="user", parts=[genai_types.Part.from_text("Status?")])]
+            response = await agent.get_response(messages)
+
+            assert response.content == "Task completed successfully"
+            assert response.tool_calls == []
+            assert response.done is True
+
+    @pytest.mark.asyncio
+    async def test_get_response_with_thinking(self, mock_gemini_client: genai.Client) -> None:
+        """Test getting response with thinking content."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = GeminiAgent.create(
+                model_client=mock_gemini_client,
+                validate_api_key=False,
+            )
+            # Set up agent as initialized (no tools needed for this test)
+            agent.gemini_tools = []
+            agent._initialized = True
+
+            mock_response = MagicMock()
+            mock_candidate = MagicMock()
+
+            thinking_part = MagicMock()
+            thinking_part.text = "Let me reason through this..."
+            thinking_part.function_call = None
+            thinking_part.thought = True
+
+            text_part = MagicMock()
+            text_part.text = "Here is my answer"
+            text_part.function_call = None
+            text_part.thought = False
+
+            mock_candidate.content = MagicMock()
+            mock_candidate.content.parts = [thinking_part, text_part]
+
+            mock_response.candidates = [mock_candidate]
+
+            mock_gemini_client.models.generate_content = MagicMock(return_value=mock_response)
+
+            messages = [
+                genai_types.Content(role="user", parts=[genai_types.Part.from_text("Hard question")])
+            ]
+            response = await agent.get_response(messages)
+
+            assert response.content == "Here is my answer"
+            assert response.reasoning == "Let me reason through this..."
 
     @pytest.mark.asyncio
     async def test_convert_tools_for_gemini(self, mock_gemini_client: genai.Client) -> None:

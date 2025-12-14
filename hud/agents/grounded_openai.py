@@ -187,6 +187,7 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
         if not msg.tool_calls:
             return AgentResponse(
                 content=msg.content or "",
+                reasoning=msg.reasoning_content,
                 tool_calls=[],
                 done=choice.finish_reason in ("stop", "length"),
                 raw=response,
@@ -197,6 +198,7 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
         if tc.function.name != "computer":
             return AgentResponse(
                 content=f"Error: Model called unexpected tool '{tc.function.name}'",
+                reasoning=msg.reasoning_content,
                 tool_calls=[],
                 done=True,
                 raw=response,
@@ -207,13 +209,21 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
             args = json.loads(tc.function.arguments or "{}")
         except json.JSONDecodeError:
             return AgentResponse(
-                content="Error: Invalid tool arguments", tool_calls=[], done=True, raw=response
+                content="Error: Invalid tool arguments",
+                reasoning=msg.reasoning_content,
+                tool_calls=[],
+                done=True,
+                raw=response,
             )
 
         tool_call = MCPToolCall(name="computer", arguments=args, id=tc.id)
 
         return AgentResponse(
-            content=msg.content or "", tool_calls=[tool_call], done=False, raw=response
+            content=msg.content or "",
+            reasoning=msg.reasoning_content,
+            tool_calls=[tool_call],
+            done=False,
+            raw=response,
         )
 
     async def call_tools(

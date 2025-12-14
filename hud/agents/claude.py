@@ -8,7 +8,7 @@ from inspect import cleandoc
 from typing import Any, ClassVar, Literal, cast
 
 import mcp.types as types
-from anthropic import Anthropic, AsyncAnthropic, Omit
+from anthropic import Anthropic, AsyncAnthropic, AsyncAnthropicBedrock, Omit
 from anthropic.types import CacheControlEphemeralParam
 from anthropic.types.beta import (
     BetaBase64ImageSourceParam,
@@ -42,7 +42,7 @@ class ClaudeConfig(BaseAgentConfig):
 
     model_name: str = "Claude"
     checkpoint_name: str = "claude-sonnet-4-5"
-    model_client: AsyncAnthropic | None = None
+    model_client: AsyncAnthropic | AsyncAnthropicBedrock | None = None
     max_tokens: int = 16384
     use_computer_beta: bool = True
     validate_api_key: bool = True
@@ -81,12 +81,6 @@ class ClaudeAgent(MCPAgent):
             if not api_key:
                 raise ValueError("Anthropic API key not found. Set ANTHROPIC_API_KEY.")
             model_client = AsyncAnthropic(api_key=api_key)
-
-        if self.config.validate_api_key:
-            try:
-                Anthropic(api_key=model_client.api_key).models.list()
-            except Exception as e:
-                raise ValueError(f"Anthropic API key is invalid: {e}") from e
 
         self.anthropic_client = model_client
         self.max_tokens = self.config.max_tokens
@@ -155,21 +149,40 @@ class ClaudeAgent(MCPAgent):
         if self.has_computer_tool:
             betas.append("computer-use-2025-01-24")
 
-        async with self.anthropic_client.beta.messages.stream(
-            model=self.config.checkpoint_name,
-            system=self.system_prompt if self.system_prompt is not None else Omit(),
-            max_tokens=self.max_tokens,
-            messages=messages_cached,
-            tools=self.claude_tools,
-            tool_choice={"type": "auto", "disable_parallel_tool_use": True},
-            betas=betas,
-        ) as stream:
-            # allow backend to accumulate message content
-            async for _ in stream:
-                pass
-            # get final message
-            response = await stream.get_final_message()
-            messages.append(BetaMessageParam(role="assistant", content=response.content))
+        # Bedrock doesn't support .stream() - use create(stream=True) instead
+        if isinstance(self.anthropic_client, AsyncAnthropicBedrock):
+            try:
+                response = await self.anthropic_client.beta.messages.create(
+                    model=self.config.checkpoint_name,
+                    system=self.system_prompt if self.system_prompt is not None else Omit(),
+                    max_tokens=self.max_tokens,
+                    messages=messages_cached,
+                    tools=self.claude_tools,
+                    tool_choice={"type": "auto", "disable_parallel_tool_use": True},
+                    betas=betas,
+                )
+                messages.append(BetaMessageParam(role="assistant", content=response.content))
+            except ModuleNotFoundError:
+                raise ValueError(
+                    "boto3 is required for AWS Bedrock. Use `pip install hud[bedrock]`"
+                ) from None
+        else:
+            # Regular Anthropic client supports .stream()
+            async with self.anthropic_client.beta.messages.stream(
+                model=self.config.checkpoint_name,
+                system=self.system_prompt if self.system_prompt is not None else Omit(),
+                max_tokens=self.max_tokens,
+                messages=messages_cached,
+                tools=self.claude_tools,
+                tool_choice={"type": "auto", "disable_parallel_tool_use": True},
+                betas=betas,
+            ) as stream:
+                # allow backend to accumulate message content
+                async for _ in stream:
+                    pass
+                # get final message
+                response = await stream.get_final_message()
+                messages.append(BetaMessageParam(role="assistant", content=response.content))
 
         # Process response
         result = AgentResponse(content="", tool_calls=[], done=True)
@@ -193,9 +206,13 @@ class ClaudeAgent(MCPAgent):
             elif block.type == "text":
                 text_content += block.text
             elif hasattr(block, "type") and block.type == "thinking":
-                thinking_content += f"Thinking: {block.thinking}\n"
+                if thinking_content:
+                    thinking_content += "\n"
+                thinking_content += block.thinking
 
-        result.content = thinking_content + text_content
+        result.content = text_content
+        if thinking_content:
+            result.reasoning = thinking_content
 
         return result
 

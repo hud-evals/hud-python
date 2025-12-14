@@ -44,7 +44,7 @@ class OpenAIChatConfig(BaseAgentConfig):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    model_name: str = "OpenAI"
+    model_name: str = "OpenAI Chat"
     checkpoint_name: str = "gpt-5-mini"
     openai_client: AsyncOpenAI | None = None
     api_key: str | None = None
@@ -295,9 +295,10 @@ class OpenAIChatAgent(MCPAgent):
 
         return AgentResponse(
             content=msg.content or "",
+            reasoning=getattr(msg, "reasoning_content", None),
             tool_calls=tool_calls,
             done=done,
-            raw=response,  # Include raw response for access to Choice objects
+            raw=response,
         )
 
     async def format_tool_results(

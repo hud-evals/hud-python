@@ -70,8 +70,8 @@ class TestTaskExtended:
         monkeypatch.setenv("EMPTY_VAR", "")
         monkeypatch.setenv("RUN_ID", "run-789")
 
-        # Mock settings to return our test values
-        with patch("hud.types.settings") as mock_settings:
+        # Mock settings in the shared env utility where resolve_env_vars is implemented
+        with patch("hud.utils.env.settings") as mock_settings:
             mock_settings.api_key = "sk-12345"
             mock_settings.hud_telemetry_url = "https://api.example.com"
             mock_settings.model_dump.return_value = {
