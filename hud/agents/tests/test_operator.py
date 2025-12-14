@@ -223,7 +223,7 @@ class TestOperatorAgent:
             mock_openai.responses.create = AsyncMock(return_value=mock_response)
 
             messages = [{"prompt": "What's on the screen?", "screenshot": None}]
-            response = await agent.get_response(messages)
+            response = await agent.get_response(messages)  # type: ignore[arg-type]
 
             assert response.done is True
             assert response.tool_calls == []
@@ -251,7 +251,7 @@ class TestOperatorAgent:
         mock_openai.responses.create = AsyncMock(return_value=mock_response)
 
         messages = [{"prompt": "Hi", "screenshot": None}]
-        response = await agent.get_response(messages)
+        response = await agent.get_response(messages)  # type: ignore[arg-type]
 
         assert response.content == ""
         assert response.tool_calls == []
