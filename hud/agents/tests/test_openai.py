@@ -352,9 +352,9 @@ class TestOpenAIAgent:
         agent._initialized = True
 
         response = await agent.get_response([])
-        # Reasoning is prepended to content in OpenAI agent
-        assert "Thinking about it..." in response.content
-        assert "Answer!" in response.content
+        # Reasoning is stored separately from content
+        assert response.reasoning == "Thinking about it..."
+        assert response.content == "Answer!"
 
 
 class TestOpenAIToolConversion:

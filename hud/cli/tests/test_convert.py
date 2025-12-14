@@ -8,7 +8,6 @@ import pytest
 import typer
 
 from hud.cli.flows.tasks import convert_tasks_to_remote
-from hud.types import LegacyTask
 
 
 class TestConvertCommand:
@@ -84,12 +83,6 @@ class TestConvertCommand:
         # Mock derive remote image
         mock_derive_remote.return_value = "registry.hud.ai/test-org/test-env:v1.0.0"
 
-        task = LegacyTask(
-            prompt="Test task",
-            mcp_config={
-                "local": {"command": "docker", "args": ["run", "--rm", "-i", "test-image:latest"]}
-            },
-        )
         raw_task = {
             "prompt": "Test task",
             "mcp_config": {
@@ -97,7 +90,7 @@ class TestConvertCommand:
             },
         }
 
-        mock_load_tasks.side_effect = [[task], [raw_task]]
+        mock_load_tasks.return_value = [raw_task]
 
         # Run conversion
         result_path = convert_tasks_to_remote(str(temp_tasks_file))
@@ -132,18 +125,18 @@ class TestConvertCommand:
         mock_settings.api_key = "test-api-key"
         mock_find_env.return_value = None  # No env dir needed for remote tasks
 
-        # Create task that's already remote
-        task = LegacyTask(
-            prompt="Test task",
-            mcp_config={
+        # Create task that's already remote (as raw dict)
+        raw_task = {
+            "prompt": "Test task",
+            "mcp_config": {
                 "remote": {
                     "url": "https://mcp.hud.ai",
                     "headers": {"Mcp-Image": "registry.hud.ai/test/image:v1"},
                 }
             },
-        )
+        }
 
-        mock_load_tasks.return_value = [task]
+        mock_load_tasks.return_value = [raw_task]
 
         # Should return original path without modification
         result_path = convert_tasks_to_remote(str(temp_tasks_file))
@@ -159,14 +152,14 @@ class TestConvertCommand:
         mock_settings.api_key = "test-api-key"
         mock_find_env.return_value = None
 
-        task = LegacyTask(
-            prompt="Test task",
-            mcp_config={
+        raw_task = {
+            "prompt": "Test task",
+            "mcp_config": {
                 "local": {"command": "docker", "args": ["run", "--rm", "-i", "test-image:latest"]}
             },
-        )
+        }
 
-        mock_load_tasks.return_value = [task]
+        mock_load_tasks.return_value = [raw_task]
 
         with pytest.raises(typer.Exit):
             convert_tasks_to_remote(str(temp_tasks_file))
@@ -209,18 +202,17 @@ class TestConvertCommand:
         env_file = mock_env_dir / ".env"
         env_file.write_text("OPENAI_API_KEY=sk-test123\nANTHROPIC_API_KEY=sk-ant456")
 
-        task = LegacyTask(
-            prompt="Test task",
-            mcp_config={
+        raw_task = {
+            "prompt": "Test task",
+            "mcp_config": {
                 "local": {
                     "command": "docker",
                     "args": ["run", "--rm", "-i", "-e", "OPENAI_API_KEY", "test-image:latest"],
                 }
             },
-        )
-        raw_task = task.model_dump()
+        }
 
-        mock_load_tasks.side_effect = [[task], [raw_task]]
+        mock_load_tasks.return_value = [raw_task]
 
         # Run conversion
         result_path = convert_tasks_to_remote(str(temp_tasks_file))

@@ -147,6 +147,7 @@ async def test_get_response_with_reasoning() -> None:
         mock_response.choices = [mock_choice]
 
         agent.oai.chat.completions.create = AsyncMock(return_value=mock_response)
+        agent._initialized = True  # Mark as initialized to skip context initialization
 
         agent.conversation_history = [
             {"role": "user", "content": [{"type": "text", "text": "Hard question"}]}

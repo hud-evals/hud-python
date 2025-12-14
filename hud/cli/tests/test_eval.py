@@ -96,7 +96,7 @@ class TestRunDataset:
         mock_ctx = MockEvalContext()
 
         with (
-            patch("hud.datasets.runner.load_tasks", return_value=mock_tasks) as mock_load,
+            patch("hud.datasets.loader.load_tasks", return_value=mock_tasks) as mock_load,
             patch("hud.datasets.runner.hud.eval") as mock_eval,
             patch.object(AgentType.OPENAI, "cls", mock_agent_cls),
         ):

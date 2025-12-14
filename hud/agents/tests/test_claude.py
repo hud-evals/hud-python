@@ -111,13 +111,7 @@ class TestClaudeAgent:
     @pytest.fixture
     def mock_anthropic(self) -> Generator[AsyncAnthropic, None, None]:  # type: ignore[misc]
         """Create a stub Anthropic client."""
-        with (
-            patch("hud.agents.claude.AsyncAnthropic") as mock_class,
-            patch("hud.agents.claude.Anthropic") as mock_sync,
-        ):
-            # Mock the sync client's models.list() for validation
-            mock_sync.return_value.models.list.return_value = []
-
+        with patch("hud.agents.claude.AsyncAnthropic") as mock_class:
             client = MagicMock(spec=AsyncAnthropic)
             client.api_key = "test-key"
             mock_class.return_value = client

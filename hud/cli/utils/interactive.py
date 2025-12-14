@@ -50,7 +50,6 @@ class InteractiveMCPTester:
             self.client = MCPClient(
                 mcp_config=config,
                 verbose=self.verbose,
-                auto_trace=False,  # Disable telemetry for interactive testing
             )
             await self.client.initialize()
 

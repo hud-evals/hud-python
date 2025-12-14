@@ -15,7 +15,7 @@ from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 
 class MockConfig(BaseAgentConfig):
     model_name: str = "MockAgent"
-    checkpoint_name: str = "mock-model"
+    model: str = "mock-model"
 
 
 class MockCreateParams(BaseCreateParams, MockConfig):

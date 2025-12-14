@@ -98,7 +98,7 @@ def test_find_reward_and_content_extractors() -> None:
 
 def test_get_available_tools_before_run_raises() -> None:
     """Test that get_available_tools raises before initialization."""
-    agent = DummyAgent(auto_trace=False)
+    agent = DummyAgent()
     with pytest.raises(RuntimeError):
         agent.get_available_tools()
 
@@ -106,7 +106,7 @@ def test_get_available_tools_before_run_raises() -> None:
 @pytest.mark.asyncio
 async def test_format_message_invalid_type_raises() -> None:
     """Test that format_message raises for invalid types."""
-    agent = DummyAgent(auto_trace=False)
+    agent = DummyAgent()
     with pytest.raises(ValueError):
         await agent.format_message({"oops": 1})  # type: ignore
 
@@ -121,7 +121,7 @@ def test_text_to_blocks_shapes() -> None:
 async def test_run_with_eval_context() -> None:
     """Test basic run() with EvalContext."""
     ctx = MockEvalContext(prompt="hello")
-    agent = DummyAgent(auto_trace=False)
+    agent = DummyAgent()
     result = await agent.run(ctx, max_steps=1)
     assert result.done is True
     assert result.isError is False
@@ -130,7 +130,7 @@ async def test_run_with_eval_context() -> None:
 @pytest.mark.asyncio
 async def test_run_requires_eval_context() -> None:
     """Test run() raises TypeError for non-EvalContext."""
-    agent = DummyAgent(auto_trace=False)
+    agent = DummyAgent()
     with pytest.raises(TypeError, match="must be EvalContext"):
         await agent.run("hello")  # type: ignore
 
@@ -139,7 +139,7 @@ async def test_run_requires_eval_context() -> None:
 async def test_run_requires_prompt() -> None:
     """Test run() raises ValueError when prompt is empty."""
     ctx = MockEvalContext(prompt="")
-    agent = DummyAgent(auto_trace=False)
+    agent = DummyAgent()
     with pytest.raises(ValueError, match="prompt is not set"):
         await agent.run(ctx)
 
@@ -158,7 +158,7 @@ async def test_call_tools_error_paths() -> None:
 
     ctx = MockEvalContext(prompt="test")
     ctx.set_call_tool_handler(handler)
-    agent = DummyAgent(auto_trace=False)
+    agent = DummyAgent()
 
     # Initialize the agent with context
     agent.ctx = ctx
@@ -180,7 +180,7 @@ async def test_call_tools_timeout_raises() -> None:
 
     ctx = MockEvalContext(prompt="test")
     ctx.set_call_tool_handler(handler)
-    agent = DummyAgent(auto_trace=False)
+    agent = DummyAgent()
 
     agent.ctx = ctx
     await agent._initialize_from_ctx(ctx)
@@ -194,7 +194,7 @@ async def test_get_available_tools_after_run() -> None:
     """Test get_available_tools works after initialization."""
     tools = [types.Tool(name="test_tool", description="Test", inputSchema={})]
     ctx = MockEvalContext(prompt="hello", tools=tools)
-    agent = DummyAgent(auto_trace=False)
+    agent = DummyAgent()
 
     # Run initializes the agent
     await agent.run(ctx, max_steps=1)

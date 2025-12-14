@@ -84,7 +84,7 @@ async def test_initialize_runs_once_and_tools_work() -> None:
 
     async def connect_and_check() -> None:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        client = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
+        client = MCPClient(mcp_config=cfg, verbose=False)
         await client.initialize()
         tools = await client.list_tools()
         names = sorted(t.name for t in tools)
@@ -123,7 +123,7 @@ async def test_shutdown_handler_only_on_sigterm_flag() -> None:
     try:
         # sanity connect so lifespan actually ran
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
+        c = MCPClient(mcp_config=cfg, verbose=False)
         await c.initialize()
         await c.shutdown()
     finally:
@@ -140,7 +140,7 @@ async def test_shutdown_handler_only_on_sigterm_flag() -> None:
     server_task2 = await _start_http_server(mcp, port=port2)
     try:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port2}/mcp"}}
-        c = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
+        c = MCPClient(mcp_config=cfg, verbose=False)
         await c.initialize()
         await c.shutdown()
 
@@ -170,7 +170,7 @@ async def test_initializer_exception_propagates_to_client() -> None:
     server_task = await _start_http_server(mcp, port)
 
     cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-    client = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
+    client = MCPClient(mcp_config=cfg, verbose=False)
 
     try:
         with pytest.raises(Exception):
@@ -211,7 +211,7 @@ async def test_init_after_tools_preserves_handlers_and_runs_once() -> None:
 
     async def connect_and_check() -> None:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
+        c = MCPClient(mcp_config=cfg, verbose=False)
         await c.initialize()
         tools = await c.list_tools()
         names = sorted(t.name for t in tools)
@@ -244,7 +244,7 @@ async def test_tool_default_argument_used_when_omitted() -> None:
     server_task = await _start_http_server(mcp, port)
     try:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
+        c = MCPClient(mcp_config=cfg, verbose=False)
         await c.initialize()
         # Call with no args → default should kick in
         res = await c.call_tool(name="echo", arguments={})
@@ -273,7 +273,7 @@ async def test_shutdown_handler_runs_once_when_both_paths_fire() -> None:
     try:
         # Ensure lifespan started
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
+        c = MCPClient(mcp_config=cfg, verbose=False)
         await c.initialize()
         await c.shutdown()
 
@@ -315,7 +315,7 @@ async def test_initialize_ctx_exposes_client_info() -> None:
     server_task = await _start_http_server(mcp, port)
     try:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
+        c = MCPClient(mcp_config=cfg, verbose=False)
         await c.initialize()
         await c.shutdown()
     finally:
@@ -344,7 +344,7 @@ async def test_initialize_redirects_stdout_to_stderr(capsys) -> None:
 
     try:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
+        c = MCPClient(mcp_config=cfg, verbose=False)
         await c.initialize()
         await c.shutdown()
     finally:
@@ -373,11 +373,11 @@ async def test_initialize_callable_form_runs_once() -> None:
     server_task = await _start_http_server(mcp, port)
     try:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c1 = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
+        c1 = MCPClient(mcp_config=cfg, verbose=False)
         await c1.initialize()
         await c1.shutdown()
 
-        c2 = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
+        c2 = MCPClient(mcp_config=cfg, verbose=False)
         await c2.initialize()
         await c2.shutdown()
     finally:

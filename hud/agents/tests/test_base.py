@@ -97,14 +97,14 @@ class TestMCPAgentInit:
 
     def test_init_defaults(self) -> None:
         """Test agent initializes with default config."""
-        agent = MockMCPAgent(auto_trace=False)
+        agent = MockMCPAgent()
         assert agent.ctx is None
         assert agent._initialized is False
         assert agent.system_prompt is None
 
     def test_init_with_system_prompt(self) -> None:
         """Test agent with custom system prompt."""
-        agent = MockMCPAgent(auto_trace=False, system_prompt="Custom prompt")
+        agent = MockMCPAgent(system_prompt="Custom prompt")
         assert agent.system_prompt == "Custom prompt"
 
 
@@ -115,7 +115,7 @@ class TestMCPAgentRun:
     async def test_run_basic(self) -> None:
         """Test basic run flow with EvalContext."""
         ctx = MockEvalContext(prompt="Do something")
-        agent = MockMCPAgent(auto_trace=False)
+        agent = MockMCPAgent()
 
         result = await agent.run(ctx)
 
@@ -127,7 +127,7 @@ class TestMCPAgentRun:
     async def test_run_initializes_agent(self) -> None:
         """Test run() initializes the agent with context."""
         ctx = MockEvalContext(prompt="Do something")
-        agent = MockMCPAgent(auto_trace=False)
+        agent = MockMCPAgent()
 
         assert not agent._initialized
         await agent.run(ctx)
@@ -141,7 +141,7 @@ class TestMCPAgentRun:
             types.Tool(name="tool2", description="Tool 2", inputSchema={}),
         ]
         ctx = MockEvalContext(prompt="Do something", tools=tools)
-        agent = MockMCPAgent(auto_trace=False)
+        agent = MockMCPAgent()
 
         # We need to check tools before cleanup
         # Store a reference to check
@@ -163,7 +163,7 @@ class TestMCPAgentRun:
     @pytest.mark.asyncio
     async def test_run_requires_eval_context(self) -> None:
         """Test run() raises TypeError for non-EvalContext."""
-        agent = MockMCPAgent(auto_trace=False)
+        agent = MockMCPAgent()
 
         with pytest.raises(TypeError, match="must be EvalContext"):
             await agent.run("not a context")  # type: ignore
@@ -172,7 +172,7 @@ class TestMCPAgentRun:
     async def test_run_requires_prompt(self) -> None:
         """Test run() raises ValueError when prompt is empty."""
         ctx = MockEvalContext(prompt="")
-        agent = MockMCPAgent(auto_trace=False)
+        agent = MockMCPAgent()
 
         with pytest.raises(ValueError, match="prompt is not set"):
             await agent.run(ctx)
@@ -181,7 +181,7 @@ class TestMCPAgentRun:
     async def test_run_clears_context_after(self) -> None:
         """Test run() clears ctx after completion."""
         ctx = MockEvalContext(prompt="Do something")
-        agent = MockMCPAgent(auto_trace=False)
+        agent = MockMCPAgent()
 
         await agent.run(ctx)
         assert agent.ctx is None
@@ -190,7 +190,7 @@ class TestMCPAgentRun:
     async def test_run_no_submit_on_empty_content(self) -> None:
         """Test run() doesn't submit when content is empty."""
         ctx = MockEvalContext(prompt="Do something")
-        agent = MockMCPAgent(auto_trace=False)
+        agent = MockMCPAgent()
         agent.set_response(AgentResponse(content="", tool_calls=[], done=True))
 
         await agent.run(ctx)
@@ -204,7 +204,7 @@ class TestMCPAgentToolCalling:
     async def test_call_tools_uses_context(self) -> None:
         """Test call_tools routes through ctx.call_tool."""
         ctx = MockEvalContext(prompt="Do something")
-        agent = MockMCPAgent(auto_trace=False)
+        agent = MockMCPAgent()
 
         # Bind context manually
         agent.ctx = ctx
@@ -220,7 +220,7 @@ class TestMCPAgentToolCalling:
     @pytest.mark.asyncio
     async def test_call_tools_without_context_raises(self) -> None:
         """Test call_tools raises when no context bound."""
-        agent = MockMCPAgent(auto_trace=False)
+        agent = MockMCPAgent()
 
         with pytest.raises(ValueError, match="not bound to context"):
             await agent.call_tools(MCPToolCall(name="test_tool", arguments={}))
@@ -237,7 +237,7 @@ class TestMCPAgentRequiredTools:
             required_tools: ClassVar[list[str]] = ["must_have_tool"]
 
         ctx = MockEvalContext(prompt="Do something", tools=[])
-        agent = AgentWithRequiredTools(auto_trace=False)
+        agent = AgentWithRequiredTools()
 
         with pytest.raises(ValueError, match="Required tools are missing"):
             await agent.run(ctx)
@@ -251,7 +251,7 @@ class TestMCPAgentRequiredTools:
 
         tools = [types.Tool(name="required_tool", description="Required", inputSchema={})]
         ctx = MockEvalContext(prompt="Do something", tools=tools)
-        agent = AgentWithRequiredTools(auto_trace=False)
+        agent = AgentWithRequiredTools()
 
         result = await agent.run(ctx)
         assert result.done
@@ -270,7 +270,7 @@ class TestMCPAgentOnToolsReady:
                 hook_called[0] = True
 
         ctx = MockEvalContext(prompt="Do something")
-        agent = AgentWithHook(auto_trace=False)
+        agent = AgentWithHook()
 
         await agent.run(ctx)
         assert hook_called[0]
@@ -289,7 +289,7 @@ class TestMCPAgentOnToolsReady:
             types.Tool(name="tool2", description="Tool 2", inputSchema={}),
         ]
         ctx = MockEvalContext(prompt="Do something", tools=tools)
-        agent = AgentWithHook(auto_trace=False)
+        agent = AgentWithHook()
 
         await agent.run(ctx)
 
@@ -311,7 +311,7 @@ class TestMCPAgentToolSchemas:
             )
         ]
         ctx = MockEvalContext(prompt="Do something", tools=tools)
-        agent = MockMCPAgent(auto_trace=False)
+        agent = MockMCPAgent()
 
         # Initialize agent
         agent.ctx = ctx
