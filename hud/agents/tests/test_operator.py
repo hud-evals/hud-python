@@ -69,12 +69,12 @@ class TestOperatorAgent:
         """Test agent initialization."""
         agent = OperatorAgent.create(
             model_client=mock_openai,
-            checkpoint_name="gpt-4",
+            model="gpt-4",
             validate_api_key=False,
         )
 
         assert agent.model_name == "Operator"
-        assert agent.config.checkpoint_name == "gpt-4"
+        assert agent.config.model == "gpt-4"
         assert agent.openai_client == mock_openai
 
     @pytest.mark.asyncio

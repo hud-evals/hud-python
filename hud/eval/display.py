@@ -62,6 +62,44 @@ def print_complete(url: str, name: str, *, error: bool = False) -> None:
         print(f"\n{name} {status}: {url}\n")  # noqa: T201
 
 
+def print_single_result(
+    trace_id: str,
+    name: str,
+    *,
+    reward: float | None = None,
+    error: str | None = None,
+) -> None:
+    """Print a single eval result summary."""
+    if not (settings.telemetry_enabled and settings.api_key):
+        return
+
+    url = f"https://hud.ai/trace/{trace_id}"
+
+    try:
+        from rich.console import Console
+
+        console = Console()
+
+        if error:
+            console.print(
+                f"\n[red]✗ '{name}' failed![/red]\n"
+                f"  [dim]Error:[/dim] [red]{error[:80]}{'...' if len(error) > 80 else ''}[/red]\n"
+                f"  [dim]View at:[/dim] [bold link={url}]{url}[/bold link]\n"
+            )
+        else:
+            reward_str = f"{reward:.3f}" if reward is not None else "—"
+            reward_color = "green" if reward is not None and reward > 0.7 else "yellow"
+            console.print(
+                f"\n[green]✓ '{name}' complete![/green]\n"
+                f"  [dim]Reward:[/dim] [{reward_color}]{reward_str}[/{reward_color}]\n"
+                f"  [dim]View at:[/dim] [bold link={url}]{url}[/bold link]\n"
+            )
+    except ImportError:
+        status = "failed" if error else "complete"
+        reward_str = f", reward={reward:.3f}" if reward is not None else ""
+        print(f"\n{name} {status}{reward_str}: {url}\n")  # noqa: T201
+
+
 def display_results(
     results: list[Any],
     *,
@@ -242,4 +280,10 @@ def _get_task_label(task: Any, index: int) -> str:
 # Backwards compatibility alias
 print_eval_stats = display_results
 
-__all__ = ["display_results", "print_complete", "print_eval_stats", "print_link"]
+__all__ = [
+    "display_results",
+    "print_complete",
+    "print_eval_stats",
+    "print_link",
+    "print_single_result",
+]

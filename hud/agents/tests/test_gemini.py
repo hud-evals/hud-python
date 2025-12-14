@@ -54,12 +54,12 @@ class TestGeminiAgent:
         """Test agent initialization."""
         agent = GeminiAgent.create(
             model_client=mock_gemini_client,
-            checkpoint_name="gemini-2.5-flash",
+            model="gemini-2.5-flash",
             validate_api_key=False,
         )
 
         assert agent.model_name == "Gemini"
-        assert agent.config.checkpoint_name == "gemini-2.5-flash"
+        assert agent.config.model == "gemini-2.5-flash"
         assert agent.gemini_client == mock_gemini_client
 
     @pytest.mark.asyncio
@@ -76,7 +76,7 @@ class TestGeminiAgent:
             mock_client_class.return_value = mock_client
 
             agent = GeminiAgent.create(
-                checkpoint_name="gemini-2.5-flash",
+                model="gemini-2.5-flash",
                 validate_api_key=False,
             )
 

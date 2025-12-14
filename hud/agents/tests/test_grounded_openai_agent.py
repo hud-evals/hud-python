@@ -76,7 +76,7 @@ async def test_call_tools_injects_screenshot_and_delegates(monkeypatch: pytest.M
     agent = GroundedOpenAIChatAgent.create(
         grounder_config=grounder_cfg,
         openai_client=fake_openai,
-        checkpoint_name="gpt-4o-mini",
+        model="gpt-4o-mini",
         initial_screenshot=False,
     )
 
@@ -129,7 +129,7 @@ async def test_get_response_with_reasoning() -> None:
         agent = GroundedOpenAIChatAgent.create(
             grounder_config=grounder_cfg,
             openai_client=fake_openai,
-            checkpoint_name="gpt-4o-mini",
+            model="gpt-4o-mini",
             initial_screenshot=False,
         )
 

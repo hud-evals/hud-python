@@ -64,13 +64,13 @@ class TestOpenAIAgent:
         """Test agent initialization with provided client."""
         agent = OpenAIAgent.create(
             model_client=mock_openai,
-            checkpoint_name="gpt-4o",
+            model="gpt-4o",
             validate_api_key=False,
         )
 
         assert agent.model_name == "OpenAI"
-        assert agent.config.checkpoint_name == "gpt-4o"
-        assert agent.checkpoint_name == "gpt-4o"
+        assert agent.config.model == "gpt-4o"
+        assert agent.model == "gpt-4o"
         assert agent.openai_client == mock_openai
         assert agent.max_output_tokens is None
         assert agent.temperature is None
@@ -80,7 +80,7 @@ class TestOpenAIAgent:
         """Test agent initialization with various parameters."""
         agent = OpenAIAgent.create(
             model_client=mock_openai,
-            checkpoint_name="gpt-4o",
+            model="gpt-4o",
             max_output_tokens=2048,
             temperature=0.7,
             reasoning={"effort": "high"},

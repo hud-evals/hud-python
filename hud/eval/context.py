@@ -311,8 +311,12 @@ class EvalContext(Environment):
         ctx._task = task
 
         # Set system_prompt from task.agent_config
-        if task.agent_config and task.agent_config.system_prompt:
-            ctx.system_prompt = task.agent_config.system_prompt
+        if task.agent_config:
+            if isinstance(task.agent_config, dict):
+                if task.agent_config.get("system_prompt"):
+                    ctx.system_prompt = task.agent_config["system_prompt"]
+            elif task.agent_config.system_prompt:
+                ctx.system_prompt = task.agent_config.system_prompt
 
         return ctx
 
@@ -562,6 +566,10 @@ class EvalContext(Environment):
 
         # Notify backend
         await self._eval_exit(error_msg)
+
+        # Print single eval result summary (unless suppressed for parallel evals)
+        self._print_single_result(error_msg)
+
         return False
 
     # =========================================================================
@@ -590,6 +598,21 @@ class EvalContext(Environment):
 
         trace_url = f"https://hud.ai/trace/{self.trace_id}"
         print_link(trace_url, "🔗 Eval Started")
+
+    def _print_single_result(self, error_msg: str | None) -> None:
+        """Print a single eval result summary."""
+        # Skip if link printing is suppressed (e.g., parallel child traces)
+        if self._suppress_link:
+            return
+
+        from hud.eval.display import print_single_result
+
+        print_single_result(
+            trace_id=self.trace_id,
+            name=self.eval_name,
+            reward=self.reward,
+            error=error_msg,
+        )
 
 
 # Re-export for backwards compatibility with trace module

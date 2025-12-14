@@ -128,12 +128,12 @@ class TestClaudeAgent:
         """Test agent initialization with provided client."""
         agent = ClaudeAgent.create(
             model_client=mock_anthropic,
-            checkpoint_name="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-20250514",
             validate_api_key=False,
         )
 
         assert agent.model_name == "Claude"
-        assert agent.config.checkpoint_name == "claude-sonnet-4-20250514"
+        assert agent.config.model == "claude-sonnet-4-20250514"
         assert agent.anthropic_client == mock_anthropic
 
     @pytest.mark.asyncio
@@ -141,7 +141,7 @@ class TestClaudeAgent:
         """Test agent initialization with various parameters."""
         agent = ClaudeAgent.create(
             model_client=mock_anthropic,
-            checkpoint_name="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-20250514",
             max_tokens=4096,
             validate_api_key=False,
         )
@@ -410,12 +410,12 @@ class TestClaudeAgentBedrock:
         """Test agent initialization."""
         agent = ClaudeAgent.create(
             model_client=bedrock_client,
-            checkpoint_name="test-model-arn",
+            model="test-model-arn",
             validate_api_key=False,
         )
 
         assert agent.model_name == "Claude"
-        assert agent.config.checkpoint_name == "test-model-arn"
+        assert agent.config.model == "test-model-arn"
         assert agent.anthropic_client == bedrock_client
 
     @pytest.mark.asyncio
@@ -426,7 +426,7 @@ class TestClaudeAgentBedrock:
         with patch("hud.settings.settings.telemetry_enabled", False):
             agent = ClaudeAgent.create(
                 model_client=bedrock_client,
-                checkpoint_name="test-model-arn",
+                model="test-model-arn",
                 validate_api_key=False,
             )
 
@@ -473,7 +473,7 @@ class TestClaudeAgentBedrock:
         with patch("hud.settings.settings.telemetry_enabled", False):
             agent = ClaudeAgent.create(
                 model_client=bedrock_client,
-                checkpoint_name="test-model-arn",
+                model="test-model-arn",
                 validate_api_key=False,
             )
 

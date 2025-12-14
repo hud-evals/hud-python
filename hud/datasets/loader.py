@@ -231,8 +231,6 @@ def load_tasks(source: str, *, raw: bool = False) -> list[Task] | list[dict[str,
 def save_tasks(
     name: str,
     tasks: list[Task],
-    *,
-    description: str | None = None,
 ) -> str:
     """Save tasks to the HUD API.
 
@@ -242,7 +240,6 @@ def save_tasks(
         name: Evalset name/slug (e.g., "my-evals/benchmark-v1").
             If no org prefix, uses user's default org.
         tasks: List of Task objects (v5 format) to save.
-        description: Optional description for the evalset.
 
     Returns:
         The evalset ID of the created/updated evalset.
@@ -268,6 +265,7 @@ def save_tasks(
         ```
 
     Raises:
+        TypeError: If any task is not a v5 Task object (must have 'scenario')
         ValueError: If API key is not set or save fails
     """
     import httpx
@@ -277,6 +275,14 @@ def save_tasks(
     if not settings.api_key:
         raise ValueError("HUD_API_KEY is required to save tasks")
 
+    # Validate all tasks are v5 format (must have 'scenario')
+    for i, task in enumerate(tasks):
+        if not hasattr(task, "scenario"):
+            raise TypeError(
+                f"Task at index {i} is missing 'scenario' - only v5 Task objects can be saved. "
+                "Use Task.from_v4(legacy_task) to convert from LegacyTask."
+            )
+
     # Convert tasks to dicts (Task is a Pydantic model)
     task_dicts = [task.model_dump(mode="json", exclude_none=True) for task in tasks]
 
@@ -285,8 +291,6 @@ def save_tasks(
         "name": name,
         "tasks": task_dicts,
     }
-    if description:
-        payload["description"] = description
 
     headers = {"Authorization": f"Bearer {settings.api_key}"}
 
