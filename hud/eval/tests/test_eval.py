@@ -10,7 +10,7 @@ from hud.eval.task import Task
 
 
 class TestTaskDataclass:
-    """Tests for Task as a data class."""
+    """Tests for Task as a Pydantic model."""
 
     def test_init_defaults(self) -> None:
         """Task initializes with sensible defaults."""
@@ -19,11 +19,9 @@ class TestTaskDataclass:
         assert task.env is None
         assert task.scenario is None
         assert task.args == {}
-        assert task.variants == {}
-        assert task.index == 0
 
     def test_init_with_env_dict(self) -> None:
-        """Task auto-converts env dict to Environment in __post_init__."""
+        """Task auto-converts env dict to Environment via validator."""
         from hud.environment import Environment
 
         task = Task(
@@ -43,126 +41,14 @@ class TestTaskDataclass:
             env={"name": "test"},
             scenario="checkout",
             args={"user_id": "alice"},
-            variants={"model": "gpt-4o"},
         )
         copied = original.copy()
 
         assert copied is not original
-        assert copied.env == original.env
+        assert copied.env is original.env  # Env reference is shared (intentional)
         assert copied.scenario == original.scenario
         assert copied.args == original.args
-        assert copied.args is not original.args  # Deep copy
-        assert copied.variants == original.variants
-        assert copied.variants is not original.variants  # Deep copy
-
-    def test_copy_clears_trace_id(self) -> None:
-        """copy() clears trace_id for fresh instance."""
-        original = Task(trace_id="original-trace")
-        copied = original.copy()
-
-        assert copied.trace_id is None
-
-
-class TestTaskToEvalContext:
-    """Tests for Task.to_eval_context()."""
-
-    def test_creates_eval_context(self) -> None:
-        """to_eval_context() creates an EvalContext."""
-        from hud.eval.context import EvalContext
-
-        task = Task(scenario="checkout")
-        ctx = task.to_eval_context()
-
-        assert isinstance(ctx, EvalContext)
-        assert ctx.eval_name == "checkout"
-
-    def test_uses_eval_as_name_when_no_scenario(self) -> None:
-        """to_eval_context() uses 'eval' as name when no scenario."""
-        task = Task()
-        ctx = task.to_eval_context()
-
-        assert ctx.eval_name == "eval"
-
-    def test_passes_through_properties(self) -> None:
-        """to_eval_context() passes through properties."""
-        task = Task(
-            scenario="checkout",
-            trace_id="test-trace",
-            api_key="test-key",
-            job_id="test-job",
-            group_id="test-group",
-            index=5,
-            variants={"model": "gpt-4o"},
-        )
-        ctx = task.to_eval_context()
-
-        assert ctx.trace_id == "test-trace"
-        assert ctx._eval_api_key == "test-key"
-        assert ctx.job_id == "test-job"
-        assert ctx.group_id == "test-group"
-        assert ctx.index == 5
-        assert ctx.variants == {"model": "gpt-4o"}
-
-
-class TestTaskContextManager:
-    """Tests for Task as async context manager."""
-
-    @pytest.mark.asyncio
-    async def test_aenter_returns_eval_context(self) -> None:
-        """__aenter__ returns an EvalContext."""
-        from hud.eval.context import EvalContext
-
-        task = Task()  # No scenario to avoid scenario lookup
-
-        with (
-            patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
-            patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
-            patch.object(EvalContext, "__aexit__", new_callable=AsyncMock),
-            patch.object(EvalContext, "_print_eval_link"),  # Suppress link printing
-        ):
-            ctx = await task.__aenter__()
-            assert isinstance(ctx, EvalContext)
-            # Clean up manually since we patched __aexit__
-            task._ctx = None
-
-    @pytest.mark.asyncio
-    async def test_context_clears_on_exit(self) -> None:
-        """__aexit__ clears internal context reference."""
-        from hud.eval.context import EvalContext
-
-        task = Task()
-
-        with (
-            patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
-            patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
-            patch.object(EvalContext, "__aexit__", new_callable=AsyncMock),
-            patch.object(EvalContext, "_print_eval_link"),  # Suppress link printing
-        ):
-            await task.__aenter__()
-            assert task._ctx is not None
-
-            # Manually call __aexit__ on Task (which will call mocked ctx.__aexit__)
-            await task.__aexit__(None, None, None)
-            assert task._ctx is None
-
-    @pytest.mark.asyncio
-    async def test_reward_accessible_after_exit(self) -> None:
-        """Reward set in context is accessible after exit."""
-        from hud.eval.context import EvalContext
-
-        task = Task()
-
-        with (
-            patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
-            patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
-            patch.object(EvalContext, "__aexit__", new_callable=AsyncMock),
-            patch.object(EvalContext, "_print_eval_link"),  # Suppress link printing
-        ):
-            ctx = await task.__aenter__()
-            ctx.reward = 0.95
-
-            await task.__aexit__(None, None, None)
-            # Context reference is cleared but reward was set on the actual context
+        assert copied.args is not original.args  # Args are deep copied
 
 
 class TestEnvironmentCall:
