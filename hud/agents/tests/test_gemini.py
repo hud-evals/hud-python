@@ -98,6 +98,7 @@ class TestGeminiAgent:
         messages = await agent.format_blocks(blocks)
         assert len(messages) == 1
         assert messages[0].role == "user"
+        assert messages[0].parts is not None
         assert len(messages[0].parts) == 2
 
     @pytest.mark.asyncio
@@ -118,6 +119,7 @@ class TestGeminiAgent:
 
         messages = await agent.format_blocks(blocks)
         assert len(messages) == 1
+        assert messages[0].parts is not None
         assert len(messages[0].parts) == 2
 
     @pytest.mark.asyncio
@@ -181,7 +183,7 @@ class TestGeminiAgent:
 
             mock_gemini_client.models.generate_content = MagicMock(return_value=mock_response)
 
-            messages = [genai_types.Content(role="user", parts=[genai_types.Part.from_text("Status?")])]
+            messages = [genai_types.Content(role="user", parts=[genai_types.Part.from_text(text="Status?")])]
             response = await agent.get_response(messages)
 
             assert response.content == "Task completed successfully"
@@ -221,7 +223,7 @@ class TestGeminiAgent:
             mock_gemini_client.models.generate_content = MagicMock(return_value=mock_response)
 
             messages = [
-                genai_types.Content(role="user", parts=[genai_types.Part.from_text("Hard question")])
+                genai_types.Content(role="user", parts=[genai_types.Part.from_text(text="Hard question")])
             ]
             response = await agent.get_response(messages)
 
@@ -249,8 +251,11 @@ class TestGeminiAgent:
 
         # Check that tools were converted
         assert len(agent.gemini_tools) == 1
-        # Gemini tools have function_declarations
-        assert agent.gemini_tools[0].function_declarations[0].name == "my_tool"
+        # Gemini tools have function_declarations - cast to genai Tool type
+        gemini_tool = agent.gemini_tools[0]
+        assert isinstance(gemini_tool, genai_types.Tool)
+        assert gemini_tool.function_declarations is not None
+        assert gemini_tool.function_declarations[0].name == "my_tool"
 
 
 class TestGeminiToolConversion:
@@ -290,10 +295,12 @@ class TestGeminiToolConversion:
         await agent._initialize_from_ctx(ctx)
 
         assert len(agent.gemini_tools) == 1
-        tool = agent.gemini_tools[0]
-        # Gemini tools have function_declarations
-        assert tool.function_declarations[0].name == "search"
-        assert tool.function_declarations[0].parameters_json_schema is not None
+        gemini_tool = agent.gemini_tools[0]
+        # Gemini tools have function_declarations - cast to genai Tool type
+        assert isinstance(gemini_tool, genai_types.Tool)
+        assert gemini_tool.function_declarations is not None
+        assert gemini_tool.function_declarations[0].name == "search"
+        assert gemini_tool.function_declarations[0].parameters_json_schema is not None
 
     @pytest.mark.asyncio
     async def test_tool_without_schema(self, mock_gemini_client: genai.Client) -> None:

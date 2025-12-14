@@ -14,7 +14,7 @@ import logging
 import sys
 from typing import Any
 
-from hud.agents import ClaudeAgent
+from hud.agents.claude import ClaudeAgent
 from hud.settings import settings
 
 # Configure logging

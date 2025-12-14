@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -107,7 +108,7 @@ class TestClaudeAgent:
     """Test ClaudeAgent class."""
 
     @pytest.fixture
-    def mock_anthropic(self) -> AsyncAnthropic:
+    def mock_anthropic(self) -> Generator[AsyncAnthropic, None, None]:  # type: ignore[misc]
         """Create a stub Anthropic client."""
         with (
             patch("hud.agents.claude.AsyncAnthropic") as mock_class,
@@ -119,7 +120,7 @@ class TestClaudeAgent:
             client = MagicMock(spec=AsyncAnthropic)
             client.api_key = "test-key"
             mock_class.return_value = client
-            yield client
+            yield client  # type: ignore[misc]
 
     @pytest.mark.asyncio
     async def test_init_with_client(self, mock_anthropic: AsyncAnthropic) -> None:
@@ -162,9 +163,11 @@ class TestClaudeAgent:
         messages = await agent.format_blocks(blocks)
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
-        assert len(messages[0]["content"]) == 2
-        assert messages[0]["content"][0]["type"] == "text"
-        assert messages[0]["content"][0]["text"] == "Hello, world!"
+        content = messages[0]["content"]
+        assert isinstance(content, list)
+        assert len(content) == 2
+        assert content[0]["type"] == "text"  # type: ignore[index]
+        assert content[0]["text"] == "Hello, world!"  # type: ignore[index]
 
     @pytest.mark.asyncio
     async def test_format_blocks_with_image(self, mock_anthropic: AsyncAnthropic) -> None:
@@ -181,8 +184,10 @@ class TestClaudeAgent:
 
         messages = await agent.format_blocks(blocks)
         assert len(messages) == 1
-        assert len(messages[0]["content"]) == 2
-        assert messages[0]["content"][1]["type"] == "image"
+        content = messages[0]["content"]
+        assert isinstance(content, list)
+        assert len(content) == 2
+        assert content[1]["type"] == "image"  # type: ignore[index]
 
     @pytest.mark.asyncio
     async def test_format_tool_results_text(self, mock_anthropic: AsyncAnthropic) -> None:
@@ -204,9 +209,10 @@ class TestClaudeAgent:
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
         content = messages[0]["content"]
+        assert isinstance(content, list)
         assert len(content) == 1
-        assert content[0]["type"] == "tool_result"
-        assert content[0]["tool_use_id"] == "call_123"
+        assert content[0]["type"] == "tool_result"  # type: ignore[index]
+        assert content[0]["tool_use_id"] == "call_123"  # type: ignore[index]
 
     @pytest.mark.asyncio
     async def test_format_tool_results_with_error(self, mock_anthropic: AsyncAnthropic) -> None:
@@ -228,7 +234,7 @@ class TestClaudeAgent:
         assert len(messages) == 1
         content = messages[0]["content"]
         # Error content should include "Error:" prefix
-        assert any("Error" in str(block) for block in content[0]["content"])
+        assert any("Error" in str(block) for block in content[0]["content"])  # type: ignore[index]
 
     @pytest.mark.asyncio
     async def test_get_system_messages(self, mock_anthropic: AsyncAnthropic) -> None:
@@ -305,7 +311,7 @@ class TestClaudeAgent:
 
         # Check that tools were converted
         assert len(agent.claude_tools) == 1
-        assert agent.claude_tools[0]["name"] == "my_tool"
+        assert agent.claude_tools[0]["name"] == "my_tool"  # type: ignore[typeddict-item]
 
     @pytest.mark.asyncio
     async def test_computer_tool_detection(self, mock_anthropic: AsyncAnthropic) -> None:
@@ -432,7 +438,7 @@ class TestClaudeAgentBedrock:
             text_block.text = "Hello from Bedrock"
             mock_response.content = [text_block]
 
-            bedrock_client.beta.messages.create.return_value = mock_response
+            bedrock_client.beta.messages.create.return_value = mock_response  # type: ignore[union-attr]
 
             messages = [
                 cast(
@@ -447,12 +453,12 @@ class TestClaudeAgentBedrock:
 
             # Bedrock-specific behavior: uses create() and appends assistant message directly.
             assert not hasattr(bedrock_client.beta.messages, "stream")
-            bedrock_client.beta.messages.create.assert_awaited_once()
+            bedrock_client.beta.messages.create.assert_awaited_once()  # type: ignore[union-attr]
             assert len(messages) == 2
             assert messages[-1]["role"] == "assistant"
 
             # Ensure the Bedrock call shape is stable.
-            _, kwargs = bedrock_client.beta.messages.create.call_args
+            _, kwargs = bedrock_client.beta.messages.create.call_args  # type: ignore[union-attr]
             assert kwargs["model"] == "test-model-arn"
             assert kwargs["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}
             assert "fine-grained-tool-streaming-2025-05-14" in kwargs["betas"]
@@ -470,7 +476,7 @@ class TestClaudeAgentBedrock:
                 validate_api_key=False,
             )
 
-            bedrock_client.beta.messages.create.side_effect = ModuleNotFoundError("boto3")
+            bedrock_client.beta.messages.create.side_effect = ModuleNotFoundError("boto3")  # type: ignore[union-attr]
             messages = [{"role": "user", "content": [{"type": "text", "text": "Hi"}]}]
 
             with pytest.raises(ValueError, match=r"boto3 is required for AWS Bedrock"):

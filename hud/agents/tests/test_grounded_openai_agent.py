@@ -130,7 +130,6 @@ async def test_get_response_with_reasoning() -> None:
             grounder_config=grounder_cfg,
             openai_client=fake_openai,
             checkpoint_name="gpt-4o-mini",
-            mcp_client=FakeMCPClient(),
             initial_screenshot=False,
         )
 

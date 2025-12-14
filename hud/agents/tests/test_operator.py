@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -41,7 +42,7 @@ class TestOperatorAgent:
     """Test OperatorAgent class."""
 
     @pytest.fixture
-    def mock_openai(self) -> AsyncOpenAI:
+    def mock_openai(self) -> Generator[AsyncOpenAI, None, None]:
         """Create a mock OpenAI client."""
         client = AsyncOpenAI(api_key="test", base_url="http://localhost")
         client.responses.create = AsyncMock()

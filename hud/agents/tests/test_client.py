@@ -15,7 +15,6 @@ from hud.types import MCPToolResult
 logger = logging.getLogger(__name__)
 
 
-@patch("hud.clients.base.setup_hud_telemetry")
 class TestMCPClient:
     """Test MCPClient class."""
 
@@ -34,7 +33,7 @@ class TestMCPClient:
             yield mock_instance
 
     @pytest.mark.asyncio
-    async def test_connect_single_server(self, mock_telemetry, mock_mcp_use_client):
+    async def test_connect_single_server(self, mock_mcp_use_client):
         """Test connecting to a single server."""
         config = {"test_server": {"command": "python", "args": ["-m", "test_server"]}}
 
@@ -77,7 +76,7 @@ class TestMCPClient:
         assert names == {"tool1", "tool2"}
 
     @pytest.mark.asyncio
-    async def test_connect_multiple_servers(self, mock_telemetry, mock_mcp_use_client):
+    async def test_connect_multiple_servers(self, mock_mcp_use_client):
         """Test connecting to multiple servers."""
         config = {
             "server1": {"command": "python", "args": ["-m", "server1"]},
@@ -129,7 +128,7 @@ class TestMCPClient:
         assert names == {"server1_tool1", "server2_tool2"}
 
     @pytest.mark.asyncio
-    async def test_call_tool(self, mock_telemetry, mock_mcp_use_client):
+    async def test_call_tool(self, mock_mcp_use_client):
         """Test calling a tool."""
         config = {"test": {"command": "test"}}
         client = MCPClient(mcp_config=config)
@@ -180,7 +179,7 @@ class TestMCPClient:
         )
 
     @pytest.mark.asyncio
-    async def test_call_tool_not_found(self, mock_telemetry, mock_mcp_use_client):
+    async def test_call_tool_not_found(self, mock_mcp_use_client):
         """Test calling a non-existent tool."""
         config = {"test": {"command": "test"}}
         client = MCPClient(mcp_config=config)
@@ -208,7 +207,7 @@ class TestMCPClient:
         assert "Tool 'nonexistent' not found" in text_content
 
     @pytest.mark.asyncio
-    async def test_get_telemetry_data(self, mock_telemetry, mock_mcp_use_client):
+    async def test_get_telemetry_data(self, mock_mcp_use_client):
         """Test getting telemetry data."""
         config = {"test": {"command": "test"}}
         client = MCPClient(mcp_config=config)
@@ -245,7 +244,7 @@ class TestMCPClient:
         assert isinstance(telemetry_data, dict)
 
     @pytest.mark.asyncio
-    async def test_close(self, mock_telemetry, mock_mcp_use_client):
+    async def test_close(self, mock_mcp_use_client):
         """Test closing client connections."""
         config = {"test": {"command": "test"}}
         client = MCPClient(mcp_config=config)
@@ -267,7 +266,7 @@ class TestMCPClient:
         mock_mcp_use_client.close_all_sessions.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_context_manager(self, mock_telemetry, mock_mcp_use_client):
+    async def test_context_manager(self, mock_mcp_use_client):
         """Test using client as context manager."""
         mock_session = MagicMock()
         mock_session.connector = MagicMock()
@@ -291,7 +290,7 @@ class TestMCPClient:
         mock_mcp_use_client.close_all_sessions.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_available_tools(self, mock_telemetry, mock_mcp_use_client):
+    async def test_get_available_tools(self, mock_mcp_use_client):
         """Test getting available tools."""
         config = {"test": {"command": "test"}}
         client = MCPClient(mcp_config=config)
@@ -319,7 +318,7 @@ class TestMCPClient:
         assert names == {"tool1", "tool2"}
 
     @pytest.mark.asyncio
-    async def test_get_tool_map(self, mock_telemetry, mock_mcp_use_client):
+    async def test_get_tool_map(self, mock_mcp_use_client):
         """Test getting tool map."""
         config = {"test": {"command": "test"}}
         client = MCPClient(mcp_config=config)

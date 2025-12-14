@@ -36,6 +36,7 @@ class EvalPayload(BaseModel):
     group_id: str | None = None
     variants: dict[str, Any] | None = None
     task_version_id: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class EvalExitPayload(EvalPayload):

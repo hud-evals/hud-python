@@ -138,8 +138,11 @@ class Environment(
         # Default prompt (EvalContext has per-run prompt)
         self.prompt: str | None = None
 
-        # Track which lifecycle tools we've warned about (only warn once per tool)
-        self._warned_lifecycle_tools: set[str] = set()
+        # Serialization support
+        # _hub_config: set by connect_hub() for v5 format {"name": "hub", "include": [...]}
+        # _mcp_config: set by connect_mcp_config() for v4 format {"server_name": {...}}
+        self._hub_config: dict[str, Any] | None = None
+        self._mcp_config: dict[str, dict[str, Any]] | None = None
 
         # Initialize mock state
         self._init_mock()
@@ -173,25 +176,8 @@ class Environment(
 
         # Parse the tool call (kwargs merged when call is string)
         parsed, fmt = parse_tool_call(call, **kwargs)
-        self._check_lifecycle_warning(parsed.name)
         result = await self._execute_tool(parsed.name, parsed.arguments or {})
         return format_result(result, parsed, fmt)
-
-    def _check_lifecycle_warning(self, name: str) -> None:
-        """Warn once if calling a setup/evaluate tool manually."""
-        if name in self._warned_lifecycle_tools:
-            return
-        setup = {n for n, _ in self._setup_calls}
-        evaluate = {n for n, _ in self._evaluate_calls}
-        if name not in setup and name not in evaluate:
-            return
-        self._warned_lifecycle_tools.add(name)
-        phase = "setup" if name in setup else "evaluate"
-        logger.warning(
-            "Tool '%s' is a %s tool (runs automatically). Manual call may duplicate.",
-            name,
-            phase,
-        )
 
     def _connections_with_tool(self, tool_name: str) -> set[str]:
         """Get connection names that have a specific tool.
@@ -523,6 +509,108 @@ class Environment(
     def local_connections(self) -> list[str]:
         """Names of local (non-parallelizable) connections."""
         return [name for name, conn in self._connections.items() if conn.is_local]
+
+    # =========================================================================
+    # Serialization
+    # =========================================================================
+
+    @property
+    def is_serializable(self) -> bool:
+        """True if environment can be serialized (no local tools/scenarios).
+
+        For v5 format: requires hub config from connect_hub()
+        For v4 format: requires mcp_config, prompt, AND evaluate_tool
+        """
+        # Check for local tools (registered via @env.tool)
+        if self._router._local_names:
+            return False
+        # Check for local scenarios (registered via @env.scenario)
+        if getattr(self, "_scenarios", {}):
+            return False
+        # v5 hub format
+        if self._hub_config is not None:
+            return True
+        # v4 format requires mcp_config + prompt + evaluate_tool
+        if self._mcp_config is not None:
+            return bool(self.prompt and self._evaluate_calls)
+        return False
+
+    def to_config(self) -> dict[str, Any]:
+        """Serialize environment config for remote submission.
+
+        Returns the config in either v5 format (hub-based) or v4 format (legacy).
+        For v4 format, automatically includes prompt, setup_tool, and evaluate_tool
+        from the Environment's state.
+
+        Returns:
+            dict: Serializable config
+
+        Raises:
+            ValueError: If environment has local tools/scenarios that can't be serialized
+
+        Example:
+            ```python
+            # v5 hub-based
+            env = Environment("my").connect_hub("browser", include=["navigate"])
+            env.to_config()  # {"name": "browser", "include": ["navigate"]}
+
+            # v4 legacy (from Task.from_v4())
+            task = Task.from_v4(legacy_task)
+            task.env.to_config()  # {"prompt": "...", "mcp_config": {...}, ...}
+            ```
+        """
+        if self._router._local_names:
+            raise ValueError(
+                f"Cannot serialize Environment with local tools: "
+                f"{list(self._router._local_names)}. "
+                "Local tools require local execution. For remote submission, "
+                "use dict config or connect to a remote hub."
+            )
+        if getattr(self, "_scenarios", {}):
+            raise ValueError(
+                f"Cannot serialize Environment with local scenarios: "
+                f"{list(self._scenarios.keys())}. "
+                "Local scenarios require local execution. For remote submission, "
+                "define scenarios on the remote environment."
+            )
+
+        # v5 hub-based format
+        if self._hub_config is not None:
+            return self._hub_config.copy()
+
+        # v4 legacy format - requires mcp_config, prompt, AND evaluate_tool
+        if self._mcp_config is not None:
+            # Validate required fields for v4 format
+            if not self.prompt:
+                raise ValueError(
+                    "Cannot serialize v4 Environment without prompt. "
+                    "Set env.prompt before serializing."
+                )
+            if not self._evaluate_calls:
+                raise ValueError(
+                    "Cannot serialize v4 Environment without evaluate_tool. "
+                    "Use env.evaluate_tool() to define evaluation criteria."
+                )
+
+            config: dict[str, Any] = {
+                "prompt": self.prompt,
+                "mcp_config": self._mcp_config,
+                "evaluate_tool": [
+                    {"name": name, "arguments": args}
+                    for name, args in self._evaluate_calls
+                ],
+            }
+            if self._setup_calls:
+                config["setup_tool"] = [
+                    {"name": name, "arguments": args}
+                    for name, args in self._setup_calls
+                ]
+            return config
+
+        raise ValueError(
+            "Cannot serialize Environment without config. "
+            "Use connect_hub() for v5 tasks or connect_mcp_config() for legacy tasks."
+        )
 
     def __repr__(self) -> str:
         return f"Environment({self.name!r}, connections={list(self._connections.keys())})"

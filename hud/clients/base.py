@@ -12,7 +12,6 @@ from mcp.types import Implementation
 from hud.shared.exceptions import HudAuthenticationError, HudException
 from hud.types import MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
-from hud.utils.mcp import setup_hud_telemetry
 from hud.version import __version__ as hud_version
 
 if TYPE_CHECKING:
@@ -86,7 +85,6 @@ class BaseHUDClient(AgentMCPClient):
         mcp_config: dict[str, dict[str, Any]] | None = None,
         verbose: bool = False,
         strict_validation: bool = False,
-        auto_trace: bool = True,
     ) -> None:
         """
         Initialize base client.
@@ -99,8 +97,6 @@ class BaseHUDClient(AgentMCPClient):
         self.verbose = verbose
         self._mcp_config = mcp_config
         self._strict_validation = strict_validation
-        self._auto_trace = auto_trace
-        self._auto_trace_cm: Any | None = None  # Store auto-created trace context manager
 
         self._initialized = False
         self._telemetry_data = {}  # Initialize telemetry data
@@ -127,8 +123,6 @@ class BaseHUDClient(AgentMCPClient):
                 "An MCP server configuration is required. "
                 "Either pass it to the constructor or call initialize with a configuration"
             )
-
-        self._auto_trace_cm = setup_hud_telemetry(self._mcp_config, auto_trace=self._auto_trace)
 
         hud_console.debug("Initializing MCP client...")
 
@@ -158,17 +152,6 @@ class BaseHUDClient(AgentMCPClient):
 
     async def shutdown(self) -> None:
         """Disconnect from the MCP server."""
-        # Clean up auto-created trace if any
-        if self._auto_trace_cm:
-            try:
-                self._auto_trace_cm.__exit__(None, None, None)
-                hud_console.info("Closed auto-created trace")
-            except Exception as e:
-                hud_console.warning(f"Failed to close auto-created trace: {e}")
-            finally:
-                self._auto_trace_cm = None
-
-        # Disconnect from server
         if self._initialized:
             await self._disconnect()
             self._initialized = False

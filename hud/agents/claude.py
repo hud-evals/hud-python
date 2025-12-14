@@ -96,11 +96,11 @@ class ClaudeAgent(MCPAgent):
         """Build Claude-specific tool mappings after tools are discovered."""
         self._convert_tools_for_claude()
 
-    async def get_system_messages(self) -> list[Any]:
+    async def get_system_messages(self) -> list[BetaMessageParam]:
         """No system messages for Claude because applied in get_response"""
         return []
 
-    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
+    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[BetaMessageParam]:
         """Format messages for Claude."""
         # Convert MCP content types to Anthropic content types
         anthropic_blocks: list[BetaContentBlockParam] = []

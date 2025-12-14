@@ -30,7 +30,6 @@ class BaseCreateParams(BaseModel):
     # Primary way to bind agent to execution context (v5)
     ctx: Any | None = None  # EvalContext or Environment - agent uses this for tool calls
 
-    auto_trace: bool = True
     auto_respond: bool = False
     verbose: bool = False
 
@@ -92,10 +91,6 @@ class MCPAgent(ABC):
         self._available_tools: list[types.Tool] | None = None
         self._tool_map: dict[str, types.Tool] = {}
         self._initialized: bool = False
-
-        # Trace
-        self._auto_trace = params.auto_trace
-        self._auto_trace_cm: Any | None = None
 
     @classmethod
     def create(cls, **kwargs: Any) -> MCPAgent:
@@ -484,16 +479,6 @@ class MCPAgent(ABC):
 
     async def _cleanup(self) -> None:
         """Cleanup resources."""
-        # Clean up auto-created trace if any
-        if self._auto_trace_cm:
-            try:
-                self._auto_trace_cm.__exit__(None, None, None)
-                self.console.debug("Closed auto-created trace")
-            except Exception as e:
-                self.console.warning_log(f"Failed to close auto-created trace: {e}")
-            finally:
-                self._auto_trace_cm = None
-
         # Clear context reference
         self.ctx = None
 

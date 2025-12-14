@@ -16,7 +16,7 @@ from fastmcp.server.server import FastMCP, Transport
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from hud.datasets import run_tasks
+from hud.datasets import run_dataset
 from hud.eval.task import Task
 from hud.server.low_level import LowLevelServerWithInit
 from hud.types import LegacyTask
@@ -765,7 +765,7 @@ class MCPServer(FastMCP):
 
                     # Fire and forget - launch evaluation in background
                     async def run_eval_background() -> None:
-                        await run_tasks(
+                        await run_dataset(
                             [Task.from_v4(task) for task in task_objects],
                             agent_type=agent_type,
                             agent_params=agent_params,

@@ -98,6 +98,12 @@ class MCPConfigConnectorMixin(BaseConnectorMixin):
                 await env.call_tool("search_repositories", query="mcp")
             ```
         """
+        # Store mcp_config for serialization (v4 format)
+        # Merge with existing if called multiple times
+        if not hasattr(self, "_mcp_config") or self._mcp_config is None:
+            self._mcp_config = {}
+        self._mcp_config.update(mcp_config)
+
         for server_name, server_config in mcp_config.items():
             self.connect_mcp({server_name: server_config}, alias=server_name, **kwargs)
         return self

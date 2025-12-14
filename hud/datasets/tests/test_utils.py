@@ -9,13 +9,12 @@ import pytest
 from hud.datasets.utils import (
     BatchRequest,
     SingleTaskRequest,
-    calculate_group_stats,
     cancel_all_jobs,
     cancel_job,
     cancel_task,
-    display_results,
     submit_rollouts,
 )
+from hud.eval.display import display_results
 from hud.types import AgentType, LegacyTask, Trace
 
 
@@ -23,9 +22,9 @@ class TestSingleTaskRequest:
     """Tests for SingleTaskRequest schema."""
 
     def test_valid_request(self):
-        """Test creating a valid SingleTaskRequest."""
+        """Test creating a valid SingleTaskRequest with v5 task."""
         request = SingleTaskRequest(
-            task={"prompt": "test", "mcp_config": {}},
+            task={"env": {"name": "browser"}, "scenario": "checkout"},
             agent_type=AgentType.CLAUDE,
             agent_params={"checkpoint_name": "claude-sonnet-4-5"},
             max_steps=10,
@@ -48,8 +47,8 @@ class TestSingleTaskRequest:
             )
 
     def test_invalid_task_rejected(self):
-        """Test that invalid task payload is rejected."""
-        with pytest.raises(ValueError, match="Invalid task payload"):
+        """Test that invalid task payload is rejected (neither v4 nor v5)."""
+        with pytest.raises(ValueError, match="Task must have 'env'"):
             SingleTaskRequest(
                 task={"invalid_field": "test"},  # Missing required fields
                 agent_type=AgentType.CLAUDE,
@@ -57,6 +56,43 @@ class TestSingleTaskRequest:
                 task_id="task-1",
                 trace_name="Test",
             )
+
+    def test_incomplete_v4_task_rejected(self):
+        """Test that incomplete v4 task (missing evaluate_tool) is rejected."""
+        with pytest.raises(ValueError, match="v4 task missing required fields"):
+            SingleTaskRequest(
+                task={"prompt": "test", "mcp_config": {}},  # Missing evaluate_tool
+                agent_type=AgentType.CLAUDE,
+                job_id="job-123",
+                task_id="task-1",
+                trace_name="Test",
+            )
+
+    def test_valid_v4_task_accepted(self):
+        """Test that complete v4 task is accepted."""
+        request = SingleTaskRequest(
+            task={
+                "prompt": "test",
+                "mcp_config": {"server": {"url": "http://localhost"}},
+                "evaluate_tool": {"name": "check", "arguments": {}},
+            },
+            agent_type=AgentType.CLAUDE,
+            job_id="job-123",
+            task_id="task-1",
+            trace_name="Test",
+        )
+        assert request.task_id == "task-1"
+
+    def test_valid_v5_task_accepted(self):
+        """Test that v5 task with env is accepted."""
+        request = SingleTaskRequest(
+            task={"env": {"name": "browser"}, "scenario": "login"},
+            agent_type=AgentType.CLAUDE,
+            job_id="job-123",
+            task_id="task-1",
+            trace_name="Test",
+        )
+        assert request.task_id == "task-1"
 
 
 class TestBatchRequest:
@@ -66,7 +102,7 @@ class TestBatchRequest:
         """Test creating a valid batch request."""
         requests = [
             SingleTaskRequest(
-                task={"prompt": "test", "mcp_config": {}},
+                task={"env": {"name": "browser"}, "scenario": "test"},
                 agent_type=AgentType.CLAUDE,
                 job_id="job-123",
                 task_id=f"task-{i}",
@@ -153,56 +189,6 @@ class TestCancellationFunctions:
 
             assert result["jobs_cancelled"] == 3
             assert result["total_tasks_cancelled"] == 10
-
-
-class TestCalculateGroupStats:
-    """Tests for calculate_group_stats function."""
-
-    def test_basic_stats(self):
-        """Test basic group statistics calculation."""
-        tasks = [
-            LegacyTask(prompt="Task 1", mcp_config={}),
-            LegacyTask(prompt="Task 2", mcp_config={}),
-        ]
-        traces: list[Trace | None] = [
-            Trace(reward=0.8, done=True),
-            Trace(reward=0.9, done=True),
-            Trace(reward=0.6, done=True),
-            Trace(reward=0.7, done=True),
-        ]
-        group_ids = {0: "group-0", 1: "group-1"}
-
-        stats = calculate_group_stats(tasks, traces, group_size=2, group_ids=group_ids)
-
-        assert len(stats) == 2
-        assert stats[0]["mean_reward"] == pytest.approx(0.85, rel=0.01)
-        assert stats[1]["mean_reward"] == pytest.approx(0.65, rel=0.01)
-
-    def test_all_none_traces(self):
-        """Test when all traces are None."""
-        tasks = [LegacyTask(prompt="Task 1", mcp_config={})]
-        traces: list[Trace | None] = [None, None]
-        group_ids = {0: "group-0"}
-
-        stats = calculate_group_stats(tasks, traces, group_size=2, group_ids=group_ids)
-
-        assert len(stats) == 1
-        assert stats[0]["error_rate"] == 1.0
-        assert stats[0]["mean_reward"] == 0.0
-
-    def test_mixed_success_failure(self):
-        """Test with mixed success and failure traces."""
-        tasks = [LegacyTask(prompt="Task 1", mcp_config={})]
-        traces: list[Trace | None] = [
-            Trace(reward=1.0, done=True),
-            Trace(reward=0.0, done=True, isError=True),
-        ]
-        group_ids = {0: "group-0"}
-
-        stats = calculate_group_stats(tasks, traces, group_size=2, group_ids=group_ids)
-
-        assert stats[0]["success_rate"] == 0.5
-        assert stats[0]["error_rate"] == 0.5
 
 
 class TestDisplayResults:

@@ -454,7 +454,7 @@ async def _run_parallel_eval(
     # Log and print stats
     eval_name = completed[0].eval_name if completed else "eval"
     log_eval_stats(completed)
-    print_eval_stats(completed, eval_name)
+    print_eval_stats(completed, name=eval_name)
 
     return list(completed)
 

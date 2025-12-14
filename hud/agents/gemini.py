@@ -88,7 +88,7 @@ class GeminiAgent(MCPAgent):
         """Build Gemini-specific tool mappings after tools are discovered."""
         self._convert_tools_for_gemini()
 
-    async def get_system_messages(self) -> list[Any]:
+    async def get_system_messages(self) -> list[genai_types.Content]:
         """No system messages for Gemini because applied in get_response"""
         return []
 

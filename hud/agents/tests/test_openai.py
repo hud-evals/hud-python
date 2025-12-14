@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Generator
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -47,14 +48,14 @@ class TestOpenAIAgent:
     """Test OpenAIAgent class."""
 
     @pytest.fixture
-    def mock_openai(self) -> AsyncOpenAI:
+    def mock_openai(self) -> Generator[AsyncOpenAI, None, None]:  # type: ignore[misc]
         """Create a stub OpenAI client."""
         with patch("hud.agents.openai.AsyncOpenAI") as mock_class:
             client = AsyncOpenAI(api_key="test", base_url="http://localhost")
             client.chat.completions.create = AsyncMock()
             client.responses.create = AsyncMock()
             mock_class.return_value = client
-            yield client
+            yield client  # type: ignore[misc]
 
     @pytest.mark.asyncio
     async def test_init_with_client(self, mock_openai: AsyncOpenAI) -> None:
@@ -137,7 +138,7 @@ class TestOpenAIAgent:
         assert len(messages) == 1
         assert len(messages[0]["content"]) == 2
         assert messages[0]["content"][1]["type"] == "input_image"
-        assert messages[0]["content"][1]["image_url"] == "data:image/png;base64,base64data"
+        assert messages[0]["content"][1]["image_url"] == "data:image/png;base64,base64data"  # type: ignore[typeddict-item]
 
     @pytest.mark.asyncio
     async def test_format_blocks_empty(self, mock_openai: AsyncOpenAI) -> None:
@@ -176,7 +177,7 @@ class TestOpenAIAgent:
         assert messages[0]["call_id"] == "call_123"
         # Output is a list of content items
         assert len(messages[0]["output"]) == 1
-        assert messages[0]["output"][0]["text"] == "Tool output"
+        assert messages[0]["output"][0]["text"] == "Tool output"  # type: ignore[index]
 
     @pytest.mark.asyncio
     async def test_format_tool_results_with_error(self, mock_openai: AsyncOpenAI) -> None:
@@ -197,7 +198,8 @@ class TestOpenAIAgent:
         messages = await agent.format_tool_results(tool_calls, tool_results)
         assert len(messages) == 1
         # Output is a list; first item is error indicator, second is the message
-        output = messages[0]["output"]
+        msg = cast("dict[str, Any]", messages[0])
+        output = cast("list[dict[str, Any]]", msg["output"])
         assert any(item.get("text") == "[tool_error] true" for item in output)
         assert any(item.get("text") == "Error message" for item in output)
 
@@ -357,13 +359,13 @@ class TestOpenAIToolConversion:
     """Tests for tool conversion to OpenAI format."""
 
     @pytest.fixture
-    def mock_openai(self) -> AsyncOpenAI:
+    def mock_openai(self) -> Generator[AsyncOpenAI, None, None]:  # type: ignore[misc]
         """Create a stub OpenAI client."""
         with patch("hud.agents.openai.AsyncOpenAI") as mock_class:
             client = AsyncOpenAI(api_key="test", base_url="http://localhost")
             client.responses.create = AsyncMock()
             mock_class.return_value = client
-            yield client
+            yield client  # type: ignore[misc]
 
     @pytest.mark.asyncio
     async def test_shell_tool_conversion(self, mock_openai: AsyncOpenAI) -> None:

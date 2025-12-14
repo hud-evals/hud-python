@@ -7,10 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from hud.datasets import (
-    LegacyTask,
-    run_dataset,
-)
+from hud.datasets import run_dataset
+from hud.types import LegacyTask
 from hud.types import MCPToolCall
 from hud.utils.tasks import save_tasks
 
@@ -214,7 +212,7 @@ class TestRunDatasetExtended:
         mock_agent.run.return_value = Trace(reward=1.0, done=True)
 
         mock_env = {"name": "test"}
-        mock_tasks = [Task(env=mock_env, scenario="loaded")]
+        mock_tasks = [Task(env=mock_env, scenario="loaded")]  # type: ignore[arg-type]
 
         mock_ctx = AsyncMock()
         mock_ctx.results = None

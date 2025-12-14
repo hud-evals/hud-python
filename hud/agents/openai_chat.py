@@ -105,14 +105,14 @@ class OpenAIChatAgent(MCPAgent):
             arguments=args,
         )
 
-    async def get_system_messages(self) -> list[Any]:
+    async def get_system_messages(self) -> list[dict[str, Any]]:
         """Get system messages for OpenAI."""
         if self.system_prompt is not None:
             return [{"role": "system", "content": self.system_prompt}]
         else:
             return []
 
-    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
+    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[dict[str, Any]]:
         """Format blocks for OpenAI."""
         content = []
         for block in blocks:
@@ -232,7 +232,7 @@ class OpenAIChatAgent(MCPAgent):
         record_args=False,
         record_result=True,
     )
-    async def get_response(self, messages: list[Any]) -> AgentResponse:
+    async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
         """Send chat request to OpenAI and convert the response."""
 
         # Convert MCP tool schemas to OpenAI format
@@ -305,7 +305,7 @@ class OpenAIChatAgent(MCPAgent):
         self,
         tool_calls: list[MCPToolCall],
         tool_results: list[MCPToolResult],
-    ) -> list[Any]:
+    ) -> list[dict[str, Any]]:
         """Render MCP tool results as OpenAI messages.
 
         Note: OpenAI tool messages only support string content.

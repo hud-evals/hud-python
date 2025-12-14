@@ -42,13 +42,19 @@ from hud.eval.manager import run_eval
 # Task is safe to import
 from hud.eval.task import Task
 
+# Utils for v4 format handling
+from hud.eval.utils import build_env_from_v4, is_v4_format, validate_v4_task
+
 if TYPE_CHECKING:
     from hud.eval.context import EvalContext
 
 __all__ = [
     "EvalContext",
     "Task",
+    "build_env_from_v4",
+    "is_v4_format",
     "run_eval",
+    "validate_v4_task",
 ]
 
 

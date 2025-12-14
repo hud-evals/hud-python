@@ -5,10 +5,13 @@ from __future__ import annotations
 from .base import AgentMCPClient, BaseHUDClient
 from .environment import EnvironmentClient
 from .fastmcp import FastMCPHUDClient
-from .mcp_use import MCPUseHUDClient
 
-# Default to MCP-use for agents (has multi-server session support)
-MCPClient = MCPUseHUDClient
+# Default to FastMCP client (no optional dependencies)
+MCPClient = FastMCPHUDClient
+
+# Note: MCPUseHUDClient requires mcp-use (optional dependency in [agents]).
+# Import directly if needed:
+#   from hud.clients.mcp_use import MCPUseHUDClient
 
 __all__ = [
     "AgentMCPClient",
@@ -16,5 +19,4 @@ __all__ = [
     "EnvironmentClient",
     "FastMCPHUDClient",
     "MCPClient",
-    "MCPUseHUDClient",
 ]

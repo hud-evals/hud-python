@@ -201,7 +201,7 @@ class OpenAIAgent(MCPAgent):
         """System messages are provided via the `instructions` field."""
         return []
 
-    async def format_blocks(self, blocks: list[types.ContentBlock]) -> ResponseInputParam:
+    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Message]:
         """Convert MCP content blocks into OpenAI user messages."""
         content: ResponseInputMessageContentListParam = []
         for block in blocks:
@@ -288,9 +288,9 @@ class OpenAIAgent(MCPAgent):
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
-    ) -> ResponseInputParam:
+    ) -> list[FunctionCallOutput]:
         """Convert MCP tool outputs into Responses input items."""
-        formatted: ResponseInputParam = []
+        formatted: list[FunctionCallOutput] = []
         for call, result in zip(tool_calls, tool_results, strict=False):
             if not call.id:
                 self.console.warning_log(f"Tool '{call.name}' missing call_id; skipping output.")

@@ -47,12 +47,6 @@ class TestEvalContext:
 
         assert ctx.success is False
 
-    def test_done_false_initially(self) -> None:
-        """done property returns False initially."""
-        ctx = EvalContext(name="test-task", quiet=True)
-
-        assert ctx.done is False
-
     def test_variants_empty_by_default(self) -> None:
         """variants is empty dict by default."""
         ctx = EvalContext(name="test-task", quiet=True)

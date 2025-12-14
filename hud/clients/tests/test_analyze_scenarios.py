@@ -24,7 +24,7 @@ class _MockClient(BaseHUDClient):
         resources: list[types.Resource],
     ) -> None:
         super().__init__(
-            mcp_config={"test": {"url": "mock://test"}}, verbose=True, auto_trace=False
+            mcp_config={"test": {"url": "mock://test"}}, verbose=True
         )
         self._mock_prompts = prompts
         self._mock_resources = resources

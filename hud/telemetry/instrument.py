@@ -1,15 +1,15 @@
-"""Simple instrumentation decorator for HUD tracing.
+"""Instrumentation decorator for HUD telemetry.
 
 This module provides a lightweight @instrument decorator that records
-function calls within the context of env.trace(). No OpenTelemetry required.
+function calls and sends them to the HUD telemetry backend.
 
 Usage:
     @hud.instrument
     async def my_function(arg1, arg2):
         ...
 
-    # Within a trace context, calls are recorded
-    async with env.eval("task") as tc:
+    # Within an eval context, calls are recorded and sent to HUD
+    async with env.eval("task") as ctx:
         result = await my_function("a", "b")
 """
 
@@ -26,6 +26,16 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 import pydantic_core
+
+from hud.telemetry.exporter import queue_span
+from hud.types import TraceStep
+
+
+def _get_trace_id() -> str | None:
+    """Lazy import to avoid circular dependency with eval.context."""
+    from hud.eval.context import get_current_trace_id
+
+    return get_current_trace_id()
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -54,13 +64,24 @@ def _serialize_value(value: Any, max_items: int = 10) -> Any:
         return f"<{type(value).__name__}>"
 
 
+def _now_iso() -> str:
+    """Get current time as ISO-8601 string."""
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _normalize_trace_id(trace_id: str) -> str:
+    """Normalize trace_id to 32-character hex string."""
+    clean = trace_id.replace("-", "")
+    return clean[:32].ljust(32, "0")
+
+
 @overload
 def instrument(
     func: None = None,
     *,
     name: str | None = None,
     category: str = "function",
-    span_type: str | None = None,  # Alias for category
+    span_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]: ...
@@ -72,7 +93,7 @@ def instrument(
     *,
     name: str | None = None,
     category: str = "function",
-    span_type: str | None = None,  # Alias for category
+    span_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[P, R]: ...
@@ -84,7 +105,7 @@ def instrument(
     *,
     name: str | None = None,
     category: str = "function",
-    span_type: str | None = None,  # Alias for category
+    span_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[P, Awaitable[R]]: ...
@@ -95,18 +116,18 @@ def instrument(
     *,
     name: str | None = None,
     category: str = "function",
-    span_type: str | None = None,  # Alias for category
+    span_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[..., Any]:
     """Instrument a function to record spans within eval context.
 
-    This decorator records function calls as spans, compatible with env.eval().
+    This decorator records function calls as spans and sends them to the HUD API.
 
     Args:
         func: The function to instrument
         name: Custom span name (defaults to module.function)
-        category: Span category (e.g., "agent", "tool", "function")
+        category: Span category (e.g., "agent", "tool", "function", "mcp")
         span_type: Alias for category (deprecated, use category instead)
         record_args: Whether to record function arguments
         record_result: Whether to record function result
@@ -123,8 +144,6 @@ def instrument(
         async def call_model(messages: list) -> str:
             return await model.generate(messages)
     """
-
-    # span_type is an alias for category
     effective_category = span_type if span_type is not None else category
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -142,24 +161,25 @@ def instrument(
             sig = None
 
         def _build_span(
-            trace_id: str,
+            task_run_id: str,
             args: tuple[Any, ...],
             kwargs: dict[str, Any],
             start_time: str,
             end_time: str,
-            duration_ms: float,
             result: Any = None,
             error: str | None = None,
         ) -> dict[str, Any]:
-            """Build a span record."""
-            attributes: dict[str, Any] = {
-                "category": effective_category,
-                "function": func_qualname,
-                "module": func_module,
-                "duration_ms": duration_ms,
-            }
+            """Build a HudSpan-compatible span record."""
+            # Build attributes using TraceStep
+            attributes = TraceStep(
+                task_run_id=task_run_id,
+                category=effective_category,
+                type="CLIENT",
+                start_timestamp=start_time,
+                end_timestamp=end_time,
+            )
 
-            # Record arguments
+            # Record arguments as request
             if record_args and sig:
                 try:
                     bound_args = sig.bind(*args, **kwargs)
@@ -170,44 +190,37 @@ def instrument(
                         if k not in ("self", "cls")
                     }
                     if args_dict:
-                        attributes["request"] = json.dumps(args_dict)
+                        attributes.request = args_dict
                 except Exception as e:
                     logger.debug("Failed to serialize args: %s", e)
 
             # Record result
             if record_result and result is not None and error is None:
                 try:
-                    attributes["result"] = json.dumps(_serialize_value(result))
+                    attributes.result = _serialize_value(result)
                 except Exception as e:
                     logger.debug("Failed to serialize result: %s", e)
 
-            # Record error
-            if error:
-                attributes["error"] = error
-
-            return {
-                "trace_id": trace_id,
-                "span_id": uuid.uuid4().hex[:16],
+            # Build span
+            span_id = uuid.uuid4().hex[:16]
+            span = {
                 "name": span_name,
+                "trace_id": _normalize_trace_id(task_run_id),
+                "span_id": span_id,
+                "parent_span_id": None,
                 "start_time": start_time,
                 "end_time": end_time,
                 "status_code": "ERROR" if error else "OK",
-                "attributes": attributes,
+                "status_message": error,
+                "attributes": attributes.model_dump(mode="json", exclude_none=True),
+                "exceptions": [{"message": error}] if error else None,
             }
-
-        def _get_trace_id() -> str | None:
-            """Get trace_id from current eval context."""
-            from hud.eval.context import get_current_trace_headers
-
-            headers = get_current_trace_headers()
-            if headers:
-                return headers.get("Trace-Id")
-            return None
+            return span
 
         @functools.wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            trace_id = _get_trace_id()
-            start_time = datetime.now(UTC).isoformat()
+            task_run_id = _get_trace_id()
+            start_time = _now_iso()
             start_perf = time.perf_counter()
             error: str | None = None
             result: Any = None
@@ -219,19 +232,20 @@ def instrument(
                 error = f"{type(e).__name__}: {e}"
                 raise
             finally:
-                end_time = datetime.now(UTC).isoformat()
+                end_time = _now_iso()
                 duration_ms = (time.perf_counter() - start_perf) * 1000
 
-                if trace_id:
-                    _build_span(
-                        trace_id, args, kwargs, start_time, end_time, duration_ms, result, error
+                if task_run_id:
+                    span = _build_span(
+                        task_run_id, args, kwargs, start_time, end_time, result, error
                     )
+                    queue_span(span)
                     logger.debug("Span: %s (%.2fms)", span_name, duration_ms)
 
         @functools.wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-            trace_id = _get_trace_id()
-            start_time = datetime.now(UTC).isoformat()
+            task_run_id = _get_trace_id()
+            start_time = _now_iso()
             start_perf = time.perf_counter()
             error: str | None = None
             result: Any = None
@@ -243,13 +257,14 @@ def instrument(
                 error = f"{type(e).__name__}: {e}"
                 raise
             finally:
-                end_time = datetime.now(UTC).isoformat()
+                end_time = _now_iso()
                 duration_ms = (time.perf_counter() - start_perf) * 1000
 
-                if trace_id:
-                    _build_span(
-                        trace_id, args, kwargs, start_time, end_time, duration_ms, result, error
+                if task_run_id:
+                    span = _build_span(
+                        task_run_id, args, kwargs, start_time, end_time, result, error
                     )
+                    queue_span(span)
                     logger.debug("Span: %s (%.2fms)", span_name, duration_ms)
 
         wrapper = async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
@@ -263,4 +278,6 @@ def instrument(
     return decorator(func)
 
 
-__all__ = ["instrument"]
+__all__ = [
+    "instrument",
+]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hud.utils.mcp import MCPConfigPatch, patch_mcp_config, setup_hud_telemetry
+from hud.utils.mcp import MCPConfigPatch, patch_mcp_config
 
 
 class TestPatchMCPConfig:
@@ -85,26 +85,3 @@ class TestPatchMCPConfig:
         # Existing meta should be preserved, new one added
         assert mcp_config["test_server"]["meta"]["existing_key"] == "existing_value"
         assert mcp_config["test_server"]["meta"]["test_key"] == "test_value"
-
-
-class TestSetupHUDTelemetry:
-    """Tests for setup_hud_telemetry function."""
-
-    def test_empty_config_returns_none(self):
-        """Test that empty config returns None (no servers to set up telemetry for)."""
-        result = setup_hud_telemetry({})
-        assert result is None
-
-    def test_none_config_raises_error(self):
-        """Test that None config raises ValueError."""
-        with pytest.raises(
-            ValueError, match="Please run initialize\\(\\) before setting up client-side telemetry"
-        ):
-            setup_hud_telemetry(None)  # type: ignore[arg-type]
-
-    def test_valid_config_returns_none_when_no_hud_servers(self):
-        """Test that valid config with no HUD servers returns None."""
-        mcp_config = {"test_server": {"url": "http://example.com"}}
-
-        result = setup_hud_telemetry(mcp_config)
-        assert result is None

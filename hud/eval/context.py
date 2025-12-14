@@ -12,13 +12,12 @@ from __future__ import annotations
 import contextvars
 import logging
 import uuid
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Self
 
 from hud.environment import Environment
 from hud.settings import settings
 from hud.shared import make_request
-from hud.telemetry.job import get_current_job
+from hud.telemetry import flush, instrument
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -35,10 +34,37 @@ _current_trace_headers: contextvars.ContextVar[dict[str, str] | None] = contextv
     "current_trace_headers", default=None
 )
 
+# Contextvar to store current api_key override (for telemetry exporter)
+_current_api_key: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "current_api_key", default=None
+)
+
 
 def get_current_trace_headers() -> dict[str, str] | None:
     """Get the current trace headers from context."""
     return _current_trace_headers.get()
+
+
+def get_current_trace_id() -> str | None:
+    """Get the current trace ID (task_run_id) from context.
+
+    Returns the Trace-Id if inside an eval context, None otherwise.
+    Used by @instrument decorator to know where to send telemetry.
+    """
+    headers = _current_trace_headers.get()
+    if headers:
+        return headers.get("Trace-Id")
+    return None
+
+
+def get_current_api_key() -> str | None:
+    """Get the current API key override from context.
+
+    Returns the api_key if one was passed to hud.eval(), otherwise None.
+    Falls back to settings.api_key if not in an eval context.
+    Used by telemetry exporter for uploads.
+    """
+    return _current_api_key.get()
 
 
 # =============================================================================
@@ -118,11 +144,7 @@ class EvalContext(Environment):
         self.eval_name: str = name  # Separate from self.name for clarity
 
         # Job linkage
-        if job_id is None:
-            current_job = get_current_job()
-            self.job_id: str | None = current_job.id if current_job else None
-        else:
-            self.job_id = job_id
+        self.job_id: str | None = job_id
 
         self.group_id: str | None = group_id
         self.index: int = index
@@ -134,9 +156,13 @@ class EvalContext(Environment):
         self.prompt: str | None = None  # From scenario setup or task
         self.reward: float | None = None
         self.answer: str | None = None  # Agent's submitted answer
+        self.system_prompt: str | None = None  # From task.agent_config, passed to agent
 
         # Error tracking
         self.error: BaseException | None = None
+
+        # User metadata (arbitrary key-value pairs)
+        self.metadata: dict[str, Any] = {}
 
         # Parallel results (empty list for single evals, populated for parallel)
         self.results: list[EvalContext] = []
@@ -146,13 +172,11 @@ class EvalContext(Environment):
 
         # Private state for eval tracking
         self._eval_api_key = api_key
-        self._started_at: datetime | None = None
-        self._completed_at: datetime | None = None
         self._token: contextvars.Token[dict[str, str] | None] | None = None
+        self._api_key_token: contextvars.Token[str | None] | None = None
         self._is_summary: bool = False  # True for summary contexts (skip trace)
         self._suppress_link: bool = quiet  # True to suppress printing eval link
         self._trace_enabled: bool = trace  # Whether to send trace data to backend
-        self._scenario_name: str | None = None  # Current scenario name (for submit)
         self._source_env_name: str | None = None  # Source env name for remote lookups
         self._task: Task | None = None  # Task config (set by from_task)
 
@@ -286,6 +310,10 @@ class EvalContext(Environment):
         # Store task info for scenario execution
         ctx._task = task
 
+        # Set system_prompt from task.agent_config
+        if task.agent_config and task.agent_config.system_prompt:
+            ctx.system_prompt = task.agent_config.system_prompt
+
         return ctx
 
     async def _run_task_scenario_setup(self) -> None:
@@ -293,7 +321,6 @@ class EvalContext(Environment):
         if self._task is None or self._task.scenario is None:
             return
 
-        self._scenario_name = self._task.scenario
         prompt = await self.run_scenario_setup(self._task.scenario, self._task.args)
         if prompt:
             self.prompt = prompt
@@ -359,22 +386,9 @@ class EvalContext(Environment):
         return {"Trace-Id": self.trace_id}
 
     @property
-    def duration(self) -> float:
-        """Execution duration in seconds."""
-        if self._started_at is None:
-            return 0.0
-        end = self._completed_at or datetime.now(UTC)
-        return (end - self._started_at).total_seconds()
-
-    @property
     def success(self) -> bool:
         """True if no error occurred."""
         return self.error is None
-
-    @property
-    def done(self) -> bool:
-        """True if execution completed."""
-        return self._completed_at is not None
 
     # =========================================================================
     # Backend Integration
@@ -392,6 +406,7 @@ class EvalContext(Environment):
             group_id=self.group_id,
             variants=self.variants if self.variants else None,
             task_version_id=self._task.id if self._task else None,
+            metadata=self.metadata if self.metadata else None,
         )
 
     async def log(self, metrics: dict[str, Any]) -> None:
@@ -426,7 +441,7 @@ class EvalContext(Environment):
                 await ctx.submit(response)
             # On exit, scenario's evaluate phase receives the answer
         """
-        if not self._scenario_name:
+        if not self._task or not self._task.scenario:
             logger.warning("submit() called but no scenario is running")
             return
 
@@ -434,7 +449,7 @@ class EvalContext(Environment):
         self.answer = answer
 
         # Delegate to Environment.submit() which handles storage + broadcast
-        await super().submit(self._scenario_name, answer)
+        await super().submit(self._task.scenario, answer)
 
     async def _eval_enter(self) -> None:
         """Notify backend that eval has started."""
@@ -494,8 +509,8 @@ class EvalContext(Environment):
             return self
 
         # Start tracking
-        self._started_at = datetime.now(UTC)
         self._token = _current_trace_headers.set(self.headers)
+        self._api_key_token = _current_api_key.set(self._eval_api_key)
 
         # Connect environment (MCP servers, tools)
         await super().__aenter__()
@@ -521,8 +536,6 @@ class EvalContext(Environment):
         if self._is_summary:
             return exc_type is ParallelEvalComplete
 
-        self._completed_at = datetime.now(UTC)
-
         # Run task scenario evaluate (if no error and has scenario)
         if exc_type is None:
             await self._run_task_scenario_evaluate()
@@ -533,17 +546,36 @@ class EvalContext(Environment):
             self.error = exc_val
             error_msg = str(exc_val) if exc_val else "Unknown error"
 
+        # Flush any pending telemetry spans for this trace
+        flush(self.trace_id)
+
         # Disconnect environment (parent class)
         await super().__aexit__(exc_type, exc_val, exc_tb)
 
-        # Reset context var
+        # Reset context vars
         if self._token is not None:
             _current_trace_headers.reset(self._token)
             self._token = None
+        if self._api_key_token is not None:
+            _current_api_key.reset(self._api_key_token)
+            self._api_key_token = None
 
         # Notify backend
         await self._eval_exit(error_msg)
         return False
+
+    # =========================================================================
+    # Tool Call Instrumentation
+    # =========================================================================
+
+    @instrument(category="mcp")
+    async def call_tool(self, call: Any, /, **kwargs: Any) -> Any:
+        """Call a tool with automatic telemetry recording.
+
+        Overrides Environment.call_tool to record MCP spans for the eval context.
+        Uses @instrument decorator for automatic span recording.
+        """
+        return await super().call_tool(call, **kwargs)
 
     def __repr__(self) -> str:
         return f"EvalContext({self.trace_id[:8]}..., name={self.eval_name!r}, reward={self.reward})"
@@ -561,4 +593,9 @@ class EvalContext(Environment):
 
 
 # Re-export for backwards compatibility with trace module
-__all__ = ["EvalContext", "get_current_trace_headers"]
+__all__ = [
+    "EvalContext",
+    "get_current_api_key",
+    "get_current_trace_headers",
+    "get_current_trace_id",
+]

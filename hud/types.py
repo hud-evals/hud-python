@@ -31,7 +31,9 @@ class AgentType(str, Enum):
 
     @property
     def cls(self) -> type:
-        from hud.agents import ClaudeAgent, GeminiAgent, OpenAIAgent, OperatorAgent
+        from hud.agents import OpenAIAgent, OperatorAgent
+        from hud.agents.claude import ClaudeAgent
+        from hud.agents.gemini import GeminiAgent
         from hud.agents.gemini_cua import GeminiCUAAgent
         from hud.agents.openai_chat import OpenAIChatAgent
 
@@ -346,6 +348,27 @@ class TraceStep(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
 
+class HudSpan(BaseModel):
+    """A telemetry span ready for export to HUD API."""
+
+    name: str
+    trace_id: str = Field(pattern=r"^[0-9a-fA-F]{32}$")
+    span_id: str = Field(pattern=r"^[0-9a-fA-F]{16}$")
+    parent_span_id: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{16}$")
+
+    start_time: str  # ISO format
+    end_time: str  # ISO format
+
+    status_code: str  # "UNSET", "OK", "ERROR"
+    status_message: str | None = None
+
+    attributes: TraceStep
+    exceptions: list[dict[str, Any]] | None = None
+    internal_type: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class Trace(BaseModel):
     """Unified result from agent execution (task or prompt).
 
@@ -381,31 +404,22 @@ class Trace(BaseModel):
     def append(self, step: TraceStep) -> None:
         self.trace.append(step)
 
-    def populate_from_context(self) -> None:
-        """Populate trace steps from the current trace context if available.
-
-        This checks if we're executing within a hud.trace() context and
-        automatically populates the trace field with collected steps.
-        """
-        from hud.otel.context import get_current_task_run_id
-        from hud.telemetry.replay import get_trace
-
-        task_run_id = get_current_task_run_id()
-        if task_run_id:
-            collected_trace = get_trace(task_run_id)
-            if collected_trace:
-                self.trace = collected_trace.trace
-
 
 # Re-export Task for backwards compatibility (after module defs to avoid circular import)
 from hud.eval.task import Task  # noqa: E402
 
+# Type alias for functions that accept v5 Task, v4 LegacyTask, or raw dicts
+TaskInput = Task | LegacyTask | dict[str, Any]
+
 __all__ = [
     "AgentResponse",
     "AgentType",
+    "HudSpan",
+    "LegacyTask",
     "MCPToolCall",
     "MCPToolResult",
     "Task",
+    "TaskInput",
     "Trace",
     "TraceStep",
 ]

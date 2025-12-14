@@ -9,59 +9,22 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 import hud
-from hud.types import AgentType, Trace
+from hud.types import AgentType, LegacyTask, TaskInput, Trace
 
 if TYPE_CHECKING:
-    from hud.agents import MCPAgent
+    from collections.abc import Sequence
+
     from hud.eval.context import EvalContext
     from hud.eval.task import Task
 
 logger = logging.getLogger("hud.datasets")
 
 
-async def run_tasks(
-    tasks: list[Task],
-    *,
-    agent_type: str,
-    agent_params: dict[str, Any] | None = None,
-    max_steps: int = 10,
-    max_concurrent: int = 30,
-    group_size: int = 1,
-) -> list[EvalContext]:
-    """Run tasks with an agent created from type and parameters.
-
-    This is a convenience wrapper around run_dataset that creates the agent
-    from a type string and parameters dictionary.
-
-    Args:
-        tasks: List of Task objects to run.
-        agent_type: Type of agent to create (e.g., "claude", "openai", "gemini").
-        agent_params: Parameters to pass to agent.create().
-        max_steps: Maximum steps per task.
-        max_concurrent: Maximum concurrent tasks.
-        group_size: Number of times to run each task.
-
-    Returns:
-        List of EvalContext results from each task execution.
-    """
-    # Use AgentType enum to get the agent class (same pattern as CLI)
-    agent_type_enum = AgentType(agent_type)
-    agent_cls = agent_type_enum.cls
-    agent = agent_cls.create(**(agent_params or {}))
-
-    return await run_dataset(
-        tasks,
-        agent,
-        max_steps=max_steps,
-        max_concurrent=max_concurrent,
-        group_size=group_size,
-    )
-
-
 async def run_dataset(
-    tasks: str | list[Task] | list[dict[str, Any]] | Task | dict[str, Any],
-    agent: MCPAgent,
+    tasks: str | TaskInput | Sequence[TaskInput],
+    agent_type: str | AgentType,
     *,
+    agent_params: dict[str, Any] | None = None,
     max_steps: int = 10,
     max_concurrent: int = 30,
     group_size: int = 1,
@@ -69,13 +32,15 @@ async def run_dataset(
     """Run an agent on a dataset of tasks.
 
     This is the primary entry point for running evaluations programmatically.
+    The agent is created fresh for each task context to ensure correct tool initialization.
 
     Args:
         tasks: Tasks to run. Can be:
             - A source string (file path, API slug) - loaded via load_dataset()
-            - A single Task object or dict (v4 or v5 format)
-            - A list of Task objects or dicts (v4 or v5 format)
-        agent: The agent instance to run.
+            - A single TaskInput (Task, LegacyTask, or dict)
+            - A list of TaskInput objects
+        agent_type: Type of agent to create (e.g., "claude", "openai", AgentType.CLAUDE).
+        agent_params: Parameters to pass to agent.create().
         max_steps: Maximum steps per task.
         max_concurrent: Maximum concurrent tasks (for parallel execution).
         group_size: Number of times to run each task (for variance estimation).
@@ -85,45 +50,46 @@ async def run_dataset(
 
     Example:
         ```python
-        from hud.agents import ClaudeAgent
         from hud.datasets import load_dataset, run_dataset
 
-        # Load tasks
+        # Load tasks and run
         tasks = load_dataset("my-tasks.json")
+        results = await run_dataset(
+            tasks,
+            agent_type="claude",
+            agent_params={"checkpoint_name": "claude-sonnet-4-20250514"},
+            max_steps=50,
+        )
 
-        # Create agent
-        agent = ClaudeAgent.create(checkpoint_name="claude-sonnet-4-20250514")
-
-        # Run evaluation
-        results = await run_dataset(tasks, agent, max_steps=50)
         for ctx in results:
             print(f"Reward: {ctx.reward}")
         ```
     """
-    from hud.datasets.loader import _task_from_dict, load_dataset
+    from hud.datasets.loader import load_dataset
     from hud.eval.task import Task
 
     # Normalize tasks to list[Task]
+    task_list: list[Task]
     if isinstance(tasks, str):
         task_list = load_dataset(tasks)
     elif isinstance(tasks, Task):
         task_list = [tasks]
-    elif isinstance(tasks, dict):
-        task_list = [_task_from_dict(tasks)]
-    elif isinstance(tasks, list):
-        task_list = []
-        for t in tasks:
-            if isinstance(t, Task):
-                task_list.append(t)
-            elif isinstance(t, dict):
-                task_list.append(_task_from_dict(t))
-            else:
-                raise TypeError(f"Expected Task or dict, got {type(t)}")
+    elif isinstance(tasks, LegacyTask | dict):
+        # Single LegacyTask or dict - convert to Task
+        task_list = [Task.from_v4(tasks)]
     else:
-        raise TypeError(f"Expected str, Task, dict, or list, got {type(tasks)}")
+        # Sequence of TaskInput - convert each to Task
+        task_list = [
+            t if isinstance(t, Task) else Task.from_v4(t)
+            for t in tasks
+        ]
 
     if not task_list:
         raise ValueError("No tasks to run")
+
+    # Resolve agent class
+    agent_type_enum = agent_type if isinstance(agent_type, AgentType) else AgentType(agent_type)
+    agent_cls = agent_type_enum.cls
 
     # Use hud.eval() for both single and parallel execution
     async with hud.eval(
@@ -131,6 +97,8 @@ async def run_dataset(
         group=group_size,
         max_concurrent=max_concurrent,
     ) as ctx:
+        # Create agent fresh for each context (ensures correct tool initialization)
+        agent = agent_cls.create(**(agent_params or {}))
         result = await agent.run(ctx, max_steps=max_steps)
         ctx.reward = result.reward
 
@@ -142,7 +110,7 @@ async def run_dataset(
 
 
 async def run_single_task(
-    task: Task | dict[str, Any],
+    task: Task,
     *,
     agent_type: AgentType,
     agent_params: dict[str, Any] | None = None,
@@ -153,14 +121,17 @@ async def run_single_task(
     trace_name: str | None = None,
     metadata: dict[str, Any] | None = None,
     trace_id: str | None = None,
+    api_key: str | None = None,
+    trace: bool = True,
+    quiet: bool = False,
 ) -> Trace:
     """Run a single task with full control over eval context parameters.
 
     This is the low-level entry point for running individual tasks with explicit
-    trace/job/group IDs. Useful for remote execution workers.
+    trace/job/group IDs. Used by remote execution workers.
 
     Args:
-        task: Task to run. Can be a Task object or dict (v4 or v5 format).
+        task: Task object to run. Use Task.from_v4() or load_dataset() to create.
         agent_type: AgentType enum specifying the agent to use.
         agent_params: Parameters passed to agent.create(). Should include
             pre-configured model_client for inference gateway usage.
@@ -171,6 +142,9 @@ async def run_single_task(
         trace_name: Name for the trace (defaults to task_id or task.id).
         metadata: Additional metadata for the trace context.
         trace_id: Pre-assigned trace ID (if provided by backend).
+        api_key: API key override for telemetry and backend calls.
+        trace: Whether to send trace data to backend (default True).
+        quiet: Whether to suppress printing eval link (default False).
 
     Returns:
         Trace result from the agent run.
@@ -178,8 +152,12 @@ async def run_single_task(
     Example:
         ```python
         from hud.datasets import run_single_task
+        from hud.eval.task import Task
         from hud.types import AgentType
         from openai import AsyncOpenAI
+
+        # Create task (from v4 dict or directly)
+        task = Task.from_v4({"prompt": "...", "mcp_config": {...}, "evaluate_tool": {...}})
 
         # Configure agent with inference gateway
         agent_params = {
@@ -192,7 +170,7 @@ async def run_single_task(
         }
 
         result = await run_single_task(
-            task={"env": {"name": "browser"}, "scenario": "find_page"},
+            task=task,
             agent_type=AgentType.OPENAI,
             agent_params=agent_params,
             max_steps=20,
@@ -201,36 +179,32 @@ async def run_single_task(
         )
         ```
     """
-    from hud.datasets.loader import _task_from_dict
-    from hud.eval.task import Task as TaskCls
-
-    # Normalize task to Task object
-    if isinstance(task, dict):
-        task_obj = _task_from_dict(task)
-    elif isinstance(task, TaskCls):
-        task_obj = task
-    else:
-        raise TypeError(f"Expected Task or dict, got {type(task)}")
-
-    # Create agent
-    agent_cls = agent_type.cls
-    agent = agent_cls.create(**(agent_params or {}))
-
     # Determine trace name
-    effective_trace_name = trace_name or task_id or task_obj.id or "single_task"
+    effective_trace_name = trace_name or task_id or task.id or "single_task"
 
     # Run with explicit eval context parameters
     async with hud.eval(
-        task_obj,
+        task,
         name=effective_trace_name,
         job_id=job_id,
         group_id=group_id,
         trace_id=trace_id,
+        api_key=api_key,
+        trace=trace,
+        quiet=quiet,
     ) as ctx:
+        # Build agent params - use system_prompt from ctx (set from task.agent_config)
+        final_agent_params = dict(agent_params or {})
+        if ctx.system_prompt and "system_prompt" not in final_agent_params:
+            final_agent_params["system_prompt"] = ctx.system_prompt
+
+        # Create agent inside ctx so it has access to context-derived values
+        agent_cls = agent_type.cls
+        agent = agent_cls.create(**final_agent_params)
+
         # Store metadata if provided
         if metadata:
-            for key, value in metadata.items():
-                setattr(ctx, f"_meta_{key}", value)
+            ctx.metadata.update(metadata)
 
         result = await agent.run(ctx, max_steps=max_steps)
         ctx.reward = result.reward

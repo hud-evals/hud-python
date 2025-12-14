@@ -52,7 +52,7 @@ class ADKMixin:
             ```
         """
         try:
-            from google.adk.tools import FunctionTool
+            from google.adk.tools.function_tool import FunctionTool
         except ImportError as e:
             raise ImportError(
                 "Google ADK not installed. Install with: pip install google-adk"

@@ -28,7 +28,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from hud.types import MCPToolCall
 
@@ -36,35 +43,21 @@ if TYPE_CHECKING:
     from hud.environment import Environment
     from hud.environment.types import EnvConfig
 
-__all__ = ["Task", "build_eval_name"]
-
-logger = logging.getLogger(__name__)
+__all__ = ["Task", "TaskAgentConfig", "build_eval_name"]
 
 
-def _warn_local_mcp(mcp_config: dict[str, Any] | None) -> None:
-    """Warn if mcp_config uses local MCP servers (command without url).
+class TaskAgentConfig(BaseModel):
+    """Agent configuration for a Task.
 
-    Local MCP servers can cause port conflicts when running tasks concurrently.
+    Contains settings that should be passed to the agent when running this task.
     """
-    if not mcp_config:
-        return
 
-    has_local = any(
-        isinstance(server_cfg, dict) and "command" in server_cfg and not server_cfg.get("url")
-        for server_cfg in mcp_config.values()
-        if isinstance(server_cfg, dict)
+    system_prompt: str | None = Field(
+        default=None,
+        description="Custom system prompt to pass to the agent",
     )
 
-    if has_local:
-        import warnings
-
-        warnings.warn(
-            "Task uses local MCP configuration (command without url). "
-            "This may cause port conflicts when running tasks concurrently. "
-            "Consider using remote MCP servers for parallel execution.",
-            UserWarning,
-            stacklevel=4,  # Skip through from_v4 -> _warn_local_mcp -> warn
-        )
+logger = logging.getLogger(__name__)
 
 
 def build_eval_name(scenario: str | None, args: dict[str, Any] | None) -> str:
@@ -141,12 +134,44 @@ class Task(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
     validation: list[MCPToolCall] | None = None
 
+    # Agent config - settings passed to agent (system_prompt, etc.)
+    agent_config: TaskAgentConfig | None = None
+
+    # Task metadata - for tracking/filtering, not used by agent
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def detect_v4_format(cls, data: Any) -> Any:
+        """Auto-detect v4 LegacyTask format and convert to v5 Task format.
+
+        If the input dict is a valid v4 format (has prompt, mcp_config, evaluate_tool),
+        it's converted using build_env_from_v4().
+
+        This allows Task(**v4_dict) to work seamlessly.
+        """
+        from hud.eval.utils import build_env_from_v4, is_v4_format, validate_v4_task
+
+        if not isinstance(data, dict):
+            return data
+
+        if is_v4_format(data):
+            # Validate completeness before conversion
+            validate_v4_task(data)
+            # build_env_from_v4 returns a dict with all Task fields
+            return build_env_from_v4(data)
+
+        return data
+
     @field_validator("env", mode="before")
     @classmethod
     def convert_env(
         cls, v: Environment | EnvConfig | dict[str, Any] | None
     ) -> Environment | None:
-        """Auto-convert dict/EnvConfig to Environment."""
+        """Auto-convert dict/EnvConfig to Environment.
+
+        Format: {"name": "browser", "include": [...], "exclude": [...]}
+        """
         from hud.environment import Environment
         from hud.environment.types import EnvConfig
 
@@ -156,12 +181,15 @@ class Task(BaseModel):
             return v
         if isinstance(v, dict):
             try:
-                v = EnvConfig(**v)
+                config = EnvConfig(**v)
             except Exception as e:
                 raise ValueError(
                     f"Invalid env config: {e}. Expected fields: name (str), "
                     f"include (list[str] | None), exclude (list[str] | None)"
                 ) from e
+            env = Environment(config.name)
+            env.connect_hub(config.name, include=config.include, exclude=config.exclude)
+            return env
         if isinstance(v, EnvConfig):
             env = Environment(v.name)
             env.connect_hub(v.name, include=v.include, exclude=v.exclude)
@@ -193,121 +221,82 @@ class Task(BaseModel):
                 )
         return converted
 
-    @classmethod
-    def from_v4(
-        cls,
-        source: Any,  # LegacyTask | dict[str, Any] | str
-    ) -> Task:
-        """Convert a v4 LegacyTask to a v5 Task.
+    @model_serializer(mode="wrap")
+    def _serialize_task(
+        self, handler: Any  # SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        """Custom serializer that converts Environment to config dict.
 
-        This is the recommended migration path for existing v4 code. The returned
-        Task automatically runs setup_tool at the start and evaluate_tool at the
-        end, matching the old LegacyTask behavior.
+        For v5 tasks: outputs {"env": {"name": "browser", ...}, "scenario": ...}
+        For v4 tasks: outputs {"prompt": ..., "mcp_config": ..., "evaluate_tool": ...}
+
+        Raises ValueError if environment has local tools/scenarios.
+        """
+        from hud.environment import Environment
+
+        # Get default serialization
+        data = handler(self)
+
+        # Convert Environment to serializable config
+        if isinstance(self.env, Environment):
+            env_config = self.env.to_config()
+
+            # Detect v4 format (has mcp_config) vs v5 format (has name)
+            if "mcp_config" in env_config:
+                # v4 format - merge env_config with Task fields
+                result = env_config.copy()
+
+                # Map validation → integration_test_tool
+                if self.validation:
+                    result["integration_test_tool"] = [
+                        {"name": v.name, "arguments": v.arguments or {}}
+                        for v in self.validation
+                    ]
+
+                # Preserve agent_config (with system_prompt)
+                if self.agent_config and self.agent_config.system_prompt:
+                    result["agent_config"] = {"system_prompt": self.agent_config.system_prompt}
+
+                # Preserve metadata
+                if self.metadata:
+                    result["metadata"] = self.metadata
+
+                # Preserve id
+                if self.id:
+                    result["id"] = self.id
+
+                return result
+            else:
+                # v5 format - env config goes in env field
+                data["env"] = env_config
+
+        return data
+
+    @classmethod
+    def from_v4(cls, source: Any) -> Task:
+        """Convert v4 LegacyTask format to v5 Task.
+
+        This is a convenience wrapper. You can also use Task(**dict) directly
+        since the model validator auto-detects v4 format.
 
         Args:
-            source: One of:
-                - LegacyTask object
-                - dict with LegacyTask fields (prompt, mcp_config, etc.)
-                - JSON string of LegacyTask fields
+            source: LegacyTask, dict, or JSON string with v4 fields
 
         Returns:
-            Task with Environment configured to mimic LegacyTask behavior.
-
-        Example:
-            ```python
-            from hud.eval import Task
-
-            # From existing LegacyTask
-            task = Task.from_v4(legacy_task)
-
-            # From dict (e.g., loaded from JSON file)
-            task = Task.from_v4(
-                {
-                    "prompt": "Navigate to google.com",
-                    "mcp_config": {"hud": {...}},
-                    "setup_tool": {"name": "navigate", "arguments": {"url": "..."}},
-                    "evaluate_tool": {"name": "check_url", "arguments": {}},
-                }
-            )
-
-            # Use with hud.eval() or as context manager
-            async with task as ctx:
-                result = await agent.run(ctx)
-            ```
-
-        Note:
-            For new code, prefer using @env.scenario() instead:
-            - setup_tool code goes BEFORE the first yield
-            - evaluate_tool code goes AFTER the first yield
-            See https://docs.hud.ai/migration for the full migration guide.
+            Task configured for v4 behavior
         """
         import json as json_module
 
-        from hud.environment import Environment
-        from hud.types import LegacyTask
-
-        # Parse JSON string
+        # JSON string → dict
         if isinstance(source, str):
-            try:
-                source = json_module.loads(source)
-            except json_module.JSONDecodeError as e:
-                from hud.shared.exceptions import HudConfigError
+            source = json_module.loads(source)
 
-                raise HudConfigError(f"Invalid JSON string for Task.from_v4: {e}") from e
+        # LegacyTask → dict (import only when needed)
+        if hasattr(source, "model_dump"):
+            source = source.model_dump()
 
-        # Convert dict to LegacyTask (suppress the deprecation warning since we're migrating)
-        if isinstance(source, dict):
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=DeprecationWarning)
-                legacy_task = LegacyTask(**source)
-        elif isinstance(source, LegacyTask):
-            legacy_task = source
-        else:
-            raise TypeError(
-                f"Task.from_v4() expects LegacyTask, dict, or JSON string, "
-                f"got {type(source).__name__}"
-            )
-
-        # Warn if using local MCP configs (command without url)
-        _warn_local_mcp(legacy_task.mcp_config)
-
-        # Create Environment and connect via mcp_config
-        env = Environment(legacy_task.id or "v4-legacy")
-        env.connect_mcp_config(legacy_task.mcp_config)
-
-        # Set the prompt
-        env.prompt = legacy_task.prompt
-
-        # Add setup_tool calls (run after connection via Environment._setup_calls)
-        if legacy_task.setup_tool:
-            setup_calls = legacy_task.setup_tool
-            if not isinstance(setup_calls, list):
-                setup_calls = [setup_calls]
-            for call in setup_calls:
-                env.setup_tool(call.name, **(call.arguments or {}))
-
-        # Add evaluate_tool calls (run before disconnection via Environment._evaluate_calls)
-        if legacy_task.evaluate_tool:
-            evaluate_calls = legacy_task.evaluate_tool
-            if not isinstance(evaluate_calls, list):
-                evaluate_calls = [evaluate_calls]
-            for call in evaluate_calls:
-                env.evaluate_tool(call.name, **(call.arguments or {}))
-
-        logger.debug(
-            "Created Task from v4 LegacyTask: %s",
-            legacy_task.prompt[:50] if legacy_task.prompt else "no prompt",
-        )
-
-        return cls(
-            env=env,  # Live Environment with mcp_config, setup_tool, evaluate_tool
-            scenario=None,  # v4 tasks use prompt directly, not scenarios
-            id=legacy_task.id,
-            args={},
-            validation=None,
-        )
+        # Model validator handles v4 detection and conversion
+        return cls(**source)
 
     def copy(self) -> Task:
         """Create a copy of this Task config.

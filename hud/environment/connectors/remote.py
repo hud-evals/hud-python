@@ -50,6 +50,16 @@ class RemoteConnectorMixin(MCPConfigConnectorMixin):
 
         logger.info("Connecting to hub environment: %s", slug)
 
+        # Store hub config for serialization (v5 format)
+        # Note: Only first hub is stored for serialization (task configs use single hub)
+        if not hasattr(self, "_hub_config") or self._hub_config is None:
+            hub_config: dict[str, Any] = {"name": slug}
+            if include:
+                hub_config["include"] = include
+            if exclude:
+                hub_config["exclude"] = exclude
+            self._hub_config = hub_config
+
         # Create mcp_config with standard MCP URL and hub slug in headers
         mcp_config = {
             "hud": {
