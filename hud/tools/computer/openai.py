@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from mcp import ErrorData, McpError
 from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ContentBlock, TextContent
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from hud.tools.computer.settings import computer_settings
-from hud.tools.types import ContentResult
+from hud.tools.types import ContentResult, Coordinate
 
 from .hud import HudComputerTool
 
@@ -17,15 +17,6 @@ if TYPE_CHECKING:
     from hud.tools.executors.base import BaseExecutor
 
 logger = logging.getLogger(__name__)
-
-
-class Coordinate(BaseModel):
-    """A coordinate point with x and y values."""
-
-    model_config = {"extra": "forbid"}  # Ensures additionalProperties: false in JSON schema
-
-    x: int = Field(..., description="X coordinate")
-    y: int = Field(..., description="Y coordinate")
 
 
 # Map OpenAI key names to CLA standard keys

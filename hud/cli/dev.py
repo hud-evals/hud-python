@@ -556,9 +556,21 @@ def run_docker_dev_server(
     inspector: bool,
     interactive: bool,
     docker_args: list[str],
+    watch_paths: list[str] | None = None,
     new_trace: bool = False,
 ) -> None:
-    """Run MCP server in Docker with volume mounts, expose via local HTTP proxy."""
+    """Run MCP server in Docker with volume mounts, expose via local HTTP proxy.
+
+    Args:
+        port: HTTP port to expose
+        verbose: Show detailed logs
+        inspector: Launch MCP Inspector
+        interactive: Launch interactive testing mode
+        docker_args: Extra Docker run arguments
+        watch_paths: Folders/files to mount for hot-reload (e.g., ["tools", "env.py"]).
+                    If None, no hot-reload mounts are added.
+        new_trace: Create a new dev trace on hud.ai
+    """
     import atexit
     import signal
 
@@ -691,10 +703,6 @@ def run_docker_dev_server(
         "--rm",  # Automatically remove container when it stops
         "--name",
         container_name,
-        "-v",
-        f"{env_dir.absolute()}/server:/app/server:rw",
-        "-v",
-        f"{env_dir.absolute()}/environment:/app/environment:rw",
         "-e",
         "PYTHONPATH=/app",
         "-e",
@@ -702,6 +710,22 @@ def run_docker_dev_server(
         "-e",
         "HUD_DEV=1",
     ]
+
+    # Add volume mounts for watch paths (hot-reload)
+    if watch_paths:
+        hud_console.info(f"Hot-reload enabled for: {', '.join(watch_paths)}")
+        for path in watch_paths:
+            # Resolve the local path
+            local_path = env_dir.absolute() / path
+            if local_path.exists():
+                # Mount to /app/<path> in container
+                container_path = f"/app/{path}"
+                base_args.extend(["-v", f"{local_path}:{container_path}:rw"])
+            else:
+                hud_console.warning(f"Watch path not found: {path}")
+    else:
+        hud_console.info("No --watch paths specified, running without hot-reload")
+        hud_console.dim_info("Tip", "Use -w to enable hot-reload (e.g., -w tools -w env.py)")
 
     # Add debugging port mappings if available
     if debugging_ports:
@@ -778,8 +802,8 @@ def run_docker_dev_server(
         )
         hud_console.dim_info(
             "",
-            "Container restarts on file changes (mounted volumes), "
-            "if changing tools run hud dev again",
+            "Container restarts on file changes in watched folders (-w), "
+            "rebuild with 'hud dev' if changing other files",
         )
         hud_console.info("")
 
@@ -893,15 +917,19 @@ def run_mcp_dev_server(
 
     # Auto-detect Docker mode if Dockerfile present and no module specified
     if not docker and module is None and should_use_docker_mode(cwd):
-        hud_console.note("Detected Dockerfile - using Docker mode with volume mounts")
+        hud_console.note("Detected Dockerfile - using Docker mode")
         hud_console.dim_info("Tip", "Use 'hud dev --help' to see all options")
         hud_console.info("")
-        run_docker_dev_server(port, verbose, inspector, interactive, docker_args, new_trace)
+        run_docker_dev_server(
+            port, verbose, inspector, interactive, docker_args, watch, new_trace
+        )
         return
 
     # Route to Docker mode if explicitly requested
     if docker:
-        run_docker_dev_server(port, verbose, inspector, interactive, docker_args, new_trace)
+        run_docker_dev_server(
+            port, verbose, inspector, interactive, docker_args, watch, new_trace
+        )
         return
 
     transport = "stdio" if stdio else "http"

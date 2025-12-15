@@ -453,10 +453,11 @@ def dev(
     interactive: bool = typer.Option(
         False, "--interactive", help="Launch interactive testing mode (HTTP mode only)"
     ),
-    watch: list[str] = typer.Option(  # noqa: B008
-        None,
+    watch: list[str] = typer.Option(
+        [],
         "--watch",
-        help="Additional directories to watch for changes (default: current directory)",
+        "-w",
+        help="Paths to watch for hot-reload (repeatable: -w tools -w env.py)",
     ),
     new: bool = typer.Option(
         False,
@@ -470,29 +471,35 @@ def dev(
 
     1. Python Module:
        hud dev                    # Auto-detects module
-       hud dev server.main        # Explicit module
+       hud dev env:env            # Explicit module:attribute
+       hud dev -w .               # Watch current directory
 
-    2. Docker with Volume Mounts (Complex environments like 'browser'):
-       hud dev --docker           # Auto-detects image from hud.lock.yaml
-       hud dev --docker -p 8080:8080  # With extra Docker args
+    2. Docker (Complex environments):
+       hud dev                        # Auto-detects Dockerfile, no hot-reload
+       hud dev -w tools -w env.py     # Mount & watch specific paths
+       hud dev -w tools               # Just watch tools folder
 
-    The server must define 'mcp' in its __init__.py or main.py.
+    For Docker mode, use --watch to specify which folders to mount and watch.
+    Paths not in --watch stay in the built image (no hot-reload).
 
     Examples:
-        hud dev                      # Auto-detect in current directory
+        hud dev                      # Auto-detect mode
         hud dev --new                # Create live dev trace on hud.ai
-        hud dev controller           # Run specific module
+        hud dev env:env              # Run specific module
         hud dev --inspector          # Launch MCP Inspector
         hud dev --interactive        # Launch interactive testing mode
-        hud dev --stdio              # Use stdio transport
-        hud dev --watch ../shared    # Watch additional directories
+        hud dev -w 'tools env.py'    # Docker: hot-reload tools/ and env.py
 
-    For environment backend servers, use uvicorn directly:
-        uvicorn server:app --reload[/not dim]
+    Local development pattern (Docker + local scenarios):
+        Terminal 1: hud dev -w 'tools env.py' --port 8000
+        Terminal 2: python local_test.py  # Uses connect_url()[/not dim]
     """
     # Extract module from params if provided (first param when not --docker)
     module = params[0] if params and not docker else None
     docker_args = params if docker else []
+
+    # Convert empty list to None for run_mcp_dev_server
+    watch_paths = watch if watch else None
 
     run_mcp_dev_server(
         module,
@@ -501,7 +508,7 @@ def dev(
         verbose,
         inspector,
         interactive,
-        watch,
+        watch_paths,
         docker=docker,
         docker_args=docker_args,
         new_trace=new,
