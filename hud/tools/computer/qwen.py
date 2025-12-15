@@ -194,7 +194,7 @@ coordinate on the screen.
         action: str = Field(..., description="The action to perform on the computer"),
         keys: list[str] | None = Field(None, description="Keys for key action"),
         text: str | None = Field(None, description="Text to type"),
-        coordinate: list[int] | tuple[int, int] | None = Field(
+        coordinate: list[int] | None = Field(
             None, description="The coordinate to interact with on the computer [x, y]"
         ),
         pixels: int | None = Field(None, description="Pixels to scroll"),
