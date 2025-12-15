@@ -99,6 +99,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # verbose = true
 # very_verbose = true
 # auto_respond = true
+# gateway = false  # Route LLM API calls through HUD Gateway
 
 [agent]
 # allowed_tools = ["computer", "playwright"]
@@ -160,6 +161,7 @@ class EvalConfig(BaseModel):
         "remote",
         "auto_respond",
         "quiet",
+        "gateway",
     }
     # Fields loaded from [agent] section
     _AGENT_FIELDS: ClassVar[set[str]] = {"allowed_tools", "disallowed_tools"}
@@ -178,6 +180,7 @@ class EvalConfig(BaseModel):
     group_size: int = 1
     remote: bool = False
     quiet: bool = False  # Suppress opening browser for eval links
+    gateway: bool = False  # Use HUD Gateway for LLM API calls
 
     # Base agent config (these merge with task's agent_config)
     allowed_tools: list[str] | None = None
@@ -211,6 +214,14 @@ class EvalConfig(BaseModel):
         if self.remote:
             if not settings.api_key:
                 hud_console.error("HUD_API_KEY is required for remote execution")
+                hud_console.info("Set it: hud set HUD_API_KEY=your-key-here")
+                raise typer.Exit(1)
+            return
+
+        # Gateway mode only requires HUD_API_KEY
+        if self.gateway:
+            if not settings.api_key:
+                hud_console.error("HUD_API_KEY is required for gateway mode")
                 hud_console.info("Set it: hud set HUD_API_KEY=your-key-here")
                 raise typer.Exit(1)
             return
@@ -316,6 +327,50 @@ class EvalConfig(BaseModel):
         ):
             kwargs["validate_api_key"] = False
 
+        # Configure gateway mode - route LLM API calls through HUD gateway
+        if self.gateway:
+            hud_api_key = settings.api_key
+            if not hud_api_key:
+                raise typer.Exit(1)  # Already validated in validate_api_keys()
+
+            if self.agent_type == AgentType.CLAUDE:
+                from anthropic import AsyncAnthropic
+
+                kwargs["model_client"] = AsyncAnthropic(
+                    api_key=hud_api_key,
+                    base_url=settings.hud_gateway_url,
+                )
+                hud_console.info("🌐 Using HUD Gateway for Claude API")
+            elif self.agent_type in (AgentType.OPENAI, AgentType.OPERATOR):
+                from openai import AsyncOpenAI
+
+                kwargs["model_client"] = AsyncOpenAI(
+                    api_key=hud_api_key,
+                    base_url=settings.hud_gateway_url,
+                )
+                hud_console.info("🌐 Using HUD Gateway for OpenAI API")
+            elif self.agent_type == AgentType.OPENAI_COMPATIBLE:
+                from openai import AsyncOpenAI
+
+                kwargs["openai_client"] = AsyncOpenAI(
+                    api_key=hud_api_key,
+                    base_url=settings.hud_gateway_url,
+                )
+                hud_console.info("🌐 Using HUD Gateway for OpenAI-compatible API")
+            elif self.agent_type in (AgentType.GEMINI, AgentType.GEMINI_CUA):
+                from google import genai
+                from google.genai.types import HttpOptions
+
+                kwargs["model_client"] = genai.Client(
+                    api_key="PLACEHOLDER",
+                    http_options=HttpOptions(
+                        api_version="v1beta",
+                        base_url=settings.hud_gateway_url,
+                        headers={"Authorization": f"Bearer {hud_api_key}"},
+                    ),
+                )
+                hud_console.info("🌐 Using HUD Gateway for Gemini API")
+
         return kwargs
 
     @classmethod
@@ -395,7 +450,7 @@ class EvalConfig(BaseModel):
 
         overrides.update({k: v for k, v in cli_args.items() if v is not None and v is not False})
 
-        for k in ("full", "verbose", "very_verbose", "remote", "quiet"):
+        for k in ("full", "verbose", "very_verbose", "remote", "quiet", "gateway"):
             if cli_args.get(k) is True:
                 overrides[k] = True
             elif k in overrides and cli_args.get(k) is False:
@@ -498,6 +553,8 @@ class EvalConfig(BaseModel):
             table.add_row("verbose", "[bold green]True[/bold green]")
         if self.remote:
             table.add_row("remote", "[bold green]True[/bold green] (submitting to platform)")
+        if self.gateway:
+            table.add_row("gateway", "[bold green]True[/bold green] (routing via HUD Gateway)")
 
         # Tool filters (only if set)
         if self.allowed_tools:
@@ -677,6 +734,9 @@ def eval_command(
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Suppress opening browser for eval links"
     ),
+    gateway: bool = typer.Option(
+        False, "--gateway", "-g", help="Route LLM API calls through HUD Gateway"
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
 
@@ -686,6 +746,7 @@ def eval_command(
         hud eval tasks.json claude --config max_tokens=32768
         hud eval tasks.json openai --config temperature=0.7
         hud eval tasks.json claude --full --remote  # Remote execution
+        hud eval tasks.json claude --gateway  # Route LLM calls through HUD Gateway
     """
     hud_console.info("🔧 Initializing evaluation...")
 
@@ -707,6 +768,7 @@ def eval_command(
         config=config,
         remote=remote,
         quiet=quiet,
+        gateway=gateway,
     )
 
     # Find source if not provided

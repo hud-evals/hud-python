@@ -398,6 +398,11 @@ class EvalContext(Environment):
         """True if no error occurred."""
         return self.error is None
 
+    @property
+    def has_scenario(self) -> bool:
+        """True if a scenario is running and can accept submissions."""
+        return self._task is not None and self._task.scenario is not None
+
     # =========================================================================
     # Backend Integration
     # =========================================================================
@@ -452,7 +457,6 @@ class EvalContext(Environment):
             # On exit, scenario's evaluate phase receives the answer
         """
         if not self._task or not self._task.scenario:
-            logger.warning("submit() called but no scenario is running")
             return
 
         # Store answer on context for display
@@ -586,12 +590,22 @@ class EvalContext(Environment):
         """Execute a tool with automatic telemetry recording.
 
         Overrides Environment._execute_tool to record MCP spans for the eval context.
-        Instrumentation is disabled when connected to a remote hub (telemetry is
+        Instrumentation is disabled when connected to a remote HUD server (telemetry is
         recorded server-side in that case).
         """
         # Skip instrumentation when connected to a remote hub - telemetry is handled server-side
         if self._hub_config is not None:
             return await super()._execute_tool(name, arguments)
+
+        # Skip instrumentation for v4 tasks with HUD MCP config (remote server)
+        if self._mcp_config is not None:
+            from hud.utils.mcp import _is_hud_server
+
+            for server_cfg in self._mcp_config.values():
+                if isinstance(server_cfg, dict):
+                    url = server_cfg.get("url", "")
+                    if url and _is_hud_server(url):
+                        return await super()._execute_tool(name, arguments)
 
         # For local environments, record MCP spans
         return await self._execute_tool_instrumented(name, arguments)

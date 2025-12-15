@@ -139,8 +139,7 @@ class OpenAIAgent(MCPAgent):
             strict_schema = ensure_strict_json_schema(copy.deepcopy(tool.inputSchema))
         except Exception as e:
             self.console.warning_log(f"Failed to convert tool '{tool.name}' schema to strict: {e}")
-            logger.error(json.dumps(tool.inputSchema, indent=2))
-            raise e
+            return None
 
         return FunctionToolParam(
             type="function",

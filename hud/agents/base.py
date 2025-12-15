@@ -115,8 +115,9 @@ class MCPAgent(ABC):
         if not isinstance(ctx, EvalContext):
             raise TypeError(f"ctx must be EvalContext, got {type(ctx).__name__}")
 
-        # Get tools from the context (tool filtering is done at Environment/Task level)
-        self._available_tools = await ctx.list_tools()
+        # Refresh tools from connections, then get filtered list for agent
+        await ctx.list_tools()
+        self._available_tools = ctx.as_tools()
         self._tool_map = {t.name: t for t in self._available_tools}
 
         # Validate required tools are present
@@ -193,8 +194,8 @@ class MCPAgent(ABC):
         try:
             result = await self._run_context(text_to_blocks(ctx.prompt), max_steps=max_steps)
 
-            # Submit final answer to context
-            if result.content:
+            # Submit final answer to context (only if scenario is running)
+            if result.content and ctx.has_scenario:
                 await ctx.submit(result.content)
 
             return result
