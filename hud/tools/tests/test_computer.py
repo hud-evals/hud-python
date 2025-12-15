@@ -9,7 +9,7 @@ from hud.tools.computer.anthropic import AnthropicComputerTool
 from hud.tools.computer.hud import HudComputerTool
 from hud.tools.computer.openai import OpenAIComputerTool
 from hud.tools.executors.base import BaseExecutor
-from hud.types import Coordinate
+from hud.tools.types import Coordinate
 
 
 @pytest.mark.asyncio

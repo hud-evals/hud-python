@@ -6,194 +6,156 @@ icon: "shield"
 
 You have a production stack. You want an agent on it. But you can't just point an agent at production—it'll make real changes, hit real APIs, affect real users. And you can't test at scale against a single live instance with shared state.
 
-HUD lets you mock your production environment so agents can run against it safely. Connect your services in a few lines. Write evals that tell agents what to do and grade how well they did it. HUD handles the sandboxing, the parallelization, the state extraction, the tracing. You get a reliable test bed where thousands of agents can run in parallel—each isolated, each reproducible, each generating useful data.
+HUD lets you mock your production environment so agents can run against it safely. Connect your services in a few lines, mock external dependencies, and run thousands of agents in parallel—each isolated, each reproducible, each generating useful data.
 
 ## Connecting Your Stack
 
-HUD wraps your existing infrastructure. Your code stays where it is—you connect it:
+HUD wraps your existing infrastructure without rewriting it:
 
 ```python
 from hud import Environment
 
 env = Environment("my-env")
 
-# Your FastAPI app → all routes become tools
-env.connect_fastapi(app)
-
-# Your MCP servers
-env.connect_server(mcp_server)
-
-# Any REST API with an OpenAPI spec
-env.connect_openapi("https://api.example.com/openapi.json")
+# Connect what you already have
+env.connect_fastapi(app)                                    # FastAPI → tools
+env.connect_openapi("https://api.example.com/openapi.json") # OpenAPI spec → tools
+env.connect_hub("hud-evals/browser")                        # HUD Hub environments
+env.connect_image("my-service:v1")                          # Docker images
 ```
 
-Docker images work with `env.connect_image("my-service:v1")`. Other HUD environments compose with `env.connect_hub("my-org/other-env")`. See the full list in the [Environment Reference](/reference/environments).
+## Making Databases Safe
 
-Run `hud init` to scaffold an environment in an existing project—it adds the HUD files without touching your code. Once connected, deploy and run evals at scale.
+Agents need isolated state. Three patterns work:
 
-### Making It Safe
-
-HUD runs each eval in its own container—isolated, reproducible, safe. But your environment might connect to external services. Here's how to handle them:
-
-**Databases.** Each agent needs its own sandbox. Use in-memory SQLite (fast, resets per eval), transaction rollback, or seed fresh data at start:
-
+**In-memory SQLite** — fastest, resets automatically:
 ```python
+import sqlite3
+db = sqlite3.connect(":memory:")  # Fresh per eval
+
 @env.scenario("update-order")
 async def update_order(order_id: str):
-    await db.seed_from("fixtures/orders.sql")
+    db.executescript(Path("fixtures/orders.sql").read_text())  # Seed
+    answer = yield f"Update order {order_id} to shipped"
+    row = db.execute("SELECT status FROM orders WHERE id=?", (order_id,)).fetchone()
+    yield 1.0 if row and row[0] == "shipped" else 0.0
+```
+
+**Transaction rollback** — use your real DB, undo changes:
+```python
+@env.scenario("process-refund")
+async def process_refund(order_id: str):
+    conn = await asyncpg.connect(DATABASE_URL)
+    tx = conn.transaction()
+    await tx.start()
+    try:
+        answer = yield f"Process refund for order {order_id}"
+        # Check result...
+        yield reward
+    finally:
+        await tx.rollback()  # Always undo
+        await conn.close()
+```
+
+**Fixture seeding** — deterministic starting state:
+```python
+await db.execute("TRUNCATE orders, users CASCADE")
+await db.executemany("INSERT INTO users ...", fixtures["users"])
+```
+
+## Mocking External Services
+
+`env.mock()` intercepts at the tool layer. Agents only see tools, so this is usually all you need:
+
+```python
+env.mock()  # All tools return schema-based fake responses
+env.mock_tool("send_email", {"status": "sent", "id": "mock-123"})
+env.mock_tool("charge_card", {"success": True, "transaction_id": "tx-mock"})
+```
+
+For stateful mocking (tracking what happened for assertions):
+
+```python
+class MockPaymentService:
+    def __init__(self):
+        self.charges = []
     
-    answer = yield f"Update order {order_id} status to 'shipped'"
-    
-    order = await db.query("SELECT status FROM orders WHERE id = ?", order_id)
-    yield 1.0 if order and order["status"] == "shipped" else 0.0
-```
+    async def charge(self, amount: int, card_token: str) -> dict:
+        self.charges.append({"amount": amount, "token": card_token})
+        return {"success": True, "id": f"ch-{len(self.charges)}"}
 
-**Third-party APIs.** Use mock mode to return fake responses without hitting real services:
+payments = MockPaymentService()
 
-```python
-env.mock()  # All tools return fake responses based on schemas
-env.mock_tool("send_email", {"status": "sent", "id": "mock-123"})  # Override specific tools
-```
-
-**Credentials.** If you need a live service, use staging keys. Point evals at staging, not production.
-
-## Good Environments
-
-A good environment gives agents what they need to succeed—and gives you what you need to evaluate them.
-
-### Observable State
-
-Agents need access to the right information. If they can't see the data they need, they can't complete the task. Design tools that expose useful state:
-
-```python
-# ❌ Bad: Agent can't see what was created
-@env.tool()
-def create_user(name: str) -> str:
-    db.insert("users", name=name)
-    return "User created"
-
-# ✅ Good: Agent gets actionable data back
-@env.tool()
-def create_user(name: str) -> dict:
-    user_id = db.insert("users", name=name)
-    return {"id": user_id, "name": name, "created": True}
-```
-
-For grading, you also need to observe what happened. If the agent creates a database row, you need to query that database. If it uploads a file, you need to read that file. Be cognizant of what you can and cannot observe—only ask agents to do things you can verify.
-
-### Deterministic Setup
-
-Each eval should seed the state it needs. HUD handles container isolation—you handle making sure your scenario sets up the right data before the agent runs.
-
-```python
-# ❌ Bad: Depends on whatever state exists
-@env.scenario("find-user")
-async def find_user(name: str):
-    answer = yield f"Find the user named {name}"
-    yield 1.0 if name in answer else 0.0
-
-# ✅ Good: Seeds known state before eval
-@env.scenario("find-user")
-async def find_user(name: str):
-    await db.clear()
-    await db.insert("users", name=name, email=f"{name}@example.com")
-    
-    answer = yield f"Find the user named {name}"
-    yield 1.0 if name in answer else 0.0
-```
-
-### Isolated Execution
-
-HUD sandboxes each eval—containers don't share state. But if your environment connects to external services, think about stateful vs stateless.
-
-**Stateless services** are fine. Multiple agents can hit the same read-only API without interference.
-
-**Stateful services** need care. If 100 agents all hit the same database endpoint that modifies data, they'll step on each other. Use per-eval instances, transaction isolation, or target different records.
-
-## Good Evals
-
-An eval combines a prompt (the first `yield`) with grading logic (everything after). The prompt tells agents what to do—write short-to-medium length instructions that ask for an unambiguous change you can verify.
-
-### Be Specific
-
-Ambiguous prompts lead to ambiguous grading. Say exactly what you want:
-
-```
-❌ "Update the user settings"
-✅ "Change the email for user alice@example.com to alice.new@example.com"
-```
-
-Real-world example: *"Add a column to the Portfolio snapshot with the 'Phase' of the engagement. C-11X should be 'Phase 2', all else are 'Phase 1'."*
-
-### Only Ask for Testable Things
-
-If you can't observe the result, you can't grade it. Don't ask an agent to "think about" something—ask it to do something you can verify.
-
-```
-❌ "Consider the best approach to optimize the query"
-✅ "Rewrite the query to use an index on the email column"
-```
-
-### Create Variations
-
-Evals are easier to write when you have a specific failure mode in mind. If you've observed agents struggling with something, incorporate that into future evals.
-
-Create different versions with more or less explicit instructions—step-by-step guidance vs. high-level goals. Use [variants](/quick-links/ab-testing) to test these systematically. Variations make it easier to tune difficulty later.
-
-## Good Graders
-
-The grading logic after the first `yield` determines the grade. Fair grading means useful signal.
-
-### Match the Prompt
-
-If the prompt says "create a document with a Japanese car brand", check for any Japanese car brand—not just "Toyota". But don't accept any document either. Exactly as strict as the prompt implies.
-
-```python
-# ❌ Bad: Too strict—only accepts one answer
-@env.scenario("add-car")
-async def add_car():
-    answer = yield "Add a Japanese car brand to the document"
-    yield 1.0 if answer == "Toyota" else 0.0
-
-# ✅ Good: Accepts any valid answer
-@env.scenario("add-car")
-async def add_car():
-    answer = yield "Add a Japanese car brand to the document"
-    japanese_brands = ["toyota", "honda", "nissan", "mazda", "subaru"]
-    yield 1.0 if any(brand in answer.lower() for brand in japanese_brands) else 0.0
-```
-
-### Use Partial Credit
-
-Partial grades help you see where agents fail. Did they add to cart but not checkout? That's useful signal. Break complex grading into sub-checks with weighted grades:
-
-```python
 @env.scenario("checkout")
-async def checkout(product: str):
-    answer = yield f"Add {product} to cart and checkout"
-    
-    score = 0.0
-    if await product_in_cart(product):
-        score += 0.3  # Partial credit for first step
-    if await order_completed(product):
-        score += 0.7  # Most credit for completion
-    yield score
+async def checkout(cart_total: int):
+    _ = yield f"Complete checkout for ${cart_total}"
+    yield 1.0 if any(c["amount"] == cart_total for c in payments.charges) else 0.0
 ```
 
-### Sanity Check
+## Docker vs No Docker
 
-At minimum, verify two cases: unchanged state → 0.0, correct completion → 1.0. For grading logic you'll reuse across many evals, write unit tests. Load a known state snapshot, verify the grade matches what you expect.
+| Pattern | When to Use | Examples |
+|---------|-------------|----------|
+| **No Docker** | Pure Python, API integrations | Web research, LLM grading |
+| **Docker** | System dependencies, persistent services | VNC, PostgreSQL, browsers |
+
+### Pattern 1: No Docker
+
+Import and test directly:
+
+```python
+# local_test.py
+from env import env
+
+async def test():
+    async with env:
+        result = await env.call_tool("search", query="test")
+```
+
+### Pattern 2: Docker
+
+Connect to the running container instead of importing. Same API, different transport—because your tools now run inside the container where dependencies live:
+
+```python
+# local_test.py
+env = Environment("browser-env")
+env.connect_url("http://localhost:8765/mcp")  # Connect instead of import
+
+async def test():
+    async with env:  # Same API from here
+        result = await env.call_tool("navigate", url="https://example.com")
+```
+
+```bash
+hud build                                 # Build image
+hud dev -w scenarios -w tools --port 8765 # Start with hot-reload
+python local_test.py                      # Connects to container
+```
+
+### Hot-Reload
+
+`hud dev -w path` reloads Python on save. System services (postgres, VNC) persist.
+
+**Rebuild** (`hud build`) when: Dockerfile, system packages, or dependencies change.
+
+## Environment Structure
+
+Start simple, add structure as needed:
+
+```
+# Simple                      # Organized
+my-env/                       my-env/
+├── env.py                    ├── env.py
+├── local_test.py             ├── scenarios/
+└── Dockerfile.hud            ├── setup/
+                              ├── evaluate/
+                              └── Dockerfile.hud
+```
+
+Most environments fall somewhere between. Split when files get hard to navigate.
 
 ## What's Next
 
-Once your environment is connected and your evals are written, you're ready to run at scale.
+**Test locally.** See [Testing Environments](/advanced/testing-environments) for debugging and scenario testing.
 
-**Deploy.** Push to GitHub, connect on [hud.ai](https://hud.ai), and your environment goes live. See [Deploy](/quick-links/deploy).
-
-**Run with any agent.** Use [Integrations](/guides/integrations) to connect OpenAI, Anthropic, LangChain, or your own agent loop.
-
-**Find the right difficulty.** A good eval set has range—target 20-30% average success rate. You want high variance: some runs should grade 0.0, others 1.0. If every run grades the same, there's no signal to learn from. Having both positive and negative examples on the same eval is what makes improvement possible.
-
-**Iterate.** Create an eval, test it manually, run it at scale, check the difficulty. If it's too easy or too hard, adjust the prompt or grading. Use your best evals as templates for more.
-
-**Train.** Every eval generates data—prompts, tool calls, grades. Use successful runs for fine-tuning. The loop: eval → analyze → train → eval again.
+**Deploy.** Push to GitHub, connect on [hud.ai](https://hud.ai). See [Deploy](/quick-links/deploy).
