@@ -363,9 +363,7 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
                     }
                 }
 
-                concurrent_client = FastMCPHUDClient(
-                    mcp_config=client_config, verbose=False
-                )
+                concurrent_client = FastMCPHUDClient(mcp_config=client_config, verbose=False)
                 await concurrent_client.initialize()
                 concurrent_clients.append(concurrent_client)
                 logger.info(f"Client {i + 1} connected")
