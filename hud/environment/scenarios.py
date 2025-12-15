@@ -306,18 +306,21 @@ class ScenarioMixin:
 
             # Get function signature for prompt arguments with type info
             sig = inspect.signature(fn)
-            prompt_args = []
-            arguments_schema: dict[str, Any] = {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            }
+            prompt_args: list[dict[str, Any]] = []
             for p in sig.parameters.values():
                 is_required = p.default is inspect.Parameter.empty
-                prompt_args.append({"name": p.name, "required": is_required})
-                if is_required:
-                    arguments_schema["required"].append(p.name)
-                # Extract type annotation for schema
+                arg_info: dict[str, Any] = {"name": p.name, "required": is_required}
+
+                # Include default value if present
+                if not is_required:
+                    # Only include JSON-serializable defaults
+                    default_val = p.default
+                    if default_val is None or isinstance(
+                        default_val, (str, int, float, bool, list, dict)
+                    ):
+                        arg_info["default"] = default_val
+
+                # Extract type annotation
                 if p.annotation is not inspect.Parameter.empty:
                     try:
                         # Use pydantic to convert annotation to JSON schema
@@ -325,12 +328,18 @@ class ScenarioMixin:
 
                         adapter = TypeAdapter(p.annotation)
                         param_schema = adapter.json_schema()
-                        arguments_schema["properties"][p.name] = param_schema
+                        # Extract type from schema (could be "string", "integer", etc.)
+                        if "type" in param_schema:
+                            arg_info["type"] = param_schema["type"]
+                        elif "$ref" in param_schema or "anyOf" in param_schema:
+                            # Complex type - store the full schema
+                            arg_info["schema"] = param_schema
                     except Exception:
-                        # Fallback: just use string type
-                        arguments_schema["properties"][p.name] = {"type": "string"}
+                        arg_info["type"] = "string"
                 else:
-                    arguments_schema["properties"][p.name] = {"type": "string"}
+                    arg_info["type"] = "string"
+
+                prompt_args.append(arg_info)
 
             # Register PROMPT - runs setup, returns prompt messages
             # We need a reference to self and the outer variables
@@ -365,12 +374,12 @@ class ScenarioMixin:
             # to bypass the **kwargs validation in from_function()
             from fastmcp.prompts.prompt import FunctionPrompt, PromptArgument
 
-            # Build meta with source code and arguments schema
+            # Build meta with source code and full arguments info (with types/defaults)
             scenario_meta: dict[str, Any] = {}
             if source_code:
                 scenario_meta["code"] = source_code
-            if arguments_schema["properties"]:
-                scenario_meta["argumentsSchema"] = arguments_schema
+            if prompt_args:
+                scenario_meta["arguments"] = prompt_args
 
             prompt = FunctionPrompt(
                 name=scenario_id,

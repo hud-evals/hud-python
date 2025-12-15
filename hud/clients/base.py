@@ -417,13 +417,23 @@ class BaseHUDClient(AgentMCPClient):
                     "description": prompt.description,
                     "arguments": args,
                 }
-                # Include meta field if present (contains scenario source code and argumentsSchema)
+                # Include meta field if present (contains scenario source code and arguments with types)
                 meta = getattr(prompt, "meta", None)
                 if meta:
                     prompt_info["meta"] = meta
-                    # Extract argumentsSchema to top level for easier access
-                    if isinstance(meta, dict) and "argumentsSchema" in meta:
-                        prompt_info["argumentsSchema"] = meta["argumentsSchema"]
+                    # Merge type/default info from meta.arguments into the arguments array
+                    if isinstance(meta, dict) and "arguments" in meta:
+                        meta_args = {a["name"]: a for a in meta["arguments"] if "name" in a}
+                        for arg in args:
+                            arg_name = arg.get("name")
+                            if arg_name and arg_name in meta_args:
+                                meta_arg = meta_args[arg_name]
+                                if "default" in meta_arg:
+                                    arg["default"] = meta_arg["default"]
+                                if "type" in meta_arg:
+                                    arg["type"] = meta_arg["type"]
+                                if "schema" in meta_arg:
+                                    arg["schema"] = meta_arg["schema"]
                 analysis["prompts"].append(prompt_info)
         except Exception as e:
             if self.verbose:
@@ -453,16 +463,10 @@ class BaseHUDClient(AgentMCPClient):
                 "has_setup_prompt": True,
                 "has_evaluate_resource": False,
             }
-            # Extract code and argumentsSchema from meta field if present
+            # Extract code from meta field if present
             meta = p.get("meta")
-            if meta and isinstance(meta, dict):
-                if "code" in meta:
-                    scenario_info["code"] = meta["code"]
-                if "argumentsSchema" in meta:
-                    scenario_info["argumentsSchema"] = meta["argumentsSchema"]
-            # Also check top-level argumentsSchema (extracted earlier)
-            if p.get("argumentsSchema"):
-                scenario_info["argumentsSchema"] = p["argumentsSchema"]
+            if meta and isinstance(meta, dict) and "code" in meta:
+                scenario_info["code"] = meta["code"]
             scenarios_by_id[scenario_id] = scenario_info
 
         for r in analysis.get("resources", []):
