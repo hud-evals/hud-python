@@ -1,0 +1,373 @@
+version: '1.1'
+images:
+  local: mcp-multitools:0.1.1
+  full: mcp-multitools:0.1.1@sha256:0808132de9f9fef0cf6e19716b0d68e013f58a1abb5c622b07c88da5b37117c2
+  pushed: reinissalaks/mcp-multitools:0.1.1
+build:
+  generatedAt: 2025-12-15T17:51:44.252000+00:00Z
+  hudVersion: 0.4.68
+  directory: mcp-multitools
+  version: 0.1.1
+  sourceHash: 55b7ae31a414ea3e8426ca11ad9dab0c85445a017c0369107fd2322bde39fc47
+  sourceFiles:
+  - Dockerfile
+  - environment/__init__.py
+  - environment/pyproject.toml
+  - environment/server.py
+  - server/__init__.py
+  - server/main.py
+  - server/pyproject.toml
+environment:
+  initializeMs: 14960
+  toolCount: 18
+tools:
+- name: setup
+  description: "Reset the environment to initial state.\n\nArgs:\n    initial_data:\
+    \ Optional dict of key-value pairs to pre-populate in scratchpad."
+  inputSchema:
+    properties:
+      initial_data:
+        anyOf:
+        - additionalProperties:
+            type: string
+          type: object
+        - type: 'null'
+        default: null
+        title: Initial Data
+    type: object
+- name: evaluate
+  description: Evaluate task completion.
+  inputSchema:
+    properties:
+      expected_keys:
+        anyOf:
+        - items:
+            type: string
+          type: array
+        - type: 'null'
+        default: null
+        title: Expected Keys
+      expected_values:
+        anyOf:
+        - additionalProperties:
+            type: string
+          type: object
+        - type: 'null'
+        default: null
+        title: Expected Values
+      exact_values:
+        anyOf:
+        - additionalProperties:
+            type: string
+          type: object
+        - type: 'null'
+        default: null
+        title: Exact Values
+      min_value_length:
+        default: 0
+        title: Min Value Length
+        type: integer
+    type: object
+- name: scratchpad_write
+  description: "Store a value in the scratchpad memory.\n\nArgs:\n    key: The key\
+    \ to store the value under.\n    value: The value to store."
+  inputSchema:
+    properties:
+      key:
+        title: Key
+        type: string
+      value:
+        title: Value
+        type: string
+    required:
+    - key
+    - value
+    type: object
+- name: scratchpad_read
+  description: "Read a value from the scratchpad memory.\n\nArgs:\n    key: The key\
+    \ to read."
+  inputSchema:
+    properties:
+      key:
+        title: Key
+        type: string
+    required:
+    - key
+    type: object
+- name: scratchpad_list
+  description: List all keys in the scratchpad memory.
+  inputSchema:
+    properties: {}
+    type: object
+- name: scratchpad_delete
+  description: "Delete a key from the scratchpad memory.\n\nArgs:\n    key: The key\
+    \ to delete."
+  inputSchema:
+    properties:
+      key:
+        title: Key
+        type: string
+    required:
+    - key
+    type: object
+- name: search
+  description: "Search the web using Exa.\n\nArgs:\n    query: The search query.\n\
+    \    max_results: Maximum number of results (default: 5)."
+  inputSchema:
+    properties:
+      query:
+        title: Query
+        type: string
+      max_results:
+        default: 5
+        title: Max Results
+        type: integer
+    required:
+    - query
+    type: object
+- name: fetch
+  description: "Fetch content from a URL (web pages, PDFs, papers).\n\nArgs:\n   \
+    \ url: The URL to fetch.\n    start_char: Where to start reading (default: 0).\n\
+    \    max_chars: Chars to return (default: 10000, max: 50000).\n\nReturns: content,\
+    \ total_chars, start_char, end_char, has_more, remaining_chars.\n\nExample - reading\
+    \ a 120k char paper:\n    fetch(url, max_chars=50000)                      # chars\
+    \ 0-50k\n    fetch(url, start_char=50000, max_chars=50000)    # chars 50k-100k\
+    \  \n    fetch(url, start_char=100000, max_chars=50000)   # chars 100k-120k"
+  inputSchema:
+    properties:
+      url:
+        title: Url
+        type: string
+      start_char:
+        default: 0
+        title: Start Char
+        type: integer
+      max_chars:
+        default: 10000
+        title: Max Chars
+        type: integer
+    required:
+    - url
+    type: object
+- name: list_documents
+  description: 'List all available documents in the document store.
+
+
+    Returns a list of documents with their IDs, filenames, and approximate page counts.'
+  inputSchema:
+    properties: {}
+    type: object
+- name: read_document
+  description: "Read content from a document in the document store.\n\nArgs:\n   \
+    \ doc_id: The document ID (filename without extension).\n    start_page: The page\
+    \ to start reading from (default: 1). Each page is ~3000 characters.\n    end_page:\
+    \ The page to stop reading at (optional). If not provided, reads just start_page.\n\
+    \nReturns document content with pagination info."
+  inputSchema:
+    properties:
+      doc_id:
+        title: Doc Id
+        type: string
+      start_page:
+        default: 1
+        title: Start Page
+        type: integer
+      end_page:
+        anyOf:
+        - type: integer
+        - type: 'null'
+        default: null
+        title: End Page
+    required:
+    - doc_id
+    type: object
+- name: search_document
+  description: "Search for text within a specific document.\n\nArgs:\n    doc_id:\
+    \ The document ID to search in.\n    query: The text to search for.\n    context_chars:\
+    \ Characters of context to include around each match (default: 200).\n\nReturns\
+    \ matching sections with line numbers and surrounding context.\n\nNOTE: Returns\
+    \ maximum 20 matches."
+  inputSchema:
+    properties:
+      doc_id:
+        title: Doc Id
+        type: string
+      query:
+        title: Query
+        type: string
+      context_chars:
+        default: 200
+        title: Context Chars
+        type: integer
+    required:
+    - doc_id
+    - query
+    type: object
+- name: github_read_file
+  description: "Read a file from a GitHub repository.\n\nArgs:\n    owner: Repository\
+    \ owner (username or organization).\n    repo: Repository name.\n    path: Path\
+    \ to the file within the repository.\n    ref: Optional branch, tag, or commit\
+    \ SHA (default: main branch).\n\nReturns the file content and metadata."
+  inputSchema:
+    properties:
+      owner:
+        title: Owner
+        type: string
+      repo:
+        title: Repo
+        type: string
+      path:
+        title: Path
+        type: string
+      ref:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        title: Ref
+    required:
+    - owner
+    - repo
+    - path
+    type: object
+- name: github_list_files
+  description: "List files in a GitHub repository directory.\n\nArgs:\n    owner:\
+    \ Repository owner (username or organization).\n    repo: Repository name.\n \
+    \   path: Path to the directory (default: root).\n    ref: Optional branch, tag,\
+    \ or commit SHA.\n\nReturns a list of files and directories."
+  inputSchema:
+    properties:
+      owner:
+        title: Owner
+        type: string
+      repo:
+        title: Repo
+        type: string
+      path:
+        default: ''
+        title: Path
+        type: string
+      ref:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        title: Ref
+    required:
+    - owner
+    - repo
+    type: object
+- name: github_search_code
+  description: "Search for code in a GitHub repository.\n\nNote: Requires GITHUB_TOKEN\
+    \ for authentication (rate limited otherwise).\n\nArgs:\n    owner: Repository\
+    \ owner (username or organization).\n    repo: Repository name.\n    query: Search\
+    \ query (code to find).\n    path: Optional path to limit search scope.\n\nReturns\
+    \ matching files with their paths."
+  inputSchema:
+    properties:
+      owner:
+        title: Owner
+        type: string
+      repo:
+        title: Repo
+        type: string
+      query:
+        title: Query
+        type: string
+      path:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        title: Path
+    required:
+    - owner
+    - repo
+    - query
+    type: object
+- name: execute_python
+  description: "Execute Python code and return the output.\n\nThe code runs in an\
+    \ environment with access to:\n- Standard libraries (json, os, sys, math, etc.)\n\
+    - supabase-py (use SUPABASE_URL and SUPABASE_KEY variables)\n- requests, httpx\n\
+    \nArgs:\n    code: Python code to execute. Use print() to output results.\n  \
+    \  timeout: Maximum execution time in seconds (default: 30).\n\nReturns stdout,\
+    \ stderr, and return code.\n\nExample to query Supabase:\n    from supabase import\
+    \ create_client\n    client = create_client(SUPABASE_URL, SUPABASE_KEY)\n    result\
+    \ = client.table('products').select('*').limit(5).execute()\n    print(result.data)"
+  inputSchema:
+    properties:
+      code:
+        title: Code
+        type: string
+      timeout:
+        default: 30
+        title: Timeout
+        type: integer
+    required:
+    - code
+    type: object
+- name: linear_list_issues
+  description: "List issues from Linear.\n\nArgs:\n    team_id: Optional team ID to\
+    \ filter issues.\n    limit: Maximum issues to return (default: 100)."
+  inputSchema:
+    properties:
+      team_id:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        title: Team Id
+      limit:
+        default: 100
+        title: Limit
+        type: integer
+    type: object
+- name: linear_create_issue
+  description: "Create a new issue in Linear.\n\nArgs:\n    title: The issue title.\n\
+    \    description: The issue description.\n    team_id: The team ID to create the\
+    \ issue in."
+  inputSchema:
+    properties:
+      title:
+        title: Title
+        type: string
+      description:
+        title: Description
+        type: string
+      team_id:
+        title: Team Id
+        type: string
+    required:
+    - title
+    - description
+    - team_id
+    type: object
+- name: linear_update_issue
+  description: "Update an existing issue in Linear.\n\nArgs:\n    issue_id: The issue\
+    \ ID to update.\n    status: Optional new status (state ID).\n    title: Optional\
+    \ new title."
+  inputSchema:
+    properties:
+      issue_id:
+        title: Issue Id
+        type: string
+      status:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        title: Status
+      title:
+        anyOf:
+        - type: string
+        - type: 'null'
+        default: null
+        title: Title
+    required:
+    - issue_id
+    type: object
+push:
+  source: mcp-multitools:0.1.1
+  pushedAt: '2025-12-15T17:57:43.134211Z'
+  registry: reinissalaks
+  image_with_tag: reinissalaks/mcp-multitools:0.1.1
