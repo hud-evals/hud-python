@@ -9,6 +9,7 @@ from hud.tools.computer.anthropic import AnthropicComputerTool
 from hud.tools.computer.hud import HudComputerTool
 from hud.tools.computer.openai import OpenAIComputerTool
 from hud.tools.executors.base import BaseExecutor
+from hud.types import Coordinate
 
 
 @pytest.mark.asyncio
@@ -193,7 +194,7 @@ class TestHudComputerToolExtended:
     async def test_drag_action(self, base_executor):
         """Test drag action with BaseExecutor."""
         tool = HudComputerTool(executor=base_executor)
-        result = await tool(action="drag", path=[(100, 100), (200, 200)])
+        result = await tool(action="drag", path=[Coordinate(x=100, y=100), Coordinate(x=200, y=200)])
         assert result
         assert any("Drag" in content.text for content in result if isinstance(content, TextContent))
 
