@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from hud.eval.task import Task
+    from hud.types import MCPToolResult
 
 
 from hud.eval.types import EvalExitPayload, EvalPayload, ParallelEvalComplete
@@ -577,13 +578,15 @@ class EvalContext(Environment):
     # =========================================================================
 
     @instrument(category="mcp")
-    async def call_tool(self, call: Any, /, **kwargs: Any) -> Any:
-        """Call a tool with automatic telemetry recording.
+    async def _execute_tool(
+        self, name: str, arguments: dict[str, Any]
+    ) -> MCPToolResult:
+        """Execute a tool with automatic telemetry recording.
 
-        Overrides Environment.call_tool to record MCP spans for the eval context.
-        Uses @instrument decorator for automatic span recording.
+        Overrides Environment._execute_tool to record MCP spans for the eval context.
+        The decorator records name, arguments, and result automatically.
         """
-        return await super().call_tool(call, **kwargs)
+        return await super()._execute_tool(name, arguments)
 
     def __repr__(self) -> str:
         return f"EvalContext({self.trace_id[:8]}..., name={self.eval_name!r}, reward={self.reward})"
