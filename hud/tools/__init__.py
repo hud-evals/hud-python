@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         GeminiComputerTool,
         HudComputerTool,
         OpenAIComputerTool,
+        QwenComputerTool,
     )
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "HudComputerTool",
     "OpenAIComputerTool",
     "PlaywrightTool",
+    "QwenComputerTool",
     "ResponseTool",
     "SubmitTool",
 ]
