@@ -333,7 +333,7 @@ class ScenarioMixin:
                             arg_info["type"] = param_schema["type"]
                         elif "$ref" in param_schema or "anyOf" in param_schema:
                             # Complex type - store the full schema
-                            arg_info["schema"] = param_schema
+                            arg_info["inputSchema"] = param_schema
                     except Exception:
                         arg_info["type"] = "string"
                 else:

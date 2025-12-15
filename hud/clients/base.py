@@ -432,8 +432,8 @@ class BaseHUDClient(AgentMCPClient):
                                     arg["default"] = meta_arg["default"]
                                 if "type" in meta_arg:
                                     arg["type"] = meta_arg["type"]
-                                if "schema" in meta_arg:
-                                    arg["schema"] = meta_arg["schema"]
+                                if "inputSchema" in meta_arg:
+                                    arg["inputSchema"] = meta_arg["inputSchema"]
                 analysis["prompts"].append(prompt_info)
         except Exception as e:
             if self.verbose:
