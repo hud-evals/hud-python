@@ -169,6 +169,9 @@ class GeminiCUAAgent(GeminiAgent):
                             error_msg = content.text
                             break
                 response_dict["error"] = error_msg
+                # for gemini cua agent, if a nonexistend computer tool is called, it won't
+                # #technically count as a computer tool call, but we still need to return a url
+                response_dict["url"] = url if url else "about:blank"
             else:
                 # Process success content
                 response_dict["success"] = True
