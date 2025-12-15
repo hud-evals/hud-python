@@ -52,7 +52,14 @@
             "pages": [
               "guides/integrations",
               "guides/sandboxing",
+              "guides/best-practices",
               "migration"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/testing-environments"
             ]
           },
           {

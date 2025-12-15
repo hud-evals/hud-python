@@ -413,7 +413,9 @@ class EvalContext(Environment):
             job_id=self.job_id,
             group_id=self.group_id,
             variants=self.variants if self.variants else None,
-            task_version_id=self._task.id if self._task else None,
+            # Only send task_version_id for v5 tasks (those with scenarios).
+            # v4 tasks have client-side IDs that shouldn't be sent to backend.
+            task_version_id=self._task.id if self._task and self._task.scenario else None,
             metadata=self.metadata if self.metadata else None,
         )
 

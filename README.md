@@ -26,8 +26,8 @@ OSS RL environment + evals toolkit. Wrap software as environments, run benchmark
 - 🚀 **[MCP environment skeleton](https://docs.hud.ai/core-concepts/mcp-protocol)** – any agent can call any environment.
 - ⚡️ **[Live telemetry](https://hud.ai)** – inspect every tool call, observation, and reward in real time.
 - 🗂️ **[Public benchmarks](https://hud.ai/leaderboards)** – OSWorld-Verified, SheetBench-50, and more.
-- 🌐 **[Cloud browsers](environments/remote_browser/)** – AnchorBrowser, Steel, BrowserBase integrations for browser automation.
-- 🛠️ **[Hot-reload dev loop](environments/README.md#phase-5-hot-reload-development-with-cursor-agent)** – `hud dev` for iterating on environments without rebuilds.
+- 🌐 **[Cloud browsers](https://hud.ai/environments)** – AnchorBrowser, Steel, BrowserBase integrations for browser automation.
+- 🛠️ **[Hot-reload dev loop](https://docs.hud.ai/build-environments)** – `hud dev` for iterating on environments without rebuilds.
 - 🎓 **[One-click RL](https://hud.ai/models)** – Run `hud rl` to get a trained model on any environment.
 
 > We welcome contributors and feature requests – open an issue or hop on a call to discuss improvements!
@@ -277,7 +277,7 @@ result = await ClaudeAgent().run({  # See all agents: https://docs.hud.ai/refere
 
 ```
 
-> See the full environment design guide and common pitfalls in [`environments/README.md`](environments/README.md)
+> See the full environment design guide at [docs.hud.ai/build-environments](https://docs.hud.ai/build-environments) and browse available environments at [hud.ai/environments](https://hud.ai/environments)
 
 ## Leaderboards & benchmarks
 
@@ -379,7 +379,7 @@ graph LR
 ## Roadmap
 
 - Merging our forks in to the main `mcp`, `mcp_use` repositories
-- Helpers for building new environments (see [current guide](environments/README.md))
+- Helpers for building new environments (see [docs](https://docs.hud.ai/build-environments))
 - Integrations with every major agent framework
 - Evaluation environment registry
 - MCP opentelemetry standard
@@ -389,7 +389,7 @@ graph LR
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 Key areas:
-- [Environment examples](environments/) - Add new MCP environments
+- [Environment examples](https://hud.ai/environments) - Add new MCP environments
 - [Agent implementations](hud/agents/) - Add support for new LLM providers
 - [Tool library](hud/tools/) - Extend the built-in tool collection
 
