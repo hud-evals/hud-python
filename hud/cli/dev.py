@@ -920,16 +920,12 @@ def run_mcp_dev_server(
         hud_console.note("Detected Dockerfile - using Docker mode")
         hud_console.dim_info("Tip", "Use 'hud dev --help' to see all options")
         hud_console.info("")
-        run_docker_dev_server(
-            port, verbose, inspector, interactive, docker_args, watch, new_trace
-        )
+        run_docker_dev_server(port, verbose, inspector, interactive, docker_args, watch, new_trace)
         return
 
     # Route to Docker mode if explicitly requested
     if docker:
-        run_docker_dev_server(
-            port, verbose, inspector, interactive, docker_args, watch, new_trace
-        )
+        run_docker_dev_server(port, verbose, inspector, interactive, docker_args, watch, new_trace)
         return
 
     transport = "stdio" if stdio else "http"

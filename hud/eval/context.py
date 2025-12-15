@@ -578,9 +578,7 @@ class EvalContext(Environment):
     # =========================================================================
 
     @instrument(category="mcp")
-    async def _execute_tool(
-        self, name: str, arguments: dict[str, Any]
-    ) -> MCPToolResult:
+    async def _execute_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
         """Execute a tool with automatic telemetry recording.
 
         Overrides Environment._execute_tool to record MCP spans for the eval context.
