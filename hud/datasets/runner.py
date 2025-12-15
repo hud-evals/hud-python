@@ -28,6 +28,7 @@ async def run_dataset(
     max_steps: int = 10,
     max_concurrent: int = 30,
     group_size: int = 1,
+    quiet: bool = False,
 ) -> list[EvalContext]:
     """Run an agent on a dataset of tasks.
 
@@ -44,6 +45,7 @@ async def run_dataset(
         max_steps: Maximum steps per task.
         max_concurrent: Maximum concurrent tasks (for parallel execution).
         group_size: Number of times to run each task (for variance estimation).
+        quiet: Whether to suppress printing eval links and opening browser (default False).
 
     Returns:
         List of EvalContext results from each task execution. Access `.reward` on each.
@@ -93,6 +95,7 @@ async def run_dataset(
         task_list,
         group=group_size,
         max_concurrent=max_concurrent,
+        quiet=quiet,
     ) as ctx:
         # Create agent fresh for each context (ensures correct tool initialization)
         agent = agent_cls.create(**(agent_params or {}))

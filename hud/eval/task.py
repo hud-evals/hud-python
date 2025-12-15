@@ -46,6 +46,8 @@ if TYPE_CHECKING:
 
 __all__ = ["Task", "TaskAgentConfig", "build_eval_name"]
 
+logger = logging.getLogger(__name__)
+
 
 class TaskAgentConfig(BaseModel):
     """Agent configuration for a Task.
@@ -53,13 +55,26 @@ class TaskAgentConfig(BaseModel):
     Contains settings that should be passed to the agent when running this task.
     """
 
+    model_config = ConfigDict(extra="ignore")
+
     system_prompt: str | None = Field(
         default=None,
         description="Custom system prompt to pass to the agent",
     )
 
-
-logger = logging.getLogger(__name__)
+    @model_validator(mode="before")
+    @classmethod
+    def warn_extra_fields(cls, data: Any) -> Any:
+        """Warn about extra fields that will be ignored."""
+        if isinstance(data, dict):
+            known_fields = {"system_prompt"}
+            extra = set(data.keys()) - known_fields
+            if extra:
+                logger.warning(
+                    "Deprecated or unknown fields in agent_config will be ignored: %s",
+                    ", ".join(sorted(extra)),
+                )
+        return data
 
 
 def build_eval_name(scenario: str | None, args: dict[str, Any] | None) -> str:

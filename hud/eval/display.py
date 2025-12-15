@@ -131,7 +131,8 @@ def display_results(
         return
 
     # Extract stats from results (EvalContext objects)
-    rewards = [getattr(r, "reward", 0) for r in results if r is not None]
+    # Use 'or 0' to handle None rewards (scenario failed before returning a reward)
+    rewards = [getattr(r, "reward", 0) or 0 for r in results if r is not None]
     errors = [r for r in results if r is not None and getattr(r, "error", None)]
     durations = [getattr(r, "duration", 0) for r in results if getattr(r, "duration", 0) > 0]
 

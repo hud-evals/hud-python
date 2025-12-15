@@ -90,19 +90,25 @@ def build_env_from_v4(source: dict[str, Any] | Any) -> dict[str, Any]:
     _warn_local_mcp(legacy.mcp_config)
 
     # Extract tool filters from agent_config (v4 style)
+    # These are agent-level filters, not connection-level
     include_tools: list[str] | None = None
     exclude_tools: list[str] | None = None
     if legacy.agent_config:
         include_tools = legacy.agent_config.allowed_tools
         exclude_tools = legacy.agent_config.disallowed_tools
 
+    # Convert ["*"] wildcard to None (meaning include all)
+    if include_tools == ["*"]:
+        include_tools = None
+
     # Create Environment - NO connections made here, just config stored
     env = Environment(legacy.id or "v4-legacy")
-    env.connect_mcp_config(
-        legacy.mcp_config,
-        include=include_tools,
-        exclude=exclude_tools,
-    )
+    env.connect_mcp_config(legacy.mcp_config)
+
+    # Store agent-level tool filters on Environment (applied in as_tools())
+    # This allows Environment to call setup/evaluate while hiding them from agent
+    env._agent_include = include_tools
+    env._agent_exclude = exclude_tools
 
     # Set the prompt
     env.prompt = legacy.prompt

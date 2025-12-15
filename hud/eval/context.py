@@ -253,6 +253,9 @@ class EvalContext(Environment):
         if env.prompt:
             ctx.prompt = env.prompt
 
+        # Copy hub config (needed to detect remote hub for telemetry)
+        ctx._hub_config = getattr(env, "_hub_config", None)
+
         return ctx
 
     @classmethod
@@ -577,13 +580,25 @@ class EvalContext(Environment):
     # Tool Call Instrumentation
     # =========================================================================
 
-    @instrument(category="mcp")
     async def _execute_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
         """Execute a tool with automatic telemetry recording.
 
         Overrides Environment._execute_tool to record MCP spans for the eval context.
-        The decorator records name, arguments, and result automatically.
+        Instrumentation is disabled when connected to a remote hub (telemetry is
+        recorded server-side in that case).
         """
+        # Skip instrumentation when connected to a remote hub - telemetry is handled server-side
+        if self._hub_config is not None:
+            return await super()._execute_tool(name, arguments)
+
+        # For local environments, record MCP spans
+        return await self._execute_tool_instrumented(name, arguments)
+
+    @instrument(category="mcp")
+    async def _execute_tool_instrumented(
+        self, name: str, arguments: dict[str, Any]
+    ) -> MCPToolResult:
+        """Instrumented version of _execute_tool for local environments."""
         return await super()._execute_tool(name, arguments)
 
     def __repr__(self) -> str:

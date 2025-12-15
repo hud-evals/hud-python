@@ -77,6 +77,7 @@ class BaseAgentConfig(BaseModel):
     allowed_tools: list[str] | None = None
     disallowed_tools: list[str] | None = None
     append_setup_output: bool = True
+    append_setup_tool: bool = True  # Alias for append_setup_output (backwards compat)
     initial_screenshot: bool = True
 
     @property

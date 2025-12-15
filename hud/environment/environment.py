@@ -144,6 +144,11 @@ class Environment(
         self._hub_config: dict[str, Any] | None = None
         self._mcp_config: dict[str, dict[str, Any]] | None = None
 
+        # Agent-level tool filtering (applied in as_tools(), not at connection level)
+        # This allows Environment to call all tools while limiting agent visibility
+        self._agent_include: list[str] | None = None
+        self._agent_exclude: list[str] | None = None
+
         # Initialize mock state
         self._init_mock()
 
@@ -155,8 +160,28 @@ class Environment(
     # =========================================================================
 
     def as_tools(self) -> list[mcp_types.Tool]:
-        """Return tools in MCP format (base format)."""
-        return self._router.tools
+        """Return tools in MCP format (base format).
+
+        Applies agent-level include/exclude filtering if set.
+        """
+        tools = self._router.tools
+
+        # Apply agent-level filtering (from v4 allowed_tools/disallowed_tools)
+        if self._agent_include is not None or self._agent_exclude is not None:
+            filtered = []
+            for tool in tools:
+                # Include filter: None means include all
+                if self._agent_include is not None:
+                    if tool.name not in self._agent_include:
+                        continue
+                # Exclude filter
+                if self._agent_exclude is not None:
+                    if tool.name in self._agent_exclude:
+                        continue
+                filtered.append(tool)
+            return filtered
+
+        return tools
 
     async def call_tool(self, call: Any, /, **kwargs: Any) -> Any:
         """Call a tool, auto-detecting format and returning matching result format.

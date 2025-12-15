@@ -159,6 +159,7 @@ class EvalConfig(BaseModel):
         "group_size",
         "remote",
         "auto_respond",
+        "quiet",
     }
     # Fields loaded from [agent] section
     _AGENT_FIELDS: ClassVar[set[str]] = {"allowed_tools", "disallowed_tools"}
@@ -176,6 +177,7 @@ class EvalConfig(BaseModel):
     auto_respond: bool | None = None  # Continue without prompting (default: True for --full)
     group_size: int = 1
     remote: bool = False
+    quiet: bool = False  # Suppress opening browser for eval links
 
     # Base agent config (these merge with task's agent_config)
     allowed_tools: list[str] | None = None
@@ -265,14 +267,11 @@ class EvalConfig(BaseModel):
         agent_key = self.agent_type.value
         if agent_key in self.agent_config:
             agent_cfg = dict(self.agent_config[agent_key])
-            # Map user-facing 'model' to internal 'checkpoint_name'
-            if "model" in agent_cfg:
-                agent_cfg["checkpoint_name"] = agent_cfg.pop("model")
             kwargs.update(agent_cfg)
 
         # CLI --model always wins
         if self.model:
-            kwargs["checkpoint_name"] = self.model
+            kwargs["model"] = self.model
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
             base_url = kwargs.get("base_url", "")
@@ -284,7 +283,7 @@ class EvalConfig(BaseModel):
                     kwargs["api_key"] = settings.openai_api_key
 
         # Auto-detect Bedrock when Claude is selected with a Bedrock ARN
-        if self.agent_type == AgentType.CLAUDE and _is_bedrock_arn(kwargs.get("checkpoint_name")):
+        if self.agent_type == AgentType.CLAUDE and _is_bedrock_arn(kwargs.get("model")):
             missing_aws = (
                 not settings.aws_access_key_id
                 or not settings.aws_secret_access_key
@@ -396,7 +395,7 @@ class EvalConfig(BaseModel):
 
         overrides.update({k: v for k, v in cli_args.items() if v is not None and v is not False})
 
-        for k in ("full", "verbose", "very_verbose", "remote"):
+        for k in ("full", "verbose", "very_verbose", "remote", "quiet"):
             if cli_args.get(k) is True:
                 overrides[k] = True
             elif k in overrides and cli_args.get(k) is False:
@@ -532,14 +531,14 @@ class EvalConfig(BaseModel):
             for name in config_cls.model_fields:
                 if name in skip:
                     continue
-                # Always show model (checkpoint_name)
-                if name == "checkpoint_name":
+                # Always show model
+                if name == "model":
                     if self.model:
                         value = self.model
                     elif overrides.get("model"):
                         value = overrides["model"]
                     else:
-                        value = getattr(defaults, "checkpoint_name", None)
+                        value = getattr(defaults, "model", None)
                     table.add_row("  model", str(value) if value else "—")
                 elif name in overrides:
                     value = overrides[name]
@@ -602,9 +601,6 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         hud_console.error("Remote execution not yet supported. Use local execution.")
         raise typer.Exit(1)
 
-    # Create agent
-    agent = cfg.agent_type.cls.create(**agent_kwargs)
-
     # Single task mode - show extra info
     if len(tasks) == 1 and cfg.group_size == 1:
         logging.getLogger("hud.agents").setLevel(logging.INFO)
@@ -622,10 +618,12 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
     # Run using run_dataset
     results = await run_dataset(
         tasks,
-        agent,
+        cfg.agent_type,
+        agent_params=agent_kwargs,
         max_steps=max_steps,
         max_concurrent=cfg.max_concurrent,
         group_size=cfg.group_size,
+        quiet=cfg.quiet,
     )
 
     # Show reward for single task
@@ -676,6 +674,9 @@ def eval_command(
     remote: bool = typer.Option(
         False, "--remote", help="Submit tasks to platform for remote execution"
     ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Suppress opening browser for eval links"
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
 
@@ -705,6 +706,7 @@ def eval_command(
         group_size=group_size,
         config=config,
         remote=remote,
+        quiet=quiet,
     )
 
     # Find source if not provided
