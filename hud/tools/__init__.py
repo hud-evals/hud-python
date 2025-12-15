@@ -43,6 +43,7 @@ def __getattr__(name: str) -> Any:
         "HudComputerTool",
         "OpenAIComputerTool",
         "GeminiComputerTool",
+        "QwenComputerTool",
     ):
         from . import computer
 
