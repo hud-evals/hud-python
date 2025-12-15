@@ -253,8 +253,23 @@ class EvalContext(Environment):
         if env.prompt:
             ctx.prompt = env.prompt
 
+        # Copy agent-level tool filters (allowed_tools/disallowed_tools)
+        ctx._agent_include = getattr(env, "_agent_include", None)
+        ctx._agent_exclude = getattr(env, "_agent_exclude", None)
+
+        # Copy router's conflict resolution strategy
+        ctx._router.conflict_resolution = env._router.conflict_resolution
+
+        # Copy mock mode settings (for testing)
+        ctx._mock_mode = getattr(env, "_mock_mode", False)
+        ctx._mock_outputs = getattr(env, "_mock_outputs", {}).copy()
+        ctx._mock_tool_schemas = getattr(env, "_mock_tool_schemas", {}).copy()
+
         # Copy hub config (needed to detect remote hub for telemetry)
         ctx._hub_config = getattr(env, "_hub_config", None)
+
+        # Copy mcp config (needed to detect remote HUD MCP for telemetry)
+        ctx._mcp_config = getattr(env, "_mcp_config", None)
 
         return ctx
 
