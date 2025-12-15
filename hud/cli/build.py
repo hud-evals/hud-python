@@ -454,7 +454,7 @@ async def analyze_mcp_environment(
     from hud.clients.fastmcp import FastMCPHUDClient
 
     start_time = time.time()
-    client = FastMCPHUDClient(mcp_config=mcp_config, verbose=verbose, auto_trace=False)
+    client = FastMCPHUDClient(mcp_config=mcp_config, verbose=verbose)
     initialized = False
 
     try:

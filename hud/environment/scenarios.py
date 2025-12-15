@@ -304,12 +304,33 @@ class ScenarioMixin:
             # Store the generator function
             self._scenarios[scenario_name] = fn
 
-            # Get function signature for prompt arguments
+            # Get function signature for prompt arguments with type info
             sig = inspect.signature(fn)
-            prompt_args = [
-                {"name": p.name, "required": p.default is inspect.Parameter.empty}
-                for p in sig.parameters.values()
-            ]
+            prompt_args = []
+            arguments_schema: dict[str, Any] = {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            }
+            for p in sig.parameters.values():
+                is_required = p.default is inspect.Parameter.empty
+                prompt_args.append({"name": p.name, "required": is_required})
+                if is_required:
+                    arguments_schema["required"].append(p.name)
+                # Extract type annotation for schema
+                if p.annotation is not inspect.Parameter.empty:
+                    try:
+                        # Use pydantic to convert annotation to JSON schema
+                        from pydantic import TypeAdapter
+
+                        adapter = TypeAdapter(p.annotation)
+                        param_schema = adapter.json_schema()
+                        arguments_schema["properties"][p.name] = param_schema
+                    except Exception:
+                        # Fallback: just use string type
+                        arguments_schema["properties"][p.name] = {"type": "string"}
+                else:
+                    arguments_schema["properties"][p.name] = {"type": "string"}
 
             # Register PROMPT - runs setup, returns prompt messages
             # We need a reference to self and the outer variables
@@ -344,8 +365,12 @@ class ScenarioMixin:
             # to bypass the **kwargs validation in from_function()
             from fastmcp.prompts.prompt import FunctionPrompt, PromptArgument
 
-            # Build meta with source code
-            scenario_meta = {"code": source_code} if source_code else None
+            # Build meta with source code and arguments schema
+            scenario_meta: dict[str, Any] = {}
+            if source_code:
+                scenario_meta["code"] = source_code
+            if arguments_schema["properties"]:
+                scenario_meta["argumentsSchema"] = arguments_schema
 
             prompt = FunctionPrompt(
                 name=scenario_id,
@@ -355,7 +380,7 @@ class ScenarioMixin:
                     for arg in prompt_args
                 ],
                 fn=prompt_handler,
-                meta=scenario_meta,
+                meta=scenario_meta if scenario_meta else None,
             )
             self._prompt_manager.add_prompt(prompt)
 

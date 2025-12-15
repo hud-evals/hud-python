@@ -246,9 +246,9 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
         logger.info("Creating MCP client via hud...")
 
         # Lazy import to avoid loading mcp_use on simple CLI commands
-        from hud.clients import MCPClient
+        from hud.clients.fastmcp import FastMCPHUDClient
 
-        client = MCPClient(mcp_config=mcp_config, verbose=False, auto_trace=False)
+        client = FastMCPHUDClient(mcp_config=mcp_config, verbose=False)
         await client.initialize()
 
         # Wait for initialization
@@ -353,7 +353,7 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
             logger.info("Creating 3 concurrent MCP clients...")
 
             # Lazy import to avoid loading mcp_use on simple CLI commands
-            from hud.clients import MCPClient
+            from hud.clients.fastmcp import FastMCPHUDClient
 
             for i in range(3):
                 client_config = {
@@ -363,8 +363,8 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
                     }
                 }
 
-                concurrent_client = MCPClient(
-                    mcp_config=client_config, verbose=False, auto_trace=False
+                concurrent_client = FastMCPHUDClient(
+                    mcp_config=client_config, verbose=False
                 )
                 await concurrent_client.initialize()
                 concurrent_clients.append(concurrent_client)

@@ -417,10 +417,13 @@ class BaseHUDClient(AgentMCPClient):
                     "description": prompt.description,
                     "arguments": args,
                 }
-                # Include meta field if present (contains scenario source code)
+                # Include meta field if present (contains scenario source code and argumentsSchema)
                 meta = getattr(prompt, "meta", None)
                 if meta:
                     prompt_info["meta"] = meta
+                    # Extract argumentsSchema to top level for easier access
+                    if isinstance(meta, dict) and "argumentsSchema" in meta:
+                        prompt_info["argumentsSchema"] = meta["argumentsSchema"]
                 analysis["prompts"].append(prompt_info)
         except Exception as e:
             if self.verbose:
@@ -450,10 +453,16 @@ class BaseHUDClient(AgentMCPClient):
                 "has_setup_prompt": True,
                 "has_evaluate_resource": False,
             }
-            # Extract code from meta field if present
+            # Extract code and argumentsSchema from meta field if present
             meta = p.get("meta")
-            if meta and isinstance(meta, dict) and "code" in meta:
-                scenario_info["code"] = meta["code"]
+            if meta and isinstance(meta, dict):
+                if "code" in meta:
+                    scenario_info["code"] = meta["code"]
+                if "argumentsSchema" in meta:
+                    scenario_info["argumentsSchema"] = meta["argumentsSchema"]
+            # Also check top-level argumentsSchema (extracted earlier)
+            if p.get("argumentsSchema"):
+                scenario_info["argumentsSchema"] = p["argumentsSchema"]
             scenarios_by_id[scenario_id] = scenario_info
 
         for r in analysis.get("resources", []):
