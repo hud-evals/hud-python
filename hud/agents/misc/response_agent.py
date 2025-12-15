@@ -40,7 +40,7 @@ class ResponseAgent:
 
     def __init__(
         self,
-        model: str = "xai/grok-4-1-fast",
+        model: str = "grok-4-1-fast",
         system_prompt: str | None = None,
     ) -> None:
         """
