@@ -1,0 +1,311 @@
+version: '1.2'
+images:
+  local: tau2:0.1.0
+  full: tau2:0.1.0@sha256:ded6986b3222b9a262cd17d54058419ea0bd83ec9af6d1ebb93ac158ae197b55
+  pushed: null
+build:
+  generatedAt: 2025-12-15T12:06:14.060008+00:00Z
+  hudVersion: 0.4.73
+  directory: tau2
+  version: 0.1.0
+  sourceHash: 6a48a0cc666701994d505add74bd74d3b58369dbae28ca8afa41a820f2e587c8
+  baseImage: python:3.12-slim
+  platform: linux/amd64
+  sourceFiles:
+  - Dockerfile
+  - pyproject.toml
+  - server/__init__.py
+  - server/evaluate/__init__.py
+  - server/evaluate/eval.py
+  - server/main.py
+  - server/setup/__init__.py
+  - server/setup/load.py
+  - server/tools/__init__.py
+  - server/tools/_wrapper.py
+  - server/tools/conversation.py
+environment:
+  initializeMs: 4187
+  toolCount: 17
+  runtime:
+    python: 3.12.12
+    cuda: null
+    cudnn: null
+    pytorch: null
+  internalToolCount: 3
+tools:
+- name: setup
+  description: "Call internal 'setup' functions. Available tools:\n\n\u2022 Name:\
+    \ load (Complete setup: load domain, set task, and initialize environment.\n\n\
+    Args:\n    domain: The domain to use (airline, retail, telecom, or mock)\n   \
+    \ task_id: The task ID to load\n    task_split: Optional task split name (e.g.,\
+    \ \"base\", \"train\", \"test\")\n    solo_mode: Whether to run in solo mode (default:\
+    \ False)\n    start_conversation: If True and solo_mode=False, send initial greeting\
+    \ (default: False)\n    initial_greeting: The greeting to send if start_conversation=True\n\
+    \nReturns:\n    Setup status with task and environment information, plus user's\
+    \ first response if start_conversation=True)\n  Arguments: domain (string), task_id\
+    \ (string), task_split (string | null) (optional), solo_mode (boolean) (optional),\
+    \ start_conversation (boolean) (optional), initial_greeting (string) (optional)"
+  inputSchema:
+    type: object
+    properties:
+      name:
+        type: string
+        description: 'Name of the internal tool to call. Must be one of: load'
+        enum:
+        - load
+      arguments:
+        anyOf:
+        - type: object
+          description: Arguments object to pass to the internal tool
+        - type: string
+          description: JSON string of arguments to pass to the internal tool
+        description: Arguments to pass to the internal tool. Can be an object or JSON
+          string. See description for details on each tool's parameters.
+    required:
+    - name
+    - arguments
+    examples:
+    - name: load
+      arguments:
+        domain: <domain>
+        task_id: <task_id>
+        task_split: null
+        solo_mode: true
+        start_conversation: true
+        initial_greeting: <initial_greeting>
+  internalTools:
+  - load
+- name: evaluate
+  description: "Call internal 'evaluate' functions. Available tools:\n\n\u2022 Name:\
+    \ evaluate_task (Evaluate the current task based on the conversation history.\n\
+    \nArgs:\n    evaluation_type: Type of evaluation to run\n        - \"env\": Environment\
+    \ state evaluation\n        - \"action\": Action completion evaluation\n     \
+    \   - \"communicate\": Communication evaluation\n        - \"nl_assertions\":\
+    \ Natural language assertions\n        - \"all\": All evaluation types combined\
+    \ (default)\n\nReturns:\n    EvaluationResult with reward, done status, and feedback)\n\
+    \  Arguments: evaluation_type (string) (optional)\n\n\u2022 Name: get_evaluation_criteria\
+    \ (Get the evaluation criteria for the current task.\n\nReturns:\n    Dictionary\
+    \ with evaluation criteria details)\n  Arguments: none"
+  inputSchema:
+    type: object
+    properties:
+      name:
+        type: string
+        description: 'Name of the internal tool to call. Must be one of: evaluate_task,
+          get_evaluation_criteria'
+        enum:
+        - evaluate_task
+        - get_evaluation_criteria
+      arguments:
+        anyOf:
+        - type: object
+          description: Arguments object to pass to the internal tool
+        - type: string
+          description: JSON string of arguments to pass to the internal tool
+        description: Arguments to pass to the internal tool. Can be an object or JSON
+          string. See description for details on each tool's parameters.
+    required:
+    - name
+    - arguments
+    examples:
+    - name: evaluate_task
+      arguments:
+        evaluation_type: <evaluation_type>
+    - name: get_evaluation_criteria
+      arguments: {}
+  internalTools:
+  - evaluate_task
+  - get_evaluation_criteria
+- name: send_message
+  description: Send a message to the customer and receive their response. Use this
+    to communicate with the customer during the conversation. The customer will respond
+    naturally based on their needs. When the customer is satisfied, they will indicate
+    the conversation should end.
+  inputSchema:
+    properties:
+      message:
+        title: Message
+        type: string
+    required:
+    - message
+    type: object
+- name: book_reservation
+  description: "def book_reservation(user_id: str, origin: str, destination: str,\
+    \ flight_type: Literal['round_trip', 'one_way'], cabin: Literal['business', 'economy',\
+    \ 'basic_economy'], flights: List[tau2.domains.airline.data_model.FlightInfo |\
+    \ dict], passengers: List[tau2.domains.airline.data_model.Passenger | dict], payment_methods:\
+    \ List[tau2.domains.airline.data_model.Payment | dict], total_baggages: int, nonfree_baggages:\
+    \ int, insurance: Literal['yes', 'no']) -> tau2.domains.airline.data_model.Reservation:\n\
+    \    \"\"\"\n        Book a reservation.\n\n        Args:\n            user_id:\
+    \ The ID of the user to book the reservation such as 'sara_doe_496'`.\n      \
+    \      origin: The IATA code for the origin city such as 'SFO'.\n            destination:\
+    \ The IATA code for the destination city such as 'JFK'.\n            flight_type:\
+    \ The type of flight such as 'one_way' or 'round_trip'.\n            cabin: The\
+    \ cabin class such as 'basic_economy', 'economy', or 'business'.\n           \
+    \ flights: An array of objects containing details about each piece of flight.\n\
+    \            passengers: An array of objects containing details about each passenger.\n\
+    \            payment_methods: An array of objects containing details about each\
+    \ payment method.\n            total_baggages: The total number of baggage items\
+    \ to book the reservation.\n            nonfree_baggages: The number of non-free\
+    \ baggage items to book the reservation.\n            insurance: Whether the reservation\
+    \ has insurance.\n        \"\"\""
+  inputSchema:
+    properties: {}
+    type: object
+- name: calculate
+  description: "def calculate(expression: str) -> str:\n    \"\"\"\n        Calculate\
+    \ the result of a mathematical expression.\n\n        Args:\n            expression:\
+    \ The mathematical expression to calculate, such as '2 + 2'. The expression can\
+    \ contain numbers, operators (+, -, *, /), parentheses, and spaces.\n\n      \
+    \  Returns:\n            The result of the mathematical expression.\n\n      \
+    \  Raises:\n            ValueError: If the expression is invalid.\n        \"\"\
+    \""
+  inputSchema:
+    properties: {}
+    type: object
+- name: cancel_reservation
+  description: "def cancel_reservation(reservation_id: str) -> tau2.domains.airline.data_model.Reservation:\n\
+    \    \"\"\"\n        Cancel the whole reservation.\n\n        Args:\n        \
+    \    reservation_id: The reservation ID, such as 'ZFA04Y'.\n\n        Returns:\n\
+    \            The updated reservation.\n\n        Raises:\n            ValueError:\
+    \ If the reservation is not found.\n        \"\"\""
+  inputSchema:
+    properties: {}
+    type: object
+- name: get_reservation_details
+  description: "def get_reservation_details(reservation_id: str) -> tau2.domains.airline.data_model.Reservation:\n\
+    \    \"\"\"\n        Get the details of a reservation.\n\n        Args:\n    \
+    \        reservation_id: The reservation ID, such as '8JX2WO'.\n\n        Returns:\n\
+    \            The reservation details.\n\n        Raises:\n            ValueError:\
+    \ If the reservation is not found.\n        \"\"\""
+  inputSchema:
+    properties: {}
+    type: object
+- name: get_user_details
+  description: "def get_user_details(user_id: str) -> tau2.domains.airline.data_model.User:\n\
+    \    \"\"\"\n        Get the details of a user, including their reservations.\n\
+    \n        Args:\n            user_id: The user ID, such as 'sara_doe_496'.\n\n\
+    \        Returns:\n            The user details.\n\n        Raises:\n        \
+    \    ValueError: If the user is not found.\n        \"\"\""
+  inputSchema:
+    properties: {}
+    type: object
+- name: list_all_airports
+  description: "def list_all_airports() -> Annotated[list[tau2.domains.airline.data_model.AirportCode],\
+    \ FieldInfo(annotation=NoneType, required=True, description='Airport information')]:\n\
+    \    \"\"\"Returns a list of all available airports.\n\n        Returns:\n   \
+    \         A dictionary mapping IATA codes to AirportInfo objects.\n        \"\"\
+    \""
+  inputSchema:
+    properties: {}
+    type: object
+- name: search_direct_flight
+  description: "def search_direct_flight(origin: str, destination: str, date: str)\
+    \ -> list[tau2.domains.airline.data_model.DirectFlight]:\n    \"\"\"\n       \
+    \ Search for direct flights between two cities on a specific date.\n\n       \
+    \ Args:\n            origin: The origin city airport in three letters, such as\
+    \ 'JFK'.\n            destination: The destination city airport in three letters,\
+    \ such as 'LAX'.\n            date: The date of the flight in the format 'YYYY-MM-DD',\
+    \ such as '2024-01-01'.\n\n        Returns:\n            The direct flights between\
+    \ the two cities on the specific date.\n        \"\"\""
+  inputSchema:
+    properties: {}
+    type: object
+- name: search_onestop_flight
+  description: "def search_onestop_flight(origin: str, destination: str, date: str)\
+    \ -> list[tuple[tau2.domains.airline.data_model.DirectFlight, tau2.domains.airline.data_model.DirectFlight]]:\n\
+    \    \"\"\"\n        Search for one-stop flights between two cities on a specific\
+    \ date.\n\n        Args:\n            origin: The origin city airport in three\
+    \ letters, such as 'JFK'.\n            destination: The destination city airport\
+    \ in three letters, such as 'LAX'.\n            date: The date of the flight in\
+    \ the format 'YYYY-MM-DD', such as '2024-05-01'.\n\n        Returns:\n       \
+    \     A list of pairs of DirectFlight objects.\n        \"\"\""
+  inputSchema:
+    properties: {}
+    type: object
+- name: send_certificate
+  description: "def send_certificate(user_id: str, amount: int) -> str:\n    \"\"\"\
+    \n        Send a certificate to a user. Be careful!\n\n        Args:\n       \
+    \     user_id: The ID of the user to book the reservation, such as 'sara_doe_496'.\n\
+    \            amount: The amount of the certificate to send.\n\n        Returns:\n\
+    \            A message indicating the certificate was sent.\n\n        Raises:\n\
+    \            ValueError: If the user is not found.\n        \"\"\""
+  inputSchema:
+    properties: {}
+    type: object
+- name: transfer_to_human_agents
+  description: "def transfer_to_human_agents(summary: str) -> str:\n    \"\"\"\n \
+    \       Transfer the user to a human agent, with a summary of the user's issue.\n\
+    \        Only transfer if\n         -  the user explicitly asks for a human agent\n\
+    \         -  given the policy and the available tools, you cannot solve the user's\
+    \ issue.\n\n        Args:\n            summary: A summary of the user's issue.\n\
+    \n        Returns:\n            A message indicating the user has been transferred\
+    \ to a human agent.\n        \"\"\""
+  inputSchema:
+    properties: {}
+    type: object
+- name: update_reservation_baggages
+  description: "def update_reservation_baggages(reservation_id: str, total_baggages:\
+    \ int, nonfree_baggages: int, payment_id: str) -> tau2.domains.airline.data_model.Reservation:\n\
+    \    \"\"\"\n        Update the baggage information of a reservation.\n\n    \
+    \    Args:\n            reservation_id: The reservation ID, such as 'ZFA04Y'\n\
+    \            total_baggages: The updated total number of baggage items included\
+    \ in the reservation.\n            nonfree_baggages: The updated number of non-free\
+    \ baggage items included in the reservation.\n            payment_id: The payment\
+    \ id stored in user profile, such as 'credit_card_7815826', 'gift_card_7815826',\
+    \ 'certificate_7815826'.\n\n        Returns:\n            The updated reservation.\n\
+    \n        Raises:\n            ValueError: If the reservation is not found.\n\
+    \            ValueError: If the user is not found.\n            ValueError: If\
+    \ the payment method is not found.\n            ValueError: If the certificate\
+    \ cannot be used to update reservation.\n            ValueError: If the gift card\
+    \ balance is not enough.\n        \"\"\""
+  inputSchema:
+    properties: {}
+    type: object
+- name: update_reservation_flights
+  description: "def update_reservation_flights(reservation_id: str, cabin: Literal['business',\
+    \ 'economy', 'basic_economy'], flights: List[tau2.domains.airline.data_model.FlightInfo\
+    \ | dict], payment_id: str) -> tau2.domains.airline.data_model.Reservation:\n\
+    \    \"\"\"\n        Update the flight information of a reservation.\n\n\n   \
+    \     Args:\n            reservation_id: The reservation ID, such as 'ZFA04Y'.\n\
+    \            cabin: The cabin class of the reservation\n            flights: An\
+    \ array of objects containing details about each piece of flight in the ENTIRE\
+    \ new reservation. Even if the a flight segment is not changed, it should still\
+    \ be included in the array.\n            payment_id: The payment id stored in\
+    \ user profile, such as 'credit_card_7815826', 'gift_card_7815826', 'certificate_7815826'.\n\
+    \n        Returns:\n            The updated reservation.\n\n        Raises:\n\
+    \            ValueError: If the reservation is not found.\n            ValueError:\
+    \ If the user is not found.\n            ValueError: If the payment method is\
+    \ not found.\n            ValueError: If the certificate cannot be used to update\
+    \ reservation.\n            ValueError: If the gift card balance is not enough.\n\
+    \        \"\"\""
+  inputSchema:
+    properties: {}
+    type: object
+- name: update_reservation_passengers
+  description: "def update_reservation_passengers(reservation_id: str, passengers:\
+    \ List[tau2.domains.airline.data_model.Passenger | dict]) -> tau2.domains.airline.data_model.Reservation:\n\
+    \    \"\"\"\n        Update the passenger information of a reservation.\n\n  \
+    \      Args:\n            reservation_id: The reservation ID, such as 'ZFA04Y'.\n\
+    \            passengers: An array of objects containing details about each passenger.\n\
+    \n        Returns:\n            The updated reservation.\n\n        Raises:\n\
+    \            ValueError: If the reservation is not found.\n            ValueError:\
+    \ If the number of passengers does not match.\n        \"\"\""
+  inputSchema:
+    properties: {}
+    type: object
+- name: get_flight_status
+  description: "def get_flight_status(flight_number: str, date: str) -> str:\n   \
+    \ \"\"\"\n        Get the status of a flight.\n\n        Args:\n            flight_number:\
+    \ The flight number.\n            date: The date of the flight.\n\n        Returns:\n\
+    \            The status of the flight.\n\n        Raises:\n            ValueError:\
+    \ If the flight is not found.\n        \"\"\""
+  inputSchema:
+    properties: {}
+    type: object
+hubTools:
+  setup:
+  - load
+  evaluate:
+  - evaluate_task
+  - get_evaluation_criteria
