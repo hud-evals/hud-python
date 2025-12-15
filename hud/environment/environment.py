@@ -171,13 +171,11 @@ class Environment(
             filtered = []
             for tool in tools:
                 # Include filter: None means include all
-                if self._agent_include is not None:
-                    if tool.name not in self._agent_include:
-                        continue
+                if self._agent_include is not None and tool.name not in self._agent_include:
+                    continue
                 # Exclude filter
-                if self._agent_exclude is not None:
-                    if tool.name in self._agent_exclude:
-                        continue
+                if self._agent_exclude is not None and tool.name in self._agent_exclude:
+                    continue
                 filtered.append(tool)
             return filtered
 

@@ -417,7 +417,7 @@ class BaseHUDClient(AgentMCPClient):
                     "description": prompt.description,
                     "arguments": args,
                 }
-                # Include meta field if present (contains scenario source code and arguments with types)
+                # Include meta field if present
                 meta = getattr(prompt, "meta", None)
                 if meta:
                     prompt_info["meta"] = meta

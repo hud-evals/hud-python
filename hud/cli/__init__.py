@@ -453,7 +453,7 @@ def dev(
     interactive: bool = typer.Option(
         False, "--interactive", help="Launch interactive testing mode (HTTP mode only)"
     ),
-    watch: list[str] = typer.Option(
+    watch: list[str] = typer.Option(  # noqa: B008
         [],
         "--watch",
         "-w",

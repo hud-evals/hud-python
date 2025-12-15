@@ -653,10 +653,29 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
 
     max_steps = cfg.max_steps or (100 if cfg.full else 10)
 
-    # Remote execution not yet supported in new flow
+    # Remote execution - submit to HUD platform
     if cfg.remote:
-        hud_console.error("Remote execution not yet supported. Use local execution.")
-        raise typer.Exit(1)
+        # Create a job ID for tracking
+        import uuid
+
+        from hud.datasets.utils import submit_rollouts
+
+        job_id = str(uuid.uuid4())
+        hud_console.info(
+            f"Submitting {len(tasks)} task(s) for remote execution (job_id: {job_id})…"
+        )
+
+        await submit_rollouts(
+            tasks=tasks,
+            job_id=job_id,
+            agent_type=cfg.agent_type,
+            agent_params=agent_kwargs,
+            max_steps=max_steps,
+            group_size=cfg.group_size,
+        )
+
+        hud_console.success(f"Tasks submitted. View at: https://hud.ai/job/{job_id}")
+        return [], tasks
 
     # Single task mode - show extra info
     if len(tasks) == 1 and cfg.group_size == 1:
