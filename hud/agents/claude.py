@@ -148,7 +148,6 @@ class ClaudeAgent(MCPAgent):
     )
     async def get_response(self, messages: list[BetaMessageParam]) -> AgentResponse:
         """Get response from Claude including any tool calls."""
-
         messages_cached = self._add_prompt_caching(messages)
 
         # betas to use
