@@ -129,7 +129,6 @@ class GeminiAgent(MCPAgent):
     )
     async def get_response(self, messages: list[genai_types.Content]) -> AgentResponse:
         """Get response from Gemini including any tool calls."""
-
         # Build generate content config
         generate_config = genai_types.GenerateContentConfig(
             temperature=self.temperature,
@@ -140,8 +139,8 @@ class GeminiAgent(MCPAgent):
             system_instruction=self.system_prompt,
         )
 
-        # Make API call
-        response = self.gemini_client.models.generate_content(
+        # Use async API to avoid blocking the event loop
+        response = await self.gemini_client.aio.models.generate_content(
             model=self.config.checkpoint_name,
             contents=cast("Any", messages),
             config=generate_config,
