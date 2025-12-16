@@ -71,7 +71,9 @@ class Tau2Task:
             "id": self.task.id,
             "domain": self.domain,
             "description": self.task.description.model_dump() if self.task.description else None,
-            "user_scenario": self.task.user_scenario.model_dump() if self.task.user_scenario else None,
+            "user_scenario": self.task.user_scenario.model_dump()
+            if self.task.user_scenario
+            else None,
             "has_initial_state": self.task.initial_state is not None,
             "has_evaluation_criteria": self.task.evaluation_criteria is not None,
         }
@@ -91,4 +93,3 @@ class Tau2Task:
         self.environment = None
         self.messages = []
         self.solo_mode = False
-

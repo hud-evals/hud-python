@@ -14,6 +14,7 @@ from .tools._wrapper import wrap_all_tools
 # Global conversation tool reference (needed for setup to bootstrap conversations)
 _conversation_tool = None
 
+
 def get_conversation_tool():
     """Get the globally registered conversation tool."""
     return _conversation_tool
@@ -32,6 +33,7 @@ async def init():
 
     # Register conversation tool for multi-turn mode
     from .tools.conversation import create_conversation_tool
+
     _conversation_tool = create_conversation_tool()
     mcp.add_tool(_conversation_tool)
 

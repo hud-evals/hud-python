@@ -1,5 +1,6 @@
 """System Promptfor tau2-bench."""
 
+
 def _format_system_prompt(policy: str, solo_mode: bool = False) -> str:
     """
     Format the TAU2-bench system prompt.

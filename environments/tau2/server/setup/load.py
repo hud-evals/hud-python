@@ -18,7 +18,7 @@ async def load(
     task_split: Optional[str] = None,
     solo_mode: bool = False,
     start_conversation: bool = False,
-    initial_greeting: str = "Hi! How can I help you today?"
+    initial_greeting: str = "Hi! How can I help you today?",
 ) -> Dict[str, Any]:
     """
     Complete setup: load domain, set task, and initialize environment.
@@ -80,7 +80,7 @@ async def load(
             "status": "ready",
             "domain": domain,
             "initial_greeting": initial_greeting,
-            "system_message": "**IMPORTANT**: YOU MUST USE THE `send_message` TOOL FOR ALL COMMUNICATION WITH THE USER. NEVER RESPOND WITH PLAIN TEXT!"
+            "system_message": "**IMPORTANT**: YOU MUST USE THE `send_message` TOOL FOR ALL COMMUNICATION WITH THE USER. NEVER RESPOND WITH PLAIN TEXT!",
         }
 
         # # 6. Initialize conversation tool for multi-turn mode

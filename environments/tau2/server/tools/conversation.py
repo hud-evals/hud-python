@@ -44,7 +44,7 @@ class ConversationTool(BaseTool):
                 "Use this to communicate with the customer during the conversation. "
                 "The customer will respond naturally based on their needs. "
                 "When the customer is satisfied, they will indicate the conversation should end."
-            )
+            ),
         )
 
     async def __call__(self, message: str) -> list[TextContent]:
@@ -53,16 +53,19 @@ class ConversationTool(BaseTool):
 
         # Validate initialization
         if not tau2_task.is_initialized():
-            return [TextContent(
-                type="text",
-                text="Error: Environment not initialized. Call setup/load first."
-            )]
+            return [
+                TextContent(
+                    type="text", text="Error: Environment not initialized. Call setup/load first."
+                )
+            ]
 
         if tau2_task.solo_mode:
-            return [TextContent(
-                type="text",
-                text="Error: Cannot use send_message in solo mode. Set solo_mode=False in setup/load."
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text="Error: Cannot use send_message in solo mode. Set solo_mode=False in setup/load.",
+                )
+            ]
 
         try:
             # Lazy initialization fallback (in case class variable was reset)
@@ -74,8 +77,7 @@ class ConversationTool(BaseTool):
 
             # Generate user response
             user_message, new_state = self.__class__._user_simulator.generate_next_message(
-                message=agent_message,
-                state=self.__class__._user_state
+                message=agent_message, state=self.__class__._user_state
             )
             self.__class__._user_state = new_state
             tau2_task.add_message(user_message)
@@ -94,13 +96,11 @@ class ConversationTool(BaseTool):
                 if len(tool_messages) > 1:
                     multi_tool_msg = MultiToolMessage(role="tool", tool_messages=tool_messages)
                     user_message, new_state = self.__class__._user_simulator.generate_next_message(
-                        message=multi_tool_msg,
-                        state=self.__class__._user_state
+                        message=multi_tool_msg, state=self.__class__._user_state
                     )
                 else:
                     user_message, new_state = self.__class__._user_simulator.generate_next_message(
-                        message=tool_messages[0],
-                        state=self.__class__._user_state
+                        message=tool_messages[0], state=self.__class__._user_state
                     )
 
                 self.__class__._user_state = new_state
@@ -110,19 +110,39 @@ class ConversationTool(BaseTool):
             user_content = user_message.content or ""
 
             if STOP in user_content:
-                return [TextContent(type="text", text=f"User: {user_content}\n\n[User has ended the conversation. Call evaluate/evaluate_task to evaluate your performance.]")]
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"User: {user_content}\n\n[User has ended the conversation. Call evaluate/evaluate_task to evaluate your performance.]",
+                    )
+                ]
 
             if TRANSFER in user_content:
-                return [TextContent(type="text", text=f"User: {user_content}\n\n[User requested transfer to human agent.]")]
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"User: {user_content}\n\n[User requested transfer to human agent.]",
+                    )
+                ]
 
             if OUT_OF_SCOPE in user_content:
-                return [TextContent(type="text", text=f"User: {user_content}\n\n[User scenario doesn't provide enough information to continue.]")]
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"User: {user_content}\n\n[User scenario doesn't provide enough information to continue.]",
+                    )
+                ]
 
             return [TextContent(type="text", text=f"User: {user_content}")]
 
         except Exception as e:
             import traceback
-            return [TextContent(type="text", text=f"Error in conversation: {str(e)}\n\n{traceback.format_exc()}")]
+
+            return [
+                TextContent(
+                    type="text", text=f"Error in conversation: {str(e)}\n\n{traceback.format_exc()}"
+                )
+            ]
 
     @classmethod
     def initialize_global(cls, tau2_task):
@@ -140,7 +160,7 @@ class ConversationTool(BaseTool):
 
         # Get user tools if available (for telecom domain)
         user_tools = None
-        if tau2_task.environment and hasattr(tau2_task.environment, 'get_user_tools'):
+        if tau2_task.environment and hasattr(tau2_task.environment, "get_user_tools"):
             try:
                 user_tools = tau2_task.environment.get_user_tools()
             except (ValueError, AttributeError):

@@ -26,15 +26,11 @@ class Tau2ToolWrapper(BaseTool):
         self.tau2_tool = tau2_tool
         self.toolkit = toolkit
 
-        super().__init__(
-            env=toolkit,
-            name=tau2_tool.name,
-            description=str(tau2_tool)
-        )
+        super().__init__(env=toolkit, name=tau2_tool.name, description=str(tau2_tool))
 
         # Set the signature from tau2_tool's function signature
         # This allows MCP to properly introspect the parameters
-        if hasattr(tau2_tool, '__signature__'):
+        if hasattr(tau2_tool, "__signature__"):
             self.__signature__ = tau2_tool.__signature__
 
     async def __call__(self, **kwargs: Any) -> list[TextContent]:
@@ -46,7 +42,7 @@ class Tau2ToolWrapper(BaseTool):
 
             # Get parameter type annotations from the tool's signature for type conversion
             param_types = {}
-            if hasattr(self.tau2_tool, '__signature__'):
+            if hasattr(self.tau2_tool, "__signature__"):
                 for param_name, param in self.tau2_tool.__signature__.parameters.items():
                     if param.annotation != param.empty:
                         param_types[param_name] = param.annotation
@@ -55,7 +51,7 @@ class Tau2ToolWrapper(BaseTool):
                 if isinstance(value, str):
                     # Check if the string looks like JSON (starts with [ or {)
                     stripped = value.strip()
-                    if stripped.startswith('[') or stripped.startswith('{'):
+                    if stripped.startswith("[") or stripped.startswith("{"):
                         try:
                             parsed_kwargs[key] = json.loads(value)
                         except (json.JSONDecodeError, ValueError):
@@ -72,7 +68,7 @@ class Tau2ToolWrapper(BaseTool):
                                     parsed_kwargs[key] = int(value)
                                 elif expected_type == bool:
                                     # Handle common boolean string representations
-                                    parsed_kwargs[key] = value.lower() in ('true', '1', 'yes', 'on')
+                                    parsed_kwargs[key] = value.lower() in ("true", "1", "yes", "on")
                                 else:
                                     # Keep as string for other types
                                     parsed_kwargs[key] = value
@@ -93,15 +89,11 @@ class Tau2ToolWrapper(BaseTool):
                     id=str(uuid.uuid4()),
                     name=self.tau2_tool.name,
                     arguments=parsed_kwargs,
-                    requestor="assistant"
+                    requestor="assistant",
                 )
 
                 # Create assistant message with the tool call
-                agent_message = AssistantMessage(
-                    role="assistant",
-                    tool_calls=[tool_call],
-                    cost=0.0
-                )
+                agent_message = AssistantMessage(role="assistant", tool_calls=[tool_call], cost=0.0)
                 tau2_task.add_message(agent_message)
 
             # Execute the tool
@@ -110,10 +102,12 @@ class Tau2ToolWrapper(BaseTool):
                 active_toolkit = tau2_task.environment.tools
 
             if active_toolkit is None:
-                return [TextContent(
-                    type="text",
-                    text="Error: Environment not initialized. Call setup/load first."
-                )]
+                return [
+                    TextContent(
+                        type="text",
+                        text="Error: Environment not initialized. Call setup/load first.",
+                    )
+                ]
 
             # Match upstream Environment.get_response semantics:
             # - Wrap tool execution in try/except
@@ -206,5 +200,5 @@ def get_tool_info(toolkit: ToolKitBase) -> Dict[str, Any]:
                 "type": toolkit.tool_type(name).value,
             }
             for name, tool in tau2_tools.items()
-        ]
+        ],
     }

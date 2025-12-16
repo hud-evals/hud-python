@@ -13,9 +13,7 @@ from . import evaluate
 
 
 @evaluate.tool("evaluate_task")
-async def evaluate_task(
-    evaluation_type: str = "all"
-) -> EvaluationResult:
+async def evaluate_task(evaluation_type: str = "all") -> EvaluationResult:
     """
     Evaluate the current task based on the conversation history.
 
@@ -37,7 +35,7 @@ async def evaluate_task(
             reward=0.0,
             done=True,
             content="Error: Environment not initialized. Call setup_task first.",
-            isError=True
+            isError=True,
         )
 
     try:
@@ -92,7 +90,11 @@ async def evaluate_task(
         # Add database check results (only when DB is part of scoring).
         # In multi-turn tasks with user tools, the user DB can legitimately change during troubleshooting,
         # and upstream env evaluator's db_check compares both agent+user DBs even when DB isn't scored.
-        if reward_info.db_check and reward_info.reward_basis and RewardType.DB in reward_info.reward_basis:
+        if (
+            reward_info.db_check
+            and reward_info.reward_basis
+            and RewardType.DB in reward_info.reward_basis
+        ):
             feedback_lines.append(
                 f"\nDatabase Check: {'✓ PASS' if reward_info.db_check.db_match else '✗ FAIL'}"
             )
@@ -106,17 +108,24 @@ async def evaluate_task(
 
         # Add communication check results
         if reward_info.communicate_checks:
-            feedback_lines.append(f"\nCommunication Checks ({len(reward_info.communicate_checks)} total):")
+            feedback_lines.append(
+                f"\nCommunication Checks ({len(reward_info.communicate_checks)} total):"
+            )
             for check in reward_info.communicate_checks:
                 status = "✓" if check.met else "✗"
                 feedback_lines.append(f"  {status} '{check.info}'")
 
         # Add environment assertion results
         if reward_info.env_assertions:
-            feedback_lines.append(f"\nEnvironment Assertions ({len(reward_info.env_assertions)} total):")
+            feedback_lines.append(
+                f"\nEnvironment Assertions ({len(reward_info.env_assertions)} total):"
+            )
             for check in reward_info.env_assertions:
                 status = "✓" if check.met else "✗"
-                desc = check.env_assertion.message or f"{check.env_assertion.func_name}({check.env_assertion.arguments})"
+                desc = (
+                    check.env_assertion.message
+                    or f"{check.env_assertion.func_name}({check.env_assertion.arguments})"
+                )
                 feedback_lines.append(f"  {status} {desc}")
 
         # Add additional info if available
@@ -129,7 +138,7 @@ async def evaluate_task(
             done=True,
             content="\n".join(feedback_lines),
             info=get_evaluation_criteria(),
-            isError=False
+            isError=False,
         )
 
     except Exception as e:
@@ -138,7 +147,7 @@ async def evaluate_task(
             done=True,
             content=f"Evaluation error: {str(e)}",
             info=get_evaluation_criteria(),
-            isError=True
+            isError=True,
         )
 
 
@@ -161,7 +170,9 @@ def get_evaluation_criteria() -> Dict[str, Any]:
     criteria = tau2_task.task.evaluation_criteria
 
     return {
-        "reward_basis": [basis.value for basis in criteria.reward_basis] if criteria.reward_basis else [],
+        "reward_basis": [basis.value for basis in criteria.reward_basis]
+        if criteria.reward_basis
+        else [],
         "actions": [action.model_dump() for action in criteria.actions] if criteria.actions else [],
         "communicate_info": criteria.communicate_info if criteria.communicate_info else [],
         "nl_assertions": criteria.nl_assertions if criteria.nl_assertions else [],
