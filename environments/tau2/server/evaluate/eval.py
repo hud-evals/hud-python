@@ -4,6 +4,7 @@ from typing import Dict, Any
 import uuid
 from hud.tools.types import EvaluationResult
 from tau2.data_model.simulation import SimulationRun, TerminationReason
+from tau2.data_model.tasks import RewardType
 from tau2.evaluator.evaluator import evaluate_simulation, EvaluationType
 from tau2.utils.utils import get_now
 from server.setup.load import get_tau2_task
@@ -40,6 +41,9 @@ async def evaluate_task(
         )
 
     try:
+        assert tau2_task.task is not None
+        assert tau2_task.domain is not None
+
         # Map string to EvaluationType enum
         eval_type_map = {
             "env": EvaluationType.ENV,
@@ -73,6 +77,9 @@ async def evaluate_task(
             domain=tau2_task.domain,
         )
 
+        # Update simulation with reward info
+        simulation.reward_info = reward_info
+
         # Format detailed feedback
         feedback_lines = [f"Evaluation complete. Reward: {reward_info.reward:.2f}"]
 
@@ -82,9 +89,13 @@ async def evaluate_task(
             for reward_type, value in reward_info.reward_breakdown.items():
                 feedback_lines.append(f"  - {reward_type.value}: {value:.2f}")
 
-        # Add database check results
-        if reward_info.db_check:
-            feedback_lines.append(f"\nDatabase Check: {'✓ PASS' if reward_info.db_check.db_match else '✗ FAIL'}")
+        # Add database check results (only when DB is part of scoring).
+        # In multi-turn tasks with user tools, the user DB can legitimately change during troubleshooting,
+        # and upstream env evaluator's db_check compares both agent+user DBs even when DB isn't scored.
+        if reward_info.db_check and reward_info.reward_basis and RewardType.DB in reward_info.reward_basis:
+            feedback_lines.append(
+                f"\nDatabase Check: {'✓ PASS' if reward_info.db_check.db_match else '✗ FAIL'}"
+            )
 
         # Add action check results
         if reward_info.action_checks:
@@ -117,6 +128,7 @@ async def evaluate_task(
             reward=reward_info.reward,
             done=True,
             content="\n".join(feedback_lines),
+            info=get_evaluation_criteria(),
             isError=False
         )
 
@@ -125,12 +137,13 @@ async def evaluate_task(
             reward=0.0,
             done=True,
             content=f"Evaluation error: {str(e)}",
+            info=get_evaluation_criteria(),
             isError=True
         )
 
 
-@evaluate.tool("get_evaluation_criteria")
-async def get_evaluation_criteria() -> Dict[str, Any]:
+# @evaluate.tool("get_evaluation_criteria")
+def get_evaluation_criteria() -> Dict[str, Any]:
     """
     Get the evaluation criteria for the current task.
 

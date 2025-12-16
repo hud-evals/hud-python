@@ -80,24 +80,24 @@ async def load(
             "status": "ready",
             "domain": domain,
             "initial_greeting": initial_greeting,
-            "initial_response": None
+            "system_message": "**IMPORTANT**: YOU MUST USE THE `send_message` TOOL FOR ALL COMMUNICATION WITH THE USER. NEVER RESPOND WITH PLAIN TEXT!"
         }
 
-        # 6. Initialize conversation tool for multi-turn mode
-        if not solo_mode:
-            from server.tools.conversation import ConversationTool
+        # # 6. Initialize conversation tool for multi-turn mode
+        # if not solo_mode:
+        #     from server.tools.conversation import ConversationTool
 
-            ConversationTool.initialize_global(tau2_task)
-            # result["conversation_initialized"] = True
+        #     ConversationTool.initialize_global(tau2_task)
+        #     # result["conversation_initialized"] = True
 
-            if start_conversation:
-                from server.main import get_conversation_tool
+        #     if start_conversation:
+        #         from server.main import get_conversation_tool
 
-                conversation_tool = get_conversation_tool()
-                if conversation_tool:
-                    response = await conversation_tool(initial_greeting)
-                    # result["conversation_started"] = True
-                    result["initial_response"] = response[0].text if response else "No response"
+        #         conversation_tool = get_conversation_tool()
+        #         if conversation_tool:
+        #             response = await conversation_tool(initial_greeting)
+        #             # result["conversation_started"] = True
+        #             result["initial_response"] = response[0].text if response else "No response"
 
         return result
 

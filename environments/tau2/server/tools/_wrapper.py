@@ -43,6 +43,14 @@ class Tau2ToolWrapper(BaseTool):
             # Parse JSON string arguments back into Python objects
             # This handles cases where lists/dicts are passed as JSON strings
             parsed_kwargs = {}
+
+            # Get parameter type annotations from the tool's signature for type conversion
+            param_types = {}
+            if hasattr(self.tau2_tool, '__signature__'):
+                for param_name, param in self.tau2_tool.__signature__.parameters.items():
+                    if param.annotation != param.empty:
+                        param_types[param_name] = param.annotation
+
             for key, value in kwargs.items():
                 if isinstance(value, str):
                     # Check if the string looks like JSON (starts with [ or {)
@@ -54,7 +62,25 @@ class Tau2ToolWrapper(BaseTool):
                             # If parsing fails, use the original string
                             parsed_kwargs[key] = value
                     else:
-                        parsed_kwargs[key] = value
+                        # Try to convert to the expected type based on the signature
+                        if key in param_types:
+                            expected_type = param_types[key]
+                            try:
+                                if expected_type == float:
+                                    parsed_kwargs[key] = float(value)
+                                elif expected_type == int:
+                                    parsed_kwargs[key] = int(value)
+                                elif expected_type == bool:
+                                    # Handle common boolean string representations
+                                    parsed_kwargs[key] = value.lower() in ('true', '1', 'yes', 'on')
+                                else:
+                                    # Keep as string for other types
+                                    parsed_kwargs[key] = value
+                            except (ValueError, TypeError):
+                                # If conversion fails, keep as string
+                                parsed_kwargs[key] = value
+                        else:
+                            parsed_kwargs[key] = value
                 else:
                     parsed_kwargs[key] = value
 
