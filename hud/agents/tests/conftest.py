@@ -32,6 +32,8 @@ class MockEvalContext(EvalContext):
         self._call_tool_handler = call_tool_handler
         self.tool_calls: list[tuple[str, dict[str, Any]]] = []
         self._router = ToolRouter()
+        self._agent_include: list[str] | None = None
+        self._agent_exclude: list[str] | None = None
 
     async def list_tools(self) -> list[types.Tool]:
         return self._tools

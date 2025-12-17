@@ -34,6 +34,8 @@ class MockEvalContext(EvalContext):
         self._submitted: str | None = None
         self.reward: float | None = None
         self._router = ToolRouter()
+        self._agent_include: list[str] | None = None
+        self._agent_exclude: list[str] | None = None
 
     async def list_tools(self) -> list[types.Tool]:
         return self._tools

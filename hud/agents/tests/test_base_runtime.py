@@ -36,6 +36,8 @@ class MockEvalContext(EvalContext):
         self.reward: float | None = None
         self._call_tool_handler: Any = None
         self._router = ToolRouter()
+        self._agent_include: list[str] | None = None
+        self._agent_exclude: list[str] | None = None
 
     def set_call_tool_handler(self, handler: Any) -> None:
         self._call_tool_handler = handler
