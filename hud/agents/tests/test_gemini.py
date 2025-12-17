@@ -54,15 +54,17 @@ class TestGeminiAgent:
     """Test GeminiAgent base class."""
 
     @pytest.fixture
-    def mock_gemini_client(self) -> genai.Client:
+    def mock_gemini_client(self) -> MagicMock:
         """Create a stub Gemini client."""
-        client = genai.Client(api_key="test_key")
+        client = MagicMock(spec=genai.Client)
+        client.api_key = "test_key"
+        client.models = MagicMock()
         client.models.list = MagicMock(return_value=iter([]))
         client.models.generate_content = MagicMock()
         return client
 
     @pytest.mark.asyncio
-    async def test_init(self, mock_gemini_client: genai.Client) -> None:
+    async def test_init(self, mock_gemini_client: MagicMock) -> None:
         """Test agent initialization."""
         agent = GeminiAgent.create(
             model_client=mock_gemini_client,
@@ -95,7 +97,7 @@ class TestGeminiAgent:
             assert agent.gemini_client is not None
 
     @pytest.mark.asyncio
-    async def test_format_blocks_text_only(self, mock_gemini_client: genai.Client) -> None:
+    async def test_format_blocks_text_only(self, mock_gemini_client: MagicMock) -> None:
         """Test formatting text content blocks."""
         agent = GeminiAgent.create(
             model_client=mock_gemini_client,
@@ -114,7 +116,7 @@ class TestGeminiAgent:
         assert len(messages[0].parts) == 2
 
     @pytest.mark.asyncio
-    async def test_format_blocks_with_image(self, mock_gemini_client: genai.Client) -> None:
+    async def test_format_blocks_with_image(self, mock_gemini_client: MagicMock) -> None:
         """Test formatting image content blocks."""
         agent = GeminiAgent.create(
             model_client=mock_gemini_client,
@@ -135,7 +137,7 @@ class TestGeminiAgent:
         assert len(messages[0].parts) == 2
 
     @pytest.mark.asyncio
-    async def test_format_tool_results(self, mock_gemini_client: genai.Client) -> None:
+    async def test_format_tool_results(self, mock_gemini_client: MagicMock) -> None:
         """Test formatting tool results."""
         agent = GeminiAgent.create(
             model_client=mock_gemini_client,
@@ -155,7 +157,7 @@ class TestGeminiAgent:
         assert messages[0].role == "user"
 
     @pytest.mark.asyncio
-    async def test_get_system_messages(self, mock_gemini_client: genai.Client) -> None:
+    async def test_get_system_messages(self, mock_gemini_client: MagicMock) -> None:
         """Test that system messages return empty (Gemini uses system_instruction)."""
         agent = GeminiAgent.create(
             model_client=mock_gemini_client,
@@ -168,7 +170,7 @@ class TestGeminiAgent:
         assert messages == []
 
     @pytest.mark.asyncio
-    async def test_get_response_text_only(self, mock_gemini_client: genai.Client) -> None:
+    async def test_get_response_text_only(self, mock_gemini_client: MagicMock) -> None:
         """Test getting text-only response."""
         # Disable telemetry for this test
         with patch("hud.settings.settings.telemetry_enabled", False):
@@ -205,7 +207,7 @@ class TestGeminiAgent:
             assert response.done is True
 
     @pytest.mark.asyncio
-    async def test_get_response_with_thinking(self, mock_gemini_client: genai.Client) -> None:
+    async def test_get_response_with_thinking(self, mock_gemini_client: MagicMock) -> None:
         """Test getting response with thinking content."""
         with patch("hud.settings.settings.telemetry_enabled", False):
             agent = GeminiAgent.create(
@@ -247,7 +249,7 @@ class TestGeminiAgent:
             assert response.reasoning == "Let me reason through this..."
 
     @pytest.mark.asyncio
-    async def test_convert_tools_for_gemini(self, mock_gemini_client: genai.Client) -> None:
+    async def test_convert_tools_for_gemini(self, mock_gemini_client: MagicMock) -> None:
         """Test converting MCP tools to Gemini format."""
         tools = [
             types.Tool(
@@ -278,14 +280,16 @@ class TestGeminiToolConversion:
     """Tests for tool conversion to Gemini format."""
 
     @pytest.fixture
-    def mock_gemini_client(self) -> genai.Client:
+    def mock_gemini_client(self) -> MagicMock:
         """Create a stub Gemini client."""
-        client = genai.Client(api_key="test_key")
+        client = MagicMock(spec=genai.Client)
+        client.api_key = "test_key"
+        client.models = MagicMock()
         client.models.list = MagicMock(return_value=iter([]))
         return client
 
     @pytest.mark.asyncio
-    async def test_tool_with_properties(self, mock_gemini_client: genai.Client) -> None:
+    async def test_tool_with_properties(self, mock_gemini_client: MagicMock) -> None:
         """Test tool with input properties."""
         tools = [
             types.Tool(
@@ -319,7 +323,7 @@ class TestGeminiToolConversion:
         assert gemini_tool.function_declarations[0].parameters_json_schema is not None
 
     @pytest.mark.asyncio
-    async def test_tool_without_schema(self, mock_gemini_client: genai.Client) -> None:
+    async def test_tool_without_schema(self, mock_gemini_client: MagicMock) -> None:
         """Test tool without description raises error."""
         # Create a tool with inputSchema but no description
         tools = [
