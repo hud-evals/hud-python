@@ -1,0 +1,161 @@
+---
+title: "Sandboxing"
+description: "Turn your existing services into agent-testable environments"
+icon: "shield"
+---
+
+You have a production stack. You want an agent on it. But you can't just point an agent at production—it'll make real changes, hit real APIs, affect real users. And you can't test at scale against a single live instance with shared state.
+
+HUD lets you mock your production environment so agents can run against it safely. Connect your services in a few lines, mock external dependencies, and run thousands of agents in parallel—each isolated, each reproducible, each generating useful data.
+
+## Connecting Your Stack
+
+HUD wraps your existing infrastructure without rewriting it:
+
+```python
+from hud import Environment
+
+env = Environment("my-env")
+
+# Connect what you already have
+env.connect_fastapi(app)                                    # FastAPI → tools
+env.connect_openapi("https://api.example.com/openapi.json") # OpenAPI spec → tools
+env.connect_hub("hud-evals/browser")                        # HUD Hub environments
+env.connect_image("my-service:v1")                          # Docker images
+```
+
+## Making Databases Safe
+
+Agents need isolated state. Three patterns work:
+
+**In-memory SQLite** — fastest, resets automatically:
+```python
+import sqlite3
+db = sqlite3.connect(":memory:")  # Fresh per eval
+
+@env.scenario("update-order")
+async def update_order(order_id: str):
+    db.executescript(Path("fixtures/orders.sql").read_text())  # Seed
+    answer = yield f"Update order {order_id} to shipped"
+    row = db.execute("SELECT status FROM orders WHERE id=?", (order_id,)).fetchone()
+    yield 1.0 if row and row[0] == "shipped" else 0.0
+```
+
+**Transaction rollback** — use your real DB, undo changes:
+```python
+@env.scenario("process-refund")
+async def process_refund(order_id: str):
+    conn = await asyncpg.connect(DATABASE_URL)
+    tx = conn.transaction()
+    await tx.start()
+    try:
+        answer = yield f"Process refund for order {order_id}"
+        # Check result...
+        yield reward
+    finally:
+        await tx.rollback()  # Always undo
+        await conn.close()
+```
+
+**Fixture seeding** — deterministic starting state:
+```python
+await db.execute("TRUNCATE orders, users CASCADE")
+await db.executemany("INSERT INTO users ...", fixtures["users"])
+```
+
+## Mocking External Services
+
+`env.mock()` intercepts at the tool layer. Agents only see tools, so this is usually all you need:
+
+```python
+env.mock()  # All tools return schema-based fake responses
+env.mock_tool("send_email", {"status": "sent", "id": "mock-123"})
+env.mock_tool("charge_card", {"success": True, "transaction_id": "tx-mock"})
+```
+
+For stateful mocking (tracking what happened for assertions):
+
+```python
+class MockPaymentService:
+    def __init__(self):
+        self.charges = []
+    
+    async def charge(self, amount: int, card_token: str) -> dict:
+        self.charges.append({"amount": amount, "token": card_token})
+        return {"success": True, "id": f"ch-{len(self.charges)}"}
+
+payments = MockPaymentService()
+
+@env.scenario("checkout")
+async def checkout(cart_total: int):
+    _ = yield f"Complete checkout for ${cart_total}"
+    yield 1.0 if any(c["amount"] == cart_total for c in payments.charges) else 0.0
+```
+
+## Docker vs No Docker
+
+| Pattern | When to Use | Examples |
+|---------|-------------|----------|
+| **No Docker** | Pure Python, API integrations | Web research, LLM grading |
+| **Docker** | System dependencies, persistent services | VNC, PostgreSQL, browsers |
+
+### Pattern 1: No Docker
+
+Import and test directly:
+
+```python
+# local_test.py
+from env import env
+
+async def test():
+    async with env:
+        result = await env.call_tool("search", query="test")
+```
+
+### Pattern 2: Docker
+
+Connect to the running container instead of importing. Same API, different transport—because your tools now run inside the container where dependencies live:
+
+```python
+# local_test.py
+env = Environment("browser-env")
+env.connect_url("http://localhost:8765/mcp")  # Connect instead of import
+
+async def test():
+    async with env:  # Same API from here
+        result = await env.call_tool("navigate", url="https://example.com")
+```
+
+```bash
+hud build                                 # Build image
+hud dev -w scenarios -w tools --port 8765 # Start with hot-reload
+python local_test.py                      # Connects to container
+```
+
+### Hot-Reload
+
+`hud dev -w path` reloads Python on save. System services (postgres, VNC) persist.
+
+**Rebuild** (`hud build`) when: Dockerfile, system packages, or dependencies change.
+
+## Environment Structure
+
+Start simple, add structure as needed:
+
+```
+# Simple                      # Organized
+my-env/                       my-env/
+├── env.py                    ├── env.py
+├── local_test.py             ├── scenarios/
+└── Dockerfile.hud            ├── setup/
+                              ├── evaluate/
+                              └── Dockerfile.hud
+```
+
+Most environments fall somewhere between. Split when files get hard to navigate.
+
+## What's Next
+
+**Test locally.** See [Testing Environments](/advanced/testing-environments) for debugging and scenario testing.
+
+**Deploy.** Push to GitHub, connect on [hud.ai](https://hud.ai). See [Deploy](/quick-links/deploy).

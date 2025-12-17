@@ -18,11 +18,34 @@ import typer
 import yaml
 
 from hud.cli.utils.source_hash import compute_source_hash, list_source_files
-from hud.clients import MCPClient
 from hud.utils.hud_console import HUDConsole
 from hud.version import __version__ as hud_version
 
 from .utils.registry import save_to_registry
+
+
+def find_dockerfile(directory: Path) -> Path | None:
+    """Find the Dockerfile in a directory, preferring Dockerfile.hud.
+
+    Checks for Dockerfile.hud first (HUD-specific), then falls back to Dockerfile.
+
+    Args:
+        directory: Directory to search in
+
+    Returns:
+        Path to the Dockerfile if found, None otherwise
+    """
+    # Prefer Dockerfile.hud for HUD environments
+    hud_dockerfile = directory / "Dockerfile.hud"
+    if hud_dockerfile.exists():
+        return hud_dockerfile
+
+    # Fall back to standard Dockerfile
+    standard_dockerfile = directory / "Dockerfile"
+    if standard_dockerfile.exists():
+        return standard_dockerfile
+
+    return None
 
 
 def parse_version(version_str: str) -> tuple[int, int, int]:
@@ -427,8 +450,11 @@ async def analyze_mcp_environment(
     mcp_config = parse_docker_command(docker_cmd)
 
     # Initialize client and measure timing
+    # Use FastMCP client directly - no mcp_use deprecation warnings
+    from hud.clients.fastmcp import FastMCPHUDClient
+
     start_time = time.time()
-    client = MCPClient(mcp_config=mcp_config, verbose=verbose, auto_trace=False)
+    client = FastMCPHUDClient(mcp_config=mcp_config, verbose=verbose)
     initialized = False
 
     try:
@@ -493,6 +519,11 @@ async def analyze_mcp_environment(
         }
         if hub_map:
             result["hub_tools"] = hub_map
+        # Include prompts and resources from analysis
+        if full_analysis.get("prompts"):
+            result["prompts"] = full_analysis["prompts"]
+        if full_analysis.get("resources"):
+            result["resources"] = full_analysis["resources"]
         return result
     except TimeoutError:
         from hud.shared.exceptions import HudException
@@ -530,15 +561,20 @@ def build_docker_image(
     hud_console = HUDConsole()
     build_args = build_args or {}
 
-    # Check if Dockerfile exists
-    dockerfile = directory / "Dockerfile"
-    if not dockerfile.exists():
+    # Check if Dockerfile exists (prefer Dockerfile.hud)
+    dockerfile = find_dockerfile(directory)
+    if dockerfile is None:
         hud_console.error(f"No Dockerfile found in {directory}")
+        hud_console.info("Expected: Dockerfile.hud or Dockerfile")
         return False
 
     # Build command - use buildx when remote cache is enabled
     effective_platform = platform if platform is not None else "linux/amd64"
     cmd = ["docker", "buildx", "build"] if remote_cache else ["docker", "build"]
+
+    # Specify dockerfile explicitly if not the default name
+    if dockerfile.name != "Dockerfile":
+        cmd.extend(["-f", str(dockerfile)])
 
     if effective_platform:
         cmd.extend(["--platform", effective_platform])
@@ -653,15 +689,17 @@ def build_environment(
 
     # Step 2: If no lock, check for Dockerfile
     if not base_name:
-        dockerfile_path = env_dir / "Dockerfile"
-        if not dockerfile_path.exists():
+        dockerfile_path = find_dockerfile(env_dir)
+        if dockerfile_path is None:
             hud_console.error(f"Not a valid environment directory: {directory}")
-            hud_console.info("Expected: Dockerfile or hud.lock.yaml")
+            hud_console.info("Expected: Dockerfile.hud, Dockerfile, or hud.lock.yaml")
             raise typer.Exit(1)
 
         # First build - use directory name
         base_name = env_dir.name
         hud_console.info(f"First build - using base name: {base_name}")
+        if dockerfile_path.name == "Dockerfile.hud":
+            hud_console.info("Using Dockerfile.hud")
 
     # If user provides --tag, respect it; otherwise use base name only (version added later)
     if tag:
@@ -720,12 +758,22 @@ def build_environment(
     finally:
         loop.close()
 
-    # Show analysis results including hub tools
-    tool_msg = f"Analyzed environment: {analysis['toolCount']} tools found"
+    # Show analysis results including hub tools, prompts, resources
+    tool_count = analysis["toolCount"]
+    prompt_count = len(analysis.get("prompts") or [])
+    resource_count = len(analysis.get("resources") or [])
+
+    parts = [f"{tool_count} tools"]
+    if prompt_count:
+        parts.append(f"{prompt_count} prompts")
+    if resource_count:
+        parts.append(f"{resource_count} resources")
+
+    tool_msg = f"Analyzed environment: {', '.join(parts)} found"
     hud_console.success(tool_msg)
 
     # Extract environment variables from Dockerfile
-    dockerfile_path = env_dir / "Dockerfile"
+    dockerfile_path = find_dockerfile(env_dir) or env_dir / "Dockerfile"
     required_env, optional_env = extract_env_vars_from_dockerfile(dockerfile_path)
 
     # Show env vars detected from .env file
@@ -771,7 +819,7 @@ def build_environment(
 
     # Create lock file content with images subsection at top
     lock_content = {
-        "version": "1.2",  # Lock file format version
+        "version": "1.3",  # Lock file format version
         "images": {
             "local": f"{base_name}:{new_version}",  # Local tag with version
             "full": None,  # Will be set with digest after build
@@ -852,6 +900,16 @@ def build_environment(
     if hub_tools:
         lock_content["hubTools"] = hub_tools
 
+    # Add prompts if present
+    prompts = analysis.get("prompts")
+    if prompts:
+        lock_content["prompts"] = prompts
+
+    # Add resources if present
+    resources = analysis.get("resources")
+    if resources:
+        lock_content["resources"] = resources
+
     # Write lock file
     lock_path = env_dir / "hud.lock.yaml"
     with open(lock_path, "w") as f:
@@ -884,6 +942,10 @@ def build_environment(
 
     # Build command - use buildx when remote cache is enabled
     label_cmd = ["docker", "buildx", "build"] if remote_cache else ["docker", "build"]
+
+    # Specify dockerfile explicitly if not the default name
+    if dockerfile_path and dockerfile_path.name != "Dockerfile":
+        label_cmd.extend(["-f", str(dockerfile_path)])
 
     # Use same defaulting for the second build step
     label_platform = platform if platform is not None else "linux/amd64"

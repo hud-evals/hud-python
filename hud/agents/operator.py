@@ -11,10 +11,10 @@ from openai.types.responses import (
     FunctionShellToolParam,
     FunctionToolParam,
     ResponseComputerToolCallOutputScreenshotParam,
-    ResponseInputParam,
 )
 from openai.types.responses.response_input_param import (
     ComputerCallOutput,
+    FunctionCallOutput,
 )
 from openai.types.shared_params.reasoning import Reasoning
 from pydantic import ConfigDict
@@ -56,7 +56,7 @@ class OperatorConfig(OpenAIConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "Operator"
-    checkpoint_name: str = "computer-use-preview"
+    model: str = "computer-use-preview"
     environment: Literal["windows", "mac", "linux", "ubuntu", "browser"] = "linux"
 
 
@@ -144,10 +144,10 @@ class OperatorAgent(OpenAIAgent):
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
-    ) -> ResponseInputParam:
+    ) -> list[ComputerCallOutput | FunctionCallOutput]:
         remaining_calls: list[MCPToolCall] = []
         remaining_results: list[MCPToolResult] = []
-        computer_outputs: ResponseInputParam = []
+        computer_outputs: list[ComputerCallOutput] = []
         ordering: list[tuple[str, int]] = []
 
         for call, result in zip(tool_calls, tool_results, strict=False):
@@ -186,8 +186,8 @@ class OperatorAgent(OpenAIAgent):
                 remaining_results.append(result)
                 ordering.append(("function", len(remaining_calls) - 1))
 
-        formatted: ResponseInputParam = []
-        function_outputs: ResponseInputParam = []
+        formatted: list[ComputerCallOutput | FunctionCallOutput] = []
+        function_outputs: list[FunctionCallOutput] = []
         if remaining_calls:
             function_outputs = await super().format_tool_results(remaining_calls, remaining_results)
 

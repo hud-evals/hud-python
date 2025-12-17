@@ -4,12 +4,16 @@ description: "SDK reference for task configuration and dataset utilities"
 icon: "list-check"
 ---
 
-The HUD SDK provides the `Task` class for defining agent objectives and dataset utilities for managing task collections.
+The HUD SDK provides the `LegacyTask` class for defining agent objectives and dataset utilities for managing task collections.
 
-## Task Class
+<Warning>
+`LegacyTask` is deprecated. For new code, use `env("scenario_name", **args)` to create Task objects. See [Environments](/reference/environments) for the recommended approach.
+</Warning>
+
+## LegacyTask Class
 
 ```python
-from hud.datasets import Task
+from hud.datasets import LegacyTask
 ```
 
 Pydantic model that defines an agent's objective, setup, and evaluation criteria.
@@ -31,7 +35,7 @@ Pydantic model that defines an agent's objective, setup, and evaluation criteria
 The `mcp_config` field automatically resolves environment variables using `${VAR_NAME}` syntax:
 
 ```python
-task = Task(
+task = LegacyTask(
     prompt="Navigate to the dashboard",
     mcp_config={
         "browser": {
@@ -45,7 +49,7 @@ task = Task(
 )
 ```
 
-Variables are resolved when Task is created from a dict - this is why datasets should store raw dictionaries.
+Variables are resolved when LegacyTask is created from a dict - this is why datasets should store raw dictionaries.
 
 ## Running Tasks
 
@@ -208,7 +212,7 @@ The `agent_config` field on tasks supports:
 | `initial_screenshot` | `bool` | Take screenshot before first action |
 
 ```python
-task = Task(
+task = LegacyTask(
     prompt="Complete the form",
     mcp_config={...},
     agent_config={

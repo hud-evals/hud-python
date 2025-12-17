@@ -2,77 +2,101 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 from mcp import types
 
+from hud.environment.router import ToolRouter
+from hud.eval.context import EvalContext
 from hud.types import MCPToolCall, MCPToolResult
 
 
-class MockMCPClient:
-    """Mock MCP client that satisfies AgentMCPClient protocol."""
+class MockEvalContext(EvalContext):
+    """Mock EvalContext for testing agents.
 
-    _initialized: bool = False
+    This provides a minimal EvalContext implementation that can be used
+    to test agent initialization and tool calling without a real environment.
+    """
 
     def __init__(
         self,
+        prompt: str = "Test prompt",
         tools: list[types.Tool] | None = None,
-        call_tool_handler: Callable[[MCPToolCall], MCPToolResult] | None = None,
-        initialize_error: Exception | None = None,
+        call_tool_handler: Any = None,
     ) -> None:
-        self._mcp_config: dict[str, dict[str, Any]] = {"test": {"url": "http://test"}}
+        # Core attributes
+        self.prompt = prompt
         self._tools = tools or []
+        self._submitted: str | None = None
+        self.reward: float | None = None
         self._call_tool_handler = call_tool_handler
-        self._initialize_error = initialize_error
-        self.call_tool_calls: list[MCPToolCall] = []
-        self.shutdown_called = False
+        self.tool_calls: list[tuple[str, dict[str, Any]]] = []
+
+        # Environment attributes
+        self._router = ToolRouter()
+        self._agent_include: list[str] | None = None
+        self._agent_exclude: list[str] | None = None
+
+        # EvalContext attributes
+        self._task = None
+        self.trace_id = "test-trace-id"
+        self.eval_name = "test-eval"
+        self.job_id: str | None = None
+        self.group_id: str | None = None
+        self.index = 0
+        self.variants: dict[str, Any] = {}
+        self.answer: str | None = None
+        self.system_prompt: str | None = None
+        self.error: BaseException | None = None
+        self.metadata: dict[str, Any] = {}
+        self.results: list[Any] = []
+        self._is_summary = False
+
+    def as_tools(self) -> list[types.Tool]:
+        return self._tools
 
     @property
-    def mcp_config(self) -> dict[str, dict[str, Any]]:
-        return self._mcp_config
-
-    @property
-    def is_connected(self) -> bool:
-        return self._initialized
-
-    async def initialize(self, mcp_config: dict[str, dict[str, Any]] | None = None) -> None:
-        if self._initialize_error:
-            raise self._initialize_error
-        self._initialized = True
-
-    async def shutdown(self) -> None:
-        self.shutdown_called = True
+    def has_scenario(self) -> bool:
+        return False
 
     async def list_tools(self) -> list[types.Tool]:
         return self._tools
 
-    async def call_tool(self, tool_call: MCPToolCall) -> MCPToolResult:
-        self.call_tool_calls.append(tool_call)
+    async def call_tool(self, call: Any, /, **kwargs: Any) -> MCPToolResult:
+        # Parse the call
+        if isinstance(call, tuple):
+            name, args = call[0], call[1] if len(call) > 1 else {}
+        elif hasattr(call, "name"):
+            name, args = call.name, getattr(call, "arguments", {}) or {}
+        else:
+            name, args = str(call), kwargs
+
+        self.tool_calls.append((name, args))
+
         if self._call_tool_handler:
-            return self._call_tool_handler(tool_call)
-        return MCPToolResult(content=[])
+            tc = MCPToolCall(name=name, arguments=args)
+            return self._call_tool_handler(tc)
 
-    def get_available_tools(self) -> list[types.Tool]:
-        return self._tools
+        return MCPToolResult(
+            content=[types.TextContent(type="text", text=f"Result from {name}")],
+            isError=False,
+        )
 
-    def get_tool_map(self) -> dict[str, types.Tool]:
-        return {t.name: t for t in self._tools}
-
-
-@pytest.fixture
-def mock_mcp_client() -> MockMCPClient:
-    """Create a mock MCP client that satisfies the AgentMCPClient protocol."""
-    return MockMCPClient()
+    async def submit(self, answer: str) -> None:
+        self._submitted = answer
 
 
 @pytest.fixture
-def mock_mcp_client_with_tools() -> MockMCPClient:
-    """Create a mock MCP client with a test tool."""
-    return MockMCPClient(
+def mock_eval_context() -> MockEvalContext:
+    """Create a basic mock EvalContext."""
+    return MockEvalContext()
+
+
+@pytest.fixture
+def mock_eval_context_with_tools() -> MockEvalContext:
+    """Create a mock EvalContext with test tools."""
+    return MockEvalContext(
         tools=[
             types.Tool(
                 name="test_tool",
@@ -84,41 +108,26 @@ def mock_mcp_client_with_tools() -> MockMCPClient:
 
 
 @pytest.fixture
-def mock_mcp_client_openai_computer() -> MockMCPClient:
-    """Create a mock MCP client with openai_computer tool for Operator tests."""
-    return MockMCPClient(
+def mock_eval_context_computer() -> MockEvalContext:
+    """Create a mock EvalContext with computer tool."""
+    return MockEvalContext(
         tools=[
             types.Tool(
-                name="openai_computer",
-                description="OpenAI computer use tool",
-                inputSchema={},
+                name="computer",
+                description="Computer use tool",
+                inputSchema={"type": "object"},
             )
         ]
     )
 
 
 @pytest.fixture
-def mock_mcp_client_gemini_computer() -> MockMCPClient:
-    """Create a mock MCP client with gemini_computer tool for Gemini tests."""
-    return MockMCPClient(
-        tools=[
-            types.Tool(
-                name="gemini_computer",
-                description="Gemini computer use tool",
-                inputSchema={},
-            )
-        ]
-    )
-
-
-@pytest.fixture
-def mock_mcp_client_browser_tools() -> MockMCPClient:
-    """Create a mock MCP client with browser-like tools for extended tests."""
-    return MockMCPClient(
+def mock_eval_context_browser_tools() -> MockEvalContext:
+    """Create a mock EvalContext with browser-like tools."""
+    return MockEvalContext(
         tools=[
             types.Tool(name="screenshot", description="Take screenshot", inputSchema={}),
             types.Tool(name="click", description="Click at coordinates", inputSchema={}),
             types.Tool(name="type", description="Type text", inputSchema={}),
-            types.Tool(name="bad_tool", description="A tool that fails", inputSchema={}),
         ]
     )

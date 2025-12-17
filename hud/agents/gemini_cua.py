@@ -10,7 +10,7 @@ from google.genai import types as genai_types
 from pydantic import ConfigDict, Field
 
 from hud.tools.computer.settings import computer_settings
-from hud.types import BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.types import with_signature
 
 from .base import BaseCreateParams, MCPAgent
@@ -62,7 +62,7 @@ class GeminiCUAConfig(GeminiConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "GeminiCUA"
-    checkpoint_name: str = "gemini-2.5-computer-use-preview-10-2025"
+    model: str = "gemini-2.5-computer-use-preview-10-2025"
     excluded_predefined_functions: list[str] = Field(default_factory=list)
 
 
@@ -126,7 +126,7 @@ class GeminiCUAAgent(GeminiAgent):
         # For non-computer tools, use the parent implementation
         return super()._to_gemini_tool(tool)
 
-    async def get_response(self, messages: list[genai_types.Content]) -> Any:
+    async def get_response(self, messages: list[genai_types.Content]) -> AgentResponse:
         """Get response from Gemini including any tool calls.
 
         Extends parent to trim old screenshots before making API call.
@@ -252,7 +252,7 @@ class GeminiCUAAgent(GeminiAgent):
             # Map common argument shapes used by Gemini Computer Use
             # 1) Coordinate arrays → x/y
             coord = raw_args.get("coordinate") or raw_args.get("coordinates")
-            if isinstance(coord, (list, tuple)) and len(coord) >= 2:
+            if isinstance(coord, list | tuple) and len(coord) >= 2:
                 try:
                     normalized_args["x"] = int(coord[0])
                     normalized_args["y"] = int(coord[1])
@@ -266,7 +266,7 @@ class GeminiCUAAgent(GeminiAgent):
                 or raw_args.get("destination_coordinate")
                 or raw_args.get("destinationCoordinate")
             )
-            if isinstance(dest, (list, tuple)) and len(dest) >= 2:
+            if isinstance(dest, list | tuple) and len(dest) >= 2:
                 try:
                     normalized_args["destination_x"] = int(dest[0])
                     normalized_args["destination_y"] = int(dest[1])

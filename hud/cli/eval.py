@@ -20,7 +20,6 @@ from pydantic import BaseModel, Field, field_validator
 from rich import box
 from rich.table import Table
 
-from hud.cli.utils.env_check import ensure_built, find_environment_dir
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.env import resolve_env_vars
@@ -37,7 +36,6 @@ def _is_bedrock_arn(model: str | None) -> bool:
 
 if TYPE_CHECKING:
     from hud.agents.base import MCPAgent
-    from hud.types import Task
 
 logger = logging.getLogger(__name__)
 hud_console = HUDConsole()
@@ -101,6 +99,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # verbose = true
 # very_verbose = true
 # auto_respond = true
+# gateway = false  # Route LLM API calls through HUD Gateway
 
 [agent]
 # allowed_tools = ["computer", "playwright"]
@@ -161,6 +160,8 @@ class EvalConfig(BaseModel):
         "group_size",
         "remote",
         "auto_respond",
+        "quiet",
+        "gateway",
     }
     # Fields loaded from [agent] section
     _AGENT_FIELDS: ClassVar[set[str]] = {"allowed_tools", "disallowed_tools"}
@@ -178,6 +179,8 @@ class EvalConfig(BaseModel):
     auto_respond: bool | None = None  # Continue without prompting (default: True for --full)
     group_size: int = 1
     remote: bool = False
+    quiet: bool = False  # Suppress opening browser for eval links
+    gateway: bool = False  # Use HUD Gateway for LLM API calls
 
     # Base agent config (these merge with task's agent_config)
     allowed_tools: list[str] | None = None
@@ -211,6 +214,14 @@ class EvalConfig(BaseModel):
         if self.remote:
             if not settings.api_key:
                 hud_console.error("HUD_API_KEY is required for remote execution")
+                hud_console.info("Set it: hud set HUD_API_KEY=your-key-here")
+                raise typer.Exit(1)
+            return
+
+        # Gateway mode only requires HUD_API_KEY
+        if self.gateway:
+            if not settings.api_key:
+                hud_console.error("HUD_API_KEY is required for gateway mode")
                 hud_console.info("Set it: hud set HUD_API_KEY=your-key-here")
                 raise typer.Exit(1)
             return
@@ -267,14 +278,11 @@ class EvalConfig(BaseModel):
         agent_key = self.agent_type.value
         if agent_key in self.agent_config:
             agent_cfg = dict(self.agent_config[agent_key])
-            # Map user-facing 'model' to internal 'checkpoint_name'
-            if "model" in agent_cfg:
-                agent_cfg["checkpoint_name"] = agent_cfg.pop("model")
             kwargs.update(agent_cfg)
 
         # CLI --model always wins
         if self.model:
-            kwargs["checkpoint_name"] = self.model
+            kwargs["model"] = self.model
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
             base_url = kwargs.get("base_url", "")
@@ -286,7 +294,11 @@ class EvalConfig(BaseModel):
                     kwargs["api_key"] = settings.openai_api_key
 
         # Auto-detect Bedrock when Claude is selected with a Bedrock ARN
-        if self.agent_type == AgentType.CLAUDE and _is_bedrock_arn(kwargs.get("checkpoint_name")):
+        # Check both model and checkpoint_name for ARN patterns
+        bedrock_arn_detected = _is_bedrock_arn(kwargs.get("model")) or _is_bedrock_arn(
+            kwargs.get("checkpoint_name")
+        )
+        if self.agent_type == AgentType.CLAUDE and bedrock_arn_detected:
             missing_aws = (
                 not settings.aws_access_key_id
                 or not settings.aws_secret_access_key
@@ -318,6 +330,50 @@ class EvalConfig(BaseModel):
             AgentType.GEMINI_CUA,
         ):
             kwargs["validate_api_key"] = False
+
+        # Configure gateway mode - route LLM API calls through HUD gateway
+        if self.gateway:
+            hud_api_key = settings.api_key
+            if not hud_api_key:
+                raise typer.Exit(1)  # Already validated in validate_api_keys()
+
+            if self.agent_type == AgentType.CLAUDE:
+                from anthropic import AsyncAnthropic
+
+                kwargs["model_client"] = AsyncAnthropic(
+                    api_key=hud_api_key,
+                    base_url=settings.hud_gateway_url,
+                )
+                hud_console.info("🌐 Using HUD Gateway for Claude API")
+            elif self.agent_type in (AgentType.OPENAI, AgentType.OPERATOR):
+                from openai import AsyncOpenAI
+
+                kwargs["model_client"] = AsyncOpenAI(
+                    api_key=hud_api_key,
+                    base_url=settings.hud_gateway_url,
+                )
+                hud_console.info("🌐 Using HUD Gateway for OpenAI API")
+            elif self.agent_type == AgentType.OPENAI_COMPATIBLE:
+                from openai import AsyncOpenAI
+
+                kwargs["openai_client"] = AsyncOpenAI(
+                    api_key=hud_api_key,
+                    base_url=settings.hud_gateway_url,
+                )
+                hud_console.info("🌐 Using HUD Gateway for OpenAI-compatible API")
+            elif self.agent_type in (AgentType.GEMINI, AgentType.GEMINI_CUA):
+                from google import genai
+                from google.genai.types import HttpOptions
+
+                kwargs["model_client"] = genai.Client(
+                    api_key="PLACEHOLDER",
+                    http_options=HttpOptions(
+                        api_version="v1beta",
+                        base_url=settings.hud_gateway_url,
+                        headers={"Authorization": f"Bearer {hud_api_key}"},
+                    ),
+                )
+                hud_console.info("🌐 Using HUD Gateway for Gemini API")
 
         return kwargs
 
@@ -398,7 +454,7 @@ class EvalConfig(BaseModel):
 
         overrides.update({k: v for k, v in cli_args.items() if v is not None and v is not False})
 
-        for k in ("full", "verbose", "very_verbose", "remote"):
+        for k in ("full", "verbose", "very_verbose", "remote", "quiet", "gateway"):
             if cli_args.get(k) is True:
                 overrides[k] = True
             elif k in overrides and cli_args.get(k) is False:
@@ -501,6 +557,8 @@ class EvalConfig(BaseModel):
             table.add_row("verbose", "[bold green]True[/bold green]")
         if self.remote:
             table.add_row("remote", "[bold green]True[/bold green] (submitting to platform)")
+        if self.gateway:
+            table.add_row("gateway", "[bold green]True[/bold green] (routing via HUD Gateway)")
 
         # Tool filters (only if set)
         if self.allowed_tools:
@@ -534,14 +592,14 @@ class EvalConfig(BaseModel):
             for name in config_cls.model_fields:
                 if name in skip:
                     continue
-                # Always show model (checkpoint_name)
-                if name == "checkpoint_name":
+                # Always show model
+                if name == "model":
                     if self.model:
                         value = self.model
                     elif overrides.get("model"):
                         value = overrides["model"]
                     else:
-                        value = getattr(defaults, "checkpoint_name", None)
+                        value = getattr(defaults, "model", None)
                     table.add_row("  model", str(value) if value else "—")
                 elif name in overrides:
                     value = overrides[name]
@@ -555,92 +613,30 @@ class EvalConfig(BaseModel):
 
 
 # =============================================================================
-# Task loading
-# =============================================================================
-
-
-def _load_tasks_from_source(source: str) -> list[Task]:
-    """Load tasks from file or HuggingFace dataset."""
-    from hud.utils.tasks import load_tasks
-
-    path = Path(source)
-    if path.exists() and path.suffix in {".json", ".jsonl"}:
-        hud_console.info("📊 Loading task file…")
-        tasks = load_tasks(str(path))
-        try:
-            env_dir = find_environment_dir(path)
-            if env_dir is not None:
-                ensure_built(env_dir, interactive=False)
-        except Exception as exc:
-            hud_console.debug(f"Eval preflight env check skipped: {exc}")
-    else:
-        hud_console.info(f"📊 Loading tasks from: {source}…")
-        tasks = load_tasks(source)
-
-    if not tasks:
-        hud_console.error(f"No tasks found in: {source}")
-        raise typer.Exit(1)
-
-    return tasks  # type: ignore[return-value]
-
-
-def _warn_local_mcp(tasks: list[Task], source: str) -> None:
-    """Warn user if tasks use local MCP configs."""
-    try:
-        has_local = any(
-            isinstance(server_cfg, dict) and "command" in server_cfg and not server_cfg.get("url")
-            for t in tasks
-            for server_cfg in (getattr(t, "mcp_config", {}) or {}).values()
-            if isinstance(getattr(t, "mcp_config", {}), dict)
-        )
-
-        if not has_local:
-            return
-
-        hud_console.warning("Detected local MCP configurations (uses 'command' instead of 'url').")
-        hud_console.info("When running concurrently, exposed host ports from Docker may conflict.")
-
-        if not hud_console.confirm("Proceed with local MCP servers?", default=True):
-            hint_file = Path(source).name if Path(source).exists() else "<tasks_file>"
-            hud_console.hint(f"Convert to remote: hud convert {hint_file}")
-            raise typer.Exit(1)
-
-        hint_file = Path(source).name if Path(source).exists() else "<tasks_file>"
-        hud_console.hint(f"Convert to remote to avoid port conflicts: hud convert {hint_file}")
-
-    except typer.Exit:
-        raise
-    except Exception as e:
-        hud_console.debug(f"Local MCP check skipped: {e}")
-
-
-# =============================================================================
 # Evaluation runner
 # =============================================================================
 
 
-async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
-    """Run evaluation with the given config."""
-    from hud.datasets import run_single_task, run_tasks
+async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
+    """Run evaluation with the given config using run_dataset()."""
+    from hud.datasets import load_tasks, run_dataset
 
     if cfg.source is None or cfg.agent_type is None:
         raise ValueError("source and agent_type must be set")
 
-    tasks = _load_tasks_from_source(cfg.source)
+    # Load tasks using unified loader (handles v4→v5 conversion automatically)
+    hud_console.info(f"📊 Loading tasks from: {cfg.source}…")
+    tasks = load_tasks(cfg.source)
 
-    if not cfg.remote and (cfg.group_size > 1 or cfg.full):
-        _warn_local_mcp(tasks, cfg.source)
-
-    agent_kwargs = cfg.get_agent_kwargs()
-
-    path = Path(cfg.source)
-    dataset_name = path.name if path.exists() else cfg.source.split("/")[-1]
-    max_steps = cfg.max_steps or (100 if cfg.full else 10)
+    if not tasks:
+        hud_console.error(f"No tasks found in: {cfg.source}")
+        raise typer.Exit(1)
 
     # Filter by task IDs if provided
     if cfg.task_ids:
         id_set = set(cfg.task_ids)
-        filtered = [t for t in tasks if str(getattr(t, "id", "")) in id_set]
+        # Match by task.id or index
+        filtered = [t for i, t in enumerate(tasks) if t.id in id_set or str(i) in id_set]
         if not filtered:
             hud_console.error(f"No tasks found matching IDs: {', '.join(cfg.task_ids)}")
             raise typer.Exit(1)
@@ -651,57 +647,69 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Task]]:
         tasks = [tasks[0]]
         hud_console.info("Using first task (run with --full or --task-ids for more)…")
 
-    auto_respond = cfg.auto_respond if cfg.auto_respond is not None else cfg.full
+    hud_console.info(f"Loaded {len(tasks)} task(s)")
 
+    # Prepare agent kwargs
+    agent_kwargs = cfg.get_agent_kwargs()
+    auto_respond = cfg.auto_respond if cfg.auto_respond is not None else cfg.full
     if auto_respond:
         agent_kwargs = {**agent_kwargs, "auto_respond": True}
 
+    max_steps = cfg.max_steps or (100 if cfg.full else 10)
+
+    # Remote execution - submit to HUD platform
     if cfg.remote:
-        hud_console.info(f"🚀 Submitting {len(tasks)} tasks for remote execution…")
-        await run_tasks(
+        # Create a job ID for tracking
+        import uuid
+
+        from hud.datasets.utils import submit_rollouts
+
+        job_id = str(uuid.uuid4())
+        hud_console.info(
+            f"Submitting {len(tasks)} task(s) for remote execution (job_id: {job_id})…"
+        )
+
+        await submit_rollouts(
             tasks=tasks,
+            job_id=job_id,
             agent_type=cfg.agent_type,
             agent_params=agent_kwargs,
-            name=f"Evaluation {dataset_name}",
-            metadata={"dataset": cfg.source},
             max_steps=max_steps,
             group_size=cfg.group_size,
-            remote=True,
         )
+
+        hud_console.success(f"Tasks submitted. View at: https://hud.ai/job/{job_id}")
         return [], tasks
 
+    # Single task mode - show extra info
     if len(tasks) == 1 and cfg.group_size == 1:
-        task = tasks[0]
         logging.getLogger("hud.agents").setLevel(logging.INFO)
         logging.getLogger("hud.agents.base").setLevel(logging.INFO)
-
-        hud_console.info(task.prompt)
-        result = await run_single_task(
-            task=task,
-            agent_type=cfg.agent_type,
-            agent_params=agent_kwargs,
-            max_steps=max_steps,
-            trace_name=task.prompt,
+        # Get prompt from args (v4 tasks) or show scenario name
+        prompt = tasks[0].args.get("prompt") if tasks[0].args else tasks[0].scenario
+        if prompt:
+            hud_console.info(f"Prompt: {prompt}")
+    else:
+        hud_console.info(
+            f"🚀 Running evaluation (max_concurrent: {cfg.max_concurrent}, "
+            f"group_size: {cfg.group_size})…"
         )
-        hud_console.success(f"Reward: {result.reward}")
-        return [result], tasks
 
-    # Local batch execution
-    hud_console.info(
-        f"🚀 Running evaluation (max_concurrent: {cfg.max_concurrent}, "
-        f"group_size: {cfg.group_size})…"
-    )
-
-    results = await run_tasks(
-        tasks=tasks,
-        agent_type=cfg.agent_type,
+    # Run using run_dataset
+    results = await run_dataset(
+        tasks,
+        cfg.agent_type,
         agent_params=agent_kwargs,
-        name=f"Evaluation {dataset_name}",
-        max_concurrent=cfg.max_concurrent,
-        metadata={"dataset": cfg.source},
         max_steps=max_steps,
+        max_concurrent=cfg.max_concurrent,
         group_size=cfg.group_size,
+        quiet=cfg.quiet,
     )
+
+    # Show reward for single task
+    if len(tasks) == 1 and cfg.group_size == 1 and results:
+        hud_console.success(f"Reward: {results[0].reward}")
+
     return results, tasks
 
 
@@ -746,6 +754,12 @@ def eval_command(
     remote: bool = typer.Option(
         False, "--remote", help="Submit tasks to platform for remote execution"
     ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Suppress opening browser for eval links"
+    ),
+    gateway: bool = typer.Option(
+        False, "--gateway", "-g", help="Route LLM API calls through HUD Gateway"
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
 
@@ -755,6 +769,7 @@ def eval_command(
         hud eval tasks.json claude --config max_tokens=32768
         hud eval tasks.json openai --config temperature=0.7
         hud eval tasks.json claude --full --remote  # Remote execution
+        hud eval tasks.json claude --gateway  # Route LLM calls through HUD Gateway
     """
     hud_console.info("🔧 Initializing evaluation...")
 
@@ -775,6 +790,8 @@ def eval_command(
         group_size=group_size,
         config=config,
         remote=remote,
+        quiet=quiet,
+        gateway=gateway,
     )
 
     # Find source if not provided

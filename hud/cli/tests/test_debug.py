@@ -132,7 +132,7 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("time.time", side_effect=[0, 0, 20]),
+            patch("hud.cli.debug.time.time", side_effect=[0, 0, 20]),
         ):
             phases = await debug_mcp_stdio(["test-cmd"], logger, max_phase=5)
             assert phases == 1
@@ -165,7 +165,7 @@ class TestDebugMCPStdio:
             # Simulate timeout - time.time() is called multiple times in the loop
             # Return increasing values to simulate time passing
             time_values = list(range(20))
-            with patch("time.time", side_effect=time_values):
+            with patch("hud.cli.debug.time.time", side_effect=time_values):
                 phases = await debug_mcp_stdio(["test-cmd"], logger, max_phase=5)
                 assert phases == 1
                 output = logger.get_output()
@@ -207,7 +207,7 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.cli.debug.MCPClient") as MockClient,
+            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
         ):
             mock_client = MockClient.return_value
             mock_client.initialize = AsyncMock()
@@ -240,7 +240,7 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.cli.debug.MCPClient") as MockClient,
+            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
         ):
             mock_client = MockClient.return_value
             mock_client.initialize = AsyncMock()
@@ -277,7 +277,7 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.cli.debug.MCPClient") as MockClient,
+            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
         ):
             mock_client = MockClient.return_value
             mock_client.initialize = AsyncMock()
@@ -286,7 +286,9 @@ class TestDebugMCPStdio:
             mock_client.call_tool = AsyncMock()
             mock_client.shutdown = AsyncMock()
 
-            with patch("time.time", side_effect=[0, 5, 5, 5, 5]):  # Start at 0, then 5 for the rest
+            with patch(
+                "hud.cli.debug.time.time", side_effect=[0, 5, 5, 5, 5]
+            ):  # Start at 0, then 5 for the rest
                 phases = await debug_mcp_stdio(["test-cmd"], logger, max_phase=4)
                 assert phases == 4
                 output = logger.get_output()
@@ -311,7 +313,7 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.cli.debug.MCPClient") as MockClient,
+            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
         ):
             mock_client = MockClient.return_value
             mock_client.initialize = AsyncMock()
@@ -324,7 +326,7 @@ class TestDebugMCPStdio:
 
             # Simulate slow init (>30s)
             # time.time() is called at start and after phase 3
-            with patch("time.time", side_effect=[0, 0, 0, 35, 35, 35]):
+            with patch("hud.cli.debug.time.time", side_effect=[0, 0, 0, 35, 35, 35]):
                 phases = await debug_mcp_stdio(["test-cmd"], logger, max_phase=5)
                 output = logger.get_output()
                 # Check if we got to phase 4 where the timing check happens
@@ -349,7 +351,7 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.cli.debug.MCPClient") as MockClient,
+            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
         ):
             # Create different mock instances for each client
             mock_clients = []
@@ -393,7 +395,7 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.cli.debug.MCPClient") as MockClient,
+            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
         ):
             # Set up for phase 1-4 success first
             test_tool = Mock()

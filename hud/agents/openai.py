@@ -31,7 +31,6 @@ from openai.types.responses.response_input_param import FunctionCallOutput, Mess
 from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 from pydantic import ConfigDict
 
-import hud
 from hud.settings import settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
 from hud.utils.strict_schema import ensure_strict_json_schema
@@ -48,7 +47,7 @@ class OpenAIConfig(BaseAgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "OpenAI"
-    checkpoint_name: str = "gpt-5.1"
+    model: str = "gpt-5.1"
     model_client: AsyncOpenAI | None = None
     max_output_tokens: int | None = None
     temperature: float | None = None
@@ -92,7 +91,7 @@ class OpenAIAgent(MCPAgent):
                 raise ValueError(f"OpenAI API key is invalid: {exc}") from exc
 
         self.openai_client = model_client
-        self.model = self.config.checkpoint_name
+        self._model = self.config.model
         self.max_output_tokens = self.config.max_output_tokens
         self.temperature = self.config.temperature
         self.reasoning = self.config.reasoning
@@ -106,9 +105,8 @@ class OpenAIAgent(MCPAgent):
         self.last_response_id: str | None = None
         self._message_cursor = 0
 
-    async def initialize(self, task: Any | None = None) -> None:
-        """Initialize agent and build tool metadata."""
-        await super().initialize(task)
+    def _on_tools_ready(self) -> None:
+        """Build OpenAI-specific tool mappings after tools are discovered."""
         self._convert_tools_for_openai()
 
     def _to_openai_tool(
@@ -141,8 +139,7 @@ class OpenAIAgent(MCPAgent):
             strict_schema = ensure_strict_json_schema(copy.deepcopy(tool.inputSchema))
         except Exception as e:
             self.console.warning_log(f"Failed to convert tool '{tool.name}' schema to strict: {e}")
-            logger.error(json.dumps(tool.inputSchema, indent=2))
-            raise e
+            return None
 
         return FunctionToolParam(
             type="function",
@@ -202,7 +199,7 @@ class OpenAIAgent(MCPAgent):
         """System messages are provided via the `instructions` field."""
         return []
 
-    async def format_blocks(self, blocks: list[types.ContentBlock]) -> ResponseInputParam:
+    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Message]:
         """Convert MCP content blocks into OpenAI user messages."""
         content: ResponseInputMessageContentListParam = []
         for block in blocks:
@@ -221,11 +218,6 @@ class OpenAIAgent(MCPAgent):
             content.append(ResponseInputTextParam(type="input_text", text=""))
         return [Message(role="user", content=content)]
 
-    @hud.instrument(
-        span_type="agent",
-        record_args=False,
-        record_result=True,
-    )
     async def get_response(self, messages: ResponseInputParam) -> AgentResponse:
         """Send the latest input items to OpenAI's Responses API."""
         new_items: ResponseInputParam = messages[self._message_cursor :]
@@ -241,7 +233,7 @@ class OpenAIAgent(MCPAgent):
                 return AgentResponse(content="", tool_calls=[], done=True)
 
         response = await self.openai_client.responses.create(
-            model=self.model,
+            model=self._model,
             input=new_items,
             instructions=self.system_prompt,
             max_output_tokens=self.max_output_tokens,
@@ -289,9 +281,9 @@ class OpenAIAgent(MCPAgent):
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
-    ) -> ResponseInputParam:
+    ) -> list[FunctionCallOutput]:
         """Convert MCP tool outputs into Responses input items."""
-        formatted: ResponseInputParam = []
+        formatted: list[FunctionCallOutput] = []
         for call, result in zip(tool_calls, tool_results, strict=False):
             if not call.id:
                 self.console.warning_log(f"Tool '{call.name}' missing call_id; skipping output.")

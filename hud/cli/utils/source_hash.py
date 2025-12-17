@@ -1,7 +1,7 @@
 """Utilities to compute a fast, deterministic source hash for environments.
 
 This intentionally focuses on the typical HUD environment layout and aims to be fast:
-- Always include: Dockerfile, pyproject.toml
+- Always include: Dockerfile.hud, Dockerfile, pyproject.toml
 - Include directories: controller/, environment/, src/
 - Exclude common build/runtime caches and lock files
 
@@ -40,7 +40,7 @@ EXCLUDE_FILES = {
     "hud.lock.yaml",
 }
 
-INCLUDE_FILES = {"Dockerfile", "pyproject.toml"}
+INCLUDE_FILES = {"Dockerfile", "Dockerfile.hud", "pyproject.toml"}
 INCLUDE_DIRS = {"server", "mcp", "controller", "environment"}
 
 

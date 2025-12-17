@@ -101,10 +101,21 @@ def show_dev_server_info(
     return cursor_deeplink
 
 
+def _has_mcp_or_env(content: str) -> bool:
+    """Check if file content defines an mcp or env variable."""
+    # Check for mcp = MCPServer(...) or mcp = FastMCP(...)
+    if "mcp" in content and ("= MCPServer" in content or "= FastMCP" in content):
+        return True
+    # Check for env = Environment(...)
+    return "env" in content and "= Environment" in content
+
+
 def auto_detect_module() -> tuple[str, Path | None] | tuple[None, None]:
     """Auto-detect MCP module in current directory.
 
-    Looks for 'mcp' defined in either __init__.py or server.py.
+    Looks for 'mcp' or 'env' defined in either __init__.py or main.py.
+    - 'mcp' with MCPServer or FastMCP
+    - 'env' with Environment
 
     Returns:
         Tuple of (module_name, parent_dir_to_add_to_path) or (None, None)
@@ -116,7 +127,7 @@ def auto_detect_module() -> tuple[str, Path | None] | tuple[None, None]:
     if init_file.exists():
         try:
             content = init_file.read_text(encoding="utf-8")
-            if "mcp" in content and ("= MCPServer" in content or "= FastMCP" in content):
+            if _has_mcp_or_env(content):
                 return (cwd.name, None)
         except Exception:  # noqa: S110
             pass
@@ -126,7 +137,7 @@ def auto_detect_module() -> tuple[str, Path | None] | tuple[None, None]:
     if main_file.exists() and init_file.exists():
         try:
             content = main_file.read_text(encoding="utf-8")
-            if "mcp" in content and ("= MCPServer" in content or "= FastMCP" in content):
+            if _has_mcp_or_env(content):
                 # Need to import as package.main, add parent to sys.path
                 return (f"{cwd.name}.main", cwd.parent)
         except Exception:  # noqa: S110
@@ -136,12 +147,15 @@ def auto_detect_module() -> tuple[str, Path | None] | tuple[None, None]:
 
 
 def should_use_docker_mode(cwd: Path) -> bool:
-    """Check if environment requires Docker mode (has Dockerfile in current dir)."""
-    return (cwd / "Dockerfile").exists()
+    """Check if environment requires Docker mode (has Dockerfile in current dir).
+
+    Checks for Dockerfile.hud first (HUD-specific), then falls back to Dockerfile.
+    """
+    return (cwd / "Dockerfile.hud").exists() or (cwd / "Dockerfile").exists()
 
 
 async def run_mcp_module(
-    module_name: str,
+    module_spec: str,
     transport: str,
     port: int,
     verbose: bool,
@@ -149,7 +163,19 @@ async def run_mcp_module(
     interactive: bool,
     new_trace: bool = False,
 ) -> None:
-    """Run an MCP module directly."""
+    """Run an MCP module directly.
+
+    Args:
+        module_spec: Module specification in format "module" or "module:attribute"
+                    e.g., "server" (looks for mcp), "env:env" (looks for env)
+    """
+    # Parse module:attribute format (like uvicorn/gunicorn)
+    if ":" in module_spec:
+        module_name, attr_name = module_spec.rsplit(":", 1)
+    else:
+        module_name = module_spec
+        attr_name = "mcp"  # Default attribute
+
     # Check if this is a reload (not first run)
     is_reload = os.environ.get("_HUD_DEV_RELOAD") == "1"
 
@@ -162,8 +188,10 @@ async def run_mcp_module(
         # Suppress tracebacks in logs unless verbose
         logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(message)s")
 
-        # Suppress FastMCP's verbose error logging
+        # Suppress FastMCP's verbose logging
         logging.getLogger("fastmcp.tools.tool_manager").setLevel(logging.WARNING)
+        logging.getLogger("fastmcp.server.server").setLevel(logging.WARNING)
+        logging.getLogger("fastmcp.server.openapi").setLevel(logging.WARNING)
 
         # On reload, suppress most startup logs
         if is_reload:
@@ -172,9 +200,9 @@ async def run_mcp_module(
             logging.getLogger("mcp.server.streamable_http_manager").setLevel(logging.ERROR)
 
             # Suppress deprecation warnings on reload
-            import warnings
+            from hud.patches.warnings import apply_default_warning_filters
 
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            apply_default_warning_filters(verbose=False)
 
     # Ensure proper directory is in sys.path based on module name
     cwd = Path.cwd()
@@ -208,8 +236,7 @@ async def run_mcp_module(
             hud_console.info(traceback.format_exc())
         sys.exit(1)
 
-    # Look for 'mcp' attribute - check module __dict__ directly
-    # Debug: print what's in the module
+    # Look for the specified attribute
     if verbose:
         hud_console.info(f"Module attributes: {dir(module)}")
         module_dict = module.__dict__ if hasattr(module, "__dict__") else {}
@@ -217,22 +244,22 @@ async def run_mcp_module(
 
     mcp_server = None
 
-    # Try different ways to access the mcp variable
-    if hasattr(module, "mcp"):
-        mcp_server = module.mcp
-    elif hasattr(module, "__dict__") and "mcp" in module.__dict__:
-        mcp_server = module.__dict__["mcp"]
+    # Try different ways to access the attribute
+    if hasattr(module, attr_name):
+        mcp_server = getattr(module, attr_name)
+    elif hasattr(module, "__dict__") and attr_name in module.__dict__:
+        mcp_server = module.__dict__[attr_name]
 
     if mcp_server is None:
-        hud_console.error(f"Module '{module_name}' does not have 'mcp' defined")
+        hud_console.error(f"Module '{module_name}' does not have '{attr_name}' defined")
         hud_console.info("")
         available = [k for k in dir(module) if not k.startswith("_")]
         hud_console.info(f"Available in module: {available}")
         hud_console.info("")
         hud_console.info("[bold cyan]Expected structure:[/bold cyan]")
-        hud_console.info("  from hud.server import MCPServer")
-        hud_console.info("  mcp = MCPServer(name='my-server')")
-        raise AttributeError(f"Module '{module_name}' must define 'mcp'")
+        hud_console.info("  from hud.environment import Environment")
+        hud_console.info(f"  {attr_name} = Environment('my-env')")
+        raise AttributeError(f"Module '{module_name}' must define '{attr_name}'")
 
     # Only show full header on first run, brief message on reload
     if is_reload:
@@ -529,9 +556,21 @@ def run_docker_dev_server(
     inspector: bool,
     interactive: bool,
     docker_args: list[str],
+    watch_paths: list[str] | None = None,
     new_trace: bool = False,
 ) -> None:
-    """Run MCP server in Docker with volume mounts, expose via local HTTP proxy."""
+    """Run MCP server in Docker with volume mounts, expose via local HTTP proxy.
+
+    Args:
+        port: HTTP port to expose
+        verbose: Show detailed logs
+        inspector: Launch MCP Inspector
+        interactive: Launch interactive testing mode
+        docker_args: Extra Docker run arguments
+        watch_paths: Folders/files to mount for hot-reload (e.g., ["tools", "env.py"]).
+                    If None, no hot-reload mounts are added.
+        new_trace: Create a new dev trace on hud.ai
+    """
     import atexit
     import signal
 
@@ -664,10 +703,6 @@ def run_docker_dev_server(
         "--rm",  # Automatically remove container when it stops
         "--name",
         container_name,
-        "-v",
-        f"{env_dir.absolute()}/server:/app/server:rw",
-        "-v",
-        f"{env_dir.absolute()}/environment:/app/environment:rw",
         "-e",
         "PYTHONPATH=/app",
         "-e",
@@ -675,6 +710,22 @@ def run_docker_dev_server(
         "-e",
         "HUD_DEV=1",
     ]
+
+    # Add volume mounts for watch paths (hot-reload)
+    if watch_paths:
+        hud_console.info(f"Hot-reload enabled for: {', '.join(watch_paths)}")
+        for path in watch_paths:
+            # Resolve the local path
+            local_path = env_dir.absolute() / path
+            if local_path.exists():
+                # Mount to /app/<path> in container
+                container_path = f"/app/{path}"
+                base_args.extend(["-v", f"{local_path}:{container_path}:rw"])
+            else:
+                hud_console.warning(f"Watch path not found: {path}")
+    else:
+        hud_console.info("No --watch paths specified, running without hot-reload")
+        hud_console.dim_info("Tip", "Use -w to enable hot-reload (e.g., -w tools -w env.py)")
 
     # Add debugging port mappings if available
     if debugging_ports:
@@ -751,8 +802,8 @@ def run_docker_dev_server(
         )
         hud_console.dim_info(
             "",
-            "Container restarts on file changes (mounted volumes), "
-            "if changing tools run hud dev again",
+            "Container restarts on file changes in watched folders (-w), "
+            "rebuild with 'hud dev' if changing other files",
         )
         hud_console.info("")
 
@@ -866,15 +917,15 @@ def run_mcp_dev_server(
 
     # Auto-detect Docker mode if Dockerfile present and no module specified
     if not docker and module is None and should_use_docker_mode(cwd):
-        hud_console.note("Detected Dockerfile - using Docker mode with volume mounts")
+        hud_console.note("Detected Dockerfile - using Docker mode")
         hud_console.dim_info("Tip", "Use 'hud dev --help' to see all options")
         hud_console.info("")
-        run_docker_dev_server(port, verbose, inspector, interactive, docker_args, new_trace)
+        run_docker_dev_server(port, verbose, inspector, interactive, docker_args, watch, new_trace)
         return
 
     # Route to Docker mode if explicitly requested
     if docker:
-        run_docker_dev_server(port, verbose, inspector, interactive, docker_args, new_trace)
+        run_docker_dev_server(port, verbose, inspector, interactive, docker_args, watch, new_trace)
         return
 
     transport = "stdio" if stdio else "http"
@@ -883,11 +934,11 @@ def run_mcp_dev_server(
     if module is None:
         module, extra_path = auto_detect_module()
         if module is None:
-            hud_console.error("Could not auto-detect MCP module in current directory")
+            hud_console.error("Could not auto-detect module in current directory")
             hud_console.info("")
             hud_console.info("[bold cyan]Expected:[/bold cyan]")
             hud_console.info("  • __init__.py file in current directory")
-            hud_console.info("  • Module must define 'mcp' variable")
+            hud_console.info("  • Module must define 'mcp' or 'env' variable")
             hud_console.info("")
             hud_console.info("[bold cyan]Examples:[/bold cyan]")
             hud_console.info("  hud dev controller")

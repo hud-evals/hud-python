@@ -1,67 +1,52 @@
 """Tiny agent-environment demo in one file.
 
 ┌───────────────┐  tool call (MCP)  ┌───────────────┐
-│   Client      │ ────────────────► │  Server       │
-│ (agent side)  │  JSON-RPC / stdio │ (environment) │
+│   Agent       │ ────────────────► │  Environment  │
+│ (client)      │   hud.eval()      │  (hud.Env)    │
 └───────────────┘                   └───────────────┘
 
-Server = the *environment*
-• Exposes one tool `sum(a, b)` using the FastMCP SDK.
-• In real projects the server runs inside Docker so stdout is reserved for the
-  protocol and stderr for logs.
+Environment = hud.Environment with @env.tool
+• Exposes one tool `sum(a, b)` using the @env.tool decorator.
+• In real projects this would be a Docker image or remote service.
 
-Client = the *agent side*
-• Uses `hud.client.MCPClient` to connect to **any** MCP environment – local
-  subprocess here, Docker or remote HUD in real scenarios.
-• Sends a single tool call and prints the result.
+Agent = the client side
+• Uses `hud.eval(env())` to connect and call tools.
+• The environment handles tool routing automatically.
 
-Run `python examples/00_minimal_fastmcp.py` → prints `3 + 4 = 7`.
+Run `python examples/00_agent_env.py` → prints `3 + 4 = 7`.
 """
 
 from __future__ import annotations
 
 import asyncio
-import sys
-from pathlib import Path
 
-from fastmcp import FastMCP
-from hud.clients import MCPClient
+import hud
 
 # ------------------------------------------------------------------
-# Environment (server)
+# Environment (with local tools)
 # ------------------------------------------------------------------
 
-server = FastMCP("MiniServer")
+env = hud.Environment("calculator")
 
 
-@server.tool()
+@env.tool()
 def sum(a: int, b: int) -> int:
+    """Add two numbers together."""
     return a + b
 
 
 # ------------------------------------------------------------------
-# Agent (client) – spawns the same file with --server and calls the tool
+# Agent (client) – connects to env and calls tools
 # ------------------------------------------------------------------
 
-THIS_FILE = Path(__file__).absolute()
 
-
-async def run_client() -> None:
-    cfg = {
-        "local": {
-            "command": sys.executable,
-            "args": [str(THIS_FILE), "--server"],
-        }
-    }
-    client = MCPClient(mcp_config=cfg)
-    await client.initialize()
-    result = await client.call_tool(name="sum", arguments={"a": 3, "b": 4})
-    print("3 + 4 =", result)
-    await client.shutdown()
+async def main() -> None:
+    """Connect to the environment and call the sum tool."""
+    # Use hud.eval() with env() to create a task and run it
+    async with hud.eval(env(), trace=False) as ctx:
+        result = await ctx.call_tool(name="sum", arguments={"a": 3, "b": 4})
+        print("3 + 4 =", result)
 
 
 if __name__ == "__main__":
-    if "--server" in sys.argv:
-        server.run()
-    else:
-        asyncio.run(run_client())  # The client will run itself with the --server flag
+    asyncio.run(main())

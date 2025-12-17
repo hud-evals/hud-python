@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import ConfigDict, field_validator
 
-from hud import instrument
 from hud.tools.grounding import GroundedComputerTool, Grounder, GrounderConfig
 from hud.types import AgentResponse, MCPToolCall, MCPToolResult
 from hud.utils.types import with_signature
@@ -38,7 +37,7 @@ class GroundedOpenAIConfig(OpenAIChatConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     grounder_config: GrounderConfig
-    checkpoint_name: str = "gpt-4o-mini"
+    model: str = "gpt-4o-mini"
     allowed_tools: list[str] | None = None  # Default set in validator
     append_setup_output: bool = False
     system_prompt: str | None = DEFAULT_GROUNDED_PROMPT
@@ -83,15 +82,12 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
         self.grounder = Grounder(self.config.grounder_config)
         self.grounded_tool: GroundedComputerTool | None = None
 
-    async def initialize(self, task: Any = None) -> None:
-        """Initialize the agent and create the grounded tool with mcp_client."""
-        # Call parent initialization first
-        await super().initialize(task)
-
-        if self.mcp_client is None:
-            raise ValueError("mcp_client must be initialized before creating grounded tool")
+    def _on_tools_ready(self) -> None:
+        """Create the grounded tool after context is bound."""
+        if self.ctx is None:
+            raise ValueError("ctx must be set before creating grounded tool")
         self.grounded_tool = GroundedComputerTool(
-            grounder=self.grounder, mcp_client=self.mcp_client, computer_tool_name="computer"
+            grounder=self.grounder, ctx=self.ctx, computer_tool_name="computer"
         )
 
     def get_tool_schemas(self) -> list[Any]:
@@ -107,11 +103,6 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
             return []
         return [self.grounded_tool.get_openai_tool_schema()]
 
-    @instrument(
-        span_type="agent",
-        record_args=False,
-        record_result=True,
-    )
     async def get_response(self, messages: Any) -> AgentResponse:
         """Get response from the planning model and handle grounded tool calls.
 
@@ -141,11 +132,9 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
         )
 
         if not has_image:
-            if self.mcp_client is None:
-                raise ValueError("mcp_client is not initialized")
-            screenshot_result = await self.mcp_client.call_tool(
-                MCPToolCall(name="computer", arguments={"action": "screenshot"})
-            )
+            if self.ctx is None:
+                raise ValueError("ctx is not initialized")
+            screenshot_result = await self.ctx.call_tool(("computer", {"action": "screenshot"}))
 
             for block in screenshot_result.content:
                 # Check for ImageContent type from MCP
@@ -169,7 +158,7 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
         extra = {k: v for k, v in (self.completion_kwargs or {}).items() if k not in protected_keys}
 
         response = await self.oai.chat.completions.create(  # type: ignore
-            model=self.config.checkpoint_name,
+            model=self.config.model,
             messages=messages,
             tools=tool_schemas,
             parallel_tool_calls=False,

@@ -5,8 +5,9 @@ from __future__ import annotations
 import copy
 import logging
 from inspect import cleandoc
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
+from typing import Any, ClassVar, Literal, cast
 
+import mcp.types as types
 from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, Omit
 from anthropic.types import CacheControlEphemeralParam
 from anthropic.types.beta import (
@@ -22,13 +23,6 @@ from anthropic.types.beta import (
     BetaToolTextEditor20250728Param,
     BetaToolUnionParam,
 )
-
-import hud
-
-if TYPE_CHECKING:
-    from hud.datasets import Task
-
-import mcp.types as types
 from pydantic import ConfigDict
 
 from hud.settings import settings
@@ -46,7 +40,7 @@ class ClaudeConfig(BaseAgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "Claude"
-    checkpoint_name: str = "claude-sonnet-4-5"
+    model: str = "claude-sonnet-4-5"
     model_client: AsyncAnthropic | AsyncAnthropicBedrock | None = None
     max_tokens: int = 16384
     use_computer_beta: bool = True
@@ -97,17 +91,15 @@ class ClaudeAgent(MCPAgent):
         self.tool_mapping: dict[str, str] = {}
         self.claude_tools: list[BetaToolUnionParam] = []
 
-    async def initialize(self, task: str | Task | None = None) -> None:
-        """Initialize the agent and build tool mappings."""
-        await super().initialize(task)
-        # Build tool mappings after tools are discovered
+    def _on_tools_ready(self) -> None:
+        """Build Claude-specific tool mappings after tools are discovered."""
         self._convert_tools_for_claude()
 
-    async def get_system_messages(self) -> list[Any]:
+    async def get_system_messages(self) -> list[BetaMessageParam]:
         """No system messages for Claude because applied in get_response"""
         return []
 
-    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
+    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[BetaMessageParam]:
         """Format messages for Claude."""
         # Convert MCP content types to Anthropic content types
         anthropic_blocks: list[BetaContentBlockParam] = []
@@ -141,11 +133,6 @@ class ClaudeAgent(MCPAgent):
 
         return [BetaMessageParam(role="user", content=anthropic_blocks)]
 
-    @hud.instrument(
-        span_type="agent",
-        record_args=False,  # Messages can be large
-        record_result=True,
-    )
     async def get_response(self, messages: list[BetaMessageParam]) -> AgentResponse:
         """Get response from Claude including any tool calls."""
         messages_cached = self._add_prompt_caching(messages)
@@ -159,7 +146,7 @@ class ClaudeAgent(MCPAgent):
         if isinstance(self.anthropic_client, AsyncAnthropicBedrock):
             try:
                 response = await self.anthropic_client.beta.messages.create(
-                    model=self.config.checkpoint_name,
+                    model=self.config.model,
                     system=self.system_prompt if self.system_prompt is not None else Omit(),
                     max_tokens=self.max_tokens,
                     messages=messages_cached,
@@ -175,7 +162,7 @@ class ClaudeAgent(MCPAgent):
         else:
             # Regular Anthropic client supports .stream()
             async with self.anthropic_client.beta.messages.stream(
-                model=self.config.checkpoint_name,
+                model=self.config.model,
                 system=self.system_prompt if self.system_prompt is not None else Omit(),
                 max_tokens=self.max_tokens,
                 messages=messages_cached,

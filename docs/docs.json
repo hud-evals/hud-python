@@ -29,12 +29,81 @@
   "navigation": {
     "versions": [
       {
-        "version": "0.4.74",
+        "version": "0.5.0",
         "groups": [
           {
             "group": "Get Started",
             "pages": [
               "index",
+              "llm-quickstart"
+            ]
+          },
+          {
+            "group": "Essentials",
+            "pages": [
+              "quick-links/gateway",
+              "quick-links/ab-testing",
+              "quick-links/environments",
+              "quick-links/deploy"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/integrations",
+              "guides/sandboxing",
+              "guides/best-practices",
+              "migration"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/testing-environments"
+            ]
+          },
+          {
+            "group": "SDK Reference",
+            "pages": [
+              "reference/evals",
+              "reference/environments",
+              "reference/tools",
+              "reference/mcpserver",
+              "reference/agents",
+              "reference/types"
+            ]
+          },
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "reference/cli/overview",
+              "reference/cli/init",
+              "reference/cli/dev",
+              "reference/cli/build",
+              "reference/cli/push",
+              "reference/cli/analyze",
+              "reference/cli/debug",
+              "reference/cli/run",
+              "reference/cli/eval",
+              "reference/cli/rft",
+              "reference/cli/misc"
+            ]
+          },
+          {
+            "group": "Community",
+            "pages": [
+              "contributing"
+            ]
+          }
+        ]
+      },
+      {
+        "version": "0.4.73",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "index-legacy",
               "quickstart",
               "llm-quickstart"
             ]
@@ -50,10 +119,11 @@
           {
             "group": "SDK Reference",
             "pages": [
+              "reference/eval",
               "reference/tools",
               "reference/agents",
               "reference/types",
-              "reference/environments",
+              "reference/mcpserver",
               "reference/tasks"
             ]
           },
@@ -65,16 +135,9 @@
             ]
           },
           {
-            "group": "Training (RL)",
-            "pages": [
-              "train-agents/quickstart",
-              "train-agents/tasks"
-            ]
-          },
-          {
             "group": "HUD Gateway",
             "pages": [
-              "gateway/index"
+              "gateway/index-legacy"
             ]
           },
           {
@@ -103,7 +166,6 @@
               "reference/cli/debug",
               "reference/cli/run",
               "reference/cli/eval",
-              "reference/cli/rl",
               "reference/cli/rft",
               "reference/cli/misc"
             ]

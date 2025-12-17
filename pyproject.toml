@@ -1,6 +1,6 @@
 [project]
 name = "hud-python"
-version = "0.4.74"
+version = "0.5.0"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
@@ -15,35 +15,18 @@ dependencies = [
     "pydantic>=2.6,<3",
     "pydantic-settings>=2.2,<3",
     # MCP dependencies
-    "hud-mcp-python-sdk>=3.13.2",
-    "hud-fastmcp-python-sdk>=0.1.2",
-    "hud-mcp-use-python-sdk==2.3.20",
-    "langchain==0.3.27",
-    "pathspec>=0.12.1",
-    "wrapt>=1.14.0",
+    "mcp>1.21.1,<1.23",
+    "fastmcp==2.13.3",
+    # For all inference agents
+    "openai>=2.8.1",
     # CLI dependencies
     "typer>=0.9.0",
     "rich>=13.0.0",
     "toml>=0.10.2",
     "watchfiles>=0.21.0",
     "questionary==2.1.0",
-    "prompt-toolkit==3.0.51",
-    # Terminal library with mouse support for JSON viewer
+    "prompt-toolkit==3.0.51",  # Locked for questionary compatibility
     "blessed>=1.20.0",
-    # Telemetry
-    "opentelemetry-instrumentation-mcp==0.47.0",
-    "opentelemetry-api>=1.34.1",
-    "opentelemetry-sdk>=1.34.1",
-    "opentelemetry-exporter-otlp-proto-http>=1.34.1",
-    # Data and evaluation
-    "datasets>=2.14.0",
-    "numpy>=1.24.0",
-    "pillow>=11.1.0",
-    # AI providers
-    "anthropic>=0.75",
-    "openai>=2.8.1",
-    "google-genai",
-    "tornado>=6.5.2",
     "scarf-sdk>=0.1.0",
 ]
 classifiers = [
@@ -124,13 +107,21 @@ packages = ["hud"]
 "hud/py.typed" = "hud/py.typed"
 
 [project.optional-dependencies]
-rl = [
-    "peft>=0.17.1",
-    "vllm==0.10.1.1",
-    "bitsandbytes>=0.41.0 ; sys_platform == 'linux'",  # For 8-bit optimizers (Linux only)
-    "liger-kernel>=0.5.0 ; sys_platform == 'linux'",  # Optimized Triton kernels for LLM training (Linux only)
-    # Note: flash-attn is recommended but optional
-    # Install separately with: uv pip install flash-attn --no-build-isolation
+# Agent implementations, AI providers, datasets, and telemetry
+agents = [
+    # MCP-use client (legacy)
+    "mcp-use==1.5.0",
+    "langchain>=1.1.0",  # Required by mcp-use
+    # AI providers
+    "anthropic>=0.75",
+    "google-genai",
+    "openai-agents",
+    # Dataset loading (HuggingFace)
+    "datasets>=2.14.0",
+    # Image processing for screenshots/grounding
+    "pillow>=11.1.0",
+    # Jupyter kernel support
+    "tornado>=6.5.2",
 ]
 
 # AWS Bedrock support for ClaudeAgent
@@ -140,7 +131,7 @@ bedrock = [
 
 # Development dependencies - includes testing, linting, and automation tools
 dev = [
-    # Include agent dependencies
+    "hud-python[agents]",  # Include agents for dev
     # Jupyter support
     "ipykernel",
     "ipython <9",
@@ -157,13 +148,13 @@ dev = [
     # Automation and computer control
     "playwright",
     "pyautogui>=0.9.54",
-    "pillow>=11.1.0",
+    # Optional integrations (for type checking)
+    "llama-index-core",
+    "google-adk",
 ]
 
-# Agent dependencies extend dev
-agent = ["hud-python[dev]"]
-
-agents = ["hud-python[agent]"]
+# Alias for backwards compatibility
+agent = ["hud-python[agents]"]
 
 
 [tool.ruff]
@@ -220,7 +211,6 @@ exclude = [
     "**/node_modules",
     "**/__pycache__",
     "**/venv",
-    "hud/misc/claude_plays_pokemon.py",
 ]
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
@@ -231,8 +221,6 @@ source = ["hud"]
 omit = [
     "*/tests/*",
     "*/examples/*",
-    "hud/rl/*",
-    "hud/cli/rl/*",
     "hud/misc/*",
 ]
 
@@ -254,8 +242,6 @@ fail_under = 58
 omit = [
     "*/tests/*",
     "*/examples/*",
-    "hud/rl/*",
-    "hud/cli/rl/*",
     "hud/misc/*",
 ]
 
@@ -265,3 +251,6 @@ asyncio_mode = "auto"
 testpaths = ["hud", "examples"]
 # Ignore the dev folder and other non-test directories
 addopts = "--ignore=dev --ignore=ref --ignore=test_env --ignore=environments"
+markers = [
+    "integration: marks tests as integration tests (require HUD_API_KEY, network access)",
+]

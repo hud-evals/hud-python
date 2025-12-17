@@ -6,6 +6,7 @@ import pytest
 from mcp.types import ImageContent, TextContent
 
 from hud.tools.computer.hud import HudComputerTool
+from hud.tools.types import Coordinate
 
 # (action, kwargs)
 CASES = [
@@ -19,7 +20,7 @@ CASES = [
     # Skip move test - it has Field parameter handling issues when called directly
     # ("move", {"x": 5, "y": 5}),  # x,y are for absolute positioning
     ("wait", {"time": 5}),
-    ("drag", {"path": [(0, 0), (10, 10)]}),
+    ("drag", {"path": [Coordinate(x=0, y=0), Coordinate(x=10, y=10)]}),
     ("mouse_down", {}),
     ("mouse_up", {}),
     ("hold_key", {"text": "a", "duration": 0.1}),

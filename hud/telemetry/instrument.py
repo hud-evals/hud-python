@@ -1,7 +1,16 @@
-"""General-purpose instrumentation decorator for HUD telemetry.
+"""Instrumentation decorator for HUD telemetry.
 
-This module provides the instrument() decorator that users can use
-to instrument any function with OpenTelemetry spans.
+This module provides a lightweight @instrument decorator that records
+function calls and sends them to the HUD telemetry backend.
+
+Usage:
+    @hud.instrument
+    async def my_function(arg1, arg2):
+        ...
+
+    # Within an eval context, calls are recorded and sent to HUD
+    async with env.eval("task") as ctx:
+        result = await my_function("a", "b")
 """
 
 from __future__ import annotations
@@ -11,14 +20,23 @@ import functools
 import inspect
 import json
 import logging
+import time
+import uuid
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 import pydantic_core
-from opentelemetry import trace
-from opentelemetry.trace import SpanKind, Status, StatusCode
 
-from hud.otel import configure_telemetry, is_telemetry_configured
-from hud.otel.context import get_current_task_run_id
+from hud.telemetry.exporter import queue_span
+from hud.types import TraceStep
+
+
+def _get_trace_id() -> str | None:
+    """Lazy import to avoid circular dependency with eval.context."""
+    from hud.eval.context import get_current_trace_id
+
+    return get_current_trace_id()
+
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -31,41 +49,31 @@ logger = logging.getLogger(__name__)
 
 
 def _serialize_value(value: Any, max_items: int = 10) -> Any:
-    """Serialize a value for span attributes.
-
-    Uses pydantic_core.to_json for robust serialization of complex objects.
-
-    Args:
-        value: The value to serialize
-        max_items: Maximum number of items for collections
-
-    Returns:
-        JSON-serializable version of the value
-    """
-    # Simple types pass through
+    """Serialize a value for recording."""
     if isinstance(value, str | int | float | bool | type(None)):
         return value
 
-    # For collections, we need to limit size first
     if isinstance(value, list | tuple):
         value = value[:max_items] if len(value) > max_items else value
     elif isinstance(value, dict) and len(value) > max_items:
         value = dict(list(value.items())[:max_items])
 
-    # Use pydantic_core for serialization - it handles:
-    # - Pydantic models (via model_dump)
-    # - Dataclasses (via asdict)
-    # - Bytes (encodes to string)
-    # - Custom objects (via __dict__ or repr)
-    # - Complex nested structures
     try:
-        # Convert to JSON bytes then back to Python objects
-        # This ensures we get JSON-serializable types
         json_bytes = pydantic_core.to_json(value, fallback=str)
         return json.loads(json_bytes)
     except Exception:
-        # Fallback if pydantic_core fails somehow
         return f"<{type(value).__name__}>"
+
+
+def _now_iso() -> str:
+    """Get current time as ISO-8601 string."""
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _normalize_trace_id(trace_id: str) -> str:
+    """Normalize trace_id to 32-character hex string."""
+    clean = trace_id.replace("-", "")
+    return clean[:32].ljust(32, "0")
 
 
 @overload
@@ -73,11 +81,10 @@ def instrument(
     func: None = None,
     *,
     name: str | None = None,
-    span_type: str = "function",
-    attributes: dict[str, Any] | None = None,
+    category: str = "function",
+    span_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
-    span_kind: SpanKind = SpanKind.INTERNAL,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]: ...
 
 
@@ -86,11 +93,10 @@ def instrument(
     func: Callable[P, R],
     *,
     name: str | None = None,
-    span_type: str = "function",
-    attributes: dict[str, Any] | None = None,
+    category: str = "function",
+    span_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
-    span_kind: SpanKind = SpanKind.INTERNAL,
 ) -> Callable[P, R]: ...
 
 
@@ -99,11 +105,10 @@ def instrument(
     func: Callable[P, Awaitable[R]],
     *,
     name: str | None = None,
-    span_type: str = "function",
-    attributes: dict[str, Any] | None = None,
+    category: str = "function",
+    span_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
-    span_kind: SpanKind = SpanKind.INTERNAL,
 ) -> Callable[P, Awaitable[R]]: ...
 
 
@@ -111,269 +116,169 @@ def instrument(
     func: Callable[..., Any] | None = None,
     *,
     name: str | None = None,
-    span_type: str = "function",
-    attributes: dict[str, Any] | None = None,
+    category: str = "function",
+    span_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
-    span_kind: SpanKind = SpanKind.INTERNAL,
 ) -> Callable[..., Any]:
-    """Instrument a function to emit OpenTelemetry spans.
+    """Instrument a function to record spans within eval context.
 
-    This decorator wraps any function to automatically create spans for
-    observability. It works with both sync and async functions.
+    This decorator records function calls as spans and sends them to the HUD API.
 
     Args:
-        func: The function to instrument (when used without parentheses)
-        name: Custom span name (defaults to fully qualified function name)
-        span_type: The category for this span (e.g., "agent", "mcp", "database", "validation")
-        attributes: Additional attributes to attach to every span
-        record_args: Whether to record function arguments in the request field
-        record_result: Whether to record function result in the result field
-        span_kind: OpenTelemetry span kind (INTERNAL, CLIENT, SERVER, etc.)
+        func: The function to instrument
+        name: Custom span name (defaults to module.function)
+        category: Span category (e.g., "agent", "tool", "function", "mcp")
+        span_type: Alias for category (deprecated, use category instead)
+        record_args: Whether to record function arguments
+        record_result: Whether to record function result
 
     Returns:
-        The instrumented function that emits spans
+        The instrumented function
 
     Examples:
-        # Basic usage - defaults to category="function"
         @hud.instrument
         async def process_data(items: list[str]) -> dict:
             return {"count": len(items)}
 
-        # Custom category
-        @hud.instrument(
-            span_type="database",  # This becomes category="database"
-            record_args=True,
-            record_result=True
-        )
-        async def query_users(filter: dict) -> list[User]:
-            return await db.find(filter)
-
-        # Agent instrumentation
-        @hud.instrument(
-            span_type="agent",  # category="agent" gets special handling
-            record_args=False,  # Don't record large message arrays
-            record_result=True
-        )
-        async def get_model_response(self, messages: list) -> Response:
-            return await self.model.complete(messages)
-
-        # Instrument third-party functions
-        import requests
-        requests.get = hud.instrument(
-            span_type="http",  # category="http"
-            span_kind=SpanKind.CLIENT
-        )(requests.get)
-
-        # Conditional instrumentation
-        if settings.enable_db_tracing:
-            db.query = hud.instrument(db.query)
+        @hud.instrument(category="agent")
+        async def call_model(messages: list) -> str:
+            return await model.generate(messages)
     """
-    # Don't configure telemetry at decoration time - wait until first call
-    # This allows users to configure alternative backends before importing agents
+    effective_category = span_type if span_type is not None else category
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        # Check if already instrumented
         if hasattr(func, "_hud_instrumented"):
-            logger.debug("Function %s already instrumented, skipping", func.__name__)
             return func
 
-        # Get function metadata
         func_module = getattr(func, "__module__", "unknown")
         func_name = getattr(func, "__name__", "unknown")
         func_qualname = getattr(func, "__qualname__", func_name)
-
-        # Determine span name
         span_name = name or f"{func_module}.{func_qualname}"
 
-        # Get function signature for argument parsing
         try:
             sig = inspect.signature(func)
         except (ValueError, TypeError):
             sig = None
 
-        @functools.wraps(func)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            # Ensure telemetry is configured (lazy initialization)
-            # Only configure with defaults if user hasn't configured it yet
-            if not is_telemetry_configured():
-                configure_telemetry()
+        def _build_span(
+            task_run_id: str,
+            args: tuple[Any, ...],
+            kwargs: dict[str, Any],
+            start_time: str,
+            end_time: str,
+            result: Any = None,
+            error: str | None = None,
+        ) -> dict[str, Any]:
+            """Build a HudSpan-compatible span record."""
+            # Build attributes using TraceStep
+            attributes = TraceStep(
+                task_run_id=task_run_id,
+                category=effective_category,
+                type="CLIENT",
+                start_timestamp=start_time,
+                end_timestamp=end_time,
+            )
 
-            tracer = trace.get_tracer("hud-sdk")
-
-            # Build span attributes
-            span_attrs = {
-                "category": span_type,  # span_type IS the category
-                "function.module": func_module,
-                "function.name": func_name,
-                "function.qualname": func_qualname,
-            }
-
-            # Add custom attributes
-            if attributes:
-                span_attrs.update(attributes)
-
-            # Add current task_run_id if available
-            task_run_id = get_current_task_run_id()
-            if task_run_id:
-                span_attrs["hud.task_run_id"] = task_run_id
-
-            # Record function arguments if requested
+            # Record arguments as request
             if record_args and sig:
                 try:
                     bound_args = sig.bind(*args, **kwargs)
                     bound_args.apply_defaults()
-
-                    # Serialize arguments (with safety limits)
-                    args_dict = {}
-                    for param_name, value in bound_args.arguments.items():
-                        try:
-                            # Skip 'self' and 'cls' parameters
-                            if param_name in ("self", "cls"):
-                                continue
-
-                            args_dict[param_name] = _serialize_value(value)
-                        except Exception:
-                            args_dict[param_name] = "<serialization_error>"
-
+                    args_dict = {
+                        k: _serialize_value(v)
+                        for k, v in bound_args.arguments.items()
+                        if k not in ("self", "cls")
+                    }
                     if args_dict:
-                        args_json = json.dumps(args_dict)
-                        span_attrs["function.arguments"] = args_json
-                        # Always set generic request field for consistency
-                        span_attrs["request"] = args_json
+                        attributes.request = args_dict
                 except Exception as e:
-                    logger.debug("Failed to record function arguments: %s", e)
+                    logger.debug("Failed to serialize args: %s", e)
 
-            with tracer.start_as_current_span(
-                span_name,
-                kind=span_kind,
-                attributes=span_attrs,
-            ) as span:
+            # Record result
+            if record_result and result is not None and error is None:
                 try:
-                    # Execute the function
-                    result = await func(*args, **kwargs)
-
-                    # Record result if requested
-                    if record_result:
-                        try:
-                            serialized = _serialize_value(result)
-                            result_json = json.dumps(serialized)
-                            span.set_attribute("function.result", result_json)
-                            # Always set generic result field for consistency
-                            span.set_attribute("result", result_json)
-
-                            # Also set result type for complex objects
-                            if not isinstance(
-                                result, str | int | float | bool | type(None) | list | tuple | dict
-                            ):
-                                span.set_attribute("function.result_type", type(result).__name__)
-                        except Exception as e:
-                            logger.debug("Failed to record function result: %s", e)
-
-                    span.set_status(Status(StatusCode.OK))
-                    return result
-
+                    attributes.result = _serialize_value(result)
                 except Exception as e:
-                    # Record exception and set error status
-                    span.record_exception(e)
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
-                    raise
+                    logger.debug("Failed to serialize result: %s", e)
+
+            # Build span
+            span_id = uuid.uuid4().hex[:16]
+            span = {
+                "name": span_name,
+                "trace_id": _normalize_trace_id(task_run_id),
+                "span_id": span_id,
+                "parent_span_id": None,
+                "start_time": start_time,
+                "end_time": end_time,
+                "status_code": "ERROR" if error else "OK",
+                "status_message": error,
+                "attributes": attributes.model_dump(mode="json", exclude_none=True),
+                "exceptions": [{"message": error}] if error else None,
+            }
+            return span
+
+        @functools.wraps(func)
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            task_run_id = _get_trace_id()
+            start_time = _now_iso()
+            start_perf = time.perf_counter()
+            error: str | None = None
+            result: Any = None
+
+            try:
+                result = await func(*args, **kwargs)
+                return result
+            except Exception as e:
+                error = f"{type(e).__name__}: {e}"
+                raise
+            finally:
+                end_time = _now_iso()
+                duration_ms = (time.perf_counter() - start_perf) * 1000
+
+                if task_run_id:
+                    span = _build_span(
+                        task_run_id, args, kwargs, start_time, end_time, result, error
+                    )
+                    queue_span(span)
+                    logger.debug("Span: %s (%.2fms)", span_name, duration_ms)
 
         @functools.wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-            # Ensure telemetry is configured (lazy initialization)
-            # Only configure with defaults if user hasn't configured it yet
-            if not is_telemetry_configured():
-                configure_telemetry()
+            task_run_id = _get_trace_id()
+            start_time = _now_iso()
+            start_perf = time.perf_counter()
+            error: str | None = None
+            result: Any = None
 
-            tracer = trace.get_tracer("hud-sdk")
+            try:
+                result = func(*args, **kwargs)
+                return result
+            except Exception as e:
+                error = f"{type(e).__name__}: {e}"
+                raise
+            finally:
+                end_time = _now_iso()
+                duration_ms = (time.perf_counter() - start_perf) * 1000
 
-            # Build span attributes (same as async)
-            span_attrs = {
-                "category": span_type,  # span_type IS the category
-                "function.module": func_module,
-                "function.name": func_name,
-                "function.qualname": func_qualname,
-            }
+                if task_run_id:
+                    span = _build_span(
+                        task_run_id, args, kwargs, start_time, end_time, result, error
+                    )
+                    queue_span(span)
+                    logger.debug("Span: %s (%.2fms)", span_name, duration_ms)
 
-            if attributes:
-                span_attrs.update(attributes)
-
-            task_run_id = get_current_task_run_id()
-            if task_run_id:
-                span_attrs["hud.task_run_id"] = task_run_id
-
-            # Record function arguments if requested
-            if record_args and sig:
-                try:
-                    bound_args = sig.bind(*args, **kwargs)
-                    bound_args.apply_defaults()
-
-                    args_dict = {}
-                    for param_name, value in bound_args.arguments.items():
-                        try:
-                            if param_name in ("self", "cls"):
-                                continue
-
-                            args_dict[param_name] = _serialize_value(value)
-                        except Exception:
-                            args_dict[param_name] = "<serialization_error>"
-
-                    if args_dict:
-                        args_json = json.dumps(args_dict)
-                        span_attrs["function.arguments"] = args_json
-                        # Always set generic request field for consistency
-                        span_attrs["request"] = args_json
-                except Exception as e:
-                    logger.debug("Failed to record function arguments: %s", e)
-
-            with tracer.start_as_current_span(
-                span_name,
-                kind=span_kind,
-                attributes=span_attrs,
-            ) as span:
-                try:
-                    # Execute the function
-                    result = func(*args, **kwargs)
-
-                    # Record result if requested
-                    if record_result:
-                        try:
-                            serialized = _serialize_value(result)
-                            result_json = json.dumps(serialized)
-                            span.set_attribute("function.result", result_json)
-                            # Always set generic result field for consistency
-                            span.set_attribute("result", result_json)
-
-                            # Also set result type for complex objects
-                            if not isinstance(
-                                result, str | int | float | bool | type(None) | list | tuple | dict
-                            ):
-                                span.set_attribute("function.result_type", type(result).__name__)
-                        except Exception as e:
-                            logger.debug("Failed to record function result: %s", e)
-
-                    span.set_status(Status(StatusCode.OK))
-                    return result
-
-                except Exception as e:
-                    span.record_exception(e)
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
-                    raise
-
-        # Choose wrapper based on function type
         wrapper = async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-
-        # Mark as instrumented
         wrapper._hud_instrumented = True  # type: ignore[attr-defined]
         wrapper._hud_original = func  # type: ignore[attr-defined]
 
         return wrapper
 
-    # Handle usage with or without parentheses
     if func is None:
-        # Called with arguments: @instrument(name="foo")
         return decorator
-    else:
-        # Called without arguments: @instrument
-        return decorator(func)
+    return decorator(func)
+
+
+__all__ = [
+    "instrument",
+]

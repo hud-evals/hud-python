@@ -6,7 +6,7 @@ import httpx
 import typer
 from rich.console import Console
 
-from hud.cli.rl.viewer import show_json_interactive
+from hud.cli.utils.viewer import show_json_interactive
 from hud.settings import settings
 from hud.utils.hud_console import HUDConsole
 

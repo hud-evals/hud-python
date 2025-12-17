@@ -70,20 +70,20 @@ class DummyGroundedTool:
 
 @pytest.mark.asyncio
 async def test_call_tools_injects_screenshot_and_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Agent with fake OpenAI client and fake MCP client
+    # Agent with fake OpenAI client
     grounder_cfg = GrounderConfig(api_base="http://example", model="qwen")
     fake_openai = AsyncOpenAI(api_key="test")
     agent = GroundedOpenAIChatAgent.create(
         grounder_config=grounder_cfg,
         openai_client=fake_openai,
-        checkpoint_name="gpt-4o-mini",
-        mcp_client=FakeMCPClient(),
+        model="gpt-4o-mini",
         initial_screenshot=False,
     )
 
     # Inject a dummy grounded tool to observe args without full initialization
     dummy_tool = DummyGroundedTool()
     agent.grounded_tool = dummy_tool  # type: ignore
+    agent._initialized = True  # Mark as initialized to skip context initialization
 
     # Seed conversation history with a user image
     png_b64 = (
@@ -129,8 +129,7 @@ async def test_get_response_with_reasoning() -> None:
         agent = GroundedOpenAIChatAgent.create(
             grounder_config=grounder_cfg,
             openai_client=fake_openai,
-            checkpoint_name="gpt-4o-mini",
-            mcp_client=FakeMCPClient(),
+            model="gpt-4o-mini",
             initial_screenshot=False,
         )
 
@@ -148,9 +147,21 @@ async def test_get_response_with_reasoning() -> None:
         mock_response.choices = [mock_choice]
 
         agent.oai.chat.completions.create = AsyncMock(return_value=mock_response)
+        agent._initialized = True  # Mark as initialized to skip context initialization
 
+        # Include an image so get_response doesn't try to take a screenshot via ctx
+        png_b64 = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQAB"
+            "J2n0mQAAAABJRU5ErkJggg=="
+        )
         agent.conversation_history = [
-            {"role": "user", "content": [{"type": "text", "text": "Hard question"}]}
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{png_b64}"}},
+                    {"type": "text", "text": "Hard question"},
+                ],
+            }
         ]
 
         response = await agent.get_response(agent.conversation_history)

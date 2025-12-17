@@ -1,0 +1,66 @@
+---
+title: "Deploy"
+description: "Deploy environments. Create evals. Run and train at scale."
+icon: "rocket"
+---
+
+You've built an environment with tools and scripts. Deploy it to the platform and you can run evals at scale—hundreds of parallel runs across models, all traced, all generating training data.
+
+## Deploying Environments
+
+Start with `hud init` ([see Environments](/quick-links/environments)) to scaffold locally. When ready:
+
+1. Go to [hud.ai](https://hud.ai) → **New** → **Environment**
+2. Connect your GitHub repo and name your environment
+3. Push changes and it rebuilds automatically, like Vercel
+
+Your environment—tools, scripts, everything—is now live. Connect from anywhere:
+
+```python
+env.connect_hub("my-org/my-env")
+```
+
+## Running at Scale
+
+Once deployed, create evals on [hud.ai](https://hud.ai) from your scripts. Each eval is a frozen configuration—same prompt, same scoring, every time.
+
+Your scenario might take arguments:
+
+```python
+@env.scenario("checkout")
+async def checkout_flow(product_name: str, apply_coupon: bool = False):
+    yield f"Complete checkout for {product_name}" + (" with coupon" if apply_coupon else "")
+    yield 1.0 if order_confirmed() else 0.0
+```
+
+On the platform, click **New Eval** → select your scenario → fill in the arguments. Create multiple evals from the same scenario:
+
+| Eval Name | Arguments |
+|-----------|-----------|
+| `checkout-laptop` | `product_name="Laptop"`, `apply_coupon=False` |
+| `checkout-phone-coupon` | `product_name="Phone"`, `apply_coupon=True` |
+| `checkout-headphones` | `product_name="Headphones"`, `apply_coupon=False` |
+
+Then run them—select an eval, choose variants and groups, launch hundreds of runs in parallel. Every run is traced. Results show scores, distributions, and side-by-side model comparisons. These become your training data.
+
+For A/B testing with variants and groups, see [A/B Evals](/quick-links/ab-testing).
+
+## What's Next?
+
+With your environment deployed:
+
+- **Scale**: Launch thousands of rollouts. Every run generates traces—prompts, tool calls, rewards.
+- **Analyze**: See which evals agents struggle with. Compare models across your entire benchmark.
+- **Train**: Use runs as training data. Fine-tune on successful completions. Run reinforcement learning to optimize for your specific environment.
+
+The loop: deploy → eval at scale → analyze → train → redeploy. Agents get better at *your* environment.
+
+<CardGroup cols={2}>
+<Card title="Integrations" icon="robot" href="/guides/integrations">
+  Connect OpenAI, Anthropic, LangChain, and more.
+</Card>
+
+<Card title="Sandboxing" icon="shield" href="/guides/sandboxing">
+  Turn production services into safe test environments.
+</Card>
+</CardGroup>

@@ -81,8 +81,42 @@ mcp = MCPServer(name='test')
         assert module_name == f"{tmp_path.name}.main"
         assert extra_path == tmp_path.parent
 
-    def test_no_detection_without_mcp(self, tmp_path, monkeypatch):
-        """Test no detection when mcp not defined."""
+    def test_detect_module_from_init_with_environment(self, tmp_path, monkeypatch):
+        """Test detection from __init__.py with Environment."""
+        monkeypatch.chdir(tmp_path)
+
+        init_file = tmp_path / "__init__.py"
+        init_file.write_text("""
+from hud import Environment
+env = Environment(name='test')
+""")
+
+        module_name, extra_path = auto_detect_module()
+
+        assert module_name == tmp_path.name
+        assert extra_path is None
+
+    def test_detect_module_from_main_py_with_environment(self, tmp_path, monkeypatch):
+        """Test detection from main.py with Environment."""
+        monkeypatch.chdir(tmp_path)
+
+        # Need both __init__.py and main.py
+        init_file = tmp_path / "__init__.py"
+        init_file.write_text("")
+
+        main_file = tmp_path / "main.py"
+        main_file.write_text("""
+from hud import Environment
+env = Environment(name='test')
+""")
+
+        module_name, extra_path = auto_detect_module()
+
+        assert module_name == f"{tmp_path.name}.main"
+        assert extra_path == tmp_path.parent
+
+    def test_no_detection_without_mcp_or_env(self, tmp_path, monkeypatch):
+        """Test no detection when neither mcp nor env is defined."""
         monkeypatch.chdir(tmp_path)
 
         init_file = tmp_path / "__init__.py"

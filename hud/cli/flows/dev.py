@@ -143,8 +143,8 @@ def show_dev_ui(
     if is_docker:
         hud_console.dim_info(
             "",
-            "Container restarts on file changes (mounted volumes), "
-            "if changing tools run hud dev again",
+            "Container restarts on file changes in watched folders (-w), "
+            "rebuild with 'hud dev' if changing other files",
         )
     hud_console.info("")
 

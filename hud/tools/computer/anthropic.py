@@ -141,13 +141,13 @@ class AnthropicComputerTool(HudComputerTool):
     async def __call__(
         self,
         action: str = Field(..., description="The action to perform on the computer"),
-        coordinate: list[int] | tuple[int, int] | None = Field(
+        coordinate: list[int] | None = Field(
             None, description="The coordinate to interact with on the computer [x, y]"
         ),
         text: str | None = Field(
             None, description="The text to type on the computer or key to press"
         ),
-        start_coordinate: list[int] | tuple[int, int] | None = Field(
+        start_coordinate: list[int] | None = Field(
             None, description="The starting coordinate for drag actions [x, y]"
         ),
         scroll_direction: str | None = Field(

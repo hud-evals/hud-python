@@ -9,7 +9,7 @@ from hud.cli.utils.interactive import InteractiveMCPTester
 
 
 @pytest.mark.asyncio
-@patch("hud.cli.utils.interactive.MCPClient")
+@patch("hud.clients.MCPClient")
 async def test_connect_and_disconnect(MockClient):
     client = AsyncMock()
     client.initialize.return_value = None

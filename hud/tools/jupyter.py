@@ -1,4 +1,7 @@
-"""Jupyter execution tool."""
+"""Jupyter execution tool.
+
+Requires the [agents] extra: pip install hud-python[agents]
+"""
 
 from __future__ import annotations
 
@@ -7,12 +10,6 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import uuid4
-
-import tornado
-from tornado.escape import json_decode, json_encode, url_escape
-from tornado.httpclient import AsyncHTTPClient, HTTPRequest
-from tornado.ioloop import PeriodicCallback
-from tornado.websocket import websocket_connect
 
 from hud.tools.base import BaseTool
 from hud.tools.types import ContentResult, ToolError
@@ -80,6 +77,15 @@ class JupyterTool(BaseTool):
             kernel_id: (Optional) If set, connect to the existed kernel with kernel_id.
                 If empty, create new kernel
         """
+        # Check tornado is available
+        try:
+            import tornado  # noqa: F401
+        except ImportError as e:
+            raise ImportError(
+                "JupyterTool requires the [agents] extra. "
+                "Install with: pip install hud-python[agents]"
+            ) from e
+
         super().__init__(
             env=None,
             name="jupyter",
@@ -94,12 +100,12 @@ class JupyterTool(BaseTool):
 
         # Kernel state (reuse existing or create new)
         self._kernel_id = kernel_id
-        self._ws = None
+        self._ws: Any = None
         self._initialized = False
 
         # WebSocket heartbeat
         self._heartbeat_interval = 10000  # 10 seconds
-        self._heartbeat_callback = None
+        self._heartbeat_callback: Any = None
 
     async def __call__(self, code: str, execution_timeout: int = 15) -> list[ContentBlock]:
         """Execute Python code in the Jupyter kernel.
@@ -140,6 +146,12 @@ class JupyterTool(BaseTool):
 
     async def _connect(self) -> None:
         """Connect to Jupyter kernel via WebSocket."""
+        import tornado.iostream
+        from tornado.escape import json_decode, json_encode, url_escape
+        from tornado.httpclient import AsyncHTTPClient, HTTPRequest
+        from tornado.ioloop import PeriodicCallback
+        from tornado.websocket import websocket_connect
+
         if self._ws:
             self._ws.close()
             self._ws = None
@@ -177,22 +189,22 @@ class JupyterTool(BaseTool):
         # Setup heartbeat to keep connection alive
         if self._heartbeat_callback:
             self._heartbeat_callback.stop()
-        self._heartbeat_callback = PeriodicCallback(self._send_heartbeat, self._heartbeat_interval)
-        self._heartbeat_callback.start()
 
-    async def _send_heartbeat(self) -> None:
-        """Send heartbeat to maintain WebSocket connection."""
-        if not self._ws:
-            return
-        try:
-            self._ws.ping()
-        except tornado.iostream.StreamClosedError:
+        async def heartbeat() -> None:
+            if not self._ws:
+                return
             try:
-                await self._connect()
-            except ConnectionRefusedError:
-                logger.warning(
-                    "Failed to reconnect to kernel websocket - Is the kernel still running?"
-                )
+                self._ws.ping()
+            except tornado.iostream.StreamClosedError:
+                try:
+                    await self._connect()
+                except ConnectionRefusedError:
+                    logger.warning(
+                        "Failed to reconnect to kernel websocket - Is the kernel still running?"
+                    )
+
+        self._heartbeat_callback = PeriodicCallback(heartbeat, self._heartbeat_interval)
+        self._heartbeat_callback.start()
 
     async def _execute(self, code: str, execution_timeout: int = 15) -> str:
         """Execute code in Jupyter kernel and return output.
@@ -204,11 +216,14 @@ class JupyterTool(BaseTool):
         Returns:
             String output from the kernel
         """
+        from tornado.escape import json_decode, json_encode
+        from tornado.httpclient import AsyncHTTPClient
+
         if not self._ws:
             await self._connect()
 
         msg_id = uuid4().hex
-        self._ws.write_message(  # type: ignore
+        self._ws.write_message(
             json_encode(
                 {
                     "header": {
@@ -233,13 +248,13 @@ class JupyterTool(BaseTool):
             )
         )
 
-        outputs = []
+        outputs: list[str] = []
 
         async def wait_for_messages() -> bool:
             execution_done = False
             while not execution_done:
-                msg = await self._ws.read_message()  # type: ignore
-                msg = json_decode(msg)  # type: ignore
+                msg = await self._ws.read_message()
+                msg = json_decode(msg)
                 msg_type = msg["msg_type"]
                 parent_msg_id = msg["parent_header"].get("msg_id", None)
 
@@ -285,6 +300,8 @@ class JupyterTool(BaseTool):
 
     async def shutdown(self) -> None:
         """Shutdown the kernel connection."""
+        from tornado.httpclient import AsyncHTTPClient
+
         if self._kernel_id:
             client = AsyncHTTPClient()
             try:

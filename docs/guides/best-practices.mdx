@@ -1,0 +1,142 @@
+---
+title: "Best Practices"
+description: "Design effective environments, evals, and grading logic"
+icon: "star"
+---
+
+Building good agent evaluations requires thoughtful design at every layer—the environment, the prompts, and the grading logic. This guide covers patterns that lead to useful, reliable signal.
+
+## Good Environments
+
+A good environment gives agents what they need to succeed—and gives you what you need to evaluate them.
+
+### Observable State
+
+Agents need access to the right information. If they can't see the data they need, they can't complete the task. Design tools that expose useful state:
+
+```python
+# ❌ Bad: Agent can't see what was created
+@env.tool()
+def create_user(name: str) -> str:
+    db.insert("users", name=name)
+    return "User created"
+
+# ✅ Good: Agent gets actionable data back
+@env.tool()
+def create_user(name: str) -> dict:
+    user_id = db.insert("users", name=name)
+    return {"id": user_id, "name": name, "created": True}
+```
+
+For grading, you also need to observe what happened. If the agent creates a database row, you need to query that database. If it uploads a file, you need to read that file. Be cognizant of what you can and cannot observe—only ask agents to do things you can verify.
+
+### Deterministic Setup
+
+Each eval should seed the state it needs. HUD handles container isolation—you handle making sure your scenario sets up the right data before the agent runs.
+
+```python
+# ❌ Bad: Depends on whatever state exists
+@env.scenario("find-user")
+async def find_user(name: str):
+    answer = yield f"Find the user named {name}"
+    yield 1.0 if name in answer else 0.0
+
+# ✅ Good: Seeds known state before eval
+@env.scenario("find-user")
+async def find_user(name: str):
+    await db.clear()
+    await db.insert("users", name=name, email=f"{name}@example.com")
+    
+    answer = yield f"Find the user named {name}"
+    yield 1.0 if name in answer else 0.0
+```
+
+### Isolated Execution
+
+HUD sandboxes each eval—containers don't share state. But if your environment connects to external services, think about stateful vs stateless.
+
+**Stateless services** are fine. Multiple agents can hit the same read-only API without interference.
+
+**Stateful services** need care. If 100 agents all hit the same database endpoint that modifies data, they'll step on each other. Use per-eval instances, transaction isolation, or target different records.
+
+## Good Evals
+
+An eval combines a prompt (the first `yield`) with grading logic (everything after). The prompt tells agents what to do—write short-to-medium length instructions that ask for an unambiguous change you can verify.
+
+### Be Specific
+
+Ambiguous prompts lead to ambiguous grading. Say exactly what you want:
+
+```
+❌ "Update the user settings"
+✅ "Change the email for user alice@example.com to alice.new@example.com"
+```
+
+Real-world example: *"Add a column to the Portfolio snapshot with the 'Phase' of the engagement. C-11X should be 'Phase 2', all else are 'Phase 1'."*
+
+### Only Ask for Testable Things
+
+If you can't observe the result, you can't grade it. Don't ask an agent to "think about" something—ask it to do something you can verify.
+
+```
+❌ "Consider the best approach to optimize the query"
+✅ "Rewrite the query to use an index on the email column"
+```
+
+### Create Variations
+
+Evals are easier to write when you have a specific failure mode in mind. If you've observed agents struggling with something, incorporate that into future evals.
+
+Create different versions with more or less explicit instructions—step-by-step guidance vs. high-level goals. Use [variants](/quick-links/ab-testing) to test these systematically. Variations make it easier to tune difficulty later.
+
+## Good Graders
+
+The grading logic after the first `yield` determines the grade. Fair grading means useful signal.
+
+### Match the Prompt
+
+If the prompt says "create a document with a Japanese car brand", check for any Japanese car brand—not just "Toyota". But don't accept any document either. Exactly as strict as the prompt implies.
+
+```python
+# ❌ Bad: Too strict—only accepts one answer
+@env.scenario("add-car")
+async def add_car():
+    answer = yield "Add a Japanese car brand to the document"
+    yield 1.0 if answer == "Toyota" else 0.0
+
+# ✅ Good: Accepts any valid answer
+@env.scenario("add-car")
+async def add_car():
+    answer = yield "Add a Japanese car brand to the document"
+    japanese_brands = ["toyota", "honda", "nissan", "mazda", "subaru"]
+    yield 1.0 if any(brand in answer.lower() for brand in japanese_brands) else 0.0
+```
+
+### Use Partial Credit
+
+Partial grades help you see where agents fail. Did they add to cart but not checkout? That's useful signal. Break complex grading into sub-checks with weighted grades:
+
+```python
+@env.scenario("checkout")
+async def checkout(product: str):
+    answer = yield f"Add {product} to cart and checkout"
+    
+    score = 0.0
+    if await product_in_cart(product):
+        score += 0.3  # Partial credit for first step
+    if await order_completed(product):
+        score += 0.7  # Most credit for completion
+    yield score
+```
+
+### Sanity Check
+
+At minimum, verify two cases: unchanged state → 0.0, correct completion → 1.0. For grading logic you'll reuse across many evals, write unit tests. Load a known state snapshot, verify the grade matches what you expect.
+
+## Finding the Right Difficulty
+
+A good eval set has range—target 20-30% average success rate. You want high variance: some runs should grade 0.0, others 1.0. If every run grades the same, there's no signal to learn from. Having both positive and negative examples on the same eval is what makes improvement possible.
+
+**Iterate.** Create an eval, test it manually, run it at scale, check the difficulty. If it's too easy or too hard, adjust the prompt or grading. Use your best evals as templates for more.
+
+**Train.** Every eval generates data—prompts, tool calls, grades. Use successful runs for fine-tuning. The loop: eval → analyze → train → eval again.

@@ -1,0 +1,108 @@
+---
+title: "Environments"
+description: "Turn your code into agent-callable tools. Define how agents are evaluated."
+icon: "cube"
+---
+
+An environment is everything an agent can interact with—your APIs, services, databases, wrapped as tools. But it's more than that: the environment also defines how agents are *evaluated* through **scripts**. When you deploy an environment, you're creating a sandbox that agents can learn from at scale.
+
+## Why Environments, Not API Servers?
+
+Your production API is a single live instance with shared state—you can't run 500 tests against it in parallel without causing chaos. Environments spin up fresh for every evaluation: isolated, deterministic, reproducible. Run thousands in parallel, each starting from the exact state you define, each generating training data. An API server is a live system you observe. An environment is a sandbox you control.
+
+## Tools
+
+Start with `hud init` to scaffold an environment—works with existing codebases or from scratch:
+
+```bash
+hud init
+```
+
+Every tool is just a function. Decorate it with `@env.tool()` and agents can call it:
+
+```python
+from hud import Environment
+
+env = Environment("my-env")
+
+@env.tool()
+async def search(query: str) -> str:
+    """Search the knowledge base."""
+    return db.search(query)
+```
+
+Got a FastAPI app? One line:
+
+```python
+env.connect_fastapi(app)
+```
+
+All your routes become tools. Run it:
+
+```python
+async with env() as ctx:
+    tools = await ctx.list_tools()
+    result = await ctx.call_tool("search", query="test")
+```
+
+## Scripts
+
+To evaluate an agent, you need two things: what to tell it, and how to score what it did. Scripts capture both with two `yield` statements:
+
+```python
+@env.scenario("checkout")
+async def checkout_flow(product_name: str):
+    # Yield the prompt, receive the agent's final answer
+    answer = yield f"Add '{product_name}' to cart and complete checkout"
+    
+    # Score based on environment state and/or the answer
+    order_exists = await check_order_status(product_name)
+    yield 1.0 if order_exists else 0.0
+```
+
+The agent runs between the yields. First yield sends the prompt and returns the agent's answer. Second yield checks environment state—database rows, files, API calls—and returns a reward. Scripts live with the environment because only the environment knows how to verify what happened.
+
+## Evals
+
+Call the environment with a scenario name and arguments to create a task:
+
+```python
+task = env("checkout", product_name="Laptop")
+
+async with hud.eval(task, group=4) as ctx:
+    # Connect your agent here. Handle tool calls, run agent loop...
+    response = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": ctx.prompt}],
+        tools=ctx.as_openai_chat_tools()
+    )
+
+    await ctx.submit(response.choices[0].message.content)
+
+print(ctx.reward)
+```
+
+This creates a trace on [hud.ai](https://hud.ai/home). Add [variants](/quick-links/ab-testing) to A/B test across models. To run evals at scale, [deploy your environment](/quick-links/deploy).
+
+## Mock Mode
+
+Testing your agent loop without hitting real services? Mock mode returns fake responses based on tool schemas:
+
+```python
+env.mock()
+env.mock_tool("search", "Mock search results") # Manual override of mock
+
+async with hud.eval(env(), group=4) as ctx:
+    tools = env.as_openai_chat_tools()
+    
+    response = await client.chat.completions.create(
+        model="claude-sonnet-4-5",
+        messages=[{"role": "user", "content": "Search for X"}],
+        tools=tools
+    )
+    
+    # Returns mock value instead of hitting real service
+    result = await env.call_tool(response.choices[0].message.tool_calls[0])
+```
+Your agent code stays the same—just toggle `env.mock()` for local testing.
+

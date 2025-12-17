@@ -6,6 +6,18 @@ from mcp.types import ContentBlock, ImageContent, TextContent
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class Coordinate(BaseModel):
+    """A coordinate point with x and y values.
+
+    Used for path-based actions like drag operations.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    x: int = Field(..., description="X coordinate")
+    y: int = Field(..., description="Y coordinate")
+
+
 class EvaluationResult(BaseModel):
     """Standard evaluation result format."""
 

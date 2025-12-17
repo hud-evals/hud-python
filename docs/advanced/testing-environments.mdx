@@ -1,0 +1,105 @@
+---
+title: "Testing Environments"
+description: "Test scenarios, tools, and environment logic locally"
+icon: "flask-vial"
+---
+
+Before deploying, test locally. See [Sandboxing](/guides/sandboxing) for Docker vs no-Docker patterns.
+
+## Local Testing
+
+| Environment | `local_test.py` |
+|-------------|-----------------|
+| No Docker | `from env import env` |
+| Docker | `env.connect_url("http://localhost:8765/mcp")` |
+
+Both use the same API after setup:
+
+```python
+async with env:
+    tools = env.as_tools()                              # List available tools
+    result = await env.call_tool("my_tool", arg="val")  # Call a tool
+```
+
+## Testing Scenarios Directly
+
+Scenarios are async generators. `hud.eval()` drives them automatically, but you can test the logic directly—this is exactly what runs at the start and end of `hud.eval()`:
+
+```python
+async def checkout(user_id: str, amount: int = 100):
+    # Setup + prompt (first yield) — runs at hud.eval() start
+    answer = yield f"Complete checkout for {user_id}, ${amount}"
+    
+    # Evaluation (second yield) — runs after agent submits
+    yield 1.0 if "success" in answer.lower() else 0.0
+
+async def test():
+    gen = checkout("alice", 50)
+    prompt = await anext(gen)           # What hud.eval() does at start
+    reward = await gen.asend("Success!") # What hud.eval() does after submit
+    assert reward == 1.0
+```
+
+If your scenario tests pass, `hud.eval()` will behave identically.
+
+## Mocking
+
+`env.mock()` intercepts at the tool layer—agents only see tools:
+
+```python
+env.mock()  # All tools return fake responses
+env.mock_tool("send_email", {"status": "sent"})
+
+# Check mock state
+assert env.is_mock == True
+```
+
+## Hot-Reload
+
+For Docker environments, `hud dev -w path` reloads Python on save:
+
+```bash
+hud dev -w scenarios -w tools --port 8765
+```
+
+System services (postgres, VNC, browsers) persist across reloads.
+
+## Debugging Build Failures
+
+`hud build` runs the exact same pipeline as **New → Environment** on [hud.ai](https://hud.ai)—so if it passes locally, it'll work in production. If the build fails or the container crashes on startup, use `hud debug` to run a 5-phase compliance test:
+
+```bash
+hud debug my-env:latest
+```
+
+Output shows exactly which phase failed:
+```
+✓ Phase 1: Docker image exists
+✓ Phase 2: MCP server responds to initialize
+✗ Phase 3: Tool discovery failed
+  → Error: Connection refused on port 8005
+  → Hint: Backend service may not be starting
+```
+
+You can also debug a directory (builds first) or stop at a specific phase:
+
+```bash
+hud debug .                    # Build and debug current directory
+hud debug . --max-phase 3      # Stop after phase 3
+hud debug --config mcp.json    # Debug from config file
+```
+
+## Useful Environment Properties
+
+```python
+# Check parallelization (for running multiple evals)
+env.is_parallelizable  # True if all connections are remote
+
+# List what's connected
+env.connections        # Dict of connection names → connectors
+env.is_connected       # True if in async context
+
+# Resources and prompts (beyond tools)
+await env.list_resources()  # MCP resources
+await env.list_prompts()    # MCP prompts
+```

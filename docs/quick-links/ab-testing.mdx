@@ -1,0 +1,61 @@
+---
+title: "A/B Evals"
+description: "Find out which model actually performs best for your use case."
+icon: "flask-vial"
+---
+
+LLM outputs vary from run to run—ask the same question twice and you might get different quality answers. To find out which model actually performs best, you need to test each one multiple times and look at the spread. **Variants** let you test different models side-by-side. **Groups** repeat each test so you see the full distribution, not just one lucky or unlucky result.
+
+## Variants
+
+Pass the configurations you want to test:
+
+```python
+import hud
+
+async with hud.eval(variants={"model": ["gpt-4o", "claude-sonnet-4-5"]}) as ctx:
+    response = await client.chat.completions.create(
+        model=ctx.variants["model"],
+        messages=[{"role": "user", "content": "What is 2+2?"}]
+    )
+    ctx.reward = 1.0 if "4" in response.choices[0].message.content else 0.0
+
+for result in ctx.results:
+    print(f"{result.variants}: reward={result.reward}")
+```
+
+## Groups
+
+Run each variant multiple times to get a distribution:
+
+```python
+async with hud.eval(
+    variants={"model": ["gpt-4o", "claude-sonnet-4-5"]},
+    group=5  # 10 runs total: 2 models × 5 each
+) as ctx:
+    ...
+```
+
+The `hud.eval` manager will parallelize your evals automatically and show the distribution across all your runs on [hud.ai](https://hud.ai/home).
+
+## Remote Rollouts
+
+Once you've [deployed an environment](/quick-links/deploy#deploying-environments) and created evals, run them by name:
+
+```python
+async with hud.eval("my-org/checkout-laptop", variants={"model": ["gpt-4o", "claude"]}) as ctx:
+    response = await client.chat.completions.create(
+        model=ctx.variants["model"],
+        messages=[{"role": "user", "content": ctx.prompt}]
+    )
+```
+
+The platform loads everything—environment, prompt, evaluation logic, comparisons across models. You just provide the agent.
+
+Or via CLI:
+
+```bash
+hud eval my-org/checkout-laptop --model gpt-4o --group-size 5
+```
+
+Or run directly on the platform—see [Running at Scale](/quick-links/deploy#running-at-scale).

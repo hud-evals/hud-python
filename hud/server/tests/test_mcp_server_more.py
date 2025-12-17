@@ -142,7 +142,7 @@ async def test_last_initialize_handler_wins_and_ctx_shape_exists() -> None:
 
     try:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
+        c = MCPClient(mcp_config=cfg, verbose=False)
         await c.initialize()
 
         # Call a tool to ensure init didn't break anything
