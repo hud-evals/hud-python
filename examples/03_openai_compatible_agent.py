@@ -119,7 +119,7 @@ async def run_example(mode: Literal["text", "browser"], target: int) -> None:
     )
 
     print("🎮 Starting 2048 game with OpenAI-compatible agent...")
-    print(f"🤖 Model: {agent.config.checkpoint_name}")
+    print(f"🤖 Model: {agent.config.model}")
     print(f"🧩 Mode: {mode}")
     print("=" * 50)
 

@@ -11,6 +11,7 @@ from openai import AsyncOpenAI
 from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
 
 from hud.agents.operator import OperatorAgent
+from hud.environment.router import ToolRouter
 from hud.eval.context import EvalContext
 from hud.types import MCPToolCall, MCPToolResult
 
@@ -26,6 +27,7 @@ class MockEvalContext(EvalContext):
         self._tools = tools or []
         self._submitted: str | None = None
         self.reward: float | None = None
+        self._router = ToolRouter()
 
     async def list_tools(self) -> list[types.Tool]:
         return self._tools

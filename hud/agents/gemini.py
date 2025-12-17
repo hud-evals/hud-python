@@ -128,7 +128,7 @@ class GeminiAgent(MCPAgent):
 
         # Use async API to avoid blocking the event loop
         response = await self.gemini_client.aio.models.generate_content(
-            model=self.config.checkpoint_name,
+            model=self.config.model,
             contents=cast("Any", messages),
             config=generate_config,
         )

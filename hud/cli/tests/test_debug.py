@@ -286,7 +286,9 @@ class TestDebugMCPStdio:
             mock_client.call_tool = AsyncMock()
             mock_client.shutdown = AsyncMock()
 
-            with patch("hud.cli.debug.time.time", side_effect=[0, 5, 5, 5, 5]):  # Start at 0, then 5 for the rest
+            with patch(
+                "hud.cli.debug.time.time", side_effect=[0, 5, 5, 5, 5]
+            ):  # Start at 0, then 5 for the rest
                 phases = await debug_mcp_stdio(["test-cmd"], logger, max_phase=4)
                 assert phases == 4
                 output = logger.get_output()

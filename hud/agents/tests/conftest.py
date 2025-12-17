@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from mcp import types
 
+from hud.environment.router import ToolRouter
 from hud.eval.context import EvalContext
 from hud.types import MCPToolCall, MCPToolResult
 
@@ -30,6 +31,7 @@ class MockEvalContext(EvalContext):
         self.reward: float | None = None
         self._call_tool_handler = call_tool_handler
         self.tool_calls: list[tuple[str, dict[str, Any]]] = []
+        self._router = ToolRouter()
 
     async def list_tools(self) -> list[types.Tool]:
         return self._tools

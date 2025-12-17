@@ -236,4 +236,5 @@ class TestRunDatasetExtended:
                 tasks,
                 group=3,
                 max_concurrent=10,
+                quiet=True,
             )

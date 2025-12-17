@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from mcp import types
 
+from hud.environment.router import ToolRouter
 from hud.eval.context import EvalContext
 from hud.types import AgentType, MCPToolResult, Trace
 
@@ -25,6 +26,7 @@ class MockEvalContext(EvalContext):
         self._submitted: str | None = None
         self.reward: float | None = None
         self.results: list[EvalContext] = []
+        self._router = ToolRouter()
 
     async def list_tools(self) -> list[types.Tool]:
         return self._tools

@@ -9,6 +9,7 @@ from mcp import types
 
 from hud.agents import MCPAgent
 from hud.agents.base import BaseCreateParams
+from hud.environment.router import ToolRouter
 from hud.eval.context import EvalContext
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 
@@ -38,6 +39,7 @@ class MockEvalContext(EvalContext):
         self._submitted: str | None = None
         self.reward: float | None = None
         self._tool_calls: list[tuple[str, dict[str, Any]]] = []
+        self._router = ToolRouter()
 
     async def list_tools(self) -> list[types.Tool]:
         return self._tools

@@ -8,6 +8,7 @@ import mcp.types as types
 import pytest
 
 from hud.agents.base import BaseCreateParams, MCPAgent, find_content, find_reward, text_to_blocks
+from hud.environment.router import ToolRouter
 from hud.eval.context import EvalContext
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 
@@ -34,6 +35,7 @@ class MockEvalContext(EvalContext):
         self._submitted: str | None = None
         self.reward: float | None = None
         self._call_tool_handler: Any = None
+        self._router = ToolRouter()
 
     def set_call_tool_handler(self, handler: Any) -> None:
         self._call_tool_handler = handler

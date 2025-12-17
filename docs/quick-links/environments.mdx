@@ -77,7 +77,7 @@ async with hud.eval(task, group=4) as ctx:
         tools=ctx.as_openai_chat_tools()
     )
 
-    ctx.submit(response.choices[0].message.content)
+    await ctx.submit(response.choices[0].message.content)
 
 print(ctx.reward)
 ```
