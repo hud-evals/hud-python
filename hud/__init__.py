@@ -5,28 +5,36 @@ tools for building, evaluating, and training AI agents.
 
 from __future__ import annotations
 
-from .telemetry import (
-    Trace,
-    async_job,
-    async_trace,
-    clear_trace,
-    create_job,
-    get_trace,
-    instrument,
-    job,
-    trace,
-)
+import warnings
+
+# Apply patches to third-party libraries early, before other imports
+from . import patches as _patches  # noqa: F401
+from .environment import Environment
+from .eval import EvalContext
+from .eval import run_eval as eval
+from .telemetry.instrument import instrument
+
+
+def trace(*args: object, **kwargs: object) -> EvalContext:
+    """Deprecated: Use hud.eval() instead.
+
+    .. deprecated:: 0.5.0
+        hud.trace() is deprecated. Use hud.eval() or env.eval() instead.
+    """
+    warnings.warn(
+        "hud.trace() is deprecated. Use hud.eval() or env.eval() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return eval(*args, **kwargs)  # type: ignore[arg-type]
+
 
 __all__ = [
-    "Trace",
-    "async_job",
-    "async_trace",
-    "clear_trace",
-    "create_job",
-    "get_trace",
+    "Environment",
+    "EvalContext",
+    "eval",
     "instrument",
-    "job",
-    "trace",
+    "trace",  # Deprecated alias for eval
 ]
 
 try:

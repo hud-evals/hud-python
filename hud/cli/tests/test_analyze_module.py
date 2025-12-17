@@ -29,7 +29,7 @@ def test_parse_docker_command():
 
 
 @pytest.mark.asyncio
-@patch("hud.cli.analyze.MCPClient")
+@patch("hud.clients.fastmcp.FastMCPHUDClient")
 @patch("hud.cli.analyze.console")
 async def test_analyze_environment_success_json(mock_console, MockClient):
     client = AsyncMock()
@@ -46,7 +46,7 @@ async def test_analyze_environment_success_json(mock_console, MockClient):
 
 
 @pytest.mark.asyncio
-@patch("hud.cli.analyze.MCPClient")
+@patch("hud.clients.fastmcp.FastMCPHUDClient")
 @patch("hud.cli.analyze.console")
 async def test_analyze_environment_failure(mock_console, MockClient):
     client = AsyncMock()
@@ -93,7 +93,7 @@ def test_display_markdown_both_paths(capsys):
     assert "MCP Environment Analysis" in captured.out
 
 
-@patch("hud.cli.analyze.MCPClient")
+@patch("hud.clients.fastmcp.FastMCPHUDClient")
 async def test_analyze_environment_from_config(MockClient, tmp_path: Path):
     client = AsyncMock()
     client.initialize.return_value = None
@@ -107,7 +107,7 @@ async def test_analyze_environment_from_config(MockClient, tmp_path: Path):
     assert client.initialize.awaited and client.shutdown.awaited
 
 
-@patch("hud.cli.analyze.MCPClient")
+@patch("hud.clients.fastmcp.FastMCPHUDClient")
 async def test_analyze_environment_from_mcp_config(MockClient):
     client = AsyncMock()
     client.initialize.return_value = None

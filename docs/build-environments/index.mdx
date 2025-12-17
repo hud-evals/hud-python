@@ -66,9 +66,6 @@ hud eval tasks.json
 
 # Deploy to registry
 hud push
-
-# Train agents on your tasks
-hud rl tasks.json
 ```
 
 ---
@@ -83,7 +80,6 @@ hud rl tasks.json
 | Troubleshoot | `hud debug my-env:dev` |
 | Build image | `hud build` |
 | Push to registry | `hud push` |
-| RL training | `hud rl tasks.json` |
 
 ---
 
@@ -93,3 +89,20 @@ hud rl tasks.json
 * **CLI reference**: [CLI Overview](/reference/cli/overview)
 
 Have fun – and remember: *stderr for logs, stdout for MCP!*
+
+---
+
+## Available Environments
+
+Browse ready-to-use environments and templates at **[hud.ai/environments](https://hud.ai/environments)**.
+
+| Environment | Description |
+|-------------|-------------|
+| `hud-blank` | Minimal starter template |
+| `hud-browser` | Browser automation with Playwright |
+| `hud-remote-browser` | Cloud browser providers (Steel, Anchor, etc.) |
+| `hud-deepresearch` | Deep research with web search |
+| `hud-rubrics` | LLM-as-judge evaluations |
+| `coding-template` | Full coding env with VNC, Postgres, Redis |
+
+Each environment is available as a GitHub template you can fork and customize.

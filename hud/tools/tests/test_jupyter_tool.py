@@ -5,6 +5,11 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+# Import tornado modules before tests to avoid forward reference issues with mocking
+import tornado.httpclient
+import tornado.ioloop
+import tornado.websocket  # noqa: F401
 from mcp.types import TextContent
 
 from hud.tools.jupyter import JupyterTool, strip_ansi
@@ -82,9 +87,9 @@ class TestJupyterTool:
         mock_client = MagicMock(fetch=AsyncMock(return_value=mock_response))
 
         with (
-            patch("hud.tools.jupyter.AsyncHTTPClient", return_value=mock_client),
-            patch("hud.tools.jupyter.websocket_connect", new_callable=AsyncMock),
-            patch("hud.tools.jupyter.PeriodicCallback"),
+            patch("tornado.httpclient.AsyncHTTPClient", return_value=mock_client),
+            patch("tornado.websocket.websocket_connect", new_callable=AsyncMock),
+            patch("tornado.ioloop.PeriodicCallback"),
         ):
             await tool._connect()
             assert tool._kernel_id == "new-kernel-123"
@@ -94,9 +99,9 @@ class TestJupyterTool:
         """Test connecting to an existing kernel."""
         tool = JupyterTool(kernel_id="existing-kernel-456")
         with (
-            patch("hud.tools.jupyter.AsyncHTTPClient"),
-            patch("hud.tools.jupyter.websocket_connect", new_callable=AsyncMock),
-            patch("hud.tools.jupyter.PeriodicCallback"),
+            patch("tornado.httpclient.AsyncHTTPClient"),
+            patch("tornado.websocket.websocket_connect", new_callable=AsyncMock),
+            patch("tornado.ioloop.PeriodicCallback"),
         ):
             await tool._connect()
             assert tool._kernel_id == "existing-kernel-456"
@@ -150,7 +155,7 @@ class TestJupyterTool:
 
         with (
             patch("hud.tools.jupyter.uuid4") as mock_uuid,
-            patch("hud.tools.jupyter.AsyncHTTPClient", return_value=mock_client),
+            patch("tornado.httpclient.AsyncHTTPClient", return_value=mock_client),
         ):
             mock_uuid.return_value.hex = "test-msg"
             result = await tool._execute("while True: pass", execution_timeout=1)
@@ -164,7 +169,7 @@ class TestJupyterTool:
         tool._ws = MagicMock()
         tool._heartbeat_callback = MagicMock()
 
-        with patch("hud.tools.jupyter.AsyncHTTPClient"):
+        with patch("tornado.httpclient.AsyncHTTPClient"):
             await tool.shutdown()
             assert tool._kernel_id == ""
             assert tool._ws is None

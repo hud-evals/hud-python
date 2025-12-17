@@ -1,0 +1,198 @@
+---
+title: "Evals"
+description: "SDK reference for hud.eval() - the unified evaluation context manager"
+icon: "flask-vial"
+---
+
+`hud.eval()` is the primary way to run evaluations. It creates an `EvalContext` with telemetry, handles parallel execution, and integrates with the HUD platform.
+
+## hud.eval()
+
+```python
+import hud
+
+async with hud.eval() as ctx:
+    # ctx is an EvalContext (extends Environment)
+    response = await client.chat.completions.create(...)
+    ctx.reward = 1.0
+```
+
+### Parameters
+
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `source` | `Task \| list[Task] \| str \| None` | Task objects from `env()`, task slugs, or None | `None` |
+| `variants` | `dict[str, Any] \| None` | A/B test configuration (lists expand to combinations) | `None` |
+| `group` | `int` | Runs per variant for statistical significance | `1` |
+| `group_ids` | `list[str] \| None` | Custom group IDs for parallel runs | `None` |
+| `job_id` | `str \| None` | Job ID to link traces to | `None` |
+| `api_key` | `str \| None` | API key for backend calls | `None` |
+| `max_concurrent` | `int \| None` | Maximum concurrent evaluations | `None` |
+| `trace` | `bool` | Send telemetry to backend | `True` |
+| `quiet` | `bool` | Suppress console output | `False` |
+
+### Source Types
+
+The `source` parameter accepts:
+
+```python
+# 1. Direct environment entry (recommended)
+env = Environment("my-env")
+async with env("checkout", product="laptop") as ctx:
+    await agent.run(ctx.prompt)
+
+# 2. Blank eval - manual setup and reward
+async with hud.eval() as ctx:
+    ctx.reward = compute_reward()
+
+# 3. Task slug (loads from platform)
+async with hud.eval("browser-task") as ctx:
+    await agent.run(ctx)
+```
+
+### Variants
+
+Test multiple configurations in parallel:
+
+```python
+async with hud.eval(
+    eval,
+    variants={"model": ["gpt-4o", "claude-sonnet-4-5"]},
+) as ctx:
+    model = ctx.variants["model"]  # Current variant
+    response = await client.chat.completions.create(model=model, ...)
+```
+
+Lists expand to all combinations:
+
+```python
+variants = {
+    "model": ["gpt-4o", "claude"],
+    "temperature": [0.0, 0.7],
+}
+# Creates 4 combinations: gpt-4o+0.0, gpt-4o+0.7, claude+0.0, claude+0.7
+```
+
+### Groups
+
+Run each variant multiple times for statistical significance:
+
+```python
+async with hud.eval(eval, variants={"model": ["gpt-4o"]}, group=5) as ctx:
+    # Runs 5 times - see the distribution of results
+    ...
+```
+
+Total runs = `len(evals) × len(variant_combinations) × group`
+
+### Concurrency Control
+
+```python
+async with hud.eval(
+    evals,
+    max_concurrent=10,  # Max 10 parallel evaluations
+) as ctx:
+    ...
+```
+
+## EvalContext
+
+`EvalContext` extends `Environment` with evaluation tracking.
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `trace_id` | `str` | Unique trace identifier |
+| `eval_name` | `str` | Evaluation name |
+| `prompt` | `str \| None` | Task prompt (from scenario or task) |
+| `variants` | `dict[str, Any]` | Current variant assignment |
+| `reward` | `float \| None` | Evaluation reward (settable) |
+| `answer` | `str \| None` | Submitted answer |
+| `error` | `BaseException \| None` | Error if failed |
+| `results` | `list[EvalContext]` | Results from parallel runs |
+| `headers` | `dict[str, str]` | Trace headers for HTTP requests |
+| `job_id` | `str \| None` | Parent job ID |
+| `group_id` | `str \| None` | Group ID for parallel runs |
+| `index` | `int` | Index in parallel execution |
+
+### Methods
+
+All `Environment` methods are available, plus:
+
+```python
+# Submit answer (passes to scenario for evaluation)
+await ctx.submit(answer)
+
+# Set reward directly
+ctx.reward = 1.0
+
+# Access tools in provider formats
+tools = ctx.as_openai_chat_tools()
+
+# Call tools
+result = await ctx.call_tool("my_tool", arg="value")
+```
+
+### Headers for Telemetry
+
+Inside an eval context, trace headers are automatically injected into HTTP requests:
+
+```python
+async with hud.eval() as ctx:
+    # Requests to HUD services include Trace-Id automatically
+    response = await client.chat.completions.create(...)
+    
+    # Manual access
+    print(ctx.headers)  # {"Trace-Id": "..."}
+```
+
+## Working with Environments
+
+The recommended pattern is to use `async with env(...)` directly:
+
+```python
+from hud import Environment
+
+env = Environment("my-env")
+
+@env.tool()
+def count_letter(text: str, letter: str) -> int:
+    return text.lower().count(letter.lower())
+
+@env.scenario("count")
+async def count_scenario(sentence: str, letter: str):
+    answer = yield f"How many '{letter}' in '{sentence}'?"
+    correct = str(sentence.lower().count(letter.lower()))
+    yield correct in answer
+
+# Run with variants
+async with env("count", sentence="Strawberry", letter="r", variants={"model": ["gpt-4o", "claude"]}) as ctx:
+    response = await client.chat.completions.create(
+        model=ctx.variants["model"],
+        messages=[{"role": "user", "content": ctx.prompt}],
+        tools=ctx.as_openai_chat_tools(),
+    )
+    await ctx.submit(response.choices[0].message.content or "")
+```
+
+## Results
+
+After parallel runs complete, access results on the context:
+
+```python
+async with env("count", sentence="Strawberry", letter="r", variants={"model": ["gpt-4o", "claude"]}, group=3) as ctx:
+    ...
+
+# ctx.results contains all individual EvalContexts
+for result in ctx.results:
+    print(f"{result.variants}: reward={result.reward}, answer={result.answer}")
+```
+
+## See Also
+
+- [Environments](/reference/environments) - Environment class reference
+- [A/B Evals](/quick-links/ab-testing) - Variants and groups guide
+- [Deploy](/quick-links/deploy) - Running evals at scale
+- [`hud eval` CLI](/reference/cli/eval) - Command-line interface
+

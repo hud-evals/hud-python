@@ -11,6 +11,7 @@ Key features:
 
 import asyncio
 import os
+import sys
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -81,15 +82,21 @@ class _BashSession:
             await asyncio.sleep(0)
             return
 
-        def demote() -> None:
-            # This only runs in the child process
-            os.setsid()
-            os.setgid(1000)
-            os.setuid(1000)
+        # preexec_fn and user demotion only available on Unix
+        preexec_fn = None
+        if sys.platform != "win32":
+
+            def demote() -> None:
+                # This only runs in the child process (Unix only)
+                os.setsid()  # type: ignore[attr-defined]
+                os.setgid(1000)  # type: ignore[attr-defined]
+                os.setuid(1000)  # type: ignore[attr-defined]
+
+            preexec_fn = demote
 
         self._process = await asyncio.create_subprocess_shell(  # noqa: S604
             self.command,
-            preexec_fn=demote,
+            preexec_fn=preexec_fn,
             shell=True,
             bufsize=0,
             stdin=asyncio.subprocess.PIPE,

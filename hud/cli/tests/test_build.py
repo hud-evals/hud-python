@@ -206,7 +206,7 @@ RUN pip install fastmcp
 class TestAnalyzeMcpEnvironment:
     """Test analyzing MCP environment."""
 
-    @mock.patch("hud.cli.build.MCPClient")
+    @mock.patch("hud.clients.fastmcp.FastMCPHUDClient")
     async def test_analyze_success(self, mock_client_class):
         """Test successful environment analysis."""
         # Setup mock client
@@ -240,7 +240,7 @@ class TestAnalyzeMcpEnvironment:
         assert result["tools"][0]["name"] == "test_tool"
         assert "initializeMs" in result
 
-    @mock.patch("hud.cli.build.MCPClient")
+    @mock.patch("hud.clients.fastmcp.FastMCPHUDClient")
     async def test_analyze_failure(self, mock_client_class):
         """Test failed environment analysis."""
         # Setup mock client to fail
@@ -253,7 +253,7 @@ class TestAnalyzeMcpEnvironment:
         with pytest.raises(HudException, match="Connection failed"):
             await analyze_mcp_environment("test:latest")
 
-    @mock.patch("hud.cli.build.MCPClient")
+    @mock.patch("hud.clients.fastmcp.FastMCPHUDClient")
     async def test_analyze_verbose_mode(self, mock_client_class):
         """Test analysis in verbose mode."""
         mock_client = mock.AsyncMock()
@@ -403,6 +403,9 @@ ENV API_KEY
         with open(lock_file) as f:
             lock_data = yaml.safe_load(f)
 
+        # Lock file format version
+        assert lock_data["version"] == "1.3"
+
         assert lock_data["images"]["full"] == "test-env:0.1.0@sha256:abc123"
         assert lock_data["images"]["local"] == "test-env:0.1.0"
         assert lock_data["build"]["version"] == "0.1.0"
@@ -472,6 +475,7 @@ FROM python:3.11
         lock_file = env_dir / "hud.lock.yaml"
         with open(lock_file) as f:
             data = yaml.safe_load(f)
+        assert data["version"] == "1.3"
         assert data["environment"]["internalToolCount"] == 2
         assert data["tools"][0]["name"] == "setup"
         assert data["tools"][0]["internalTools"] == ["board", "seed"]

@@ -6,6 +6,7 @@ through the existing :class:`hud.agent.MCPAgent` scaffolding.
 
 Key points:
 - Stateless, no special server-side conversation state is assumed.
+- Defaults to HUD inference gateway (inference.hud.ai) when HUD_API_KEY is set
 - Accepts an :class:`openai.AsyncOpenAI` client, caller can supply their own
   base_url / api_key (e.g. llama.cpp, together.ai, …)
 - All HUD features (step_count, OTel spans, tool filtering, screenshots, …)
@@ -23,7 +24,7 @@ import mcp.types as types
 from openai import AsyncOpenAI
 from pydantic import ConfigDict, Field
 
-from hud import instrument
+from hud.settings import settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
@@ -43,7 +44,7 @@ class OpenAIChatConfig(BaseAgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "OpenAI Chat"
-    checkpoint_name: str = "gpt-5-mini"
+    model: str = "gpt-5-mini"
     openai_client: AsyncOpenAI | None = None
     api_key: str | None = None
     base_url: str | None = None
@@ -73,10 +74,16 @@ class OpenAIChatAgent(MCPAgent):
             self.oai = self.config.openai_client
         elif self.config.api_key is not None or self.config.base_url is not None:
             self.oai = AsyncOpenAI(api_key=self.config.api_key, base_url=self.config.base_url)
+        elif settings.api_key:
+            # Default to HUD inference gateway
+            self.oai = AsyncOpenAI(
+                api_key=settings.api_key,
+                base_url=settings.hud_gateway_url,
+            )
         else:
             raise ValueError(
-                "Either openai_client or api_key must be provided. "
-                "Set OPENAI_API_KEY environment variable or pass api_key explicitly."
+                "No API key found. Set HUD_API_KEY for HUD gateway, "
+                "or provide api_key/base_url/openai_client explicitly."
             )
 
         self.completion_kwargs = dict(self.config.completion_kwargs)
@@ -97,14 +104,14 @@ class OpenAIChatAgent(MCPAgent):
             arguments=args,
         )
 
-    async def get_system_messages(self) -> list[Any]:
+    async def get_system_messages(self) -> list[dict[str, Any]]:
         """Get system messages for OpenAI."""
         if self.system_prompt is not None:
             return [{"role": "system", "content": self.system_prompt}]
         else:
             return []
 
-    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
+    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[dict[str, Any]]:
         """Format blocks for OpenAI."""
         content = []
         for block in blocks:
@@ -213,18 +220,13 @@ class OpenAIChatAgent(MCPAgent):
             raise ValueError("openai_client is required for OpenAIChatAgent")
         # default transport = OpenAI SDK
         return await self.oai.chat.completions.create(
-            model=self.config.checkpoint_name,
+            model=self.config.model,
             messages=messages,
             tools=tools,  # type: ignore ready ChatCompletionToolParam-shaped
             **extra,
         )  # type: ignore
 
-    @instrument(
-        span_type="agent",
-        record_args=False,
-        record_result=True,
-    )
-    async def get_response(self, messages: list[Any]) -> AgentResponse:
+    async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
         """Send chat request to OpenAI and convert the response."""
 
         # Convert MCP tool schemas to OpenAI format
@@ -297,7 +299,7 @@ class OpenAIChatAgent(MCPAgent):
         self,
         tool_calls: list[MCPToolCall],
         tool_results: list[MCPToolResult],
-    ) -> list[Any]:
+    ) -> list[dict[str, Any]]:
         """Render MCP tool results as OpenAI messages.
 
         Note: OpenAI tool messages only support string content.

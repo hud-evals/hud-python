@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from mcp.types import ImageContent, TextContent
 
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Task, Trace, TraceStep
+from hud.types import AgentResponse, LegacyTask, MCPToolCall, MCPToolResult, Trace, TraceStep
 
 
 def test_task_with_json_strings():
-    """Test Task with JSON strings for config fields."""
-    task = Task(
+    """Test LegacyTask with JSON strings for config fields."""
+    task = LegacyTask(
         prompt="test",
         mcp_config='{"test": "config"}',  # type: ignore
         metadata='{"key": "value"}',  # type: ignore
@@ -23,19 +23,19 @@ def test_task_with_json_strings():
 
 
 def test_task_json_parse_error():
-    """Test Task raises error on invalid JSON."""
+    """Test LegacyTask raises error on invalid JSON."""
     from hud.shared.exceptions import HudConfigError
 
     with pytest.raises(HudConfigError, match="Invalid JSON string"):
-        Task(prompt="test", mcp_config="{invalid json}")  # type: ignore
+        LegacyTask(prompt="test", mcp_config="{invalid json}")  # type: ignore
 
 
 def test_task_agent_config_rejects_extra_fields():
-    """Test Task agent_config rejects unknown fields."""
+    """Test LegacyTask agent_config rejects unknown fields."""
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        Task(
+        LegacyTask(
             prompt="test",
             mcp_config={},
             agent_config={"model": "test", "unknown_field": "value"},  # type: ignore
@@ -43,8 +43,8 @@ def test_task_agent_config_rejects_extra_fields():
 
 
 def test_task_setup_tool_from_json_string():
-    """Test Task converts JSON string to tool call."""
-    task = Task(
+    """Test LegacyTask converts JSON string to tool call."""
+    task = LegacyTask(
         prompt="test",
         mcp_config={},
         setup_tool='{"name": "test_tool", "arguments": {"x": 1}}',  # type: ignore
@@ -54,16 +54,16 @@ def test_task_setup_tool_from_json_string():
 
 
 def test_task_setup_tool_json_error():
-    """Test Task raises error on invalid tool JSON."""
+    """Test LegacyTask raises error on invalid tool JSON."""
     from hud.shared.exceptions import HudConfigError
 
     with pytest.raises(HudConfigError, match="Invalid JSON string"):
-        Task(prompt="test", mcp_config={}, setup_tool="{invalid}")  # type: ignore
+        LegacyTask(prompt="test", mcp_config={}, setup_tool="{invalid}")  # type: ignore
 
 
 def test_task_setup_tool_from_list():
-    """Test Task converts list of dicts to list of tool calls."""
-    task = Task(
+    """Test LegacyTask converts list of dicts to list of tool calls."""
+    task = LegacyTask(
         prompt="test",
         mcp_config={},
         setup_tool=[
@@ -77,9 +77,9 @@ def test_task_setup_tool_from_list():
 
 
 def test_task_env_var_substitution():
-    """Test Task resolves environment variables."""
+    """Test LegacyTask resolves environment variables."""
     with patch.dict("os.environ", {"TEST_VAR": "test_value"}):
-        task = Task(
+        task = LegacyTask(
             prompt="test",
             mcp_config={"url": "${TEST_VAR}"},
         )
@@ -87,9 +87,9 @@ def test_task_env_var_substitution():
 
 
 def test_task_env_var_nested():
-    """Test Task resolves env vars in nested structures."""
+    """Test LegacyTask resolves env vars in nested structures."""
     with patch.dict("os.environ", {"NESTED_VAR": "nested_value"}):
-        task = Task(
+        task = LegacyTask(
             prompt="test",
             mcp_config={"level1": {"level2": {"url": "${NESTED_VAR}"}}},
         )
@@ -97,9 +97,9 @@ def test_task_env_var_nested():
 
 
 def test_task_env_var_in_list():
-    """Test Task resolves env vars in lists."""
+    """Test LegacyTask resolves env vars in lists."""
     with patch.dict("os.environ", {"LIST_VAR": "list_value"}):
-        task = Task(
+        task = LegacyTask(
             prompt="test",
             mcp_config={"items": ["${LIST_VAR}", "static"]},
         )
@@ -249,45 +249,3 @@ def test_trace_num_messages():
     """Test Trace num_messages property."""
     trace = Trace(messages=[{"role": "user"}, {"role": "assistant"}])
     assert trace.num_messages == 2
-
-
-def test_trace_populate_from_context():
-    """Test Trace.populate_from_context with no context."""
-    trace = Trace()
-    # Should not raise when no context
-    trace.populate_from_context()
-    assert len(trace.trace) == 0
-
-
-def test_trace_populate_from_context_with_context():
-    """Test Trace.populate_from_context with active context."""
-    with (
-        patch("hud.otel.context.get_current_task_run_id") as mock_get_id,
-        patch("hud.telemetry.replay.get_trace") as mock_get_trace,
-    ):
-        mock_get_id.return_value = "test_run_id"
-        mock_trace = MagicMock()
-        mock_trace.trace = [TraceStep(category="mcp")]
-        mock_get_trace.return_value = mock_trace
-
-        trace = Trace()
-        trace.populate_from_context()
-
-        assert len(trace.trace) == 1
-        mock_get_id.assert_called_once()
-        mock_get_trace.assert_called_once_with("test_run_id")
-
-
-def test_trace_populate_from_context_no_trace():
-    """Test Trace.populate_from_context when get_trace returns None."""
-    with (
-        patch("hud.otel.context.get_current_task_run_id") as mock_get_id,
-        patch("hud.telemetry.replay.get_trace") as mock_get_trace,
-    ):
-        mock_get_id.return_value = "test_run_id"
-        mock_get_trace.return_value = None
-
-        trace = Trace()
-        trace.populate_from_context()
-
-        assert len(trace.trace) == 0

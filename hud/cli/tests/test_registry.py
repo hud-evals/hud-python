@@ -189,7 +189,7 @@ class TestLoadFromRegistry:
             digest_dir = registry_dir / "abc123"
             digest_dir.mkdir(parents=True)
 
-            lock_data = {"image": "test:latest", "version": "1.0"}
+            lock_data = {"image": "test:latest", "version": "1.3"}
             lock_file = digest_dir / "hud.lock.yaml"
             lock_file.write_text(yaml.dump(lock_data))
 

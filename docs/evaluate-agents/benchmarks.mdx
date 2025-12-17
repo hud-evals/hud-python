@@ -18,7 +18,30 @@ hud eval tasks.json
 hud eval hud-evals/SheetBench-50 claude --full
 ```
 
-- SDK
+- SDK (Context Manager)
+
+```python
+import hud
+
+# Single task evaluation
+async with hud.eval("hud-evals/SheetBench-50:0") as ctx:
+    agent = MyAgent()
+    result = await agent.run(ctx)
+    ctx.reward = result.reward
+
+# All tasks with variants
+async with hud.eval(
+    "hud-evals/SheetBench-50:*",
+    variants={"model": ["claude-sonnet", "gpt-4o"]},
+    group=3,
+    max_concurrent=50,
+) as ctx:
+    agent = create_agent(model=ctx.variants["model"])
+    result = await agent.run(ctx)
+    ctx.reward = result.reward
+```
+
+- SDK (Batch Execution)
 
 ```python
 from hud.datasets import run_tasks
@@ -72,7 +95,7 @@ from hud.utils.tasks import save_tasks
 
 save_tasks(
   web_tasks,
-  repo_id="my-org/web-navigation-benchmark",
+  repo_id="web-navigation-benchmark",
   private=False,
   tags=["web", "navigation", "automation"],
 )
@@ -108,8 +131,9 @@ results = await run_tasks(
 
 ## See Also
 
-- [`hud eval`](/reference/cli/eval)
-- [`hud rl`](/reference/cli/rl)
+- [Evaluation API](/reference/eval) - SDK reference for `hud.eval()`
+- [`hud eval`](/reference/cli/eval) - CLI reference
+- [`hud rft`](/reference/cli/rft)
 - [Tasks](/reference/tasks)
 - [Agents (SDK)](/reference/agents)
 

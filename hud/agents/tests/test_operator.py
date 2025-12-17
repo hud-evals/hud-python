@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,43 +11,107 @@ from openai import AsyncOpenAI
 from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
 
 from hud.agents.operator import OperatorAgent
+from hud.environment.router import ToolRouter
+from hud.eval.context import EvalContext
 from hud.types import MCPToolCall, MCPToolResult
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+
+class MockEvalContext(EvalContext):
+    """Mock EvalContext for testing."""
+
+    def __init__(self, tools: list[types.Tool] | None = None) -> None:
+        # Core attributes
+        self.prompt = "Test prompt"
+        self._tools = tools or []
+        self._submitted: str | None = None
+        self.reward: float | None = None
+
+        # Environment attributes
+        self._router = ToolRouter()
+        self._agent_include: list[str] | None = None
+        self._agent_exclude: list[str] | None = None
+
+        # EvalContext attributes
+        self._task = None
+        self.trace_id = "test-trace-id"
+        self.eval_name = "test-eval"
+        self.job_id: str | None = None
+        self.group_id: str | None = None
+        self.index = 0
+        self.variants: dict[str, Any] = {}
+        self.answer: str | None = None
+        self.system_prompt: str | None = None
+        self.error: BaseException | None = None
+        self.metadata: dict[str, Any] = {}
+        self.results: list[Any] = []
+        self._is_summary = False
+
+    def as_tools(self) -> list[types.Tool]:
+        return self._tools
+
+    @property
+    def has_scenario(self) -> bool:
+        return False
+
+    async def list_tools(self) -> list[types.Tool]:
+        return self._tools
+
+    async def call_tool(self, call: Any, /, **kwargs: Any) -> MCPToolResult:
+        return MCPToolResult(
+            content=[types.TextContent(type="text", text="ok")],
+            isError=False,
+        )
+
+    async def submit(self, answer: str) -> None:
+        self._submitted = answer
 
 
 class TestOperatorAgent:
     """Test OperatorAgent class."""
 
     @pytest.fixture
-    def mock_openai(self):
+    def mock_openai(self) -> Generator[AsyncOpenAI, None, None]:
         """Create a mock OpenAI client."""
         client = AsyncOpenAI(api_key="test", base_url="http://localhost")
         client.responses.create = AsyncMock()
         with patch("hud.agents.openai.AsyncOpenAI", return_value=client):
             yield client
 
+    @pytest.fixture
+    def mock_eval_context_computer(self) -> MockEvalContext:
+        """Create a mock EvalContext with computer tool."""
+        return MockEvalContext(
+            tools=[
+                types.Tool(
+                    name="openai_computer",
+                    description="OpenAI computer use tool",
+                    inputSchema={},
+                )
+            ]
+        )
+
     @pytest.mark.asyncio
-    async def test_init(self, mock_mcp_client_openai_computer):
+    async def test_init(self, mock_openai: AsyncOpenAI) -> None:
         """Test agent initialization."""
-        mock_model_client = AsyncOpenAI(api_key="test")
         agent = OperatorAgent.create(
-            mcp_client=mock_mcp_client_openai_computer,
-            model_client=mock_model_client,
-            checkpoint_name="gpt-4",
-            validate_api_key=False,  # Skip validation in tests
+            model_client=mock_openai,
+            model="gpt-4",
+            validate_api_key=False,
         )
 
         assert agent.model_name == "Operator"
-        assert agent.config.checkpoint_name == "gpt-4"
-        assert agent.openai_client == mock_model_client
+        assert agent.config.model == "gpt-4"
+        assert agent.openai_client == mock_openai
 
     @pytest.mark.asyncio
-    async def test_format_blocks(self, mock_mcp_client_openai_computer):
+    async def test_format_blocks(self, mock_openai: AsyncOpenAI) -> None:
         """Test formatting content blocks."""
-        mock_model_client = AsyncOpenAI(api_key="test")
         agent = OperatorAgent.create(
-            mcp_client=mock_mcp_client_openai_computer,
-            model_client=mock_model_client,
-            validate_api_key=False,  # Skip validation in tests
+            model_client=mock_openai,
+            validate_api_key=False,
         )
 
         # Test with text blocks
@@ -85,17 +149,16 @@ class TestOperatorAgent:
         }
 
     @pytest.mark.asyncio
-    async def test_format_tool_results(self, mock_mcp_client_openai_computer, mock_openai):
+    async def test_format_tool_results(self, mock_openai: AsyncOpenAI) -> None:
         """Test formatting tool results."""
         agent = OperatorAgent.create(
-            mcp_client=mock_mcp_client_openai_computer,
             model_client=mock_openai,
-            validate_api_key=False,  # Skip validation in tests
+            validate_api_key=False,
         )
 
         tool_calls = [
-            MCPToolCall(name="test_tool", arguments={}, id="call_123"),  # type: ignore
-            MCPToolCall(name="screenshot", arguments={}, id="call_456"),  # type: ignore
+            MCPToolCall(name="test_tool", arguments={}, id="call_123"),
+            MCPToolCall(name="screenshot", arguments={}, id="call_456"),
         ]
 
         tool_results = [
@@ -126,18 +189,15 @@ class TestOperatorAgent:
         assert output1[0]["image_url"] == "data:image/png;base64,base64data"
 
     @pytest.mark.asyncio
-    async def test_format_tool_results_with_error(
-        self, mock_mcp_client_openai_computer, mock_openai
-    ):
+    async def test_format_tool_results_with_error(self, mock_openai: AsyncOpenAI) -> None:
         """Test formatting tool results with errors."""
         agent = OperatorAgent.create(
-            mcp_client=mock_mcp_client_openai_computer,
             model_client=mock_openai,
-            validate_api_key=False,  # Skip validation in tests
+            validate_api_key=False,
         )
 
         tool_calls = [
-            MCPToolCall(name="failing_tool", arguments={}, id="call_error"),  # type: ignore
+            MCPToolCall(name="failing_tool", arguments={}, id="call_error"),
         ]
 
         tool_results = [
@@ -160,20 +220,19 @@ class TestOperatorAgent:
         assert output[1]["text"] == "Something went wrong"
 
     @pytest.mark.asyncio
-    async def test_get_model_response(self, mock_mcp_client_openai_computer, mock_openai):
+    async def test_get_model_response(
+        self, mock_openai: AsyncOpenAI, mock_eval_context_computer: MockEvalContext
+    ) -> None:
         """Test getting model response from OpenAI API."""
-        # Disable telemetry for this test to avoid backend configuration issues
         with patch("hud.settings.settings.telemetry_enabled", False):
             agent = OperatorAgent.create(
-                mcp_client=mock_mcp_client_openai_computer,
                 model_client=mock_openai,
-                validate_api_key=False,  # Skip validation in tests
+                validate_api_key=False,
             )
 
-            # Set up available tools so agent doesn't return "No computer use tools available"
-            agent._available_tools = [
-                types.Tool(name="computer_openai", description="Computer tool", inputSchema={})
-            ]
+            # Initialize with context
+            agent.ctx = mock_eval_context_computer
+            await agent._initialize_from_ctx(mock_eval_context_computer)
 
             # Mock OpenAI API response for a successful computer use response
             mock_response = MagicMock()
@@ -193,26 +252,24 @@ class TestOperatorAgent:
             mock_openai.responses.create = AsyncMock(return_value=mock_response)
 
             messages = [{"prompt": "What's on the screen?", "screenshot": None}]
-            response = await agent.get_response(messages)
+            response = await agent.get_response(messages)  # type: ignore[arg-type]
 
-            # The test should verify that the response is processed correctly
-            # Since the isinstance checks will fail, content will be empty, but done should be True
             assert response.done is True
             assert response.tool_calls == []
 
     @pytest.mark.asyncio
-    async def test_handle_empty_response(self, mock_mcp_client_openai_computer, mock_openai):
+    async def test_handle_empty_response(
+        self, mock_openai: AsyncOpenAI, mock_eval_context_computer: MockEvalContext
+    ) -> None:
         """Test handling empty response from API."""
         agent = OperatorAgent.create(
-            mcp_client=mock_mcp_client_openai_computer,
             model_client=mock_openai,
-            validate_api_key=False,  # Skip validation in tests
+            validate_api_key=False,
         )
 
-        # Set up available tools
-        agent._available_tools = [
-            types.Tool(name="openai_computer", description="Computer tool", inputSchema={})
-        ]
+        # Initialize with context
+        agent.ctx = mock_eval_context_computer
+        await agent._initialize_from_ctx(mock_eval_context_computer)
 
         # Mock empty response
         mock_response = MagicMock()
@@ -223,16 +280,15 @@ class TestOperatorAgent:
         mock_openai.responses.create = AsyncMock(return_value=mock_response)
 
         messages = [{"prompt": "Hi", "screenshot": None}]
-        response = await agent.get_response(messages)
+        response = await agent.get_response(messages)  # type: ignore[arg-type]
 
         assert response.content == ""
         assert response.tool_calls == []
 
     @pytest.mark.asyncio
-    async def test_pending_safety_checks_initialization(self, mock_mcp_client, mock_openai):
+    async def test_pending_safety_checks_initialization(self, mock_openai: AsyncOpenAI) -> None:
         """Test that OperatorAgent initializes pending_call_id and pending_safety_checks."""
         agent = OperatorAgent.create(
-            mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
         )
@@ -253,10 +309,9 @@ class TestOperatorAgent:
         assert agent.pending_safety_checks[0].id == "safety_check_id"
 
     @pytest.mark.asyncio
-    async def test_extract_tool_call_computer(self, mock_mcp_client, mock_openai):
+    async def test_extract_tool_call_computer(self, mock_openai: AsyncOpenAI) -> None:
         """Test that _extract_tool_call routes computer_call to openai_computer."""
         agent = OperatorAgent.create(
-            mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
         )
@@ -281,10 +336,9 @@ class TestOperatorAgent:
         assert agent.pending_safety_checks == mock_item.pending_safety_checks
 
     @pytest.mark.asyncio
-    async def test_extract_tool_call_delegates_to_super(self, mock_mcp_client, mock_openai):
+    async def test_extract_tool_call_delegates_to_super(self, mock_openai: AsyncOpenAI) -> None:
         """Test that _extract_tool_call delegates non-computer calls to parent."""
         agent = OperatorAgent.create(
-            mcp_client=mock_mcp_client,
             model_client=mock_openai,
             validate_api_key=False,
         )

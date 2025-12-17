@@ -3,18 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import Any, ClassVar, cast
 
+import mcp.types as types
 from google import genai
 from google.genai import types as genai_types
 from pydantic import ConfigDict
-
-import hud
-
-if TYPE_CHECKING:
-    from hud.datasets import Task
-
-import mcp.types as types
 
 from hud.settings import settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
@@ -32,7 +26,7 @@ class GeminiConfig(BaseAgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "Gemini"
-    checkpoint_name: str = "gemini-3-pro-preview"
+    model: str = "gemini-3-pro-preview"
     model_client: genai.Client | None = None
     temperature: float = 1.0
     top_p: float = 0.95
@@ -89,13 +83,11 @@ class GeminiAgent(MCPAgent):
         self._gemini_to_mcp_tool_map: dict[str, str] = {}
         self.gemini_tools: genai_types.ToolListUnion = []
 
-    async def initialize(self, task: str | Task | None = None) -> None:
-        """Initialize the agent and build tool mappings."""
-        await super().initialize(task)
-        # Build tool mappings after tools are discovered
+    def _on_tools_ready(self) -> None:
+        """Build Gemini-specific tool mappings after tools are discovered."""
         self._convert_tools_for_gemini()
 
-    async def get_system_messages(self) -> list[Any]:
+    async def get_system_messages(self) -> list[genai_types.Content]:
         """No system messages for Gemini because applied in get_response"""
         return []
 
@@ -122,14 +114,8 @@ class GeminiAgent(MCPAgent):
 
         return [genai_types.Content(role="user", parts=gemini_parts)]
 
-    @hud.instrument(
-        span_type="agent",
-        record_args=False,  # Messages can be large
-        record_result=True,
-    )
     async def get_response(self, messages: list[genai_types.Content]) -> AgentResponse:
         """Get response from Gemini including any tool calls."""
-
         # Build generate content config
         generate_config = genai_types.GenerateContentConfig(
             temperature=self.temperature,
@@ -140,9 +126,9 @@ class GeminiAgent(MCPAgent):
             system_instruction=self.system_prompt,
         )
 
-        # Make API call
-        response = self.gemini_client.models.generate_content(
-            model=self.config.checkpoint_name,
+        # Use async API to avoid blocking the event loop
+        response = await self.gemini_client.aio.models.generate_content(
+            model=self.config.model,
             contents=cast("Any", messages),
             config=generate_config,
         )

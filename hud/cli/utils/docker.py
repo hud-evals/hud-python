@@ -121,7 +121,7 @@ def detect_environment_dir(start_dir: Path | None = None) -> Path | None:
     - Current directory containing `hud.lock.yaml`
     - Parent directory containing `hud.lock.yaml`
     - Current directory that looks like an environment if it has either a
-      `Dockerfile` or a `pyproject.toml` (looser than `is_environment_directory`).
+      `Dockerfile.hud`, `Dockerfile`, or a `pyproject.toml` (looser than `is_environment_directory`)
 
     Returns the detected directory path or None if not found.
     """
@@ -132,8 +132,12 @@ def detect_environment_dir(start_dir: Path | None = None) -> Path | None:
         if (candidate / "hud.lock.yaml").exists():
             return candidate
 
-    # Fallback: treat as env if it has Dockerfile OR pyproject.toml
-    if (base / "Dockerfile").exists() or (base / "pyproject.toml").exists():
+    # Fallback: treat as env if it has Dockerfile.hud, Dockerfile, or pyproject.toml
+    if (
+        (base / "Dockerfile.hud").exists()
+        or (base / "Dockerfile").exists()
+        or (base / "pyproject.toml").exists()
+    ):
         return base
 
     return None
@@ -200,7 +204,7 @@ def create_docker_run_command(
 
     # Load env from `.env` in detected env directory
     env_dir_path: Path | None = (
-        Path(env_dir).resolve() if isinstance(env_dir, (str, Path)) else detect_environment_dir()
+        Path(env_dir).resolve() if isinstance(env_dir, str | Path) else detect_environment_dir()
     )
 
     merged_env: dict[str, str] = {}

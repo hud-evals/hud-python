@@ -50,7 +50,7 @@ class TestAnalyzeEnvironment:
         }
 
         with (
-            patch("hud.cli.analyze.MCPClient") as MockClient,
+            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
             patch("hud.cli.analyze.console"),
             patch("hud.cli.analyze.display_interactive") as mock_interactive,
         ):
@@ -80,7 +80,7 @@ class TestAnalyzeEnvironment:
     async def test_analyze_environment_failure(self) -> None:
         """Test handling analysis failure."""
         with (
-            patch("hud.cli.analyze.MCPClient") as MockClient,
+            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
             patch("hud.cli.analyze.console") as mock_console,
             patch("platform.system", return_value="Windows"),
         ):
@@ -119,7 +119,7 @@ class TestAnalyzeEnvironment:
 
         for output_format in ["json", "markdown", "interactive"]:
             with (
-                patch("hud.cli.analyze.MCPClient") as MockClient,
+                patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
                 patch("hud.cli.analyze.console") as mock_console,
                 patch("hud.cli.analyze.display_interactive") as mock_interactive,
                 patch("hud.cli.analyze.display_markdown") as mock_markdown,
@@ -163,7 +163,7 @@ class TestAnalyzeWithConfig:
         }
 
         with (
-            patch("hud.cli.analyze.MCPClient") as MockClient,
+            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
             patch("hud.cli.analyze.console"),
             patch("hud.cli.analyze.display_interactive") as mock_interactive,
         ):
@@ -190,7 +190,7 @@ class TestAnalyzeWithConfig:
         mock_config = {"server": {"command": "test"}}
 
         with (
-            patch("hud.cli.analyze.MCPClient") as MockClient,
+            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
             patch("hud.cli.analyze.console"),
         ):
             # Setup mock client that fails

@@ -17,74 +17,72 @@ import os
 
 import hud
 from hud.agents.grounded_openai import GroundedOpenAIChatAgent
+from hud.eval.task import Task
 from hud.settings import settings
 from hud.tools.grounding import GrounderConfig
 from openai import AsyncOpenAI
 
 
-async def main():
+async def main() -> None:
     """Run the grounded agent example."""
 
-    with hud.trace("Grounded Agent Demo"):
-        # Configure the grounding model
-        grounder_config = GrounderConfig(
-            api_base="https://openrouter.ai/api/v1",  # OpenRouter API
-            model="qwen/qwen-2.5-vl-7b-instruct",  # Vision model for grounding
-            api_key=settings.openrouter_api_key,
-        )
+    # Configure the grounding model
+    openrouter_key = os.getenv("OPENROUTER_API_KEY") or settings.openrouter_api_key
+    if not openrouter_key:
+        raise ValueError("OPENROUTER_API_KEY is required for grounding model")
 
-        # MCP configuration for environment
-        mcp_config = {
-            "local": {
-                "command": "docker",
-                "args": ["run", "--rm", "-i", "-p", "8080:8080", "hudevals/hud-browser:0.1.6"],
-            }
-        }
+    grounder_config = GrounderConfig(
+        api_base="https://openrouter.ai/api/v1",  # OpenRouter API
+        model="qwen/qwen-2.5-vl-7b-instruct",  # Vision model for grounding
+        api_key=openrouter_key,
+    )
 
-        # Create OpenAI client for planning
-        openai_client = AsyncOpenAI(
-            api_key=os.getenv("OPENAI_API_KEY", settings.openai_api_key)
-        )  # can use any OpenAI-compatible endpoint
+    # Create OpenAI client for planning
+    openai_client = AsyncOpenAI(
+        api_key=os.getenv("OPENAI_API_KEY", settings.openai_api_key)
+    )  # can use any OpenAI-compatible endpoint
 
-        agent = GroundedOpenAIChatAgent.create(
-            grounder_config=grounder_config,
-            openai_client=openai_client,
-            checkpoint_name="gpt-4o-mini",  # Planning model
-        )
+    agent = GroundedOpenAIChatAgent.create(
+        grounder_config=grounder_config,
+        openai_client=openai_client,
+        checkpoint_name="gpt-4o-mini",  # Planning model
+    )
 
-        try:
-            # Create a task with MCP config
-            from hud.datasets import Task
+    form_url = "https://hb.cran.dev/forms/post"
 
-            form_url = "https://hb.cran.dev/forms/post"
+    form_prompt = """
+    Fill out the form:
+    1. Enter "Grounded Test" in the customer name field
+    2. Enter "555-9876" in the telephone field
+    3. Type "Testing grounded agent with separated vision and reasoning" in comments
+    4. Select medium pizza size
+    5. Choose mushroom as a topping
+    6. Submit the form
+    """
 
-            form_prompt = f"""
-            Fill out the form:
-            1. Enter "Grounded Test" in the customer name field
-            2. Enter "555-9876" in the telephone field
-            3. Type "Testing grounded agent with separated vision and reasoning" in comments
-            4. Select medium pizza size
-            5. Choose mushroom as a topping
-            6. Submit the form
-            """
+    # Create v5 Task with local Docker environment
+    env = hud.Environment("browser-grounded")
+    env.connect_image(
+        "hudevals/hud-browser:0.1.6",
+        docker_args=["-p", "8080:8080"],
+    )
 
-            task = Task(
-                prompt=form_prompt,
-                mcp_config=mcp_config,
-                setup_tool={
-                    "name": "playwright",
-                    "arguments": {"action": "navigate", "url": form_url},
-                },
-            )
+    task = Task(
+        env=env,
+        scenario="form_fill",
+        args={"url": form_url},
+        agent_config={"system_prompt": form_prompt},
+    )
 
-            print(f"📋 Task: Form interaction")
-            print(f"🚀 Running grounded agent...\n")
+    print("📋 Task: Form interaction with grounded agent")
+    print("🚀 Running grounded agent...\n")
 
-            result = await agent.run(task, max_steps=10)
-            print(f"Result: {result.content}\n")
-
-        except Exception as e:
-            print(f"Error during agent execution: {e}")
+    try:
+        async with hud.eval(task, name="grounded-form-demo") as ctx:
+            result = await agent.run(ctx, max_steps=10)
+        print(f"Result: {result.content}\n")
+    except Exception as e:
+        print(f"Error during agent execution: {e}")
 
     print("\n✨ Grounded agent demo complete!")
 

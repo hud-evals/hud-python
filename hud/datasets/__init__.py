@@ -1,33 +1,36 @@
 """HUD datasets module.
 
-Provides data models, utilities, and execution functions for working with HUD datasets.
+Provides unified task loading, saving, and execution for HUD evaluations.
+
+Key functions:
+- load_tasks(): Load tasks from JSON, JSONL, HuggingFace, or HUD API
+- save_tasks(): Save tasks to the HUD API
+- run_dataset(): Run an agent on a dataset of tasks
+- submit_rollouts(): Submit tasks for remote execution
+
+Supports both v4 (LegacyTask) and v5 (Task) formats with automatic conversion.
 """
 
-# Data models
-# Execution functions
 from __future__ import annotations
 
-from hud.types import Task
-from hud.utils.tasks import save_tasks
+from hud.eval.display import display_results
 
-from .runner import run_dataset, run_single_task, run_tasks
+from .loader import load_dataset, load_tasks, save_tasks
+from .runner import run_dataset, run_single_task
 from .utils import (
     BatchRequest,
     SingleTaskRequest,
-    calculate_group_stats,
-    display_results,
     submit_rollouts,
 )
 
 __all__ = [
     "BatchRequest",
     "SingleTaskRequest",
-    "Task",
-    "calculate_group_stats",
     "display_results",
+    "load_dataset",  # Deprecated alias
+    "load_tasks",
     "run_dataset",
     "run_single_task",
-    "run_tasks",
     "save_tasks",
     "submit_rollouts",
 ]

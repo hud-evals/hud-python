@@ -8,9 +8,9 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from hud.datasets import load_tasks
 from hud.settings import settings
 from hud.utils.hud_console import HUDConsole
-from hud.utils.tasks import load_tasks
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -192,12 +192,8 @@ def rft_command(
 
     # Load and validate tasks
     try:
-        # Load tasks with env vars already resolved
-        from hud.types import Task  # noqa: TC001
-
-        tasks_objects: list[Task] = load_tasks(tasks_file)  # type: ignore[assignment]
-        # Convert to dicts for patching and serialization
-        tasks: list[dict[str, Any]] = [t.model_dump() for t in tasks_objects]
+        # Load tasks as raw dicts for patching and serialization
+        tasks: list[dict[str, Any]] = load_tasks(tasks_file, raw=True)  # type: ignore[assignment]
         if not tasks:
             hud_console.error(f"No tasks found in {tasks_file}")
             raise typer.Exit(1)
@@ -243,7 +239,7 @@ def rft_command(
                 hud_console.info("Skipping task preview in auto-accept mode (--yes)")
             else:
                 try:
-                    from hud.cli.rl.viewer import show_json_interactive
+                    from hud.cli.utils.viewer import show_json_interactive
 
                     hud_console.section_title("Task Preview")
                     show_json_interactive(

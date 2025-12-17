@@ -11,7 +11,6 @@ import time
 
 from rich.console import Console
 
-from hud.clients import MCPClient
 from hud.utils.hud_console import HUDConsole
 
 from .utils.logging import CaptureLogger, Colors, analyze_error_for_hints
@@ -246,7 +245,10 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
         logger.command(command)
         logger.info("Creating MCP client via hud...")
 
-        client = MCPClient(mcp_config=mcp_config, verbose=False, auto_trace=False)
+        # Lazy import to avoid loading mcp_use on simple CLI commands
+        from hud.clients.fastmcp import FastMCPHUDClient
+
+        client = FastMCPHUDClient(mcp_config=mcp_config, verbose=False)
         await client.initialize()
 
         # Wait for initialization
@@ -350,6 +352,9 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
         try:
             logger.info("Creating 3 concurrent MCP clients...")
 
+            # Lazy import to avoid loading mcp_use on simple CLI commands
+            from hud.clients.fastmcp import FastMCPHUDClient
+
             for i in range(3):
                 client_config = {
                     f"test_concurrent_{i}": {
@@ -358,9 +363,7 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
                     }
                 }
 
-                concurrent_client = MCPClient(
-                    mcp_config=client_config, verbose=False, auto_trace=False
-                )
+                concurrent_client = FastMCPHUDClient(mcp_config=client_config, verbose=False)
                 await concurrent_client.initialize()
                 concurrent_clients.append(concurrent_client)
                 logger.info(f"Client {i + 1} connected")
