@@ -37,6 +37,7 @@ class MockEvalContext(EvalContext):
         self._agent_include: list[str] | None = None
         self._agent_exclude: list[str] | None = None
         self._task = None
+        self.trace_id = "test-trace-id"
 
     def as_tools(self) -> list[types.Tool]:
         return self._tools
