@@ -28,8 +28,6 @@ _SKIP_FRAME_PATTERNS = (
     # Python stdlib
     "contextlib.py",
     "asyncio",
-    # Third-party
-    "site-packages",
     # HUD eval internals (both Unix and Windows paths)
     "hud/eval/mixin.py",
     "hud/eval/manager.py",
@@ -39,12 +37,19 @@ _SKIP_FRAME_PATTERNS = (
     "hud\\eval\\parallel.py",
 )
 
+# Frames that should NOT be skipped even if in site-packages
+# These contain legitimate async with hud.eval() calls
+_ALLOWED_FRAME_PATTERNS = (
+    "hud/datasets/runner.py",
+    "hud\\datasets\\runner.py",
+)
+
 
 def find_user_frame() -> FrameType:
     """Walk the call stack to find the first user code frame.
 
-    Skips internal frames from contextlib, asyncio, site-packages,
-    and hud.eval internals.
+    Skips internal frames from contextlib, asyncio, and hud.eval internals.
+    Frames in site-packages are skipped UNLESS they match _ALLOWED_FRAME_PATTERNS.
 
     Returns:
         The frame containing user code (typically the async with statement).
@@ -60,9 +65,18 @@ def find_user_frame() -> FrameType:
         caller_frame = frame.f_back
         while caller_frame is not None:
             filename = caller_frame.f_code.co_filename
-            # Stop at first frame not matching skip patterns
-            if not any(pattern in filename for pattern in _SKIP_FRAME_PATTERNS):
+
+            # Check if this is an explicitly allowed frame (e.g., hud/datasets/runner.py)
+            if any(pattern in filename for pattern in _ALLOWED_FRAME_PATTERNS):
                 return caller_frame
+
+            # Skip internal frames, but also skip site-packages unless allowed above
+            is_internal = any(pattern in filename for pattern in _SKIP_FRAME_PATTERNS)
+            is_site_packages = "site-packages" in filename
+
+            if not is_internal and not is_site_packages:
+                return caller_frame
+
             caller_frame = caller_frame.f_back
 
         raise ASTExtractionError("Cannot find user code frame in call stack")

@@ -14,7 +14,6 @@ import logging
 import sys
 from typing import Any
 
-from hud.agents.claude import ClaudeAgent
 from hud.settings import settings
 
 # Configure logging
@@ -54,8 +53,7 @@ class PreReleaseChecker:
             from hud.datasets import run_dataset
 
             # Run the evaluation
-            agent_class = ClaudeAgent
-            agent_config = {
+            agent_params = {
                 "model": "claude-sonnet-4-5",
                 "allowed_tools": ["anthropic_computer"],
                 "verbose": False,
@@ -63,14 +61,11 @@ class PreReleaseChecker:
 
             logger.info("Running evaluation...")
             self.results = await run_dataset(
-                name=f"Pre-release check: {self.dataset}",
-                dataset=self.dataset,
-                agent_class=agent_class,
-                agent_config=agent_config,
+                tasks=self.dataset,
+                agent_type="claude",
+                agent_params=agent_params,
                 max_concurrent=25,
                 max_steps=25,
-                auto_respond=False,
-                metadata={"purpose": "pre-release-check", "dataset": self.dataset},
             )
 
             return self._validate_results()
