@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from google import genai
@@ -21,15 +21,31 @@ class MockEvalContext(EvalContext):
     """Mock EvalContext for testing."""
 
     def __init__(self, tools: list[types.Tool] | None = None) -> None:
+        # Core attributes
         self.prompt = "Test prompt"
         self._tools = tools or []
         self._submitted: str | None = None
         self.reward: float | None = None
+        
+        # Environment attributes
         self._router = ToolRouter()
         self._agent_include: list[str] | None = None
         self._agent_exclude: list[str] | None = None
+        
+        # EvalContext attributes
         self._task = None
         self.trace_id = "test-trace-id"
+        self.eval_name = "test-eval"
+        self.job_id: str | None = None
+        self.group_id: str | None = None
+        self.index = 0
+        self.variants: dict[str, Any] = {}
+        self.answer: str | None = None
+        self.system_prompt: str | None = None
+        self.error: BaseException | None = None
+        self.metadata: dict[str, Any] = {}
+        self.results: list[Any] = []
+        self._is_summary = False
 
     def as_tools(self) -> list[types.Tool]:
         return self._tools
@@ -62,6 +78,10 @@ class TestGeminiAgent:
         client.models = MagicMock()
         client.models.list = MagicMock(return_value=iter([]))
         client.models.generate_content = MagicMock()
+        # Set up async interface (aio.models.generate_content)
+        client.aio = MagicMock()
+        client.aio.models = MagicMock()
+        client.aio.models.generate_content = AsyncMock()
         return client
 
     @pytest.mark.asyncio
@@ -196,7 +216,7 @@ class TestGeminiAgent:
 
             mock_response.candidates = [mock_candidate]
 
-            mock_gemini_client.models.generate_content = MagicMock(return_value=mock_response)
+            mock_gemini_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
 
             messages = [
                 genai_types.Content(role="user", parts=[genai_types.Part.from_text(text="Status?")])
@@ -237,7 +257,7 @@ class TestGeminiAgent:
 
             mock_response.candidates = [mock_candidate]
 
-            mock_gemini_client.models.generate_content = MagicMock(return_value=mock_response)
+            mock_gemini_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
 
             messages = [
                 genai_types.Content(
@@ -287,6 +307,10 @@ class TestGeminiToolConversion:
         client.api_key = "test_key"
         client.models = MagicMock()
         client.models.list = MagicMock(return_value=iter([]))
+        # Set up async interface
+        client.aio = MagicMock()
+        client.aio.models = MagicMock()
+        client.aio.models.generate_content = AsyncMock()
         return client
 
     @pytest.mark.asyncio
