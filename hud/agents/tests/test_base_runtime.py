@@ -36,12 +36,12 @@ class MockEvalContext(EvalContext):
         self._submitted: str | None = None
         self.reward: float | None = None
         self._call_tool_handler: Any = None
-        
+
         # Environment attributes
         self._router = ToolRouter()
         self._agent_include: list[str] | None = None
         self._agent_exclude: list[str] | None = None
-        
+
         # EvalContext attributes
         self._task = None
         self.trace_id = "test-trace-id"
