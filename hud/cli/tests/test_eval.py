@@ -29,6 +29,14 @@ class MockEvalContext(EvalContext):
         self._router = ToolRouter()
         self._agent_include: list[str] | None = None
         self._agent_exclude: list[str] | None = None
+        self._task = None
+
+    def as_tools(self) -> list[types.Tool]:
+        return self._tools
+
+    @property
+    def has_scenario(self) -> bool:
+        return False
 
     async def list_tools(self) -> list[types.Tool]:
         return self._tools
