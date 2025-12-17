@@ -14,6 +14,7 @@ You cannot do both at the same time.
 
 Try to be helpful and always follow the policy. Always make sure you generate valid JSON only."""
 
+
 def _format_system_prompt(policy: str, solo_mode: bool = False) -> str:
     """
     Format the TAU2-bench system prompt.

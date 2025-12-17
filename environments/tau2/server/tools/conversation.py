@@ -109,7 +109,7 @@ class ConversationTool(BaseTool):
             # Get policy and format system prompt (mimics TAU2's system message + conversation pattern)
             system_prompt = ""
             try:
-                if tau2_task.environment and hasattr(tau2_task.environment, 'get_policy'):
+                if tau2_task.environment and hasattr(tau2_task.environment, "get_policy"):
                     policy = tau2_task.environment.get_policy()
                     # Use TAU2's exact system prompt formatting
                     system_prompt = _format_system_prompt(policy, solo_mode=False)
@@ -143,7 +143,9 @@ class ConversationTool(BaseTool):
             current_exchange = f"Assistant: {message}\n\nUser: {user_content}"
 
             # Build full response with policy + history (mimics TAU2's architecture)
-            full_response = f"{conversation_history}\n\n=== Current Exchange ===\n{current_exchange}"
+            full_response = (
+                f"{conversation_history}\n\n=== Current Exchange ===\n{current_exchange}"
+            )
 
             if STOP in user_content:
                 return [
