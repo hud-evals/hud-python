@@ -23,6 +23,8 @@ PRESET_MAP: dict[str, str | None] = {
     "deep-research": "hud-deepresearch",
     "browser": "hud-browser",
     "rubrics": "hud-rubrics",
+    "verilog-coding-template": "verilog-coding-template",
+    "data-science-template": "data-science-template",
 }
 
 SKIP_DIR_NAMES = {"node_modules", "__pycache__", "dist", "build", ".next", ".git"}
@@ -92,6 +94,8 @@ def _prompt_for_preset() -> str:
             {"name": "browser", "message": "browser"},
             {"name": "deep-research", "message": "deep-research"},
             {"name": "rubrics", "message": "rubrics"},
+            {"name": "verilog-coding-template", "message": "verilog-coding-template"},
+            {"name": "data-science-template", "message": "data-science-template"},
         ]
         display_choices = [c["message"] for c in choices]
         selected = questionary.select(
