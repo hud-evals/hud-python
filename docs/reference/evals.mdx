@@ -36,24 +36,18 @@ async with hud.eval() as ctx:
 The `source` parameter accepts:
 
 ```python
-# 1. Blank eval - manual setup and reward
+# 1. Direct environment entry (recommended)
+env = Environment("my-env")
+async with env("checkout", product="laptop") as ctx:
+    await agent.run(ctx.prompt)
+
+# 2. Blank eval - manual setup and reward
 async with hud.eval() as ctx:
     ctx.reward = compute_reward()
 
-# 2. Task from Environment (recommended)
-env = Environment("my-env")
-task = env("checkout", product="laptop")  # Creates Task from scenario
-async with hud.eval(task) as ctx:
-    await agent.run(ctx.prompt)
-
 # 3. Task slug (loads from platform)
-async with hud.eval("my-org/browser-task") as ctx:
+async with hud.eval("browser-task") as ctx:
     await agent.run(ctx)
-
-# 4. Multiple tasks
-tasks = [env("checkout", product="laptop"), env("checkout", product="phone")]
-async with hud.eval(tasks) as ctx:
-    await agent.run(ctx.prompt)
 ```
 
 ### Variants
@@ -155,11 +149,10 @@ async with hud.eval() as ctx:
 
 ## Working with Environments
 
-The recommended pattern is to create Evals from an Environment:
+The recommended pattern is to use `async with env(...)` directly:
 
 ```python
 from hud import Environment
-import hud
 
 env = Environment("my-env")
 
@@ -173,11 +166,8 @@ async def count_scenario(sentence: str, letter: str):
     correct = str(sentence.lower().count(letter.lower()))
     yield correct in answer
 
-# Create a Task from the scenario
-task = env("count", sentence="Strawberry", letter="r")
-
 # Run with variants
-async with hud.eval(task, variants={"model": ["gpt-4o", "claude"]}) as ctx:
+async with env("count", sentence="Strawberry", letter="r", variants={"model": ["gpt-4o", "claude"]}) as ctx:
     response = await client.chat.completions.create(
         model=ctx.variants["model"],
         messages=[{"role": "user", "content": ctx.prompt}],
@@ -188,10 +178,10 @@ async with hud.eval(task, variants={"model": ["gpt-4o", "claude"]}) as ctx:
 
 ## Results
 
-After parallel runs complete, access results on the summary context:
+After parallel runs complete, access results on the context:
 
 ```python
-async with hud.eval(eval, variants={"model": ["gpt-4o", "claude"]}, group=3) as ctx:
+async with env("count", sentence="Strawberry", letter="r", variants={"model": ["gpt-4o", "claude"]}, group=3) as ctx:
     ...
 
 # ctx.results contains all individual EvalContexts

@@ -40,22 +40,10 @@ The `hud.eval` manager will parallelize your evals automatically and show the di
 
 ## Remote Rollouts
 
-Once you've [deployed an environment](/quick-links/deploy#deploying-environments) and created evals, run them by name:
-
-```python
-async with hud.eval("my-org/checkout-laptop", variants={"model": ["gpt-4o", "claude"]}) as ctx:
-    response = await client.chat.completions.create(
-        model=ctx.variants["model"],
-        messages=[{"role": "user", "content": ctx.prompt}]
-    )
-```
-
-The platform loads everything—environment, prompt, evaluation logic, comparisons across models. You just provide the agent.
-
-Or via CLI:
+Once you've [deployed an environment](/quick-links/deploy#deploying-environments) and made an evalset, run evals via CLI:
 
 ```bash
-hud eval my-org/checkout-laptop --model gpt-4o --group-size 5
+hud eval my-evalset --model gpt-4o --group-size 5
 ```
 
 Or run directly on the platform—see [Running at Scale](/quick-links/deploy#running-at-scale).
