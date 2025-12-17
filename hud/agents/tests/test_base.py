@@ -66,7 +66,7 @@ class MockEvalContext(EvalContext):
 
     @property
     def has_scenario(self) -> bool:
-        return False
+        return True
 
     async def list_tools(self) -> list[types.Tool]:
         return self._tools
