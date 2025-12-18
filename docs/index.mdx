@@ -45,7 +45,7 @@ Every call is traced. View them at [hud.ai/home](https://hud.ai/home).
 
 A production API is one live instance with shared state—you can't run 1,000 parallel tests without them stepping on each other. Environments spin up fresh for every evaluation: isolated, deterministic, reproducible. Each generates training data.
 
-Turn your code into tools agents can call. Define scripts that evaluate what agents do:
+Turn your code into tools agents can call. Define scenarios that evaluate what agents do:
 
 ```python
 from hud import Environment
@@ -63,7 +63,7 @@ async def find_answer(question: str):
     yield 1.0 if "correct" in answer.lower() else 0.0
 ```
 
-Scripts define the prompt (first yield) and the scoring logic (second yield). The agent runs in between.
+Scenarios define the prompt (first yield) and the scoring logic (second yield). The agent runs in between.
 
 → [More on Environments](/quick-links/environments)
 
@@ -109,7 +109,7 @@ hud eval my-eval --model gpt-4o --group-size 100
 </Card>
 
 <Card title="Environments" icon="cube" href="/quick-links/environments">
-  Tools, scripts, and local testing.
+  Tools, Scenarios, and local testing.
 </Card>
 
 <Card title="A/B Evals" icon="flask-vial" href="/quick-links/ab-testing">

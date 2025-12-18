@@ -4,7 +4,7 @@ description: "Turn your code into agent-callable tools. Define how agents are ev
 icon: "cube"
 ---
 
-An environment is everything an agent can interact with—your APIs, services, databases, wrapped as tools. But it's more than that: the environment also defines how agents are *evaluated* through **scripts**. When you deploy an environment, you're creating a sandbox that agents can learn from at scale.
+An environment is everything an agent can interact with—your APIs, services, databases, wrapped as tools. But it's more than that: the environment also defines how agents are *evaluated* through **Scenarios**. When you deploy an environment, you're creating a sandbox that agents can learn from at scale.
 
 ## Why Environments, Not API Servers?
 
@@ -45,9 +45,9 @@ async with env() as ctx:
     result = await ctx.call_tool("search", query="test")
 ```
 
-## Scripts
+## Scenarios
 
-To evaluate an agent, you need two things: what to tell it, and how to score what it did. Scripts capture both with two `yield` statements:
+To evaluate an agent, you need two things: what to tell it, and how to score what it did. Scenarios capture both with two `yield` statements:
 
 ```python
 @env.scenario("checkout")
@@ -60,7 +60,7 @@ async def checkout_flow(product_name: str):
     yield 1.0 if order_exists else 0.0
 ```
 
-The agent runs between the yields. First yield sends the prompt and returns the agent's answer. Second yield checks environment state—database rows, files, API calls—and returns a reward. Scripts live with the environment because only the environment knows how to verify what happened.
+The agent runs between the yields. First yield sends the prompt and returns the agent's answer. Second yield checks environment state—database rows, files, API calls—and returns a reward. Scenarios live with the environment because only the environment knows how to verify what happened.
 
 ## Evals
 
