@@ -323,7 +323,8 @@ class Environment(
                     if conn.is_connected:
                         await conn.disconnect()
                 name, err = errors[0]
-                raise ConnectionError(f"Failed to connect to {name}") from err
+                str_err = str(err).replace("Client failed to connect: ", "") # Strip from FastMCP
+                raise ConnectionError(f"Failed to connect to {name}: {str_err}") from err
 
         await self._build_routing()
 
