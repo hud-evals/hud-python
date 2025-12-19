@@ -678,7 +678,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             group_size=cfg.group_size,
         )
 
-        hud_console.success(f"Tasks submitted. View at: https://hud.ai/job/{job_id}")
+        hud_console.success(f"Tasks submitted. View at: https://hud.ai/jobs/{job_id}")
         return [], tasks
 
     # Single task mode - show extra info
