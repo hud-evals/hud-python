@@ -51,6 +51,10 @@ class SingleTaskRequest(BaseModel):
         description="Additional metadata to inject into the trace context.",
     )
     trace_id: str | None = Field(default=None, description="Pre-assigned trace ID.")
+    use_byok: bool = Field(
+        default=False,
+        description="If True, use BYOK headers from encrypted env vars for inference.",
+    )
 
     @model_validator(mode="after")
     def _validate_task(self) -> SingleTaskRequest:
@@ -110,6 +114,7 @@ async def submit_rollouts(
     group_size: int = 1,
     batch_size: int = 50,
     metadata: dict[str, Any] | None = None,
+    use_byok: bool = False,
 ) -> None:
     """Submit rollouts to the HUD platform API for remote execution (fire-and-forget).
 
@@ -122,6 +127,7 @@ async def submit_rollouts(
         group_size: Number of rollouts per task (for variance estimation)
         batch_size: Number of rollouts per API batch request
         metadata: Additional metadata for each rollout
+        use_byok: If True, use BYOK keys from encrypted env vars (remote only)
     """
     from hud.eval.utils import is_v4_format
 
@@ -168,6 +174,7 @@ async def submit_rollouts(
                     trace_name=trace_name,
                     group_id=base_task_id if group_size > 1 else None,
                     metadata=metadata or {},
+                    use_byok=use_byok,
                 )
             )
 
