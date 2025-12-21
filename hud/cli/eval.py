@@ -211,13 +211,13 @@ class EvalConfig(BaseModel):
 
     def validate_api_keys(self) -> None:
         """Validate required API keys for the selected agent. Raises typer.Exit on failure."""
-        if self.agent_type is None:
-            return
-
-        # BYOK requires remote execution
+        # BYOK requires remote execution (check before agent_type guard)
         if self.byok and not self.remote:
             hud_console.error("--byok requires --remote (BYOK only works with remote execution)")
             raise typer.Exit(1)
+
+        if self.agent_type is None:
+            return
 
         if self.remote:
             if not settings.api_key:
@@ -292,14 +292,11 @@ class EvalConfig(BaseModel):
         if self.model:
             kwargs["model"] = self.model
 
-        if self.agent_type == AgentType.OPENAI_COMPATIBLE:
+        # For gateway base_url, inject HUD API key if not already set
+        if self.agent_type == AgentType.OPENAI_COMPATIBLE and "api_key" not in kwargs:
             base_url = kwargs.get("base_url", "")
-            if "api_key" not in kwargs:
-                # Use HUD API key for gateway, otherwise fall back to OpenAI API key
-                if settings.hud_gateway_url in base_url:
-                    kwargs["api_key"] = settings.api_key
-                elif settings.openai_api_key:
-                    kwargs["api_key"] = settings.openai_api_key
+            if settings.hud_gateway_url in base_url and settings.api_key:
+                kwargs["api_key"] = settings.api_key
 
         # Auto-detect Bedrock when Claude is selected with a Bedrock ARN
         # Check both model and checkpoint_name for ARN patterns
@@ -669,6 +666,9 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
 
     # Remote execution - submit to HUD platform
     if cfg.remote:
+        agent_kwargs = {
+            k: v for k, v in agent_kwargs.items() if k not in ("api_key", "model_client")
+        }
         # Create a job ID for tracking
         import uuid
 
