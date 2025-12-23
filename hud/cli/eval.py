@@ -751,7 +751,7 @@ def eval_command(
     max_concurrent: int | None = typer.Option(
         None, "--max-concurrent", help="Max concurrent tasks"
     ),
-    max_steps: int = typer.Option(10, "--max-steps", help="Max steps per task"),
+    max_steps: int | None = typer.Option(None, "--max-steps", help="Max steps per task"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     very_verbose: bool = typer.Option(False, "--very-verbose", "-vv", help="Debug logs"),
     auto_respond: bool = typer.Option(
