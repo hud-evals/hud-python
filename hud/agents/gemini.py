@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-import httpx
 import mcp.types as types
 from google import genai
 from google.genai import types as genai_types
@@ -15,6 +14,9 @@ from hud.settings import settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
+
+if TYPE_CHECKING:
+    import httpx
 
 from .base import BaseCreateParams, MCPAgent
 
