@@ -547,9 +547,7 @@ class EvalConfig(BaseModel):
             table.add_row("max_concurrent", str(self.max_concurrent))
         if self.group_size > 1:
             table.add_row("group_size", str(self.group_size))
-        # Show auto_respond when it will be true (explicit or via --full)
-        effective_auto_respond = self.auto_respond if self.auto_respond is not None else self.full
-        if effective_auto_respond:
+        if self.auto_respond:
             table.add_row("auto_respond", "[bold green]True[/bold green]")
         if self.very_verbose:
             table.add_row("very_verbose", "[bold green]True[/bold green]")
@@ -746,7 +744,7 @@ def eval_command(
     auto_respond: bool | None = typer.Option(
         None,
         "--auto-respond",
-        help="Continue without prompting after tool calls (default: True for --full)",
+        help="Automatically prompt the agent to continue if it does not respond with a tool call",
     ),
     group_size: int | None = typer.Option(None, "--group-size", help="Runs per task"),
     task_ids: str | None = typer.Option(None, "--task-ids", help="Comma-separated task IDs to run"),
