@@ -362,23 +362,17 @@ class EvalConfig(BaseModel):
                 )
                 hud_console.info("🌐 Using HUD Gateway for OpenAI-compatible API")
             elif self.agent_type in (AgentType.GEMINI, AgentType.GEMINI_CUA):
-                import httpx
                 from google import genai
                 from google.genai.types import HttpOptions
 
-                httpx_async_client = httpx.AsyncClient()
                 kwargs["model_client"] = genai.Client(
                     api_key="PLACEHOLDER",
                     http_options=HttpOptions(
                         api_version="v1beta",
                         base_url=settings.hud_gateway_url,
                         headers={"Authorization": f"Bearer {hud_api_key}"},
-                        # Important: By default this uses aiohttp, but
-                        # we use an httpx hook for injecting Trace-Id
-                        httpx_async_client=httpx_async_client,
                     ),
                 )
-                kwargs["httpx_client"] = httpx_async_client
                 hud_console.info("🌐 Using HUD Gateway for Gemini API")
 
         return kwargs
