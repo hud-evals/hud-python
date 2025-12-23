@@ -350,3 +350,67 @@ class TestMCPAgentToolSchemas:
         assert len(schemas) == 1
         assert schemas[0]["name"] == "my_tool"
         assert schemas[0]["description"] == "My tool description"
+
+
+class TestMCPAgentErrorPropagation:
+    """Tests for error propagation to EvalContext."""
+
+    @pytest.mark.asyncio
+    async def test_exception_propagates_to_ctx_error(self) -> None:
+        """Test that exceptions during run() set ctx.error for platform visibility."""
+
+        class FailingAgent(MockMCPAgent):
+            async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
+                raise RuntimeError("Agent crashed")
+
+        ctx = MockEvalContext(prompt="Do something")
+        agent = FailingAgent()
+
+        result = await agent.run(ctx)
+
+        # Should return error trace
+        assert result.isError is True
+        assert result.content is not None
+        assert "Agent crashed" in result.content
+
+        assert ctx.error is not None
+        assert isinstance(ctx.error, BaseException)
+        assert "Agent crashed" in str(ctx.error)
+
+    @pytest.mark.asyncio
+    async def test_step_error_propagates_to_ctx_error(self) -> None:
+        """Test that step-level errors (caught internally) set ctx.error."""
+        step_count = [0]
+
+        class FailOnSecondStepAgent(MockMCPAgent):
+            async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
+                step_count[0] += 1
+                if step_count[0] == 1:
+                    return AgentResponse(
+                        content="",
+                        tool_calls=[MCPToolCall(name="test_tool", arguments={})],
+                        done=False,
+                    )
+                else:
+                    raise ValueError("Step 2 failed")
+
+        ctx = MockEvalContext(prompt="Do something")
+        agent = FailOnSecondStepAgent()
+
+        result = await agent.run(ctx)
+
+        # Should return error trace
+        assert result.isError is True
+        assert ctx.error is not None
+        assert "Step 2 failed" in str(ctx.error)
+
+    @pytest.mark.asyncio
+    async def test_no_error_when_successful(self) -> None:
+        """Test that ctx.error remains None on successful run."""
+        ctx = MockEvalContext(prompt="Do something")
+        agent = MockMCPAgent()
+
+        result = await agent.run(ctx)
+
+        assert result.isError is False
+        assert ctx.error is None

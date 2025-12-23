@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 from openai import AsyncOpenAI
 
 from hud.settings import settings
+
+logger = logging.getLogger(__name__)
 
 ResponseType = Literal["STOP", "CONTINUE"]
 
@@ -97,5 +100,6 @@ class ResponseAgent:
             else:
                 return "CONTINUE"
 
-        except Exception:
+        except Exception as e:
+            logger.warning("Auto-respond failed: %s", e)
             return "CONTINUE"  # Default to continue on error
