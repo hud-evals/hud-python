@@ -499,6 +499,8 @@ def find_reward(result: MCPToolResult) -> float:
     """
     accept_keys = ["reward", "grade", "score"]
 
+    logger.error(f"Result: {result.structuredContent}")
+
     # Check for direct reward/grade/score keys
     for key in accept_keys:
         if isinstance(result.structuredContent, dict) and key in result.structuredContent:
@@ -520,6 +522,7 @@ def find_reward(result: MCPToolResult) -> float:
                     for key in subscores
                     if key in weights
                 )
+                logger.error(f"Reward: {reward}")
                 return reward
             except (ValueError, TypeError) as e:
                 logger.error("Failed to parse subscores/weights: %s", e)
@@ -537,7 +540,7 @@ def find_reward(result: MCPToolResult) -> float:
                 except json.JSONDecodeError:
                     pass
 
-    logger.error("Couldn't parse reward from result: %s", result)
+    logger.error(f"Couldn't parse reward from result: %s", str(result.structuredContent))
     return 0.0
 
 
