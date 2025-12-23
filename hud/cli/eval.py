@@ -91,7 +91,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 [eval]
 # source = "hud-evals/SheetBench-50"
 # agent = "claude"
-# full = false
+# all = false  # Run all problems instead of just 1
 # max_concurrent = 30
 # max_steps = 10
 # group_size = 1
@@ -152,7 +152,7 @@ class EvalConfig(BaseModel):
         "source",
         "agent_type",
         "task_ids",
-        "full",
+        "all",
         "max_concurrent",
         "max_steps",
         "verbose",
@@ -171,12 +171,12 @@ class EvalConfig(BaseModel):
     agent_type: AgentType | None = None
     model: str | None = None
     task_ids: list[str] | None = None
-    full: bool = False
+    all: bool = False  # Run all problems instead of just 1
     max_concurrent: int = 30
-    max_steps: int | None = None
+    max_steps: int = 10
     verbose: bool = False
     very_verbose: bool = False
-    auto_respond: bool | None = None  # Continue without prompting (default: True for --full)
+    auto_respond: bool | None = None  # Continue without prompting
     group_size: int = 1
     remote: bool = False
     quiet: bool = False  # Suppress opening browser for eval links
@@ -454,11 +454,19 @@ class EvalConfig(BaseModel):
 
         overrides.update({k: v for k, v in cli_args.items() if v is not None and v is not False})
 
-        for k in ("full", "verbose", "very_verbose", "remote", "quiet", "gateway"):
+        for k in ("all", "verbose", "very_verbose", "remote", "quiet", "gateway"):
             if cli_args.get(k) is True:
                 overrides[k] = True
             elif k in overrides and cli_args.get(k) is False:
                 del overrides[k]
+
+        # --full is a shortcut for --all --auto-respond --max-steps 100
+        if overrides.get("full"):
+            overrides["all"] = True
+            if "auto_respond" not in overrides:
+                overrides["auto_respond"] = True
+            if "max_steps" not in overrides:
+                overrides["max_steps"] = 100
 
         if config:
             merged_agent_config = dict(self.agent_config)
@@ -541,15 +549,13 @@ class EvalConfig(BaseModel):
             table.add_row(
                 "task_ids", ", ".join(self.task_ids[:5]) + ("..." if len(self.task_ids) > 5 else "")
             )
-        table.add_row("full", str(self.full))
-        table.add_row("max_steps", str(self.max_steps or (100 if self.full else 10)))
+        table.add_row("all", str(self.all))
+        table.add_row("max_steps", str(self.max_steps))
         if not self.remote:
             table.add_row("max_concurrent", str(self.max_concurrent))
         if self.group_size > 1:
             table.add_row("group_size", str(self.group_size))
-        # Show auto_respond when it will be true (explicit or via --full)
-        effective_auto_respond = self.auto_respond if self.auto_respond is not None else self.full
-        if effective_auto_respond:
+        if self.auto_respond:
             table.add_row("auto_respond", "[bold green]True[/bold green]")
         if self.very_verbose:
             table.add_row("very_verbose", "[bold green]True[/bold green]")
@@ -642,8 +648,8 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             raise typer.Exit(1)
         hud_console.info(f"Filtered to {len(filtered)} task(s) by ID")
         tasks = filtered
-    elif not cfg.full:
-        # Single task mode (no --full, no --task-ids)
+    elif not cfg.all:
+        # Single task mode (no --all, --full, or --task-ids)
         tasks = [tasks[0]]
         hud_console.info("Using first task (run with --full or --task-ids for more)…")
 
@@ -651,11 +657,11 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
 
     # Prepare agent kwargs
     agent_kwargs = cfg.get_agent_kwargs()
-    auto_respond = cfg.auto_respond if cfg.auto_respond is not None else cfg.full
+    auto_respond = cfg.auto_respond
     if auto_respond:
         agent_kwargs = {**agent_kwargs, "auto_respond": True}
 
-    max_steps = cfg.max_steps or (100 if cfg.full else 10)
+    max_steps = cfg.max_steps
 
     # Remote execution - submit to HUD platform
     if cfg.remote:
@@ -724,7 +730,12 @@ def eval_command(
         None,
         help="Agent: claude, openai, operator, gemini, gemini_cua, openai_compatible, integration_test",  # noqa: E501
     ),
-    full: bool = typer.Option(False, "--full", help="Run entire dataset"),
+    all: bool = typer.Option(False, "--all", help="Run all problems instead of just 1"),
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="Run the entire dataset. Shortcut for --all --auto-respond  --max-steps 100",
+    ),
     model: str | None = typer.Option(None, "--model", "-m", help="Model name"),
     config: list[str] | None = typer.Option(  # noqa: B008
         None, "--config", "-c", help="Agent config: key=value"
@@ -743,10 +754,10 @@ def eval_command(
     max_steps: int | None = typer.Option(None, "--max-steps", help="Max steps per task"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     very_verbose: bool = typer.Option(False, "--very-verbose", "-vv", help="Debug logs"),
-    auto_respond: bool | None = typer.Option(
-        None,
+    auto_respond: bool = typer.Option(
+        False,
         "--auto-respond",
-        help="Continue without prompting after tool calls (default: True for --full)",
+        help="Automatically prompt the agent to continue if it does not respond with a tool call",
     ),
     group_size: int | None = typer.Option(None, "--group-size", help="Runs per task"),
     task_ids: str | None = typer.Option(None, "--task-ids", help="Comma-separated task IDs to run"),
@@ -778,6 +789,7 @@ def eval_command(
         source=source,
         agent=agent,
         model=model,
+        all=all,
         full=full,
         max_concurrent=max_concurrent,
         max_steps=max_steps,
