@@ -657,11 +657,11 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
 
     # Prepare agent kwargs
     agent_kwargs = cfg.get_agent_kwargs()
-    auto_respond = cfg.auto_respond if cfg.auto_respond is not None else cfg.all
+    auto_respond = cfg.auto_respond
     if auto_respond:
         agent_kwargs = {**agent_kwargs, "auto_respond": True}
 
-    max_steps = cfg.max_steps or (100 if cfg.all else 10)
+    max_steps = cfg.max_steps
 
     # Remote execution - submit to HUD platform
     if cfg.remote:
