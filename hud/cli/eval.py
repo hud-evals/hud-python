@@ -649,9 +649,9 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         hud_console.info(f"Filtered to {len(filtered)} task(s) by ID")
         tasks = filtered
     elif not cfg.all:
-        # Single task mode (no --all, no --task-ids)
+        # Single task mode (no --all, --full, or --task-ids)
         tasks = [tasks[0]]
-        hud_console.info("Using first task (run with --all or --task-ids for more)…")
+        hud_console.info("Using first task (run with --full or --task-ids for more)…")
 
     hud_console.info(f"Loaded {len(tasks)} task(s)")
 

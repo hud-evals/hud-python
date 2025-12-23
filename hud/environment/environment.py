@@ -402,7 +402,6 @@ class Environment(
             result = await self._tool_manager.call_tool(name, arguments)
             return MCPToolResult(
                 content=result.content,
-                isError=result.is_error,
                 structuredContent=result.structured_content,
             )
 
