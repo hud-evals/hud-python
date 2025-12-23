@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, ClassVar, cast
 
+import httpx
 import mcp.types as types
 from google import genai
 from google.genai import types as genai_types
@@ -28,6 +29,7 @@ class GeminiConfig(BaseAgentConfig):
     model_name: str = "Gemini"
     model: str = "gemini-3-pro-preview"
     model_client: genai.Client | None = None
+    httpx_client: httpx.AsyncClient | None = None
     temperature: float = 1.0
     top_p: float = 0.95
     top_k: int = 40
@@ -78,10 +80,17 @@ class GeminiAgent(MCPAgent):
         self.top_k = self.config.top_k
         self.max_output_tokens = self.config.max_output_tokens
         self.hud_console = HUDConsole(logger=logger)
+        self._httpx_client = self.config.httpx_client
 
         # Track mapping from Gemini tool names to MCP tool names
         self._gemini_to_mcp_tool_map: dict[str, str] = {}
         self.gemini_tools: genai_types.ToolListUnion = []
+
+    async def _cleanup(self) -> None:
+        await super()._cleanup()
+        if self._httpx_client is not None:
+            await self._httpx_client.aclose()
+            self._httpx_client = None
 
     def _on_tools_ready(self) -> None:
         """Build Gemini-specific tool mappings after tools are discovered."""
