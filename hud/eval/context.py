@@ -539,12 +539,24 @@ class EvalContext(Environment):
         # Connect environment (MCP servers, tools)
         await super().__aenter__()
 
-        # Run task scenario setup (if created from_task with scenario)
-        await self._run_task_scenario_setup()
+        try:
+            # Run task scenario setup (if created from_task with scenario)
+            await self._run_task_scenario_setup()
 
-        # Notify backend and print link
-        await self._eval_enter()
-        self._print_eval_link()
+            # Notify backend and print link
+            await self._eval_enter()
+            self._print_eval_link()
+        except BaseException:
+            # Cleanup if setup fails - __aexit__ won't be called automatically
+            await super().__aexit__(None, None, None)
+            # Reset context vars
+            if self._token is not None:
+                _current_trace_headers.reset(self._token)
+                self._token = None
+            if self._api_key_token is not None:
+                _current_api_key.reset(self._api_key_token)
+                self._api_key_token = None
+            raise
 
         return self
 

@@ -179,16 +179,53 @@ class ScenarioMixin:
                 logger.debug("Remote scenario (adding namespace): prompt_id=%s", prompt_id)
             try:
                 result = await self.get_prompt(prompt_id, args)  # type: ignore[attr-defined]
-                if result.messages:
-                    first_msg = result.messages[0]
-                    content = first_msg.content
-                    if hasattr(content, "text") and isinstance(content.text, str):  # type: ignore[union-attr]
-                        return content.text  # type: ignore[union-attr]
-                    elif isinstance(content, str):
-                        return content
             except Exception as e:
-                logger.warning("Failed to get scenario prompt: %s", e)
-            return None
+                # Fetch available scenarios for error context
+                try:
+                    prompts = await self.list_prompts()  # type: ignore[attr-defined]
+                    scenario_prompts = [p.name for p in prompts if ":" in p.name]
+                    available = (
+                        "\n    ".join(scenario_prompts) if scenario_prompts else "(none found)"
+                    )
+                except Exception:
+                    available = "(could not fetch available scenarios)"
+
+                raise ValueError(
+                    f"Scenario not found.\n\n"
+                    f"Scenario IDs have the format 'environment_name:scenario_name'.\n"
+                    f"If you only specify 'scenario_name', the SDK uses your task's env name "
+                    f"as the prefix.\n"
+                    f"This won't work if the HUD environment was declared with a different name."
+                    f"\n\n"
+                    f"  You requested: {scenario_name}\n"
+                    f"  SDK looked for: {prompt_id}\n\n"
+                    f"Available scenarios:\n    {available}\n\n"
+                    f"Fix: Use one of the scenario IDs above in your task JSON."
+                ) from e
+
+            # Validate the response (outside try/except so errors aren't wrapped)
+            if result.messages:
+                first_msg = result.messages[0]
+                content = first_msg.content
+                if hasattr(content, "text") and isinstance(content.text, str):  # type: ignore[union-attr]
+                    return content.text  # type: ignore[union-attr]
+                elif isinstance(content, str):
+                    return content
+                else:
+                    # Content exists but is neither text object nor string
+                    raise ValueError(
+                        f"Scenario '{scenario_name}' returned malformed content.\n\n"
+                        f"Expected: content with .text attribute (str) or content as str\n"
+                        f"Got: {type(content).__name__}\n\n"
+                        f"Check that the scenario's setup function returns a valid prompt."
+                    )
+            else:
+                # get_prompt succeeded but returned empty messages
+                raise ValueError(
+                    f"Scenario '{scenario_name}' returned an empty response.\n\n"
+                    f"The scenario's setup function was called but returned no messages.\n"
+                    f"Check that the scenario returns a valid prompt string."
+                )
 
     async def run_scenario_evaluate(self, scenario_name: str) -> float | None:
         """Run a scenario's evaluate phase and return the reward.

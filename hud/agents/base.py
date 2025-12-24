@@ -182,7 +182,23 @@ class MCPAgent(ABC):
             raise TypeError(f"ctx must be EvalContext, got {type(ctx).__name__}")
 
         if not ctx.prompt:
-            raise ValueError("ctx.prompt is not set - did the scenario setup run?")
+            if ctx.has_scenario:
+                # Scenario was specified but prompt is still empty
+                # (e.g., scenario returned empty string, or edge case not caught in scenarios.py)
+                scenario = ctx._task.scenario if ctx._task else "unknown"
+                raise ValueError(
+                    f"ctx.prompt is not set.\n\n"
+                    f"Scenario '{scenario}' was specified but returned an empty prompt.\n"
+                    f"Check that the scenario's setup function returns a non-empty string."
+                )
+            else:
+                # No scenario specified at all
+                raise ValueError(
+                    "ctx.prompt is not set.\n\n"
+                    "No scenario was specified in your task file.\n"
+                    "Either add a 'scenario' field to your task, or set ctx.prompt manually "
+                    "before running the agent."
+                )
 
         # Store context for tool calls
         self.ctx = ctx
