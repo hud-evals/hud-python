@@ -70,6 +70,18 @@ class OpenAIChatAgent(MCPAgent):
         super().__init__(params, **kwargs)
         self.config: OpenAIChatConfig
 
+        if (
+            self.config.api_key
+            and self.config.base_url
+            and settings.hud_gateway_url in self.config.base_url
+            and settings.api_key
+            and self.config.api_key != settings.api_key
+        ):
+            raise ValueError(
+                "OpenAIChatAgent api_key is not allowed with HUD Gateway. "
+                "Use HUD_API_KEY for gateway auth and BYOK headers for provider keys."
+            )
+
         if self.config.openai_client is not None:
             self.oai = self.config.openai_client
         elif self.config.api_key is not None or self.config.base_url is not None:

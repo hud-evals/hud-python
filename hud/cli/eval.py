@@ -95,6 +95,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # max_concurrent = 30
 # max_steps = 10
 # group_size = 1
+# byok = false  # Remote only; use encrypted env vars on the platform.
 # task_ids = ["task_1", "task_2"]
 # verbose = true
 # very_verbose = true
@@ -158,6 +159,7 @@ class EvalConfig(BaseModel):
         "verbose",
         "very_verbose",
         "group_size",
+        "byok",
         "remote",
         "auto_respond",
         "quiet",
@@ -178,6 +180,7 @@ class EvalConfig(BaseModel):
     very_verbose: bool = False
     auto_respond: bool | None = None  # Continue without prompting
     group_size: int = 1
+    byok: bool = False
     remote: bool = False
     quiet: bool = False  # Suppress opening browser for eval links
     gateway: bool = False  # Use HUD Gateway for LLM API calls
@@ -208,6 +211,11 @@ class EvalConfig(BaseModel):
 
     def validate_api_keys(self) -> None:
         """Validate required API keys for the selected agent. Raises typer.Exit on failure."""
+        # BYOK requires remote execution (check before agent_type guard)
+        if self.byok and not self.remote:
+            hud_console.error("--byok requires --remote (BYOK only works with remote execution)")
+            raise typer.Exit(1)
+
         if self.agent_type is None:
             return
 
@@ -284,14 +292,11 @@ class EvalConfig(BaseModel):
         if self.model:
             kwargs["model"] = self.model
 
-        if self.agent_type == AgentType.OPENAI_COMPATIBLE:
+        # For gateway base_url, inject HUD API key if not already set
+        if self.agent_type == AgentType.OPENAI_COMPATIBLE and "api_key" not in kwargs:
             base_url = kwargs.get("base_url", "")
-            if "api_key" not in kwargs:
-                # Use HUD API key for gateway, otherwise fall back to OpenAI API key
-                if settings.hud_gateway_url in base_url:
-                    kwargs["api_key"] = settings.api_key
-                elif settings.openai_api_key:
-                    kwargs["api_key"] = settings.openai_api_key
+            if settings.hud_gateway_url in base_url and settings.api_key:
+                kwargs["api_key"] = settings.api_key
 
         # Auto-detect Bedrock when Claude is selected with a Bedrock ARN
         # Check both model and checkpoint_name for ARN patterns
@@ -565,6 +570,8 @@ class EvalConfig(BaseModel):
             table.add_row("remote", "[bold green]True[/bold green] (submitting to platform)")
         if self.gateway:
             table.add_row("gateway", "[bold green]True[/bold green] (routing via HUD Gateway)")
+        if self.byok:
+            table.add_row("byok", "[bold green]True[/bold green] (remote only)")
 
         # Tool filters (only if set)
         if self.allowed_tools:
@@ -665,6 +672,9 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
 
     # Remote execution - submit to HUD platform
     if cfg.remote:
+        agent_kwargs = {
+            k: v for k, v in agent_kwargs.items() if k not in ("api_key", "model_client")
+        }
         # Create a job ID for tracking
         import uuid
 
@@ -682,6 +692,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             agent_params=agent_kwargs,
             max_steps=max_steps,
             group_size=cfg.group_size,
+            use_byok=cfg.byok,
         )
 
         hud_console.success(f"Tasks submitted. View at: https://hud.ai/jobs/{job_id}")
@@ -765,6 +776,11 @@ def eval_command(
     remote: bool = typer.Option(
         False, "--remote", help="Submit tasks to platform for remote execution"
     ),
+    byok: bool = typer.Option(
+        False,
+        "--byok",
+        help="Remote only: use BYOK keys from encrypted env vars for inference",
+    ),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Suppress opening browser for eval links"
     ),
@@ -802,6 +818,7 @@ def eval_command(
         group_size=group_size,
         config=config,
         remote=remote,
+        byok=byok,
         quiet=quiet,
         gateway=gateway,
     )
