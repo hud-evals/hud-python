@@ -131,6 +131,7 @@
             "group": "Environments",
             "pages": [
               "build-environments/index",
+              "build-environments/remote-builds",
               "build-environments/spec"
             ]
           },
