@@ -68,14 +68,21 @@ from hud import Environment
 env = Environment("my-env")
 
 @env.tool()
-def search(query: str) -> str:
-    """Search the knowledge base."""
-    return db.search(query)
+def add(a: int, b: int) -> int:
+    """Add two numbers."""
+    return a + b
 
-@env.scenario("find-answer")
-async def find_answer(question: str, answer: str):
-    response = yield f"Find: {question}"       # Prompt
-    yield 1.0 if answer in response else 0.0  # Reward
+@env.scenario("solve-math")
+async def solve_math(problem: str, answer: int):
+    response = yield problem                    # Prompt
+    yield 1.0 if str(answer) in response else 0.0  # Reward
+
+async with env("solve-math", problem="What is 2+2?", answer=4) as ctx:
+    # Your agent logic here - call tools, get response
+    result = await ctx.call_tool("add", a=2, b=2)
+    await ctx.submit(f"The answer is {result}")
+
+print(ctx.reward)  # 1.0
 ```
 
 The agent runs between the yields. First yield sends the prompt, second yield scores the result. → [Docs](https://docs.hud.ai/quick-links/environments) · [Templates](https://hud.ai/environments)
@@ -85,14 +92,20 @@ The agent runs between the yields. First yield sends the prompt, second yield sc
 Test different models. Repeat runs to see the distribution:
 
 ```python
-import hud
+from openai import AsyncOpenAI
+import os
 
-task = env("find-answer", question="What is 2+2?", answer="4")
+client = AsyncOpenAI(
+    base_url="https://inference.hud.ai",
+    api_key=os.environ["HUD_API_KEY"]
+)
 
-async with hud.eval(task, variants={"model": ["gpt-4o", "claude-sonnet-4-5"]}, group=5) as ctx:
+# Using the env from above
+async with env("solve-math", problem="What is 2+2?", answer=4, variants={"model": ["gpt-4o", "claude-sonnet-4-5"]}, group=5) as ctx:
     response = await client.chat.completions.create(
         model=ctx.variants["model"],
-        messages=[{"role": "user", "content": ctx.prompt}]
+        messages=[{"role": "user", "content": ctx.prompt}],
+        tools=ctx.tools  # Environment tools available to the model
     )
     await ctx.submit(response.choices[0].message.content)
 ```
@@ -107,7 +120,7 @@ Push to GitHub, connect on hud.ai, run at scale:
 hud init                  # Scaffold environment
 git push                  # Push to GitHub
 # Connect on hud.ai → New → Environment
-hud eval my-org/my-eval --model gpt-4o --group-size 100
+hud eval my-eval --model gpt-4o --group-size 100
 # Or create and run tasks on the platform
 ```
 

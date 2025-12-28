@@ -545,7 +545,7 @@ def find_reward(result: MCPToolResult) -> float:
                 except json.JSONDecodeError:
                     pass
 
-    logger.error("Couldn't parse reward from result: %s", result)
+    logger.error("Couldn't parse reward from result: %s", str(result.structuredContent))
     return 0.0
 
 

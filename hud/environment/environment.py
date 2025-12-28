@@ -323,7 +323,8 @@ class Environment(
                     if conn.is_connected:
                         await conn.disconnect()
                 name, err = errors[0]
-                raise ConnectionError(f"Failed to connect to {name}") from err
+                str_err = str(err).replace("Client failed to connect: ", "")  # Strip from FastMCP
+                raise ConnectionError(f"Failed to connect to {name}: {str_err}") from err
 
         await self._build_routing()
 
@@ -399,13 +400,20 @@ class Environment(
         if self._router.is_local(name):
             # Call tool manager directly to avoid FastMCP context requirement
             result = await self._tool_manager.call_tool(name, arguments)
-            return MCPToolResult(content=result.content, isError=False)
+            return MCPToolResult(
+                content=result.content,
+                structuredContent=result.structured_content,
+            )
 
         connection_name = self._router.get_connection(name)
         if connection_name:
             conn = self._connections[connection_name]
             result = await conn.call_tool(name, arguments)
-            return MCPToolResult(content=result.content, isError=result.isError)
+            return MCPToolResult(
+                content=result.content,
+                isError=result.isError,
+                structuredContent=result.structuredContent,
+            )
 
         raise ValueError(f"Tool not found: {name}")
 

@@ -507,15 +507,10 @@ class EvalContext(Environment):
         if not settings.telemetry_enabled or not api_key:
             return
 
-        # Use evaluate tool reward if not manually set
-        reward = self.reward
-        if reward is None:
-            reward = getattr(self, "_evaluate_reward", None)
-
         try:
             payload = EvalExitPayload(
                 **self._build_base_payload().model_dump(),
-                reward=reward,
+                reward=self.reward,
                 success=self.success,
                 error_message=error_message,
             )
@@ -578,8 +573,12 @@ class EvalContext(Environment):
         # Flush any pending telemetry spans for this trace
         flush(self.trace_id)
 
-        # Disconnect environment (parent class)
+        # Disconnect environment (parent class) - also runs evaluate tools
         await super().__aexit__(exc_type, exc_val, exc_tb)
+
+        # Set reward from evaluate tools if not already set
+        if self.reward is None and hasattr(self, "_evaluate_reward"):
+            self.reward = self._evaluate_reward
 
         # Reset context vars
         if self._token is not None:
