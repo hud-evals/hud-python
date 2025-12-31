@@ -182,7 +182,23 @@ class MCPAgent(ABC):
             raise TypeError(f"ctx must be EvalContext, got {type(ctx).__name__}")
 
         if not ctx.prompt:
-            raise ValueError("ctx.prompt is not set - did the scenario setup run?")
+            if ctx.has_scenario:
+                # Scenario was specified but prompt is still empty
+                # (e.g., scenario returned empty string, or edge case not caught in scenarios.py)
+                scenario = ctx._task.scenario if ctx._task else "unknown"
+                raise ValueError(
+                    f"ctx.prompt is not set.\n\n"
+                    f"Scenario '{scenario}' was specified but returned an empty prompt.\n"
+                    f"Check that the scenario's setup function returns a non-empty string."
+                )
+            else:
+                # No scenario specified at all
+                raise ValueError(
+                    "ctx.prompt is not set.\n\n"
+                    "No scenario was specified in your task file.\n"
+                    "Either add a 'scenario' field to your task, or set ctx.prompt manually "
+                    "before running the agent."
+                )
 
         # Store context for tool calls
         self.ctx = ctx
@@ -194,6 +210,11 @@ class MCPAgent(ABC):
         try:
             result = await self._run_context(text_to_blocks(ctx.prompt), max_steps=max_steps)
 
+            # Propagate error state to context for platform visibility
+            if result.isError and hasattr(ctx, "error"):
+                error_msg = result.info.get("error") if result.info else result.content
+                ctx.error = Exception(str(error_msg)) if error_msg else Exception("Agent error")
+
             # Submit final answer to context (only if scenario is running)
             if result.content and ctx.has_scenario:
                 await ctx.submit(result.content)
@@ -202,6 +223,9 @@ class MCPAgent(ABC):
 
         except Exception as e:
             logger.exception("Error while running agent:")
+            # Propagate error to context for platform visibility
+            if hasattr(ctx, "error"):
+                ctx.error = e
             return Trace(
                 reward=0.0,
                 done=True,

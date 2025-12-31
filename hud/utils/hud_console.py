@@ -20,9 +20,6 @@ import time
 import traceback
 from typing import TYPE_CHECKING, Any, Literal, Self
 
-import questionary
-import typer
-from questionary import Style
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -488,6 +485,9 @@ class HUDConsole:
         Returns:
             The selected choice value
         """
+        import questionary
+        from questionary import Style
+
         # Convert choices to questionary format
         q_choices = []
 
@@ -518,6 +518,8 @@ class HUDConsole:
 
         # If no selection made (Ctrl+C or ESC), exit
         if result is None:
+            import typer
+
             raise typer.Exit(1)
 
         return result
@@ -573,6 +575,8 @@ class HUDConsole:
             message: The confirmation message
             default: If True, the default choice is True
         """
+        import questionary
+
         return questionary.confirm(message, default=default).ask()
 
     # Symbol-based output methods
