@@ -6,6 +6,14 @@ icon: "robot"
 
 The `hud eval` command runs an agent on a tasks file or HuggingFace dataset.
 
+<Note>
+**Local Execution Dependencies**: Running Claude or Gemini agents locally requires additional packages:
+```bash
+uv add "hud-python[agents]"
+```
+This is not needed for `--remote` execution, which runs on HUD infrastructure.
+</Note>
+
 ## Usage
 
 ```bash

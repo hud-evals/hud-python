@@ -89,17 +89,13 @@ class EvalContext(Environment):
 
     Example:
         ```python
-        # From existing environment
-        async with env.eval("task") as ctx:
-            await ctx.call_tool("navigate", url="...")
-            ctx.reward = 0.9
-
-        # Standalone with slug
-        async with hud.eval("my-org/task:1") as ctx:
+        # With task (scenario sets reward automatically)
+        tasks = load_tasks("my-org/task:1")
+        async with hud.eval(tasks) as ctx:
             await agent.run(ctx)
-            ctx.reward = result.reward
+            # reward set by scenario evaluate phase in __aexit__
 
-        # Blank eval
+        # Blank eval (manual reward)
         async with hud.eval() as ctx:
             ctx.reward = compute_reward()
         ```
@@ -229,6 +225,9 @@ class EvalContext(Environment):
         # Copy connections from parent - each connector is copied so parallel
         # execution gets fresh client instances
         ctx._connections = {name: connector.copy() for name, connector in env._connections.items()}
+
+        # Note: Auth is injected at request time by httpx/aiohttp hooks in hud.eval.instrument
+        # using the contextvar set in __aenter__ (supports api_key passed to hud.eval())
         ctx._setup_calls = env._setup_calls.copy()
         ctx._evaluate_calls = env._evaluate_calls.copy()
 
@@ -536,26 +535,19 @@ class EvalContext(Environment):
         self._token = _current_trace_headers.set(self.headers)
         self._api_key_token = _current_api_key.set(self._eval_api_key)
 
-        # Connect environment (MCP servers, tools)
-        await super().__aenter__()
+        # Register trace first (environment connection can fail)
+        await self._eval_enter()
 
         try:
+            # Connect environment (MCP servers, tools)
+            await super().__aenter__()
+
             # Run task scenario setup (if created from_task with scenario)
             await self._run_task_scenario_setup()
-
-            # Notify backend and print link
-            await self._eval_enter()
             self._print_eval_link()
-        except BaseException:
+        except BaseException as e:
             # Cleanup if setup fails - __aexit__ won't be called automatically
-            await super().__aexit__(None, None, None)
-            # Reset context vars
-            if self._token is not None:
-                _current_trace_headers.reset(self._token)
-                self._token = None
-            if self._api_key_token is not None:
-                _current_api_key.reset(self._api_key_token)
-                self._api_key_token = None
+            await self.__aexit__(type(e), e, e.__traceback__)
             raise
 
         return self
