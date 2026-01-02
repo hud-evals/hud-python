@@ -89,17 +89,13 @@ class EvalContext(Environment):
 
     Example:
         ```python
-        # From existing environment
-        async with env.eval("task") as ctx:
-            await ctx.call_tool("navigate", url="...")
-            ctx.reward = 0.9
-
-        # Standalone with slug
-        async with hud.eval("my-org/task:1") as ctx:
+        # With task (scenario sets reward automatically)
+        tasks = load_tasks("my-org/task:1")
+        async with hud.eval(tasks) as ctx:
             await agent.run(ctx)
-            ctx.reward = result.reward
+            # reward set by scenario evaluate phase in __aexit__
 
-        # Blank eval
+        # Blank eval (manual reward)
         async with hud.eval() as ctx:
             ctx.reward = compute_reward()
         ```
