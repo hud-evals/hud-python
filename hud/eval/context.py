@@ -229,6 +229,12 @@ class EvalContext(Environment):
         # Copy connections from parent - each connector is copied so parallel
         # execution gets fresh client instances
         ctx._connections = {name: connector.copy() for name, connector in env._connections.items()}
+
+        # Update HUD connection auth if we have an API key (fixes late API key injection)
+        # Prefer explicit api_key, fall back to settings
+        effective_api_key = api_key or settings.api_key
+        if effective_api_key and "hud" in ctx._connections:
+            ctx._connections["hud"]._auth = f"Bearer {effective_api_key}"
         ctx._setup_calls = env._setup_calls.copy()
         ctx._evaluate_calls = env._evaluate_calls.copy()
 
