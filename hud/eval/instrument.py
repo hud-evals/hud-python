@@ -26,6 +26,17 @@ def _get_trace_headers() -> dict[str, str] | None:
     return get_current_trace_headers()
 
 
+def _get_api_key() -> str | None:
+    """Get API key from context or settings.
+
+    Prefers the contextvar (set by hud.eval(api_key=...)),
+    falls back to settings (env var HUD_API_KEY).
+    """
+    from hud.eval.context import get_current_api_key
+
+    return get_current_api_key() or settings.api_key
+
+
 def _is_hud_url(url_str: str) -> bool:
     """Check if URL is a HUD service (inference or MCP)."""
     parsed = urlparse(url_str)
@@ -61,10 +72,11 @@ def _httpx_request_hook(request: Any) -> None:
             request.headers[key] = value
         logger.debug("Added trace headers to request: %s", url_str)
 
-    # Auto-inject API key if not present
+    # Auto-inject API key if not present (prefer contextvar, fallback to settings)
     has_auth = "authorization" in {k.lower() for k in request.headers}
-    if not has_auth and settings.api_key:
-        request.headers["Authorization"] = f"Bearer {settings.api_key}"
+    api_key = _get_api_key()
+    if not has_auth and api_key:
+        request.headers["Authorization"] = f"Bearer {api_key}"
         logger.debug("Added API key auth to request: %s", url_str)
 
 
@@ -139,8 +151,9 @@ def _patch_aiohttp() -> None:
             logger.debug("Added trace headers to aiohttp request: %s", url_str)
 
         has_auth = "authorization" in {k.lower() for k in params.headers}
-        if not has_auth and settings.api_key:
-            params.headers["Authorization"] = f"Bearer {settings.api_key}"
+        api_key = _get_api_key()
+        if not has_auth and api_key:
+            params.headers["Authorization"] = f"Bearer {api_key}"
             logger.debug("Added API key auth to aiohttp request: %s", url_str)
 
     trace_config = aiohttp.TraceConfig()
