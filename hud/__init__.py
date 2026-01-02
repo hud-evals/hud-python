@@ -18,7 +18,7 @@ from .telemetry.instrument import instrument
 def trace(*args: object, **kwargs: object) -> EvalContext:
     """Deprecated: Use hud.eval() instead.
 
-    .. deprecated:: 0.5.0
+    .. deprecated:: 0.5.1
         hud.trace() is deprecated. Use hud.eval() or env.eval() instead.
     """
     warnings.warn(

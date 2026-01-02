@@ -1,6 +1,6 @@
 [project]
 name = "hud-python"
-version = "0.5.0"
+version = "0.5.1"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
