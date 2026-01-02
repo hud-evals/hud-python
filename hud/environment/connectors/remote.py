@@ -61,13 +61,12 @@ class RemoteConnectorMixin(MCPConfigConnectorMixin):
             self._hub_config = hub_config
 
         # Create mcp_config with standard MCP URL and hub slug in headers
+        # Note: Authorization is injected at request time by httpx/aiohttp hooks
+        # in hud.eval.instrument (uses contextvar for api_key).
         mcp_config = {
             "hud": {
                 "url": settings.hud_mcp_url,
-                "headers": {
-                    "Authorization": f"Bearer {settings.api_key}",
-                    "Environment-Name": slug,
-                },
+                "headers": {"Environment-Name": slug},
             }
         }
 

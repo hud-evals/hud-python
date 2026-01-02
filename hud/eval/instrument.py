@@ -72,12 +72,14 @@ def _httpx_request_hook(request: Any) -> None:
             request.headers[key] = value
         logger.debug("Added trace headers to request: %s", url_str)
 
-    # Auto-inject API key if not present (prefer contextvar, fallback to settings)
-    has_auth = "authorization" in {k.lower() for k in request.headers}
+    # Auto-inject API key if not present or invalid (prefer contextvar, fallback to settings)
     api_key = _get_api_key()
-    if not has_auth and api_key:
-        request.headers["Authorization"] = f"Bearer {api_key}"
-        logger.debug("Added API key auth to request: %s", url_str)
+    if api_key:
+        existing_auth = request.headers.get("Authorization", "")
+        # Override if no auth, empty auth, or invalid "Bearer None"
+        if not existing_auth or existing_auth in ("Bearer None", "Bearer null", "Bearer "):
+            request.headers["Authorization"] = f"Bearer {api_key}"
+            logger.debug("Added API key auth to request: %s", url_str)
 
 
 async def _async_httpx_request_hook(request: Any) -> None:
@@ -150,11 +152,13 @@ def _patch_aiohttp() -> None:
                 params.headers[key] = value
             logger.debug("Added trace headers to aiohttp request: %s", url_str)
 
-        has_auth = "authorization" in {k.lower() for k in params.headers}
         api_key = _get_api_key()
-        if not has_auth and api_key:
-            params.headers["Authorization"] = f"Bearer {api_key}"
-            logger.debug("Added API key auth to aiohttp request: %s", url_str)
+        if api_key:
+            existing_auth = params.headers.get("Authorization", "")
+            # Override if no auth, empty auth, or invalid "Bearer None"
+            if not existing_auth or existing_auth in ("Bearer None", "Bearer null", "Bearer "):
+                params.headers["Authorization"] = f"Bearer {api_key}"
+                logger.debug("Added API key auth to aiohttp request: %s", url_str)
 
     trace_config = aiohttp.TraceConfig()
     trace_config.on_request_start.append(on_request_start)
