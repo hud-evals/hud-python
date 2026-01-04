@@ -69,8 +69,7 @@ def _httpx_request_hook(request: Any) -> None:
     headers = _get_trace_headers()
     if headers is not None:
         for key, value in headers.items():
-            if key.lower() not in {k.lower() for k in request.headers}:
-                request.headers[key] = value
+            request.headers[key] = value
         logger.debug("Added trace headers to request: %s", url_str)
 
     # Auto-inject API key if not present or invalid (prefer contextvar, fallback to settings)
@@ -150,8 +149,7 @@ def _patch_aiohttp() -> None:
         trace_headers = _get_trace_headers()
         if trace_headers is not None:
             for key, value in trace_headers.items():
-                if key.lower() not in {k.lower() for k in params.headers}:
-                    params.headers[key] = value
+                params.headers[key] = value
             logger.debug("Added trace headers to aiohttp request: %s", url_str)
 
         api_key = _get_api_key()

@@ -6,7 +6,6 @@ from typing import Literal
 from openai import AsyncOpenAI
 
 from hud.settings import settings
-from hud.telemetry import instrument
 
 logger = logging.getLogger(__name__)
 
@@ -65,11 +64,6 @@ class ResponseAgent:
         self.model = model
         self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
 
-    @instrument(
-        category="agent",
-        name="response_agent",
-        internal_type="user-message",
-    )
     async def determine_response(self, agent_message: str) -> ResponseType:
         """
         Determine whether the agent should stop or continue based on its message.
@@ -92,7 +86,6 @@ class ResponseAgent:
                 ],
                 temperature=0.1,
                 max_tokens=5,
-                extra_headers={"Trace-Id": ""},
             )
 
             response_text = response.choices[0].message.content

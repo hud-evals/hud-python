@@ -83,7 +83,6 @@ def instrument(
     name: str | None = None,
     category: str = "function",
     span_type: str | None = None,
-    internal_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]: ...
@@ -96,7 +95,6 @@ def instrument(
     name: str | None = None,
     category: str = "function",
     span_type: str | None = None,
-    internal_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[P, R]: ...
@@ -109,7 +107,6 @@ def instrument(
     name: str | None = None,
     category: str = "function",
     span_type: str | None = None,
-    internal_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[P, Awaitable[R]]: ...
@@ -121,7 +118,6 @@ def instrument(
     name: str | None = None,
     category: str = "function",
     span_type: str | None = None,
-    internal_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
 ) -> Callable[..., Any]:
@@ -134,7 +130,6 @@ def instrument(
         name: Custom span name (defaults to module.function)
         category: Span category (e.g., "agent", "tool", "function", "mcp")
         span_type: Alias for category (deprecated, use category instead)
-        internal_type: Internal span type (e.g., "user-message")
         record_args: Whether to record function arguments
         record_result: Whether to record function result
 
@@ -209,7 +204,7 @@ def instrument(
 
             # Build span
             span_id = uuid.uuid4().hex[:16]
-            span: dict[str, Any] = {
+            span = {
                 "name": span_name,
                 "trace_id": _normalize_trace_id(task_run_id),
                 "span_id": span_id,
@@ -221,8 +216,6 @@ def instrument(
                 "attributes": attributes.model_dump(mode="json", exclude_none=True),
                 "exceptions": [{"message": error}] if error else None,
             }
-            if internal_type:
-                span["internal_type"] = internal_type
             return span
 
         @functools.wraps(func)
