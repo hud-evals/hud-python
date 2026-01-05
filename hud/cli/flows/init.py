@@ -102,7 +102,7 @@ def smart_init(
         hud_console.info("  hud set HUD_API_KEY=your-key-here")
         hud_console.info("  Or: export HUD_API_KEY=your-key")
         hud_console.info("")
-        hud_console.info("Get your key at: https://hud.ai/settings/api-keys")
+        hud_console.info("Get your key at: https://hud.ai/project/api-keys")
         return
 
     target = Path(directory).resolve()
