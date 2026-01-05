@@ -61,6 +61,12 @@
                 ]
               },
               {
+                "group": "Cookbooks",
+                "pages": [
+                  "cookbooks/codex-coding"
+                ]
+              },
+              {
                 "group": "Advanced",
                 "pages": [
                   "advanced/testing-environments"

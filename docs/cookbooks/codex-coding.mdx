@@ -1,0 +1,368 @@
+---
+title: "Codex Agent"
+description: "Build coding agents with OpenAI's native shell and apply_patch tools"
+icon: "code"
+---
+
+HUD provides native support for OpenAI's coding tools (`shell` and `apply_patch`), enabling you to build powerful coding agents that can create, modify, and execute code.
+
+<Card
+  title="Example Code"
+  icon="github"
+  href="https://github.com/hud-evals/hud-python/blob/main/examples/06_codex_coding_agent.py"
+>
+  Follow along with the full working example on GitHub.
+</Card>
+
+## Overview
+
+OpenAI's Responses API includes specialized tools for coding tasks:
+
+| Tool          | Purpose                                                | HUD Implementation                     |
+| ------------- | ------------------------------------------------------ | -------------------------------------- |
+| `shell`       | Execute shell commands in a persistent bash session    | `hud.tools.shell.ShellTool`            |
+| `apply_patch` | Create, update, and delete files using V4A diff format | `hud.tools.apply_patch.ApplyPatchTool` |
+
+When you register tools named `shell` or `apply_patch` in your environment, the `OpenAIAgent` automatically converts them to OpenAI's native tool types for optimal performance.
+
+## Two Modes
+
+HUD supports two execution modes for coding agents:
+
+| Mode                  | Tools Run On | Inference Via   | API Keys Required |
+| --------------------- | ------------ | --------------- | ----------------- |
+| **Local** (`--local`) | Your machine | OpenAI directly | `OPENAI_API_KEY`  |
+| **Hub** (default)     | HUD Cloud    | HUD Gateway     | `HUD_API_KEY`     |
+
+Both modes support traces on hud.ai if `HUD_API_KEY` is set.
+
+## Quick Start
+
+### Local Mode (No Docker)
+
+Run coding agents directly on your machine without any infrastructure:
+
+```python
+import hud
+from hud.agents.openai import OpenAIAgent
+from hud.tools.shell import ShellTool
+from hud.tools.apply_patch import ApplyPatchTool
+
+# Create environment with coding tools
+env = hud.Environment("coding")
+shell_tool = ShellTool()
+apply_patch_tool = ApplyPatchTool(base_path="/path/to/workspace")
+
+@env.tool()
+async def shell(commands: list[str], timeout_ms: int | None = None):
+    """Execute shell commands."""
+    result = await shell_tool(commands=commands, timeout_ms=timeout_ms)
+    return result.to_dict()
+
+@env.tool()
+async def apply_patch(type: str, path: str, diff: str | None = None):
+    """Apply file patches."""
+    result = await apply_patch_tool(type=type, path=path, diff=diff)
+    return result.to_dict()
+
+# Run with OpenAI agent (calls OpenAI directly)
+agent = OpenAIAgent.create(model="gpt-5.1")
+
+async with hud.eval(env(), name="coding-task") as ctx:
+    result = await agent.run(ctx, max_steps=20)
+```
+
+### Hub Mode (Cloud Execution)
+
+Connect to HUD Hub for full cloud execution and telemetry:
+
+```python
+import hud
+from hud.agents.openai import OpenAIAgent
+from hud.settings import settings
+from openai import AsyncOpenAI
+
+# Connect to HUD Hub environment
+env = hud.Environment()
+env.connect_hub("codex_sandbox_environment")
+
+# Use HUD Gateway for inference (full telemetry)
+model_client = AsyncOpenAI(
+    base_url=settings.hud_gateway_url,
+    api_key=settings.api_key,
+)
+agent = OpenAIAgent.create(
+    model="gpt-5.1",
+    model_client=model_client,
+    validate_api_key=False,
+)
+
+async with hud.eval(env(), name="coding-task") as ctx:
+    result = await agent.run(ctx, max_steps=20)
+```
+
+<Note>
+  The first request may take a few seconds while the environment spins up in the
+  cloud. Subsequent requests will be faster.
+</Note>
+
+## Tool Specifications
+
+### Shell Tool
+
+The `ShellTool` provides a persistent bash session for executing commands.
+
+**Features:**
+
+- Auto-restart on error (session automatically restarts if needed)
+- Dynamic timeout via `timeout_ms` parameter
+- Persistent environment (exported variables, working directory)
+- Concurrent command execution support
+
+**Input Schema:**
+
+```python
+{
+    "commands": ["ls -la", "cat file.py"],  # List of commands
+    "timeout_ms": 30000,                     # Optional timeout per command
+    "max_output_length": 10000               # Optional output limit
+}
+```
+
+**Output Format:**
+
+```python
+{
+    "output": [
+        {
+            "stdout": "file1.py\nfile2.py",
+            "stderr": "",
+            "outcome": {"type": "exit", "exit_code": 0}
+        }
+    ]
+}
+```
+
+### Apply Patch Tool
+
+The `ApplyPatchTool` creates, updates, and deletes files using OpenAI's V4A diff format.
+
+**Operations:**
+
+| Operation     | Description          | Diff Required |
+| ------------- | -------------------- | ------------- |
+| `create_file` | Create a new file    | Yes           |
+| `update_file` | Modify existing file | Yes           |
+| `delete_file` | Remove a file        | No            |
+
+**Input Schema:**
+
+```python
+{
+    "type": "update_file",
+    "path": "src/main.py",
+    "diff": "..."  # V4A diff content
+}
+```
+
+**V4A Diff Format Example:**
+
+```diff
+@@ def hello():
+-    print("Hello")
++    print("Hello, World!")
+```
+
+**Output Format:**
+
+```python
+{
+    "status": "completed",  # or "failed"
+    "output": "Updated src/main.py"
+}
+```
+
+## Agent Integration
+
+The `OpenAIAgent` automatically detects `shell` and `apply_patch` tools and converts them to OpenAI's native types:
+
+```python
+# In hud/agents/openai.py
+def _to_openai_tool(self, tool):
+    if tool.name == "shell":
+        return FunctionShellToolParam(type="shell")
+    if tool.name == "apply_patch":
+        return ApplyPatchToolParam(type="apply_patch")
+    # ... regular function tools
+```
+
+This means:
+
+1. The model sees native `shell` and `apply_patch` tools
+2. Responses include `shell_call` and `apply_patch_call` output types
+3. The agent routes these back to your registered tools
+
+## Complete Example
+
+Here's the full local mode example with a working directory:
+
+```python
+import asyncio
+import os
+import tempfile
+
+from dotenv import load_dotenv
+from openai import AsyncOpenAI
+
+load_dotenv()  # Load .env file
+
+import hud
+from hud.agents.openai import OpenAIAgent
+from hud.tools.shell import ShellTool
+from hud.tools.apply_patch import ApplyPatchTool
+
+
+async def main():
+    # Set up working directory
+    work_dir = "./codex_output"
+    os.makedirs(work_dir, exist_ok=True)
+    base_path = os.path.abspath(work_dir)
+
+    # Initialize tools
+    shell_tool = ShellTool()
+    apply_patch_tool = ApplyPatchTool(base_path=base_path)
+
+    # Create environment with local tools
+    env = hud.Environment("local-codex")
+
+    @env.tool()
+    async def shell(
+        commands: list[str],
+        timeout_ms: int | None = None,
+        max_output_length: int | None = None,
+    ) -> dict:
+        """Execute shell commands in a bash session."""
+        # Change to working directory before executing
+        prefixed_commands = [f"cd {base_path} && {cmd}" for cmd in commands]
+        result = await shell_tool(
+            commands=prefixed_commands,
+            timeout_ms=timeout_ms,
+            max_output_length=max_output_length,
+        )
+        return result.to_dict()
+
+    @env.tool()
+    async def apply_patch(
+        type: str,
+        path: str,
+        diff: str | None = None,
+    ) -> dict:
+        """Apply file operations using V4A diff format."""
+        result = await apply_patch_tool(type=type, path=path, diff=diff)
+        return result.to_dict()
+
+    # Define scenario
+    @env.scenario("coding_task")
+    async def coding_task_scenario(task_description: str):
+        yield f"""You are a skilled software developer. Complete the following task:
+
+{task_description}
+
+Use the available tools:
+- `shell` to run commands (ls, cat, python, etc.)
+- `apply_patch` to create or modify files
+
+Work in the current directory. When done, verify your work runs correctly."""
+
+        yield 1.0
+
+    # Create agent
+    agent = OpenAIAgent.create(model="gpt-5.1", verbose=True)
+
+    # Run the task
+    task = "Create a Python script called main.py that prints Hello World"
+    eval_task = env("coding_task", task_description=task)
+
+    async with hud.eval(eval_task, name="codex-coding-local") as ctx:
+        await agent.run(ctx, max_steps=20)
+
+    print(f"Reward: {ctx.reward}")
+    print(f"Files created in: {base_path}")
+
+    # Show created files
+    for f in os.listdir(base_path):
+        print(f"  - {f}")
+
+
+asyncio.run(main())
+```
+
+## CLI Usage
+
+### Setting Up API Keys
+
+Create a `.env` file in your project root:
+
+```bash
+# For local mode (calls OpenAI directly)
+OPENAI_API_KEY=sk-...
+
+# For hub mode OR traces (recommended)
+HUD_API_KEY=sk-hud-...
+```
+
+Get your keys:
+
+- **HUD_API_KEY**: [hud.ai/project/api-keys](https://hud.ai/project/api-keys)
+- **OPENAI_API_KEY**: [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+
+<Tip>
+  If you have both keys set, you get local execution with cloud traces - the
+  best of both worlds!
+</Tip>
+
+### Running the Example
+
+```bash
+# Local mode - tools run on your machine
+uv run python examples/06_codex_coding_agent.py --local
+
+# Local mode with persistent output directory
+uv run python examples/06_codex_coding_agent.py --local --work-dir ./codex_output
+
+# Hub mode - full cloud execution (default)
+uv run python examples/06_codex_coding_agent.py
+
+# Custom task
+uv run python examples/06_codex_coding_agent.py --local \
+  --task "Create a Python script that prints the Fibonacci sequence up to 10 numbers"
+
+# Verbose output
+uv run python examples/06_codex_coding_agent.py --local --verbose
+```
+
+### CLI Options
+
+| Flag          | Default            | Description                                        |
+| ------------- | ------------------ | -------------------------------------------------- |
+| `--local`     | Off                | Run locally (tools on your machine, OpenAI direct) |
+| `--task`      | Hello World script | The coding task to complete                        |
+| `--model`     | `gpt-5.1`          | Codex-capable model (`gpt-5.1`, `gpt-5.1-codex`)   |
+| `--work-dir`  | Temp directory     | Working directory (local mode only)                |
+| `--max-steps` | `20`               | Maximum agent steps                                |
+| `--verbose`   | Off                | Enable verbose output                              |
+
+## Security Considerations
+
+<Warning>
+  The shell and apply_patch tools can execute arbitrary commands and modify
+  files. Use them in sandboxed environments for untrusted tasks.
+</Warning>
+
+## See Also
+
+- [Codex-capable models](https://platform.openai.com/docs/guides/tools-shell#supported-models) - OpenAI models that support native shell and apply_patch tools
+- [Tools Reference](/reference/tools) - Complete tool documentation
+- [OpenAI Agent](/reference/agents#openaiagent) - Agent configuration options
+- [Integrations](/guides/integrations) - Using HUD with other frameworks
+- [Sandboxing](/guides/sandboxing) - Running agents safely
