@@ -381,10 +381,8 @@ class MCPAgent(ABC):
                 self.console.debug(f"Calling tool: {tc}")
                 result = await self.ctx.call_tool(tc)
                 results.append(MCPToolResult(content=result.content, isError=result.isError))
-            except TimeoutError as e:
-                self.console.error_log(f"Tool execution timed out: {e}")
-                raise
             except Exception as e:
+                # Return ALL errors as results so agent can see them and move on
                 self.console.error_log(f"Tool execution failed: {e}")
                 results.append(_format_error_result(str(e)))
         return results

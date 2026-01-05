@@ -5,6 +5,7 @@ A collection of examples demonstrating HUD SDK usage patterns.
 ## Quick Start
 
 ### 00_agent_env.py
+
 Minimal MCP server and client in one file. Shows the basic agent-environment communication pattern using `hud.eval()`.
 
 ```bash
@@ -12,7 +13,9 @@ python examples/00_agent_env.py
 ```
 
 ### 01_agent_lifecycle.py
+
 Complete agent lifecycle demonstrating:
+
 - v5 Task format with Environment and scenario
 - `hud.eval()` context for connection and tracing
 - Agent initialization and execution
@@ -27,6 +30,7 @@ python examples/01_agent_lifecycle.py
 ## Agent Examples
 
 ### 02_claude_agent.py
+
 Claude agent with computer use capabilities for browser automation.
 
 ```bash
@@ -36,6 +40,7 @@ python examples/02_claude_agent.py
 > Requires `HUD_API_KEY` and `ANTHROPIC_API_KEY`.
 
 ### 03_openai_compatible_agent.py
+
 OpenAI-compatible chat.completions agent with both text and browser 2048 environments.
 
 ```bash
@@ -49,6 +54,7 @@ python examples/03_openai_compatible_agent.py --mode browser  # browser environm
 > Requires Docker for local environment execution.
 
 ### 04_grounded_agent.py
+
 Grounded agent that separates visual grounding (element detection) from high-level reasoning.
 
 ```bash
@@ -61,7 +67,9 @@ python examples/04_grounded_agent.py
 > Requires Docker and API keys for both OpenAI and OpenRouter.
 
 ### 05_custom_agent.py
+
 Build a custom MCPAgent using HUD Gateway for unified model access:
+
 - No need for individual provider API keys
 - Works with Anthropic, OpenAI, Gemini, OpenRouter models
 - Automatic tracing with `@hud.instrument`
@@ -70,9 +78,34 @@ Build a custom MCPAgent using HUD Gateway for unified model access:
 HUD_API_KEY=sk-hud-... python examples/05_custom_agent.py
 ```
 
+### 06_codex_coding_agent.py
+
+Use OpenAI's coding-focused models with `shell` and `apply_patch` tools for software development tasks:
+
+- Native OpenAI Responses API integration
+- Persistent shell sessions for command execution
+- V4A diff format for file creation/modification
+- Automatic tool type conversion by OpenAIAgent
+
+```bash
+export OPENAI_API_KEY=your-key
+
+# Default task (Hello World script)
+python examples/06_codex_coding_agent.py
+
+# Custom coding task
+python examples/06_codex_coding_agent.py --task "Create a Python script that calculates prime numbers"
+
+# Specify model and working directory
+python examples/06_codex_coding_agent.py --model gpt-4.1 --work-dir ./my_project --verbose
+```
+
+> See [Codex Coding Tools Guide](../docs/guides/codex-coding.mdx) for detailed documentation.
+
 ## Dataset Evaluation
 
 ### run_evaluation.py
+
 Generic dataset evaluation runner using the programmatic API.
 
 ```bash
@@ -121,6 +154,7 @@ async with hud.eval(task, name="my-eval", variants={"model": "gpt-4o"}) as ctx:
 ```
 
 The context manager handles:
+
 - Environment connection (MCP servers start)
 - Scenario setup execution
 - Telemetry and tracing

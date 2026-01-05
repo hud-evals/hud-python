@@ -112,7 +112,7 @@ async def run_example(mode: Literal["text", "browser"], target: int) -> None:
     # Create OpenAI-compatible agent
     agent = OpenAIChatAgent.create(
         openai_client=openai_client,
-        checkpoint_name=checkpoint,
+        model=checkpoint,
         allowed_tools=allowed_tools,
         append_setup_output=False,
         system_prompt=system_prompt,

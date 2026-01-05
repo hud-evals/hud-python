@@ -310,11 +310,32 @@ class Environment(
 
         async def connect_one(name: str, conn: Connector) -> None:
             async with sem:
-                try:
-                    await conn.connect()
-                    await conn.list_tools()
-                except Exception as e:
-                    errors.append((name, e))
+                # Retry logic for transient network errors (like 502 Bad Gateway)
+                max_retries = 3
+                retry_delay = 1.0  # Start with 1 second
+                
+                for attempt in range(max_retries):
+                    try:
+                        await conn.connect()
+                        await conn.list_tools()
+                        return  # Success - exit retry loop
+                    except Exception as e:
+                        error_str = str(e).lower()
+                        is_transient = any(code in error_str for code in ['502', '503', '504', 'timeout', 'connection'])
+                        
+                        if is_transient and attempt < max_retries - 1:
+                            # Transient error and we have retries left
+                            import logging
+                            logger = logging.getLogger(__name__)
+                            logger.warning(
+                                f"Transient error connecting to {name} (attempt {attempt + 1}/{max_retries}): {e}"
+                            )
+                            await asyncio.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                        else:
+                            # Non-transient error or out of retries
+                            errors.append((name, e))
+                            return
 
         if self._connections:
             await asyncio.gather(*[connect_one(n, c) for n, c in self._connections.items()])

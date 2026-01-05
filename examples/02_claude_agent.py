@@ -49,7 +49,7 @@ async def main() -> None:
 
     # Create Claude-specific agent
     agent = ClaudeAgent.create(
-        checkpoint_name="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-20250514",
         allowed_tools=["anthropic_computer"],
         initial_screenshot=True,
     )
