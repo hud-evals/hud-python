@@ -570,7 +570,7 @@ def find_content(result: MCPToolResult) -> str | None:
 
     Agent accepts "content", "text", "message", or "logs"
 
-    If not found, return 0.0
+    If not found, return empty string.
     """
     accept_keys = ["content", "text", "message", "logs"]
     for key in accept_keys:
