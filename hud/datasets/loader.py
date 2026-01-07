@@ -303,7 +303,7 @@ def save_tasks(
             )
             response.raise_for_status()
             data = response.json()
-            taskset_id = data.get("taskset_id") or data.get("id") or name
+            taskset_id = data.get("evalset_id") or data.get("id") or name
             logger.info("Saved %d tasks to taskset: %s", len(tasks), taskset_id)
             return taskset_id
     except httpx.HTTPStatusError as e:
