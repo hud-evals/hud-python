@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 @patch("hud.cli.utils.metadata.settings")
 @patch("requests.get")
 def test_fetch_lock_from_registry_success(mock_get, mock_settings):
-    mock_settings.hud_telemetry_url = "https://api.example.com"
+    mock_settings.hud_api_url = "https://api.example.com"
     mock_settings.api_key = None
     resp = MagicMock(status_code=200)
     resp.json.return_value = {"lock": "image: img\n"}
