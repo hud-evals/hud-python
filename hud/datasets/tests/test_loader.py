@@ -22,10 +22,10 @@ class TestLoadTasks:
         mock_settings.api_key = "test_key"
 
         mock_response = MagicMock()
-        # New EvalsetTasksResponse format: tasks keyed by task ID
+        # New TasksetTasksResponse format: tasks keyed by task ID
         mock_response.json.return_value = {
-            "evalset_id": "evalset-123",
-            "evalset_name": "test-dataset",
+            "taskset_id": "taskset-123",
+            "taskset_name": "test-dataset",
             "tasks": {
                 "task-1": {
                     "env": {"name": "test"},

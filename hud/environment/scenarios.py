@@ -177,8 +177,17 @@ class ScenarioMixin:
                 safe_env_name = env_name.replace("_", "-")
                 prompt_id = f"{safe_env_name}:{scenario_name}"
                 logger.debug("Remote scenario (adding namespace): prompt_id=%s", prompt_id)
+            # Serialize args for MCP prompt (only supports string values)
+            # JSON-encode any non-string values so they can be deserialized on the other side
+            serialized_args: dict[str, str] = {}
+            for key, value in args.items():
+                if isinstance(value, str):
+                    serialized_args[key] = value
+                else:
+                    serialized_args[key] = json.dumps(value)
+
             try:
-                result = await self.get_prompt(prompt_id, args)  # type: ignore[attr-defined]
+                result = await self.get_prompt(prompt_id, serialized_args)  # type: ignore[attr-defined]
             except Exception as e:
                 # Fetch available scenarios for error context
                 try:
@@ -384,9 +393,35 @@ class ScenarioMixin:
             scenario_fn = fn
             scenario_name_ref = scenario_name
 
+            # Build a map of parameter names to their expected types for JSON deserialization
+            # MCP prompts only support string arguments, so we JSON-serialize complex types
+            param_types: dict[str, type] = {}
+            for p in sig.parameters.values():
+                if p.annotation is not inspect.Parameter.empty:
+                    param_types[p.name] = p.annotation
+
             async def prompt_handler(**handler_args: Any) -> list[str]:
-                # Create generator instance
-                gen = scenario_fn(**handler_args)
+                # Deserialize JSON-encoded arguments based on type annotations
+                # MCP prompts only support string values, so complex types are JSON-serialized
+                deserialized_args: dict[str, Any] = {}
+                for arg_name, arg_value in handler_args.items():
+                    expected_type = param_types.get(arg_name)
+                    if (
+                        expected_type is not None
+                        and expected_type is not str
+                        and isinstance(arg_value, str)
+                    ):
+                        # Try to JSON-parse non-string typed arguments
+                        try:
+                            deserialized_args[arg_name] = json.loads(arg_value)
+                        except json.JSONDecodeError:
+                            # If it fails, pass the string as-is
+                            deserialized_args[arg_name] = arg_value
+                    else:
+                        deserialized_args[arg_name] = arg_value
+
+                # Create generator instance with deserialized args
+                gen = scenario_fn(**deserialized_args)
 
                 # Run setup phase (code before first yield)
                 prompt_text = await gen.__anext__()

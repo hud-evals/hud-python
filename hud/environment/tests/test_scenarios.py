@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from hud.environment import Environment
@@ -278,3 +280,222 @@ class TestScenarioMeta:
         assert resource.meta is not None
         assert "code" in resource.meta
         assert "async def example_scenario" in resource.meta["code"]
+
+
+class TestScenarioJsonSerialization:
+    """Tests for JSON serialization of complex argument types.
+
+    MCP prompts only support string arguments (dict[str, str]).
+    Complex types like lists, dicts, and numbers are JSON-serialized
+    when sent and deserialized based on type annotations when received.
+    """
+
+    @pytest.mark.asyncio
+    async def test_list_argument_deserialization(self) -> None:
+        """List arguments are JSON-deserialized from strings."""
+        env = Environment("test-env")
+        received_items: list[str] = []
+
+        @env.scenario("process_items")
+        async def process_items_scenario(items: list[str]):
+            received_items.extend(items)
+            yield f"Processing {len(items)} items"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:process_items")
+        assert prompt is not None
+
+        # Simulate MCP sending JSON-encoded list as string
+        await prompt.render({"items": '["apple", "banana", "cherry"]'})
+
+        assert received_items == ["apple", "banana", "cherry"]
+
+    @pytest.mark.asyncio
+    async def test_dict_argument_deserialization(self) -> None:
+        """Dict arguments are JSON-deserialized from strings."""
+        env = Environment("test-env")
+        received_config: dict[str, Any] = {}
+
+        @env.scenario("configure")
+        async def configure_scenario(config: dict[str, Any]):
+            received_config.update(config)
+            yield "Configuring..."
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:configure")
+        assert prompt is not None
+
+        # Simulate MCP sending JSON-encoded dict as string
+        await prompt.render({"config": '{"timeout": 30, "retries": 3}'})
+
+        assert received_config == {"timeout": 30, "retries": 3}
+
+    @pytest.mark.asyncio
+    async def test_int_argument_deserialization(self) -> None:
+        """Integer arguments are JSON-deserialized from strings."""
+        env = Environment("test-env")
+        received_count = 0
+
+        @env.scenario("count")
+        async def count_scenario(count: int):
+            nonlocal received_count
+            received_count = count
+            yield f"Counting to {count}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:count")
+        assert prompt is not None
+
+        # Simulate MCP sending JSON-encoded int as string
+        await prompt.render({"count": "42"})
+
+        assert received_count == 42
+        assert isinstance(received_count, int)
+
+    @pytest.mark.asyncio
+    async def test_float_argument_deserialization(self) -> None:
+        """Float arguments are JSON-deserialized from strings."""
+        env = Environment("test-env")
+        received_value = 0.0
+
+        @env.scenario("precision")
+        async def precision_scenario(value: float):
+            nonlocal received_value
+            received_value = value
+            yield f"Value is {value}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:precision")
+        assert prompt is not None
+
+        # Simulate MCP sending JSON-encoded float as string
+        await prompt.render({"value": "3.14159"})
+
+        assert received_value == 3.14159
+        assert isinstance(received_value, float)
+
+    @pytest.mark.asyncio
+    async def test_bool_argument_deserialization(self) -> None:
+        """Boolean arguments are JSON-deserialized from strings."""
+        env = Environment("test-env")
+        received_flag = False
+
+        @env.scenario("toggle")
+        async def toggle_scenario(enabled: bool):
+            nonlocal received_flag
+            received_flag = enabled
+            yield f"Enabled: {enabled}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:toggle")
+        assert prompt is not None
+
+        # Simulate MCP sending JSON-encoded bool as string
+        await prompt.render({"enabled": "true"})
+
+        assert received_flag is True
+        assert isinstance(received_flag, bool)
+
+    @pytest.mark.asyncio
+    async def test_string_argument_unchanged(self) -> None:
+        """String arguments are passed through unchanged."""
+        env = Environment("test-env")
+        received_name = ""
+
+        @env.scenario("greet")
+        async def greet_scenario(name: str):
+            nonlocal received_name
+            received_name = name
+            yield f"Hello, {name}!"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:greet")
+        assert prompt is not None
+
+        # String should pass through as-is (not double-encoded)
+        await prompt.render({"name": "Alice"})
+
+        assert received_name == "Alice"
+
+    @pytest.mark.asyncio
+    async def test_mixed_argument_types(self) -> None:
+        """Mixed argument types are handled correctly."""
+        env = Environment("test-env")
+        received_args: dict[str, Any] = {}
+
+        @env.scenario("mixed")
+        async def mixed_scenario(
+            name: str,
+            count: int,
+            items: list[str],
+            options: dict[str, bool],
+        ):
+            received_args["name"] = name
+            received_args["count"] = count
+            received_args["items"] = items
+            received_args["options"] = options
+            yield "Processing..."
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:mixed")
+        assert prompt is not None
+
+        await prompt.render({
+            "name": "test",
+            "count": "5",
+            "items": '["a", "b", "c"]',
+            "options": '{"verbose": true, "dry_run": false}',
+        })
+
+        assert received_args["name"] == "test"
+        assert received_args["count"] == 5
+        assert received_args["items"] == ["a", "b", "c"]
+        assert received_args["options"] == {"verbose": True, "dry_run": False}
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_falls_back_to_string(self) -> None:
+        """Invalid JSON for non-string type falls back to string value."""
+        env = Environment("test-env")
+        received_items: list[str] = []
+
+        @env.scenario("fallback")
+        async def fallback_scenario(items: list[str]):
+            # This will receive the raw string if JSON parsing fails
+            received_items.append(str(items))
+            yield "Processing..."
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:fallback")
+        assert prompt is not None
+
+        # Invalid JSON - should fall back to string
+        await prompt.render({"items": "not valid json ["})
+
+        # Falls back to raw string
+        assert received_items == ["not valid json ["]
+
+    @pytest.mark.asyncio
+    async def test_nested_complex_types(self) -> None:
+        """Nested complex types are deserialized correctly."""
+        env = Environment("test-env")
+        received_data: dict[str, Any] = {}
+
+        @env.scenario("nested")
+        async def nested_scenario(data: dict[str, Any]):
+            received_data.update(data)
+            yield "Processing nested data..."
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:nested")
+        assert prompt is not None
+
+        nested_json = '{"users": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}], "metadata": {"version": 1}}'
+        await prompt.render({"data": nested_json})
+
+        assert received_data == {
+            "users": [
+                {"name": "Alice", "age": 30},
+                {"name": "Bob", "age": 25},
+            ],
+            "metadata": {"version": 1},
+        }
