@@ -57,9 +57,10 @@ class AgentType(str, Enum):
 class BaseAgentConfig(BaseModel):
     """Agent configuration for LLM-specific settings.
 
-    Note: allowed_tools, disallowed_tools, append_setup_output, and initial_screenshot
-    are kept for backwards compatibility with v4 task configs but are no longer applied
-    at the agent level. These should be configured on the Environment/Task instead.
+    Note: allowed_tools, disallowed_tools, response_tool_name, append_setup_output,
+    and initial_screenshot are kept for backwards compatibility with v4 task configs
+    but are no longer applied at the agent level. These should be configured on the
+    Environment/Task instead.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", populate_by_name=True)
@@ -76,6 +77,7 @@ class BaseAgentConfig(BaseModel):
     # Deprecated: kept for backwards compat with v4 task configs, not applied by agent
     allowed_tools: list[str] | None = None
     disallowed_tools: list[str] | None = None
+    response_tool_name: str | None = None
     append_setup_output: bool = True
     append_setup_tool: bool = True  # Alias for append_setup_output (backwards compat)
     initial_screenshot: bool = True
