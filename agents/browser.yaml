@@ -41,30 +41,13 @@ system_prompt: |
   - Describe what you see in each screenshot
   - Provide a final summary of your observations
 
-# Isolated context (Agent-as-Tool pattern)
-isolation: true
-
-# Use default use_computer_beta: true so Claude uses its native computer_use format
-# The anthropic_computer_tool on the remote environment accepts this format
-
 # Tools available to this agent (from hud-online-mind2web environment)
 tools:
   - anthropic_computer_tool
   - playwright
 
-# CodeAct not needed for browser tasks
-codeact:
-  enabled: false
-
-# Return schema
+# Return schema - agent will output structured JSON matching this schema
 returns:
   schema: ResearchResult
-  fields:
-    - summary: str
-    - sources: list[str]
-    - findings: list[str]
-    - confidence: float
 
 max_steps: 50
-max_context_tokens: 32000
-timeout: 300

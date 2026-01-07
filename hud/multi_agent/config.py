@@ -2,9 +2,8 @@
 
 This module loads agent configurations from YAML files, supporting:
 - Main orchestrator agent with sub-agent tools
-- Specialist sub-agents with isolated contexts
-- CodeAct settings and tool configurations
-- Structured return schemas
+- Specialist sub-agents with tool configurations
+- Structured return schemas for typed sub-agent outputs
 """
 
 from __future__ import annotations
@@ -52,53 +51,45 @@ class AgentToolConfig(BaseModel):
     name: str
     agent: str  # Reference to another agent config
     description: str = ""
-    returns: str = "GenericResult"  # Schema name
-
-
-class CodeActConfig(BaseModel):
-    """CodeAct configuration."""
-
-    enabled: bool = False
-    keep_errors: bool = True
-    timeout: int = 60
 
 
 class ReturnsConfig(BaseModel):
-    """Return schema configuration."""
+    """Return schema configuration.
+    
+    Specifies which schema to use for structured sub-agent output.
+    The schema's fields are automatically extracted and included in
+    the agent's system prompt to guide JSON output.
+    """
 
     schema_name: str = Field(alias="schema", default="GenericResult")
-    fields: list[dict[str, Any]] = []
 
 
 class AgentConfig(BaseModel):
-    """Configuration for a single agent."""
+    """Configuration for a single agent.
+    
+    Note: This intentionally doesn't extend BaseAgentConfig because:
+    1. It's for YAML config loading with different defaults
+    2. BaseAgentConfig has extra="forbid" while this needs flexibility
+    3. The fields are converted to SubAgentConfig when creating agents
+    """
 
     name: str
     type: str = "specialist"  # "orchestrator" or "specialist"
-    model: str = "anthropic/claude-sonnet-4-5-20250929"
+    model: str = "anthropic/claude-sonnet-4-5"
 
-    system_prompt: str = ""
+    system_prompt: str = ""  # Different default than BaseAgentConfig (None vs "")
 
     # For orchestrator: sub-agents as tools
     agent_tools: list[AgentToolConfig] = []
 
-    # For specialist: isolation and tools
-    isolation: bool = True
+    # For specialist: tools available
     tools: list[str] = []
 
-    # CodeAct settings
-    codeact: CodeActConfig = Field(default_factory=CodeActConfig)
-
-    # Return schema
+    # Return schema - specifies structured output format for sub-agent results
     returns: ReturnsConfig | None = None
 
-    # Additional settings
+    # Execution limits
     max_steps: int = 10
-    max_context_tokens: int = 32_000
-    timeout: int = 300
-
-    # Claude-specific settings
-    use_computer_beta: bool = True  # Use Anthropic computer_use beta format
 
     def get_return_schema(self) -> type[BaseModel]:
         """Get the return schema class."""
@@ -122,12 +113,6 @@ class MultiAgentConfig(BaseModel):
     # Global settings
     workspace: str = "./workspace"
     log_dir: str = "./.logs"
-
-    # Context settings   
-    max_context_tokens: int = 128_000
-    compaction_threshold: float = 0.8
-    offload_threshold: int = 500
-    progressive_compaction: bool = True  # Compact after each sub-agent call
 
 
 class ConfigLoader:
@@ -194,10 +179,6 @@ class ConfigLoader:
             agents=agents,
             workspace=data.get("workspace", "./workspace"),
             log_dir=data.get("log_dir", "./.logs"),
-            max_context_tokens=data.get("max_context_tokens", 128_000),
-            compaction_threshold=data.get("compaction_threshold", 0.8),
-            offload_threshold=data.get("offload_threshold", 500),
-            progressive_compaction=data.get("progressive_compaction", True),
         )
 
     def _load_from_directory(self) -> MultiAgentConfig:
@@ -266,12 +247,6 @@ class ConfigLoader:
                 if tool.agent not in config.agents:
                     errors.append(f"Agent '{name}' references unknown agent '{tool.agent}'")
 
-                # Check return schema
-                if tool.returns not in SCHEMA_REGISTRY:
-                    errors.append(
-                        f"Agent '{name}' tool '{tool.name}' has unknown schema '{tool.returns}'"
-                    )
-
         return errors
 
 
@@ -291,7 +266,6 @@ def load_config(path: str | Path) -> MultiAgentConfig:
 __all__ = [
     "AgentConfig",
     "AgentToolConfig",
-    "CodeActConfig",
     "ConfigLoader",
     "MultiAgentConfig",
     "ReturnsConfig",

@@ -270,6 +270,12 @@ class EvalContext(Environment):
         # Copy mcp config (needed to detect remote HUD MCP for telemetry)
         ctx._mcp_config = getattr(env, "_mcp_config", None)
 
+        # Copy agent tool configs and re-register (so closures capture ctx, not env)
+        if hasattr(env, "_agent_configs"):
+            ctx._agent_configs = env._agent_configs.copy()
+            for agent_name in ctx._agent_configs:
+                ctx._register_single_agent_tool(agent_name)
+
         return ctx
 
     @classmethod

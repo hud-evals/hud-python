@@ -18,7 +18,6 @@ from uuid import uuid4
 
 import yaml
 
-from hud.multi_agent.schemas import StepLog
 
 logger = logging.getLogger(__name__)
 
@@ -52,201 +51,18 @@ def _sanitize_response_string(response: str | None) -> str | None:
     return sanitized
 
 
-def _sanitize_tool_results(results: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    """Remove base64 images and large data from tool results for logging.
-
-    Args:
-        results: List of tool result dicts
-
-    Returns:
-        Sanitized list safe for logging
-    """
-    if not results:
-        return []
-
-    sanitized = []
-    for result in results:
-        sanitized_result = {}
-        for key, value in result.items():
-            if key == "content":
-                # Handle content that may contain images
-                if isinstance(value, list):
-                    # Filter out image blocks, keep text
-                    sanitized_content = []
-                    for item in value:
-                        if isinstance(item, dict):
-                            if item.get("type") == "image":
-                                sanitized_content.append(
-                                    {"type": "image", "source": "[BASE64_IMAGE_REMOVED]"}
-                                )
-                            elif item.get("type") == "base64":
-                                sanitized_content.append(
-                                    {"type": "base64", "data": "[BASE64_DATA_REMOVED]"}
-                                )
-                            else:
-                                sanitized_content.append(item)
-                        else:
-                            sanitized_content.append(item)
-                    sanitized_result[key] = sanitized_content
-                elif isinstance(value, str) and len(value) > 5000:
-                    # Truncate very long string content
-                    sanitized_result[key] = value[:1000] + f"... [TRUNCATED {len(value)} chars]"
-                else:
-                    sanitized_result[key] = value
-            else:
-                sanitized_result[key] = value
-        sanitized.append(sanitized_result)
-
-    return sanitized
-
-
-class SubAgentLogger:
-    """Logger for a single sub-agent execution instance.
-
-    Each invocation of a sub-agent gets its own YAML log file.
-    If coder is called twice, you get: coder_1.yaml, coder_2.yaml
-
-    Example:
-        logger = SubAgentLogger(run_dir=Path(".logs/abc123"), agent_name="coder", invocation=1)
-
-        logger.log_execution_step(
-            tool="bash",
-            arguments={"command": "python chart.py"},
-            result="Chart saved",
-            duration_ms=1200
-        )
-
-        logger.finalize(output="Created chart", artifacts=["./chart.png"])
-        # Writes to .logs/abc123/coder_1.yaml
-    """
-
-    def __init__(
-        self,
-        run_dir: Path,
-        agent_name: str,
-        prompt: str = "",
-        invocation: int = 1,
-    ) -> None:
-        """Initialize sub-agent logger.
-
-        Args:
-            run_dir: Directory for this run's logs
-            agent_name: Name of the sub-agent (e.g., "coder", "researcher")
-            prompt: The task prompt given to this sub-agent
-            invocation: Which invocation of this agent (1st, 2nd, etc.)
-        """
-        self.run_dir = run_dir
-        self.agent_name = agent_name
-        self.invocation = invocation
-        # Each invocation gets its own file: coder_1.yaml, coder_2.yaml, etc.
-        self.log_file = run_dir / f"{agent_name}_{invocation}.yaml"
-
-        self._invoked_at = datetime.now()
-        self._prompt = prompt
-        self._execution_steps: list[dict[str, Any]] = []
-        self._step_count = 0
-
-    def log_execution_step(
-        self,
-        tool: str,
-        arguments: dict[str, Any],
-        result: str,
-        duration_ms: float | None = None,
-        error: str | None = None,
-    ) -> None:
-        """Log a single tool execution step.
-
-        Args:
-            tool: Name of the tool called
-            arguments: Tool arguments
-            result: Tool result (will be sanitized)
-            duration_ms: Execution time in milliseconds
-            error: Error message if tool failed
-        """
-        self._step_count += 1
-
-        # Sanitize result
-        if len(result) > 2000:
-            result = result[:1000] + f"... [TRUNCATED {len(result)} chars]"
-
-        step = {
-            "step": self._step_count,
-            "tool": tool,
-            "arguments": arguments,
-            "result": result,
-        }
-
-        if duration_ms is not None:
-            step["duration_ms"] = round(duration_ms, 2)
-
-        if error:
-            step["error"] = error
-
-        self._execution_steps.append(step)
-
-    def finalize(
-        self,
-        output: str,
-        success: bool = True,
-        error: str | None = None,
-        artifacts: list[str] | None = None,
-    ) -> str:
-        """Finalize and write the sub-agent log to YAML file.
-
-        Args:
-            output: Final output summary from the sub-agent
-            success: Whether execution succeeded
-            error: Error message if failed
-            artifacts: List of file paths created/modified
-
-        Returns:
-            Path to the log file (relative to workspace)
-        """
-        end_time = datetime.now()
-        duration_ms = (end_time - self._invoked_at).total_seconds() * 1000
-
-        log_data = {
-            "agent": self.agent_name,
-            "invocation": self.invocation,
-            "invoked_at": self._invoked_at.isoformat(),
-            "prompt": self._prompt,
-            "execution": self._execution_steps,
-            "output": output,
-            "success": success,
-            "duration_ms": round(duration_ms, 2),
-        }
-
-        if artifacts:
-            log_data["artifacts"] = artifacts
-
-        if error:
-            log_data["error"] = error
-
-        # Write YAML file (each invocation gets its own file)
-        with open(self.log_file, "w") as f:
-            yaml.dump(log_data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-
-        return str(self.log_file)
-
-
 class StepLogger:
     """Log every agent step with full context.
 
     Logs are saved in YAML format for human readability.
-    Each sub-agent gets its own log file.
 
     Example:
         logger = StepLogger(log_dir=Path("./.logs"), run_id="abc123")
 
-        # Create sub-agent logger
-        sub_logger = logger.create_subagent_logger("coder", prompt="Create chart")
-
         # Log steps
-        sub_logger.log_execution_step(...)
-        sub_logger.finalize(...)
+        await logger.log_step(...)
 
         # Main log saved to .logs/abc123/main.yaml
-        # Sub-agent log saved to .logs/abc123/coder.yaml
     """
 
     def __init__(
@@ -283,38 +99,6 @@ class StepLogger:
         self._error_count = 0
         self._start_time = datetime.now()
         self._steps: list[dict[str, Any]] = []
-        # Track all sub-agent loggers (list since same agent can be invoked multiple times)
-        self._subagent_loggers: list[SubAgentLogger] = []
-        # Track invocation count per agent name for numbering log files
-        self._agent_invocation_counts: dict[str, int] = {}
-
-    def create_subagent_logger(self, agent_name: str, prompt: str = "") -> SubAgentLogger:
-        """Create a logger for a sub-agent invocation.
-
-        Each call creates a new logger with incrementing invocation number.
-        E.g., first call to coder -> coder_1.yaml, second -> coder_2.yaml
-
-        Args:
-            agent_name: Name of the sub-agent (e.g., "coder", "researcher")
-            prompt: The task prompt given to this sub-agent
-
-        Returns:
-            SubAgentLogger instance for the sub-agent to use
-        """
-        # Increment invocation count for this agent
-        if agent_name not in self._agent_invocation_counts:
-            self._agent_invocation_counts[agent_name] = 0
-        self._agent_invocation_counts[agent_name] += 1
-        invocation = self._agent_invocation_counts[agent_name]
-
-        sub_logger = SubAgentLogger(
-            run_dir=self.run_dir,
-            agent_name=agent_name,
-            prompt=prompt,
-            invocation=invocation,
-        )
-        self._subagent_loggers.append(sub_logger)
-        return sub_logger
 
     def _write_main_log(self) -> None:
         """Write the main orchestrator log to YAML file."""
@@ -418,6 +202,11 @@ class StepLogger:
         self._step_count += 1
         timestamp = datetime.now()
 
+        # _build_result always includes 'output' with primary content
+        output = result.get("output", "")
+        if isinstance(output, str) and len(output) > 500:
+            output = output[:500] + "..."
+
         step_entry = {
             "step_id": self._step_count,
             "agent": self.main_agent,
@@ -427,7 +216,7 @@ class StepLogger:
             "timestamp": timestamp.isoformat(),
             "result": {
                 "success": result.get("success", True),
-                "output": result.get("output", "")[:500],
+                "output": output,
                 "artifacts": result.get("artifacts", []),
                 "log_file": result.get("log_file"),
             },
@@ -484,29 +273,7 @@ class StepLogger:
             Tool call ID
         """
         call_id = f"{step_id}_tool_{uuid4().hex[:6]}"
-
-        # Tool calls are now logged directly by SubAgentLogger in sub_agent.py
-        # This method just returns the call_id for correlation
-
         return call_id
-
-    async def log_tool_result(
-        self,
-        call_id: str,
-        result: str,
-        success: bool = True,
-        duration_ms: float | None = None,
-    ) -> None:
-        """Log a tool result.
-
-        Args:
-            call_id: Tool call ID from log_tool_call
-            result: Tool result (may be truncated for context)
-            success: Whether tool succeeded
-            duration_ms: Execution time
-        """
-        # Tool results are now primarily logged in sub-agent logs
-        pass
 
     async def log_context_event(
         self,
@@ -557,9 +324,6 @@ class StepLogger:
             "duration_seconds": round(duration, 2),
             "total_steps": self._step_count,
             "error_count": self._error_count,
-            "subagent_logs": [
-                sub_logger.log_file.name for sub_logger in self._subagent_loggers
-            ],
         }
 
         if final_result:
@@ -613,4 +377,4 @@ class StepLogger:
             return yaml.safe_load(f)
 
 
-__all__ = ["StepLogger", "SubAgentLogger", "_sanitize_tool_results"]
+__all__ = ["StepLogger"]

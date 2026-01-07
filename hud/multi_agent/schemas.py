@@ -11,7 +11,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # =============================================================================
@@ -107,6 +107,22 @@ class CodeResult(AgentResultBase):
     dependencies_added: list[str] = Field(default_factory=list, description="New dependencies added")
     commands_run: list[str] = Field(default_factory=list, description="Shell commands executed")
 
+    @field_validator("files_created", mode="before")
+    @classmethod
+    def normalize_files(cls, v: Any) -> list[dict[str, Any]]:
+        """Accept strings or dicts for files_created - LLMs often simplify."""
+        if not isinstance(v, list):
+            return []
+        normalized = []
+        for item in v:
+            if isinstance(item, str):
+                normalized.append({"path": item, "action": "created"})
+            elif isinstance(item, dict):
+                normalized.append(item)
+            else:
+                normalized.append(item)  # Let pydantic handle it
+        return normalized
+
 
 # =============================================================================
 # Review Agent Results
@@ -153,6 +169,26 @@ class ReviewResult(AgentResultBase):
     suggestions: list[str] = Field(default_factory=list, description="General improvement suggestions")
     security_concerns: list[str] = Field(default_factory=list, description="Security-related concerns")
 
+    @field_validator("issues", mode="before")
+    @classmethod
+    def normalize_issues(cls, v: Any) -> list[dict[str, Any]]:
+        """Accept strings or dicts for issues - LLMs often simplify."""
+        if not isinstance(v, list):
+            return []
+        normalized = []
+        for item in v:
+            if isinstance(item, str):
+                # Simple string becomes a medium-severity issue
+                normalized.append({"severity": "medium", "file": "unknown", "description": item})
+            elif isinstance(item, dict):
+                # Ensure severity is valid
+                if "severity" in item and isinstance(item["severity"], str):
+                    item["severity"] = item["severity"].lower()
+                normalized.append(item)
+            else:
+                normalized.append(item)
+        return normalized
+
 
 # =============================================================================
 # Plan Agent Results
@@ -198,6 +234,28 @@ class PlanResult(AgentResultBase):
     risks: list[str] = Field(default_factory=list, description="Potential risks or blockers")
     assumptions: list[str] = Field(default_factory=list, description="Assumptions made in planning")
 
+    @field_validator("tasks", mode="before")
+    @classmethod
+    def normalize_tasks(cls, v: Any) -> list[dict[str, Any]]:
+        """Accept strings or dicts for tasks - LLMs often simplify."""
+        if not isinstance(v, list):
+            return []
+        normalized = []
+        for i, item in enumerate(v):
+            if isinstance(item, str):
+                # Simple string becomes a task description
+                normalized.append({"id": str(i + 1), "description": item, "agent": "coder"})
+            elif isinstance(item, dict):
+                # Ensure id exists
+                if "id" not in item:
+                    item["id"] = str(i + 1)
+                if "agent" not in item:
+                    item["agent"] = "coder"
+                normalized.append(item)
+            else:
+                normalized.append(item)
+        return normalized
+
 
 # =============================================================================
 # Generic/Custom Results
@@ -224,10 +282,10 @@ class GenericResult(AgentResultBase):
 class SubAgentResult(BaseModel):
     """Minimal result returned from sub-agent to parent.
 
-    Following Manus context engineering principles:
+    Following the following principles:
     - Only essential info returns to parent (saves ~90% tokens)
     - Detailed execution trace written to log_file (restorable)
-    - Errors stay visible (per Manus principle #5)
+    - Errors stay visible
     - Artifacts are file paths only, not content
 
     Example:
@@ -243,7 +301,7 @@ class SubAgentResult(BaseModel):
 
     output: str = Field(default="", description="Natural language summary of what was accomplished")
     success: bool = Field(default=True, description="Whether the task completed successfully")
-    error: str | None = Field(default=None, description="Error message if failed (KEEP per Manus)")
+    error: str | None = Field(default=None, description="Error message if failed (KEEP)")
     artifacts: list[str] = Field(
         default_factory=list, description="File paths created/modified (not content)"
     )
@@ -260,124 +318,119 @@ class SubAgentResult(BaseModel):
 
 
 # =============================================================================
-# Context Entry Types (for AppendOnlyContext)
+# Schema Factory Helper
 # =============================================================================
 
 
-class ContextEntryType(str, Enum):
-    """Types of entries in the append-only context."""
+def make_schema(
+    name: str,
+    __base__: type[BaseModel] | None = None,
+    **fields: Any,
+) -> type[BaseModel]:
+    """Create and register a custom schema in one line.
 
-    SYSTEM = "system"
-    USER = "user"
-    ASSISTANT = "assistant"
-    TOOL_CALL = "tool_call"
-    TOOL_RESULT = "tool_result"
-    FILE_CONTENT = "file_content"
-    FILE_REF = "file_ref"  # Compacted reference
-    ERROR = "error"
-    SUMMARY = "summary"  # Irreversible summarization
+    This is the easiest way to define a custom return schema for your sub-agents.
+    The schema is automatically registered so you can reference it by name in YAML.
 
+    Args:
+        name: Schema name (used in YAML config's `returns.schema` field)
+        __base__: Base class (defaults to AgentResultBase which includes
+                  success, error, duration_ms, timestamp fields)
+        **fields: Field definitions. Can be:
+            - Just a type: `insights=list[str]` (uses smart defaults)
+            - A tuple of (type, default): `score=(float, 0.5)`
+            - A tuple with Field: `items=(list[str], Field(default_factory=list))`
 
-class ContextEntry(BaseModel):
-    """A single entry in the append-only context."""
+    Returns:
+        The created Pydantic model class (also registered in SCHEMA_REGISTRY)
 
-    id: str = Field(description="Unique identifier for this entry")
-    type: ContextEntryType
-    content: str
-    timestamp: datetime = Field(default_factory=datetime.now)
+    Example:
+        ```python
+        from hud.multi_agent import make_schema
 
-    # For file-related entries
-    path: str | None = None
-    start_line: int | None = None
-    end_line: int | None = None
+        # Simple schema - one line!
+        DataAnalysisResult = make_schema(
+            "DataAnalysisResult",
+            insights=list[str],           # List field, defaults to []
+            chart_path=(str | None, None), # Optional field
+            metrics=dict[str, float],      # Dict field, defaults to {}
+            confidence=(float, 0.8),       # Float with default
+        )
 
-    # For tool-related entries
-    tool_name: str | None = None
-    tool_args: dict[str, Any] | None = None
+        # Now use in YAML:
+        # agents/analyst.yaml
+        # returns:
+        #   schema: DataAnalysisResult
+        ```
 
-    # Metadata
-    agent_id: str | None = None
-    token_count: int | None = None
-    compacted: bool = Field(default=False, description="Whether this entry has been compacted")
+    Advanced example with custom base:
+        ```python
+        # If you don't want AgentResultBase fields (success, error, etc.)
+        from pydantic import BaseModel
+        
+        SimpleResult = make_schema(
+            "SimpleResult",
+            __base__=BaseModel,  # Plain Pydantic, no extra fields
+            answer=str,
+            confidence=float,
+        )
+        ```
+    """
+    from typing import get_args, get_origin
 
-    def render(self) -> str:
-        """Render this entry as a string for the context window."""
-        if self.type == ContextEntryType.FILE_REF:
-            return f"[File: {self.path} (lines {self.start_line}-{self.end_line})]"
-        elif self.type == ContextEntryType.TOOL_CALL:
-            return f"[Tool Call: {self.tool_name}({self.tool_args})]"
-        elif self.type == ContextEntryType.TOOL_RESULT:
-            return f"[Tool Result: {self.content[:200]}...]" if len(self.content) > 200 else f"[Tool Result: {self.content}]"
-        elif self.type == ContextEntryType.ERROR:
-            return f"[Error: {self.content}]"
+    from pydantic import create_model
+
+    # Import here to avoid circular import
+    from hud.multi_agent.config import SCHEMA_REGISTRY
+
+    # Default to AgentResultBase for common fields
+    if __base__ is None:
+        __base__ = AgentResultBase
+
+    # Normalize fields to Pydantic's (type, default) format
+    field_definitions: dict[str, Any] = {}
+
+    for field_name, field_spec in fields.items():
+        if isinstance(field_spec, tuple) and len(field_spec) == 2:
+            # User provided (type, default)
+            field_type, default = field_spec
         else:
-            return self.content
+            # User provided just a type - infer sensible default
+            field_type = field_spec
+            origin = get_origin(field_type)
 
+            if origin is list:
+                default = Field(default_factory=list)
+            elif origin is dict:
+                default = Field(default_factory=dict)
+            elif origin is set:
+                default = Field(default_factory=set)
+            elif field_type is str:
+                default = ""
+            elif field_type is bool:
+                default = False
+            elif field_type is int:
+                default = 0
+            elif field_type is float:
+                default = 0.0
+            else:
+                # Check if it's Optional (Union with None)
+                args = get_args(field_type)
+                if type(None) in args:
+                    default = None
+                else:
+                    # Required field
+                    default = ...
 
-# =============================================================================
-# Checkpoint Schema (for resilience)
-# =============================================================================
+        field_definitions[field_name] = (field_type, default)
 
+    # Create the Pydantic model dynamically
+    schema_cls = create_model(name, __base__=__base__, **field_definitions)
 
-class Checkpoint(BaseModel):
-    """Snapshot of system state for crash recovery."""
+    # Auto-register so YAML can reference by name
+    SCHEMA_REGISTRY[name] = schema_cls
 
-    run_id: str
-    step_number: int
-    timestamp: datetime = Field(default_factory=datetime.now)
-
-    # Context state
-    context_entries: list[dict[str, Any]]
-    frozen_prefix_length: int
-
-    # Filesystem state
-    workspace_files: dict[str, str] = Field(
-        default_factory=dict, description="path -> content hash"
-    )
-    memory_index: dict[str, Any] = Field(default_factory=dict)
-
-    # Agent state
-    current_agent: str
-    pending_task: dict[str, Any] | None = None
-
-
-# =============================================================================
-# Step Log Schema
-# =============================================================================
-
-
-class StepLog(BaseModel):
-    """Log entry for a single agent step."""
-
-    # Identity
-    step_id: str
-    run_id: str
-    agent_id: str
-    parent_step_id: str | None = None
-
-    # Input
-    input_prompt: str
-    input_context_size: int  # Token count
-
-    # Output
-    output_response: str | None = None
-    output_tool_calls: list[dict[str, Any]] = Field(default_factory=list)
-    output_tool_results: list[dict[str, Any]] = Field(default_factory=list)
-
-    # Timing
-    timestamp_start: datetime
-    timestamp_end: datetime | None = None
-    duration_ms: float | None = None
-
-    # Metadata
-    model: str
-    token_usage: dict[str, int] = Field(default_factory=dict)
-    error: str | None = None
-
-    # Context health
-    context_tokens_before: int | None = None
-    context_tokens_after: int | None = None
-    compactions_performed: int = 0
+    return schema_cls
 
 
 __all__ = [
@@ -395,12 +448,7 @@ __all__ = [
     "TaskStatus",
     "GenericResult",
     "SubAgentResult",
-    # Context Types
-    "ContextEntry",
-    "ContextEntryType",
-    # Checkpoint
-    "Checkpoint",
-    # Logging
-    "StepLog",
+    # Schema Factory
+    "make_schema",
 ]
 

@@ -324,7 +324,6 @@ class Environment(
                         is_transient = any(code in error_str for code in ['502', '503', '504', 'timeout', 'connection'])
                         
                         if is_transient and attempt < max_retries - 1:
-                            # Transient error and we have retries left
                             import logging
                             logger = logging.getLogger(__name__)
                             logger.warning(
@@ -333,7 +332,6 @@ class Environment(
                             await asyncio.sleep(retry_delay)
                             retry_delay *= 2  # Exponential backoff
                         else:
-                            # Non-transient error or out of retries
                             errors.append((name, e))
                             return
 
@@ -407,6 +405,101 @@ class Environment(
             await asyncio.gather(*[c.list_tools() for c in self._connections.values()])
         await self._build_routing()
         return self._router.tools
+
+    # =========================================================================
+    # Agent-as-Tool
+    # =========================================================================
+
+    def agent_tool(
+        self,
+        name: str,
+        model: str = "claude-sonnet-4-5",
+        system_prompt: str = "",
+        max_steps: int = 10,
+        tools: list[str] | None = None,
+        **kwargs: Any,
+    ) -> Self:
+        """Register an MCPAgent as a callable tool on this environment.
+
+        When called, creates the appropriate agent (Claude, OpenAI, etc.)
+        based on the model name and runs it with the given prompt.
+
+        Args:
+            name: Tool name (how the agent will be called)
+            model: Model identifier (e.g., "claude-sonnet-4-5", "gpt-4o")
+            system_prompt: System prompt for the agent
+            max_steps: Maximum steps the agent can take
+            tools: Optional list of tool names this agent can use
+
+        Returns:
+            self for chaining
+
+        Example:
+            env = Environment("my-env")
+            env.agent_tool(name="coder", model="claude-sonnet-4-5")
+
+            async with hud.eval(env()) as ctx:
+                result = await ctx.call_tool("coder", prompt="Write a hello world")
+        """
+        from hud.multi_agent.sub_agent import SubAgentConfig
+
+        # Store config - will be re-registered when EvalContext copies
+        if not hasattr(self, "_agent_configs"):
+            self._agent_configs: dict[str, SubAgentConfig] = {}
+
+        self._agent_configs[name] = SubAgentConfig(
+            name=name,
+            model=model,
+            system_prompt=system_prompt,
+            max_steps=max_steps,
+            tools=tools or [],
+            **kwargs,
+        )
+
+        # Register immediately (for direct Environment use)
+        self._register_single_agent_tool(name)
+
+        return self
+
+    def _register_single_agent_tool(self, name: str) -> None:
+        """Register one agent tool wrapper.
+
+        Creates an async wrapper function that:
+        1. Creates an MCPAgent from the stored config
+        2. Runs it with the given prompt
+        3. Returns a SubAgentResult dict
+
+        Note: This tool is designed to be used inside hud.eval() where
+        self is actually an EvalContext. Using it on a bare Environment
+        will raise an error at runtime.
+        """
+        from hud.eval.context import EvalContext
+        from hud.multi_agent.sub_agent import SubAgentResult, create_sub_agent
+
+        config = self._agent_configs[name]
+        env_self = self  # Capture for closure
+
+        async def _agent_wrapper(prompt: str) -> dict[str, Any]:
+            # Agent tools require EvalContext (from hud.eval())
+            if not isinstance(env_self, EvalContext):
+                raise RuntimeError(
+                    f"agent_tool '{name}' requires EvalContext. "
+                    "Use inside `async with hud.eval(...) as ctx:` context."
+                )
+            agent = create_sub_agent(config, env_self)
+            trace = await agent.run(env_self, max_steps=config.max_steps)
+            return SubAgentResult(
+                output=trace.content or "",
+                success=not trace.isError,
+                error=trace.info.get("error") if trace.isError else None,
+            ).model_dump()
+
+        # Set docstring for tool description
+        _agent_wrapper.__doc__ = config.system_prompt or f"Agent: {name}"
+        _agent_wrapper.__name__ = name
+
+        # Register as a regular tool via FastMCP
+        self.tool(name=name)(_agent_wrapper)
 
     async def _execute_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
         """Execute a tool by name. Routes to local or remote handler.

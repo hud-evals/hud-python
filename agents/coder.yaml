@@ -25,9 +25,6 @@ system_prompt: |
   - Preserve formatting when possible
   - Validate data after transformations
 
-# Isolated context (Agent-as-Tool pattern)
-isolation: true
-
 # Tools available to this agent (from environment)
 # Note: These should match the actual tool names from hud-jupyter
 tools:
@@ -35,21 +32,8 @@ tools:
   - evaluate
   - hud-logs
 
-# CodeAct settings
-codeact:
-  enabled: true
-  keep_errors: true
-  timeout: 120
-
-# Return schema
+# Return schema - agent will output structured JSON matching this schema
 returns:
   schema: CodeResult
-  fields:
-    - explanation: str
-    - code_snippet: str
-    - files_created: list[str]
-    - success: bool
 
 max_steps: 15
-max_context_tokens: 32000
-timeout: 180

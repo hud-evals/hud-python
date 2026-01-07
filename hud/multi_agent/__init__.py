@@ -2,9 +2,9 @@
 
 This module implements a hierarchical multi-agent system with:
 - Agent-as-Tool pattern: Sub-agents exposed as tools to main agent
-- CodeAct: Agent writes Python code instead of JSON tool calls
-- Filesystem as Memory: grep/glob search, not vector DB
-- Append-only Context: KV cache optimization
+- YAML configuration: Define agents in YAML files
+- Structured returns: Type-safe sub-agent results with make_schema()
+- Execution logging: Full trace in YAML log files
 
 Quick Start:
     ```python
@@ -29,14 +29,11 @@ Quick Start:
     ```
 """
 
-# Schemas
+# Schemas - structured return types for sub-agents
 from hud.multi_agent.schemas import (
     AgentResultBase,
-    Checkpoint,
     CodeIssue,
     CodeResult,
-    ContextEntry,
-    ContextEntryType,
     FileChange,
     GenericResult,
     IssueSeverity,
@@ -45,38 +42,18 @@ from hud.multi_agent.schemas import (
     ResearchResult,
     ReviewResult,
     Source,
-    StepLog,
+    SubAgentResult,
     TaskStatus,
+    make_schema,
 )
 
-# Context
-from hud.multi_agent.context import AppendOnlyContext
+# SubAgent - factory for creating sub-agents
+from hud.multi_agent.sub_agent import SubAgentConfig, create_sub_agent
 
-# Memory
-from hud.multi_agent.memory import FilesystemMemory, MemoryEntry, SearchResult
-
-# Compaction
-from hud.multi_agent.compaction import ContextCompactor, ContextOffloader
-
-# CodeAct
-from hud.multi_agent.codeact import CodeActExecutor, ExecutionResult, SandboxExecutor
-
-# Agent-as-Tool
-from hud.multi_agent.agent_tool import (
-    AgentToolRegistry,
-    agent_as_tool,
-    agent_tools,
-    register_agent_tool,
-)
-
-# SubAgent
-from hud.multi_agent.sub_agent import SimpleSubAgent, SubAgent, SubAgentConfig
-
-# Config
+# Config - YAML configuration loading
 from hud.multi_agent.config import (
     AgentConfig,
     AgentToolConfig,
-    CodeActConfig,
     ConfigLoader,
     MultiAgentConfig,
     ReturnsConfig,
@@ -85,20 +62,17 @@ from hud.multi_agent.config import (
     register_schema,
 )
 
-# Logger
+# Logger - execution trace logging
 from hud.multi_agent.logger import StepLogger
 
-# Runner
+# Runner - main orchestration
 from hud.multi_agent.runner import MultiAgentRunner, RunResult
 
 __all__ = [
-    # Schemas
+    # Schemas - structured returns
     "AgentResultBase",
-    "Checkpoint",
     "CodeIssue",
     "CodeResult",
-    "ContextEntry",
-    "ContextEntryType",
     "FileChange",
     "GenericResult",
     "IssueSeverity",
@@ -107,34 +81,15 @@ __all__ = [
     "ResearchResult",
     "ReviewResult",
     "Source",
-    "StepLog",
+    "SubAgentResult",
     "TaskStatus",
-    # Context
-    "AppendOnlyContext",
-    # Memory
-    "FilesystemMemory",
-    "MemoryEntry",
-    "SearchResult",
-    # Compaction
-    "ContextCompactor",
-    "ContextOffloader",
-    # CodeAct
-    "CodeActExecutor",
-    "ExecutionResult",
-    "SandboxExecutor",
-    # Agent-as-Tool
-    "AgentToolRegistry",
-    "agent_as_tool",
-    "agent_tools",
-    "register_agent_tool",
+    "make_schema",
     # SubAgent
-    "SimpleSubAgent",
-    "SubAgent",
     "SubAgentConfig",
+    "create_sub_agent",
     # Config
     "AgentConfig",
     "AgentToolConfig",
-    "CodeActConfig",
     "ConfigLoader",
     "MultiAgentConfig",
     "ReturnsConfig",

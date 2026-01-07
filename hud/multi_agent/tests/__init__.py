@@ -1,2 +1,2 @@
-"""Tests for multi_agent module."""
+# Multi-agent tests
 

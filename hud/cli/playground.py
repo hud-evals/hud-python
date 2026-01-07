@@ -48,6 +48,20 @@ def create_playground(
         """Initialize the environment and runner."""
         nonlocal runner, env, eval_ctx
 
+        # Check if any environment is configured
+        has_environment = bool(jupyter_url or browser_hub)
+        
+        if not has_environment:
+            raise RuntimeError(
+                "No environment connected! The playground requires at least one environment.\n\n"
+                "Please specify an environment using:\n"
+                "  --jupyter-url <url>  - Connect to a Jupyter MCP server\n"
+                "  --browser-hub <hub>  - Connect to a browser hub (e.g., 'hud-online-mind2web')\n\n"
+                "Example:\n"
+                "  hud playground --jupyter-url http://localhost:8765/mcp\n"
+                "  hud playground --browser-hub hud-online-mind2web"
+            )
+
         # Create environment
         env = Environment("playground")
 
@@ -73,6 +87,14 @@ def create_playground(
         # Get available tools for info
         tools = await eval_ctx.list_tools()
         tool_names = [t.name for t in tools]
+        
+        # Verify we actually have environment tools (not just sub-agent tools)
+        if len(tool_names) == 0:
+            raise RuntimeError(
+                "Environment connected but no tools available!\n\n"
+                "This usually means the MCP server failed to start or has no tools.\n"
+                "Check that your environment URL is correct and the server is running."
+            )
 
         # Create runner with EvalContext for full tool access
         runner = MultiAgentRunner(
@@ -118,8 +140,9 @@ def create_playground(
                 progress_messages.append(update)
                 last_progress = update
 
-            # Attach progress callback to runner
-            runner.progress_callback = on_progress
+            # Set progress callback directly on eval context (runner will pick it up)
+            if eval_ctx is not None:
+                setattr(eval_ctx, 'progress_callback', on_progress)
 
             # Initial status
             yield "🤖 Running agent..."
@@ -181,7 +204,7 @@ def create_playground(
         env_info_parts.append(f"Jupyter: {jupyter_url}")
     if browser_hub:
         env_info_parts.append(f"Browser: {browser_hub}")
-    env_info = " | ".join(env_info_parts) if env_info_parts else "No environments connected"
+    env_info = " | ".join(env_info_parts) if env_info_parts else "⚠️ No environments configured - will fail on first message"
 
     # Create Gradio interface
     demo = gr.ChatInterface(

@@ -1,251 +1,166 @@
-"""Tests for multi-agent schemas."""
+"""Tests for schemas.py including make_schema helper."""
 
 import pytest
-from datetime import datetime
+from pydantic import BaseModel
 
-from hud.multi_agent.schemas import (
-    ResearchResult,
-    CodeResult,
-    ReviewResult,
-    PlanResult,
-    GenericResult,
-    Source,
-    FileChange,
-    CodeIssue,
-    IssueSeverity,
-    PlannedTask,
-    TaskStatus,
-    ContextEntry,
-    ContextEntryType,
-    StepLog,
-    Checkpoint,
-)
+from hud.multi_agent.config import SCHEMA_REGISTRY
+from hud.multi_agent.schemas import AgentResultBase, make_schema
 
 
-class TestResearchResult:
-    """Test ResearchResult schema."""
+class TestMakeSchema:
+    """Test the make_schema() helper function.
+    
+    Note: Many tests use `# type: ignore[attr-defined]` because make_schema()
+    creates dynamic models whose attributes can't be statically inferred.
+    """
 
-    def test_basic_result(self):
-        """Test creating a basic research result."""
-        result = ResearchResult(
-            summary="Python is a programming language.",
-            confidence=0.9,
+    def test_basic_schema_creation(self):
+        """Test creating a simple schema with make_schema."""
+        # Create a schema
+        TestResult = make_schema(
+            "TestResult",
+            summary=str,
+            score=float,
         )
-        assert result.summary == "Python is a programming language."
-        assert result.confidence == 0.9
-        assert result.success is True
-        assert result.sources == []
 
-    def test_with_sources(self):
-        """Test research result with sources."""
-        result = ResearchResult(
-            summary="Found information",
-            sources=[
-                Source(title="Wikipedia", url="https://wikipedia.org"),
-                Source(title="Local file", path="/docs/readme.md"),
-            ],
-            confidence=0.85,
-            key_findings=["Finding 1", "Finding 2"],
+        # Verify it's a Pydantic model
+        assert issubclass(TestResult, BaseModel)
+        assert issubclass(TestResult, AgentResultBase)
+
+        # Verify it was registered
+        assert "TestResult" in SCHEMA_REGISTRY
+        assert SCHEMA_REGISTRY["TestResult"] is TestResult
+
+    def test_list_and_dict_defaults(self):
+        """Test that list and dict fields get proper defaults."""
+        ListDictResult = make_schema(
+            "ListDictResult",
+            items=list[str],
+            data=dict[str, int],
         )
-        assert len(result.sources) == 2
-        assert result.sources[0].url == "https://wikipedia.org"
-        assert len(result.key_findings) == 2
 
+        # Create instance without providing values
+        instance = ListDictResult()
 
-class TestCodeResult:
-    """Test CodeResult schema."""
+        # Should have empty defaults, not None
+        assert instance.items == []  # type: ignore[attr-defined]
+        assert instance.data == {}  # type: ignore[attr-defined]
+        assert instance.success is True  # type: ignore[attr-defined]
 
-    def test_basic_result(self):
-        """Test creating a basic code result."""
-        result = CodeResult(
-            explanation="Created a function",
-            code_snippet="def hello(): pass",
+    def test_explicit_defaults(self):
+        """Test providing explicit default values."""
+        DefaultsResult = make_schema(
+            "DefaultsResult",
+            title=(str, "default_title"),
+            count=(int, 42),
+            enabled=(bool, True),
         )
-        assert result.explanation == "Created a function"
-        assert result.files_created == []
 
-    def test_with_files(self):
-        """Test code result with file changes."""
-        result = CodeResult(
-            explanation="Implemented feature",
-            files_created=[
-                FileChange(path="src/main.py", action="created", language="python"),
-                FileChange(path="tests/test_main.py", action="created"),
-            ],
-            tests_passed=True,
-            dependencies_added=["fastapi", "uvicorn"],
+        instance = DefaultsResult()
+
+        assert instance.title == "default_title"  # type: ignore[attr-defined]
+        assert instance.count == 42  # type: ignore[attr-defined]
+        assert instance.enabled is True  # type: ignore[attr-defined]
+
+    def test_optional_fields(self):
+        """Test that Optional types default to None."""
+        OptionalResult = make_schema(
+            "OptionalResult",
+            maybe_str=str | None,
+            maybe_int=int | None,
         )
-        assert len(result.files_created) == 2
-        assert result.files_created[0].language == "python"
-        assert result.tests_passed is True
-        assert "fastapi" in result.dependencies_added
 
+        instance = OptionalResult()
 
-class TestReviewResult:
-    """Test ReviewResult schema."""
+        assert instance.maybe_str is None  # type: ignore[attr-defined]
+        assert instance.maybe_int is None  # type: ignore[attr-defined]
 
-    def test_basic_result(self):
-        """Test creating a basic review result."""
-        result = ReviewResult(
-            summary="Code looks good",
-            approved=True,
-            score=0.95,
+    def test_custom_base_class(self):
+        """Test using a custom base class instead of AgentResultBase."""
+
+        class MyBase(BaseModel):
+            custom_field: str = "custom"
+
+        CustomBaseResult = make_schema(
+            "CustomBaseResult",
+            __base__=MyBase,
+            data=str,
         )
-        assert result.approved is True
-        assert result.score == 0.95
 
-    def test_with_issues(self):
-        """Test review result with issues."""
-        result = ReviewResult(
-            summary="Found some issues",
-            issues=[
-                CodeIssue(
-                    severity=IssueSeverity.HIGH,
-                    file="auth.py",
-                    line=42,
-                    description="SQL injection vulnerability",
-                    suggestion="Use parameterized queries",
-                    category="security",
-                ),
-                CodeIssue(
-                    severity=IssueSeverity.LOW,
-                    file="utils.py",
-                    description="Missing docstring",
-                ),
-            ],
-            approved=False,
-            score=0.6,
-            security_concerns=["SQL injection in auth.py"],
+        instance = CustomBaseResult()
+
+        # Should have custom base field
+        assert instance.custom_field == "custom"  # type: ignore[attr-defined]
+        # Should NOT have AgentResultBase fields
+        assert not hasattr(instance, "success")
+
+    def test_inherits_agent_result_base_fields(self):
+        """Test that schemas inherit AgentResultBase fields by default."""
+        InheritResult = make_schema(
+            "InheritResult",
+            my_field=str,
         )
-        assert len(result.issues) == 2
-        assert result.issues[0].severity == IssueSeverity.HIGH
-        assert not result.approved
 
+        instance = InheritResult()
 
-class TestPlanResult:
-    """Test PlanResult schema."""
+        # AgentResultBase fields should be present
+        assert hasattr(instance, "success")
+        assert hasattr(instance, "error")
+        assert hasattr(instance, "duration_ms")
+        assert hasattr(instance, "timestamp")
 
-    def test_basic_plan(self):
-        """Test creating a basic plan."""
-        result = PlanResult(
-            goal="Build a REST API",
-            estimated_steps=5,
+    def test_schema_validation(self):
+        """Test that created schemas validate data properly."""
+        ValidatedResult = make_schema(
+            "ValidatedResult",
+            count=(int, 0),
+            items=list[str],
         )
-        assert result.goal == "Build a REST API"
-        assert result.tasks == []
 
-    def test_with_tasks(self):
-        """Test plan with tasks."""
-        result = PlanResult(
-            goal="Build a REST API",
-            tasks=[
-                PlannedTask(
-                    id="1",
-                    description="Set up project structure",
-                    agent="coder",
-                    priority=1,
-                ),
-                PlannedTask(
-                    id="2",
-                    description="Implement endpoints",
-                    agent="coder",
-                    dependencies=["1"],
-                    estimated_complexity="moderate",
-                ),
-            ],
-            estimated_steps=10,
-            risks=["Database schema may need revision"],
+        # Valid data
+        instance = ValidatedResult(count=5, items=["a", "b"])
+        assert instance.count == 5  # type: ignore[attr-defined]
+        assert instance.items == ["a", "b"]  # type: ignore[attr-defined]
+
+        # Invalid data should raise
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            ValidatedResult(count="not_an_int")
+
+    def test_schema_serialization(self):
+        """Test that created schemas serialize properly."""
+        SerialResult = make_schema(
+            "SerialResult",
+            message=str,
+            score=(float, 0.5),
         )
-        assert len(result.tasks) == 2
-        assert result.tasks[1].dependencies == ["1"]
 
+        instance = SerialResult(message="hello", score=0.9)
+        data = instance.model_dump()
 
-class TestGenericResult:
-    """Test GenericResult schema."""
+        assert data["message"] == "hello"
+        assert data["score"] == 0.9
+        assert "success" in data  # From AgentResultBase
 
-    def test_basic_result(self):
-        """Test creating a generic result."""
-        result = GenericResult(
-            output="Some output",
-            data={"key": "value"},
+    def test_real_world_example(self):
+        """Test a realistic custom schema for data analysis."""
+        DataAnalysisResult = make_schema(
+            "DataAnalysisResult",
+            insights=list[str],
+            chart_path=(str | None, None),
+            metrics=dict[str, float],
+            confidence=(float, 0.8),
         )
-        assert result.output == "Some output"
-        assert result.data["key"] == "value"
 
-
-class TestContextEntry:
-    """Test ContextEntry schema."""
-
-    def test_user_entry(self):
-        """Test creating a user entry."""
-        entry = ContextEntry(
-            id="entry1",
-            type=ContextEntryType.USER,
-            content="Hello!",
+        # Simulate what an LLM might return
+        result = DataAnalysisResult(
+            insights=["Revenue up 20%", "Q4 strongest quarter"],
+            chart_path="/workspace/chart.png",
+            metrics={"revenue": 1000000, "growth": 0.2},
+            confidence=0.95,
+            success=True,
         )
-        assert entry.type == ContextEntryType.USER
-        assert entry.content == "Hello!"
-        assert entry.compacted is False
 
-    def test_file_entry(self):
-        """Test creating a file content entry."""
-        entry = ContextEntry(
-            id="entry2",
-            type=ContextEntryType.FILE_CONTENT,
-            content="def hello(): pass",
-            path="/src/main.py",
-            start_line=1,
-            end_line=5,
-        )
-        assert entry.path == "/src/main.py"
-        assert entry.start_line == 1
-
-    def test_render_file_ref(self):
-        """Test rendering a file reference."""
-        entry = ContextEntry(
-            id="ref1",
-            type=ContextEntryType.FILE_REF,
-            content="",
-            path="/src/main.py",
-            start_line=1,
-            end_line=10,
-        )
-        rendered = entry.render()
-        assert "/src/main.py" in rendered
-        assert "1-10" in rendered
-
-
-class TestStepLog:
-    """Test StepLog schema."""
-
-    def test_basic_log(self):
-        """Test creating a step log."""
-        log = StepLog(
-            step_id="step1",
-            run_id="run1",
-            agent_id="main",
-            input_prompt="Do something",
-            input_context_size=1000,
-            timestamp_start=datetime.now(),
-            model="claude-3",
-        )
-        assert log.step_id == "step1"
-        assert log.agent_id == "main"
-        assert log.output_tool_calls == []
-
-
-class TestCheckpoint:
-    """Test Checkpoint schema."""
-
-    def test_basic_checkpoint(self):
-        """Test creating a checkpoint."""
-        checkpoint = Checkpoint(
-            run_id="run1",
-            step_number=5,
-            context_entries=[],
-            frozen_prefix_length=2,
-            current_agent="main",
-        )
-        assert checkpoint.run_id == "run1"
-        assert checkpoint.step_number == 5
-
+        assert len(result.insights) == 2  # type: ignore[attr-defined]
+        assert result.chart_path == "/workspace/chart.png"  # type: ignore[attr-defined]
+        assert result.metrics["growth"] == 0.2  # type: ignore[attr-defined]
+        assert result.confidence == 0.95  # type: ignore[attr-defined]

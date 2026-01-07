@@ -3,33 +3,125 @@
 This module ties everything together:
 - Loads configuration from YAML
 - Creates main agent and sub-agents
-- Manages context, memory, and logging
+- Manages logging
 - Handles the agent-as-tool pattern
-- Implements CodeAct execution
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from hud.multi_agent.agent_tool import AgentToolRegistry, agent_as_tool
-from hud.multi_agent.codeact import CodeActExecutor
-from hud.multi_agent.compaction import ContextCompactor, ContextOffloader
-from hud.multi_agent.config import AgentConfig, ConfigLoader, MultiAgentConfig, load_config
-from hud.multi_agent.context import AppendOnlyContext
+from hud.multi_agent.config import MultiAgentConfig, load_config
 from hud.multi_agent.logger import StepLogger
-from hud.multi_agent.memory import FilesystemMemory
-from hud.multi_agent.schemas import GenericResult
-from hud.multi_agent.sub_agent import SubAgent, SubAgentConfig
+from hud.multi_agent.sub_agent import SubAgentConfig, SubAgentResult, create_sub_agent
 
 if TYPE_CHECKING:
     from hud.eval.context import EvalContext
 
 logger = logging.getLogger(__name__)
+
+
+def _build_result(
+    schema: type | None,
+    *,
+    output: str,
+    success: bool,
+    error: str | None = None,
+    duration_ms: float | None = None,
+) -> dict[str, Any]:
+    """Build a result dict using the specified schema.
+    
+    First tries to parse JSON from the agent's output. If successful,
+    uses that data to construct the schema. Otherwise, falls back to
+    putting the output in the schema's primary field.
+    
+    Falls back to SubAgentResult if schema is None or construction fails.
+    """
+    from hud.multi_agent.sub_agent import parse_json_from_output
+    
+    # Fall back to SubAgentResult if no schema specified
+    if schema is None:
+        return SubAgentResult(
+            output=output,
+            success=success,
+            error=error,
+            duration_ms=duration_ms,
+        ).model_dump()
+    
+    schema_name = schema.__name__
+
+    def _primary_field_for(schema_type: type) -> str:
+        """Pick the primary content field for a schema, with inference fallback."""
+        explicit = {
+            "SubAgentResult": "output",
+            "GenericResult": "output",
+            "CodeResult": "explanation",
+            "ResearchResult": "summary",
+            "ReviewResult": "summary",
+            "PlanResult": "goal",
+        }.get(schema_type.__name__)
+        if explicit:
+            return explicit
+
+        metadata_fields = {"success", "error", "duration_ms", "timestamp", "tool_calls", "tool_results"}
+        fields = getattr(schema_type, "model_fields", None) or getattr(schema_type, "__fields__", {}) or {}
+        for name in fields:
+            if name not in metadata_fields:
+                return name
+        return "output"
+
+    output_field = _primary_field_for(schema)
+
+    # Try to parse JSON from the output
+    parsed_json = parse_json_from_output(output)
+    
+    if parsed_json is not None:
+        try:
+            parsed_json["success"] = success
+            parsed_json["duration_ms"] = duration_ms
+            if error is not None:
+                parsed_json["error"] = error
+            
+            result = schema(**parsed_json)
+            result_dict = result.model_dump()
+            
+            if "output" not in result_dict:
+                result_dict["output"] = result_dict.get(output_field, "")
+            
+            logger.debug(f"Successfully parsed structured {schema_name} from agent output")
+            return result_dict
+        except (ValueError, TypeError, KeyError) as e:
+            logger.debug(f"Failed to parse JSON for {schema_name}: {e}")
+    
+    try:
+        kwargs: dict[str, Any] = {
+            output_field: output,
+            "success": success,
+            "duration_ms": duration_ms,
+        }
+        if error is not None:
+            kwargs["error"] = error
+            
+        result = schema(**kwargs)
+        result_dict = result.model_dump()
+        
+        if "output" not in result_dict:
+            result_dict["output"] = result_dict.get(output_field, "")
+        
+        return result_dict
+    except (ValueError, TypeError) as e:
+        logger.debug(f"Failed to construct {schema_name}, falling back to SubAgentResult: {e}")
+        return SubAgentResult(
+            output=output,
+            success=success,
+            error=error,
+            duration_ms=duration_ms,
+        ).model_dump()
 
 
 @dataclass
@@ -51,7 +143,7 @@ class MultiAgentRunner:
 
     This is the main entry point for running multi-agent tasks:
     1. Loads configuration from YAML
-    2. Sets up context, memory, and logging
+    2. Sets up logging
     3. Creates main agent with sub-agents as tools
     4. Runs the task and returns structured result
 
@@ -84,8 +176,8 @@ class MultiAgentRunner:
         Args:
             config_dir: Path to YAML config directory or file
             config: Pre-loaded configuration (alternative to config_dir)
-            ctx: EvalContext for evaluation
-            workspace: Working directory for filesystem memory
+            ctx: EvalContext for evaluation (required for running tasks)
+            workspace: Working directory for file operations
         """
         # Load configuration
         if config is not None:
@@ -103,86 +195,24 @@ class MultiAgentRunner:
         self.workspace = Path(workspace or self.config.workspace)
         self.workspace.mkdir(parents=True, exist_ok=True)
 
-        # Initialize components
-        self.memory = FilesystemMemory(self.workspace)
-        self.context = AppendOnlyContext(max_tokens=self.config.max_context_tokens)
-        self.offloader = ContextOffloader(
-            self.memory, threshold=self.config.offload_threshold
-        )
-        self.compactor = ContextCompactor(
-            self.memory, rot_threshold=self.config.max_context_tokens
-        )
-
         # Logger
         self.logger = StepLogger(
             log_dir=Path(self.config.log_dir),
         )
 
-        # CodeAct executor (initialized lazily)
-        self._codeact: CodeActExecutor | None = None
-
-        # Agent registry
-        self.agent_registry = AgentToolRegistry()
-
         # Track state
         self._initialized = False
         self._start_time: datetime | None = None
-        
-        # Progress callback for UI updates
-        self.progress_callback: Any = None
 
     async def initialize(self) -> None:
         """Initialize the runner and all components."""
         if self._initialized:
             return
 
-        # Create sub-agents from config
-        for name, agent_config in self.config.agents.items():
-            if agent_config.type == "specialist":
-                self._create_sub_agent(name, agent_config)
-
         self._initialized = True
         logger.info(
             f"MultiAgentRunner initialized with {len(self.config.agents)} agents"
         )
-
-    def _create_sub_agent(self, name: str, config: AgentConfig) -> None:
-        """Create a sub-agent from configuration.
-
-        Args:
-            name: Agent name
-            config: Agent configuration
-        """
-        # Create SubAgent class dynamically with embedded config
-        sub_config = SubAgentConfig(
-            name=name,
-            model=config.model,
-            max_steps=config.max_steps,
-            timeout=config.timeout,
-            isolation=config.isolation,
-            max_context_tokens=config.max_context_tokens,
-            system_prompt=config.system_prompt,
-            tools=config.tools,
-            return_schema=config.returns.schema_name if config.returns else None,
-            use_computer_beta=config.use_computer_beta,
-        )
-
-        # Create agent class with decorator
-        return_schema = config.get_return_schema()
-
-        # Create a closure to capture sub_config
-        captured_config = sub_config
-
-        @agent_as_tool(name=name, description=config.system_prompt[:100] if config.system_prompt else f"Sub-agent: {name}", returns=return_schema)
-        class ConfiguredSubAgent(SubAgent):
-            """Dynamically configured sub-agent."""
-
-            def __init__(self, **kwargs: Any) -> None:
-                # Use the captured config, but allow overrides
-                super().__init__(config=captured_config, **kwargs)
-
-        # Register the agent
-        self.agent_registry.register(ConfiguredSubAgent)
 
     async def run(
         self,
@@ -198,8 +228,6 @@ class MultiAgentRunner:
         Returns:
             RunResult with output, files, and metrics
         """
-        import time
-
         self._start_time = datetime.now()
         start_time = time.time()
 
@@ -208,19 +236,11 @@ class MultiAgentRunner:
             await self.initialize()
 
         try:
-            # Setup context
-            main_config = self.config.agents.get(self.config.main)
-            if main_config and main_config.system_prompt:
-                self.context.append_system(main_config.system_prompt)
-
-            self.context.append_user(task)
-            self.context.freeze_prefix()
-
             # Log initial step
+            main_config = self.config.agents.get(self.config.main)
             await self.logger.log_step(
                 agent_id=self.config.main,
                 input_prompt=task,
-                input_context_size=self.context.token_count,
                 model=main_config.model if main_config else "unknown",
             )
 
@@ -229,7 +249,9 @@ class MultiAgentRunner:
 
             # Calculate metrics
             duration_ms = (time.time() - start_time) * 1000
-            files = await self.memory.list_files()
+            
+            # List files in workspace
+            files = [str(p) for p in self.workspace.rglob("*") if p.is_file()]
 
             # Finalize logging
             await self.logger.finalize(
@@ -278,13 +300,16 @@ class MultiAgentRunner:
 
         Returns:
             Result dict
+            
+        Raises:
+            RuntimeError: If EvalContext is not provided
         """
-        # If we have an EvalContext, use it
-        if self.ctx is not None:
-            return await self._run_with_ctx(task, max_steps)
-
-        # Otherwise, run standalone
-        return await self._run_standalone(task, max_steps)
+        if self.ctx is None:
+            raise RuntimeError(
+                "EvalContext is required. MultiAgentRunner must be initialized with ctx parameter."
+            )
+        
+        return await self._run_with_ctx(task, max_steps)
 
     async def _run_with_ctx(
         self,
@@ -302,35 +327,43 @@ class MultiAgentRunner:
         from fastmcp.tools import Tool as FastMCPTool
         from fastmcp.tools.tool import ToolResult
 
-        # Type guard - this method is only called when ctx is not None
-        assert self.ctx is not None, "EvalContext is required for _run_with_ctx"
+        # Explicit check - this method requires EvalContext
+        if self.ctx is None:
+            raise RuntimeError("EvalContext is required for _run_with_ctx")
         ctx = self.ctx  # Local reference for type checker
 
         main_config = self.config.agents.get(self.config.main)
         model = main_config.model if main_config else "gpt-4o-mini"
 
-        # Register sub-agent tools with the context so the LLM can call them
-        agent_tool_schemas = self.agent_registry.list_tools()
-        for tool_schema in agent_tool_schemas:
-            tool_name = tool_schema["name"]
-            tool_desc = tool_schema.get("description", f"Call sub-agent: {tool_name}")
-            input_schema = tool_schema.get("inputSchema", {})
-            logger.info(f"Registering sub-agent tool: {tool_name}")
+        # Register sub-agent tools with the context
+        for agent_name, agent_config in self.config.agents.items():
+            if agent_config.type != "specialist":
+                continue  # Skip orchestrator
 
-            # Create a custom Tool subclass that accepts any arguments
-            # This bypasses FastMCP's function signature validation
+            tool_desc = agent_config.system_prompt[:100] if agent_config.system_prompt else f"Call sub-agent: {agent_name}"
+            logger.info(f"Registering sub-agent tool: {agent_name}")
+
+            # Create SubAgentConfig for this agent
+            return_schema = agent_config.get_return_schema()
+            sub_config = SubAgentConfig(
+                name=agent_name,
+                model=agent_config.model,
+                system_prompt=agent_config.system_prompt,
+                max_steps=agent_config.max_steps,
+                tools=agent_config.tools,
+                return_schema=return_schema,
+            )
+
+            # Create a custom Tool subclass for sub-agent calls
             class SubAgentTool(FastMCPTool):
-                """A tool wrapper that calls a sub-agent with arbitrary arguments."""
+                """A tool wrapper that calls a sub-agent with logging."""
 
                 def __init__(
                     self,
                     agent_name: str,
+                    agent_config: SubAgentConfig,
                     parent_ctx: Any,
-                    registry: AgentToolRegistry,
                     step_logger: StepLogger,
-                    compactor: ContextCompactor,
-                    context: AppendOnlyContext,
-                    progressive_compaction: bool,
                     name: str,
                     description: str,
                     parameters: dict[str, Any],
@@ -341,49 +374,79 @@ class MultiAgentRunner:
                         parameters=parameters,
                     )
                     self._agent_name = agent_name
+                    self._agent_config = agent_config
                     self._parent_ctx = parent_ctx
-                    self._registry = registry
                     self._step_logger = step_logger
-                    self._compactor = compactor
-                    self._context = context
-                    self._progressive_compaction = progressive_compaction
 
                 async def run(self, arguments: dict[str, Any]) -> ToolResult:
-                    """Run the sub-agent with the provided arguments.
+                    """Run the sub-agent with the provided arguments."""
+                    print(f"🔄 Calling sub-agent: {self._agent_name}")
 
-                    Returns MINIMAL result to parent (token optimized):
-                    - output: Natural language summary
-                    - success: bool
-                    - error: Error message if failed (KEPT)
-                    - artifacts: List of file paths
-                    - summary: Brief action summary
-                    - log_file: Path to detailed YAML log
-                    """
-                    logger.info(f"Calling sub-agent: {self._agent_name}")
-                    
                     # Report progress
-                    if hasattr(self._parent_ctx, 'progress_callback') and callable(getattr(self._parent_ctx, 'progress_callback', None)):
-                        self._parent_ctx.progress_callback(f"🔧 Calling {self._agent_name} agent...")
+                    progress_cb = getattr(self._parent_ctx, 'progress_callback', None)
+                    if callable(progress_cb):
+                        progress_cb(f"🔧 Calling {self._agent_name} agent...")
 
                     # Get prompt from arguments
                     prompt = arguments.get("prompt", str(arguments))
+                    start_time = time.time()
 
                     try:
-                        # Pass run_id so sub-agent logs to same directory as parent
-                        result = await self._registry.call(
-                            self._agent_name,
-                            self._parent_ctx,
-                            run_id=self._step_logger.run_id,
-                            **arguments,
-                        )
+                        # Create and run the sub-agent directly
+                        agent = create_sub_agent(self._agent_config, self._parent_ctx)
 
-                        # Result is already in minimal SubAgentResult format
-                        if hasattr(result, "model_dump"):
-                            result_dict: dict[str, Any] = result.model_dump()
-                        elif isinstance(result, dict):
-                            result_dict = result
-                        else:
-                            result_dict = {"output": str(result), "success": True}
+                        # Set prompt on context temporarily
+                        original_prompt = getattr(self._parent_ctx, "prompt", None)
+                        self._parent_ctx.prompt = prompt
+
+                        try:
+                            trace = await agent.run(self._parent_ctx, max_steps=self._agent_config.max_steps)
+                        finally:
+                            self._parent_ctx.prompt = original_prompt
+
+                        duration_ms = (time.time() - start_time) * 1000
+                        
+                        # Write sub-agent log file with full trace
+                        subagent_log_file = self._step_logger.run_dir / f"{self._agent_name}.yaml"
+                        subagent_log_data = {
+                            "agent": self._agent_name,
+                            "model": self._agent_config.model,
+                            "prompt": prompt,
+                            "duration_ms": duration_ms,
+                            "success": not trace.isError,
+                            "messages": trace.messages or [],
+                            "content": trace.content,
+                        }
+                        if trace.isError and trace.info:
+                            subagent_log_data["error"] = trace.info.get("error")
+                        
+                        import yaml
+                        with open(subagent_log_file, "w") as f:
+                            yaml.dump(subagent_log_data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+                        
+                        logger.debug(f"Sub-agent {self._agent_name} log written to {subagent_log_file}")
+
+                        result_dict = _build_result(
+                            self._agent_config.return_schema,
+                            output=trace.content or "",
+                            success=not trace.isError,
+                            error=trace.info.get("error") if trace.isError and trace.info else None,
+                            duration_ms=duration_ms,
+                        )
+                        
+                        if trace.isError:
+                            error_msg = trace.info.get("error") if trace.info else "unknown error"
+                            print(f"⚠️  Sub-agent '{self._agent_name}' returned error: {error_msg}")
+                        
+                        # Set log_file to point to the sub-agent's detailed log
+                        result_dict["log_file"] = str(subagent_log_file)
+                        
+                        # Set artifacts from files_created if present (CodeResult)
+                        if "files_created" in result_dict and not result_dict.get("artifacts"):
+                            result_dict["artifacts"] = [
+                                f.get("path", f) if isinstance(f, dict) else str(f)
+                                for f in result_dict["files_created"]
+                            ]
 
                         # Log sub-agent call in main YAML log
                         await self._step_logger.log_subagent_call(
@@ -391,54 +454,38 @@ class MultiAgentRunner:
                             prompt=prompt,
                             result=result_dict,
                         )
-                        
-                        # Report completion
-                        if hasattr(self._parent_ctx, 'progress_callback') and callable(getattr(self._parent_ctx, 'progress_callback', None)):
-                            summary = result_dict.get('summary', 'completed')
-                            self._parent_ctx.progress_callback(f"✅ {self._agent_name}: {summary}")
 
-                        # Progressive compaction after each sub-agent call
-                        # Per the following principle: keep context lean
-                        if self._progressive_compaction and self._compactor.should_compact(
-                            self._context
-                        ):
-                            compacted_count = self._compactor.compact_context(self._context)
-                            if compacted_count > 0:
-                                logger.debug(
-                                    f"Progressive compaction: compacted {compacted_count} entries"
-                                )
-                                await self._step_logger.log_context_event(
-                                    "progressive_compaction",
-                                    {
-                                        "after_subagent": self._agent_name,
-                                        "entries_compacted": compacted_count,
-                                        "context_tokens": self._context.token_count,
-                                    },
-                                )
+                        # Report completion
+                        progress_cb = getattr(self._parent_ctx, 'progress_callback', None)
+                        if callable(progress_cb):
+                            summary = result_dict.get('summary', 'completed')
+                            progress_cb(f"✅ {self._agent_name}: {summary}")
 
                         logger.debug(
                             f"Sub-agent {self._agent_name} completed: "
                             f"{result_dict.get('summary', 'no summary')}"
                         )
 
-                        # Return minimal result to parent context
-                        # NO tool_calls or tool_results arrays - they're in the log file
                         return ToolResult(content=result_dict)
 
                     except Exception as e:
                         logger.exception(f"Sub-agent {self._agent_name} failed:")
-                        
-                        # Report error
-                        if hasattr(self._parent_ctx, 'progress_callback') and callable(getattr(self._parent_ctx, 'progress_callback', None)):
-                            self._parent_ctx.progress_callback(f"❌ {self._agent_name} failed: {str(e)[:50]}")
 
-                        error_result = {
-                            "output": "",
-                            "success": False,
-                            "error": str(e),  # KEEP errors visible per Manus principle
-                            "artifacts": [],
-                            "summary": "Failed with error",
-                        }
+                        duration_ms = (time.time() - start_time) * 1000
+
+                        # Report error
+                        progress_cb = getattr(self._parent_ctx, 'progress_callback', None)
+                        if callable(progress_cb):
+                            progress_cb(f"❌ {self._agent_name} failed: {str(e)[:50]}")
+
+                        # Use the configured return schema or fall back to SubAgentResult
+                        error_result = _build_result(
+                            self._agent_config.return_schema,
+                            output="",
+                            success=False,
+                            error=str(e),
+                            duration_ms=duration_ms,
+                        )
 
                         # Log error
                         await self._step_logger.log_subagent_call(
@@ -451,22 +498,24 @@ class MultiAgentRunner:
 
             # Create and register the sub-agent tool
             sub_agent_tool = SubAgentTool(
-                agent_name=tool_name,
+                agent_name=agent_name,
+                agent_config=sub_config,
                 parent_ctx=ctx,
-                registry=self.agent_registry,
                 step_logger=self.logger,
-                compactor=self.compactor,
-                context=self.context,
-                progressive_compaction=self.config.progressive_compaction,
-                name=tool_name,
+                name=agent_name,
                 description=tool_desc,
-                parameters=input_schema or {"type": "object", "properties": {}},
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string", "description": "The prompt for this agent"}
+                    },
+                    "required": ["prompt"],
+                },
             )
-            
-            # Attach progress callback to context so tools can access it (dynamic attribute)
-            if self.progress_callback:
-                setattr(ctx, 'progress_callback', self.progress_callback)
-            
+
+            # Progress callback can be set directly on ctx by callers (e.g., playground)
+            # No need to set it here - tools will check ctx.progress_callback directly
+
             ctx._tool_manager.add_tool(sub_agent_tool)
 
         # Rebuild routing to include new tools
@@ -515,139 +564,6 @@ class MultiAgentRunner:
             "error": trace.info.get("error") if trace.info else None,
         }
 
-    async def _run_standalone(
-        self,
-        task: str,
-        max_steps: int,
-    ) -> dict[str, Any]:
-        """Run without EvalContext (standalone mode).
-
-        Useful for testing or when full HUD integration not needed.
-        """
-        main_config = self.config.agents.get(self.config.main)
-
-        # Simple execution loop
-        step = 0
-        while step < max_steps:
-            step += 1
-
-            # Check if we need to compact
-            if self.compactor.should_compact(self.context):
-                compacted = self.compactor.compact_context(self.context)
-                await self.logger.log_context_event(
-                    "compaction",
-                    {"entries_compacted": compacted},
-                )
-
-            # For standalone mode, we just return after one step
-            # Full implementation would loop with LLM calls
-            break
-
-        return {
-            "success": True,
-            "output": f"Standalone execution completed: {task}",
-            "reward": 0.0,
-        }
-
-    async def call_agent_tool(
-        self,
-        name: str,
-        **kwargs: Any,
-    ) -> Any:
-        """Call a sub-agent as a tool.
-
-        Args:
-            name: Agent tool name
-            **kwargs: Arguments for the agent
-
-        Returns:
-            Structured result from agent
-        """
-        # Log the call
-        step_id = await self.logger.log_step(
-            agent_id=self.config.main,
-            input_prompt=f"Calling agent tool: {name}",
-            input_context_size=self.context.token_count,
-        )
-
-        tool_call_id = await self.logger.log_tool_call(
-            step_id=step_id,
-            tool_name=name,
-            tool_args=kwargs,
-            agent_id=self.config.main,
-        )
-
-        try:
-            # Execute via registry
-            result = await self.agent_registry.call(name, self.ctx, **kwargs)
-
-            # Process result for context
-            result_str = str(result)
-            processed = await self.offloader.process_tool_result(result_str, name)
-
-            # Add to context
-            self.context.append_tool_result(processed, tool_name=name)
-
-            # Log result
-            await self.logger.log_tool_result(
-                call_id=tool_call_id,
-                result=result_str,
-                success=True,
-            )
-
-            return result
-
-        except Exception as e:
-            error = str(e)
-            self.context.append_error(error)
-
-            await self.logger.log_tool_result(
-                call_id=tool_call_id,
-                result=error,
-                success=False,
-            )
-
-            raise
-
-    async def execute_code(self, code: str) -> dict[str, Any]:
-        """Execute Python code via CodeAct.
-
-        Args:
-            code: Python code to execute
-
-        Returns:
-            Execution result
-        """
-        # Initialize CodeAct if needed
-        if self._codeact is None:
-            self._codeact = CodeActExecutor(
-                workspace=str(self.workspace),
-                keep_errors=True,
-            )
-
-        result = await self._codeact.execute(code)
-
-        # Log the execution
-        await self.logger.log_step(
-            agent_id=self.config.main,
-            input_prompt=f"CodeAct execution:\n{code}",
-            output_response=result.to_context(),
-            model="codeact",
-            error=result.error if not result.success else None,
-        )
-
-        # Add result to context
-        context_str = result.to_context()
-        processed = await self.offloader.process_tool_result(context_str, "python")
-        self.context.append_tool_result(processed, tool_name="python")
-
-        return {
-            "success": result.success,
-            "output": result.output,
-            "error": result.error,
-            "return_value": result.return_value,
-        }
-
     def _get_conversation_history(self) -> str:
         """Read previous conversation from logs and format for injection.
         
@@ -688,19 +604,9 @@ class MultiAgentRunner:
             logger.warning(f"Failed to read conversation history: {e}")
             return ""
 
-    def get_context(self) -> AppendOnlyContext:
-        """Get the current context."""
-        return self.context
-
-    def get_memory(self) -> FilesystemMemory:
-        """Get the filesystem memory."""
-        return self.memory
-
     async def shutdown(self) -> None:
         """Shutdown the runner and release resources."""
-        if self._codeact is not None:
-            await self._codeact.shutdown()
+        pass  # Reserved for future cleanup
 
 
 __all__ = ["MultiAgentRunner", "RunResult"]
-

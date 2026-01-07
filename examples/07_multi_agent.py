@@ -1,328 +1,342 @@
 """Multi-Agent System Example.
 
-This example demonstrates a multi-agent system with:
-- Agent-as-Tool pattern: Sub-agents exposed as tools
-- CodeAct: Agent writes Python code instead of JSON tools
-- Filesystem as Memory: grep/glob search for external memory
-- Append-only Context: KV cache optimization
+This example demonstrates the multi-agent system with:
+- YAML configuration: Define agents in YAML files
+- Agent-as-Tool pattern: Sub-agents exposed as callable tools
+- Structured returns: Type-safe sub-agent results with make_schema()
+
+The module provides:
+- MultiAgentRunner: Orchestrate multi-agent tasks
+- make_schema(): Create custom return schemas in one line
+- SubAgentConfig / create_sub_agent: Programmatic sub-agent creation
+- Built-in schemas: CodeResult, ResearchResult, ReviewResult, PlanResult
 """
 
 import asyncio
-import os
 from pathlib import Path
 
 import hud
 from hud.multi_agent import (
     # Core runner
     MultiAgentRunner,
-    # Schemas for structured returns
-    ResearchResult,
+    RunResult,
+    # Schema factory
+    make_schema,
+    # Built-in schemas
     CodeResult,
+    ResearchResult,
     ReviewResult,
-    # Agent-as-tool decorators
-    agent_as_tool,
-    register_agent_tool,
-    # Sub-agent base class
-    SubAgent,
-    # Context management
-    AppendOnlyContext,
-    # Filesystem memory
-    FilesystemMemory,
-    # CodeAct execution
-    CodeActExecutor,
+    GenericResult,
+    # Sub-agent utilities
+    SubAgentConfig,
+    create_sub_agent,
+    # Config
+    load_config,
+    register_schema,
 )
 
 
 # =============================================================================
-# Example 1: Using MultiAgentRunner with YAML config
+# Example 1: Basic MultiAgentRunner with YAML Config
 # =============================================================================
 
-# Create a local environment with tools for the demo
-demo_env = hud.Environment("multi-agent-demo")
 
-
-@demo_env.tool()
-def fibonacci(n: int) -> list[int]:
-    """Calculate Fibonacci sequence up to n numbers."""
-    if n <= 0:
-        return []
-    if n == 1:
-        return [0]
-    fib = [0, 1]
-    while len(fib) < n:
-        fib.append(fib[-1] + fib[-2])
-    return fib
-
-
-@demo_env.tool()
-def add(a: int, b: int) -> int:
-    """Add two numbers."""
-    return a + b
-
-
-@demo_env.tool()
-def echo(message: str) -> str:
-    """Echo a message back."""
-    return message
-
-
-async def example_with_config():
-    """Run a multi-agent task with access to BOTH Jupyter AND Browser environments.
-
-    Uses MultiAgentRunner with:
-    - main.yaml: Orchestrator that delegates to sub-agents
-    - coder.yaml: Python/Jupyter specialist for code execution
-    - browser.yaml: Web automation specialist for browsing
+async def example_basic_runner():
+    """Basic multi-agent setup with YAML configuration.
     
-    The environment connects to BOTH:
-    - Local Jupyter container (for Python/data tasks)
-    - Remote hud-online-mind2web (for web browsing tasks)
+    This is the recommended way to use multi-agent:
+    1. Define agents in YAML files (agents/*.yaml)
+    2. Create an environment with tools
+    3. Run with MultiAgentRunner
     
-    This allows sub-agents to use whichever tools they need!
+    YAML files needed:
+    - agents/main.yaml (orchestrator)
+    - agents/coder.yaml (specialist)
     """
     print("\n" + "=" * 60)
-    print("Example: Multi-Agent with Jupyter + Browser")
+    print("Example 1: MultiAgentRunner with YAML Config")
     print("=" * 60)
 
-    from hud.environment import Environment
-
-    # Connect to locally running containers
-    JUPYTER_URL = os.getenv("HUD_DEV_URL", "http://localhost:8765/mcp")
-    BROWSER_URL = os.getenv("HUD_BROWSER_URL", "http://localhost:8766/mcp")
-
-    # Create a unified environment that connects to BOTH sources
-    env = Environment("multi-agent-env")
+    # Create an environment with your tools
+    env = hud.Environment("coding-env")
     
-    # 1. Connect to LOCAL Jupyter (for coding/data tasks)
-    env.connect_url(JUPYTER_URL, alias="jupyter")
-    
-    # 2. Connect to LOCAL browser (hud-online-mind2web running locally)
-    #    This gives sub-agents access to browser tools: navigate, click, screenshot, etc.
-    env.connect_url(BROWSER_URL, alias="browser")
+    # Add any tools the agents need
+    @env.tool()
+    def run_python(code: str) -> str:
+        """Execute Python code and return the output."""
+        # In reality, you'd connect to a Jupyter/code execution environment
+        return f"Executed: {code[:50]}..."
 
-    # Multi-phase task: Browser scraping + Jupyter analysis
-    # Using books.toscrape.com - a fast, reliable demo site for web scraping
-    task_prompt = """
-Scrape book data from an online bookstore and create a price analysis.
+    @env.tool()
+    def read_file(path: str) -> str:
+        """Read a file from the workspace."""
+        return f"Contents of {path}"
 
-PHASE 1 - BROWSER SCRAPING:
-1. Navigate to https://books.toscrape.com/
-2. Extract data for the first 10 books visible on the homepage:
-   - Book title
-   - Price (in £)
-   - Star rating (One to Five stars)
-3. Record all the data before proceeding to Phase 2.
-
-PHASE 2 - JUPYTER DATA ANALYSIS:
-Using the scraped data, create a Python analysis:
-
-1. Create a pandas DataFrame with the 10 books
-2. Convert prices from £ to USD (use rate: 1 GBP = 1.27 USD)
-3. Calculate:
-   - Average book price in USD
-   - Most expensive and cheapest books
-   - Average rating (convert star text to numbers)
-   - Price distribution stats
-4. Create a bar chart showing prices by book title
-5. Save the chart as 'book_analysis.png'
-6. Print a summary table with all metrics
-
-PHASE 3 - INSIGHTS:
-Provide 3 insights about the book pricing patterns you observed.
-
-Return the complete analysis with all findings.
-"""
-
-    env.prompt = task_prompt
-
-    # Run with combined environment (has tools from BOTH Jupyter and Browser)
-    async with hud.eval(env(), name="multi-agent-combined") as ctx:
-        ctx.prompt = task_prompt
-
-        print(f"Task: Book Store Scraping + Price Analysis")
-        tools = await ctx.list_tools()
-        print(f"Available tools ({len(tools)}): {[t.name for t in tools]}")
-
+    # Run with multi-agent orchestration
+    async with hud.eval(env(), name="multi-agent-demo") as ctx:
         runner = MultiAgentRunner(
-            config_dir=Path("agents/"),
+            config_dir=Path("agents/"),  # Directory with YAML configs
             ctx=ctx,
             workspace=Path("./workspace"),
         )
 
         result = await runner.run(
-            task=ctx.prompt,
-            max_steps=50,  # More steps needed for complex multi-phase task
+            task="Write a Python function to calculate fibonacci numbers",
+            max_steps=20,
         )
 
-        print(f"\n{'='*60}")
-        print("RESULT:")
-        print(f"{'='*60}")
-        print(f"  Success: {result.success}")
-        print(f"  Steps: {result.steps}")
-        print(f"  Files in workspace: {len(result.files)}")
-        print(f"  Logs: {result.logs_dir}")
-        print(f"\nAgent Output:")
+        print(f"Success: {result.success}")
+        print(f"Steps: {result.steps}")
+        print(f"Logs: {result.logs_dir}")
         if result.output:
-            print(f"  {result.output[:1500]}..." if len(result.output) > 1500 else f"  {result.output}")
+            print(f"Output: {result.output[:500]}")
 
 
 # =============================================================================
-# Example 2: Creating a custom sub-agent
+# Example 2: Custom Schemas with make_schema()
 # =============================================================================
 
 
-@agent_as_tool(name="analyze", description="Analyze code complexity", returns=ReviewResult)
-class AnalyzerAgent(SubAgent):
-    """Custom sub-agent for code analysis."""
-
-    async def run_isolated(self, prompt: str, **kwargs):
-        """Analyze code and return structured result."""
-        # In a real implementation, this would use an LLM
-        # Here we demonstrate the pattern
-
-        return {
-            "summary": f"Analysis of: {prompt}",
-            "issues": [],
-            "approved": True,
-            "score": 0.85,
-            "suggestions": ["Consider adding type hints", "Add docstrings"],
-            "security_concerns": [],
-        }
-
-
-async def example_custom_agent():
-    """Demonstrate creating a custom sub-agent."""
+async def example_custom_schema():
+    """Create custom return schemas for your sub-agents.
+    
+    Use make_schema() to define structured output in one line.
+    The schema is auto-registered for use in YAML configs.
+    """
     print("\n" + "=" * 60)
-    print("Example 2: Custom Sub-Agent")
+    print("Example 2: Custom Schemas with make_schema()")
     print("=" * 60)
 
-    # Register the agent
-    register_agent_tool(AnalyzerAgent)
-
-    # Create and run the agent directly
-    agent = AnalyzerAgent(isolation=True)
-    result = await agent.run_isolated("def hello(): print('world')")
-
-    print(f"Result: {result}")
-
-
-# =============================================================================
-# Example 3: Using AppendOnlyContext directly
-# =============================================================================
-
-
-async def example_context():
-    """Demonstrate AppendOnlyContext usage."""
-    print("\n" + "=" * 60)
-    print("Example 3: AppendOnlyContext")
-    print("=" * 60)
-
-    context = AppendOnlyContext(max_tokens=128_000)
-
-    # Add system message and freeze (stable prefix for KV cache)
-    context.append_system("You are a helpful coding assistant.")
-    context.freeze_prefix()
-
-    # Add conversation
-    context.append_user("Write a hello world function")
-    context.append_assistant("Here's a simple function:\n```python\ndef hello():\n    print('Hello, World!')\n```")
-
-    # Add tool interaction
-    context.append_tool_call("python", {"code": "hello()"})
-    context.append_tool_result("Hello, World!")
-
-    print(f"Context entries: {len(context)}")
-    print(f"Frozen prefix: {context.frozen_prefix_length}")
-    print(f"Token count: {context.token_count}")
-    print(f"Should compact: {context.should_compact()}")
-
-    # Render for display
-    print("\nRendered context:")
-    print(context.render())
-
-
-# =============================================================================
-# Example 4: Using FilesystemMemory
-# =============================================================================
-
-
-async def example_memory():
-    """Demonstrate FilesystemMemory usage."""
-    print("\n" + "=" * 60)
-    print("Example 4: FilesystemMemory")
-    print("=" * 60)
-
-    workspace = Path("./workspace_example")
-    workspace.mkdir(exist_ok=True)
-
-    memory = FilesystemMemory(workspace)
-
-    # Store some content
-    ref = await memory.store(
-        "research_notes",
-        "This is a long research document about Python async patterns...\n" * 50,
-    )
-    print(f"Stored: {ref}")
-
-    # Store code
-    await memory.store(
-        "fibonacci",
-        """
-def fibonacci(n):
-    if n <= 1:
-        return n
-    a, b = 0, 1
-    for _ in range(2, n + 1):
-        a, b = b, a + b
-    return b
-""",
-        extension="py",
+    # Create a custom schema - one line!
+    DataAnalysisResult = make_schema(
+        "DataAnalysisResult",
+        insights=list[str],              # List defaults to []
+        chart_path=(str | None, None),   # Optional field
+        metrics=dict[str, float],        # Dict defaults to {}
+        confidence=(float, 0.8),         # Explicit default
     )
 
-    # Search with grep
-    results = await memory.search("fibonacci")
-    print(f"Search results: {results}")
+    print(f"Created: {DataAnalysisResult.__name__}")
+    print(f"Fields: {list(DataAnalysisResult.model_fields.keys())}")
 
-    # List files
-    files = await memory.list_files()
-    print(f"Files in workspace: {files}")
+    # The schema includes AgentResultBase fields automatically
+    result = DataAnalysisResult(
+        insights=["Revenue increased 20%", "Q4 was strongest quarter"],
+        chart_path="/workspace/revenue_chart.png",
+        metrics={"total_revenue": 1_000_000, "growth_rate": 0.2},
+    )
+
+    print(f"\nExample result:")
+    print(f"  insights: {result.insights}")  # type: ignore[attr-defined]
+    print(f"  success: {result.success}")  # type: ignore[attr-defined] (from AgentResultBase)
+
+    print("\n📝 Use in YAML config:")
+    print("""
+    # agents/analyst.yaml
+    name: analyst
+    type: specialist
+    model: claude-sonnet-4-5
+    system_prompt: "You analyze data and provide insights..."
+    returns:
+      schema: DataAnalysisResult  # References your custom schema
+    """)
 
 
 # =============================================================================
-# Example 5: CodeAct Execution
+# Example 3: Using env.agent_tool() Pattern
 # =============================================================================
 
 
-async def example_codeact():
-    """Demonstrate CodeAct execution."""
+async def example_agent_tool():
+    """Register agents as tools directly on the environment.
+    
+    This is useful when you want to dynamically create agent tools
+    without YAML configuration.
+    """
     print("\n" + "=" * 60)
-    print("Example 5: CodeAct Execution")
+    print("Example 3: env.agent_tool() Pattern")
     print("=" * 60)
 
-    # Use SandboxExecutor for simple execution (no Jupyter needed)
-    from hud.multi_agent import SandboxExecutor
+    env = hud.Environment("agent-tools-demo")
 
-    executor = SandboxExecutor(timeout=30)
+    # Register agents as callable tools
+    env.agent_tool(
+        name="coder",
+        model="claude-sonnet-4-5",
+        system_prompt="You are a Python expert. Write clean, efficient code.",
+        max_steps=10,
+    )
 
-    # Execute some Python code
-    code = """
-# Calculate first 10 Fibonacci numbers
-def fib(n):
-    a, b = 0, 1
-    for _ in range(n):
-        yield a
-        a, b = b, a + b
+    env.agent_tool(
+        name="reviewer",
+        model="gpt-4o",
+        system_prompt="You review code for bugs, style issues, and security.",
+        max_steps=5,
+    )
 
-result = list(fib(10))
-print(f"Fibonacci: {result}")
-"""
+    print("Registered agent tools: coder, reviewer")
+    print("\n📝 Usage:")
+    print("""
+    async with hud.eval(env()) as ctx:
+        # Call agents like any other tool
+        code = await ctx.call_tool(name="coder", arguments={
+            "prompt": "Write a fibonacci function"
+        })
+        
+        review = await ctx.call_tool(name="reviewer", arguments={
+            "prompt": f"Review this code: {code}"
+        })
+    """)
 
-    result = await executor.execute(code)
 
-    print(f"Success: {result.success}")
-    print(f"Output: {result.output}")
-    if result.error:
-        print(f"Error: {result.error}")
+# =============================================================================
+# Example 4: Programmatic Sub-Agent Creation
+# =============================================================================
+
+
+async def example_programmatic_subagent():
+    """Create sub-agents programmatically without YAML.
+    
+    Use SubAgentConfig and create_sub_agent() for full control.
+    """
+    print("\n" + "=" * 60)
+    print("Example 4: Programmatic Sub-Agent Creation")
+    print("=" * 60)
+
+    # Create sub-agent config
+    config = SubAgentConfig(
+        name="researcher",
+        model="claude-sonnet-4-5",
+        system_prompt="You research topics and provide summaries with sources.",
+        max_steps=15,
+        return_schema=ResearchResult,  # Built-in schema
+    )
+
+    print(f"Created config: {config.name}")
+    print(f"  Model: {config.model}")
+    print(f"  Max steps: {config.max_steps}")
+    print(f"  Return schema: {config.return_schema.__name__ if config.return_schema else 'None'}")
+
+    print("\n📝 Usage with EvalContext:")
+    print("""
+    async with hud.eval(env()) as ctx:
+        agent = create_sub_agent(config, ctx)
+        trace = await agent.run(ctx, max_steps=config.max_steps)
+        print(trace.content)  # Agent's response
+    """)
+
+
+# =============================================================================
+# Example 5: Built-in Schemas Reference
+# =============================================================================
+
+
+def example_builtin_schemas():
+    """Reference for built-in return schemas.
+    
+    These are ready to use in your YAML configs.
+    """
+    print("\n" + "=" * 60)
+    print("Example 5: Built-in Schemas Reference")
+    print("=" * 60)
+
+    schemas = {
+        "CodeResult": CodeResult,
+        "ResearchResult": ResearchResult,
+        "ReviewResult": ReviewResult,
+        "GenericResult": GenericResult,
+    }
+
+    for name, schema in schemas.items():
+        fields = list(schema.model_fields.keys())
+        # Filter out base fields for clarity
+        base_fields = {"success", "error", "duration_ms", "timestamp", "tool_calls", "tool_results"}
+        custom_fields = [f for f in fields if f not in base_fields]
+        
+        print(f"\n{name}:")
+        print(f"  Custom fields: {', '.join(custom_fields)}")
+
+    print("\n📝 Use in YAML:")
+    print("""
+    # For coding agents
+    returns:
+      schema: CodeResult  # explanation, files_created, tests_passed, etc.
+    
+    # For research agents  
+    returns:
+      schema: ResearchResult  # summary, sources, key_findings, etc.
+    
+    # For code review agents
+    returns:
+      schema: ReviewResult  # summary, issues, approved, score, etc.
+    """)
+
+
+# =============================================================================
+# Example 6: Complete YAML Config Reference
+# =============================================================================
+
+
+def example_yaml_reference():
+    """Reference for YAML configuration structure."""
+    print("\n" + "=" * 60)
+    print("Example 6: YAML Configuration Reference")
+    print("=" * 60)
+
+    print("""
+📁 agents/
+├── main.yaml       # Orchestrator agent
+├── coder.yaml      # Coding specialist
+└── reviewer.yaml   # Code review specialist
+
+# ═══════════════════════════════════════════════════════════
+# agents/main.yaml - Orchestrator
+# ═══════════════════════════════════════════════════════════
+name: main
+type: orchestrator
+model: anthropic/claude-sonnet-4-5
+system_prompt: |
+  You are a project manager that delegates tasks to specialists.
+  
+  Available specialists:
+  - coder: For writing and modifying code
+  - reviewer: For code review and quality checks
+  
+  Break down tasks and delegate appropriately.
+
+# ═══════════════════════════════════════════════════════════
+# agents/coder.yaml - Specialist
+# ═══════════════════════════════════════════════════════════
+name: coder
+type: specialist
+model: anthropic/claude-sonnet-4-5
+system_prompt: |
+  You are an expert Python developer.
+  Write clean, well-documented, tested code.
+tools:
+  - bash
+  - str_replace_based_edit_tool
+  - read_file
+returns:
+  schema: CodeResult
+max_steps: 20
+
+# ═══════════════════════════════════════════════════════════
+# agents/reviewer.yaml - Specialist
+# ═══════════════════════════════════════════════════════════
+name: reviewer
+type: specialist
+model: anthropic/claude-sonnet-4-5
+system_prompt: |
+  You review code for:
+  - Bugs and logic errors
+  - Security vulnerabilities
+  - Style and best practices
+  - Performance issues
+returns:
+  schema: ReviewResult
+max_steps: 10
+    """)
 
 
 # =============================================================================
@@ -331,18 +345,21 @@ print(f"Fibonacci: {result}")
 
 
 async def main():
-    """Run all examples."""
-    print("Multi-Agent System Examples")
+    """Run examples."""
+    print("=" * 60)
+    print("HUD Multi-Agent System Examples")
     print("=" * 60)
 
-    # Example 1: Full MultiAgentRunner with YAML config
-    await example_with_config()
+    # Standalone examples (no environment needed)
+    await example_custom_schema()
+    await example_agent_tool()
+    await example_programmatic_subagent()
+    example_builtin_schemas()
+    example_yaml_reference()
 
-    # Other examples (standalone, no HUD connection needed)
-    # await example_custom_agent()
-    # await example_context()
-    # await example_memory()
-    # await example_codeact()
+    # Full runner example (needs YAML configs and environment)
+    # Uncomment to run with actual environment:
+    # await example_basic_runner()
 
     print("\n" + "=" * 60)
     print("All examples completed!")
@@ -351,4 +368,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
