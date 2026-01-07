@@ -6,7 +6,7 @@ import inspect
 import json
 import logging
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, get_type_hints
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
@@ -393,30 +393,44 @@ class ScenarioMixin:
             scenario_fn = fn
             scenario_name_ref = scenario_name
 
-            # Build a map of parameter names to their expected types for JSON deserialization
+            # Resolve parameter type hints for deserialization
+            # Use get_type_hints() to handle `from __future__ import annotations`
+            # which makes annotations lazy strings (PEP 563)
             # MCP prompts only support string arguments, so we JSON-serialize complex types
-            param_types: dict[str, type] = {}
-            for p in sig.parameters.values():
-                if p.annotation is not inspect.Parameter.empty:
-                    param_types[p.name] = p.annotation
+            # and use Pydantic TypeAdapter to properly deserialize them
+            try:
+                param_annotations = get_type_hints(fn)
+            except Exception:
+                # Fall back to raw annotations if get_type_hints fails
+                param_annotations = {
+                    p.name: p.annotation
+                    for p in sig.parameters.values()
+                    if p.annotation is not inspect.Parameter.empty
+                }
 
             async def prompt_handler(**handler_args: Any) -> list[str]:
-                # Deserialize JSON-encoded arguments based on type annotations
-                # MCP prompts only support string values, so complex types are JSON-serialized
+                from pydantic import TypeAdapter
+
+                # Deserialize JSON-encoded arguments using Pydantic TypeAdapter
+                # This properly handles: Pydantic models, enums, datetime, lists, dicts
                 deserialized_args: dict[str, Any] = {}
                 for arg_name, arg_value in handler_args.items():
-                    expected_type = param_types.get(arg_name)
+                    annotation = param_annotations.get(arg_name)
                     if (
-                        expected_type is not None
-                        and expected_type is not str
+                        annotation is not None
+                        and annotation is not str
                         and isinstance(arg_value, str)
                     ):
-                        # Try to JSON-parse non-string typed arguments
+                        # Try TypeAdapter.validate_json for proper type coercion
                         try:
-                            deserialized_args[arg_name] = json.loads(arg_value)
-                        except json.JSONDecodeError:
-                            # If it fails, pass the string as-is
-                            deserialized_args[arg_name] = arg_value
+                            adapter = TypeAdapter(annotation)
+                            deserialized_args[arg_name] = adapter.validate_json(arg_value)
+                        except Exception:
+                            # Fall back to plain json.loads if TypeAdapter fails
+                            try:
+                                deserialized_args[arg_name] = json.loads(arg_value)
+                            except json.JSONDecodeError:
+                                deserialized_args[arg_name] = arg_value
                     else:
                         deserialized_args[arg_name] = arg_value
 
