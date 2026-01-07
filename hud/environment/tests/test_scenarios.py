@@ -482,12 +482,14 @@ class TestScenarioJsonSerialization:
         prompt = env._prompt_manager._prompts.get("test-env:mixed")
         assert prompt is not None
 
-        await prompt.render({
-            "name": "test",
-            "count": "5",
-            "items": '["a", "b", "c"]',
-            "options": '{"verbose": true, "dry_run": false}',
-        })
+        await prompt.render(
+            {
+                "name": "test",
+                "count": "5",
+                "items": '["a", "b", "c"]',
+                "options": '{"verbose": true, "dry_run": false}',
+            }
+        )
 
         assert received_args["name"] == "test"
         assert received_args["count"] == 5
