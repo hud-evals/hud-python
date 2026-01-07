@@ -234,15 +234,15 @@ def save_tasks(
 ) -> str:
     """Save tasks to the HUD API.
 
-    Creates or updates an evalset with the given tasks.
+    Creates or updates a taskset with the given tasks.
 
     Args:
-        name: Evalset name/slug (e.g., "my-evals/benchmark-v1").
+        name: Taskset name/slug (e.g., "my-evals/benchmark-v1").
             If no org prefix, uses user's default org.
         tasks: List of Task objects (v5 format) to save.
 
     Returns:
-        The evalset ID of the created/updated evalset.
+        The taskset ID of the created/updated taskset.
 
     Example:
         ```python
@@ -258,7 +258,7 @@ def save_tasks(
         ]
 
         # Save to HUD API
-        evalset_id = save_tasks("my-evals/benchmark-v1", tasks)
+        taskset_id = save_tasks("my-evals/benchmark-v1", tasks)
 
         # Later, load them back
         loaded = load_tasks("my-evals/benchmark-v1")
@@ -303,9 +303,9 @@ def save_tasks(
             )
             response.raise_for_status()
             data = response.json()
-            evalset_id = data.get("evalset_id") or data.get("id") or name
-            logger.info("Saved %d tasks to evalset: %s", len(tasks), evalset_id)
-            return evalset_id
+            taskset_id = data.get("evalset_id") or data.get("id") or name
+            logger.info("Saved %d tasks to taskset: %s", len(tasks), taskset_id)
+            return taskset_id
     except httpx.HTTPStatusError as e:
         raise ValueError(f"Failed to save tasks: {e.response.text}") from e
     except Exception as e:

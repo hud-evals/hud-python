@@ -2,9 +2,53 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from enum import Enum
+from typing import Any
+
 import pytest
+from pydantic import BaseModel
 
 from hud.environment import Environment
+
+
+# Module-level models for Pydantic/Enum/datetime deserialization tests
+# (prefixed with underscore to avoid pytest collection warnings)
+class _UserConfig(BaseModel):
+    """Pydantic model for testing."""
+
+    name: str
+    age: int
+    active: bool = True
+
+
+class _Status(Enum):
+    """Enum for testing."""
+
+    PENDING = "pending"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+
+
+class _Address(BaseModel):
+    """Nested Pydantic model for testing."""
+
+    street: str
+    city: str
+
+
+class _Person(BaseModel):
+    """Pydantic model with nested model for testing."""
+
+    name: str
+    address: _Address
+
+
+class _Item(BaseModel):
+    """Pydantic model for list tests."""
+
+    id: int
+    name: str
 
 
 class TestScenarioDecorator:
@@ -278,3 +322,428 @@ class TestScenarioMeta:
         assert resource.meta is not None
         assert "code" in resource.meta
         assert "async def example_scenario" in resource.meta["code"]
+
+
+class TestScenarioJsonSerialization:
+    """Tests for JSON serialization of complex argument types.
+
+    MCP prompts only support string arguments (dict[str, str]).
+    Complex types like lists, dicts, and numbers are JSON-serialized
+    when sent and deserialized based on type annotations when received.
+    """
+
+    @pytest.mark.asyncio
+    async def test_list_argument_deserialization(self) -> None:
+        """List arguments are JSON-deserialized from strings."""
+        env = Environment("test-env")
+        received_items: list[str] = []
+
+        @env.scenario("process_items")
+        async def process_items_scenario(items: list[str]):
+            received_items.extend(items)
+            yield f"Processing {len(items)} items"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:process_items")
+        assert prompt is not None
+
+        # Simulate MCP sending JSON-encoded list as string
+        await prompt.render({"items": '["apple", "banana", "cherry"]'})
+
+        assert received_items == ["apple", "banana", "cherry"]
+
+    @pytest.mark.asyncio
+    async def test_dict_argument_deserialization(self) -> None:
+        """Dict arguments are JSON-deserialized from strings."""
+        env = Environment("test-env")
+        received_config: dict[str, Any] = {}
+
+        @env.scenario("configure")
+        async def configure_scenario(config: dict[str, Any]):
+            received_config.update(config)
+            yield "Configuring..."
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:configure")
+        assert prompt is not None
+
+        # Simulate MCP sending JSON-encoded dict as string
+        await prompt.render({"config": '{"timeout": 30, "retries": 3}'})
+
+        assert received_config == {"timeout": 30, "retries": 3}
+
+    @pytest.mark.asyncio
+    async def test_int_argument_deserialization(self) -> None:
+        """Integer arguments are JSON-deserialized from strings."""
+        env = Environment("test-env")
+        received_count = 0
+
+        @env.scenario("count")
+        async def count_scenario(count: int):
+            nonlocal received_count
+            received_count = count
+            yield f"Counting to {count}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:count")
+        assert prompt is not None
+
+        # Simulate MCP sending JSON-encoded int as string
+        await prompt.render({"count": "42"})
+
+        assert received_count == 42
+        assert isinstance(received_count, int)
+
+    @pytest.mark.asyncio
+    async def test_float_argument_deserialization(self) -> None:
+        """Float arguments are JSON-deserialized from strings."""
+        env = Environment("test-env")
+        received_value = 0.0
+
+        @env.scenario("precision")
+        async def precision_scenario(value: float):
+            nonlocal received_value
+            received_value = value
+            yield f"Value is {value}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:precision")
+        assert prompt is not None
+
+        # Simulate MCP sending JSON-encoded float as string
+        await prompt.render({"value": "3.14159"})
+
+        assert received_value == 3.14159
+        assert isinstance(received_value, float)
+
+    @pytest.mark.asyncio
+    async def test_bool_argument_deserialization(self) -> None:
+        """Boolean arguments are JSON-deserialized from strings."""
+        env = Environment("test-env")
+        received_flag = False
+
+        @env.scenario("toggle")
+        async def toggle_scenario(enabled: bool):
+            nonlocal received_flag
+            received_flag = enabled
+            yield f"Enabled: {enabled}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:toggle")
+        assert prompt is not None
+
+        # Simulate MCP sending JSON-encoded bool as string
+        await prompt.render({"enabled": "true"})
+
+        assert received_flag is True
+        assert isinstance(received_flag, bool)
+
+    @pytest.mark.asyncio
+    async def test_string_argument_unchanged(self) -> None:
+        """String arguments are passed through unchanged."""
+        env = Environment("test-env")
+        received_name = ""
+
+        @env.scenario("greet")
+        async def greet_scenario(name: str):
+            nonlocal received_name
+            received_name = name
+            yield f"Hello, {name}!"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:greet")
+        assert prompt is not None
+
+        # String should pass through as-is (not double-encoded)
+        await prompt.render({"name": "Alice"})
+
+        assert received_name == "Alice"
+
+    @pytest.mark.asyncio
+    async def test_mixed_argument_types(self) -> None:
+        """Mixed argument types are handled correctly."""
+        env = Environment("test-env")
+        received_args: dict[str, Any] = {}
+
+        @env.scenario("mixed")
+        async def mixed_scenario(
+            name: str,
+            count: int,
+            items: list[str],
+            options: dict[str, bool],
+        ):
+            received_args["name"] = name
+            received_args["count"] = count
+            received_args["items"] = items
+            received_args["options"] = options
+            yield "Processing..."
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:mixed")
+        assert prompt is not None
+
+        await prompt.render(
+            {
+                "name": "test",
+                "count": "5",
+                "items": '["a", "b", "c"]',
+                "options": '{"verbose": true, "dry_run": false}',
+            }
+        )
+
+        assert received_args["name"] == "test"
+        assert received_args["count"] == 5
+        assert received_args["items"] == ["a", "b", "c"]
+        assert received_args["options"] == {"verbose": True, "dry_run": False}
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_falls_back_to_string(self) -> None:
+        """Invalid JSON for non-string type falls back to string value."""
+        env = Environment("test-env")
+        received_items: list[str] = []
+
+        @env.scenario("fallback")
+        async def fallback_scenario(items: list[str]):
+            # This will receive the raw string if JSON parsing fails
+            received_items.append(str(items))
+            yield "Processing..."
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:fallback")
+        assert prompt is not None
+
+        # Invalid JSON - should fall back to string
+        await prompt.render({"items": "not valid json ["})
+
+        # Falls back to raw string
+        assert received_items == ["not valid json ["]
+
+    @pytest.mark.asyncio
+    async def test_nested_complex_types(self) -> None:
+        """Nested complex types are deserialized correctly."""
+        env = Environment("test-env")
+        received_data: dict[str, Any] = {}
+
+        @env.scenario("nested")
+        async def nested_scenario(data: dict[str, Any]):
+            received_data.update(data)
+            yield "Processing nested data..."
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:nested")
+        assert prompt is not None
+
+        nested_json = (
+            '{"users": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}], '
+            '"metadata": {"version": 1}}'
+        )
+        await prompt.render({"data": nested_json})
+
+        assert received_data == {
+            "users": [
+                {"name": "Alice", "age": 30},
+                {"name": "Bob", "age": 25},
+            ],
+            "metadata": {"version": 1},
+        }
+
+    @pytest.mark.asyncio
+    async def test_optional_list_with_value(self) -> None:
+        """Optional[list[str]] receives list when provided."""
+        env = Environment("test-env")
+        received_items: list[str] | None = None
+
+        @env.scenario("optional_list")
+        async def optional_list_scenario(items: list[str] | None = None):
+            nonlocal received_items
+            received_items = items
+            yield f"Got {items}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:optional_list")
+        assert prompt is not None
+
+        await prompt.render({"items": '["x", "y", "z"]'})
+
+        assert received_items == ["x", "y", "z"]
+
+    @pytest.mark.asyncio
+    async def test_optional_list_with_null(self) -> None:
+        """Optional[list[str]] receives None when 'null' is passed."""
+        env = Environment("test-env")
+        received_items: list[str] | None = ["initial"]
+
+        @env.scenario("optional_list_null")
+        async def optional_list_null_scenario(items: list[str] | None = None):
+            nonlocal received_items
+            received_items = items
+            yield f"Got {items}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:optional_list_null")
+        assert prompt is not None
+
+        await prompt.render({"items": "null"})
+
+        assert received_items is None
+
+    @pytest.mark.asyncio
+    async def test_optional_str_with_value(self) -> None:
+        """Optional[str] receives string value correctly."""
+        env = Environment("test-env")
+        received_name: str | None = None
+
+        @env.scenario("optional_str")
+        async def optional_str_scenario(name: str | None = None):
+            nonlocal received_name
+            received_name = name
+            yield f"Got {name}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:optional_str")
+        assert prompt is not None
+
+        await prompt.render({"name": "Alice"})
+
+        assert received_name == "Alice"
+
+    @pytest.mark.asyncio
+    async def test_optional_str_with_null(self) -> None:
+        """Optional[str] receives None when 'null' is passed."""
+        env = Environment("test-env")
+        received_name: str | None = "initial"
+
+        @env.scenario("optional_str_null")
+        async def optional_str_null_scenario(name: str | None = None):
+            nonlocal received_name
+            received_name = name
+            yield f"Got {name}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:optional_str_null")
+        assert prompt is not None
+
+        await prompt.render({"name": "null"})
+
+        assert received_name is None
+
+    @pytest.mark.asyncio
+    async def test_pydantic_model_deserialization(self) -> None:
+        """Pydantic models are properly deserialized from JSON."""
+        env = Environment("test-env")
+        received_config: _UserConfig | None = None
+
+        @env.scenario("pydantic_model")
+        async def pydantic_model_scenario(config: _UserConfig):
+            nonlocal received_config
+            received_config = config
+            yield f"Got config for {config.name}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:pydantic_model")
+        assert prompt is not None
+
+        await prompt.render({"config": '{"name": "Alice", "age": 30}'})
+
+        assert received_config is not None
+        assert isinstance(received_config, _UserConfig)
+        assert received_config.name == "Alice"
+        assert received_config.age == 30
+        assert received_config.active is True  # default value
+
+    @pytest.mark.asyncio
+    async def test_enum_deserialization(self) -> None:
+        """Enum values are properly deserialized from JSON strings."""
+        env = Environment("test-env")
+        received_status: _Status | None = None
+
+        @env.scenario("enum_status")
+        async def enum_scenario(status: _Status):
+            nonlocal received_status
+            received_status = status
+            yield f"Status is {status.value}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:enum_status")
+        assert prompt is not None
+
+        await prompt.render({"status": '"active"'})
+
+        assert received_status is not None
+        assert isinstance(received_status, _Status)
+        assert received_status == _Status.ACTIVE
+
+    @pytest.mark.asyncio
+    async def test_datetime_deserialization(self) -> None:
+        """Datetime values are properly deserialized from ISO strings."""
+        env = Environment("test-env")
+        received_dt: datetime | None = None
+
+        @env.scenario("datetime_scenario")
+        async def datetime_scenario(created_at: datetime):
+            nonlocal received_dt
+            received_dt = created_at
+            yield f"Created at {created_at}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:datetime_scenario")
+        assert prompt is not None
+
+        await prompt.render({"created_at": '"2024-06-15T10:30:00"'})
+
+        assert received_dt is not None
+        assert isinstance(received_dt, datetime)
+        assert received_dt.year == 2024
+        assert received_dt.month == 6
+        assert received_dt.day == 15
+        assert received_dt.hour == 10
+        assert received_dt.minute == 30
+
+    @pytest.mark.asyncio
+    async def test_nested_pydantic_model(self) -> None:
+        """Nested Pydantic models are properly deserialized."""
+        env = Environment("test-env")
+        received_person: _Person | None = None
+
+        @env.scenario("nested_pydantic")
+        async def nested_pydantic_scenario(person: _Person):
+            nonlocal received_person
+            received_person = person
+            yield f"Person {person.name} from {person.address.city}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:nested_pydantic")
+        assert prompt is not None
+
+        json_data = '{"name": "Bob", "address": {"street": "123 Main St", "city": "NYC"}}'
+        await prompt.render({"person": json_data})
+
+        assert received_person is not None
+        assert isinstance(received_person, _Person)
+        assert received_person.name == "Bob"
+        assert isinstance(received_person.address, _Address)
+        assert received_person.address.city == "NYC"
+
+    @pytest.mark.asyncio
+    async def test_list_of_pydantic_models(self) -> None:
+        """List of Pydantic models are properly deserialized."""
+        env = Environment("test-env")
+        received_items: list[_Item] = []
+
+        @env.scenario("list_pydantic")
+        async def list_pydantic_scenario(items: list[_Item]):
+            nonlocal received_items
+            received_items = items
+            yield f"Got {len(items)} items"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:list_pydantic")
+        assert prompt is not None
+
+        json_data = '[{"id": 1, "name": "Apple"}, {"id": 2, "name": "Banana"}]'
+        await prompt.render({"items": json_data})
+
+        assert len(received_items) == 2
+        assert all(isinstance(item, _Item) for item in received_items)
+        assert received_items[0].name == "Apple"
+        assert received_items[1].name == "Banana"
