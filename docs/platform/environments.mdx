@@ -1,0 +1,161 @@
+---
+title: "Environments"
+description: "Deploy, manage, and monitor agent environments on the HUD platform."
+icon: "cube"
+---
+
+The Environments page at [hud.ai/environments](https://hud.ai/environments) is where you deploy, configure, and monitor your agent environments. Connect a GitHub repo or push via CLI, configure environment variables, and see live build status.
+
+## Overview
+
+Navigate to **Environments** to see two main tabs:
+
+- **Explore** — Browse public environments from the community
+- **My Environments** — Environments you've created or deployed
+
+The header shows real-time stats: environments run in the last 24 hours and currently active instances.
+
+<Frame>
+  <img src="/src/images/platform-environments.png" alt="Environments page showing deployed environments" />
+</Frame>
+
+## Creating an Environment
+
+Click **New Environment** to create one. You have three options:
+
+### Import from GitHub
+
+Connect a GitHub repository containing your environment code:
+
+1. Enter a GitHub URL directly, or
+2. Connect your GitHub account to browse repositories
+3. Select your repo
+4. Choose the branch to track
+5. Click **Import**
+
+HUD automatically builds your environment when you push to the connected branch.
+
+### Create from Template
+
+Start from a pre-built template:
+
+- **Blank** — Minimal starter environment
+- **Browser** — Browser automation with Playwright
+- **Deep Research** — Web research and analysis tools
+
+### Push via CLI
+
+Develop locally and push directly:
+
+```bash
+hud init          # Scaffold a new environment
+hud dev           # Test locally with hot reload
+hud push          # Deploy to platform
+```
+
+## Environment Details
+
+Click on an environment to see its detail page with several tabs:
+
+### Overview Tab
+
+The main landing page shows:
+
+- **Source** — GitHub repo link or "Pushed via CLI"
+- **Visibility** — Public or private
+- **Tools** — Available tools with their schemas
+- **Code Snippet** — Copy-paste code to use this environment
+
+If environment variables are missing, you'll see a warning banner linking to Settings.
+
+### Scenarios Tab
+
+Lists all scenarios defined with `@env.scenario()`:
+
+- **Name** — The scenario identifier
+- **Description** — What the scenario tests
+- **Arguments** — Required parameters
+
+Click a scenario to see its full definition and create tasks from it.
+
+<Frame>
+  <img src="/src/images/platform-env-scenarios.png" alt="Scenarios tab showing available scenarios" />
+</Frame>
+
+### Builds Tab
+
+Shows build history and status (for GitHub-connected environments):
+
+- **Status** — Building, Success, or Failed
+- **Duration** — How long the build took
+- **Commit** — Git commit that triggered the build
+- **Logs** — Click to view full build output
+
+Failed builds show error details to help debug issues.
+
+<Note>
+Builds tab is only available for environments connected to GitHub. Environments pushed via CLI don't show builds.
+</Note>
+
+### Settings Tab
+
+Configure your environment:
+
+- **Display Name** — How it appears in the UI
+- **Build Settings** — Branch and entry folder
+- **Environment Variables** — Secrets and configuration (see below)
+
+## Environment Variables
+
+Many environments need API keys or configuration. Add them in Settings:
+
+1. Go to your environment's **Settings** tab
+2. Find the **Environment Variables** section
+3. Add key-value pairs for each variable
+4. Click **Save**
+
+Variables are encrypted at rest and injected at runtime. They're available in your environment code as regular environment variables.
+
+<Warning>
+Never commit secrets to your repository. Always use environment variables for API keys and credentials.
+</Warning>
+
+### Lock File Variables
+
+If your environment has a `hud.lock` file defining required variables, Settings will show which ones are missing. You'll see warnings until all required variables are configured.
+
+## Using Environments
+
+Once deployed, use your environment in evaluations:
+
+```python
+import hud
+
+# Create a task from a deployed environment
+task = hud.Task(
+    scenario="my-env/checkout",
+    args={"product_name": "Laptop"}
+)
+
+async with hud.eval(task) as ctx:
+    # Your agent code here
+    await ctx.submit(response)
+```
+
+Or run from the CLI:
+
+```bash
+hud eval my-env/checkout --model gpt-4o --group-size 10
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+<Card title="Build Environments" icon="hammer" href="/quick-links/environments">
+  Learn the environment SDK
+</Card>
+
+<Card title="Deploy Guide" icon="rocket" href="/quick-links/deploy">
+  Push your environment to production
+</Card>
+</CardGroup>
