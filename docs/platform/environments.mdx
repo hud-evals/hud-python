@@ -25,15 +25,47 @@ Click **New Environment** to create one. You have three options:
 
 ### Import from GitHub
 
-Connect a GitHub repository containing your environment code:
+Connect a GitHub repository containing your environment code.
 
-1. Enter a GitHub URL directly, or
-2. Connect your GitHub account to browse repositories
-3. Select your repo
-4. Choose the branch to track
-5. Click **Import**
+#### Connect GitHub
 
-HUD automatically builds your environment when you push to the connected branch.
+First, connect your GitHub account by installing the GitHub App:
+
+1. Click **Connect GitHub** to install the HUD GitHub App
+2. You'll be redirected to GitHub to authorize the installation
+3. Choose repository access:
+   - **All repositories** — HUD can build from any repo in your account
+   - **Only select repositories** — Grant access to specific repos
+
+<Frame>
+  <img src="/src/images/remote-builds/connect-github.png" alt="Connect GitHub button" />
+</Frame>
+
+<Note>
+You can change repository access later in your GitHub settings.
+</Note>
+
+#### Build from Repository
+
+Once GitHub is connected:
+
+1. Select a repository from the list
+2. Choose a branch (defaults to `main`)
+3. Click **Import**
+
+<Frame>
+  <img src="/src/images/remote-builds/select-repo.png" alt="Repository selection" />
+</Frame>
+
+HUD will clone your repo, build the Docker image, and push it to the HUD registry. Watch build logs in real-time on the Builds tab.
+
+#### Automatic Rebuilds
+
+HUD automatically rebuilds your environment when you push changes to the connected branch. To manually trigger a rebuild, go to the Builds tab and click **Rebuild**.
+
+<Frame>
+  <img src="/src/images/remote-builds/rebuild.png" alt="Rebuild button in Builds tab" />
+</Frame>
 
 ### Create from Template
 
@@ -147,6 +179,17 @@ Or run from the CLI:
 ```bash
 hud eval my-env/checkout --model gpt-4o --group-size 10
 ```
+
+## Troubleshooting Builds
+
+| Issue | Solution |
+|-------|----------|
+| Repository not appearing | Check that you've granted HUD access in GitHub settings |
+| Build fails immediately | Verify your Dockerfile exists in the repository root or check the build logs |
+| Docker Hub rate limit error | Save your [Docker Hub credentials in settings](https://www.hud.ai/project/secrets) |
+| Build times out | Reduce image size or use multi-stage builds |
+
+For local debugging before pushing, see [`hud debug`](/reference/cli/debug).
 
 ## Next Steps
 
