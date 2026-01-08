@@ -290,8 +290,8 @@ class TestAgentToolCall:
 
         # Mock the eval context and agent
         with (
-            patch("hud.eval.manager.run_eval") as mock_run_eval,
-            patch("hud.agents.create_agent") as mock_create_agent,
+            patch("hud.tools.agent.run_eval") as mock_run_eval,
+            patch("hud.tools.agent.create_agent") as mock_create_agent,
         ):
             mock_ctx = AsyncMock()
             mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
@@ -325,8 +325,8 @@ class TestAgentToolCall:
         tool = AgentTool(task, model="claude")
 
         with (
-            patch("hud.eval.manager.run_eval") as mock_run_eval,
-            patch("hud.agents.create_agent") as mock_create_agent,
+            patch("hud.tools.agent.run_eval") as mock_run_eval,
+            patch("hud.tools.agent.create_agent") as mock_create_agent,
         ):
             mock_ctx = AsyncMock()
             mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
