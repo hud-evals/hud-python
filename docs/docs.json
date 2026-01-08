@@ -61,6 +61,12 @@
                 ]
               },
               {
+                "group": "Cookbook",
+                "pages": [
+                  "cookbook/ops-diagnostics"
+                ]
+              },
+              {
                 "group": "Advanced",
                 "pages": [
                   "advanced/testing-environments"
