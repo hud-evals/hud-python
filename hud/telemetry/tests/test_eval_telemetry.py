@@ -49,8 +49,8 @@ class TestEvalContextTelemetry:
             """Say hello."""
             return f"Hello, {name}!"
 
-        # Create task from environment
-        task = Task(env=env)
+        # Create task from environment (args={} = runnable, args=None = template)
+        task = Task(env=env, args={})
 
         with (
             patch("hud.settings.settings") as mock_settings,
@@ -110,7 +110,7 @@ class TestEvalContextTelemetry:
             """Always fails."""
             raise ValueError("Tool error")
 
-        task = Task(env=env)
+        task = Task(env=env, args={})
 
         with (
             patch("hud.settings.settings") as mock_settings,
@@ -162,7 +162,7 @@ class TestEvalContextTelemetry:
             """Multiply two numbers."""
             return a * b
 
-        task = Task(env=env)
+        task = Task(env=env, args={})
 
         with (
             patch("hud.settings.settings") as mock_settings,
@@ -195,7 +195,7 @@ class TestEvalContextTelemetry:
         async def simple_tool() -> str:
             return "done"
 
-        task = Task(env=env)
+        task = Task(env=env, args={})
 
         with (
             patch("hud.eval.context.flush") as mock_flush,
@@ -229,7 +229,7 @@ class TestEvalContextTelemetry:
         async def test_tool() -> str:
             return "ok"
 
-        task = Task(env=env)
+        task = Task(env=env, args={})
 
         with (
             patch("hud.settings.settings") as mock_settings,
@@ -272,7 +272,7 @@ class TestSpanFormat:
         async def echo(message: str) -> str:
             return message
 
-        task = Task(env=env)
+        task = Task(env=env, args={})
 
         with (
             patch("hud.settings.settings") as mock_settings,
@@ -329,7 +329,7 @@ class TestSpanFormat:
         async def noop() -> None:
             pass
 
-        task = Task(env=env)
+        task = Task(env=env, args={})
 
         with (
             patch("hud.settings.settings") as mock_settings,
