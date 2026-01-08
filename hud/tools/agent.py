@@ -5,8 +5,8 @@ from __future__ import annotations
 import inspect
 from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
-from fastmcp.tools.tool import ToolResult
-from mcp.types import TextContent, Tool
+from fastmcp.tools.tool import FunctionTool, ToolResult
+from mcp.types import TextContent
 
 from hud.tools.base import BaseTool
 
@@ -156,18 +156,26 @@ class AgentTool(BaseTool):
         return {"type": "object", "properties": properties, "required": required}
 
     @property
-    def mcp(self) -> Tool:
-        """Get as MCP Tool with filtered schema."""
+    def mcp(self) -> FunctionTool:
+        """Get as FastMCP FunctionTool with filtered schema."""
         if not hasattr(self, "_mcp_tool"):
-            self._mcp_tool = Tool(
+            # Directly instantiate FunctionTool with our callable and schema
+            # This bypasses from_function's signature parsing
+            self._mcp_tool = FunctionTool(
                 name=self.name,
-                description=self.description,
-                inputSchema=self._param_schema,
+                description=self.description or "",
+                parameters=self._param_schema,
+                fn=self._execute_with_args,
             )
         return self._mcp_tool
 
+    async def _execute_with_args(self, **kwargs: Any) -> ToolResult:
+        """Internal executor that FastMCP calls with parsed arguments."""
+        return await self(**kwargs)
+
     async def __call__(self, **kwargs: Any) -> ToolResult:
         """Execute the task with a fresh agent."""
+        from hud.eval.context import get_current_trace_id
         from hud.eval.manager import run_eval
 
         # Filter to visible params only
@@ -177,7 +185,10 @@ class AgentTool(BaseTool):
         base_args = self._task.args or {}
         task = self._task.model_copy(update={"args": {**base_args, **filtered}})
 
-        async with run_eval(task, trace=self._trace) as ctx:
+        # Use parent trace if available (for hierarchical agents)
+        parent_trace_id = get_current_trace_id()
+
+        async with run_eval(task, trace=self._trace, trace_id=parent_trace_id, quiet=True) as ctx:
             if self._model:
                 from hud.agents import create_agent
 

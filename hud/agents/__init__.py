@@ -58,10 +58,13 @@ def create_agent(model: str, **kwargs: Any) -> MCPAgent:
 
     # Set up kwargs
     kwargs.setdefault("model", model_id)
-    kwargs.setdefault("validate_api_key", False)
 
-    # Use correct client key
-    client_key = "openai_client" if agent_cls == OpenAIChatAgent else "model_client"
-    kwargs.setdefault(client_key, client)
+    # Use correct client key based on agent type
+    if agent_cls == OpenAIChatAgent:
+        kwargs.setdefault("openai_client", client)
+    else:
+        # Claude and other agents use model_client and validate_api_key
+        kwargs.setdefault("model_client", client)
+        kwargs.setdefault("validate_api_key", False)
 
     return agent_cls.create(**kwargs)
