@@ -74,6 +74,14 @@ async with hud.eval(env(), name="coding-task") as ctx:
 
 ### Hub Mode (Cloud Execution)
 
+<Note>
+  **Prerequisites**: You must create the `codex_environment_sandbox` environment
+  in [hud.ai](https://hud.ai) first before using hub mode. Go to
+  [hud.ai](https://hud.ai) → **New** → **Environment** → Import from
+  [hud-evals/codex_environment_sandbox](https://github.com/hud-evals/codex_environment_sandbox).
+  Once deployed, your environment will be accessible via `connect_hub()`.
+</Note>
+
 Connect to HUD Hub for full cloud execution and telemetry:
 
 ```python
@@ -84,7 +92,7 @@ from openai import AsyncOpenAI
 
 # Connect to HUD Hub environment
 env = hud.Environment()
-env.connect_hub("codex_sandbox_environment")
+env.connect_hub("codex_environment_sandbox")
 
 # Use HUD Gateway for inference (full telemetry)
 model_client = AsyncOpenAI(
@@ -242,8 +250,10 @@ async def main():
         max_output_length: int | None = None,
     ) -> dict:
         """Execute shell commands in a bash session."""
+        import shlex
         # Change to working directory before executing
-        prefixed_commands = [f"cd {base_path} && {cmd}" for cmd in commands]
+        safe_path = shlex.quote(base_path)
+        prefixed_commands = [f"cd {safe_path} && {cmd}" for cmd in commands]
         result = await shell_tool(
             commands=prefixed_commands,
             timeout_ms=timeout_ms,

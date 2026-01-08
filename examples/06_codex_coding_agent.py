@@ -32,6 +32,7 @@ Requirements:
 import argparse
 import asyncio
 import os
+import shlex
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
@@ -50,7 +51,7 @@ from hud.tools.shell import ShellTool
 # =============================================================================
 
 # Default hub environment name
-DEFAULT_HUB = "codex_sandbox_environment"
+DEFAULT_HUB = "codex_environment_sandbox"
 
 # Codex-capable models that support native shell/apply_patch tools
 CODEX_MODELS = {
@@ -124,7 +125,9 @@ async def run_coding_task_local(
             max_output_length: Optional max output length hint
         """
         # Change to working directory before executing
-        prefixed_commands = [f"cd {base_path} && {cmd}" for cmd in commands]
+        # Use shlex.quote to safely handle paths with spaces or special characters
+        safe_path = shlex.quote(base_path)
+        prefixed_commands = [f"cd {safe_path} && {cmd}" for cmd in commands]
         result = await shell_tool(
             commands=prefixed_commands,
             timeout_ms=timeout_ms,
@@ -207,16 +210,19 @@ async def run_coding_task_hub(
     verbose: bool = False,
 ) -> None:
     """
-    Run a coding task against the codex-sandbox environment via HUD Hub.
+    Run a coding task against the codex_environment_sandbox via HUD Hub.
 
     Uses connect_hub() to route through HUD's infrastructure, enabling
     full telemetry (both inference and environment steps visible in trace).
+
+    Note: You must create the codex_environment_sandbox environment in hud.ai
+    first before using this function.
 
     Args:
         task: Description of the coding task
         model: OpenAI model to use (default: gpt-5.1)
         max_steps: Maximum agent steps (default: 20)
-        hub_name: Hub environment name (default: codex-sandbox)
+        hub_name: Hub environment name (default: codex_environment_sandbox)
         verbose: Enable verbose output
     """
     # Require HUD_API_KEY for hub mode
