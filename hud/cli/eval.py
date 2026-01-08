@@ -338,47 +338,27 @@ class EvalConfig(BaseModel):
 
         # Configure gateway mode - route LLM API calls through HUD gateway
         if self.gateway:
-            hud_api_key = settings.api_key
-            if not hud_api_key:
+            if not settings.api_key:
                 raise typer.Exit(1)  # Already validated in validate_api_keys()
 
-            if self.agent_type == AgentType.CLAUDE:
-                from anthropic import AsyncAnthropic
+            from hud.agents.gateway import build_gateway_client
 
-                kwargs["model_client"] = AsyncAnthropic(
-                    api_key=hud_api_key,
-                    base_url=settings.hud_gateway_url,
-                )
-                hud_console.info("🌐 Using HUD Gateway for Claude API")
-            elif self.agent_type in (AgentType.OPENAI, AgentType.OPERATOR):
-                from openai import AsyncOpenAI
+            # Map AgentType to provider
+            agent_to_provider = {
+                AgentType.CLAUDE: "anthropic",
+                AgentType.OPENAI: "openai",
+                AgentType.OPERATOR: "openai",
+                AgentType.GEMINI: "gemini",
+                AgentType.GEMINI_CUA: "gemini",
+                AgentType.OPENAI_COMPATIBLE: "openai",
+            }
+            provider = agent_to_provider.get(self.agent_type, "openai")
+            client = build_gateway_client(provider)
 
-                kwargs["model_client"] = AsyncOpenAI(
-                    api_key=hud_api_key,
-                    base_url=settings.hud_gateway_url,
-                )
-                hud_console.info("🌐 Using HUD Gateway for OpenAI API")
-            elif self.agent_type == AgentType.OPENAI_COMPATIBLE:
-                from openai import AsyncOpenAI
-
-                kwargs["openai_client"] = AsyncOpenAI(
-                    api_key=hud_api_key,
-                    base_url=settings.hud_gateway_url,
-                )
-                hud_console.info("🌐 Using HUD Gateway for OpenAI-compatible API")
-            elif self.agent_type in (AgentType.GEMINI, AgentType.GEMINI_CUA):
-                from google import genai
-                from google.genai.types import HttpOptions
-
-                kwargs["model_client"] = genai.Client(
-                    api_key="PLACEHOLDER",
-                    http_options=HttpOptions(
-                        api_version="v1beta",
-                        base_url=settings.hud_gateway_url,
-                        headers={"Authorization": f"Bearer {hud_api_key}"},
-                    ),
-                )
-                hud_console.info("🌐 Using HUD Gateway for Gemini API")
+            # OpenAI-compatible uses openai_client key
+            is_oai_compat = self.agent_type == AgentType.OPENAI_COMPATIBLE
+            kwargs["openai_client" if is_oai_compat else "model_client"] = client
+            hud_console.info(f"🌐 Using HUD Gateway for {provider} API")
 
         return kwargs
 

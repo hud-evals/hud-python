@@ -338,54 +338,6 @@ class Task(BaseModel):
             id=self.id,
             env=self.env,  # Share reference
             scenario=self.scenario,
-            args=self.args.copy() if self.args else {},
+            args=self.args.copy() if self.args else None,
             validation=self.validation.copy() if self.validation else None,
         )
-
-    async def run(
-        self,
-        rollout: Any,
-        *,
-        trace: bool = True,
-        max_steps: int = 10,
-    ) -> str:
-        """Run this task with a rollout/agent and return the answer.
-
-        This is a convenience method for quick task execution.
-        For full control over the evaluation context, use hud.eval(task) instead.
-
-        Args:
-            rollout: Rollout or MCPAgent to execute the task.
-                Must have a run(ctx) method that takes EvalContext.
-            trace: Whether to send trace data to backend (default True)
-            max_steps: Maximum agent steps (passed to rollout if supported)
-
-        Returns:
-            The agent's final answer as a string
-
-        Example:
-            task = investigate(issue_id="123")
-            result = await task.run(OpenAIChatAgent.create(model="gpt-4o"))
-
-            # Equivalent to:
-            async with hud.eval(task) as ctx:
-                result = await agent.run(ctx)
-        """
-        from hud.eval.manager import run_eval
-
-        async with run_eval(self, trace=trace) as ctx:
-            # Call rollout.run(ctx) - works for both MCPAgent and Rollout protocol
-            # MCPAgent.run accepts max_steps, but we check if supported
-            try:
-                result = await rollout.run(ctx, max_steps=max_steps)
-            except TypeError:
-                # Rollout doesn't accept max_steps
-                result = await rollout.run(ctx)
-
-            # Extract content from result
-            if hasattr(result, "content"):
-                return result.content if result.content else ""
-            elif isinstance(result, str):
-                return result
-            else:
-                return str(result) if result else ""
