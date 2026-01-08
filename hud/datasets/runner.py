@@ -22,7 +22,7 @@ logger = logging.getLogger("hud.datasets")
 
 async def run_dataset(
     tasks: str | TaskInput | Sequence[TaskInput],
-    agent_type: AgentType,
+    agent_type: str | AgentType,
     *,
     agent_params: dict[str, Any] | None = None,
     max_steps: int = 10,
@@ -40,7 +40,7 @@ async def run_dataset(
             - A source string (file path, API slug) - loaded via load_tasks()
             - A single TaskInput (Task, LegacyTask, or dict)
             - A list of TaskInput objects
-        agent_type: AgentType enum specifying the agent to use.
+        agent_type: Agent type (e.g., "claude", "openai", AgentType.CLAUDE).
         agent_params: Parameters to pass to agent.create().
         max_steps: Maximum steps per task.
         max_concurrent: Maximum concurrent tasks (for parallel execution).
@@ -69,6 +69,10 @@ async def run_dataset(
     """
     from hud.datasets.loader import load_tasks
     from hud.eval.task import Task
+
+    # Normalize agent_type to AgentType enum
+    if isinstance(agent_type, str):
+        agent_type = AgentType(agent_type)
 
     # Normalize tasks to list[Task]
     task_list: list[Task]

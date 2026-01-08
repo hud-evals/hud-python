@@ -338,6 +338,6 @@ class Task(BaseModel):
             id=self.id,
             env=self.env,  # Share reference
             scenario=self.scenario,
-            args=self.args.copy() if self.args else None,
+            args=self.args.copy() if self.args is not None else None,
             validation=self.validation.copy() if self.validation else None,
         )
