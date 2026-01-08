@@ -21,42 +21,7 @@ def create_agent(
     agent_type: str | AgentType,
     **kwargs: Any,
 ) -> MCPAgent:
-    """Create an agent from a type string or AgentType enum.
-
-    This is the recommended factory for creating agents programmatically.
-    The agent type maps to a specific agent class via AgentType.cls.
-
-    Args:
-        agent_type: Agent type ("claude", "openai", "gemini", etc.) or AgentType enum.
-        **kwargs: Parameters passed to the agent's create() method.
-            Common params: model, max_tokens, temperature, system_prompt.
-
-    Returns:
-        Configured MCPAgent instance ready to use with hud.eval().
-
-    Example:
-        ```python
-        from hud.agents import create_agent
-
-        # Create Claude agent
-        agent = create_agent("claude", model="claude-sonnet-4-5")
-
-        # Create OpenAI agent
-        agent = create_agent("openai", model="gpt-4o")
-
-        # Use with hud.eval()
-        async with hud.eval(task) as ctx:
-            await agent.run(ctx)
-        ```
-
-    Supported agent types:
-        - "claude": ClaudeAgent (Anthropic Claude)
-        - "openai": OpenAIAgent (OpenAI with responses API)
-        - "operator": OperatorAgent (OpenAI Computer Use)
-        - "gemini": GeminiAgent (Google Gemini)
-        - "gemini_cua": GeminiCUAAgent (Gemini Computer Use)
-        - "openai_compatible": OpenAIChatAgent (OpenAI-compatible endpoints)
-    """
+    """Create an agent from a type string or AgentType enum."""
     from hud.types import AgentType as AT
 
     # Normalize to AgentType enum
