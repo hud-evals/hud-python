@@ -38,10 +38,11 @@ class AgentTool(BaseTool):
         ```python
         @env.scenario()
         async def investigate(
-            issue_id: str,                    # Required - orchestrator sees
-            expected_cause: str | None = None # Eval only - hidden
+            issue_id: str,  # Required - orchestrator sees
+            expected_cause: str | None = None,  # Eval only - hidden
         ):
             yield {"task": f"Investigate {issue_id}"}
+
 
         seer = AgentTool(env("investigate"), model="ft:seer-v2")
         ```
@@ -77,10 +78,7 @@ class AgentTool(BaseTool):
             scenario_fn = task.env._scenarios.get(task.scenario)
             if scenario_fn:
                 sig = inspect.signature(scenario_fn)
-                visible = {
-                    name: p for name, p in sig.parameters.items()
-                    if not _is_eval_only(p)
-                }
+                visible = {name: p for name, p in sig.parameters.items() if not _is_eval_only(p)}
                 self._visible_params = set(visible.keys())
                 self._param_schema = self._build_schema(visible)
 
@@ -140,6 +138,7 @@ class AgentTool(BaseTool):
         async with run_eval(task, trace=self._trace) as ctx:
             if self._model:
                 from hud.agents import create_agent
+
                 agent = create_agent(self._model, **self._agent_params)
             else:
                 agent = self._agent_cls.create(**self._agent_params)  # type: ignore

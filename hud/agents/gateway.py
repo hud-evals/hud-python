@@ -40,4 +40,3 @@ def build_gateway_client(provider: str) -> Any:
     from openai import AsyncOpenAI
 
     return AsyncOpenAI(api_key=settings.api_key, base_url=settings.hud_gateway_url)
-

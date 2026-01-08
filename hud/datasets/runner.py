@@ -22,7 +22,7 @@ logger = logging.getLogger("hud.datasets")
 
 async def run_dataset(
     tasks: str | TaskInput | Sequence[TaskInput],
-    agent_type: str | AgentType,
+    agent_type: AgentType,
     *,
     agent_params: dict[str, Any] | None = None,
     max_steps: int = 10,
@@ -40,7 +40,7 @@ async def run_dataset(
             - A source string (file path, API slug) - loaded via load_tasks()
             - A single TaskInput (Task, LegacyTask, or dict)
             - A list of TaskInput objects
-        agent_type: Type of agent to create (e.g., "claude", "openai", AgentType.CLAUDE).
+        agent_type: AgentType enum specifying the agent to use.
         agent_params: Parameters to pass to agent.create().
         max_steps: Maximum steps per task.
         max_concurrent: Maximum concurrent tasks (for parallel execution).
@@ -93,10 +93,8 @@ async def run_dataset(
         max_concurrent=max_concurrent,
         quiet=quiet,
     ) as ctx:
-        # Create agent (handles AgentType, gateway models, etc.)
-        from hud.agents import create_agent
-
-        agent = create_agent(agent_type, **(agent_params or {}))
+        # Create agent using AgentType.cls.create()
+        agent = agent_type.cls.create(**(agent_params or {}))
         await agent.run(ctx, max_steps=max_steps)
         # Reward is computed by EvalContext.__aexit__ from evaluate tools
 
@@ -110,7 +108,7 @@ async def run_dataset(
 async def run_single_task(
     task: Task,
     *,
-    agent_type: str | AgentType,
+    agent_type: AgentType,
     agent_params: dict[str, Any] | None = None,
     max_steps: int = 10,
     job_id: str | None = None,
@@ -196,10 +194,8 @@ async def run_single_task(
         if ctx.system_prompt and "system_prompt" not in final_agent_params:
             final_agent_params["system_prompt"] = ctx.system_prompt
 
-        # Create agent (handles AgentType, gateway models, etc.)
-        from hud.agents import create_agent
-
-        agent = create_agent(agent_type, **final_agent_params)
+        # Create agent using AgentType.cls.create()
+        agent = agent_type.cls.create(**final_agent_params)
 
         # Store metadata if provided
         if metadata:

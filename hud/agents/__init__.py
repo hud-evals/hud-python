@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .base import MCPAgent
 from .openai import OpenAIAgent
 from .openai_chat import OpenAIChatAgent
 from .operator import OperatorAgent
-from .resolver import resolve_cls
-
-if TYPE_CHECKING:
-    from hud.types import AgentType
 
 __all__ = [
     "MCPAgent",
@@ -17,50 +13,55 @@ __all__ = [
     "OpenAIChatAgent",
     "OperatorAgent",
     "create_agent",
-    "resolve_cls",
 ]
 
 
-def create_agent(model: str | AgentType, **kwargs: Any) -> MCPAgent:
-    """Create an agent from a model string or AgentType.
+def create_agent(model: str, **kwargs: Any) -> MCPAgent:
+    """Create an agent for a gateway model.
+
+    This routes ALL requests through the HUD gateway. For direct API access
+    (using your own API keys), use the agent classes directly.
 
     Args:
-        model: AgentType ("claude"), or gateway model name ("gpt-4o").
-        **kwargs: Params passed to agent.create().
+        model: Model name (e.g., "gpt-4o", "claude-sonnet-4-5").
+        **kwargs: Additional params passed to agent.create().
+
+    Returns:
+        Configured MCPAgent instance with gateway routing.
 
     Example:
         ```python
-        agent = create_agent("claude", model="claude-sonnet-4-5")
-        agent = create_agent("gpt-4o")  # auto-configures gateway
+        # Gateway routing (recommended)
+        agent = create_agent("gpt-4o")
+        agent = create_agent("claude-sonnet-4-5", temperature=0.7)
+
+        # Direct API access (use agent classes)
+        from hud.agents.claude import ClaudeAgent
+
+        agent = ClaudeAgent.create(model="claude-sonnet-4-5")
         ```
     """
-    from hud.types import AgentType as AT
+    from hud.agents.gateway import build_gateway_client
+    from hud.agents.resolver import resolve_cls
 
-    # AgentType enum → just create
-    if isinstance(model, AT):
-        return model.cls.create(**kwargs)
-
-    # Resolve class and optional gateway info
+    # Resolve class and gateway info
     agent_cls, gateway_info = resolve_cls(model)
 
-    # If not a gateway model, just create
-    if gateway_info is None:
-        return agent_cls.create(**kwargs)
+    # Get model ID from gateway info or use input
+    model_id = model
+    if gateway_info:
+        model_id = gateway_info.get("model") or gateway_info.get("id") or model
 
-    # Build gateway params
-    model_id = gateway_info.get("model") or gateway_info.get("id") or model
+    # Build gateway client
+    provider = gateway_info.get("provider", "openai") if gateway_info else "openai"
+    client = build_gateway_client(provider)
+
+    # Set up kwargs
     kwargs.setdefault("model", model_id)
     kwargs.setdefault("validate_api_key", False)
 
-    # Build model_client based on provider
-    if "model_client" not in kwargs and "openai_client" not in kwargs:
-        from hud.agents.gateway import build_gateway_client
-
-        provider = gateway_info.get("provider", "openai_compatible")
-        client = build_gateway_client(provider)
-
-        # OpenAIChatAgent uses openai_client key, others use model_client
-        key = "openai_client" if agent_cls == OpenAIChatAgent else "model_client"
-        kwargs[key] = client
+    # Use correct client key
+    client_key = "openai_client" if agent_cls == OpenAIChatAgent else "model_client"
+    kwargs.setdefault(client_key, client)
 
     return agent_cls.create(**kwargs)
