@@ -89,9 +89,9 @@ class AgentTool(BaseTool):
         description: str | None = None,
         trace: bool = False,
     ) -> None:
-        if model is None and agent is None:
+        if not model and agent is None:
             raise ValueError("Must provide either 'model' or 'agent'")
-        if model is not None and agent is not None:
+        if model and agent is not None:
             raise ValueError("Cannot provide both 'model' and 'agent'")
 
         self._task = task
@@ -187,16 +187,19 @@ class AgentTool(BaseTool):
 
         # Use parent trace if available (for hierarchical agents)
         parent_trace_id = get_current_trace_id()
-        
-        # If nested (has parent), skip subagent's enter/exit registration but keep tool instrumentation
+
+        # If nested (has parent), skip subagent's enter/exit registration
         # Tool calls are still recorded via the shared trace_id's context
         is_nested = parent_trace_id is not None
 
+        # Trace if explicitly requested AND not nested (nested uses parent trace)
+        should_trace = self._trace and not is_nested
+
         async with run_eval(
-            task, 
-            trace=not is_nested,  # Skip enter/exit for nested agents
-            trace_id=parent_trace_id, 
-            quiet=True
+            task,
+            trace=should_trace,
+            trace_id=parent_trace_id,
+            quiet=True,
         ) as ctx:
             if self._model:
                 from hud.agents import create_agent

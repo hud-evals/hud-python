@@ -237,8 +237,8 @@ class TestAgentToolMCP:
     """Tests for MCP tool integration."""
 
     def test_mcp_property_returns_tool(self) -> None:
-        """The mcp property returns an MCP Tool."""
-        from mcp.types import Tool
+        """The mcp property returns a FastMCP FunctionTool."""
+        from fastmcp.tools import FunctionTool
 
         env = Environment("test")
 
@@ -250,7 +250,7 @@ class TestAgentToolMCP:
         tool = AgentTool(task, model="claude")
 
         mcp_tool = tool.mcp
-        assert isinstance(mcp_tool, Tool)
+        assert isinstance(mcp_tool, FunctionTool)
 
     def test_mcp_has_filtered_parameters(self) -> None:
         """MCP tool has filtered parameter schema."""
@@ -267,7 +267,7 @@ class TestAgentToolMCP:
         tool = AgentTool(task, model="claude")
 
         mcp_tool = tool.mcp
-        params = mcp_tool.inputSchema
+        params = mcp_tool.parameters  # FunctionTool uses 'parameters'
 
         assert "data" in params["properties"]
         assert "expected_result" not in params["properties"]
