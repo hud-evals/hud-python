@@ -362,6 +362,22 @@ class Environment(
             await asyncio.gather(*[c.disconnect() for c in self._connections.values()])
         self._router.clear()
 
+    async def run_async(
+        self,
+        transport: Literal["stdio", "http", "sse"] | None = None,
+        show_banner: bool = True,
+        **transport_kwargs: Any,
+    ) -> None:
+        """Run the MCP server, auto-connecting all connectors first.
+
+        This ensures that tools from external MCP servers (via connect_mcp_config)
+        are discovered and available when the server starts.
+        """
+        async with self:  # Connect all connectors via __aenter__
+            await super().run_async(
+                transport=transport, show_banner=show_banner, **transport_kwargs
+            )
+
     async def _build_routing(self) -> None:
         """Build tool routing from local tools and connection caches."""
         # Use get_tools() not list_tools() - it includes mounted servers without
