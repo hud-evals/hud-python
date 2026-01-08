@@ -138,11 +138,14 @@ class AgentTool(BaseTool):
                         try:
                             annotation = eval(annotation)  # noqa: S307
                         except Exception:
-                            properties[name] = {"type": "string"}
-                            continue
+                            # Fall back to string type but don't skip required handling
+                            annotation = None
 
-                    adapter = TypeAdapter(annotation)
-                    properties[name] = adapter.json_schema()
+                    if annotation is not None:
+                        adapter = TypeAdapter(annotation)
+                        properties[name] = adapter.json_schema()
+                    else:
+                        properties[name] = {"type": "string"}
                 except Exception:
                     properties[name] = {"type": "string"}
             else:

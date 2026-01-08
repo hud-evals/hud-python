@@ -393,6 +393,21 @@ class Environment(
         self._populate_mock_schemas()
 
     # =========================================================================
+    # MCP Protocol Overrides - Include connector tools in MCP responses
+    # =========================================================================
+
+    def _mcp_list_tools(self) -> list[mcp_types.Tool]:
+        """Override FastMCP to return all tools including those from connectors."""
+        return self._router.tools
+
+    async def _mcp_call_tool(
+        self, key: str, arguments: dict[str, Any]
+    ) -> list[Any] | tuple[list[Any], dict[str, Any]]:
+        """Override FastMCP to route tool calls through our router."""
+        result = await self._execute_tool(key, arguments)
+        return result.content or []
+
+    # =========================================================================
     # Tool Operations
     # =========================================================================
 
