@@ -1,4 +1,4 @@
-"""Scenario decorator for Environment - defines setup/evaluate phases."""
+"""Scenario decorator and classes for Environment setup/evaluate phases."""
 
 from __future__ import annotations
 
@@ -8,6 +8,11 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any, get_type_hints
 
+from fastmcp.tools.tool import ToolResult
+from mcp.types import TextContent
+
+from hud.tools.base import BaseTool
+
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
@@ -15,35 +20,211 @@ if TYPE_CHECKING:
     from fastmcp.resources import ResourceManager
     from fastmcp.tools import ToolManager
 
-__all__ = ["ScenarioMixin"]
+    from hud.agents.base import Rollout
+    from hud.environment import Environment
+    from hud.types import AgentType
+
+__all__ = ["Scenario", "ScenarioMixin", "ScenarioTool"]
 
 logger = logging.getLogger(__name__)
 
 
-class ScenarioMixin:
-    """Mixin providing @env.scenario decorator for setup/evaluate phases.
-
-    Scenarios are async generators that yield twice:
-    - First yield: prompt string (setup phase)
-    - Second yield: reward float (evaluate phase)
-
-    The scenario can receive the agent's answer via yield:
-        answer = yield "Do the task"
-        yield 1.0 if "success" in answer else 0.0
-
-    The answer is passed via the hud_submit tool or ctx.submit().
-
-    The decorator registers both an MCP prompt and resource with the same
-    identifier ({env_name}:{scenario_name}), linked by session state.
+class Scenario:
+    """Scenario template created by @env.scenario() - can create Tasks or Tools.
 
     Example:
         @env.scenario()
-        async def search_cats(url: str):
-            await env.call_tool("navigate", url=url)
-            answer = yield "Find all cat images on the page"
-            result = await env.call_tool("count_cats")
-            yield float(result > 0 or "found" in answer.lower())
+        async def investigate(issue_id: str):
+            yield f"Investigate {issue_id}"
+            yield 1.0
+
+        task = investigate(issue_id="123")           # Create Task
+        tool = investigate.as_tool(my_agent)         # Create Tool
     """
+
+    def __init__(
+        self,
+        fn: Callable[..., AsyncGenerator[Any, Any]],
+        env: Environment,
+        name: str,
+        description: str | None = None,
+    ) -> None:
+        self.fn = fn
+        self.env = env
+        self.name = name
+        self.description = description or fn.__doc__ or f"Scenario: {name}"
+        self._signature = inspect.signature(fn)
+
+    @property
+    def input_schema(self) -> dict[str, Any]:
+        """JSON schema for the scenario's parameters."""
+        properties: dict[str, Any] = {}
+        required: list[str] = []
+
+        for pname, param in self._signature.parameters.items():
+            prop: dict[str, Any] = {}
+            if param.annotation is not inspect.Parameter.empty:
+                try:
+                    from pydantic import TypeAdapter
+                    param_schema = TypeAdapter(param.annotation).json_schema()
+                    if "type" in param_schema:
+                        prop["type"] = param_schema["type"]
+                    elif "$ref" in param_schema or "anyOf" in param_schema:
+                        prop = param_schema  # Complex type - store full schema
+                    else:
+                        prop["type"] = "string"
+                except Exception:
+                    prop["type"] = "string"
+            else:
+                prop["type"] = "string"
+
+            properties[pname] = prop
+            if param.default is inspect.Parameter.empty:
+                required.append(pname)
+
+        return {"type": "object", "properties": properties, "required": required}
+
+    def __call__(self, **kwargs: Any) -> Any:
+        """Create a Task from this scenario."""
+        from hud.eval.task import Task
+        return Task(env=self.env, scenario=self.name, args=kwargs)
+
+    def as_tool(
+        self,
+        rollout: Rollout,
+        *,
+        name: str | None = None,
+        trace: bool = False,
+    ) -> ScenarioTool:
+        """Convert to a tool backed by an agent/rollout."""
+        return ScenarioTool(scenario=self, rollout=rollout, name=name, trace=trace)
+
+    def as_agent_tool(
+        self,
+        agent_type: str | AgentType,
+        *,
+        agent_params: dict[str, Any] | None = None,
+        name: str | None = None,
+        trace: bool = False,
+    ) -> ScenarioTool:
+        """Convert to a tool that spawns a fresh agent for each call.
+
+        This is a convenience over as_tool() when you want the agent created
+        automatically from a model type rather than passing an existing rollout.
+
+        Args:
+            agent_type: Agent type string ("claude", "openai", etc.) or AgentType enum.
+            agent_params: Parameters passed to agent.create() (model, max_tokens, etc.).
+            name: Override tool name (defaults to scenario name).
+            trace: Whether to trace the sub-agent's execution.
+
+        Returns:
+            ScenarioTool that creates a fresh agent per invocation.
+
+        Example:
+            tool = investigate.as_agent_tool(
+                "claude",
+                agent_params={"model": "claude-sonnet-4-5"},
+            )
+        """
+        from hud.agents import create_agent
+
+        # Create a rollout wrapper that creates a fresh agent per call
+        class AgentRollout:
+            def __init__(
+                self,
+                agent_type: str | AgentType,
+                agent_params: dict[str, Any] | None,
+            ) -> None:
+                self._agent_type = agent_type
+                self._agent_params = agent_params or {}
+
+            async def run(self, ctx: Any, **kwargs: Any) -> Any:
+                agent = create_agent(self._agent_type, **self._agent_params)
+                return await agent.run(ctx, **kwargs)
+
+        rollout = AgentRollout(agent_type, agent_params)
+        return ScenarioTool(scenario=self, rollout=rollout, name=name, trace=trace)
+
+    @classmethod
+    def from_remote(
+        cls,
+        env: Environment,
+        scenario_name: str,
+        *,
+        description: str | None = None,
+    ) -> Scenario:
+        """Create a Scenario handle for a remote scenario (via MCP).
+
+        Use this when the scenario is defined on a remote environment (hub)
+        rather than locally. The scenario runs via MCP prompt/resource calls.
+
+        Args:
+            env: Environment connected to the hub where scenario is defined.
+            scenario_name: Name of the scenario (with or without env prefix).
+            description: Optional description override.
+
+        Returns:
+            Scenario object that can create Tasks or be converted to tools.
+
+        Example:
+            env = await Environment.connect_hub("http://hub:8000")
+            scenario = Scenario.from_remote(env, "checkout")
+            task = scenario(user="alice")  # Creates Task for remote execution
+        """
+        # Remote scenarios don't have a local function
+        # Create a placeholder that works with Task creation
+        async def _remote_placeholder(**kwargs: Any) -> AsyncGenerator[Any, Any]:
+            # This generator is never actually called for remote scenarios
+            # Task execution goes through MCP prompt/resource
+            raise RuntimeError(
+                f"Scenario '{scenario_name}' is remote - "
+                "use Task execution, not direct generator call"
+            )
+            yield  # Make it a generator
+
+        return cls(
+            fn=_remote_placeholder,
+            env=env,
+            name=scenario_name,
+            description=description or f"Remote scenario: {scenario_name}",
+        )
+
+
+class ScenarioTool(BaseTool):
+    """Tool wrapping a Scenario + Rollout for hierarchical agent patterns."""
+
+    def __init__(
+        self,
+        *,
+        scenario: Scenario,
+        rollout: Rollout,
+        name: str | None = None,
+        trace: bool = False,
+    ) -> None:
+        self._scenario = scenario
+        self._rollout = rollout
+        self._trace = trace
+        super().__init__(
+            name=name or scenario.name,
+            description=scenario.description,
+            meta={"input_schema": scenario.input_schema},
+        )
+
+    async def __call__(self, **kwargs: Any) -> ToolResult:
+        """Execute scenario with rollout and return answer."""
+        from hud.eval.manager import run_eval
+        from hud.eval.task import Task
+
+        task = Task(env=self._scenario.env, scenario=self._scenario.name, args=kwargs)
+        async with run_eval(task, trace=self._trace) as ctx:
+            result = await self._rollout.run(ctx)
+            content = result.content if hasattr(result, "content") and result.content else ""
+            return ToolResult(content=[TextContent(type="text", text=content)])
+
+
+class ScenarioMixin:
+    """Mixin providing @env.scenario decorator for setup/evaluate phases."""
 
     # These come from Environment/MCPServer
     name: str
@@ -52,7 +233,7 @@ class ScenarioMixin:
     _tool_manager: ToolManager
 
     # Scenario state
-    _scenarios: dict[str, Callable[..., AsyncGenerator[Any, Any]]]
+    _scenarios: dict[str, Scenario]  # scenario_name -> Scenario object
     _scenario_sessions: dict[str, AsyncGenerator[Any, Any]]  # session_id -> generator
     _scenario_latest: dict[str, str]  # scenario_name -> latest session_id
     _scenario_answers: dict[str, str]  # scenario_name -> submitted answer
@@ -148,8 +329,8 @@ class ScenarioMixin:
         # Check if scenario is registered locally
         if scenario_name in self._scenarios:
             # Local scenario - run setup via generator
-            scenario_fn = self._scenarios[scenario_name]
-            gen = scenario_fn(**args)
+            scenario_obj = self._scenarios[scenario_name]
+            gen = scenario_obj.fn(**args)
 
             # Run setup phase (code before first yield)
             prompt = await gen.__anext__()
@@ -298,13 +479,14 @@ class ScenarioMixin:
         self,
         name: str | None = None,
         description: str | None = None,
-    ) -> Callable[
-        [Callable[..., AsyncGenerator[Any, None]]],
-        Callable[..., AsyncGenerator[Any, None]],
-    ]:
+    ) -> Callable[[Callable[..., AsyncGenerator[Any, None]]], Scenario]:
         """Decorator to register a scenario with setup and evaluate phases.
 
-        Creates both a prompt and resource with identifier scenario:{name}.
+        Returns a Scenario object that can be:
+        - Called with args to create a Task: scenario(issue_id="123")
+        - Converted to a tool: scenario.as_tool(agent)
+
+        Creates both a prompt and resource with identifier {env_name}:{name}.
         The scenario function should yield twice:
         - First yield: the prompt string (returned from prompt)
         - Second yield: the reward float (returned from resource)
@@ -321,15 +503,14 @@ class ScenarioMixin:
                 result = await env.call_tool("count_cats")
                 yield float(result > 0)
 
-            # MCP client usage:
-            # 1. get_prompt("{env_name}:search_cats", {url: "..."}) -> prompt messages
-            # 2. agent runs...
-            # 3. read_resource("{env_name}:search_cats") -> {"reward": 0.95}
+            # Create Task for evaluation
+            task = search_cats(url="https://example.com")
+
+            # Create Tool for subagent orchestration
+            tool = search_cats.as_tool(my_agent)
         """
 
-        def decorator(
-            fn: Callable[..., AsyncGenerator[Any, None]],
-        ) -> Callable[..., AsyncGenerator[Any, None]]:
+        def decorator(fn: Callable[..., AsyncGenerator[Any, None]]) -> Scenario:
             scenario_name = name or fn.__name__
             # Sanitize env name for URI scheme (no underscores allowed)
             safe_env_name = self.name.replace("_", "-")
@@ -347,11 +528,14 @@ class ScenarioMixin:
                 )
                 source_code = None
 
-            # Store the generator function
-            self._scenarios[scenario_name] = fn
+            # Create Scenario object
+            scenario_obj = Scenario(
+                fn=fn, env=self, name=scenario_name, description=scenario_desc  # type: ignore[arg-type]
+            )
+            self._scenarios[scenario_name] = scenario_obj
 
             # Get function signature for prompt arguments with type info
-            sig = inspect.signature(fn)
+            sig = scenario_obj._signature
             prompt_args: list[dict[str, Any]] = []
             for p in sig.parameters.values():
                 is_required = p.default is inspect.Parameter.empty
@@ -390,7 +574,7 @@ class ScenarioMixin:
             # Register PROMPT - runs setup, returns prompt messages
             # We need a reference to self and the outer variables
             scenario_self = self
-            scenario_fn = fn
+            scenario_fn = scenario_obj.fn
             scenario_name_ref = scenario_name
 
             # Resolve parameter type hints for deserialization
@@ -537,6 +721,17 @@ class ScenarioMixin:
                 scenario_id,
             )
 
-            return fn
+            return scenario_obj
 
         return decorator
+
+    def get_scenario(self, name: str) -> Scenario | None:
+        """Get a Scenario object by name.
+
+        Args:
+            name: Name of the scenario
+
+        Returns:
+            Scenario object or None if not found
+        """
+        return self._scenarios.get(name)

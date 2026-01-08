@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_checkable
 
 import mcp.types as types
 from pydantic import BaseModel, ConfigDict
@@ -21,6 +21,49 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["BaseCreateParams", "MCPAgent", "Rollout"]
+
+
+# =============================================================================
+# Rollout Protocol
+# =============================================================================
+
+
+@runtime_checkable
+class Rollout(Protocol):
+    """Protocol for agent rollouts - any execution strategy.
+
+    A Rollout takes an EvalContext and runs an agent loop,
+    returning a result (typically a Trace).
+
+    MCPAgent inherits from Rollout, so any MCPAgent can be used
+    wherever a Rollout is expected.
+
+    Custom rollouts can implement this protocol for non-MCPAgent
+    execution strategies (e.g., LangGraph, custom loops).
+
+    Example:
+        class MyCustomRollout(Rollout):
+            async def run(self, ctx: EvalContext) -> Trace:
+                # Custom agent logic
+                return Trace(content="result", done=True)
+
+        # Use with scenario.as_tool()
+        tool = investigate.as_tool(MyCustomRollout())
+    """
+
+    async def run(self, ctx: Any, **kwargs: Any) -> Any:
+        """Run the agent loop on the given context.
+
+        Args:
+            ctx: EvalContext containing prompt and tools
+            **kwargs: Additional arguments (e.g., max_steps)
+
+        Returns:
+            Trace or result object with content
+        """
+        ...
+
 
 class BaseCreateParams(BaseModel):
     """Runtime parameters for agent creation."""
@@ -34,7 +77,7 @@ class BaseCreateParams(BaseModel):
     verbose: bool = False
 
 
-class MCPAgent(ABC):
+class MCPAgent(Rollout, ABC):
     """
     Base class for MCP-enabled agents.
 
