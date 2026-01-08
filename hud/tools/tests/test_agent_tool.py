@@ -280,7 +280,7 @@ class TestAgentToolCall:
     async def test_filters_kwargs_to_visible_only(self) -> None:
         """Call filters kwargs to visible params only."""
         # Import modules first so patches work
-        import hud.agents  # noqa: F401
+        import hud.agents
         import hud.eval.manager  # noqa: F401
 
         env = Environment("test")
@@ -319,7 +319,7 @@ class TestAgentToolCall:
     async def test_merges_template_args(self) -> None:
         """Call merges kwargs with template args."""
         # Import modules first so patches work
-        import hud.agents  # noqa: F401
+        import hud.agents
         import hud.eval.manager  # noqa: F401
 
         env = Environment("test")
