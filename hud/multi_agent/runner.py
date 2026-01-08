@@ -16,12 +16,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from hud.multi_agent.config import MultiAgentConfig, load_config
+from hud.multi_agent.config import AgentToolConfig, MultiAgentConfig, load_config
 from hud.multi_agent.logger import StepLogger
 from hud.multi_agent.sub_agent import SubAgentConfig, SubAgentResult, create_sub_agent
 
 if TYPE_CHECKING:
     from hud.eval.context import EvalContext
+    from hud.tools.agent import AgentTool
 
 logger = logging.getLogger(__name__)
 
@@ -335,7 +336,9 @@ class MultiAgentRunner:
         main_config = self.config.agents.get(self.config.main)
         model = main_config.model if main_config else "gpt-4o-mini"
 
-        # Register sub-agent tools with the context
+        if main_config and main_config.agent_tools:
+            await self._register_agent_tools(main_config.agent_tools, ctx)
+
         for agent_name, agent_config in self.config.agents.items():
             if agent_config.type != "specialist":
                 continue  # Skip orchestrator
@@ -563,6 +566,170 @@ class MultiAgentRunner:
             "reward": trace.reward,
             "error": trace.info.get("error") if trace.info else None,
         }
+
+    async def _register_agent_tools(
+        self,
+        agent_tools: list[AgentToolConfig],
+        ctx: EvalContext,
+    ) -> None:
+        """Register agent tools from config.
+
+        Args:
+            agent_tools: List of AgentToolConfig from main agent's agent_tools
+            ctx: Parent EvalContext
+        """
+        from fastmcp.tools import Tool as FastMCPTool
+        from fastmcp.tools.tool import ToolResult
+
+        for tool_config in agent_tools:
+            if tool_config.scenario:
+                agent_tool = self._create_agent_tool(tool_config)
+                ctx._tool_manager.add_tool(agent_tool.mcp)
+                logger.info(f"Registered AgentTool (isolated context): {tool_config.name}")
+            elif tool_config.agent:
+                agent_config = self.config.agents.get(tool_config.agent)
+                if not agent_config:
+                    logger.warning(f"Agent '{tool_config.agent}' not found for tool '{tool_config.name}'")
+                    continue
+
+                tool_desc = tool_config.description or agent_config.system_prompt[:100] if agent_config.system_prompt else f"Call sub-agent: {tool_config.name}"
+                return_schema = agent_config.get_return_schema()
+                sub_config = SubAgentConfig(
+                    name=tool_config.name,
+                    model=agent_config.model,
+                    system_prompt=agent_config.system_prompt,
+                    max_steps=agent_config.max_steps,
+                    tools=agent_config.tools,
+                    return_schema=return_schema,
+                )
+
+                class SubAgentToolInline(FastMCPTool):
+                    """A tool wrapper that calls a sub-agent with logging."""
+
+                    def __init__(
+                        self,
+                        agent_name: str,
+                        agent_config: SubAgentConfig,
+                        parent_ctx: Any,
+                        step_logger: StepLogger,
+                        name: str,
+                        description: str,
+                        parameters: dict[str, Any],
+                    ) -> None:
+                        super().__init__(
+                            name=name,
+                            description=description,
+                            parameters=parameters,
+                        )
+                        self._agent_name = agent_name
+                        self._agent_config = agent_config
+                        self._parent_ctx = parent_ctx
+                        self._step_logger = step_logger
+
+                    async def run(self, arguments: dict[str, Any]) -> ToolResult:
+                        """Run the sub-agent with the provided arguments."""
+                        print(f"🔄 Calling sub-agent: {self._agent_name}")
+                        prompt = arguments.get("prompt", str(arguments))
+                        start_time_inner = time.time()
+
+                        try:
+                            agent = create_sub_agent(self._agent_config, self._parent_ctx)
+                            original_prompt = getattr(self._parent_ctx, "prompt", None)
+                            self._parent_ctx.prompt = prompt
+
+                            try:
+                                trace_result = await agent.run(self._parent_ctx, max_steps=self._agent_config.max_steps)
+                            finally:
+                                self._parent_ctx.prompt = original_prompt
+
+                            duration_ms_inner = (time.time() - start_time_inner) * 1000
+                            result_dict = _build_result(
+                                self._agent_config.return_schema,
+                                output=trace_result.content or "",
+                                success=not trace_result.isError,
+                                error=trace_result.info.get("error") if trace_result.isError and trace_result.info else None,
+                                duration_ms=duration_ms_inner,
+                            )
+                            return ToolResult(content=result_dict)
+
+                        except Exception as e:
+                            logger.exception(f"Sub-agent {self._agent_name} failed:")
+                            duration_ms_inner = (time.time() - start_time_inner) * 1000
+                            error_result = _build_result(
+                                self._agent_config.return_schema,
+                                output="",
+                                success=False,
+                                error=str(e),
+                                duration_ms=duration_ms_inner,
+                            )
+                            return ToolResult(content=error_result)
+
+                sub_agent_tool = SubAgentToolInline(
+                    agent_name=tool_config.name,
+                    agent_config=sub_config,
+                    parent_ctx=ctx,
+                    step_logger=self.logger,
+                    name=tool_config.name,
+                    description=tool_desc,
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "prompt": {"type": "string", "description": "The prompt for this agent"}
+                        },
+                        "required": ["prompt"],
+                    },
+                )
+                ctx._tool_manager.add_tool(sub_agent_tool)
+                logger.info(f"Registered SubAgentTool (shared context): {tool_config.name}")
+
+    def _create_agent_tool(self, config: AgentToolConfig) -> AgentTool:
+        """Create AgentTool from scenario config.
+
+        Args:
+            config: AgentToolConfig with scenario and model specified
+
+        Returns:
+            AgentTool instance ready to register
+        """
+        from hud.environment import Environment
+        from hud.eval.task import Task
+        from hud.tools.agent import AgentTool
+
+        if not config.scenario:
+            raise ValueError("AgentToolConfig must have 'scenario' set")
+        if not config.model:
+            raise ValueError("AgentToolConfig must have 'model' set when using 'scenario'")
+
+        # Parse env:scenario format (e.g., "sentry:investigate")
+        if ":" in config.scenario:
+            env_name, scenario_name = config.scenario.split(":", 1)
+        else:
+            # Default: scenario name without env prefix means use current context's env
+            env_name = None
+            scenario_name = config.scenario
+
+        # Create or get environment
+        if env_name:
+            env = Environment(env_name)
+            env.connect_hub(env_name)
+        else:
+            # Use the parent context's environment if no env prefix
+            if self.ctx and hasattr(self.ctx, "env"):
+                env = self.ctx.env
+            else:
+                raise ValueError(
+                    f"Scenario '{config.scenario}' has no env prefix and no parent context available"
+                )
+
+        # Create Task template (args will be filled in at call time)
+        task = Task(env=env, scenario=scenario_name)
+
+        return AgentTool(
+            task,
+            model=config.model,
+            name=config.name,
+            description=config.description or f"Run scenario: {scenario_name}",
+        )
 
     def _get_conversation_history(self) -> str:
         """Read previous conversation from logs and format for injection.

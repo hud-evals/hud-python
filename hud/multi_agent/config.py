@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from hud.multi_agent.schemas import (
     CodeResult,
@@ -46,11 +46,40 @@ def register_schema(name: str, schema_cls: type[BaseModel]) -> None:
 
 
 class AgentToolConfig(BaseModel):
-    """Configuration for a sub-agent exposed as a tool."""
+    """Configuration for a sub-agent exposed as a tool.
+
+    Supports two modes:
+    1. agent: Reference to another agent config (shared context)
+    2. scenario: Direct scenario reference with model (isolated context via AgentTool)
+
+    Example YAML:
+        # Mode 1: Shared context sub-agent
+        - name: coder
+          agent: coder  # References agents/coder.yaml
+
+        # Mode 2: Isolated context AgentTool
+        - name: investigate
+          scenario: sentry:investigate  # env:scenario format
+          model: ft:seer-v2
+          description: "Investigate production issues"
+    """
 
     name: str
-    agent: str  # Reference to another agent config
+    agent: str | None = None
+    scenario: str | None = None
+    model: str | None = None
     description: str = ""
+
+    @model_validator(mode="after")
+    def validate_agent_or_scenario(self) -> Self:
+        """Validate that exactly one of agent or scenario is specified."""
+        if not self.agent and not self.scenario:
+            raise ValueError("Must specify either 'agent' or 'scenario'")
+        if self.agent and self.scenario:
+            raise ValueError("Cannot specify both 'agent' and 'scenario'")
+        if self.scenario and not self.model:
+            raise ValueError("Must specify 'model' when using 'scenario'")
+        return self
 
 
 class ReturnsConfig(BaseModel):
@@ -244,7 +273,8 @@ class ConfigLoader:
         # Check agent tool references
         for name, agent in config.agents.items():
             for tool in agent.agent_tools:
-                if tool.agent not in config.agents:
+                # Only check agent references (not scenario-based tools)
+                if tool.agent and tool.agent not in config.agents:
                     errors.append(f"Agent '{name}' references unknown agent '{tool.agent}'")
 
         return errors

@@ -203,55 +203,15 @@ def create_sub_agent(
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"Added JSON instructions for agent '{config.name}' with schema '{return_schema.__name__}' ({len(json_instructions)} chars)")
 
-    # Choose agent based on model prefix
-    if model.startswith("anthropic/") or _is_claude_model(model):
-        from hud.agents.claude import ClaudeAgent
+    # Use create_agent() to route through HUD gateway
+    from hud.agents import create_agent
 
-        return ClaudeAgent.create(
-            ctx=ctx,
-            model=model.replace("anthropic/", ""),
-            system_prompt=system_prompt,
-        )
-    elif model.startswith("openai/") or _is_openai_model(model):
-        from hud.agents.openai import OpenAIAgent
-
-        return OpenAIAgent.create(
-            ctx=ctx,
-            model=model.replace("openai/", ""),
-            system_prompt=system_prompt,
-        )
-    elif model.startswith("gemini/") or "gemini" in model.lower():
-        from hud.agents.gemini import GeminiAgent
-
-        return GeminiAgent.create(
-            ctx=ctx,
-            model=model.replace("gemini/", ""),
-            system_prompt=system_prompt,
-        )
-    else:
-        # Default to Claude for unrecognized models
-        from hud.agents.claude import ClaudeAgent
-
-        logger.debug(f"Unrecognized model '{model}', defaulting to Claude")
-        return ClaudeAgent.create(
-            ctx=ctx,
-            model=model,
-            system_prompt=system_prompt,
-        )
-
-
-def _is_claude_model(model: str) -> bool:
-    """Check if model string indicates a Claude model."""
-    claude_indicators = ["claude", "sonnet", "opus", "haiku"]
-    model_lower = model.lower()
-    return any(ind in model_lower for ind in claude_indicators)
-
-
-def _is_openai_model(model: str) -> bool:
-    """Check if model string indicates an OpenAI model."""
-    openai_indicators = ["gpt", "o1", "o3"]
-    model_lower = model.lower()
-    return any(ind in model_lower for ind in openai_indicators)
+    return create_agent(
+        model=model,
+        ctx=ctx,
+        system_prompt=system_prompt,
+        **{k: v for k, v in overrides.items() if k not in ("model", "system_prompt", "return_schema")},
+    )
 
 
 __all__ = [

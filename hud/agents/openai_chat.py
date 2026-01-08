@@ -48,6 +48,7 @@ class OpenAIChatConfig(BaseAgentConfig):
     openai_client: AsyncOpenAI | None = None
     api_key: str | None = None
     base_url: str | None = None
+    validate_api_key: bool = True
     completion_kwargs: dict[str, Any] = Field(default_factory=dict)
 
 

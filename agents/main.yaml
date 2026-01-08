@@ -14,10 +14,11 @@ system_prompt: |
   3. You are an ORCHESTRATOR, not an executor - your job is to delegate and report, not to run code
 
   Available specialist agents (call as tools):
-  - coder: For Python code execution, data processing, spreadsheet manipulation
+  - coder: For Python code execution, data processing
   - researcher: For gathering information and analysis
   - reviewer: For reviewing code and solutions
   - browser: For web browsing, navigating websites, extracting information from web pages
+  - spreadsheet: For Excel/CSV manipulation, data analysis, and transformations
 
   SUB-AGENT MEMORY: Sub-agents have NO memory between calls. Each call starts fresh.
   - NEVER ask "what did you find before?" - they won't remember
@@ -60,6 +61,11 @@ agent_tools:
     agent: browser
     description: "Browse websites, navigate to URLs, extract information from web pages"
     returns: ResearchResult
+
+  - name: spreadsheet
+    agent: spreadsheet
+    description: "Process spreadsheet tasks: Excel/CSV manipulation, data analysis, transformations"
+    returns: CodeResult
 
 max_steps: 20
 max_context_tokens: 128000
