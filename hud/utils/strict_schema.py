@@ -118,7 +118,7 @@ def _ensure_strict_json_schema(
     if "default" in json_schema:
         json_schema.pop("default")
 
-    for keyword in ("title", "examples"):
+    for keyword in ("title", "examples", "format"):
         json_schema.pop(keyword, None)
 
     ref = json_schema.get("$ref")
