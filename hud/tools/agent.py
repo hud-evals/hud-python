@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING, Any, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
 from fastmcp.tools.tool import ToolResult
-from mcp.types import TextContent
+from mcp.types import TextContent, Tool
 
 from hud.tools.base import BaseTool
 
@@ -18,14 +18,44 @@ __all__ = ["AgentTool"]
 
 
 def _is_eval_only(param: inspect.Parameter) -> bool:
-    """Check if param is eval-only: has None default AND None in type union."""
+    """Check if param is eval-only: has None default AND None in type union.
+
+    Handles both runtime types and string annotations (PEP 563).
+    """
+    # Must have default of None
     if param.default is not None:
         return False
     if param.annotation is inspect.Parameter.empty:
         return False
-    origin = get_origin(param.annotation)
-    if origin is not None:
-        return type(None) in get_args(param.annotation)
+
+    annotation = param.annotation
+
+    # Handle string annotations (from __future__ annotations or quoted)
+    if isinstance(annotation, str):
+        # Check if it looks like "X | None", "Union[X, None]", or "Optional[X]"
+        return (
+            "| None" in annotation
+            or "None |" in annotation
+            or "Optional[" in annotation
+            or ("Union[" in annotation and "None" in annotation)
+        )
+
+    # Handle runtime type annotations
+    origin = get_origin(annotation)
+
+    # Union types (X | None or Union[X, None])
+    if origin is Union:
+        return type(None) in get_args(annotation)
+
+    # For Python 3.10+ union syntax at runtime (types.UnionType)
+    try:
+        import types
+
+        if isinstance(annotation, types.UnionType):
+            return type(None) in get_args(annotation)
+    except (ImportError, AttributeError):
+        pass
+
     return False
 
 
@@ -72,13 +102,19 @@ class AgentTool(BaseTool):
 
         # Get visible params from scenario function
         self._visible_params: set[str] = set()
-        self._param_schema: dict[str, Any] | None = None
+        self._param_schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
 
         if task.env and task.scenario:
             scenario_fn = task.env._scenarios.get(task.scenario)
             if scenario_fn:
                 sig = inspect.signature(scenario_fn)
-                visible = {name: p for name, p in sig.parameters.items() if not _is_eval_only(p)}
+                visible = {
+                    name: p for name, p in sig.parameters.items() if not _is_eval_only(p)
+                }
                 self._visible_params = set(visible.keys())
                 self._param_schema = self._build_schema(visible)
 
@@ -97,7 +133,17 @@ class AgentTool(BaseTool):
         for name, param in params.items():
             if param.annotation is not inspect.Parameter.empty:
                 try:
-                    adapter = TypeAdapter(param.annotation)
+                    # Handle string annotations
+                    annotation = param.annotation
+                    if isinstance(annotation, str):
+                        # Try to evaluate the annotation
+                        try:
+                            annotation = eval(annotation)  # noqa: S307
+                        except Exception:
+                            properties[name] = {"type": "string"}
+                            continue
+
+                    adapter = TypeAdapter(annotation)
                     properties[name] = adapter.json_schema()
                 except Exception:
                     properties[name] = {"type": "string"}
@@ -112,16 +158,14 @@ class AgentTool(BaseTool):
         return {"type": "object", "properties": properties, "required": required}
 
     @property
-    def mcp(self) -> Any:
-        """Get as FastMCP FunctionTool with filtered schema."""
+    def mcp(self) -> Tool:
+        """Get as MCP Tool with filtered schema."""
         if not hasattr(self, "_mcp_tool"):
-            from fastmcp.tools import FunctionTool
-
-            self._mcp_tool = FunctionTool.from_function(
-                self, name=self.name, description=self.description
+            self._mcp_tool = Tool(
+                name=self.name,
+                description=self.description,
+                inputSchema=self._param_schema,
             )
-            if self._param_schema:
-                self._mcp_tool.parameters = self._param_schema
         return self._mcp_tool
 
     async def __call__(self, **kwargs: Any) -> ToolResult:

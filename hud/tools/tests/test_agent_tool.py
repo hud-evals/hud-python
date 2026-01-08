@@ -65,6 +65,27 @@ class TestIsEvalOnly:
         param = sig.parameters["x"]
         assert _is_eval_only(param)
 
+    def test_string_annotation_with_none_union(self) -> None:
+        """Handles string annotations like 'str | None'."""
+        # Simulate string annotation
+        param = inspect.Parameter(
+            "x",
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            default=None,
+            annotation="str | None",
+        )
+        assert _is_eval_only(param)
+
+    def test_string_annotation_without_none(self) -> None:
+        """String annotations without None are not eval-only."""
+        param = inspect.Parameter(
+            "x",
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            default=None,
+            annotation="str",
+        )
+        assert not _is_eval_only(param)
+
 
 class TestAgentToolInit:
     """Tests for AgentTool initialization."""
@@ -123,6 +144,7 @@ class TestAgentToolParamFiltering:
         """Eval-only params (| None = None) are filtered from visible_params."""
         env = Environment("test")
 
+        # Use Union syntax for consistency across Python versions
         @env.scenario()
         async def investigate(
             issue_id: str,
@@ -214,9 +236,9 @@ class TestAgentToolSchema:
 class TestAgentToolMCP:
     """Tests for MCP tool integration."""
 
-    def test_mcp_property_returns_function_tool(self) -> None:
-        """The mcp property returns a FunctionTool."""
-        from fastmcp.tools import FunctionTool
+    def test_mcp_property_returns_tool(self) -> None:
+        """The mcp property returns an MCP Tool."""
+        from mcp.types import Tool
 
         env = Environment("test")
 
@@ -228,7 +250,7 @@ class TestAgentToolMCP:
         tool = AgentTool(task, model="claude")
 
         mcp_tool = tool.mcp
-        assert isinstance(mcp_tool, FunctionTool)
+        assert isinstance(mcp_tool, Tool)
 
     def test_mcp_has_filtered_parameters(self) -> None:
         """MCP tool has filtered parameter schema."""
@@ -245,7 +267,7 @@ class TestAgentToolMCP:
         tool = AgentTool(task, model="claude")
 
         mcp_tool = tool.mcp
-        params = mcp_tool.parameters
+        params = mcp_tool.inputSchema
 
         assert "data" in params["properties"]
         assert "expected_result" not in params["properties"]
@@ -268,7 +290,7 @@ class TestAgentToolCall:
 
         # Mock the eval context and agent
         with (
-            patch("hud.tools.agent.run_eval") as mock_run_eval,
+            patch("hud.eval.manager.run_eval") as mock_run_eval,
             patch("hud.agents.create_agent") as mock_create_agent,
         ):
             mock_ctx = AsyncMock()
@@ -303,7 +325,7 @@ class TestAgentToolCall:
         tool = AgentTool(task, model="claude")
 
         with (
-            patch("hud.tools.agent.run_eval") as mock_run_eval,
+            patch("hud.eval.manager.run_eval") as mock_run_eval,
             patch("hud.agents.create_agent") as mock_create_agent,
         ):
             mock_ctx = AsyncMock()
