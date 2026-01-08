@@ -279,6 +279,10 @@ class TestAgentToolCall:
     @pytest.mark.asyncio
     async def test_filters_kwargs_to_visible_only(self) -> None:
         """Call filters kwargs to visible params only."""
+        # Import modules first so patches work
+        import hud.agents  # noqa: F401
+        import hud.eval.manager  # noqa: F401
+
         env = Environment("test")
 
         @env.scenario()
@@ -290,8 +294,8 @@ class TestAgentToolCall:
 
         # Mock the eval context and agent
         with (
-            patch("hud.tools.agent.run_eval") as mock_run_eval,
-            patch("hud.tools.agent.create_agent") as mock_create_agent,
+            patch("hud.eval.manager.run_eval") as mock_run_eval,
+            patch("hud.agents.create_agent") as mock_create_agent,
         ):
             mock_ctx = AsyncMock()
             mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
@@ -314,6 +318,10 @@ class TestAgentToolCall:
     @pytest.mark.asyncio
     async def test_merges_template_args(self) -> None:
         """Call merges kwargs with template args."""
+        # Import modules first so patches work
+        import hud.agents  # noqa: F401
+        import hud.eval.manager  # noqa: F401
+
         env = Environment("test")
 
         @env.scenario()
@@ -325,8 +333,8 @@ class TestAgentToolCall:
         tool = AgentTool(task, model="claude")
 
         with (
-            patch("hud.tools.agent.run_eval") as mock_run_eval,
-            patch("hud.tools.agent.create_agent") as mock_create_agent,
+            patch("hud.eval.manager.run_eval") as mock_run_eval,
+            patch("hud.agents.create_agent") as mock_create_agent,
         ):
             mock_ctx = AsyncMock()
             mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
