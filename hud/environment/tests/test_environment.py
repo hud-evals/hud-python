@@ -159,3 +159,150 @@ class TestEnvironmentSetupEvaluate:
         )
 
         assert len(env._setup_calls) == 2
+
+
+class TestEnvironmentMCPProtocol:
+    """Tests for MCP protocol overrides (_mcp_list_tools, _mcp_call_tool)."""
+
+    @pytest.mark.asyncio
+    async def test_mcp_list_tools_includes_local_tools(self) -> None:
+        """_mcp_list_tools returns local tools."""
+        from hud.environment import Environment
+
+        env = Environment("test")
+
+        @env.tool()
+        def my_tool(x: int) -> int:
+            """A test tool."""
+            return x * 2
+
+        # Build routing manually without full context (avoids import issues)
+        await env._build_routing()
+        tools = env._mcp_list_tools()
+
+        assert len(tools) == 1
+        assert tools[0].name == "my_tool"
+
+    @pytest.mark.asyncio
+    async def test_mcp_list_tools_includes_connector_tools(self) -> None:
+        """_mcp_list_tools returns tools from connectors."""
+        from unittest.mock import AsyncMock, PropertyMock
+
+        import mcp.types as mcp_types
+
+        from hud.environment import Environment
+
+        env = Environment("test")
+
+        # Create a mock connector with cached tools
+        mock_tools = [
+            mcp_types.Tool(
+                name="remote_tool",
+                description="A remote tool",
+                inputSchema={"type": "object"},
+            )
+        ]
+
+        class MockConnector:
+            is_connected = True
+            _tools_cache = mock_tools
+
+            @property
+            def cached_tools(self) -> list[mcp_types.Tool]:
+                return self._tools_cache
+
+            async def connect(self) -> None:
+                pass
+
+            async def disconnect(self) -> None:
+                pass
+
+            async def list_tools(self) -> list[mcp_types.Tool]:
+                return self._tools_cache
+
+        # Add the mock connector
+        env._connections["mock"] = MockConnector()  # type: ignore
+
+        # Build routing manually
+        await env._build_routing()
+        tools = env._mcp_list_tools()
+
+        # Should include the remote tool
+        tool_names = [t.name for t in tools]
+        assert "remote_tool" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_mcp_call_tool_routes_to_local(self) -> None:
+        """_mcp_call_tool routes local tool calls correctly."""
+        from hud.environment import Environment
+
+        env = Environment("test")
+        called_with: list[int] = []
+
+        @env.tool()
+        def my_tool(x: int) -> str:
+            """A test tool."""
+            called_with.append(x)
+            return f"result: {x}"
+
+        # Build routing manually without full context
+        await env._build_routing()
+        result = await env._mcp_call_tool("my_tool", {"x": 42})
+
+        assert called_with == [42]
+        assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_mcp_call_tool_routes_to_connector(self) -> None:
+        """_mcp_call_tool routes connector tool calls correctly."""
+        from unittest.mock import AsyncMock
+
+        import mcp.types as mcp_types
+
+        from hud.environment import Environment
+        from hud.types import MCPToolResult
+
+        env = Environment("test")
+
+        # Create a mock connector
+        mock_tools = [
+            mcp_types.Tool(
+                name="remote_tool",
+                description="A remote tool",
+                inputSchema={"type": "object"},
+            )
+        ]
+
+        class MockConnector:
+            is_connected = True
+            _tools_cache = mock_tools
+            call_tool = AsyncMock(
+                return_value=MCPToolResult(
+                    content=[mcp_types.TextContent(type="text", text="remote result")],
+                    isError=False,
+                )
+            )
+
+            @property
+            def cached_tools(self) -> list[mcp_types.Tool]:
+                return self._tools_cache
+
+            async def connect(self) -> None:
+                pass
+
+            async def disconnect(self) -> None:
+                pass
+
+            async def list_tools(self) -> list[mcp_types.Tool]:
+                return self._tools_cache
+
+        mock_conn = MockConnector()
+        env._connections["mock"] = mock_conn  # type: ignore
+
+        # Build routing manually without full context
+        await env._build_routing()
+        result = await env._mcp_call_tool("remote_tool", {"arg": "value"})
+
+        # Verify the connector was called
+        mock_conn.call_tool.assert_called_once_with("remote_tool", {"arg": "value"})
+        assert len(result) == 1

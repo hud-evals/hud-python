@@ -396,15 +396,23 @@ class Environment(
     # MCP Protocol Overrides - Include connector tools in MCP responses
     # =========================================================================
 
-    def _mcp_list_tools(self) -> list[mcp_types.Tool]:
-        """Override FastMCP to return all tools including those from connectors."""
+    def _setup_handlers(self) -> None:
+        """Override FastMCP to register our custom handlers for tools."""
+        # Call parent to set up all standard handlers
+        super()._setup_handlers()
+        # Re-register our custom handlers (overwrites parent's registrations)
+        self._mcp_server.list_tools()(self._env_list_tools)
+        self._mcp_server.call_tool()(self._env_call_tool)
+
+    async def _env_list_tools(self) -> list[mcp_types.Tool]:
+        """Return all tools including those from connectors."""
         return self._router.tools
 
-    async def _mcp_call_tool(
-        self, key: str, arguments: dict[str, Any]
-    ) -> list[Any] | tuple[list[Any], dict[str, Any]]:
-        """Override FastMCP to route tool calls through our router."""
-        result = await self._execute_tool(key, arguments)
+    async def _env_call_tool(
+        self, name: str, arguments: dict[str, Any] | None = None
+    ) -> list[Any]:
+        """Route tool calls through our router (handles both local and connector tools)."""
+        result = await self._execute_tool(name, arguments or {})
         return result.content or []
 
     # =========================================================================
