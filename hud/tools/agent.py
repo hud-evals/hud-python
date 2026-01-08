@@ -187,8 +187,17 @@ class AgentTool(BaseTool):
 
         # Use parent trace if available (for hierarchical agents)
         parent_trace_id = get_current_trace_id()
+        
+        # If nested (has parent), skip subagent's enter/exit registration but keep tool instrumentation
+        # Tool calls are still recorded via the shared trace_id's context
+        is_nested = parent_trace_id is not None
 
-        async with run_eval(task, trace=self._trace, trace_id=parent_trace_id, quiet=True) as ctx:
+        async with run_eval(
+            task, 
+            trace=not is_nested,  # Skip enter/exit for nested agents
+            trace_id=parent_trace_id, 
+            quiet=True
+        ) as ctx:
             if self._model:
                 from hud.agents import create_agent
 
