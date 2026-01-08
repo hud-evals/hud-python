@@ -353,7 +353,7 @@ class EvalContext(Environment):
         if self._task is None or self._task.scenario is None:
             return
 
-        prompt = await self.run_scenario_setup(self._task.scenario, self._task.args)
+        prompt = await self.run_scenario_setup(self._task.scenario, self._task.args or {})
         if prompt:
             self.prompt = prompt
 
