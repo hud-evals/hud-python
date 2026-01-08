@@ -162,11 +162,14 @@ class TestEnvironmentSetupEvaluate:
 
 
 class TestEnvironmentMCPProtocol:
-    """Tests for MCP protocol overrides (_mcp_list_tools, _mcp_call_tool)."""
+    """Tests for MCP protocol overrides - Environment._env_list_tools and _env_call_tool.
+
+    These test that Environment properly exposes connector tools via MCP handlers.
+    """
 
     @pytest.mark.asyncio
-    async def test_mcp_list_tools_includes_local_tools(self) -> None:
-        """_mcp_list_tools returns local tools."""
+    async def test_env_list_tools_includes_local_tools(self) -> None:
+        """_env_list_tools returns local tools after routing is built."""
         from hud.environment import Environment
 
         env = Environment("test")
@@ -176,18 +179,18 @@ class TestEnvironmentMCPProtocol:
             """A test tool."""
             return x * 2
 
-        # Build routing manually without full context (avoids import issues)
+        # Build routing (simulates what __aenter__ does)
         await env._build_routing()
-        tools = env._mcp_list_tools()
+
+        # Call the handler that MCP will call
+        tools = await env._env_list_tools()
 
         assert len(tools) == 1
         assert tools[0].name == "my_tool"
 
     @pytest.mark.asyncio
-    async def test_mcp_list_tools_includes_connector_tools(self) -> None:
-        """_mcp_list_tools returns tools from connectors."""
-        from unittest.mock import AsyncMock, PropertyMock
-
+    async def test_env_list_tools_includes_connector_tools(self) -> None:
+        """_env_list_tools returns tools from connectors (the key feature)."""
         import mcp.types as mcp_types
 
         from hud.environment import Environment
@@ -223,17 +226,19 @@ class TestEnvironmentMCPProtocol:
         # Add the mock connector
         env._connections["mock"] = MockConnector()  # type: ignore
 
-        # Build routing manually
+        # Build routing
         await env._build_routing()
-        tools = env._mcp_list_tools()
+
+        # Call the handler that MCP will call
+        tools = await env._env_list_tools()
 
         # Should include the remote tool
         tool_names = [t.name for t in tools]
         assert "remote_tool" in tool_names
 
     @pytest.mark.asyncio
-    async def test_mcp_call_tool_routes_to_local(self) -> None:
-        """_mcp_call_tool routes local tool calls correctly."""
+    async def test_env_call_tool_routes_to_local(self) -> None:
+        """_env_call_tool routes local tool calls correctly."""
         from hud.environment import Environment
 
         env = Environment("test")
@@ -245,16 +250,18 @@ class TestEnvironmentMCPProtocol:
             called_with.append(x)
             return f"result: {x}"
 
-        # Build routing manually without full context
+        # Build routing
         await env._build_routing()
-        result = await env._mcp_call_tool("my_tool", {"x": 42})
+
+        # Call the handler that MCP will call
+        result = await env._env_call_tool("my_tool", {"x": 42})
 
         assert called_with == [42]
         assert len(result) == 1
 
     @pytest.mark.asyncio
-    async def test_mcp_call_tool_routes_to_connector(self) -> None:
-        """_mcp_call_tool routes connector tool calls correctly."""
+    async def test_env_call_tool_routes_to_connector(self) -> None:
+        """_env_call_tool routes connector tool calls correctly."""
         from unittest.mock import AsyncMock
 
         import mcp.types as mcp_types
@@ -299,10 +306,24 @@ class TestEnvironmentMCPProtocol:
         mock_conn = MockConnector()
         env._connections["mock"] = mock_conn  # type: ignore
 
-        # Build routing manually without full context
+        # Build routing
         await env._build_routing()
-        result = await env._mcp_call_tool("remote_tool", {"arg": "value"})
+
+        # Call the handler that MCP will call
+        result = await env._env_call_tool("remote_tool", {"arg": "value"})
 
         # Verify the connector was called
         mock_conn.call_tool.assert_called_once_with("remote_tool", {"arg": "value"})
         assert len(result) == 1
+
+    def test_setup_handlers_registers_custom_handlers(self) -> None:
+        """Verify _setup_handlers registers our _env_list_tools and _env_call_tool."""
+        from hud.environment import Environment
+
+        env = Environment("test")
+
+        # Verify the custom handlers exist
+        assert hasattr(env, "_env_list_tools")
+        assert hasattr(env, "_env_call_tool")
+        assert callable(env._env_list_tools)
+        assert callable(env._env_call_tool)
