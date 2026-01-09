@@ -82,10 +82,10 @@ class _BashSession:
             await asyncio.sleep(0)
             return
 
-        # preexec_fn and user demotion only available on Unix
+        # preexec_fn and user demotion only available on Unix when running as root
         preexec_fn = None
-        if sys.platform != "win32":
-
+        if sys.platform != "win32" and os.getuid() == 0:
+            # Only demote when running as root (e.g., inside Docker containers)
             def demote() -> None:
                 # This only runs in the child process (Unix only)
                 os.setsid()  # type: ignore[attr-defined]

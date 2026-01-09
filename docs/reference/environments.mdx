@@ -266,6 +266,81 @@ env.unmock()  # Disable mock mode
 | `mock_tool(name, output)` | Set specific mock output |
 | `is_mock` | Check if mock mode is enabled |
 
+## Serving as MCP Server
+
+Environment can serve its tools over MCP protocols, either standalone or mounted on an existing server.
+
+### serve()
+
+Start a standalone MCP server:
+
+```python
+from hud import Environment
+
+env = Environment("my-env")
+
+@env.tool()
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+
+# Run as MCP server (blocking)
+env.serve()
+```
+
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `transport` | `Literal["stdio", "sse", "streamable-http"]` | Transport protocol | `"streamable-http"` |
+| `host` | `str` | Host address to bind | `"0.0.0.0"` |
+| `port` | `int` | Port to bind | `8000` |
+
+```python
+# Serve over stdio (for CLI tools)
+env.serve(transport="stdio")
+
+# Serve over HTTP on custom port
+env.serve(transport="streamable-http", host="0.0.0.0", port=8765)
+```
+
+### http_app()
+
+Get a Starlette/ASGI app to mount on an existing FastAPI server:
+
+```python
+from fastapi import FastAPI
+from hud import Environment
+
+app = FastAPI()
+env = Environment("my-env")
+
+@env.tool()
+def my_tool(arg: str) -> str:
+    return f"Got: {arg}"
+
+# Mount the HUD environment's MCP endpoint at /mcp
+app.mount("/mcp", env.http_app())
+
+# Your other FastAPI routes work normally
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+```
+
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `path` | `str \| None` | Internal path for the MCP endpoint | `"/"` |
+| `transport` | `Literal["http", "streamable-http", "sse"]` | Transport protocol | `"http"` |
+| `middleware` | `list[ASGIMiddleware] \| None` | Starlette middleware | `None` |
+| `json_response` | `bool \| None` | Use JSON response format | `None` |
+| `stateless_http` | `bool \| None` | Use stateless HTTP mode | `None` |
+
+MCP clients can then connect at `http://your-server/mcp`:
+
+```python
+# Client connecting to mounted environment
+env.connect_url("http://localhost:8000/mcp")
+```
+
+
 ## Properties
 
 | Property | Type | Description |

@@ -33,7 +33,7 @@
         "icon": "code",
         "versions": [
           {
-            "version": "0.5.2",
+            "version": "0.5.3",
             "groups": [
               {
                 "group": "Get Started",
@@ -61,9 +61,10 @@
                 ]
               },
               {
-                "group": "Cookbook",
+                "group": "Cookbooks",
                 "pages": [
-                  "cookbook/ops-diagnostics"
+                  "cookbooks/codex-coding",
+                  "cookbooks/ops-diagnostics"
                 ]
               },
               {
