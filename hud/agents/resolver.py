@@ -60,7 +60,7 @@ def resolve_cls(model: str) -> tuple[type[MCPAgent], dict[str, Any] | None]:
     # Gateway lookup
     for m in _fetch_gateway_models():
         if model in (m.get("id"), m.get("name"), m.get("model")):
-            provider = m.get("provider", "openai_compatible").lower()
+            provider = (m.get("provider") or "openai_compatible").lower()
             agent_str = _PROVIDER_TO_AGENT.get(provider, provider)
             try:
                 return AgentType(agent_str).cls, m
