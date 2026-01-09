@@ -408,9 +408,7 @@ class Environment(
         """Return all tools including those from connectors."""
         return self._router.tools
 
-    async def _env_call_tool(
-        self, name: str, arguments: dict[str, Any] | None = None
-    ) -> list[Any]:
+    async def _env_call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> list[Any]:
         """Route tool calls through our router (handles both local and connector tools)."""
         result = await self._execute_tool(name, arguments or {})
         return result.content or []
