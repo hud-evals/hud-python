@@ -201,7 +201,7 @@ class ScenarioMixin:
 
                 # Check if the prompt exists - if so, the error is something else
                 original_error = str(e)
-                if prompt_id in available:
+                if prompt_id in scenario_prompts:
                     # Prompt exists but get_prompt failed for another reason
                     raise ValueError(
                         f"⚠️ ERROR: Scenario '{prompt_id}' exists but failed to execute.\n\n"
@@ -439,8 +439,13 @@ class ScenarioMixin:
                         deserialized_args[arg_name] = arg_value
                         continue
 
+                    # If annotation is explicitly str, keep as string (no deserialization)
+                    if annotation is str:
+                        deserialized_args[arg_name] = arg_value
+                        continue
+
                     # If we have a non-str type annotation, use TypeAdapter
-                    if annotation is not None and annotation is not str:
+                    if annotation is not None:
                         try:
                             adapter = TypeAdapter(annotation)
                             deserialized_args[arg_name] = adapter.validate_json(arg_value)
@@ -448,9 +453,8 @@ class ScenarioMixin:
                         except Exception:  # noqa: S110
                             pass  # Fall through to generic JSON decode
 
-                    # Always try JSON decode for strings that look like JSON
+                    # No type annotation - try JSON decode for strings that look like JSON
                     # (arrays, objects, numbers, booleans, null)
-                    # This handles cases where type annotation is missing/unknown
                     stripped = arg_value.strip()
                     if (stripped and stripped[0] in "[{") or stripped in ("true", "false", "null"):
                         try:
