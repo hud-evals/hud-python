@@ -445,7 +445,7 @@ class ScenarioMixin:
                             adapter = TypeAdapter(annotation)
                             deserialized_args[arg_name] = adapter.validate_json(arg_value)
                             continue
-                        except Exception: # noqa: S110
+                        except Exception:  # noqa: S110
                             pass  # Fall through to generic JSON decode
 
                     # Always try JSON decode for strings that look like JSON
