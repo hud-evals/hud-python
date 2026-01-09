@@ -129,6 +129,7 @@ class Environment(
         super().__init__(name=name, instructions=instructions, **fastmcp_kwargs)
         self._connections: dict[str, Connector] = {}
         self._router = ToolRouter(conflict_resolution=conflict_resolution)
+        self._routing_built = False  # Track if _build_routing has been called
         self._in_context = False
 
         # Tool call queues - run after connections established
@@ -361,6 +362,7 @@ class Environment(
         if self._connections:
             await asyncio.gather(*[c.disconnect() for c in self._connections.values()])
         self._router.clear()
+        self._routing_built = False
 
     async def run_async(
         self,
@@ -389,6 +391,7 @@ class Environment(
             connections=self._connections,
             connection_order=list(self._connections.keys()),
         )
+        self._routing_built = True
         # Populate mock schemas for auto-generated mock values
         self._populate_mock_schemas()
 
@@ -406,7 +409,7 @@ class Environment(
 
     async def _env_list_tools(self) -> list[mcp_types.Tool]:
         """Return all tools including those from connectors."""
-        if not self._router.tools:
+        if not self._routing_built:
             await self._build_routing()
         return self._router.tools
 
