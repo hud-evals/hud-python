@@ -406,6 +406,8 @@ class Environment(
 
     async def _env_list_tools(self) -> list[mcp_types.Tool]:
         """Return all tools including those from connectors."""
+        if not self._router.tools:
+            await self._build_routing()
         return self._router.tools
 
     async def _env_call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> list[Any]:
