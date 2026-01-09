@@ -199,8 +199,23 @@ class ScenarioMixin:
                 except Exception:
                     available = "(could not fetch available scenarios)"
 
+                # Check if the prompt exists - if so, the error is something else
+                original_error = str(e)
+                if prompt_id in available:
+                    # Prompt exists but get_prompt failed for another reason
+                    raise ValueError(
+                        f"⚠️ ERROR: Scenario '{prompt_id}' exists but failed to execute.\n\n"
+                        f"The scenario was found but encountered an error during setup:\n"
+                        f"  {original_error}\n\n"
+                        f"This could be caused by:\n"
+                        f"  - Missing or invalid scenario arguments\n"
+                        f"  - An error in the scenario's setup function\n"
+                        f"  - Connection or serialization issues\n\n"
+                        f"Check the scenario definition and required arguments."
+                    ) from e
+
                 raise ValueError(
-                    f"Scenario not found.\n\n"
+                    f"⚠️ ERROR: Scenario not found.\n\n"
                     f"Scenario IDs have the format 'environment_name:scenario_name'.\n"
                     f"If you only specify 'scenario_name', the SDK uses your task's env name "
                     f"as the prefix.\n"
@@ -362,7 +377,7 @@ class ScenarioMixin:
                     # Only include JSON-serializable defaults
                     default_val = p.default
                     if default_val is None or isinstance(
-                        default_val, (str, int, float, bool, list, dict)
+                        default_val, (str | int | float | bool | list | dict)
                     ):
                         arg_info["default"] = default_val
 
@@ -413,26 +428,47 @@ class ScenarioMixin:
 
                 # Deserialize JSON-encoded arguments using Pydantic TypeAdapter
                 # This properly handles: Pydantic models, enums, datetime, lists, dicts
+                # MCP prompts only support string arguments, so we JSON-serialize complex
+                # types on the sending side and deserialize them here
                 deserialized_args: dict[str, Any] = {}
                 for arg_name, arg_value in handler_args.items():
                     annotation = param_annotations.get(arg_name)
-                    if (
-                        annotation is not None
-                        and annotation is not str
-                        and isinstance(arg_value, str)
-                    ):
-                        # Try TypeAdapter.validate_json for proper type coercion
+
+                    # Only attempt deserialization on string values
+                    if not isinstance(arg_value, str):
+                        deserialized_args[arg_name] = arg_value
+                        continue
+
+                    # If we have a non-str type annotation, use TypeAdapter
+                    if annotation is not None and annotation is not str:
                         try:
                             adapter = TypeAdapter(annotation)
                             deserialized_args[arg_name] = adapter.validate_json(arg_value)
-                        except Exception:
-                            # Fall back to plain json.loads if TypeAdapter fails
-                            try:
-                                deserialized_args[arg_name] = json.loads(arg_value)
-                            except json.JSONDecodeError:
-                                deserialized_args[arg_name] = arg_value
-                    else:
-                        deserialized_args[arg_name] = arg_value
+                            continue
+                        except Exception: # noqa: S110
+                            pass  # Fall through to generic JSON decode
+
+                    # Always try JSON decode for strings that look like JSON
+                    # (arrays, objects, numbers, booleans, null)
+                    # This handles cases where type annotation is missing/unknown
+                    stripped = arg_value.strip()
+                    if (stripped and stripped[0] in "[{") or stripped in ("true", "false", "null"):
+                        try:
+                            deserialized_args[arg_name] = json.loads(arg_value)
+                            continue
+                        except json.JSONDecodeError:
+                            pass  # Keep as string
+
+                    # Also try to decode if it looks like a number
+                    if stripped.lstrip("-").replace(".", "", 1).isdigit():
+                        try:
+                            deserialized_args[arg_name] = json.loads(arg_value)
+                            continue
+                        except json.JSONDecodeError:
+                            pass
+
+                    # Keep as string
+                    deserialized_args[arg_name] = arg_value
 
                 # Create generator instance with deserialized args
                 gen = scenario_fn(**deserialized_args)
