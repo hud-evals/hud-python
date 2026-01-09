@@ -1,0 +1,4211 @@
+[
+  {
+    "prompt": "Calculate from the RawData tab the z-scores from the mean close price for each row. Return, starting in ANSWER!A1 and descending to ANSWER!A5, the 5 dates with the greatest absolute value of standard deviations from the mean",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "6e4744c7-b2c9-4bb6-807e-2cc144a4e8c2",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/c6ddeb9a-0c16-4f5e-8a06-f148ebb4be8a/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/c6ddeb9a-0c16-4f5e-8a06-f148ebb4be8a/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "1/12/2024",
+            "A2": "1/10/2024",
+            "A3": "1/15/2024",
+            "A4": "1/11/2024",
+            "A5": "1/17/2024"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Calculate the # of unique customer IDs in the worksheet ANSWER cell A1 and calculate the # of duplicate IDs in cell A2. Create a pivot table in the ANSWER tab, cell B1 with the CustomerID field as a row, Date (at the years level) as a column, and insert the Amount field as a value. The values should be in basic form without thousands separators and two decimal places.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "67d1c961-47c6-42a5-8a68-67bee5d1f1c1",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/0226adc3-051a-49e9-b1da-feb5c72ddfc7/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/0226adc3-051a-49e9-b1da-feb5c72ddfc7/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "B2": "CustomerID",
+            "B3": "476232",
+            "B4": "963589",
+            "B5": "1430820",
+            "B6": "2410043",
+            "B7": "3789483",
+            "B8": "4226444",
+            "B9": "4308096",
+            "C2": "2023",
+            "C5": "686.40",
+            "C8": "966.76",
+            "C9": "863.37",
+            "D2": "2024",
+            "D3": "912.70",
+            "D4": "397.62",
+            "D6": "383.38",
+            "D7": "619.56",
+            "E2": "Grand Total",
+            "E3": "912.70",
+            "E4": "397.62",
+            "E5": "686.40",
+            "E6": "383.38",
+            "E7": "619.56",
+            "E8": "966.76",
+            "E9": "863.37",
+            "B10": "5907496",
+            "B11": "6224271",
+            "B12": "6538101",
+            "B13": "6584993",
+            "B14": "6791810",
+            "B15": "7250781",
+            "B16": "8518187",
+            "B17": "8668097",
+            "B18": "8885050",
+            "B19": "9296053",
+            "B20": "10414682",
+            "B21": "10839621",
+            "B22": "12313143",
+            "B23": "13672423",
+            "B24": "14744105",
+            "B25": "14780608",
+            "B26": "15144539",
+            "B27": "15616289",
+            "B28": "15694782",
+            "B29": "15904102",
+            "B30": "16385696",
+            "B31": "17254618",
+            "B32": "17441704",
+            "B33": "17624107",
+            "B34": "18043433",
+            "B35": "18296075",
+            "B36": "18600797",
+            "B37": "19026954",
+            "B38": "19395319",
+            "B39": "19650142",
+            "B40": "19842318",
+            "B41": "20241148",
+            "B42": "20587659",
+            "B43": "21647994",
+            "B44": "21671104",
+            "B45": "21935183",
+            "B46": "22115836",
+            "B47": "22846037",
+            "B48": "23621954",
+            "B49": "24962520",
+            "B50": "25073201",
+            "B51": "25090031",
+            "B52": "25096194",
+            "B53": "25211207",
+            "B54": "26168579",
+            "B55": "26250755",
+            "B56": "26419282",
+            "B57": "26953175",
+            "B58": "27281086",
+            "B59": "27646724",
+            "B60": "30370166",
+            "B61": "30738270",
+            "B62": "30876644",
+            "B63": "32255126",
+            "B64": "32373769",
+            "B65": "33121017",
+            "B66": "33897455",
+            "B67": "34507001",
+            "B68": "35475491",
+            "B69": "36972111",
+            "B70": "37040802",
+            "B71": "37543198",
+            "B72": "37609900",
+            "B73": "37674649",
+            "B74": "38019388",
+            "B75": "38658747",
+            "B76": "38793189",
+            "B77": "39134950",
+            "B78": "40399799",
+            "B79": "41039038",
+            "B80": "41271414",
+            "B81": "41870334",
+            "B82": "42495130",
+            "B83": "43189090",
+            "B84": "43235421",
+            "B85": "43837144",
+            "B86": "44115166",
+            "B87": "44270797",
+            "B88": "45380457",
+            "B89": "45386282",
+            "B90": "46196026",
+            "B91": "46300157",
+            "B92": "48512428",
+            "B93": "49546866",
+            "B94": "49687477",
+            "B95": "50893874",
+            "B96": "51093532",
+            "B97": "51126698",
+            "B98": "51397982",
+            "B99": "52376160",
+            "C10": "714.36",
+            "C11": "369.01",
+            "C12": "525.20",
+            "C20": "120.72",
+            "C21": "269.30",
+            "C22": "422.36",
+            "C26": "971.83",
+            "C28": "110.65",
+            "C29": "496.66",
+            "C30": "841.89",
+            "C31": "886.06",
+            "C32": "536.09",
+            "C34": "16.13",
+            "C38": "90.40",
+            "C39": "76.23",
+            "C40": "185.33",
+            "C41": "65.32",
+            "C42": "111.51",
+            "C43": "493.89",
+            "C44": "787.04",
+            "C45": "578.58",
+            "C46": "204.48",
+            "C48": "985.49",
+            "C50": "268.33",
+            "C52": "34.51",
+            "C54": "61.19",
+            "C60": "62.83",
+            "C63": "326.11",
+            "C64": "898.66",
+            "C65": "251.17",
+            "C66": "902.46",
+            "C67": "442.33",
+            "C70": "561.10",
+            "C71": "469.05",
+            "C74": "477.14",
+            "C76": "284.69",
+            "C80": "266.21",
+            "C82": "699.49",
+            "C85": "82.73",
+            "C87": "542.97",
+            "C88": "446.42",
+            "C89": "380.14",
+            "C91": "683.73",
+            "C92": "566.99",
+            "C94": "646.75",
+            "C97": "748.88",
+            "C98": "253.40",
+            "D13": "174.59",
+            "D14": "374.65",
+            "D15": "339.03",
+            "D16": "140.66",
+            "D17": "862.92",
+            "D18": "282.39",
+            "D19": "847.67",
+            "D23": "616.14",
+            "D24": "376.83",
+            "D25": "523.78",
+            "D27": "701.88",
+            "D29": "496.66",
+            "D33": "805.83",
+            "D35": "579.30",
+            "D36": "577.84",
+            "D37": "673.27",
+            "D38": "90.40",
+            "D47": "47.03",
+            "D48": "985.49",
+            "D49": "779.72",
+            "D51": "277.24",
+            "D53": "702.84",
+            "D55": "334.42",
+            "D56": "875.84",
+            "D57": "570.46",
+            "D58": "60.52",
+            "D59": "29.15",
+            "D61": "822.61",
+            "D62": "931.36",
+            "D68": "728.49",
+            "D69": "454.44",
+            "D72": "866.51",
+            "D73": "968.06",
+            "D74": "477.14",
+            "D75": "154.14",
+            "D77": "69.76",
+            "D78": "323.27",
+            "D79": "862.51",
+            "D81": "335.73",
+            "D83": "555.46",
+            "D84": "685.07",
+            "D86": "942.65",
+            "D90": "813.06",
+            "D93": "671.93",
+            "D95": "995.04",
+            "D96": "896.64",
+            "D98": "253.40",
+            "D99": "66.10",
+            "E10": "714.36",
+            "E11": "369.01",
+            "E12": "525.20",
+            "E13": "174.59",
+            "E14": "374.65",
+            "E15": "339.03",
+            "E16": "140.66",
+            "E17": "862.92",
+            "E18": "282.39",
+            "E19": "847.67",
+            "E20": "120.72",
+            "E21": "269.30",
+            "E22": "422.36",
+            "E23": "616.14",
+            "E24": "376.83",
+            "E25": "523.78",
+            "E26": "971.83",
+            "E27": "701.88",
+            "E28": "110.65",
+            "E29": "993.32",
+            "E30": "841.89",
+            "E31": "886.06",
+            "E32": "536.09",
+            "E33": "805.83",
+            "E34": "16.13",
+            "E35": "579.30",
+            "E36": "577.84",
+            "E37": "673.27",
+            "E38": "180.80",
+            "E39": "76.23",
+            "E40": "185.33",
+            "E41": "65.32",
+            "E42": "111.51",
+            "E43": "493.89",
+            "E44": "787.04",
+            "E45": "578.58",
+            "E46": "204.48",
+            "E47": "47.03",
+            "E48": "1970.98",
+            "E49": "779.72",
+            "E50": "268.33",
+            "E51": "277.24",
+            "E52": "34.51",
+            "E53": "702.84",
+            "E54": "61.19",
+            "E55": "334.42",
+            "E56": "875.84",
+            "E57": "570.46",
+            "E58": "60.52",
+            "E59": "29.15",
+            "E60": "62.83",
+            "E61": "822.61",
+            "E62": "931.36",
+            "E63": "326.11",
+            "E64": "898.66",
+            "E65": "251.17",
+            "E66": "902.46",
+            "E67": "442.33",
+            "E68": "728.49",
+            "E69": "454.44",
+            "E70": "561.10",
+            "E71": "469.05",
+            "E72": "866.51",
+            "E73": "968.06",
+            "E74": "954.28",
+            "E75": "154.14",
+            "E76": "284.69",
+            "E77": "69.76",
+            "E78": "323.27",
+            "E79": "862.51",
+            "E80": "266.21",
+            "E81": "335.73",
+            "E82": "699.49",
+            "E83": "555.46",
+            "E84": "685.07",
+            "E85": "82.73",
+            "E86": "942.65",
+            "E87": "542.97",
+            "E88": "446.42",
+            "E89": "380.14",
+            "E90": "813.06",
+            "E91": "683.73",
+            "E92": "566.99",
+            "E93": "671.93",
+            "E94": "646.75",
+            "E95": "995.04",
+            "E96": "896.64",
+            "E97": "748.88",
+            "E98": "506.80",
+            "E99": "66.10",
+            "B100": "52697630",
+            "B101": "52870804",
+            "B102": "53239020",
+            "B103": "53335630",
+            "B104": "53858146",
+            "B105": "54040755",
+            "B106": "54479395",
+            "B107": "54528192",
+            "B108": "54730083",
+            "B109": "55444897",
+            "B110": "55450065",
+            "B111": "55853989",
+            "B112": "55859479",
+            "B113": "55978545",
+            "B114": "56702798",
+            "B115": "56940756",
+            "B116": "58152560",
+            "B117": "59169574",
+            "B118": "59736806",
+            "B119": "61602489",
+            "B120": "62665919",
+            "B121": "62758192",
+            "B122": "62943277",
+            "B123": "63051186",
+            "B124": "65657133",
+            "B125": "65899458",
+            "B126": "66761945",
+            "B127": "66846840",
+            "B128": "67283606",
+            "B129": "67548873",
+            "B130": "69613838",
+            "B131": "69765117",
+            "B132": "70098167",
+            "B133": "70534368",
+            "B134": "71078229",
+            "B135": "71319902",
+            "B136": "71369648",
+            "B137": "71376141",
+            "B138": "72217443",
+            "B139": "72659809",
+            "B140": "72883709",
+            "B141": "73191421",
+            "B142": "73684220",
+            "B143": "74014279",
+            "B144": "74088126",
+            "B145": "75410476",
+            "B146": "75817527",
+            "B147": "77140593",
+            "B148": "77558800",
+            "B149": "78916470",
+            "B150": "79031936",
+            "B151": "79751742",
+            "B152": "80286530",
+            "B153": "80765899",
+            "B154": "82060237",
+            "B155": "82306595",
+            "B156": "83101113",
+            "B157": "83211478",
+            "B158": "83713620",
+            "B159": "84770820",
+            "B160": "84800206",
+            "B161": "84952943",
+            "B162": "86407021",
+            "B163": "86619158",
+            "B164": "86663007",
+            "B165": "87144451",
+            "B166": "87254792",
+            "B167": "88194202",
+            "B168": "88266169",
+            "B169": "88761732",
+            "B170": "88882642",
+            "B171": "89421277",
+            "B172": "89565544",
+            "B173": "90841330",
+            "B174": "91483447",
+            "B175": "91590435",
+            "B176": "91939241",
+            "B177": "92335820",
+            "B178": "92422728",
+            "B179": "92676749",
+            "B180": "93202190",
+            "B181": "93479509",
+            "B182": "95353791",
+            "B183": "95696393",
+            "B184": "95804583",
+            "B185": "95860510",
+            "B186": "96051566",
+            "B187": "96263709",
+            "B188": "96456101",
+            "B189": "99519803",
+            "B190": "Grand Total",
+            "C100": "409.46",
+            "C101": "28.08",
+            "C106": "184.81",
+            "C107": "906.16",
+            "C108": "1094.00",
+            "C109": "818.87",
+            "C110": "192.68",
+            "C111": "385.72",
+            "C117": "976.44",
+            "C118": "310.80",
+            "C119": "354.99",
+            "C120": "898.04",
+            "C122": "397.81",
+            "C128": "537.90",
+            "C129": "886.96",
+            "C131": "420.66",
+            "C133": "359.50",
+            "C134": "60.29",
+            "C139": "740.19",
+            "C142": "554.52",
+            "C144": "759.21",
+            "C145": "116.62",
+            "C148": "302.90",
+            "C152": "187.16",
+            "C153": "847.55",
+            "C154": "700.62",
+            "C155": "190.59",
+            "C161": "432.99",
+            "C163": "886.00",
+            "C167": "715.20",
+            "C169": "101.82",
+            "C171": "122.95",
+            "C174": "609.90",
+            "C175": "867.14",
+            "C177": "675.11",
+            "C178": "623.53",
+            "C182": "40.39",
+            "C184": "554.62",
+            "C187": "839.28",
+            "C189": "717.61",
+            "C190": "43541.41",
+            "D102": "995.08",
+            "D103": "761.74",
+            "D104": "773.13",
+            "D105": "364.27",
+            "D112": "841.73",
+            "D113": "560.15",
+            "D114": "824.63",
+            "D115": "783.50",
+            "D116": "788.60",
+            "D117": "976.44",
+            "D118": "310.80",
+            "D121": "92.40",
+            "D123": "171.84",
+            "D124": "336.61",
+            "D125": "206.92",
+            "D126": "345.03",
+            "D127": "505.00",
+            "D130": "539.76",
+            "D132": "189.69",
+            "D135": "713.31",
+            "D136": "993.98",
+            "D137": "541.38",
+            "D138": "790.14",
+            "D139": "740.19",
+            "D140": "481.88",
+            "D141": "83.31",
+            "D143": "883.45",
+            "D146": "394.60",
+            "D147": "281.52",
+            "D149": "64.48",
+            "D150": "645.82",
+            "D151": "771.06",
+            "D156": "405.74",
+            "D157": "741.29",
+            "D158": "196.84",
+            "D159": "152.71",
+            "D160": "356.93",
+            "D162": "138.69",
+            "D164": "929.08",
+            "D165": "887.13",
+            "D166": "554.21",
+            "D168": "820.22",
+            "D170": "939.97",
+            "D171": "122.95",
+            "D172": "335.69",
+            "D173": "917.55",
+            "D176": "514.59",
+            "D179": "288.94",
+            "D180": "214.12",
+            "D181": "16.74",
+            "D183": "27.28",
+            "D185": "458.58",
+            "D186": "648.09",
+            "D188": "985.01",
+            "D190": "56717.97",
+            "E100": "409.46",
+            "E101": "28.08",
+            "E102": "995.08",
+            "E103": "761.74",
+            "E104": "773.13",
+            "E105": "364.27",
+            "E106": "184.81",
+            "E107": "906.16",
+            "E108": "1094.00",
+            "E109": "818.87",
+            "E110": "192.68",
+            "E111": "385.72",
+            "E112": "841.73",
+            "E113": "560.15",
+            "E114": "824.63",
+            "E115": "783.50",
+            "E116": "788.60",
+            "E117": "1952.88",
+            "E118": "621.60",
+            "E119": "354.99",
+            "E120": "898.04",
+            "E121": "92.40",
+            "E122": "397.81",
+            "E123": "171.84",
+            "E124": "336.61",
+            "E125": "206.92",
+            "E126": "345.03",
+            "E127": "505.00",
+            "E128": "537.90",
+            "E129": "886.96",
+            "E130": "539.76",
+            "E131": "420.66",
+            "E132": "189.69",
+            "E133": "359.50",
+            "E134": "60.29",
+            "E135": "713.31",
+            "E136": "993.98",
+            "E137": "541.38",
+            "E138": "790.14",
+            "E139": "1480.38",
+            "E140": "481.88",
+            "E141": "83.31",
+            "E142": "554.52",
+            "E143": "883.45",
+            "E144": "759.21",
+            "E145": "116.62",
+            "E146": "394.60",
+            "E147": "281.52",
+            "E148": "302.90",
+            "E149": "64.48",
+            "E150": "645.82",
+            "E151": "771.06",
+            "E152": "187.16",
+            "E153": "847.55",
+            "E154": "700.62",
+            "E155": "190.59",
+            "E156": "405.74",
+            "E157": "741.29",
+            "E158": "196.84",
+            "E159": "152.71",
+            "E160": "356.93",
+            "E161": "432.99",
+            "E162": "138.69",
+            "E163": "886.00",
+            "E164": "929.08",
+            "E165": "887.13",
+            "E166": "554.21",
+            "E167": "715.20",
+            "E168": "820.22",
+            "E169": "101.82",
+            "E170": "939.97",
+            "E171": "245.90",
+            "E172": "335.69",
+            "E173": "917.55",
+            "E174": "609.90",
+            "E175": "867.14",
+            "E176": "514.59",
+            "E177": "675.11",
+            "E178": "623.53",
+            "E179": "288.94",
+            "E180": "214.12",
+            "E181": "16.74",
+            "E182": "40.39",
+            "E183": "27.28",
+            "E184": "554.62",
+            "E185": "458.58",
+            "E186": "648.09",
+            "E187": "839.28",
+            "E188": "985.01",
+            "E189": "717.61",
+            "E190": "100259.38"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Find the GET request which most commonly results in an error. Place the URL in ANSWER!A1",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "a9efbeeb-3fe0-4e15-9a6b-773437858ad4",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/aba12ab9-a833-4ae9-ab60-80044111621f/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/aba12ab9-a833-4ae9-ab60-80044111621f/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "/api/users"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "For a company with USD 5 million in cash, they want to expand and increase per month 2 employees. Consider the increase per month on sales is 3.5%, determine if the company could contining hiring employees or not, if not when they will have spend USD 3 million of their cash, put the month and the year on ANSWER!A1 formatted as YYYY-MM. If they can continue hiring such that they will NOT drop below a cash balance of 3M, place FALSE in ANSWER!A1.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "e3edb2a9-6f28-4d2a-9352-3739b6919643",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/d00d7968-047c-4db6-af0c-3d14f1a1e751/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/d00d7968-047c-4db6-af0c-3d14f1a1e751/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "2026-04"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "For the ticker that has the greatest correlation between volume and next day price change (%) find the day with the greatest volume and the next days price change (%)\n - put the ticker in ANSWER!A1\n - put the volume in ANSWER B1 (basic number with no thousands separators and no decimal precision and no dollar sign)\n - put the next day price change in ANSWER C1 (percentage format with no decimal points)\nNOTE\n- use CORREL to determine correlation\n- create a pivot table to compare each ticker's volume and price side by side, and then create a separate array to determine day over day price change (%)s over time. Lastly, run the CORREL function across these side by side arrays to generate correlation for each ticker",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "0963d367-f0ac-4be0-8f46-337bf335e68f",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/715426c8-9df7-4ffa-92e9-200134a84da9/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/715426c8-9df7-4ffa-92e9-200134a84da9/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "ABC",
+            "B1": "4999972",
+            "C1": "145%"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given a beginning loan balance of $150,000 dated March 21, 2025 at 12% interest, with payment amounts of $6965 on April 1, $25,000 on April 5th, and $7500 on May 1st. Please calculate the remaining principal balance after the May 1, 2025 payment, assuming that for each payment detailed in cells B3:B5 in the \"INPUT\" sheet, the payment went (i) first to pay any interest accrued since the prior payment (or in the case of the first payment in row 3, since the loan origination) and that (ii) the remainder of such payment then went towards paying down the outstanding principal balance. Place the answer in cell A1 of the ANSWER tab. Round it to 2 decimal places.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "1bb82b07-9899-4360-a3ce-1815eeb5c80d",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/31b03ce3-43e8-4ff6-b3a3-8ebbcbbcc8b3/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/31b03ce3-43e8-4ff6-b3a3-8ebbcbbcc8b3/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "$112,281.49"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given an automobile was purchased in Feb 1, 2022 with an estimated life of 7 years at a cost of 45,000 and was disposed of in April 1, 2025 with no salvage value and monthly depreciation is calculted to the nearest cent, calculate the loss on disposal. Put your answer in the ANSWER tab in cell A1. Format with dollar sign, thousands separators and 2 decimal places.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "49ccea4d-4aaf-4faf-9659-b389686568a7",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/cc654e52-d186-459d-8416-81bf1c80462f/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/cc654e52-d186-459d-8416-81bf1c80462f/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "$24,642.86"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the amounts in foreign currency, convert them to usd using the FX tab. Sum the total amount in USD, put the result on ANSWER!A1. The answer should have no thousands separator with 2 decimal places.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "48d43d57-ed1d-4df0-8b36-62380bba7865",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/9fb9cb55-a466-40a0-afec-dad4d8fb3362/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/9fb9cb55-a466-40a0-afec-dad4d8fb3362/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "1664934.45"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the customer churn data, identify the months with the highest and lowest net new signups. Place the month with the highest signups in ANSWER!A1 and the number of signup for that month in B1. Place the month with the lowest signups in ANSWER!A2 and the number of signups for that month in B2. Format the month in all caps and three letters.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "ff114e80-196d-4a7a-99ca-152bac4fba90",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/9c233ba4-799e-4eae-92e7-f82077e62c38/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/9c233ba4-799e-4eae-92e7-f82077e62c38/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "MAY",
+            "A2": "OCT",
+            "B1": "95",
+            "B2": "73"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the data from the client, format the rows and create a pivot table on answer A1 with Category as column 1 and Sum of Amount as column 2, sort from smallest to largest by Sum of Amounts. Round the number to no decimal places.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "1c0a2b67-393c-4a92-8cde-1cd1de4fe00b",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/0e9ca100-9e38-4e70-a31b-750b7e9ae4b7/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/0e9ca100-9e38-4e70-a31b-750b7e9ae4b7/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Category",
+            "A2": "Meals & Entertainment",
+            "A3": "Travel",
+            "A4": "Office Supplies",
+            "B1": "Sum of Amount",
+            "B2": "0",
+            "B3": "345",
+            "B4": "45760"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the data provided, make a pivot table on ANSWER!A3, using the metrics: Net Income, Revenue and Total Assets and the title for the headings the Quarter, for the quarter use the structure: 4 Digits of the company, year and quarter.. Ensure that the metrics are the rows and the quarters are the columns. Label the quarters like this: FORD2024Q1 for Q1 2024. There should be both grand totals.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "9d1a335a-aeae-4b63-ba09-4b9ac0b1501c",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/abbb6413-bc91-473f-bf8b-be51fcf7b189/gold_solution_3.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/abbb6413-bc91-473f-bf8b-be51fcf7b189/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A3": "Sum of Amount (USD Millions)",
+            "A5": "Net Income",
+            "A6": "Revenue",
+            "A7": "Total Assets",
+            "A8": "Grand Total",
+            "B4": "FORD2024Q1",
+            "B5": "1.33",
+            "B6": "42.78",
+            "B7": "274.34",
+            "B8": "318.45",
+            "C4": "FORD2024Q2",
+            "C5": "1.83",
+            "C6": "44.81",
+            "C7": "276.59",
+            "C8": "323.23",
+            "D4": "FORD2024Q3",
+            "D5": "896.00",
+            "D6": "43.07",
+            "D7": "287.05",
+            "D8": "1226.12",
+            "E4": "FORD2025Q1",
+            "E5": "471.00",
+            "E6": "40.66",
+            "E7": "284.54",
+            "E8": "796.20",
+            "F4": "Grand Total",
+            "F5": "1370.17",
+            "F6": "171.32",
+            "F7": "1122.51",
+            "F8": "2664.00"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the data, create a pivot table in the ANSWER tab with AssignedAgentID and Status fields as rows. Add a column for the count of the # of TicketID and a calculated field that averages the ResolutionTimeHours and replacing an errors with zeros. Average of ResolutionTimeHours should be formatted with 2 decimal places. Note that the zeros should not be included in the calculation of the average. If you are using GoogleSheets, start your pivot table on cell A3.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "c7d6cdf8-7c66-48f7-b185-21f1c77fa9cb",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/749b8a15-cdb3-454e-bfc3-f7d0e2b40830/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/749b8a15-cdb3-454e-bfc3-f7d0e2b40830/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "C3": "Count of TicketID",
+            "D3": "Average of ResolutionTimeHours",
+            "A4": "Agent-101",
+            "B4": "Closed",
+            "C4": "73",
+            "D4": "13.90",
+            "B5": "In Progress",
+            "C5": "30",
+            "B6": "Open",
+            "C6": "31",
+            "B7": "Resolved",
+            "C7": "66",
+            "D7": "22.04",
+            "B8": "Waiting for Customer",
+            "C8": "12",
+            "C9": "212",
+            "D9": "17.76",
+            "A10": "Agent-102",
+            "B10": "Closed",
+            "C10": "70",
+            "D10": "28.53",
+            "B11": "In Progress",
+            "C11": "36",
+            "B12": "Open",
+            "C12": "32",
+            "B13": "Resolved",
+            "C13": "77",
+            "D13": "17.09",
+            "B14": "Waiting for Customer",
+            "C14": "10",
+            "C15": "225",
+            "D15": "22.54",
+            "A16": "Agent-103",
+            "B16": "Closed",
+            "C16": "73",
+            "D16": "23.11",
+            "B17": "In Progress",
+            "C17": "39",
+            "B18": "Open",
+            "C18": "14",
+            "B19": "Resolved",
+            "C19": "92",
+            "D19": "17.08",
+            "B20": "Waiting for Customer",
+            "C20": "11",
+            "C21": "229",
+            "D21": "19.75",
+            "A22": "Agent-104",
+            "B22": "Closed",
+            "C22": "63",
+            "D22": "15.48",
+            "B23": "In Progress",
+            "C23": "32",
+            "B24": "Open",
+            "C24": "18",
+            "B25": "Resolved",
+            "C25": "97",
+            "D25": "15.40",
+            "B26": "Waiting for Customer",
+            "C26": "13",
+            "C27": "223",
+            "D27": "15.43",
+            "A28": "Agent-105",
+            "B28": "Closed",
+            "C28": "70",
+            "D28": "22.20",
+            "B29": "In Progress",
+            "C29": "27",
+            "B30": "Open",
+            "C30": "16",
+            "B31": "Resolved",
+            "C31": "69",
+            "D31": "15.21",
+            "B32": "Waiting for Customer",
+            "C32": "10",
+            "C33": "192",
+            "D33": "18.73",
+            "A34": "Agent-106",
+            "B34": "Closed",
+            "C34": "65",
+            "D34": "26.15",
+            "B35": "In Progress",
+            "C35": "38",
+            "B36": "Open",
+            "C36": "20",
+            "B37": "Resolved",
+            "C37": "87",
+            "D37": "21.56",
+            "B38": "Waiting for Customer",
+            "C38": "10",
+            "C39": "220",
+            "D39": "23.52",
+            "A40": "Agent-107",
+            "B40": "Closed",
+            "C40": "68",
+            "D40": "18.41",
+            "B41": "In Progress",
+            "C41": "35",
+            "B42": "Open",
+            "C42": "17",
+            "B43": "Resolved",
+            "C43": "106",
+            "D43": "16.52",
+            "B44": "Waiting for Customer",
+            "C44": "11",
+            "C45": "237",
+            "D45": "17.26",
+            "A46": "Agent-108",
+            "B46": "Closed",
+            "C46": "65",
+            "D46": "16.81",
+            "B47": "In Progress",
+            "C47": "33",
+            "B48": "Open",
+            "C48": "20",
+            "B49": "Resolved",
+            "C49": "93",
+            "D49": "14.93",
+            "B50": "Waiting for Customer",
+            "C50": "8",
+            "C51": "219",
+            "D51": "15.70",
+            "B52": "(blank)",
+            "C52": "243",
+            "D52": "20.98",
+            "B53": "Closed",
+            "C53": "74",
+            "D53": "24.44",
+            "B54": "In Progress",
+            "C54": "32",
+            "B55": "Open",
+            "C55": "26",
+            "B56": "Resolved",
+            "C56": "99",
+            "D56": "18.39",
+            "B57": "Waiting for Customer",
+            "C57": "12",
+            "B58": "Grand Total",
+            "C58": "2000",
+            "D58": "19.05"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the employee data, create a pivot table in the ANSWER tab on A1 with two rows: Department and PerformanceRating. The values should be Count of LastPromotionDate and Average of SalaryUSD. The salary column should be rounded to 2 decimal places, no currency symbol, no thousands separators.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "7598db5d-0fd1-44db-ab1a-593cf026317b",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/33a38ce1-f7fb-4488-9c2f-1e2b0d90267e/gold_solution_3.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/33a38ce1-f7fb-4488-9c2f-1e2b0d90267e/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "B2": "1",
+            "B3": "2",
+            "B4": "3",
+            "B5": "4",
+            "B6": "5",
+            "B8": "1",
+            "B9": "2",
+            "C1": "Count of LastPromotionDate",
+            "C2": "12",
+            "C3": "13",
+            "C4": "10",
+            "C5": "15",
+            "C6": "5",
+            "C8": "1",
+            "C9": "5",
+            "D1": "Average of SalaryUSD",
+            "D2": "84965.91",
+            "D3": "87028.38",
+            "D4": "86094.90",
+            "D5": "78111.64",
+            "D6": "86015.00",
+            "D8": "82727.50",
+            "D9": "78876.00",
+            "A38": "Grand Total",
+            "B10": "3",
+            "B11": "4",
+            "B12": "5",
+            "B14": "1",
+            "B15": "2",
+            "B16": "3",
+            "B17": "4",
+            "B18": "5",
+            "B20": "1",
+            "B21": "2",
+            "B22": "3",
+            "B23": "4",
+            "B24": "5",
+            "B26": "1",
+            "B27": "2",
+            "B28": "3",
+            "B29": "4",
+            "B30": "5",
+            "B32": "1",
+            "B33": "2",
+            "B34": "3",
+            "B35": "4",
+            "B36": "5",
+            "C10": "4",
+            "C15": "3",
+            "C16": "2",
+            "C17": "2",
+            "C20": "1",
+            "C21": "4",
+            "C22": "6",
+            "C23": "3",
+            "C24": "5",
+            "C26": "10",
+            "C27": "9",
+            "C28": "4",
+            "C29": "6",
+            "C30": "4",
+            "C32": "5",
+            "C33": "2",
+            "C34": "4",
+            "C35": "4",
+            "C36": "1",
+            "C38": "140",
+            "D10": "76759.43",
+            "D11": "78318.00",
+            "D12": "80036.25",
+            "D14": "76599.00",
+            "D15": "93749.17",
+            "D16": "79929.00",
+            "D17": "88994.75",
+            "D18": "102902.00",
+            "D20": "77878.50",
+            "D21": "77480.38",
+            "D22": "84212.67",
+            "D23": "77508.83",
+            "D24": "77182.50",
+            "D26": "56034.08",
+            "D27": "52096.20",
+            "D28": "63190.71",
+            "D29": "60750.00",
+            "D30": "50299.25",
+            "D32": "71131.57",
+            "D33": "89669.50",
+            "D34": "81155.50",
+            "D35": "82037.80",
+            "D36": "61600.50",
+            "D38": "77770.00"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the EUR values of a company transactions and the FX of the day of the transaction, convert values to USD. Then, create a tab called \"Answer\" and provide the sum all of all amounts in USD in A1.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "b4462209-0822-4220-8e7e-a9a2a8e6b58e",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/e491ec81-2ab2-4bee-b646-01c1d7940e31/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/e491ec81-2ab2-4bee-b646-01c1d7940e31/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": " 27,301,058.62 "
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the financial data create 3 scenarios, one for moderate, bull and bear. For the first moderate, consider the CAGR as 8%, GM as 60% and OP as 20%. For the bull, replace the numers for 12%, 65% and 30%. For bear replace for 3%, 55% and 20%. Create a table for each scenario, where rows are 2025 through 2029. Columns should be Year Revenue COGS Operating Expenses EBITDA Net Income. Moderate should start in A1 and end in F6. Bull should start in A9 and end in F14. Bear should start in A17 and end in F22. Assume that in all cases the tax rate is 20% and that there is no D&A expense. CAGR is based of the previous years revenue and all other percentages are based off the current year revenue. All values should be in basic number with thousands separators and 2 decimal places and no dollar signs.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "d4abb58a-47bf-4535-b1ab-d60a4ead37c8",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/98bb22e2-1bbd-4a81-8df4-d8665518d6be/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/98bb22e2-1bbd-4a81-8df4-d8665518d6be/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Year",
+            "A2": "2025",
+            "A3": "2026",
+            "A4": "2027",
+            "A5": "2028",
+            "A6": "2029",
+            "A9": "Year",
+            "B1": "Revenue",
+            "B2": "108,000,000.00",
+            "B3": "116,640,000.00",
+            "B4": "125,971,200.00",
+            "B5": "136,048,896.00",
+            "B6": "146,932,807.68",
+            "B9": "Revenue",
+            "C1": "COGS",
+            "C2": "43,200,000.00",
+            "C3": "46,656,000.00",
+            "C4": "50,388,480.00",
+            "C5": "54,419,558.40",
+            "C6": "58,773,123.07",
+            "C9": "COGS",
+            "D1": "Operating Expenses",
+            "D2": "21,600,000.00",
+            "D3": "23,328,000.00",
+            "D4": "25,194,240.00",
+            "D5": "27,209,779.20",
+            "D6": "29,386,561.54",
+            "D9": "Operating Expenses",
+            "E1": "EBITDA",
+            "E2": "43,200,000.00",
+            "E3": "46,656,000.00",
+            "E4": "50,388,480.00",
+            "E5": "54,419,558.40",
+            "E6": "58,773,123.07",
+            "E9": "EBITDA",
+            "F1": "Net Income",
+            "F2": "34,560,000.00",
+            "F3": "37,324,800.00",
+            "F4": "40,310,784.00",
+            "F5": "43,535,646.72",
+            "F6": "47,018,498.46",
+            "F9": "Net Income",
+            "A10": "2025",
+            "A11": "2026",
+            "A12": "2027",
+            "A13": "2028",
+            "A14": "2029",
+            "A17": "Year",
+            "A18": "2025",
+            "A19": "2026",
+            "A20": "2027",
+            "A21": "2028",
+            "A22": "2029",
+            "B10": "112,000,000.00",
+            "B11": "125,440,000.00",
+            "B12": "140,492,800.00",
+            "B13": "157,351,936.00",
+            "B14": "176,234,168.32",
+            "B17": "Revenue",
+            "B18": "103,000,000.00",
+            "B19": "106,090,000.00",
+            "B20": "109,272,700.00",
+            "B21": "112,550,881.00",
+            "B22": "115,927,407.43",
+            "C10": "39,200,000.00",
+            "C11": "43,904,000.00",
+            "C12": "49,172,480.00",
+            "C13": "55,073,177.60",
+            "C14": "61,681,958.91",
+            "C17": "COGS",
+            "C18": "46,350,000.00",
+            "C19": "47,740,500.00",
+            "C20": "49,172,715.00",
+            "C21": "50,647,896.45",
+            "C22": "52,167,333.34",
+            "D10": "33,600,000.00",
+            "D11": "37,632,000.00",
+            "D12": "42,147,840.00",
+            "D13": "47,205,580.80",
+            "D14": "52,870,250.50",
+            "D17": "Operating Expenses",
+            "D18": "20,600,000.00",
+            "D19": "21,218,000.00",
+            "D20": "21,854,540.00",
+            "D21": "22,510,176.20",
+            "D22": "23,185,481.49",
+            "E10": "39,200,000.00",
+            "E11": "43,904,000.00",
+            "E12": "49,172,480.00",
+            "E13": "55,073,177.60",
+            "E14": "61,681,958.91",
+            "E17": "EBITDA",
+            "E18": "36,050,000.00",
+            "E19": "37,131,500.00",
+            "E20": "38,245,445.00",
+            "E21": "39,392,808.35",
+            "E22": "40,574,592.60",
+            "F10": "31,360,000.00",
+            "F11": "35,123,200.00",
+            "F12": "39,337,984.00",
+            "F13": "44,058,542.08",
+            "F14": "49,345,567.13",
+            "F17": "Net Income",
+            "F18": "28,840,000.00",
+            "F19": "29,705,200.00",
+            "F20": "30,596,356.00",
+            "F21": "31,514,246.68",
+            "F22": "32,459,674.08"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the FX data and dates, create column that identifies each day as weekday or weekend. Then create a pivot tabe in ANSWER!A3 with daily-average FX rates and filter out weekends. Dates should be YYYY-MM-DD format, FX rate should have 3 decimal places. Verify that values occupy B4-B13, with grand total in B14.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "cea3b19a-6855-45f0-863e-42694346d487",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/c2ca4cb3-8f15-4a9e-9489-95c67646ed25/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/c2ca4cb3-8f15-4a9e-9489-95c67646ed25/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A4": "2024-04-01",
+            "A5": "2024-04-02",
+            "A6": "2024-04-03",
+            "A7": "2024-04-04",
+            "A8": "2024-04-05",
+            "A9": "2024-04-08",
+            "B4": "1.020",
+            "B5": "0.953",
+            "B6": "0.989",
+            "B7": "0.046",
+            "B8": "0.046",
+            "B9": "0.046",
+            "A10": "2024-04-09",
+            "A11": "2024-04-10",
+            "A12": "2024-04-11",
+            "A13": "2024-04-12",
+            "A14": "Grand Total",
+            "B10": "0.046",
+            "B11": "0.046",
+            "B12": "0.046",
+            "B13": "0.046",
+            "B14": "0.328"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the global revenue from the company, convert the foreign values into USD and sum all the values, answer on A1 on Answer. Use the conversion rate for 3/15/2023. Before submitting, remove the formula and just put the value. Should be formatted with a thousands separator and two decimal places, no currency symbol.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "9a96fc8b-75c9-49dc-bf0b-3e62e36a6ac2",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/f199d15d-e8c1-4d34-9823-1b2999a43b36/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/f199d15d-e8c1-4d34-9823-1b2999a43b36/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "1,758,109,357.43"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the gross wages file which includes name, rate and hours worked and a file which includes the federal and state taxes with rates and basis of calculations, calculate the employee payroll tax burden for each employee. Put the answer in the ANSWER tab in a table format which includes columns for the employee name, rate of pay, hours worked, total pay, and employee costs for social security, medicare, workers compensation, unemployment, family medical leave, and CARES (long term disability), and the total employee tax burden. The dollar values use currency type, with 2 decimal places of precision.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "ed7985e4-051b-4ca2-8490-e5d755f01c9a",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/774a3069-410d-4436-aa21-5f733aabaafd/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/774a3069-410d-4436-aa21-5f733aabaafd/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A2": "Kressa",
+            "A3": "Saumya",
+            "A4": "Jeane",
+            "A5": "Sarah",
+            "A6": "Anaiya",
+            "A7": "Varun",
+            "A8": "Sofie",
+            "B2": "$27.00",
+            "B3": "$30.50",
+            "B4": "$27.00",
+            "B5": "$18.00",
+            "B6": "$50.00",
+            "B7": "$52.00",
+            "B8": "$19.00",
+            "C2": "40",
+            "C3": "50",
+            "C4": "20",
+            "C5": "20",
+            "C6": "80",
+            "C7": "80",
+            "C8": "20",
+            "D2": "$1,080.00",
+            "D3": "$1,525.00",
+            "D4": "$540.00",
+            "D5": "$360.00",
+            "D6": "$4,000.00",
+            "D7": "$4,160.00",
+            "D8": "$380.00",
+            "E2": "$66.96",
+            "E3": "$94.55",
+            "E4": "$33.48",
+            "E5": "$22.32",
+            "E6": "$248.00",
+            "E7": "$257.92",
+            "E8": "$23.56",
+            "F2": "$15.66",
+            "F3": "$22.11",
+            "F4": "$7.83",
+            "F5": "$5.22",
+            "F6": "$58.00",
+            "F7": "$60.32",
+            "F8": "$5.51",
+            "G2": "$2.24",
+            "G3": "$2.80",
+            "G4": "$1.12",
+            "G5": "$1.12",
+            "G6": "$4.48",
+            "G7": "$4.48",
+            "G8": "$1.12",
+            "H2": "$0.32",
+            "H3": "$0.46",
+            "H4": "$0.16",
+            "H5": "$0.11",
+            "H6": "$1.20",
+            "H7": "$1.25",
+            "H8": "$0.11",
+            "I2": "$5.71",
+            "I3": "$8.06",
+            "I4": "$2.85",
+            "I5": "$1.90",
+            "I6": "$21.14",
+            "I7": "$21.99",
+            "I8": "$2.01",
+            "J2": "$6.26",
+            "J3": "$8.85",
+            "J4": "$3.13",
+            "J5": "$2.09",
+            "J6": "$23.20",
+            "J7": "$24.13",
+            "J8": "$2.20",
+            "K2": "$97.16",
+            "K3": "$136.82",
+            "K4": "$48.58",
+            "K5": "$32.76",
+            "K6": "$356.02",
+            "K7": "$370.08",
+            "K8": "$34.52"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the information from curves dates, deduplicate records by date-maturity and Format Yield in USD as currency, then retain the latest entry using the As of Date, and create a pivot table on Answer A1 where rows are curvedate, columns are maturity, and values are yields. Format to 2 decimal places and a dollar sign. There should be both grand totals.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "3506dbf9-71cc-4af5-b2d5-5a994de4e0a4",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/88a420cb-b5d0-47a2-a155-7ba54d4fb6e9/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/88a420cb-b5d0-47a2-a155-7ba54d4fb6e9/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "B3": "Maturity",
+            "A4": "CurveDate",
+            "B4": "10Y",
+            "C4": "1Y",
+            "D4": "2Y",
+            "E4": "30Y",
+            "F4": "5Y",
+            "G4": "Grand Total",
+            "A5": "2024-01-01",
+            "B5": "$3.52",
+            "C5": "$3.73",
+            "D5": "$3.71",
+            "E5": "$3.86",
+            "F5": "$4.71",
+            "G5": "$19.53",
+            "A6": "2024-01-02",
+            "B6": "$3.73",
+            "C6": "$3.62",
+            "D6": "$3.79",
+            "E6": "$4.81",
+            "F6": "$4.54",
+            "G6": "$20.49",
+            "A7": "2024-01-03",
+            "B7": "$4.28",
+            "C7": "$4.98",
+            "D7": "$4.63",
+            "E7": "$3.70",
+            "F7": "$4.79",
+            "G7": "$22.38",
+            "A8": "2024-01-04",
+            "B8": "$4.03",
+            "C8": "$4.84",
+            "D8": "$3.94",
+            "E8": "$4.84",
+            "F8": "$4.49",
+            "G8": "$22.14",
+            "A9": "Grand Total",
+            "B9": "$15.56",
+            "C9": "$17.17",
+            "D9": "$16.07",
+            "E9": "$17.21",
+            "F9": "$18.53",
+            "G9": "$84.54"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the Input data, determine the ticker with the greatest correlation between volume and next day price change.\n- in ANSWER tab put the Ticker in A1 and the correlation in B1\n - use CORREL to determine correlation\n- be sure to first sort the date by ticker Z to A (descending) and then date ascending before calculating next-day price change %\nCorrelation should be rounded to 2 decimal places",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "0b87f523-22b7-4988-a276-8fbdf434eb2c",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/615426c8-9df7-4ffa-92e9-200134a84da9/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/615426c8-9df7-4ffa-92e9-200134a84da9/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "ABC",
+            "B1": "-0.08"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the input data\n 1. Which salesperson generated the highest total sales in terms of value? Put their name in ANSWER!A1 and the amount in ANSWER!B1\n 2. How much more sales, in terms of total value, did they generate than the second place salesperon? Put the amount in ANSWER!A2. Format all dollar numbers with a dollar sign and 2 decimal places of precision.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "bab851c8-51e0-4278-b4f3-29575ecae2f1",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/8c2f7db9-b47e-49aa-8c08-86277ec03860/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/8c2f7db9-b47e-49aa-8c08-86277ec03860/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Carla White",
+            "A2": "$155.00",
+            "B1": "$8,758.00"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the marketing campaign data calculate the cost per conversion within each Channel. List each channel in Answer Column A sorted A-Z. In column B, provide the Campaign which corresponds to the lowest cost per conversion. Finally, in column C provide the cost per conversion for that campaign",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "1e4ede56-163f-4815-b634-7946cf9e60c0",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/8a20abce-f84f-46ff-b6dc-1ea06c9b1d86/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/8a20abce-f84f-46ff-b6dc-1ea06c9b1d86/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Content Marketing",
+            "A2": "Email",
+            "A3": "PPC",
+            "A4": "SEO",
+            "A5": "Social Media",
+            "B1": "Harness Frictionless Users",
+            "B2": "Transform Out-Of-The-Box Schemas",
+            "B3": "Morph Back-End E-Business",
+            "B4": "Facilitate Dynamic Channels",
+            "B5": "Re-Intermediate Cutting-Edge Web-Readiness",
+            "C1": "6.61",
+            "C2": "5.99",
+            "C3": "5.02",
+            "C4": "5.49",
+            "C5": "5.68"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the project management export, figure out who is the most accurate estimator (the most projects completed exactly on predicted time) and who is the most efficient employee (most projects completed under estimated time). Put your answer for most accurate in ANSWER!A1 and most efficient in ANSWER!A2. Don't consider unfinished projects.\n",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "8499e399-48e6-4603-bd96-9b45f5aabed0",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/80869e7a-34bd-42fb-a010-ee43edf8399a/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/80869e7a-34bd-42fb-a010-ee43edf8399a/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Omar Donovan",
+            "A2": "Omar Donovan"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the provided metrics from my company, calculate the average opening ARR between months 2023-01 and 2024-01. Assume all ARR comes in the start of the month.\nPut your answer in ANSWER!A1. No thousands separators and dollar signs, two decimal places.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "304c4d2c-72a4-4c1d-97ce-6e1b32d9b447",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/04601676-b195-4b34-82f4-0b08a17a5a75/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/04601676-b195-4b34-82f4-0b08a17a5a75/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "1876764.43"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the quarterly revenue data in the INPUTS tab project the quartely revenue for 2025 using an average of the growth for the corresponding quarters from prior years. Sum those to find the total. Place the quaterly values (Q1-Q4) in ANSWER cell A1 to A4. Place the total in B1. All numbers should be without thousands separators, with no dollar sign and no decimal places.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "3c8d3cfb-ce35-45fb-828b-b4e2c6209435",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/14114f14-d4e5-4b47-97b1-dc654351c014/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/14114f14-d4e5-4b47-97b1-dc654351c014/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "991105",
+            "A2": "1044283",
+            "A3": "1095308",
+            "A4": "1169204",
+            "B1": "4299900"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the quarterly revenue data in the INPUTS tab, calculate the total Annual revenue for 2022, 2023 and 2024 and use these data points to calculate CAGR in ANSWER tab cell A1. Calculate which year has the highest revenue growth % and place the value of this revenue growth % in cell B1 of the ANSWER tab. Both numbers should format as percentages with two decimal places of precision.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "764ca583-7091-4b7f-8663-5e996db26a2c",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/923e579f-2f38-493d-a85e-29cf4524e4c6/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/923e579f-2f38-493d-a85e-29cf4524e4c6/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "16.74%",
+            "B1": "27.80%"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the real estate data, which city has the highest average monthly growth rate in total list price? Use ListDate to determine the month each ID is in.\nProvide the city name in the ANSWER tab in cell A1. Provide the average monthly growth rate, formatted as a percent with two decimal places, for that city in B1",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "9f71aa71-07f7-4421-8757-bbccbeab0984",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/4e26d81b-0be1-4fc1-b32f-cc043cb5bb37/gold_solution_3.xlsx"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/4e26d81b-0be1-4fc1-b32f-cc043cb5bb37/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Star City",
+            "B1": "39.11%"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the real estate data, which city has the highest count of sales (status sold) of houses with greater than 4 bed in the last calender year? Assume the latest date in the file is the current date\nProvide the city name in the ANSWER tab in cell A1. Provide the number of houses sold with more than 4 beds in that year and city in B1",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "d5d7cc74-c47e-4988-9c8c-8bc08e19f7af",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/87f0f0e4-abc3-4075-a181-0d18fd5227bc/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/87f0f0e4-abc3-4075-a181-0d18fd5227bc/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Gotham",
+            "B1": "4"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the results of budget vs. actual find the difference, identify if its favorable or not. Place the value of the smallest absolute difference on ANSWER tab B1 and the name of the cost center on A1. The value should have no decimal points and no dollar sign.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "6ee1f05a-9d68-4efc-b807-2efdb8d0c74b",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/739c14d9-2651-43e8-a4a4-dcd2c876c932/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/739c14d9-2651-43e8-a4a4-dcd2c876c932/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Finance",
+            "B1": "1,000"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the salaries and the country's tax, The goal is to identify the amount received by employees by country. Determine the value of the sum of net pay by country. Place the value of greatest summed net pay ANSWER!A1. Number should have no thousands seperator, 3 decimal places.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "2774e5e5-10ec-42b1-84cb-c2d4819a5342",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/c707579d-ead6-4623-a8ea-68d5dc3e2a0d/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/c707579d-ead6-4623-a8ea-68d5dc3e2a0d/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "21680.086"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the Sales and COGS projection for the next 2 years (2024-2025) predict into 2026 using 3 scenarios, Rank in ANSWER from A1 to A3 the scenerio with the highest to lowest COGS in dollars. Scenario 1: rev growth 5%, gross margin 18%. Scenario 2: rev growth 12%, gross margin 5%. Scenario 3: rev growth 15%, gross margin 2%. All growth percentages should be applied to the previous year",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "d2c56ee0-7863-45be-b503-eb1639454629",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/630f74b1-6855-46fb-acc7-d01e9a0581da/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/630f74b1-6855-46fb-acc7-d01e9a0581da/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Scenario 3",
+            "A2": "Scenario 2",
+            "A3": "Scenario 1"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the set of past payment transactions, identify the vendors where a 1099 is required to be delivered based on w-9 reported entity (see \"Input 1\" tab). In the ANSWER tab list the vendors in order with the amounts to be reported with two columns: Vendor, 1099 Report amount. Have the vendors be ascending by #. Omit the vendors that don't need to report 1099. Use Currency input type, rounded to 2 decimal places.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "077926f8-6e93-406b-9eb9-b44907173c74",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/0af775fe-a6e7-47d6-968c-e8a7b089162b/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/0af775fe-a6e7-47d6-968c-e8a7b089162b/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Vendor",
+            "A2": "vendor 18",
+            "A3": "vendor 15",
+            "A4": "vendor 19",
+            "A5": "vendor 1",
+            "A6": "vendor 14",
+            "A7": "vendor 9",
+            "A8": "vendor 8",
+            "A9": "vendor 11",
+            "B1": "1099 Report amount",
+            "B2": "$4.00",
+            "B3": "$48.00",
+            "B4": "$81.00",
+            "B5": "$92.60",
+            "B6": "$177.00",
+            "B7": "$866.00",
+            "B8": "$1,661.00",
+            "B9": "$2,615.00",
+            "A10": "vendor 4",
+            "A11": "vendor 5",
+            "B10": "$6,446.00",
+            "B11": "$6,519.00"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the set of past transactions (inflows into our account), project our breakeven month given our implied monthly inflow growth rate (as determined by taking a straight average of the monthly growth rates observed for the five month-over-month periods observable in the inflow data) and fixed expenses of 150k per mo. Produce your answer as a value in the cell A1 of a sheet in the spreadsheet in the format YYYY-MM. Ensure there is nothing else in the ANSWER tab. You may create as many additional sheets as you need to conduct your analysis. If you build a model, put it in its own tab separate from the raw data.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "f1afee7f-df70-4a11-a65e-767a718f2117",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/35571ea4-82a5-4ca7-ab36-d679b523282e/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/35571ea4-82a5-4ca7-ab36-d679b523282e/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "2025-02"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the social media engagement data in the INPUTS tab populate column G by using a vlookup function to look up the month text value in the REFERENCE tab corresponding to the numeric month value from column A in the INPUTS tab. In the ANSWER tab create a pivot table on A3 with the Platform field as a row and Month field as a column. Months should be sorted alphabetically. Sum each of the Posts, Likes, Comments, and Shares for each month as rows too.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "36e43b84-e583-4f02-a160-74049bcab901",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/b105e2c6-6e65-4715-9c42-f9015e5d5751/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/b105e2c6-6e65-4715-9c42-f9015e5d5751/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A4": "Platform",
+            "A5": "Facebook",
+            "A9": "Instagram",
+            "B4": "Values",
+            "B5": "Sum of Posts",
+            "B6": "Sum of Likes",
+            "B7": "Sum of Shares",
+            "B8": "Sum of Comments",
+            "B9": "Sum of Posts",
+            "C4": "August",
+            "C5": "66",
+            "C6": "3899",
+            "C7": "618",
+            "C8": "241",
+            "C9": "54",
+            "D4": "July",
+            "D5": "65",
+            "D6": "4008",
+            "D7": "749",
+            "D8": "260",
+            "D9": "58",
+            "E4": "June",
+            "E5": "54",
+            "E6": "3236",
+            "E7": "560",
+            "E8": "296",
+            "E9": "70",
+            "F4": "November",
+            "F5": "39",
+            "F6": "2066",
+            "F7": "430",
+            "F8": "209",
+            "F9": "52",
+            "G4": "October",
+            "G5": "68",
+            "G6": "3048",
+            "G7": "773",
+            "G8": "271",
+            "G9": "54",
+            "H4": "September",
+            "H5": "64",
+            "H6": "2918",
+            "H7": "769",
+            "H8": "262",
+            "H9": "57",
+            "I4": "Grand Total",
+            "I5": "356",
+            "I6": "19175",
+            "I7": "3899",
+            "I8": "1539",
+            "I9": "345",
+            "A13": "LinkedIn",
+            "A17": "Twitter",
+            "A21": "Grand Total",
+            "B10": "Sum of Likes",
+            "B11": "Sum of Shares",
+            "B12": "Sum of Comments",
+            "B13": "Sum of Posts",
+            "B14": "Sum of Likes",
+            "B15": "Sum of Shares",
+            "B16": "Sum of Comments",
+            "B17": "Sum of Posts",
+            "B18": "Sum of Likes",
+            "B19": "Sum of Shares",
+            "B20": "Sum of Comments",
+            "B21": "Sum of Posts",
+            "B22": "Sum of Likes",
+            "B23": "Sum of Shares",
+            "B24": "Sum of Comments",
+            "C10": "3231",
+            "C11": "541",
+            "C12": "226",
+            "C13": "61",
+            "C14": "2923",
+            "C15": "668",
+            "C16": "295",
+            "C17": "60",
+            "C18": "3290",
+            "C19": "671",
+            "C20": "295",
+            "C21": "241",
+            "C22": "13343",
+            "C23": "2498",
+            "C24": "1057",
+            "D10": "3025",
+            "D11": "700",
+            "D12": "232",
+            "D13": "60",
+            "D14": "3122",
+            "D15": "589",
+            "D16": "314",
+            "D17": "54",
+            "D18": "2950",
+            "D19": "454",
+            "D20": "271",
+            "D21": "237",
+            "D22": "13105",
+            "D23": "2492",
+            "D24": "1077",
+            "E10": "4195",
+            "E11": "834",
+            "E12": "317",
+            "E13": "45",
+            "E14": "2291",
+            "E15": "451",
+            "E16": "185",
+            "E17": "63",
+            "E18": "3366",
+            "E19": "797",
+            "E20": "278",
+            "E21": "232",
+            "E22": "13088",
+            "E23": "2642",
+            "E24": "1076",
+            "F10": "2860",
+            "F11": "514",
+            "F12": "249",
+            "F13": "61",
+            "F14": "3116",
+            "F15": "708",
+            "F16": "246",
+            "F17": "63",
+            "F18": "2714",
+            "F19": "581",
+            "F20": "243",
+            "F21": "215",
+            "F22": "10756",
+            "F23": "2233",
+            "F24": "947",
+            "G10": "2993",
+            "G11": "623",
+            "G12": "265",
+            "G13": "70",
+            "G14": "3596",
+            "G15": "716",
+            "G16": "336",
+            "G17": "58",
+            "G18": "2382",
+            "G19": "578",
+            "G20": "293",
+            "G21": "250",
+            "G22": "12019",
+            "G23": "2690",
+            "G24": "1165",
+            "H10": "3409",
+            "H11": "401",
+            "H12": "313",
+            "H13": "65",
+            "H14": "3271",
+            "H15": "771",
+            "H16": "278",
+            "H17": "51",
+            "H18": "2156",
+            "H19": "431",
+            "H20": "312",
+            "H21": "237",
+            "H22": "11754",
+            "H23": "2372",
+            "H24": "1165",
+            "I10": "19713",
+            "I11": "3613",
+            "I12": "1602",
+            "I13": "362",
+            "I14": "18319",
+            "I15": "3903",
+            "I16": "1654",
+            "I17": "349",
+            "I18": "16858",
+            "I19": "3512",
+            "I20": "1692",
+            "I21": "1412",
+            "I22": "74065",
+            "I23": "14927",
+            "I24": "6487"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the social media engagement data in the INPUTS tab produce an ANSWER tab:\n1. for each row categorize them into \"LOW\" or \"HIGH\" engagements days.\n - start with the ratio of likes to posts, comments to posts, shares to posts\n - normalize each of these against overall ratios (eg (Value - MIN(ratio)) / (MAX(ratio) - MIN(ratio)))\n - produce an engagement metric for each day by averaging the three normalized metrics\n - if this metric is >=0.6 categorize row as \"HIGH\" if its <= 0.3 its \"LOW\"\n2. For each platform, compute the ratio of High / Low days\n\nProduce a table in ANSWER. Where row 1 is the header. column A is 'Platform' and column B is the ratio of high to low days 'RATIO OF HIGH / LOW'.\n - Twitter should be in A2, ratio in B2\n - Facebook should be in A3, ratio in B3\n - Instagram should be in A4, ratio in B4\n - LinkedIn should be in A5, ratio in B5\nRatios in the final table should have 2 decimal places",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "871eefda-4c69-4e3a-abb4-d4215f4a6849",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/86f51853-bb54-4b87-8cf9-77473610a0ad/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/86f51853-bb54-4b87-8cf9-77473610a0ad/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Platform",
+            "A2": "Twitter",
+            "A3": "Facebook",
+            "A4": "Instagram",
+            "A5": "LinkedIn",
+            "B1": "RATIO OF HIGH / LOW",
+            "B2": "1.88",
+            "B3": "2.64",
+            "B4": "3.17",
+            "B5": "2.05"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the social media engagement data in the INPUTS tab, create a pivot table in ANSWER tab. In the ANSWER tab, create a filter using the Platform field and filter for Facebook and Instagram . Include the Date field on the month level as a row (formated by 3 letters) and include values from the Posts, Likes, Shares, and Comments fields summarized by SUM. Columns should be named Sum of X, where X is the field name. Verify that columns occupy Row 3, numbers occupy B2 to E10, with a Grand Total in row 10.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "c437f78d-6382-43b2-b857-153db6efa1c9",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/9c172ee4-5b31-4b7c-9c48-fb0cd1e2c18a/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/9c172ee4-5b31-4b7c-9c48-fb0cd1e2c18a/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A4": "Jun",
+            "A5": "Jul",
+            "A6": "Aug",
+            "A7": "Sep",
+            "A8": "Oct",
+            "A9": "Nov",
+            "B3": "Sum of Posts",
+            "B4": "124",
+            "B5": "123",
+            "B6": "120",
+            "B7": "121",
+            "B8": "122",
+            "B9": "91",
+            "C3": "Sum of Likes",
+            "C4": "7431",
+            "C5": "7033",
+            "C6": "7130",
+            "C7": "6327",
+            "C8": "6041",
+            "C9": "4926",
+            "D3": "Sum of Comments",
+            "D4": "613",
+            "D5": "492",
+            "D6": "467",
+            "D7": "575",
+            "D8": "536",
+            "D9": "458",
+            "E3": "Sum of Shares",
+            "E4": "1394",
+            "E5": "1449",
+            "E6": "1159",
+            "E7": "1170",
+            "E8": "1396",
+            "E9": "944",
+            "A10": "Grand Total",
+            "B10": "701",
+            "C10": "38888",
+            "D10": "3141",
+            "E10": "7512"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the web traffic data in the INPUTS tab, parse the Date column into a Year column and a month column. In the ANSWER tab, create a header name \"Month\" in cell A1, \"Year\" in cell B1, \"Total Monthly Unique Users\" in cell C1, \"Total Monthly Page Views\" in cell D1, and \"Avg Monthly Bounce Rate (%)\" in cell E1. Populate the Month column starting in cells A2 to A13 starting from 1 to 12 where Year is 2023. Populate the Year column starting in cells B2 to B13 with 2023. Populate the Month column starting in cells A14 to A17 starting from 1 to 4. Populate the \"Year\" column starting in cells B14 to B17 with 2024. Calculate the \"Total Monthly Unique Users\" from cells C2 to C13, \"Total Monthly Page Views\" from cells D2 to D13, and \"Avg Monthly Bounce Rate (%)\" from cells E2 to E13. The growth values should be percentages with 2 decimal places.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "67a53dc7-e07e-46df-a4c8-ecbcad1dd0bc",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/35f323aa-bf61-4a0a-bb15-3cc9f3c00a0f/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/35f323aa-bf61-4a0a-bb15-3cc9f3c00a0f/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Month",
+            "A2": "1",
+            "A3": "2",
+            "A4": "3",
+            "A5": "4",
+            "A6": "5",
+            "A7": "6",
+            "A8": "7",
+            "A9": "8",
+            "B1": "Year",
+            "B2": "2023",
+            "B3": "2023",
+            "B4": "2023",
+            "B5": "2023",
+            "B6": "2023",
+            "B7": "2023",
+            "B8": "2023",
+            "B9": "2023",
+            "C1": "Total Monthly Unique Users",
+            "C2": "21928",
+            "C3": "19296",
+            "C4": "21453",
+            "C5": "20987",
+            "C6": "21944",
+            "C7": "21024",
+            "C8": "20875",
+            "C9": "21495",
+            "D1": "Total Monthly Page Views",
+            "D2": "34560",
+            "D3": "32162",
+            "D4": "35497",
+            "D5": "34263",
+            "D6": "35875",
+            "D7": "34896",
+            "D8": "36121",
+            "D9": "35382",
+            "E1": "Avg Monthly Bounce Rate (%)",
+            "E2": "44.68%",
+            "E3": "43.14%",
+            "E4": "43.77%",
+            "E5": "43.27%",
+            "E6": "44.90%",
+            "E7": "44.03%",
+            "E8": "44.06%",
+            "E9": "43.97%",
+            "A10": "9",
+            "A11": "10",
+            "A12": "11",
+            "A13": "12",
+            "A14": "1",
+            "A15": "2",
+            "A16": "3",
+            "A17": "4",
+            "B10": "2023",
+            "B11": "2023",
+            "B12": "2023",
+            "B13": "2023",
+            "B14": "2024",
+            "B15": "2024",
+            "B16": "2024",
+            "B17": "2024",
+            "C10": "21054",
+            "C11": "21153",
+            "C12": "20957",
+            "C13": "21493",
+            "C14": "21238",
+            "C15": "20205",
+            "C16": "21617",
+            "C17": "21094",
+            "D10": "34959",
+            "D11": "36723",
+            "D12": "34626",
+            "D13": "35262",
+            "D14": "36110",
+            "D15": "33484",
+            "D16": "34397",
+            "D17": "34643",
+            "E10": "44.37%",
+            "E11": "44.10%",
+            "E12": "46.70%",
+            "E13": "48.06%",
+            "E14": "45.94%",
+            "E15": "45.48%",
+            "E16": "44.06%",
+            "E17": "43.93%"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the web traffic data in the INPUTS tab, parse the Date column into a Year column and a month column. In the ANSWER tab, create a header name Month in cell A1, Year in cell B1, Total Monthly Unique Usersi n cell C1, Total Monthly Page Views in cell D1, and Avg Monthly Bounce Rate (%) in cell E1. Populate the Month column starting in cells A2 to A13 starting from 1 to 12 where Year is 2023. Populate the Year column starting in cells B2 to B13 with 2023. Populate the Month column starting in cells A14 to A17 starting from 1 to 4. Populate the Year column starting in cells B14 to B17 with 2024. Calculate the Total Monthly Unique Users from cells C2 to C17, Total Monthly Page Views from cells D2 to D17, and Ave Monthly Bounce Rate (%) from cells E2 to E17. For each cell from C18 to C25, D18 to D25, and E18 to E25 calculate the average based on the previous 6 cells in order to forecast what the subsequent Total Monthly Unique Users, Total Monthly Page Views, and Ave Monthly Bounce Rate would be for the next 8 months. The users should be rounded to 0 decimal places, rate to 1 decimal place.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "9ba9631e-8560-4dc4-a285-8d186715a542",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/1ad92615-f52e-482d-8e8f-bf74079c5594/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/1ad92615-f52e-482d-8e8f-bf74079c5594/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Month",
+            "A2": "1",
+            "A3": "2",
+            "A4": "3",
+            "A5": "4",
+            "A6": "5",
+            "A7": "6",
+            "A8": "7",
+            "A9": "8",
+            "B1": "Year",
+            "B2": "2023",
+            "B3": "2023",
+            "B4": "2023",
+            "B5": "2023",
+            "B6": "2023",
+            "B7": "2023",
+            "B8": "2023",
+            "B9": "2023",
+            "C1": "Total Monthly Unique Users",
+            "C2": "21928",
+            "C3": "19296",
+            "C4": "21453",
+            "C5": "20987",
+            "C6": "21944",
+            "C7": "21024",
+            "C8": "20875",
+            "C9": "21495",
+            "D1": "Total Monthly Page Views",
+            "D2": "34560",
+            "D3": "32162",
+            "D4": "35497",
+            "D5": "34263",
+            "D6": "35875",
+            "D7": "34896",
+            "D8": "36121",
+            "D9": "35382",
+            "E1": "Avg Monthly Bounce Rate (%)",
+            "E2": "44.7%",
+            "E3": "43.1%",
+            "E4": "43.8%",
+            "E5": "43.3%",
+            "E6": "44.9%",
+            "E7": "44.0%",
+            "E8": "44.1%",
+            "E9": "44.0%",
+            "A10": "9",
+            "A11": "10",
+            "A12": "11",
+            "A13": "12",
+            "A14": "1",
+            "A15": "2",
+            "A16": "3",
+            "A17": "4",
+            "A18": "5",
+            "A19": "6",
+            "A20": "7",
+            "A21": "8",
+            "A22": "9",
+            "A23": "10",
+            "A24": "11",
+            "A25": "12",
+            "B10": "2023",
+            "B11": "2023",
+            "B12": "2023",
+            "B13": "2023",
+            "B14": "2024",
+            "B15": "2024",
+            "B16": "2024",
+            "B17": "2024",
+            "B18": "2024",
+            "B19": "2024",
+            "B20": "2024",
+            "B21": "2024",
+            "B22": "2024",
+            "B23": "2024",
+            "B24": "2024",
+            "B25": "2024",
+            "C10": "21054",
+            "C11": "21153",
+            "C12": "20957",
+            "C13": "21493",
+            "C14": "21238",
+            "C15": "20205",
+            "C16": "21617",
+            "C17": "21094",
+            "C18": "21095",
+            "C19": "21015",
+            "C20": "21141",
+            "C21": "21311",
+            "C22": "21064",
+            "C23": "21182",
+            "C24": "21209",
+            "C25": "21238",
+            "D10": "34959",
+            "D11": "36723",
+            "D12": "34626",
+            "D13": "35262",
+            "D14": "36110",
+            "D15": "33484",
+            "D16": "34397",
+            "D17": "34643",
+            "D18": "34237",
+            "D19": "33819",
+            "D20": "33547",
+            "D21": "33832",
+            "D22": "33424",
+            "D23": "33162",
+            "D24": "33042",
+            "D25": "32929",
+            "E10": "44.4%",
+            "E11": "44.1%",
+            "E12": "46.7%",
+            "E13": "48.1%",
+            "E14": "45.9%",
+            "E15": "45.5%",
+            "E16": "44.1%",
+            "E17": "43.9%",
+            "E18": "43.1%",
+            "E19": "41.8%",
+            "E20": "41.3%",
+            "E21": "40.4%",
+            "E22": "39.7%",
+            "E23": "38.7%",
+            "E24": "37.9%",
+            "E25": "37.2%"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Given the web traffic data in the INPUTS, produce an ANSWER tab.\n1. Which day had the highest number of unique visitors? put this value in ANSWER!A1 (YYYY-MM-DD)\n2. On this day, what was the bounce rate? put this value in ANSWER!A2 (two decimal places)\n3. What is the correlation of bounce rate to unique visitors as measured by coefficient of determination. Put your answer in ANSWER!A3 (5 decimal places)",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "0721e45c-8677-4aef-b9b2-65ad6bea1392",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/d8e5298e-68fb-4d8a-8c56-62adf2cde1ff/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/d8e5298e-68fb-4d8a-8c56-62adf2cde1ff/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "2023-04-30",
+            "A2": "0.48",
+            "A3": "0.00296"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "In the INPUTS tab, add a Sales field to column H and calculate the Sales amount. In column I extract the numeric month based on the date value in column b. In column J extract the numeric year based on the date value in column B. In the ANSWER tab, A1, create a pivot table with the ProductID field in the row, the Year field in the column, and Sales field as the value. In cell D2 create a field called \"Rank based on 2024 Sales\" and rank each ProductID based on 2024 sales with 1 being the highest sales. Check that numerical values occupy D3 to D22.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "60ee8e1a-6d95-4ff5-bf80-35f899ea7277",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/7c134f47-c8a7-4a68-ba47-4e783fea21ba/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/7c134f47-c8a7-4a68-ba47-4e783fea21ba/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "D2": "Rank Based on 2024 Sales",
+            "D3": "4",
+            "D4": "3",
+            "D5": "7",
+            "D6": "17",
+            "D7": "12",
+            "D8": "1",
+            "D9": "18",
+            "D10": "8",
+            "D11": "6",
+            "D12": "14",
+            "D13": "5",
+            "D14": "13",
+            "D15": "9",
+            "D16": "20",
+            "D17": "11",
+            "D18": "10",
+            "D19": "19",
+            "D20": "15",
+            "D21": "2",
+            "D22": "16"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "In the INPUTS tab, add a Sales field to column H and calculate the Sales amount. In the ANSWER tab starting in cell A1, create a pivot table with the Region field in the row, the Year field in the column, and Sales field as the value. Calculate the year of year growth in column D called \"YoY Growth\", make the values in this column percent data types with two decimal places. All other values should format as numbers with no thousands separators, no dollar signs and 2 decimal places.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "20507108-4188-402e-8cfe-2354309bad6c",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/ba2d7ea0-9722-48fa-b6de-fc0f8e9c263c/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/ba2d7ea0-9722-48fa-b6de-fc0f8e9c263c/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A2": "Region",
+            "A3": "Central",
+            "A4": "East",
+            "A5": "North",
+            "A6": "South",
+            "A7": "West",
+            "B2": "2023",
+            "B3": "351351.87",
+            "B4": "364129.72",
+            "B5": "377252.87",
+            "B6": "396259.93",
+            "B7": "395672.78",
+            "C2": "2024",
+            "C3": "368644.54",
+            "C4": "399862.83",
+            "C5": "364113.70",
+            "C6": "345896.80",
+            "C7": "393456.82",
+            "D2": "YoY Growth",
+            "D3": "4.92%",
+            "D4": "9.81%",
+            "D5": "-3.48%",
+            "D6": "-12.71%",
+            "D7": "-0.56%"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "In your ANSWER tab, have A1 be a dropdown selector for the different catagories of spending from the \"RAW_INFO\" sheet, and B1 be the total spend within that catagory. The spend should be formatted in Accounting form \"$ (...)\". Select the value of the dropdown as Shopping.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "a0c8e617-aa64-4e7a-8dd5-8878684720b2",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/9ef22631-f42b-4c0d-b987-8d78181feb03/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/9ef22631-f42b-4c0d-b987-8d78181feb03/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Shopping",
+            "B1": "$ (16,401.91)"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Sheet LOAN_AMORT contains the following columns: Date, Loan Issuance, Payment, Principal, and Interest. In each column you will see the cash flows in such category over time, as detailed by the date column. By summing the net loan cash flows for each monthly period, determine what the effective annual interest rate was on the loan in the percentage format with two decimals (e.g., 7.43%), which was fully paid off via the last payment made on 12/31/2029, and place the answer in ANSWER!A1; nothing else in ANSWER.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "2b2ab7bf-edb8-4d11-b8fb-0fea1799aa59",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/e7681ead-fa36-408a-8f3c-5e5165a7b610/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/e7681ead-fa36-408a-8f3c-5e5165a7b610/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "6.17%"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Sheet REV_QTR lists quarterly revenue from Q1-2022 through Q1-2025. Compute the compound annual growth rate between those two points. Enter the result in ANSWER!A1 formatted as a percent with two decimal places. Assume an even period between quarters.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "5b58a0f7-dbdb-4f56-abc3-08640052af3a",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/852a6a9e-7e9f-4563-8298-20e80ee0a66a/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/852a6a9e-7e9f-4563-8298-20e80ee0a66a/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "24.20%"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Sheets provided: MULTI_CCY (cash movements) and FX (daily USD rates). Add a column in MULTI_CCY converting every amount to USD by matching date and currency. Sum all USD-equivalent amounts. Put that single total in ANSWER!A1; nothing else in ANSWER. Round to 2 decimal places.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "371507f7-721a-457e-9618-bc8fba1b909b",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/1c4e710d-d430-4cfd-a3fb-f2d0b6db38b6/gold_solution_3.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/1c4e710d-d430-4cfd-a3fb-f2d0b6db38b6/setup_input_3.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "$316,309.56"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Sheets: HIST_REV (36-month history) and SCENARIOS (base, bull, bear monthly growth rates). Build a 24-month forecast under each scenario by applying the monthly growth rate to the monthly revenue in 2024-12 and then to each subsequent monthly revenue amount thereafter. Determine the following: base-case calendar month (YYYY-MM) when monthly revenue first exceeds $20 million. bull-case calendar month (YYYY-MM) when monthly revenue first exceeds $20 million. bear-case calendar month (YYYY-MM) when monthly revenue first exceeds $20 million. Place base-case month in ANSWER!A1, bull-case month in ANSWER!A2, and bear-case month in ANSWER!A3",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "4a081ed2-532c-4895-a034-ab0076927c7c",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/e83487c6-3a71-409a-9da3-8b0b19bb93f3/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/e83487c6-3a71-409a-9da3-8b0b19bb93f3/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "2026-03",
+            "A2": "2025-09",
+            "A3": "2026-12"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Sum the total amount for each currency from data in March 2025 and list in ANSWER column A the abbreviation of the currencies with the most to least amount. In column B provide the corresponding amount. Use two decimal places of precision.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "1b737be7-eeb6-45c3-88d8-4bc3bbc7a008",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/2c4e710d-d430-4cfd-a3fb-f2d0b6db38b6/gold_solution_3.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/2c4e710d-d430-4cfd-a3fb-f2d0b6db38b6/setup_input_3.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "JPY",
+            "A2": "USD",
+            "A3": "EUR",
+            "A4": "GBP",
+            "B1": "3500000.00",
+            "B2": "64351.25",
+            "B3": "43501.00",
+            "B4": "15000.25"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "This spreadsheet contains individual customer IDs in column A, their signup date in column B, their churn date in column C, and other data in columns D and beyond.\n\nUsing this data and assuming the date is 12/31/24, determine the blended average annual churn rates for those customer cohorts who signed up as customers in 2022 and separately for those who signed up in 2023. Place the answers on the ANSWER tab in cells A1 and B1, respectively, formatted as a percent with two decimals.\n\nIn a given year, the annual churn rate is defined as the number of customers who churned in such year divded by the total number of customers who were active in that year. The blended average annual churn rate is the straight average of the observable annual churn rates. For the avoidance of doubt, the average excludes any churn rates for years prior to the origin of the customer cohort (e.g., the annual churn rates factored into the blended annual average churn rate for the 2023 cohort of customers excludes the activity in such cohort in years prior to its existence (i.e., 2022 and prior)).",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "31508ec6-c993-4e00-b70c-093dba016fcc",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/979a71c1-3c88-4781-9d46-0389d89f92e0/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/979a71c1-3c88-4781-9d46-0389d89f92e0/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "1.07%",
+            "A2": "1.73%"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Which city has the highest 2023 quarterly CAGR at the end of 2023. Place the name of the city in ANSWER!A1.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "133ef005-207c-490f-b55c-7734fd1678da",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/b6fa9285-4d72-47f5-99e1-93b21c9a5001/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/b6fa9285-4d72-47f5-99e1-93b21c9a5001/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Central City"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  },
+  {
+    "prompt": "Work in sheet RAW_TRANSACTIONS. Delete exact duplicate rows (all-column match). Convert every value in the Date column to ISO YYYY-MM-DD. Copy the header “Date” plus the cleaned, unique dates into column A of a sheet named ANSWER (no blanks, descending order not required). No other content may appear in ANSWER. Sort by date. All amounts should have 2 decimal places, no dollar sign and no thousands separators.",
+    "mcp_config": {
+      "hud": {
+        "url": "https://mcp.hud.so/v3/mcp",
+        "headers": {
+          "Authorization": "Bearer ${HUD_API_KEY}",
+          "Mcp-Image": "hudevals/hud-remote-browser:0.1.1"
+        }
+      }
+    },
+    "id": "eb410896-3e1e-4491-9460-061579b65c6f",
+    "metadata": {
+      "partial": true,
+      "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/f24e4430-c965-4bcc-b56d-a77f9ed9eb7f/gold_solution_2.xlsx?"
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "sheets_from_xlsx",
+        "arguments": {
+          "file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/f24e4430-c965-4bcc-b56d-a77f9ed9eb7f/setup_input_2.xlsx?"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "sheets_cell_values",
+        "arguments": {
+          "args": {
+            "A1": "Date",
+            "A2": "2025-01-05",
+            "A3": "2025-01-12",
+            "A4": "2025-01-15",
+            "A5": "2025-01-20",
+            "A6": "2025-01-25",
+            "A7": "2025-01-30",
+            "A8": "2025-02-05",
+            "A9": "2025-02-08",
+            "B1": "Description",
+            "B2": "Membership Fee",
+            "B3": "Project Income",
+            "B4": "Interest",
+            "B5": "Event Revenue",
+            "B6": "Refund",
+            "B7": "Consulting Fee",
+            "B8": "Website Hosting",
+            "B9": "Maintenance",
+            "C1": "Amount",
+            "C2": "-250.00",
+            "C3": "5600.00",
+            "C4": "350.00",
+            "C5": "7000.00",
+            "C6": "-5000.00",
+            "C7": "7800.00",
+            "C8": "-99.99",
+            "C9": "-750.25",
+            "D1": "Currency",
+            "D2": "USD",
+            "D3": "USD",
+            "D4": "USD",
+            "D5": "USD",
+            "D6": "USD",
+            "D7": "USD",
+            "D8": "USD",
+            "D9": "USD",
+            "A10": "2025-02-15",
+            "A11": "2025-02-18",
+            "A12": "2025-02-20",
+            "A13": "2025-02-25",
+            "A14": "2025-02-28",
+            "A15": "2025-03-01",
+            "A16": "2025-03-05",
+            "A17": "2025-03-10",
+            "A18": "2025-03-15",
+            "A19": "2025-03-20",
+            "A20": "2025-03-25",
+            "B10": "Invoice Payment",
+            "B11": "Equipment Purchase",
+            "B12": "Software License",
+            "B13": "Bonus",
+            "B14": "Travel Expenses",
+            "B15": "Subscription",
+            "B16": "Advertising",
+            "B17": "Office Supplies",
+            "B18": "Utilities",
+            "B19": "Legal Fees",
+            "B20": "Marketing",
+            "C10": "2500.00",
+            "C11": "-3600.00",
+            "C12": "-3000.00",
+            "C13": "4800.00",
+            "C14": "-1750.00",
+            "C15": "-1200.00",
+            "C16": "-2450.50",
+            "C17": "-450.75",
+            "C18": "-899.00",
+            "C19": "-4000.00",
+            "C20": "-2200.00",
+            "D10": "USD",
+            "D11": "USD",
+            "D12": "USD",
+            "D13": "USD",
+            "D14": "USD",
+            "D15": "USD",
+            "D16": "USD",
+            "D17": "USD",
+            "D18": "USD",
+            "D19": "USD",
+            "D20": "USD"
+          }
+        }
+      }
+    },
+    "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+    "agent_config": {
+      "system_prompt": "\n    All solutions should be put in the sheet called \"ANSWER\". In the answer sheet, all dates should use the American standard format MM/DD/YYYY with no leading zero. All numbers should use the format and decimal place precision given in the input sheets (e.g., with or without a thousands separator should depend on the inputs), unless specified otherwise.\n    ",
+      "allowed_tools": [
+        "*"
+      ],
+      "disallowed_tools": [
+        "setup",
+        "evaluate"
+      ],
+      "append_setup_tool": true,
+      "initial_screenshot": true
+    }
+  }
+]
