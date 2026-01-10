@@ -236,7 +236,7 @@ class Environment(
 
         # Check which connections have this tool in their visible list
         targets = self._connections_with_tool(tool_name)
-        
+
         # For internal tools (underscore prefix), try ALL connections
         # since they may be hidden from tool listing but still callable
         if tool_name.startswith("_") and not targets:
