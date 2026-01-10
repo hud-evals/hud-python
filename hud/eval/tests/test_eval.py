@@ -16,7 +16,7 @@ class TestTaskDataclass:
 
         assert task.env is None
         assert task.scenario is None
-        assert task.args == {}
+        assert task.args is None  # None = template, {} = runnable with no args
 
     def test_init_with_env_dict(self) -> None:
         """Task auto-converts env dict to Environment via validator."""

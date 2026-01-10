@@ -362,6 +362,22 @@ class Environment(
             await asyncio.gather(*[c.disconnect() for c in self._connections.values()])
         self._router.clear()
 
+    async def run_async(
+        self,
+        transport: Literal["stdio", "http", "sse"] | None = None,
+        show_banner: bool = True,
+        **transport_kwargs: Any,
+    ) -> None:
+        """Run the MCP server, auto-connecting all connectors first.
+
+        This ensures that tools from external MCP servers (via connect_mcp_config)
+        are discovered and available when the server starts.
+        """
+        async with self:  # Connect all connectors via __aenter__
+            await super().run_async(
+                transport=transport, show_banner=show_banner, **transport_kwargs
+            )
+
     async def _build_routing(self) -> None:
         """Build tool routing from local tools and connection caches."""
         # Use get_tools() not list_tools() - it includes mounted servers without
@@ -375,6 +391,27 @@ class Environment(
         )
         # Populate mock schemas for auto-generated mock values
         self._populate_mock_schemas()
+
+    # =========================================================================
+    # MCP Protocol Overrides - Include connector tools in MCP responses
+    # =========================================================================
+
+    def _setup_handlers(self) -> None:
+        """Override FastMCP to register our custom handlers for tools."""
+        # Call parent to set up all standard handlers
+        super()._setup_handlers()
+        # Re-register our custom handlers (overwrites parent's registrations)
+        self._mcp_server.list_tools()(self._env_list_tools)
+        self._mcp_server.call_tool()(self._env_call_tool)
+
+    async def _env_list_tools(self) -> list[mcp_types.Tool]:
+        """Return all tools including those from connectors."""
+        return self._router.tools
+
+    async def _env_call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> list[Any]:
+        """Route tool calls through our router (handles both local and connector tools)."""
+        result = await self._execute_tool(name, arguments or {})
+        return result.content or []
 
     # =========================================================================
     # Tool Operations

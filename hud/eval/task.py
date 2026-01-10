@@ -148,7 +148,10 @@ class Task(BaseModel):
     env: Any = Field(default=None)  # Typed as Any for input flexibility, validated below
     scenario: str | None = None
     id: str | None = None
-    args: dict[str, Any] = Field(default_factory=dict)
+    args: dict[str, Any] | None = Field(
+        default=None,
+        description="Scenario arguments. None indicates a template (args filled in later).",
+    )
     validation: list[MCPToolCall] | None = None
 
     # Agent config - settings passed to agent (system_prompt, etc.)
@@ -335,6 +338,6 @@ class Task(BaseModel):
             id=self.id,
             env=self.env,  # Share reference
             scenario=self.scenario,
-            args=self.args.copy() if self.args else {},
+            args=self.args.copy() if self.args is not None else None,
             validation=self.validation.copy() if self.validation else None,
         )

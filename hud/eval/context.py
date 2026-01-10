@@ -302,9 +302,19 @@ class EvalContext(Environment):
             code_snippet: Code being evaluated
             trace: Whether to send traces to backend
             quiet: Whether to suppress output
+
+        Raises:
+            ValueError: If task.args is None (template tasks cannot be run directly)
         """
         from hud.environment import Environment
         from hud.eval.task import build_eval_name
+
+        # Validate that task has args (not a template)
+        if task.args is None:
+            raise ValueError(
+                f"Cannot run task with args=None (this is a template). "
+                f"Provide args when creating the task: env('{task.scenario}', **args)"
+            )
 
         eval_name = name or build_eval_name(task.scenario, task.args)
 
@@ -343,7 +353,7 @@ class EvalContext(Environment):
         if self._task is None or self._task.scenario is None:
             return
 
-        prompt = await self.run_scenario_setup(self._task.scenario, self._task.args)
+        prompt = await self.run_scenario_setup(self._task.scenario, self._task.args or {})
         if prompt:
             self.prompt = prompt
 

@@ -63,7 +63,8 @@ def _load_from_file(path: Path) -> list[Task]:
     from hud.eval.task import Task
 
     raw_items = _load_raw_from_file(path)
-    return [Task(**item) for item in raw_items]
+    # Default args to {} for runnable tasks (None = template)
+    return [Task(**{**item, "args": item.get("args") or {}}) for item in raw_items]
 
 
 def _load_raw_from_huggingface(dataset_name: str) -> list[dict[str, Any]]:
@@ -99,7 +100,8 @@ def _load_from_huggingface(dataset_name: str) -> list[Task]:
     raw_items = _load_raw_from_huggingface(dataset_name)
     from hud.eval.task import Task
 
-    return [Task(**item) for item in raw_items]
+    # Default args to {} for runnable tasks (None = template)
+    return [Task(**{**item, "args": item.get("args") or {}}) for item in raw_items]
 
 
 def _load_raw_from_api(dataset_name: str) -> list[dict[str, Any]]:
@@ -138,7 +140,8 @@ def _load_from_api(dataset_name: str) -> list[Task]:
     from hud.eval.task import Task
 
     raw_items = _load_raw_from_api(dataset_name)
-    return [Task(**item) for item in raw_items]
+    # Default args to {} for runnable tasks (None = template)
+    return [Task(**{**item, "args": item.get("args") or {}}) for item in raw_items]
 
 
 @overload
