@@ -426,6 +426,17 @@ class ScenarioMixin:
             async def prompt_handler(**handler_args: Any) -> list[str]:
                 from pydantic import TypeAdapter
 
+                # Log incoming arguments for debugging
+                logger.info(
+                    "[prompt_handler] Scenario '%s' received args: %s",
+                    scenario_name_ref,
+                    {k: (type(v).__name__, repr(v)[:100]) for k, v in handler_args.items()},
+                )
+                logger.info(
+                    "[prompt_handler] Available param_annotations: %s",
+                    {k: str(v) for k, v in param_annotations.items()},
+                )
+
                 # Deserialize JSON-encoded arguments using Pydantic TypeAdapter
                 # This properly handles: Pydantic models, enums, datetime, lists, dicts
                 # MCP prompts only support string arguments, so we JSON-serialize complex
@@ -436,11 +447,17 @@ class ScenarioMixin:
 
                     # Only attempt deserialization on string values
                     if not isinstance(arg_value, str):
+                        logger.debug(
+                            "[prompt_handler] %s: already %s, skipping deserialization",
+                            arg_name,
+                            type(arg_value).__name__,
+                        )
                         deserialized_args[arg_name] = arg_value
                         continue
 
                     # If annotation is explicitly str, keep as string (no deserialization)
                     if annotation is str:
+                        logger.debug("[prompt_handler] %s: annotation is str, keeping as string", arg_name)
                         deserialized_args[arg_name] = arg_value
                         continue
 
@@ -449,8 +466,18 @@ class ScenarioMixin:
                         try:
                             adapter = TypeAdapter(annotation)
                             deserialized_args[arg_name] = adapter.validate_json(arg_value)
+                            logger.info(
+                                "[prompt_handler] %s: TypeAdapter deserialized to %s",
+                                arg_name,
+                                type(deserialized_args[arg_name]).__name__,
+                            )
                             continue
-                        except Exception:  # noqa: S110
+                        except Exception as e:  # noqa: S110
+                            logger.warning(
+                                "[prompt_handler] %s: TypeAdapter failed (%s), falling through",
+                                arg_name,
+                                e,
+                            )
                             pass  # Fall through to generic JSON decode
 
                     # No type annotation - try JSON decode for strings that look like JSON
@@ -459,6 +486,11 @@ class ScenarioMixin:
                     if (stripped and stripped[0] in "[{") or stripped in ("true", "false", "null"):
                         try:
                             deserialized_args[arg_name] = json.loads(arg_value)
+                            logger.info(
+                                "[prompt_handler] %s: json.loads deserialized to %s",
+                                arg_name,
+                                type(deserialized_args[arg_name]).__name__,
+                            )
                             continue
                         except json.JSONDecodeError:
                             pass  # Keep as string
@@ -467,12 +499,23 @@ class ScenarioMixin:
                     if stripped.lstrip("-").replace(".", "", 1).isdigit():
                         try:
                             deserialized_args[arg_name] = json.loads(arg_value)
+                            logger.info(
+                                "[prompt_handler] %s: numeric json.loads to %s",
+                                arg_name,
+                                type(deserialized_args[arg_name]).__name__,
+                            )
                             continue
                         except json.JSONDecodeError:
                             pass
 
                     # Keep as string
+                    logger.debug("[prompt_handler] %s: keeping as string", arg_name)
                     deserialized_args[arg_name] = arg_value
+
+                logger.info(
+                    "[prompt_handler] Final deserialized_args types: %s",
+                    {k: type(v).__name__ for k, v in deserialized_args.items()},
+                )
 
                 # Create generator instance with deserialized args
                 gen = scenario_fn(**deserialized_args)

@@ -234,10 +234,13 @@ class Environment(
         """
         import asyncio
 
-        # Only call connections that have this tool
+        # Check which connections have this tool in their visible list
         targets = self._connections_with_tool(tool_name)
-        if not targets:
-            return {}
+        
+        # For internal tools (underscore prefix), try ALL connections
+        # since they may be hidden from tool listing but still callable
+        if tool_name.startswith("_") and not targets:
+            targets = set(self._connections.keys())
 
         results: dict[str, Any] = {}
 
@@ -246,7 +249,8 @@ class Environment(
             if not connector or not connector.client:
                 return
             try:
-                results[name] = await connector.client.call_tool(tool_name, **kwargs)
+                # Use connector.call_tool which expects arguments as a dict
+                results[name] = await connector.call_tool(tool_name, kwargs)
                 logger.debug("Broadcast '%s' to '%s' succeeded", tool_name, name)
             except Exception as e:
                 results[name] = e
