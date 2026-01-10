@@ -198,7 +198,8 @@
           {
             "group": "Get Started",
             "pages": [
-              "platform/index"
+              "platform/index",
+              "platform/mcp"
             ]
           },
           {
