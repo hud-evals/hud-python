@@ -234,13 +234,11 @@ class Environment(
         """
         import asyncio
 
-        # Check which connections have this tool in their visible list
+        # Check which connections have this tool in their cached_tools.
+        # Note: cached_tools includes ALL tools from the MCP server (including
+        # underscore-prefixed internal tools). The hiding of underscore tools
+        # only happens in the router when building the agent-visible list.
         targets = self._connections_with_tool(tool_name)
-
-        # For internal tools (underscore prefix), try ALL connections
-        # since they may be hidden from tool listing but still callable
-        if tool_name.startswith("_") and not targets:
-            targets = set(self._connections.keys())
 
         results: dict[str, Any] = {}
 
