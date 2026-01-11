@@ -225,6 +225,9 @@ class Environment(
         Automatically filters to only connections where the tool exists
         (based on cached_tools from initial discovery).
 
+        For internal tools (starting with _), tries ALL connections since
+        internal tools are hidden from list_tools() and won't be in cached_tools.
+
         Args:
             tool_name: Name of the tool to call
             **kwargs: Arguments to pass to the tool
@@ -234,11 +237,13 @@ class Environment(
         """
         import asyncio
 
-        # Check which connections have this tool in their cached_tools.
-        # Note: cached_tools includes ALL tools from the MCP server (including
-        # underscore-prefixed internal tools). The hiding of underscore tools
-        # only happens in the router when building the agent-visible list.
-        targets = self._connections_with_tool(tool_name)
+        # For internal tools (underscore prefix), try ALL connections since
+        # they're hidden from list_tools() and won't appear in cached_tools.
+        # For regular tools, only try connections that advertise the tool.
+        if tool_name.startswith("_"):
+            targets = set(self._connections.keys())
+        else:
+            targets = self._connections_with_tool(tool_name)
 
         results: dict[str, Any] = {}
 
