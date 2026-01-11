@@ -225,6 +225,9 @@ class Environment(
         Automatically filters to only connections where the tool exists
         (based on cached_tools from initial discovery).
 
+        For internal tools (starting with _), tries ALL connections since
+        internal tools are hidden from list_tools() and won't be in cached_tools.
+
         Args:
             tool_name: Name of the tool to call
             **kwargs: Arguments to pass to the tool
@@ -234,10 +237,13 @@ class Environment(
         """
         import asyncio
 
-        # Only call connections that have this tool
-        targets = self._connections_with_tool(tool_name)
-        if not targets:
-            return {}
+        # For internal tools (underscore prefix), try ALL connections since
+        # they're hidden from list_tools() and won't appear in cached_tools.
+        # For regular tools, only try connections that advertise the tool.
+        if tool_name.startswith("_"):
+            targets = set(self._connections.keys())
+        else:
+            targets = self._connections_with_tool(tool_name)
 
         results: dict[str, Any] = {}
 
@@ -246,7 +252,8 @@ class Environment(
             if not connector or not connector.client:
                 return
             try:
-                results[name] = await connector.client.call_tool(tool_name, **kwargs)
+                # Use connector.call_tool which expects arguments as a dict
+                results[name] = await connector.call_tool(tool_name, kwargs)
                 logger.debug("Broadcast '%s' to '%s' succeeded", tool_name, name)
             except Exception as e:
                 results[name] = e
