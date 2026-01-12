@@ -203,11 +203,17 @@
             ]
           },
           {
-            "group": "Platform Guide",
+            "group": "Concepts",
             "pages": [
               "platform/models",
               "platform/environments",
               "platform/tasksets"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "platform/publishing-leaderboards"
             ]
           }
         ]

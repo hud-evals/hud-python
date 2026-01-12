@@ -1,0 +1,140 @@
+---
+title: "Publishing Leaderboards"
+description: "Create a taskset, run evaluations, validate results, and publish to the community."
+icon: "trophy"
+---
+
+A leaderboard is a published taskset with public evaluation results. This guide walks through the complete workflow—from empty taskset to public benchmark.
+
+<Note>
+  **Prerequisites**: You need an environment with at least one scenario. See [Environments](/platform/environments) if you haven't deployed one yet.
+</Note>
+
+## Create a Taskset
+
+Go to [hud.ai/evalsets](https://hud.ai/evalsets) → **New Taskset**. Name it something descriptive—this becomes your leaderboard title once published.
+
+<Frame>
+  <img src="/src/images/platform-leaderboards-taskset.png" alt="Empty taskset page" />
+</Frame>
+
+## Add Tasks
+
+Tasks are what agents get evaluated on. Each task references a scenario from your environment with specific arguments. Click **Upload Tasks** (cloud icon) to bulk add tasks via JSON.
+
+See [Tasksets → Adding Tasks](/platform/tasksets#adding-tasks) for the full upload format and options.
+
+<Tip>
+  Aim for 20–50 tasks. Fewer leads to high variance; more gives better signal but takes longer to run.
+</Tip>
+
+## Run Evaluations
+
+Click **Run Taskset** in the header. The run modal lets you configure:
+
+- **Models** — Select one or more models to evaluate. Multi-select runs the same tasks across all selected models.
+- **Group Size** — How many times to run each task per model (more runs = higher confidence)
+- **Max Steps** — Limit agent actions per task
+
+<Frame>
+  <img src="/src/images/platform-leaderboards-run.png" alt="Run taskset modal" />
+</Frame>
+
+<Warning>
+  **Run at least 3 different models** before publishing. A single-entry leaderboard isn't useful for comparison.
+</Warning>
+
+Jobs appear in the **Jobs** tab as they run. Click a job to see individual trace results.
+
+<Frame>
+  <img src="/src/images/platform-leaderboards-jobs.png" alt="Jobs tab showing evaluation jobs" />
+</Frame>
+
+## Review and Validate
+
+Before publishing, check your results.
+
+### Leaderboard Tab
+
+Shows aggregated rankings—agent scores, task-by-task breakdown, result distributions.
+
+<Frame>
+  <img src="/src/images/platform-leaderboards-leaderboard.png" alt="Leaderboard tab showing agent rankings" />
+</Frame>
+
+Look for:
+
+- **Reasonable scores** — 0% or 100% everywhere signals something's wrong
+- **Variance** — Good benchmarks have range
+- **Outliers** — Unexpectedly high or low scores worth investigating
+
+### Traces
+
+Click into jobs to review individual runs. Check that grading reflects actual agent performance. Look for environment issues or grading bugs.
+
+### Invalidate Bad Runs
+
+Found issues? Select affected jobs in the **Jobs** tab and click **Invalidate**.
+
+Invalidated jobs:
+- Are excluded from leaderboard calculations
+- Show with a striped background
+- Cannot be published
+- Remain visible for reference
+
+Common reasons to invalidate: environment bugs, incorrect grading logic, external service outages, test runs with wrong configuration.
+
+<Note>
+  Invalidation is permanent. To get fresh results, re-run the evaluation.
+</Note>
+
+## Publish
+
+Click **Publish** in the taskset header.
+
+The modal shows:
+
+1. **Evalset Status** — Whether the taskset itself is already public
+2. **Jobs to Include** — Select which jobs to make public (invalidated jobs don't appear)
+3. **Already Public** — Previously published jobs are checked and disabled
+
+<Warning>
+  **Publishing is permanent.** Once published, jobs and traces are publicly accessible. This cannot be undone.
+</Warning>
+
+### What Gets Published
+
+| Item | Visibility |
+|------|------------|
+| Taskset name | Public |
+| Task configurations | Public |
+| Selected job results | Public |
+| Trace details | Public |
+| Your team name | Public |
+| Non-selected jobs | Private |
+| Invalidated jobs | Never published |
+
+### Adding More Later
+
+After initial publication, run new models and return to **Publish** to add them. Previously published jobs stay public.
+
+## Best Practices
+
+Before publishing:
+
+- **Verify grading** — Manually check 5–10 traces. Look for false positives and false negatives.
+- **Test stability** — Flaky environments produce inconsistent results that undermine leaderboard validity.
+- **Include baselines** — Always include well-known models (GPT-4o, Claude) as reference points.
+- **Document clearly** — Add a description explaining what skills are tested and expected difficulty.
+
+A quality leaderboard has diverse tasks, multiple agents (3–5 minimum), reasonable difficulty (20–80% average success), and fair, consistent grading.
+
+<CardGroup cols={2}>
+  <Card title="Tasksets" icon="list-check" href="/platform/tasksets">
+    Detailed taskset management
+  </Card>
+
+  <Card title="Environments" icon="cube" href="/platform/environments">
+    Create environments with scenarios
+  </Card>
+</CardGroup>
