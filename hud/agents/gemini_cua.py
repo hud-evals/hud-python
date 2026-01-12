@@ -123,6 +123,9 @@ class GeminiCUAAgent(GeminiAgent):
                 )
             )
 
+        if tool.name == "computer" or tool.name.endswith("_computer"):
+            return None
+
         # For non-computer tools, use the parent implementation
         return super()._to_gemini_tool(tool)
 
