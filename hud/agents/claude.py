@@ -76,10 +76,18 @@ class ClaudeAgent(MCPAgent):
 
         model_client = self.config.model_client
         if model_client is None:
-            api_key = settings.anthropic_api_key
-            if not api_key:
-                raise ValueError("Anthropic API key not found. Set ANTHROPIC_API_KEY.")
-            model_client = AsyncAnthropic(api_key=api_key)
+            # Default to HUD gateway when HUD_API_KEY is available
+            if settings.api_key:
+                from hud.agents.gateway import build_gateway_client
+
+                model_client = build_gateway_client("anthropic")
+            elif settings.anthropic_api_key:
+                model_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+            else:
+                raise ValueError(
+                    "No API key found. Set HUD_API_KEY for HUD gateway, "
+                    "or ANTHROPIC_API_KEY for direct Anthropic access."
+                )
 
         self.anthropic_client = model_client
         self.max_tokens = self.config.max_tokens
@@ -295,7 +303,7 @@ class ClaudeAgent(MCPAgent):
                         display_width_px=computer_settings.ANTHROPIC_COMPUTER_WIDTH,
                         display_height_px=computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
                     )
-                elif tool.name == "computer":
+                elif tool.name == "computer" or tool.name.endswith("_computer"):
                     logger.warning(
                         "Renamed tool %s to 'computer', dropping original 'computer' tool",
                         selected_computer_tool.name,

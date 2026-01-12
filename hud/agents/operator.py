@@ -129,6 +129,8 @@ class OperatorAgent(OpenAIAgent):
                 display_height=self._operator_display_height,
                 environment=self._operator_environment,
             )
+        if tool.name == "computer" or tool.name.endswith("_computer"):
+            return None
         return super()._to_openai_tool(tool)
 
     def _extract_tool_call(self, item: Any) -> MCPToolCall | None:

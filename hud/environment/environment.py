@@ -129,6 +129,7 @@ class Environment(
         super().__init__(name=name, instructions=instructions, **fastmcp_kwargs)
         self._connections: dict[str, Connector] = {}
         self._router = ToolRouter(conflict_resolution=conflict_resolution)
+        self._routing_built = False  # Track if _build_routing has been called
         self._in_context = False
 
         # Tool call queues - run after connections established
@@ -181,6 +182,10 @@ class Environment(
 
         return tools
 
+    def add_tool(self, obj: Any, **kwargs: Any) -> None:
+        super().add_tool(obj, **kwargs)
+        self._routing_built = False
+
     async def call_tool(self, call: Any, /, **kwargs: Any) -> Any:
         """Call a tool, auto-detecting format and returning matching result format.
 
@@ -224,6 +229,9 @@ class Environment(
         Automatically filters to only connections where the tool exists
         (based on cached_tools from initial discovery).
 
+        For internal tools (starting with _), tries ALL connections since
+        internal tools are hidden from list_tools() and won't be in cached_tools.
+
         Args:
             tool_name: Name of the tool to call
             **kwargs: Arguments to pass to the tool
@@ -233,10 +241,13 @@ class Environment(
         """
         import asyncio
 
-        # Only call connections that have this tool
-        targets = self._connections_with_tool(tool_name)
-        if not targets:
-            return {}
+        # For internal tools (underscore prefix), try ALL connections since
+        # they're hidden from list_tools() and won't appear in cached_tools.
+        # For regular tools, only try connections that advertise the tool.
+        if tool_name.startswith("_"):
+            targets = set(self._connections.keys())
+        else:
+            targets = self._connections_with_tool(tool_name)
 
         results: dict[str, Any] = {}
 
@@ -245,7 +256,8 @@ class Environment(
             if not connector or not connector.client:
                 return
             try:
-                results[name] = await connector.client.call_tool(tool_name, **kwargs)
+                # Use connector.call_tool which expects arguments as a dict
+                results[name] = await connector.call_tool(tool_name, kwargs)
                 logger.debug("Broadcast '%s' to '%s' succeeded", tool_name, name)
             except Exception as e:
                 results[name] = e
@@ -361,6 +373,23 @@ class Environment(
         if self._connections:
             await asyncio.gather(*[c.disconnect() for c in self._connections.values()])
         self._router.clear()
+        self._routing_built = False
+
+    async def run_async(
+        self,
+        transport: Literal["stdio", "http", "sse"] | None = None,
+        show_banner: bool = True,
+        **transport_kwargs: Any,
+    ) -> None:
+        """Run the MCP server, auto-connecting all connectors first.
+
+        This ensures that tools from external MCP servers (via connect_mcp_config)
+        are discovered and available when the server starts.
+        """
+        async with self:  # Connect all connectors via __aenter__
+            await super().run_async(
+                transport=transport, show_banner=show_banner, **transport_kwargs
+            )
 
     async def run_async(
         self,
@@ -389,6 +418,7 @@ class Environment(
             connections=self._connections,
             connection_order=list(self._connections.keys()),
         )
+        self._routing_built = True
         # Populate mock schemas for auto-generated mock values
         self._populate_mock_schemas()
 
@@ -406,6 +436,8 @@ class Environment(
 
     async def _env_list_tools(self) -> list[mcp_types.Tool]:
         """Return all tools including those from connectors."""
+        if not self._routing_built:
+            await self._build_routing()
         return self._router.tools
 
     async def _env_call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> list[Any]:
@@ -433,6 +465,10 @@ class Environment(
         if self._mock_mode:
             logger.debug("Mock mode: returning mock result for tool %s", name)
             return self._get_mock_result(name, arguments)
+
+        # Rebuild routing if invalidated (e.g., after add_tool)
+        if not self._routing_built:
+            await self._build_routing()
 
         if self._router.is_local(name):
             # Call tool manager directly to avoid FastMCP context requirement

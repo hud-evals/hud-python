@@ -128,8 +128,9 @@ class TestOpenAIAgent:
     async def test_init_without_client_no_api_key(self) -> None:
         """Test agent initialization fails without API key."""
         with patch("hud.agents.openai.settings") as mock_settings:
+            mock_settings.api_key = None
             mock_settings.openai_api_key = None
-            with pytest.raises(ValueError, match="OpenAI API key not found"):
+            with pytest.raises(ValueError, match="No API key found"):
                 OpenAIAgent.create()
 
     @pytest.mark.asyncio

@@ -21,6 +21,7 @@ import traceback
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -95,7 +96,7 @@ class HUDConsole:
             stderr: If True, output to stderr (default), otherwise stdout
         """
         console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"[{GREEN}]✅ {message}[/{GREEN}]")
+        console.print(f"[{GREEN}]✅ {escape(message)}[/{GREEN}]")
 
     def error(self, message: str, stderr: bool = True) -> None:
         """Print an error message.
@@ -106,10 +107,12 @@ class HUDConsole:
         """
         console = self._stderr_console if stderr else self._stdout_console
         tb = traceback.format_exc()
+        escaped_message = escape(message)
         if "NoneType: None" not in tb:
-            console.print(f"[{RED} not bold]❌ {message}\n{tb}[/{RED} not bold]")
+            escaped_tb = escape(tb)
+            console.print(f"[{RED} not bold]❌ {escaped_message}\n{escaped_tb}[/{RED} not bold]")
         else:
-            console.print(f"[{RED} not bold]❌ {message}[/{RED} not bold]")
+            console.print(f"[{RED} not bold]❌ {escaped_message}[/{RED} not bold]")
 
     def warning(self, message: str, stderr: bool = True) -> None:
         """Print a warning message.
@@ -119,7 +122,7 @@ class HUDConsole:
             stderr: If True, output to stderr (default), otherwise stdout
         """
         console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"⚠️  [{YELLOW} not bold]{message}[/{YELLOW} not bold]")
+        console.print(f"⚠️  [{YELLOW} not bold]{escape(message)}[/{YELLOW} not bold]")
 
     def info(self, message: str, stderr: bool = True) -> None:
         """Print an info message.
@@ -129,7 +132,7 @@ class HUDConsole:
             stderr: If True, output to stderr (default), otherwise stdout
         """
         console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"[{TEXT} not bold]{message}[/{TEXT} not bold]")
+        console.print(f"[{TEXT} not bold]{escape(message)}[/{TEXT} not bold]")
 
     def print(self, message: str, stderr: bool = True) -> None:
         """Print a message.
@@ -151,7 +154,7 @@ class HUDConsole:
         """
         console = self._stderr_console if stderr else self._stdout_console
         console.print(
-            f"[{DIM} not bold][default]{label}[/default][/{DIM} not bold] [default]{value}[/default]"  # noqa: E501
+            f"[{DIM} not bold][default]{escape(label)}[/default][/{DIM} not bold] [default]{escape(value)}[/default]"  # noqa: E501
         )
 
     def link(self, url: str, stderr: bool = True) -> None:
@@ -162,7 +165,7 @@ class HUDConsole:
             stderr: If True, output to stderr (default), otherwise stdout
         """
         console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"[{SECONDARY} underline]{url}[/{SECONDARY} underline]")
+        console.print(f"[{SECONDARY} underline]{escape(url)}[/{SECONDARY} underline]")
 
     def json_config(self, json_str: str, stderr: bool = True) -> None:
         """Print JSON configuration with neutral theme.
@@ -173,7 +176,7 @@ class HUDConsole:
         """
         # Print JSON with neutral grey text
         console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"[{TEXT}]{json_str}[/{TEXT}]")
+        console.print(f"[{TEXT}]{escape(json_str)}[/{TEXT}]")
 
     def key_value_table(
         self, data: dict[str, str | int | float], show_header: bool = False, stderr: bool = True
@@ -203,7 +206,7 @@ class HUDConsole:
             stderr: If True, output to stderr (default), otherwise stdout
         """
         console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"[{DIM}]{message}[/{DIM}]")
+        console.print(f"[{DIM}]{escape(message)}[/{DIM}]")
 
     def phase(self, phase_num: int, title: str, stderr: bool = True) -> None:
         """Print a phase header (for debug command).
@@ -236,7 +239,7 @@ class HUDConsole:
             stderr: If True, output to stderr (default), otherwise stdout
         """
         console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"[rgb(181,137,0)]💡 Hint: {hint}[/rgb(181,137,0)]")
+        console.print(f"[rgb(181,137,0)]💡 Hint: {escape(hint)}[/rgb(181,137,0)]")
 
     def status_item(
         self,
@@ -265,10 +268,14 @@ class HUDConsole:
         indicator = indicators.get(status, indicators["info"])
         console = self._stderr_console if stderr else self._stdout_console
 
+        escaped_label = escape(label)
+        escaped_value = escape(value)
         if primary:
-            console.print(f"{indicator} {label}: [bold {SECONDARY}]{value}[/bold {SECONDARY}]")
+            console.print(
+                f"{indicator} {escaped_label}: [bold {SECONDARY}]{escaped_value}[/bold {SECONDARY}]"
+            )
         else:
-            console.print(f"{indicator} {label}: [{TEXT}]{value}[/{TEXT}]")
+            console.print(f"{indicator} {escaped_label}: [{TEXT}]{escaped_value}[/{TEXT}]")
 
     def command_example(
         self, command: str, description: str | None = None, stderr: bool = True
@@ -546,7 +553,12 @@ class HUDConsole:
             except (TypeError, ValueError):
                 args_str = str(arguments)[:60]
 
-        return f"[{GOLD}]→[/{GOLD}] [bold {TEXT}]{name}[/bold {TEXT}][{DIM}]({args_str})[/{DIM}]"
+        escaped_name = escape(name)
+        escaped_args = escape(args_str)
+        return (
+            f"[{GOLD}]→[/{GOLD}] [bold {TEXT}]{escaped_name}[/bold {TEXT}]"
+            f"[{DIM}]({escaped_args})[/{DIM}]"
+        )
 
     def format_tool_result(self, content: str, is_error: bool = False) -> str:
         """Format a tool result in compact HUD style.
@@ -562,11 +574,12 @@ class HUDConsole:
         if len(content) > 80:
             content = content[:77] + "..."
 
+        escaped_content = escape(content)
         # Format with status using HUD colors
         if is_error:
-            return f"  [{RED}]✗[/{RED}] [{DIM}]{content}[/{DIM}]"
+            return f"  [{RED}]✗[/{RED}] [{DIM}]{escaped_content}[/{DIM}]"
         else:
-            return f"  [{GREEN}]✓[/{GREEN}] [{TEXT}]{content}[/{TEXT}]"
+            return f"  [{GREEN}]✓[/{GREEN}] [{TEXT}]{escaped_content}[/{TEXT}]"
 
     def confirm(self, message: str, default: bool = True) -> bool:
         """Print a confirmation message.
@@ -590,12 +603,12 @@ class HUDConsole:
             stderr: If True, output to stderr
         """
         console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"[{color}]{symbol}[/{color}] {message}")
+        console.print(f"[{color}]{symbol}[/{color}] {escape(message)}")
 
     def detail(self, message: str, stderr: bool = True) -> None:
         """Print an indented detail line with gold pointer symbol."""
         console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"  [{GOLD}]{Symbols.ITEM}[/{GOLD}] {message}")
+        console.print(f"  [{GOLD}]{Symbols.ITEM}[/{GOLD}] {escape(message)}")
 
     def flow(self, message: str, stderr: bool = True) -> None:
         """Print a flow/transition message with wave symbol."""
