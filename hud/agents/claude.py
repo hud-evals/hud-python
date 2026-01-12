@@ -303,7 +303,7 @@ class ClaudeAgent(MCPAgent):
                         display_width_px=computer_settings.ANTHROPIC_COMPUTER_WIDTH,
                         display_height_px=computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
                     )
-                elif tool.name == "computer":
+                elif tool.name == "computer" or tool.name.endswith("_computer"):
                     logger.warning(
                         "Renamed tool %s to 'computer', dropping original 'computer' tool",
                         selected_computer_tool.name,
