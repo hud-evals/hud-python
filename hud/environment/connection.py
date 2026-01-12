@@ -110,8 +110,10 @@ class Connector:
         """
         from fastmcp.client import Client as FastMCPClient
 
-        # Create fresh client from stored transport config
-        self.client = FastMCPClient(transport=self._transport, auth=self._auth)
+        self.client = FastMCPClient(
+            transport=self._transport,
+            auth=self._auth,
+        )
         await self.client.__aenter__()
 
     async def disconnect(self) -> None:

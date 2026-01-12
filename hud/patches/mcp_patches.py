@@ -18,8 +18,10 @@ def patch_streamable_http_error_handling() -> None:
     Patch StreamableHTTPTransport.post_writer to handle request errors properly.
 
     The original implementation doesn't catch errors in handle_request_async,
-    which can cause silent failures. This patch wraps the handler to send
-    errors to the read stream so clients know the request failed.
+    which can cause the client to hang indefinitely. This patch wraps the handler
+    to send a proper JSONRPCError response when transport errors occur (e.g.,
+    ReadTimeout), allowing the waiting caller to receive the error and fail
+    gracefully instead of hanging.
     """
     try:
         from mcp.client.streamable_http import StreamableHTTPTransport
@@ -33,10 +35,52 @@ def patch_streamable_http_error_handling() -> None:
             start_get_stream: Any,
             tg: Any,
         ) -> None:
-            """Patched post_writer with error handling for handle_request_async."""
+            import asyncio
+            import ssl
+            import time
+
+            import httpx
             from mcp.client.streamable_http import RequestContext
-            from mcp.shared.message import ClientMessageMetadata
-            from mcp.types import JSONRPCRequest
+            from mcp.shared.message import ClientMessageMetadata, SessionMessage
+            from mcp.types import ErrorData, JSONRPCError, JSONRPCMessage, JSONRPCRequest
+
+            from hud.settings import settings
+
+            async def handle_request_async(ctx: RequestContext, is_resumption: bool) -> None:
+                msg = ctx.session_message.message
+                deadline = time.monotonic() + settings.client_timeout if settings.client_timeout > 0 else None
+                retryable = (httpx.ConnectError, httpx.ReadError, httpx.TimeoutException, ssl.SSLError)
+
+                while True:
+                    try:
+                        if is_resumption:
+                            await self._handle_resumption_request(ctx)
+                        else:
+                            await self._handle_post_request(ctx)
+                        return
+                    except retryable as e:
+                        if deadline and time.monotonic() >= deadline:
+                            raise
+                        logger.warning("Retrying MCP request after error: %s", e)
+                        await asyncio.sleep(2.0)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        logger.exception("Request handler error: %s", e)
+                        if isinstance(msg.root, JSONRPCRequest):
+                            error_response = JSONRPCError(
+                                jsonrpc="2.0",
+                                id=msg.root.id,
+                                error=ErrorData(
+                                    code=-32000,
+                                    message=f"Transport error: {type(e).__name__}",
+                                    data={"error_type": type(e).__name__, "detail": str(e)},
+                                ),
+                            )
+                            await ctx.read_stream_writer.send(SessionMessage(JSONRPCMessage(error_response)))
+                        else:
+                            await ctx.read_stream_writer.send(e)
+                        return
 
             try:
                 async with write_stream_reader:
@@ -47,7 +91,6 @@ def patch_streamable_http_error_handling() -> None:
                             if isinstance(session_message.metadata, ClientMessageMetadata)
                             else None
                         )
-
                         is_resumption = bool(metadata and metadata.resumption_token)
 
                         logger.debug("Sending client message: %s", message)
@@ -64,21 +107,6 @@ def patch_streamable_http_error_handling() -> None:
                             read_stream_writer=read_stream_writer,
                             sse_read_timeout=self.sse_read_timeout,
                         )
-
-                        # Patched: Accept ctx and is_resumption as params, add error handling
-                        async def handle_request_async(
-                            ctx: RequestContext = ctx,
-                            is_resumption: bool = is_resumption,
-                        ) -> None:
-                            try:
-                                if is_resumption:
-                                    await self._handle_resumption_request(ctx)
-                                else:
-                                    await self._handle_post_request(ctx)
-                            except Exception as e:
-                                # Send error to read stream so client knows request failed
-                                logger.error("Request handler error: %s", e)
-                                await ctx.read_stream_writer.send(e)
 
                         if isinstance(message.root, JSONRPCRequest):
                             tg.start_soon(handle_request_async, ctx, is_resumption)
