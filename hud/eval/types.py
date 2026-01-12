@@ -53,6 +53,7 @@ class JobEnterPayload(BaseModel):
     name: str | None = None
     variants: dict[str, Any] | None = None  # Full variant config
     group: int | None = None
+    taskset: str | None = None  # taskset slug to associate job with
 
 
 __all__ = [

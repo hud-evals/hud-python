@@ -62,6 +62,7 @@ def _send_job_enter(
     variants: dict[str, Any] | None,
     group: int,
     api_key: str | None,
+    taskset: str | None = None,
 ) -> None:
     """Send job enter payload (sync request before traces start)."""
     import httpx
@@ -77,6 +78,7 @@ def _send_job_enter(
         name=name,
         variants=variants,
         group=group,
+        taskset=taskset,
     )
 
     try:
@@ -105,6 +107,7 @@ async def run_eval(
     max_concurrent: int | None = None,
     trace: bool = True,
     quiet: bool = False,
+    taskset: str | None = None,
 ) -> AsyncGenerator[EvalContext, None]:
     """Standalone eval context manager.
 
@@ -279,6 +282,7 @@ async def run_eval(
             variants=variants,
             group=group,
             api_key=api_key,
+            taskset=taskset,
         )
 
         # Print job URL (not individual trace URLs)

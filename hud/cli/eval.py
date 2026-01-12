@@ -164,6 +164,7 @@ class EvalConfig(BaseModel):
         "auto_respond",
         "quiet",
         "gateway",
+        "taskset",
     }
     # Fields loaded from [agent] section
     _AGENT_FIELDS: ClassVar[set[str]] = {"allowed_tools", "disallowed_tools"}
@@ -184,6 +185,7 @@ class EvalConfig(BaseModel):
     remote: bool = False
     quiet: bool = False  # Suppress opening browser for eval links
     gateway: bool = False  # Use HUD Gateway for LLM API calls
+    taskset: str | None = None  # Taskset slug to associate job with
 
     # Base agent config (these merge with task's agent_config)
     allowed_tools: list[str] | None = None
@@ -701,6 +703,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         max_concurrent=cfg.max_concurrent,
         group_size=cfg.group_size,
         quiet=cfg.quiet,
+        taskset=cfg.taskset,
     )
 
     # Show reward for single task
@@ -767,6 +770,9 @@ def eval_command(
     gateway: bool = typer.Option(
         False, "--gateway", "-g", help="Route LLM API calls through HUD Gateway"
     ),
+    taskset: str | None = typer.Option(
+        None, "--taskset", "-t", help="Taskset slug to associate job with"
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
 
@@ -801,6 +807,7 @@ def eval_command(
         byok=byok,
         quiet=quiet,
         gateway=gateway,
+        taskset=taskset,
     )
 
     # Find source if not provided

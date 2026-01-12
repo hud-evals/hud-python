@@ -29,6 +29,7 @@ async def run_dataset(
     max_concurrent: int = 30,
     group_size: int = 1,
     quiet: bool = True,
+    taskset: str | None = None,
 ) -> list[EvalContext]:
     """Run an agent on a dataset of tasks.
 
@@ -96,6 +97,7 @@ async def run_dataset(
         group=group_size,
         max_concurrent=max_concurrent,
         quiet=quiet,
+        taskset=taskset,
     ) as ctx:
         # Create agent using AgentType.cls.create()
         agent = agent_type.cls.create(**(agent_params or {}))
