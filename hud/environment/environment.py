@@ -450,6 +450,10 @@ class Environment(
             logger.debug("Mock mode: returning mock result for tool %s", name)
             return self._get_mock_result(name, arguments)
 
+        # Rebuild routing if invalidated (e.g., after add_tool)
+        if not self._routing_built:
+            await self._build_routing()
+
         if self._router.is_local(name):
             # Call tool manager directly to avoid FastMCP context requirement
             result = await self._tool_manager.call_tool(name, arguments)
