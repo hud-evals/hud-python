@@ -11,7 +11,6 @@ from mcp.types import INVALID_PARAMS, ContentBlock
 from pydantic import Field
 
 from .base import BaseTool
-from .computer.settings import computer_settings
 from .types import ContentResult
 
 if TYPE_CHECKING:
@@ -191,19 +190,10 @@ class PlaywrightTool(BaseTool):
                     existing_pages = self._browser_context.pages
                     if existing_pages:
                         self.page = existing_pages[0]
-                        await self.page.set_viewport_size(
-                            {
-                                "width": computer_settings.DISPLAY_WIDTH,
-                                "height": computer_settings.DISPLAY_HEIGHT,
-                            }
-                        )
                 else:
                     # As a fallback, create a new context
                     self._browser_context = await self._browser.new_context(
-                        viewport={
-                            "width": computer_settings.DISPLAY_WIDTH,
-                            "height": computer_settings.DISPLAY_HEIGHT,
-                        },
+                        viewport={"width": 1920, "height": 1080},
                         ignore_https_errors=True,
                     )
             else:
@@ -236,10 +226,7 @@ class PlaywrightTool(BaseTool):
                     raise RuntimeError("Browser failed to initialize")
 
                 self._browser_context = await self._browser.new_context(
-                    viewport={
-                        "width": computer_settings.DISPLAY_WIDTH,
-                        "height": computer_settings.DISPLAY_HEIGHT,
-                    },
+                    viewport={"width": 1920, "height": 1080},
                     ignore_https_errors=True,
                 )
 
