@@ -115,5 +115,26 @@ class ComputerSettings(BaseSettings):
         validation_alias="GEMINI_MAX_RECENT_TURN_WITH_SCREENSHOTS",
     )
 
+    TINKER_COMPUTER_WIDTH: int = Field(
+        default=700,
+        description="Width of the display to use for the Tinker computer tools",
+        validation_alias="TINKER_COMPUTER_WIDTH",
+    )
+    TINKER_COMPUTER_HEIGHT: int = Field(
+        default=448,
+        description="Height of the display to use for the Tinker computer tools",
+        validation_alias="TINKER_COMPUTER_HEIGHT",
+    )
+    TINKER_RESCALE_IMAGES: bool = Field(
+        default=True,
+        description="Whether to rescale images to the agent width and height",
+        validation_alias="TINKER_RESCALE_IMAGES",
+    )
+    TINKER_MAX_RECENT_TURN_WITH_SCREENSHOTS: int = Field(
+        default=3,
+        description="Maximum number of recent turns to keep screenshots for in Tinker agent",
+        validation_alias="TINKER_MAX_RECENT_TURN_WITH_SCREENSHOTS",
+    )
+
 
 computer_settings = ComputerSettings()

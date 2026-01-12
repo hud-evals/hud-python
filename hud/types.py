@@ -27,6 +27,7 @@ class AgentType(str, Enum):
     GEMINI = "gemini"
     GEMINI_CUA = "gemini_cua"
     OPENAI_COMPATIBLE = "openai_compatible"
+    TINKER = "tinker"
     INTEGRATION_TEST = "integration_test"
 
     @property
@@ -36,6 +37,7 @@ class AgentType(str, Enum):
         from hud.agents.gemini import GeminiAgent
         from hud.agents.gemini_cua import GeminiCUAAgent
         from hud.agents.openai_chat import OpenAIChatAgent
+        from hud.agents.tinker import TinkerAgent
 
         mapping: dict[AgentType, type] = {
             AgentType.CLAUDE: ClaudeAgent,
@@ -44,6 +46,7 @@ class AgentType(str, Enum):
             AgentType.GEMINI: GeminiAgent,
             AgentType.GEMINI_CUA: GeminiCUAAgent,
             AgentType.OPENAI_COMPATIBLE: OpenAIChatAgent,
+            AgentType.TINKER: TinkerAgent,
         }
         if self == AgentType.INTEGRATION_TEST:
             from hud.agents.misc.integration_test_agent import IntegrationTestRunner
