@@ -182,6 +182,10 @@ class Environment(
 
         return tools
 
+    def add_tool(self, obj: Any, **kwargs: Any) -> None:
+        super().add_tool(obj, **kwargs)
+        self._routing_built = False
+
     async def call_tool(self, call: Any, /, **kwargs: Any) -> Any:
         """Call a tool, auto-detecting format and returning matching result format.
 
