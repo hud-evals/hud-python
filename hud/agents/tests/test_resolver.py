@@ -57,6 +57,44 @@ class TestResolveCls:
             assert info is not None
             assert info["id"] == "gpt-4o"
 
+    def test_resolves_codex_model_to_openai_agent_even_if_provider_is_openai_compatible(
+        self,
+    ) -> None:
+        """Codex-capable models use OpenAIAgent for native tools."""
+        from hud.agents import OpenAIAgent
+
+        mock_models = [
+            {"id": "gpt-5.1-codex", "model": "gpt-5.1-codex", "provider": "openai_compatible"},
+        ]
+
+        with patch("hud.agents.resolver._fetch_gateway_models", return_value=mock_models):
+            cls, info = resolve_cls("gpt-5.1-codex")
+            assert cls == OpenAIAgent
+            assert info is not None
+            assert info["id"] == "gpt-5.1-codex"
+
+    def test_does_not_misroute_claude_when_alias_is_codex_capable(self) -> None:
+        """Only the matched ID should be checked for codex capability, not aliases."""
+        from hud.agents.claude import ClaudeAgent
+
+        # Contrived example: a model entry where one alias is codex-capable
+        # but the requested ID is not
+        mock_models = [
+            {
+                "id": "claude-via-gateway",
+                "name": "gpt-5.1-codex",  # Alias happens to be codex-capable
+                "model": "claude-3-sonnet",
+                "provider": "anthropic",
+            },
+        ]
+
+        with patch("hud.agents.resolver._fetch_gateway_models", return_value=mock_models):
+            # Request by the non-codex ID - should route to Claude, not OpenAI
+            cls, info = resolve_cls("claude-via-gateway")
+            assert cls == ClaudeAgent
+            assert info is not None
+            assert info["id"] == "claude-via-gateway"
+
     def test_resolves_anthropic_provider_to_claude(self) -> None:
         """Provider 'anthropic' maps to ClaudeAgent."""
         from hud.agents.claude import ClaudeAgent
