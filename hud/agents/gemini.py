@@ -61,10 +61,18 @@ class GeminiAgent(MCPAgent):
 
         model_client = self.config.model_client
         if model_client is None:
-            api_key = settings.gemini_api_key
-            if not api_key:
-                raise ValueError("Gemini API key not found. Set GEMINI_API_KEY.")
-            model_client = genai.Client(api_key=api_key)
+            # Default to HUD gateway when HUD_API_KEY is available
+            if settings.api_key:
+                from hud.agents.gateway import build_gateway_client
+
+                model_client = build_gateway_client("gemini")
+            elif settings.gemini_api_key:
+                model_client = genai.Client(api_key=settings.gemini_api_key)
+            else:
+                raise ValueError(
+                    "No API key found. Set HUD_API_KEY for HUD gateway, "
+                    "or GEMINI_API_KEY for direct Gemini access."
+                )
 
         if self.config.validate_api_key:
             try:

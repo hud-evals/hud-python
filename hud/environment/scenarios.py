@@ -70,35 +70,17 @@ class ScenarioMixin:
     async def submit(self, scenario: str, answer: str) -> None:
         """Submit the agent's answer for a scenario's evaluate phase.
 
-        This stores the answer locally and broadcasts to connected hubs
-        that have the _hud_submit tool (auto-detected by Environment).
+        Stores locally and broadcasts to connected hubs with _hud_submit tool.
 
         Args:
             scenario: Name of the scenario (without env prefix)
             answer: The agent's answer/result to submit
-
-        Example:
-            # Direct call with scenario name
-            await env.submit("checkout", "Order completed successfully")
-
-            # Or via EvalContext (knows its own scenario)
-            await ctx.submit("Order completed successfully")
         """
-        # Store locally for our scenarios
         self._scenario_answers[scenario] = answer
-        logger.debug(
-            "Stored answer for scenario '%s': %s...",
-            scenario,
-            answer[:50] if len(answer) > 50 else answer,
-        )
+        logger.debug("Stored answer for scenario '%s'", scenario)
 
-        # Broadcast to connections that have _hud_submit
-        # Environment._broadcast_tool auto-filters to connections with the tool
-        await self._broadcast_tool(  # type: ignore[attr-defined]
-            "_hud_submit",
-            scenario=scenario,
-            answer=answer,
-        )
+        # Broadcast to all connections (internal tools try all connections)
+        await self._broadcast_tool("_hud_submit", scenario=scenario, answer=answer)  # type: ignore[attr-defined]
 
     def _register_hud_submit_tool(self) -> None:
         """Register the _hud_submit tool for receiving agent answers.
@@ -178,13 +160,9 @@ class ScenarioMixin:
                 prompt_id = f"{safe_env_name}:{scenario_name}"
                 logger.debug("Remote scenario (adding namespace): prompt_id=%s", prompt_id)
             # Serialize args for MCP prompt (only supports string values)
-            # JSON-encode any non-string values so they can be deserialized on the other side
             serialized_args: dict[str, str] = {}
             for key, value in args.items():
-                if isinstance(value, str):
-                    serialized_args[key] = value
-                else:
-                    serialized_args[key] = json.dumps(value)
+                serialized_args[key] = value if isinstance(value, str) else json.dumps(value)
 
             try:
                 result = await self.get_prompt(prompt_id, serialized_args)  # type: ignore[attr-defined]
@@ -193,14 +171,26 @@ class ScenarioMixin:
                 try:
                     prompts = await self.list_prompts()  # type: ignore[attr-defined]
                     scenario_prompts = [p.name for p in prompts if ":" in p.name]
-                    available = (
-                        "\n    ".join(scenario_prompts) if scenario_prompts else "(none found)"
-                    )
+                    available = "\n    ".join(scenario_prompts) if scenario_prompts else "(none)"
                 except Exception:
-                    available = "(could not fetch available scenarios)"
+                    available = "(could not fetch)"
+                    scenario_prompts = []
+
+                original_error = str(e)
+                if prompt_id in scenario_prompts:
+                    raise ValueError(
+                        f"⚠️ ERROR: Scenario '{prompt_id}' exists but failed to execute.\n\n"
+                        f"The scenario was found but encountered an error during setup:\n"
+                        f"  {original_error}\n\n"
+                        f"This could be caused by:\n"
+                        f"  - Missing or invalid scenario arguments\n"
+                        f"  - An error in the scenario's setup function\n"
+                        f"  - Connection or serialization issues\n\n"
+                        f"Check the scenario definition and required arguments."
+                    ) from e
 
                 raise ValueError(
-                    f"Scenario not found.\n\n"
+                    f"⚠️ ERROR: Scenario not found.\n\n"
                     f"Scenario IDs have the format 'environment_name:scenario_name'.\n"
                     f"If you only specify 'scenario_name', the SDK uses your task's env name "
                     f"as the prefix.\n"
@@ -212,7 +202,7 @@ class ScenarioMixin:
                     f"Fix: Use one of the scenario IDs above in your task JSON."
                 ) from e
 
-            # Validate the response (outside try/except so errors aren't wrapped)
+            # Validate the response
             if result.messages:
                 first_msg = result.messages[0]
                 content = first_msg.content
@@ -275,23 +265,24 @@ class ScenarioMixin:
                         del self._scenario_latest[scenario_name]
 
         # Remote scenario - read via MCP resource
-        # If scenario_name already contains ":", it's already namespaced - use directly
         if ":" in scenario_name:
             resource_id = scenario_name
         else:
             env_name = getattr(self, "_source_env_name", None) or self.name
             safe_env_name = env_name.replace("_", "-")
             resource_id = f"{safe_env_name}:{scenario_name}"
+
         try:
             contents = await self.read_resource(resource_id)  # type: ignore[attr-defined]
             if contents:
-                first_content = contents[0]
-                if hasattr(first_content, "text") and isinstance(first_content.text, str):  # type: ignore[union-attr]
-                    data = json.loads(first_content.text)  # type: ignore[union-attr]
+                first = contents[0]
+                if hasattr(first, "text") and isinstance(first.text, str):  # type: ignore[union-attr]
+                    data = json.loads(first.text)  # type: ignore[union-attr]
                     if "reward" in data:
                         return float(data["reward"])
         except Exception as e:
             logger.warning("Failed to get scenario reward: %s", e)
+
         return None
 
     def scenario(
@@ -362,7 +353,7 @@ class ScenarioMixin:
                     # Only include JSON-serializable defaults
                     default_val = p.default
                     if default_val is None or isinstance(
-                        default_val, (str, int, float, bool, list, dict)
+                        default_val, (str | int | float | bool | list | dict)
                     ):
                         arg_info["default"] = default_val
 
@@ -412,27 +403,50 @@ class ScenarioMixin:
                 from pydantic import TypeAdapter
 
                 # Deserialize JSON-encoded arguments using Pydantic TypeAdapter
-                # This properly handles: Pydantic models, enums, datetime, lists, dicts
+                # MCP prompts only support string arguments, so complex types are
+                # JSON-serialized on the sending side and deserialized here
                 deserialized_args: dict[str, Any] = {}
                 for arg_name, arg_value in handler_args.items():
                     annotation = param_annotations.get(arg_name)
-                    if (
-                        annotation is not None
-                        and annotation is not str
-                        and isinstance(arg_value, str)
-                    ):
-                        # Try TypeAdapter.validate_json for proper type coercion
+
+                    # Only attempt deserialization on string values
+                    if not isinstance(arg_value, str):
+                        deserialized_args[arg_name] = arg_value
+                        continue
+
+                    # If annotation is explicitly str, keep as string
+                    if annotation is str:
+                        deserialized_args[arg_name] = arg_value
+                        continue
+
+                    # If we have a non-str type annotation, use TypeAdapter
+                    if annotation is not None:
                         try:
                             adapter = TypeAdapter(annotation)
                             deserialized_args[arg_name] = adapter.validate_json(arg_value)
-                        except Exception:
-                            # Fall back to plain json.loads if TypeAdapter fails
-                            try:
-                                deserialized_args[arg_name] = json.loads(arg_value)
-                            except json.JSONDecodeError:
-                                deserialized_args[arg_name] = arg_value
-                    else:
-                        deserialized_args[arg_name] = arg_value
+                            continue
+                        except Exception:  # noqa: S110
+                            pass  # Fall through to generic JSON decode
+
+                    # Try JSON decode for strings that look like JSON
+                    stripped = arg_value.strip()
+                    if (stripped and stripped[0] in "[{") or stripped in ("true", "false", "null"):
+                        try:
+                            deserialized_args[arg_name] = json.loads(arg_value)
+                            continue
+                        except json.JSONDecodeError:
+                            pass
+
+                    # Try to decode if it looks like a number
+                    if stripped.lstrip("-").replace(".", "", 1).isdigit():
+                        try:
+                            deserialized_args[arg_name] = json.loads(arg_value)
+                            continue
+                        except json.JSONDecodeError:
+                            pass
+
+                    # Keep as string
+                    deserialized_args[arg_name] = arg_value
 
                 # Create generator instance with deserialized args
                 gen = scenario_fn(**deserialized_args)

@@ -33,7 +33,7 @@
         "icon": "code",
         "versions": [
           {
-            "version": "0.5.3",
+            "version": "0.5.5",
             "groups": [
               {
                 "group": "Get Started",
@@ -198,15 +198,22 @@
           {
             "group": "Get Started",
             "pages": [
-              "platform/index"
+              "platform/index",
+              "platform/mcp"
             ]
           },
           {
-            "group": "Platform Guide",
+            "group": "Concepts",
             "pages": [
               "platform/models",
               "platform/environments",
               "platform/tasksets"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "platform/publishing-leaderboards"
             ]
           }
         ]

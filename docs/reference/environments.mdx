@@ -303,21 +303,32 @@ env.serve(transport="streamable-http", host="0.0.0.0", port=8765)
 
 ### http_app()
 
-Get a Starlette/ASGI app to mount on an existing FastAPI server:
+Get a Starlette/ASGI app to mount on an existing FastAPI server. This is inherited from FastMCP and enables deployment on platforms like Railway, Fly.io, or Vercel.
 
 ```python
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from hud import Environment
 
-app = FastAPI()
 env = Environment("my-env")
 
 @env.tool()
 def my_tool(arg: str) -> str:
     return f"Got: {arg}"
 
-# Mount the HUD environment's MCP endpoint at /mcp
-app.mount("/mcp", env.http_app())
+# Create the MCP app with stateless_http=True for multi-replica deployments
+mcp_app = env.http_app(path="/", stateless_http=True)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Enter BOTH the environment context AND the MCP app's lifespan
+    async with env, mcp_app.router.lifespan_context(mcp_app):
+        yield
+
+app = FastAPI(lifespan=lifespan, redirect_slashes=False)
+
+# Mount the MCP app
+app.mount("/mcp", mcp_app)
 
 # Your other FastAPI routes work normally
 @app.get("/health")
@@ -328,10 +339,45 @@ def health():
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
 | `path` | `str \| None` | Internal path for the MCP endpoint | `"/"` |
-| `transport` | `Literal["http", "streamable-http", "sse"]` | Transport protocol | `"http"` |
+| `stateless_http` | `bool` | Stateless mode for multi-replica deployments | `False` |
 | `middleware` | `list[ASGIMiddleware] \| None` | Starlette middleware | `None` |
-| `json_response` | `bool \| None` | Use JSON response format | `None` |
-| `stateless_http` | `bool \| None` | Use stateless HTTP mode | `None` |
+
+<Warning>
+**Lifespan is critical.** You must enter both `env` (the Environment context) and `mcp_app.router.lifespan_context(mcp_app)` (the MCP session manager). Missing either will cause tools to fail or sessions to not initialize.
+</Warning>
+
+#### Stateless HTTP Mode
+
+Enable `stateless_http=True` when deploying to platforms with multiple replicas (Railway, Fly.io, etc.). This ensures each request creates a fresh transport context, eliminating session affinity requirements:
+
+```python
+# For single-replica or sticky sessions
+mcp_app = env.http_app(path="/")
+
+# For multi-replica deployments (Railway, Fly.io, Vercel)
+mcp_app = env.http_app(path="/", stateless_http=True)
+```
+
+#### Authentication via Headers
+
+For authenticated tools, use FastMCP's `get_http_headers()` to extract the API key:
+
+```python
+from fastmcp.server.dependencies import get_http_headers
+
+@env.tool()
+async def protected_tool(query: str) -> dict:
+    """A tool that requires authentication."""
+    headers = get_http_headers()
+    auth_header = headers.get("authorization", "")
+    
+    if not auth_header.startswith("Bearer "):
+        return {"error": "Missing API key"}
+    
+    api_key = auth_header[7:]  # Remove "Bearer " prefix
+    # Validate api_key and proceed...
+    return {"result": "authenticated"}
+```
 
 MCP clients can then connect at `http://your-server/mcp`:
 

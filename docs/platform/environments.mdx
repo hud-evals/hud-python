@@ -191,6 +191,54 @@ hud eval my-env/checkout --model gpt-4o --group-size 10
 
 For local debugging before pushing, see [`hud debug`](/reference/cli/debug).
 
+## Debugging Traces
+
+When viewing a trace (task run), the environment pane on the right side provides powerful debugging tools through two special tabs:
+
+### DEBUG Tab
+
+The DEBUG tab shows low-level information about the environment and agent execution:
+
+- **Environment Info** — Container ID, pod status, and connection details
+- **MCP Operations** — All MCP protocol messages including prompts, resources, and internal operations that aren't tool calls
+- **Raw Attributes** — Expand any operation to see the full request/response payload
+- **Worker Logs** (Admin only) — Server-side logs from the Celery worker that executed the rollout
+
+This is useful for diagnosing:
+- Why a scenario setup or evaluation failed
+- MCP protocol issues between the agent and environment
+- Authentication or connection problems
+- Server-side errors that don't surface in the agent trace
+
+### LOGS Tab
+
+The LOGS tab shows container stdout/stderr from the environment:
+
+- **Real-time streaming** — Logs update as the environment runs
+- **Timestamp filtering** — See when specific events occurred
+- **Error highlighting** — Errors and warnings are visually distinct
+
+This helps debug:
+- Environment startup issues
+- Tool execution failures
+- Python exceptions in your environment code
+- Resource exhaustion (memory, CPU, disk)
+
+<Tip>
+If an agent run fails with no obvious error, check the LOGS tab first—often the environment container logged an exception that explains what went wrong.
+</Tip>
+
+### Accessing Debug Information
+
+1. Open any trace at `hud.ai/trace/{id}`
+2. Look at the environment pane on the right side
+3. Click the **DEBUG** or **LOGS** tab at the top
+4. For MCP operations in DEBUG, click the expand icon to see full payloads
+
+<Note>
+Worker logs in the DEBUG tab are only visible to platform administrators. Regular users see environment logs in the LOGS tab.
+</Note>
+
 ## Next Steps
 
 <CardGroup cols={2}>
