@@ -237,14 +237,6 @@ class ScenarioMixin:
                 env_name = getattr(self, "_source_env_name", None) or self.name
                 prompt_id = f"{env_name}:{scenario_name}"
 
-            # Use router to find which connection serves this prompt
-            conn_name = self._router.get_prompt_connection(prompt_id)  # type: ignore[attr-defined]
-            logger.debug(
-                "Remote scenario: prompt_id=%s, connection=%s",
-                prompt_id,
-                conn_name or "(not found in router)",
-            )
-
             # Serialize args for MCP prompt (only supports string values)
             serialized_args: dict[str, str] = {}
             for key, value in args.items():
@@ -252,6 +244,13 @@ class ScenarioMixin:
 
             try:
                 result = await self.get_prompt(prompt_id, serialized_args)  # type: ignore[attr-defined]
+                # Get connection AFTER get_prompt succeeds (routing is now guaranteed built)
+                conn_name = self._router.get_prompt_connection(prompt_id)  # type: ignore[attr-defined]
+                logger.debug(
+                    "Remote scenario: prompt_id=%s, connection=%s",
+                    prompt_id,
+                    conn_name or "(not found in router)",
+                )
             except Exception as e:
                 # Fetch available scenarios for error context
                 try:

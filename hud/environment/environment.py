@@ -406,6 +406,7 @@ class Environment(
         self._tool_routing_built = False
         self._prompt_routing_built = False
         self._resource_routing_built = False
+        self._active_session = None  # Clear stale scenario state
 
     async def run_async(
         self,
