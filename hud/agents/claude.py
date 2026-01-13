@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import logging
 from inspect import cleandoc
-from typing import Any, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import mcp.types as types
 from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, Omit
@@ -34,6 +34,9 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
 
 from .base import BaseCreateParams, MCPAgent
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -414,7 +417,7 @@ def document_to_content_block(base64_data: str) -> BetaRequestDocumentBlockParam
 
 def tool_use_content_block(
     tool_use_id: str,
-    content: list[BetaTextBlockParam | BetaImageBlockParam | BetaRequestDocumentBlockParam],
+    content: Sequence[BetaTextBlockParam | BetaImageBlockParam | BetaRequestDocumentBlockParam],
 ) -> BetaToolResultBlockParam:
     """Create tool result content block."""
     return {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}  # pyright: ignore[reportReturnType]
