@@ -95,7 +95,7 @@ async def main() -> None:
 
         # Get sampling client (creates initial checkpoint)
         sampling_client = await training_client.save_weights_and_get_sampling_client_async()
-        print("   ✓ Sampling client ready : {sampling_client}")
+        print(f"   ✓ Sampling client ready : {sampling_client}")
 
     except Exception as e:
         print(f"❌ Error connecting to Tinker: {e}")
