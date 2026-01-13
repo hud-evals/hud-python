@@ -660,12 +660,52 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         # Create a job ID for tracking
         import uuid
 
+        import httpx
+
         from hud.datasets.utils import submit_rollouts
+        from hud.eval.types import JobEnterPayload
+        from hud.settings import settings
 
         job_id = str(uuid.uuid4())
         hud_console.info(
             f"Submitting {len(tasks)} task(s) for remote execution (job_id: {job_id})…"
         )
+
+        # If taskset is specified, associate the job and auto-add tasks.
+        # Also attach returned task_version_ids back onto tasks so remote traces link.
+        if cfg.taskset:
+            tasks_to_create = [t for t in tasks if not t.id]
+            tasks_data = (
+                [t.model_dump(mode="json", exclude_none=True) for t in tasks_to_create]
+                if tasks_to_create
+                else None
+            )
+
+            payload = JobEnterPayload(
+                name=f"eval ({cfg.source})" if cfg.source else "eval",
+                variants=None,
+                group=cfg.group_size,
+                taskset=cfg.taskset,
+                tasks=tasks_data,
+            )
+
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        f"{settings.hud_api_url}/trace/job/{job_id}/enter",
+                        json=payload.model_dump(exclude_none=True),
+                        headers={"Authorization": f"Bearer {settings.api_key}"},
+                    )
+                if not resp.is_success:
+                    raise ValueError(f"job_enter failed ({resp.status_code})")
+                data = resp.json()
+                ids = data.get("task_version_ids") if isinstance(data, dict) else None
+                if isinstance(ids, list) and all(isinstance(x, str) for x in ids):
+                    for task_obj, task_version_id in zip(tasks_to_create, ids, strict=False):
+                        task_obj.id = task_version_id
+            except Exception as e:
+                # Best-effort: remote submission should still proceed even if association fails.
+                logger.warning("Failed to associate remote job with taskset: %s", e)
 
         await submit_rollouts(
             tasks=tasks,
