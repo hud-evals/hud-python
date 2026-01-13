@@ -1004,6 +1004,10 @@ def build_environment(
     if image_tag and image_tag not in [version_tag, latest_tag]:
         label_cmd.extend(["-t", image_tag])
 
+    # Add build args to final image build (same as initial build)
+    for key, value in build_args.items():
+        label_cmd.extend(["--build-arg", f"{key}={value}"])
+
     label_cmd.append(str(env_dir))
 
     # Run rebuild using Docker's native output formatting
