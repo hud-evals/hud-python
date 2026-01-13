@@ -250,13 +250,37 @@ async def run_eval(
 
     if total_evals == 1:
         if tasks:
+            # Even for single-task evals, --taskset requires a job_enter call so the run
+            # and task are linked to the taskset (via job_id + task_version_id).
+            job_id_for_run = job_id
+            if taskset:
+                eval_name = _get_eval_name(tasks=tasks)
+                if job_id_for_run is None:
+                    job_id_for_run = str(uuid.uuid4())
+
+                task_data = None
+                if not tasks[0].id:
+                    task_data = [tasks[0].model_dump(mode="json", exclude_none=True)]
+
+                created_task_version_ids = _send_job_enter(
+                    job_id=job_id_for_run,
+                    name=eval_name,
+                    variants=variants,
+                    group=group,
+                    api_key=api_key,
+                    taskset=taskset,
+                    tasks=task_data,
+                )
+                if created_task_version_ids and not tasks[0].id:
+                    tasks[0].id = created_task_version_ids[0]
+
             # Single task - use EvalContext.from_task()
             ctx = EvalContext.from_task(
                 tasks[0],
                 name=name,
                 trace_id=trace_id,
                 api_key=api_key,
-                job_id=job_id,
+                job_id=job_id_for_run,
                 group_id=group_id,
                 variants=variant_combos[0],
                 code_snippet=code_snippet,
