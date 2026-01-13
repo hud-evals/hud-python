@@ -33,7 +33,7 @@
         "icon": "code",
         "versions": [
           {
-            "version": "0.5.6",
+            "version": "0.5.7",
             "groups": [
               {
                 "group": "Get Started",
@@ -213,7 +213,14 @@
           {
             "group": "Guides",
             "pages": [
-              "platform/publishing-leaderboards"
+              "platform/publishing-leaderboards",
+              "platform/subagent"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "platform/slack"
             ]
           }
         ]

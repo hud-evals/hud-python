@@ -1,0 +1,225 @@
+---
+title: "Subagent API"
+description: "Create a scenario, optionally train a model, and get a simple API endpoint that runs your agent."
+icon: "robot"
+---
+
+Turn any scenario into a callable API endpoint. Define what your agent does, train it (optional), and get a single cURL command that runs it on demand.
+
+This is useful for:
+
+- **Automations** — Trigger agent runs from CI/CD, webhooks, or other services
+- **Integrations** — Embed HUD agents in your existing tools
+- **Demos** — Share a simple endpoint that showcases your agent's capabilities
+
+## Overview
+
+The workflow is:
+
+1. **Create a Scenario** — Define setup and evaluation in your environment
+2. **Train (Optional)** — Fine-tune a model on successful runs
+3. **Call the API** — Use the `/v1/agent/run` endpoint to trigger runs
+
+## Step 1: Create a Scenario
+
+Scenarios define what your agent does. In your environment code:
+
+```python
+from hud import Env
+
+env = Env("my-assistant")
+
+@env.scenario()
+async def answer_question(query: str):
+    """Answer a user question using available tools."""
+    
+    yield env.setup(f"Answer this question: {query}")
+    
+    result = yield  # Agent runs here
+    
+    # Evaluate the result
+    if "helpful" in result.lower():
+        yield env.reward(1.0)
+    else:
+        yield env.reward(0.0)
+```
+
+Deploy your environment through the platform:
+
+1. Go to [hud.ai/environments](https://hud.ai/environments) → **New Environment**
+2. Connect your GitHub repository or upload your code
+3. The platform builds and deploys automatically
+
+See [Environments](/platform/environments) for the full deployment workflow.
+
+## Step 2: Train a Model (Optional)
+
+If you want better performance, train a model on successful trajectories:
+
+1. Create a [Taskset](/platform/tasksets) with tasks using your scenario
+2. Run evaluations to generate trajectories
+3. Go to the **Models** tab in your taskset and click **Train Model**
+4. Select successful runs and a base model for fine-tuning
+
+The platform handles training and creates a model checkpoint you can use in API calls.
+
+<Note>
+  Training is optional. You can use any available model directly without fine-tuning.
+</Note>
+
+## Step 3: Call the API
+
+Once your scenario exists, call it via the REST API:
+
+### cURL
+
+```bash
+curl -X POST https://api.hud.so/v1/agent/run \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HUD_API_KEY" \
+  -d '{
+    "env_name": "my-assistant",
+    "scenario_name": "answer_question",
+    "scenario_args": {
+      "query": "What is the capital of France?"
+    },
+    "model": "claude-opus-4-5",
+    "max_steps": 100
+  }'
+```
+
+### Response
+
+```json
+{
+  "trace_id": "abc123-def456-..."
+}
+```
+
+The `trace_id` lets you look up the full run on [hud.ai](https://hud.ai) or via the API.
+
+### Python
+
+```python
+import hud
+from hud import Environment
+
+env = Environment()
+env.connect_hub("my-assistant")
+
+# Create a task with scenario and args
+task = env("answer_question", query="What is the capital of France?")
+
+# Run evaluation
+async with hud.eval(task) as ctx:
+    result = await ctx.call_tool("respond", answer="Paris is the capital of France.")
+```
+
+## Request Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `env_name` | string | ✓ | Environment name |
+| `scenario_name` | string | ✓ | Scenario to run |
+| `scenario_args` | object | ✓ | Arguments for the scenario |
+| `model` | string | ✓ | Model to use (see [Models](/platform/models)) |
+| `max_steps` | integer | | Maximum agent actions (default: 100, max: 500) |
+
+## Viewing Results
+
+Each run creates a trace. View it at:
+
+```
+https://hud.ai/traces/<trace_id>
+```
+
+Traces show:
+
+- Full agent trajectory (actions + observations)
+- Tool calls and responses
+- Final evaluation result and reward
+- Timing and token usage
+
+## From the Platform
+
+Every scenario card has a code snippet panel with ready-to-copy commands:
+
+1. Go to your environment's **Scenarios** tab
+2. Click the `</>` icon on any scenario card
+3. Select **cURL** or **Python** tab
+4. Copy the command with your scenario args pre-filled
+
+Arguments you enter in the scenario card get inserted into the code snippet automatically.
+
+## Use Cases
+
+### Webhook Handler
+
+Trigger agent runs from external events:
+
+```python
+@app.post("/webhook")
+async def handle_webhook(event: dict):
+    response = requests.post(
+        "https://api.hud.so/v1/agent/run",
+        headers={"Authorization": f"Bearer {HUD_API_KEY}"},
+        json={
+            "env_name": "support-agent",
+            "scenario_name": "handle_ticket",
+            "scenario_args": {"ticket_id": event["id"]},
+            "model": "claude-opus-4-5"
+        }
+    )
+    return {"trace_id": response.json()["trace_id"]}
+```
+
+### Scheduled Tasks
+
+Run agents on a schedule with cron or similar:
+
+```bash
+# Run daily cleanup agent
+0 0 * * * curl -X POST https://api.hud.so/v1/agent/run \
+  -H "Authorization: Bearer $HUD_API_KEY" \
+  -d '{"env_name": "ops", "scenario_name": "daily_cleanup", "scenario_args": {}, "model": "claude-sonnet-4-5"}'
+```
+
+### Chat Interface
+
+Power a chat UI with agent capabilities:
+
+```javascript
+async function sendMessage(message) {
+  const response = await fetch("https://api.hud.so/v1/agent/run", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${HUD_API_KEY}`
+    },
+    body: JSON.stringify({
+      env_name: "chat-assistant",
+      scenario_name: "respond",
+      scenario_args: { message },
+      model: "claude-opus-4-5"
+    })
+  });
+  return response.json();
+}
+```
+
+## Best Practices
+
+- **Set appropriate `max_steps`** — Lower for simple tasks, higher for complex ones
+- **Handle errors** — The API returns standard HTTP error codes
+- **Monitor usage** — Each run consumes compute; check your usage dashboard
+- **Use trained models** — Fine-tuned models often perform better on specific tasks
+
+<CardGroup cols={2}>
+  <Card title="Slack Integration" icon="slack" href="/platform/slack">
+    Run agents from Slack
+  </Card>
+
+  <Card title="Models" icon="microchip" href="/platform/models">
+    Available models and fine-tuning
+  </Card>
+</CardGroup>

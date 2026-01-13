@@ -119,6 +119,26 @@ class Environment(
 
     MAX_CONCURRENT_CONNECTIONS = 10
 
+    @staticmethod
+    def _normalize_name(name: str) -> str:
+        """Normalize environment name to lowercase with hyphens.
+
+        - Strips whitespace
+        - Replaces spaces and underscores with hyphens
+        - Lowercases the result
+        - Removes any non-alphanumeric characters except hyphens
+        """
+        import re
+
+        normalized = name.strip().lower()
+        normalized = normalized.replace(" ", "-").replace("_", "-")
+        # Keep only alphanumeric and hyphens
+        normalized = re.sub(r"[^a-z0-9-]", "", normalized)
+        # Collapse multiple hyphens
+        normalized = re.sub(r"-+", "-", normalized)
+        # Strip leading/trailing hyphens
+        return normalized.strip("-") or "environment"
+
     def __init__(
         self,
         name: str = "environment",
@@ -126,10 +146,15 @@ class Environment(
         conflict_resolution: ConflictResolution = ConflictResolution.PREFIX,
         **fastmcp_kwargs: Any,
     ) -> None:
+        # Normalize name to prevent casing/spacing issues
+        name = self._normalize_name(name)
         super().__init__(name=name, instructions=instructions, **fastmcp_kwargs)
         self._connections: dict[str, Connector] = {}
         self._router = ToolRouter(conflict_resolution=conflict_resolution)
-        self._routing_built = False  # Track if _build_routing has been called
+        # Granular routing flags - only rebuild what's invalidated
+        self._tool_routing_built = False
+        self._prompt_routing_built = False
+        self._resource_routing_built = False
         self._in_context = False
 
         # Tool call queues - run after connections established
@@ -184,7 +209,7 @@ class Environment(
 
     def add_tool(self, obj: Any, **kwargs: Any) -> None:
         super().add_tool(obj, **kwargs)
-        self._routing_built = False
+        self._tool_routing_built = False  # Only invalidate tool routing
 
     async def call_tool(self, call: Any, /, **kwargs: Any) -> Any:
         """Call a tool, auto-detecting format and returning matching result format.
@@ -316,7 +341,7 @@ class Environment(
         """Connect all connectors, build routing, run setup tools."""
         self._in_context = True
 
-        # Connect to all servers (on_connect callbacks run first within connect())
+        # Connect to all servers and fetch tools/prompts/resources in parallel
         sem = asyncio.Semaphore(self.MAX_CONCURRENT_CONNECTIONS)
         errors: list[tuple[str, Exception]] = []
 
@@ -324,7 +349,12 @@ class Environment(
             async with sem:
                 try:
                     await conn.connect()
-                    await conn.list_tools()
+                    # Batch fetch all MCP primitives in parallel for performance
+                    await asyncio.gather(
+                        conn.list_tools(),
+                        conn.list_prompts(),
+                        conn.list_resources(),
+                    )
                 except Exception as e:
                     errors.append((name, e))
 
@@ -373,7 +403,10 @@ class Environment(
         if self._connections:
             await asyncio.gather(*[c.disconnect() for c in self._connections.values()])
         self._router.clear()
-        self._routing_built = False
+        self._tool_routing_built = False
+        self._prompt_routing_built = False
+        self._resource_routing_built = False
+        self._active_session = None  # Clear stale scenario state
 
     async def run_async(
         self,
@@ -392,9 +425,22 @@ class Environment(
             )
 
     async def _build_routing(self) -> None:
+        """Build routing for tools, prompts, and resources in parallel.
+
+        Only rebuilds what's actually invalidated for performance.
+        """
+        tasks = []
+        if not self._tool_routing_built:
+            tasks.append(self._build_tool_routing())
+        if not self._prompt_routing_built:
+            tasks.append(self._build_prompt_routing())
+        if not self._resource_routing_built:
+            tasks.append(self._build_resource_routing())
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    async def _build_tool_routing(self) -> None:
         """Build tool routing from local tools and connection caches."""
-        # Use get_tools() not list_tools() - it includes mounted servers without
-        # requiring MCP server communication (via_server=False)
         local_tools_dict = await self._tool_manager.get_tools()
         local_tools = list(local_tools_dict.values())
         self._router.build(
@@ -402,9 +448,23 @@ class Environment(
             connections=self._connections,
             connection_order=list(self._connections.keys()),
         )
-        self._routing_built = True
         # Populate mock schemas for auto-generated mock values
         self._populate_mock_schemas()
+        self._tool_routing_built = True
+
+    async def _build_prompt_routing(self) -> None:
+        """Build prompt routing from local prompts and connections."""
+        local_prompts_dict = await self._prompt_manager.get_prompts()
+        local_prompts = [p.to_mcp_prompt() for p in local_prompts_dict.values()]
+        self._router.build_prompts(local_prompts, self._connections)
+        self._prompt_routing_built = True
+
+    async def _build_resource_routing(self) -> None:
+        """Build resource routing from local resources and connections."""
+        local_resources_dict = await self._resource_manager.get_resources()
+        local_resources = [r.to_mcp_resource() for r in local_resources_dict.values()]
+        self._router.build_resources(local_resources, self._connections)
+        self._resource_routing_built = True
 
     # =========================================================================
     # MCP Protocol Overrides - Include connector tools in MCP responses
@@ -420,8 +480,8 @@ class Environment(
 
     async def _env_list_tools(self) -> list[mcp_types.Tool]:
         """Return all tools including those from connectors."""
-        if not self._routing_built:
-            await self._build_routing()
+        if not self._tool_routing_built:
+            await self._build_tool_routing()
         return self._router.tools
 
     async def _env_call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> list[Any]:
@@ -434,10 +494,10 @@ class Environment(
     # =========================================================================
 
     async def list_tools(self) -> list[mcp_types.Tool]:
-        """Refresh tools from all connections and rebuild routing."""
+        """Refresh tools from all connections and rebuild tool routing."""
         if self._connections:
             await asyncio.gather(*[c.list_tools() for c in self._connections.values()])
-        await self._build_routing()
+        await self._build_tool_routing()
         return self._router.tools
 
     async def _execute_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
@@ -450,9 +510,9 @@ class Environment(
             logger.debug("Mock mode: returning mock result for tool %s", name)
             return self._get_mock_result(name, arguments)
 
-        # Rebuild routing if invalidated (e.g., after add_tool)
-        if not self._routing_built:
-            await self._build_routing()
+        # Rebuild tool routing if invalidated (e.g., after add_tool)
+        if not self._tool_routing_built:
+            await self._build_tool_routing()
 
         if self._router.is_local(name):
             # Call tool manager directly to avoid FastMCP context requirement
@@ -479,86 +539,83 @@ class Environment(
     # =========================================================================
 
     async def list_resources(self) -> list[mcp_types.Resource]:
-        """List all resources (local + remote)."""
-        local = list((await self._resource_manager.get_resources()).values())
-        resources: list[mcp_types.Resource] = [r.to_mcp_resource() for r in local]
-
+        """Refresh resources from all connections and rebuild resource routing."""
         if self._connections:
-            results = await asyncio.gather(
-                *[c.list_resources() for c in self._connections.values()], return_exceptions=True
-            )
-            for r in results:
-                if isinstance(r, list):
-                    resources.extend(r)
-
-        return resources
+            await asyncio.gather(*[c.list_resources() for c in self._connections.values()])
+        await self._build_resource_routing()
+        return self._router.resources
 
     async def read_resource(
         self, uri: str
     ) -> list[mcp_types.TextResourceContents | mcp_types.BlobResourceContents]:
-        """Read a resource by URI (tries local first, then remote)."""
+        """Read a resource by URI using router for connection lookup."""
         from pydantic import AnyUrl
 
-        try:
-            result = await self._resource_manager.read_resource(uri)
-            resource_uri = AnyUrl(uri)
-            if isinstance(result, str):
-                return [mcp_types.TextResourceContents(uri=resource_uri, text=result)]
-            import base64
+        # Ensure resource routing is built
+        if not self._resource_routing_built:
+            await self._build_resource_routing()
 
-            return [
-                mcp_types.BlobResourceContents(
-                    uri=resource_uri, blob=base64.b64encode(result).decode()
-                )
-            ]
-        except Exception as e:
-            logger.debug("Local resource read failed for %s: %s", uri, e)
+        # Use router to find which connection has this resource
+        conn_name = self._router.get_resource_connection(uri)
 
-        for conn in self._connections.values():
+        if conn_name is None:
+            # Local resource
             try:
-                return await conn.read_resource(uri)
-            except Exception as e:
-                logger.debug("Remote resource read failed for %s: %s", uri, e)
-                continue
+                result = await self._resource_manager.read_resource(uri)
+                resource_uri = AnyUrl(uri)
+                if isinstance(result, str):
+                    return [mcp_types.TextResourceContents(uri=resource_uri, text=result)]
+                import base64
 
-        raise ValueError(f"Resource not found: {uri}")
+                return [
+                    mcp_types.BlobResourceContents(
+                        uri=resource_uri, blob=base64.b64encode(result).decode()
+                    )
+                ]
+            except Exception as e:
+                logger.debug("Local resource read failed for %s: %s", uri, e)
+                raise ValueError(f"Resource not found: {uri}") from e
+        else:
+            # Remote resource
+            conn = self._connections.get(conn_name)
+            if conn is None:
+                raise ValueError(f"Connection '{conn_name}' not found for resource '{uri}'")
+            return await conn.read_resource(uri)
 
     # =========================================================================
     # Prompt Operations
     # =========================================================================
 
     async def list_prompts(self) -> list[mcp_types.Prompt]:
-        """List all prompts (local + remote)."""
-        local = list((await self._prompt_manager.get_prompts()).values())
-        prompts: list[mcp_types.Prompt] = [p.to_mcp_prompt() for p in local]
-
+        """Refresh prompts from all connections and rebuild prompt routing."""
         if self._connections:
-            results = await asyncio.gather(
-                *[c.list_prompts() for c in self._connections.values()], return_exceptions=True
-            )
-            for r in results:
-                if isinstance(r, list):
-                    prompts.extend(r)
-
-        return prompts
+            await asyncio.gather(*[c.list_prompts() for c in self._connections.values()])
+        await self._build_prompt_routing()
+        return self._router.prompts
 
     async def get_prompt(
         self, name: str, arguments: dict[str, Any] | None = None
     ) -> mcp_types.GetPromptResult:
-        """Get a prompt by name (tries local first, then remote)."""
-        try:
-            return await self._prompt_manager.render_prompt(name, arguments or {})
-        except Exception as e:
-            logger.debug("Local prompt render failed for %s: %s", name, e)
+        """Get a prompt by name using router for connection lookup."""
+        # Ensure prompt routing is built
+        if not self._prompt_routing_built:
+            await self._build_prompt_routing()
 
-        for conn in self._connections.values():
+        # Use router to find which connection has this prompt
+        conn_name = self._router.get_prompt_connection(name)
+
+        if conn_name is None:
+            # Local prompt
             try:
-                return await conn.get_prompt(name, arguments)
+                return await self._prompt_manager.render_prompt(name, arguments or {})
             except Exception as e:
-                logger.debug("Remote prompt get failed for %s: %s", name, e)
-                continue
-
-        raise ValueError(f"Prompt not found: {name}")
+                raise ValueError(f"Prompt not found: {name}") from e
+        else:
+            # Remote prompt
+            conn = self._connections.get(conn_name)
+            if conn is None:
+                raise ValueError(f"Connection '{conn_name}' not found for prompt '{name}'")
+            return await conn.get_prompt(name, arguments)
 
     # =========================================================================
     # Server Methods
@@ -610,7 +667,7 @@ class Environment(
         For v4 format: requires mcp_config, prompt, AND evaluate_tool
         """
         # Check for local tools (registered via @env.tool)
-        if self._router._local_names:
+        if self._router._local_tool_names:
             return False
         # Check for local scenarios (registered via @env.scenario)
         if getattr(self, "_scenarios", {}):
@@ -647,10 +704,10 @@ class Environment(
             task.env.to_config()  # {"prompt": "...", "mcp_config": {...}, ...}
             ```
         """
-        if self._router._local_names:
+        if self._router._local_tool_names:
             raise ValueError(
                 f"Cannot serialize Environment with local tools: "
-                f"{list(self._router._local_names)}. "
+                f"{list(self._router._local_tool_names)}. "
                 "Local tools require local execution. For remote submission, "
                 "use dict config or connect to a remote hub."
             )

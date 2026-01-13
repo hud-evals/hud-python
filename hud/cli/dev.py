@@ -250,6 +250,15 @@ async def run_mcp_module(
     elif hasattr(module, "__dict__") and attr_name in module.__dict__:
         mcp_server = module.__dict__[attr_name]
 
+    # If default 'mcp' not found, try 'env' as fallback
+    if mcp_server is None and attr_name == "mcp":
+        for fallback in ["env", "environment", "server"]:
+            if hasattr(module, fallback):
+                mcp_server = getattr(module, fallback)
+                if verbose:
+                    hud_console.info(f"Found '{fallback}' instead of 'mcp'")
+                break
+
     if mcp_server is None:
         hud_console.error(f"Module '{module_name}' does not have '{attr_name}' defined")
         hud_console.info("")
@@ -258,8 +267,8 @@ async def run_mcp_module(
         hud_console.info("")
         hud_console.info("[bold cyan]Expected structure:[/bold cyan]")
         hud_console.info("  from hud.environment import Environment")
-        hud_console.info(f"  {attr_name} = Environment('my-env')")
-        raise AttributeError(f"Module '{module_name}' must define '{attr_name}'")
+        hud_console.info("  env = Environment('my-env')  # or mcp = ...")
+        raise AttributeError(f"Module '{module_name}' must define 'mcp', 'env', or 'environment'")
 
     # Only show full header on first run, brief message on reload
     if is_reload:

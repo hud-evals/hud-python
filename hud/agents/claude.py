@@ -5,16 +5,18 @@ from __future__ import annotations
 import copy
 import logging
 from inspect import cleandoc
-from typing import Any, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import mcp.types as types
 from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, Omit
 from anthropic.types import CacheControlEphemeralParam
 from anthropic.types.beta import (
     BetaBase64ImageSourceParam,
+    BetaBase64PDFSourceParam,
     BetaContentBlockParam,
     BetaImageBlockParam,
     BetaMessageParam,
+    BetaRequestDocumentBlockParam,
     BetaTextBlockParam,
     BetaToolBash20250124Param,
     BetaToolComputerUse20250124Param,
@@ -32,6 +34,9 @@ from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
 
 from .base import BaseCreateParams, MCPAgent
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +225,10 @@ class ClaudeAgent(MCPAgent):
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
     ) -> list[BetaMessageParam]:
-        """Format tool results into Claude messages."""
+        """Format tool results into Claude messages.
+
+        Handles EmbeddedResource (PDFs), images, and text content.
+        """
         # Process each tool result
         user_content = []
 
@@ -232,7 +240,9 @@ class ClaudeAgent(MCPAgent):
                 continue
 
             # Convert MCP tool results to Claude format
-            claude_blocks = []
+            claude_blocks: list[
+                BetaTextBlockParam | BetaImageBlockParam | BetaRequestDocumentBlockParam
+            ] = []
 
             if result.isError:
                 # Extract error message from content
@@ -249,6 +259,16 @@ class ClaudeAgent(MCPAgent):
                         claude_blocks.append(text_to_content_block(content.text))
                     elif isinstance(content, types.ImageContent):
                         claude_blocks.append(base64_to_content_block(content.data))
+                    elif isinstance(content, types.EmbeddedResource):
+                        # Handle embedded resources (PDFs)
+                        resource = content.resource
+                        if (
+                            isinstance(resource, types.BlobResourceContents)
+                            and resource.mimeType == "application/pdf"
+                        ):
+                            claude_blocks.append(
+                                document_to_content_block(base64_data=resource.blob)
+                            )
 
             # Add tool result
             user_content.append(tool_use_content_block(tool_use_id, claude_blocks))
@@ -330,11 +350,14 @@ class ClaudeAgent(MCPAgent):
         self.claude_tools = []
         for tool in available_tools:
             claude_tool = to_api_tool(tool)
-            if claude_tool is None or "name" not in claude_tool:
+            if claude_tool is None:
                 continue
-            if claude_tool["name"] == "computer":
+            tool_name = claude_tool.get("name")
+            if tool_name is None:
+                continue
+            if tool_name == "computer":
                 self.has_computer_tool = True
-            self.tool_mapping[claude_tool["name"]] = tool.name
+            self.tool_mapping[tool_name] = tool.name
             self.claude_tools.append(claude_tool)
 
     def _add_prompt_caching(self, messages: list[BetaMessageParam]) -> list[BetaMessageParam]:
@@ -380,8 +403,21 @@ def text_to_content_block(text: str) -> BetaTextBlockParam:
     return {"type": "text", "text": text}
 
 
+def document_to_content_block(base64_data: str) -> BetaRequestDocumentBlockParam:
+    """Convert base64 PDF to Claude document content block."""
+    return BetaRequestDocumentBlockParam(
+        type="document",
+        source=BetaBase64PDFSourceParam(
+            type="base64",
+            media_type="application/pdf",
+            data=base64_data,
+        ),
+    )
+
+
 def tool_use_content_block(
-    tool_use_id: str, content: list[BetaTextBlockParam | BetaImageBlockParam]
+    tool_use_id: str,
+    content: Sequence[BetaTextBlockParam | BetaImageBlockParam | BetaRequestDocumentBlockParam],
 ) -> BetaToolResultBlockParam:
     """Create tool result content block."""
-    return {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
+    return {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}  # pyright: ignore[reportReturnType]

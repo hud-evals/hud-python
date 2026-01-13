@@ -7,10 +7,10 @@ icon: "arrow-right-arrow-left"
 v4 separated environments (Docker containers) from evaluation logic (Task objects). v5 unifies everything in the `Environment` class—tools, setup, and scoring live together.
 
 <Warning>
-**Deprecation Notice**: `LegacyTask`, `setup_tool`, and `evaluate_tool` are deprecated in v0.5.0 and will be removed in v0.6.0 (no earlier than March 1st, 2026). Use `Task.from_v4()` for quick migration or `@env.scenario()` for new code.
+**Deprecation Notice**: `LegacyTask`, `setup_tool`, and `evaluate_tool` are deprecated in v0.5.0 and will be removed in v0.6.0 (no earlier than March 1st, 2026). Migrate to `@env.scenario()` for new code.
 </Warning>
 
-## Good News: Your Code Still Works
+## MCPServer → Environment
 
 `Environment` inherits from `MCPServer`. Same API, same behavior. Just change the import:
 
@@ -38,76 +38,77 @@ env.run()
 
 That's it. Your Dockerfile, your tools, your `run()` call—all unchanged. Environment adds scenarios, connectors, and integrations on top.
 
-## Migration Path 1: Quick Conversion with Task.from_v4()
+## Migrating Tasks: Prompt Passthrough Pattern
 
-The fastest way to migrate existing v4 code—no changes to task definitions needed:
-
-```python
-# BEFORE (deprecated in v0.6.0)
-from hud.datasets import LegacyTask
-
-legacy_task = LegacyTask(
-    prompt="Navigate to google.com",
-    mcp_config={"hud": {...}},
-    setup_tool={"name": "navigate", "arguments": {"url": "https://google.com"}},
-    evaluate_tool={"name": "check_url", "arguments": {}}
-)
-
-# AFTER - One-line conversion
-from hud.eval import Task
-
-task = Task.from_v4(legacy_task)  # Converts LegacyTask → Task
-# Also works with: Task.from_v4(dict), Task.from_v4(json_string)
-
-# Works the same with agents
-agent = ClaudeAgent.create()
-result = await agent.run(task)
-```
-
-`Task.from_v4()` automatically:
-- Runs `setup_tool` at the start of evaluation
-- Runs `evaluate_tool` at the end to compute reward
-- Preserves all existing behavior
-
-## Migration Path 2: Full Scenario Migration (Recommended)
-
-For new code or when refactoring, migrate `setup_tool` and `evaluate_tool` to `@env.scenario()`.
-
-**The rule is simple:**
-- `setup_tool` code → **before the first yield**
-- `evaluate_tool` code → **after the first yield**
+The recommended migration uses the **prompt passthrough pattern**—scenario arguments become the prompt content:
 
 ```python
-# BEFORE (deprecated in v0.6.0)
-task = LegacyTask(
-    prompt="What's the current URL?",
-    mcp_config={"hud": {...}},
-    setup_tool={"name": "navigate", "arguments": {"url": "https://google.com"}},
-    evaluate_tool={"name": "check_url", "arguments": {"expected": "google.com"}}
-)
-
-# AFTER
 from hud import Environment
 
 env = Environment("browser").connect_hub("hud-evals/browser")
 
-@env.scenario("navigate-google")
-async def navigate_google():
-    # ===== SETUP SECTION (replaces setup_tool) =====
-    await env.call_tool("navigate", url="https://google.com")
+@env.scenario("web-task")
+async def web_task(instruction: str, start_url: str = "https://example.com"):
+    """
+    The instruction arg passes through directly to the prompt.
+    One scenario, infinite test cases.
+    """
+    # Setup phase (before yield)
+    await env.call_tool("navigate", url=start_url)
     
-    # ===== PROMPT (first yield) =====
-    answer = yield "What's the current URL?"
+    # Prompt - the instruction IS the prompt
+    answer = yield instruction
     
-    # ===== EVALUATE SECTION (replaces evaluate_tool) =====
-    result = await env.call_tool("check_url", expected="google.com")
-    
-    # ===== REWARD (second yield) =====
-    yield 1.0 if result else 0.0
+    # Evaluate phase (after yield)
+    result = await env.call_tool("check_completion")
+    yield 1.0 if result["success"] else 0.0
 
-# Create task from scenario
-task = env("navigate-google")
+# Create tasks by passing the actual prompt as an arg
+task1 = env("web-task", instruction="Find the contact page and extract the support email")
+task2 = env("web-task", instruction="Add a MacBook Pro to cart", start_url="https://store.example.com")
+task3 = env("web-task", instruction="Fill out the signup form with test data")
 ```
+
+This pattern:
+- **Args ARE the prompt**: The instruction flows directly through as the agent's task
+- **Enables parametric evaluation**: Same scenario, different instructions
+- **Replaces hardcoded prompts**: Instead of `LegacyTask(prompt="...")`, pass the prompt as an arg
+- **Type-safe**: Arguments are validated against the scenario signature
+
+### Before/After Comparison
+
+```python
+# BEFORE (deprecated in v0.6.0)
+task = LegacyTask(
+    prompt="Find all products under $50 and add the cheapest to cart",
+    mcp_config={"hud": {...}},
+    setup_tool={"name": "navigate", "arguments": {"url": "https://shop.example.com"}},
+    evaluate_tool={"name": "check_cart", "arguments": {}}
+)
+
+# AFTER - Prompt passthrough pattern
+@env.scenario("shopping")
+async def shopping(task: str, shop_url: str):
+    await env.call_tool("navigate", url=shop_url)
+    
+    answer = yield task  # The task arg IS the prompt
+    
+    result = await env.call_tool("check_cart")
+    yield 1.0 if result["has_items"] else 0.0
+
+# Now create multiple tasks with different instructions
+tasks = [
+    env("shopping", task="Find all products under $50 and add the cheapest to cart", shop_url="https://shop.example.com"),
+    env("shopping", task="Search for 'laptop' and add the first result to cart", shop_url="https://shop.example.com"),
+    env("shopping", task="Apply promo code SAVE20 at checkout", shop_url="https://shop.example.com"),
+]
+```
+
+### The Migration Rule
+
+- `prompt` → **scenario arg** (passthrough)
+- `setup_tool` → **code before first yield**
+- `evaluate_tool` → **code after first yield**
 
 ### Multiple setup_tool Calls
 
@@ -118,45 +119,80 @@ If you have multiple setup tools, just call them in sequence:
 setup_tool=[
     {"name": "navigate", "arguments": {"url": "..."}},
     {"name": "login", "arguments": {"user": "..."}},
-    {"name": "go_to_page", "arguments": {"page": "settings"}}
 ]
 
 # AFTER
-@env.scenario("settings-test")
-async def settings_test():
-    # Multiple setup steps - just call them in order
-    await env.call_tool("navigate", url="...")
-    await env.call_tool("login", user="...")
-    await env.call_tool("go_to_page", page="settings")
+@env.scenario("authenticated-task")
+async def authenticated_task(instruction: str, username: str):
+    await env.call_tool("navigate", url="https://app.example.com")
+    await env.call_tool("login", user=username)
     
-    answer = yield "Verify the settings page loaded correctly"
+    answer = yield instruction
     
-    result = await env.call_tool("check_settings")
+    result = await env.call_tool("check_completion")
     yield 1.0 if result else 0.0
 ```
 
+## JSON Task Format (Platform Ready)
+
+For JSON-based task definitions that can be uploaded to the HUD platform, use this format:
+
+```json
+{
+  "env": {
+    "name": "hud-evals/browser"
+  },
+  "scenario": "web-task",
+  "args": {
+    "instruction": "Find the contact page and extract the support email",
+    "start_url": "https://example.com"
+  }
+}
+```
+
+This maps directly to the scenario call: `env("web-task", instruction="...", start_url="...")`.
+
+**Example: Task set for platform upload**
+
+```json
+[
+  {
+    "env": { "name": "hud-ops-diagnostics-sentry" },
+    "scenario": "sentry-agent:investigate",
+    "args": {
+      "issue_id": "PROJ-1234",
+      "max_depth": 3
+    }
+  },
+  {
+    "env": { "name": "hud-evals/browser" },
+    "scenario": "web-task",
+    "args": {
+      "instruction": "Add a MacBook Pro to cart and proceed to checkout"
+    }
+  }
+]
+```
+
+The `args` field uses prompt passthrough—the values flow directly into the scenario's yield statement.
+
 ## Using with Built-in Agents
 
-Built-in agents (ClaudeAgent, OpenAIAgent, etc.) work with both patterns:
+Built-in agents work with scenarios:
 
 ```python
 from hud.agents import ClaudeAgent
 
 agent = ClaudeAgent.create()
-
-# Works with Task from scenario
-result = await agent.run(env("navigate-google"))
-
-# Works with Task.from_v4() conversion
-result = await agent.run(Task.from_v4(legacy_task))
+result = await agent.run(env("web-task", instruction="Find the pricing page"))
 ```
 
-## Optional: Bring Your Own Agent
+## Bring Your Own Agent
 
 v5 gives you the `hud.eval()` context manager for maximum flexibility:
 
 ```python
-async with hud.eval(env("checkout", product="laptop")) as ctx:
+async with hud.eval(env("shopping", task="Add item to cart", shop_url="https://shop.example.com")) as ctx:
     # Use OpenAI, Anthropic, your own agent—whatever you want
     response = await client.chat.completions.create(
         model="gpt-4o",
@@ -170,14 +206,12 @@ async with hud.eval(env("checkout", product="laptop")) as ctx:
 print(ctx.reward)
 ```
 
-The old `ClaudeAgent` and `OperatorAgent` still work—even with the new `hud.eval()` system. But now you're not locked into a specific agent spec. Pair with the [Gateway](/quick-links/gateway) to use any model through one API.
-
 ## Quick Reference
 
-| v4 (deprecated in v0.6.0) | v5 |
-|---------------------------|-----|
-| `LegacyTask(...)` | `Task.from_v4(...)` (quick) or `env("scenario", ...)` (recommended) |
+| v4 (deprecated in v0.6.0) | v5 (recommended) |
+|---------------------------|------------------|
+| `LegacyTask(prompt=...)` | `env("scenario", instruction=...)` — prompt passthrough |
 | `setup_tool` | Code before first yield in `@env.scenario()` |
 | `evaluate_tool` | Code after first yield in `@env.scenario()` |
 | `MCPServer` | `Environment` (drop-in replacement) |
-| `agent.run(task)` | Still works, or use `hud.eval()` for BYOA |
+| JSON with `mcp_config` + `prompt` | JSON with `env` + `scenario` + `args` |

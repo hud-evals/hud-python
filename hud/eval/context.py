@@ -234,9 +234,7 @@ class EvalContext(Environment):
         # Copy scenarios (definitions) by reference - they don't change
         ctx._scenarios = getattr(env, "_scenarios", {})
         # Create fresh session state for this eval (parallel evals each need their own)
-        ctx._scenario_sessions = {}
-        ctx._scenario_latest = {}
-        ctx._scenario_answers = {}
+        ctx._active_session = None
 
         # Store source env name for remote scenario lookups
         ctx._source_env_name = env.name

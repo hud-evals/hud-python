@@ -5,8 +5,9 @@ from __future__ import annotations
 import inspect
 import json
 import logging
-import uuid
 from typing import TYPE_CHECKING, Any, get_type_hints
+
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
@@ -15,9 +16,26 @@ if TYPE_CHECKING:
     from fastmcp.resources import ResourceManager
     from fastmcp.tools import ToolManager
 
-__all__ = ["ScenarioMixin"]
+__all__ = ["ScenarioMixin", "ScenarioSession"]
 
 logger = logging.getLogger(__name__)
+
+
+class ScenarioSession(BaseModel):
+    """Tracks an active scenario from setup through evaluate.
+
+    Created during run_scenario_setup(), used by submit() and run_scenario_evaluate().
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    local_name: str  # Canonical short name (e.g., "investigate")
+    full_name: str  # Full name as called (e.g., "sentry-agent:investigate")
+    is_local: bool  # True if running locally (generator exists)
+    connection_name: str | None  # Which connection served it (if remote)
+    resource_uri: str  # Full URI for reading evaluation result
+    generator: Any | None = None  # AsyncGenerator (if local) - Any to avoid validation issues
+    answer: str | None = None  # Submitted answer
 
 
 class ScenarioMixin:
@@ -45,24 +63,25 @@ class ScenarioMixin:
             yield float(result > 0 or "found" in answer.lower())
     """
 
-    # These come from Environment/MCPServer
+    # These come from Environment/MCPServer (type hints for mixin)
     name: str
     _prompt_manager: PromptManager
     _resource_manager: ResourceManager
     _tool_manager: ToolManager
 
-    # Scenario state
+    # Scenario function registry
     _scenarios: dict[str, Callable[..., AsyncGenerator[Any, Any]]]
-    _scenario_sessions: dict[str, AsyncGenerator[Any, Any]]  # session_id -> generator
-    _scenario_latest: dict[str, str]  # scenario_name -> latest session_id
-    _scenario_answers: dict[str, str]  # scenario_name -> submitted answer
+
+    # Single active scenario session - used for BOTH:
+    # - Client-side: when we run scenarios (local or remote)
+    # - Server-side: when external clients call our scenarios via MCP
+    # Only one scenario can be active at a time.
+    _active_session: ScenarioSession | None
 
     def _init_scenarios(self) -> None:
         """Initialize scenario state. Called from Environment.__init__."""
         self._scenarios = {}
-        self._scenario_sessions = {}
-        self._scenario_latest = {}
-        self._scenario_answers = {}
+        self._active_session = None
 
         # Register _hud_submit tool (underscore = hidden from agent)
         self._register_hud_submit_tool()
@@ -70,17 +89,41 @@ class ScenarioMixin:
     async def submit(self, scenario: str, answer: str) -> None:
         """Submit the agent's answer for a scenario's evaluate phase.
 
-        Stores locally and broadcasts to connected hubs with _hud_submit tool.
+        Uses _active_session to route to the correct connection (if remote)
+        or store locally (if local scenario).
 
         Args:
-            scenario: Name of the scenario (without env prefix)
+            scenario: Name of the scenario (may include env prefix like "env:name")
             answer: The agent's answer/result to submit
         """
-        self._scenario_answers[scenario] = answer
-        logger.debug("Stored answer for scenario '%s'", scenario)
+        local_name = scenario.split(":")[-1] if ":" in scenario else scenario
 
-        # Broadcast to all connections (internal tools try all connections)
-        await self._broadcast_tool("_hud_submit", scenario=scenario, answer=answer)  # type: ignore[attr-defined]
+        if not self._active_session:
+            raise ValueError(
+                "No active scenario session. Call run_scenario_setup() before submit()."
+            )
+
+        if self._active_session.local_name != local_name:
+            raise ValueError(
+                f"Scenario mismatch: active session is '{self._active_session.local_name}', "
+                f"but submit() called with '{local_name}'"
+            )
+
+        self._active_session.answer = answer
+        logger.debug("Stored answer in session for scenario '%s'", local_name)
+
+        if not self._active_session.is_local:
+            # Remote scenario - send to specific connection
+            conn_name = self._active_session.connection_name
+            if not conn_name:
+                raise ValueError(f"Remote scenario '{local_name}' has no connection")
+
+            conn = self._connections.get(conn_name)  # type: ignore[attr-defined]
+            if not conn or not conn.client:
+                raise ValueError(f"Connection '{conn_name}' not available")
+
+            await conn.call_tool("_hud_submit", {"scenario": local_name, "answer": answer})
+            logger.debug("Sent answer to connection '%s' for scenario '%s'", conn_name, local_name)
 
     def _register_hud_submit_tool(self) -> None:
         """Register the _hud_submit tool for receiving agent answers.
@@ -92,22 +135,33 @@ class ScenarioMixin:
         scenario_self = self
 
         async def _hud_submit(scenario: str, answer: str) -> str:
-            """Submit the agent's answer for a scenario's evaluate phase.
+            """Receive an agent's answer from an external client.
 
-            Internal tool - called by Environment.submit() on connected hubs.
+            Called when an external client's Environment.submit() sends an answer
+            to us via MCP. Stores in _active_session for resource_handler to use.
 
             Args:
-                scenario: Name of the scenario (without env prefix)
+                scenario: Name of the scenario (may include env prefix like "env:name")
                 answer: The agent's answer/result to submit
             """
-            # Store locally (don't broadcast - we ARE the target)
-            scenario_self._scenario_answers[scenario] = answer
+            local_name = scenario.split(":")[-1] if ":" in scenario else scenario
+
+            if not scenario_self._active_session:
+                raise ValueError(f"No active scenario session for '{local_name}'")
+
+            if scenario_self._active_session.local_name != local_name:
+                raise ValueError(
+                    f"Scenario mismatch: active is '{scenario_self._active_session.local_name}', "
+                    f"but received answer for '{local_name}'"
+                )
+
+            scenario_self._active_session.answer = answer
             logger.debug(
-                "_hud_submit received answer for scenario '%s': %s...",
-                scenario,
+                "_hud_submit stored answer for scenario '%s': %s...",
+                local_name,
                 answer[:50] if len(answer) > 50 else answer,
             )
-            return f"Answer submitted for scenario '{scenario}'"
+            return f"Answer submitted for scenario '{local_name}'"
 
         # Register the tool with underscore name
         tool = Tool.from_function(_hud_submit)
@@ -118,33 +172,58 @@ class ScenarioMixin:
         """Run a scenario's setup phase and return the prompt.
 
         Handles both local scenarios (registered via @env.scenario) and remote
-        scenarios (via MCP prompt).
+        scenarios (via MCP prompt). Creates _active_session for use by submit/evaluate.
 
         Args:
-            scenario_name: Name of the scenario to run
+            scenario_name: Name of the scenario to run (may include "env:" prefix)
             args: Arguments to pass to the scenario
 
         Returns:
             The prompt string from the scenario's setup phase, or None if failed
         """
-        # Check if scenario is registered locally
-        if scenario_name in self._scenarios:
+        # Determine if this should be local or remote:
+        # - No prefix ("greet") → check local first
+        # - Prefix matches our env name ("my-env:greet" when self.name="my-env") → local
+        # - Prefix is different ("other-env:greet") → remote only
+        local_name: str | None = None
+        is_explicitly_remote = False
+        if ":" in scenario_name:
+            prefix, short_name = scenario_name.rsplit(":", 1)
+            # self.name is already normalized (underscores → hyphens) in Environment.__init__
+            if prefix == self.name:
+                # Prefix matches our env - check local
+                local_name = short_name
+            else:
+                # Different prefix - explicitly remote
+                local_name = short_name
+                is_explicitly_remote = True
+        else:
+            # No prefix - check local
+            local_name = scenario_name
+
+        # Check if scenario is registered locally (unless explicitly remote)
+        if not is_explicitly_remote and local_name in self._scenarios:
             # Local scenario - run setup via generator
-            scenario_fn = self._scenarios[scenario_name]
+            scenario_fn = self._scenarios[local_name]
             gen = scenario_fn(**args)
 
             # Run setup phase (code before first yield)
             prompt = await gen.__anext__()
 
-            # Store generator for evaluate phase
-            session_id = uuid.uuid4().hex[:8]
-            self._scenario_sessions[session_id] = gen
-            self._scenario_latest[scenario_name] = session_id
+            # Create session for local scenario
+            self._active_session = ScenarioSession(
+                local_name=local_name,
+                full_name=scenario_name,
+                is_local=True,
+                connection_name=None,
+                resource_uri=f"{self.name}:{local_name}",
+                generator=gen,
+            )
 
             logger.debug(
-                "Scenario %s setup complete, session=%s",
-                scenario_name,
-                session_id,
+                "Local scenario setup: %s (session=%s)",
+                local_name,
+                self._active_session,
             )
             return str(prompt)
         else:
@@ -153,12 +232,11 @@ class ScenarioMixin:
             # Otherwise, prefix with env name: {env_name}:{scenario_name}
             if ":" in scenario_name:
                 prompt_id = scenario_name
-                logger.debug("Remote scenario (already namespaced): prompt_id=%s", prompt_id)
             else:
+                # Use _source_env_name (from EvalContext) or self.name - both are normalized
                 env_name = getattr(self, "_source_env_name", None) or self.name
-                safe_env_name = env_name.replace("_", "-")
-                prompt_id = f"{safe_env_name}:{scenario_name}"
-                logger.debug("Remote scenario (adding namespace): prompt_id=%s", prompt_id)
+                prompt_id = f"{env_name}:{scenario_name}"
+
             # Serialize args for MCP prompt (only supports string values)
             serialized_args: dict[str, str] = {}
             for key, value in args.items():
@@ -166,6 +244,13 @@ class ScenarioMixin:
 
             try:
                 result = await self.get_prompt(prompt_id, serialized_args)  # type: ignore[attr-defined]
+                # Get connection AFTER get_prompt succeeds (routing is now guaranteed built)
+                conn_name = self._router.get_prompt_connection(prompt_id)  # type: ignore[attr-defined]
+                logger.debug(
+                    "Remote scenario: prompt_id=%s, connection=%s",
+                    prompt_id,
+                    conn_name or "(not found in router)",
+                )
             except Exception as e:
                 # Fetch available scenarios for error context
                 try:
@@ -202,35 +287,46 @@ class ScenarioMixin:
                     f"Fix: Use one of the scenario IDs above in your task JSON."
                 ) from e
 
-            # Validate the response
+            # Extract prompt text from response
+            prompt_text: str | None = None
             if result.messages:
                 first_msg = result.messages[0]
                 content = first_msg.content
                 if hasattr(content, "text") and isinstance(content.text, str):  # type: ignore[union-attr]
-                    return content.text  # type: ignore[union-attr]
+                    prompt_text = content.text  # type: ignore[union-attr]
                 elif isinstance(content, str):
-                    return content
-                else:
-                    # Content exists but is neither text object nor string
-                    raise ValueError(
-                        f"Scenario '{scenario_name}' returned malformed content.\n\n"
-                        f"Expected: content with .text attribute (str) or content as str\n"
-                        f"Got: {type(content).__name__}\n\n"
-                        f"Check that the scenario's setup function returns a valid prompt."
-                    )
-            else:
-                # get_prompt succeeded but returned empty messages
+                    prompt_text = content
+
+            if not prompt_text:
                 raise ValueError(
                     f"Scenario '{scenario_name}' returned an empty response.\n\n"
                     f"The scenario's setup function was called but returned no messages.\n"
                     f"Check that the scenario returns a valid prompt string."
                 )
 
+            # Create session for remote scenario - use router's connection info
+            self._active_session = ScenarioSession(
+                local_name=local_name,
+                full_name=scenario_name,
+                is_local=False,
+                connection_name=conn_name,
+                resource_uri=prompt_id,  # Resource has same URI as prompt
+                generator=None,
+            )
+
+            logger.debug(
+                "Remote scenario setup: %s (connection=%s)",
+                prompt_id,
+                conn_name,
+            )
+            return prompt_text
+
     async def run_scenario_evaluate(self, scenario_name: str) -> float | None:
         """Run a scenario's evaluate phase and return the reward.
 
-        Uses the submitted answer (if any) via gen.asend().
-        Handles both local and remote scenarios.
+        Uses _active_session created by run_scenario_setup():
+        - Local: use stored generator with submitted answer
+        - Remote: read resource from the connection that served setup
 
         Args:
             scenario_name: Name of the scenario to evaluate
@@ -238,52 +334,49 @@ class ScenarioMixin:
         Returns:
             The reward from the scenario's evaluate phase, or None if failed
         """
-        # Check if we have a stored generator (local scenario)
-        session_id = self._scenario_latest.get(scenario_name)
-        if session_id:
-            gen = self._scenario_sessions.pop(session_id, None)
-            if gen:
-                # Get submitted answer (if any)
-                answer = self._scenario_answers.pop(scenario_name, None)
+        if not self._active_session:
+            logger.warning("No active session for scenario '%s'", scenario_name)
+            return None
 
-                try:
-                    # Use asend to pass the answer to the scenario
-                    reward = await gen.asend(answer)
-                    logger.debug(
-                        "Scenario %s evaluate complete, answer=%s, reward=%s",
-                        scenario_name,
-                        answer[:50] if answer and len(answer) > 50 else answer,
-                        reward,
-                    )
-                    return float(reward)
-                except StopAsyncIteration:
-                    # Generator ended without second yield - assume success
-                    return 1.0
-                finally:
-                    # Clean up latest pointer
-                    if self._scenario_latest.get(scenario_name) == session_id:
-                        del self._scenario_latest[scenario_name]
+        session = self._active_session
+        self._active_session = None  # Clear after use
 
-        # Remote scenario - read via MCP resource
-        if ":" in scenario_name:
-            resource_id = scenario_name
+        if session.is_local:
+            # Local scenario - use generator
+            if not session.generator:
+                logger.warning("Local scenario '%s' has no generator", session.local_name)
+                return None
+
+            answer = session.answer
+            try:
+                reward = await session.generator.asend(answer)
+                logger.debug(
+                    "Local scenario %s evaluate: answer=%s, reward=%s",
+                    session.local_name,
+                    answer[:50] if answer and len(answer) > 50 else answer,
+                    reward,
+                )
+                return float(reward)
+            except StopAsyncIteration:
+                return 1.0
         else:
-            env_name = getattr(self, "_source_env_name", None) or self.name
-            safe_env_name = env_name.replace("_", "-")
-            resource_id = f"{safe_env_name}:{scenario_name}"
-
-        try:
-            contents = await self.read_resource(resource_id)  # type: ignore[attr-defined]
-            if contents:
-                first = contents[0]
-                if hasattr(first, "text") and isinstance(first.text, str):  # type: ignore[union-attr]
-                    data = json.loads(first.text)  # type: ignore[union-attr]
-                    if "reward" in data:
-                        return float(data["reward"])
-        except Exception as e:
-            logger.warning("Failed to get scenario reward: %s", e)
-
-        return None
+            # Remote scenario - read resource via router
+            try:
+                contents = await self.read_resource(session.resource_uri)  # type: ignore[attr-defined]
+                if contents:
+                    first = contents[0]
+                    if hasattr(first, "text") and isinstance(first.text, str):  # type: ignore[union-attr]
+                        data = json.loads(first.text)  # type: ignore[union-attr]
+                        if "reward" in data:
+                            logger.debug(
+                                "Remote scenario %s evaluate: reward=%s",
+                                session.local_name,
+                                data["reward"],
+                            )
+                            return float(data["reward"])
+            except Exception as e:
+                logger.warning("Failed to get scenario reward from %s: %s", session.resource_uri, e)
+            return None
 
     def scenario(
         self,
@@ -322,9 +415,16 @@ class ScenarioMixin:
             fn: Callable[..., AsyncGenerator[Any, None]],
         ) -> Callable[..., AsyncGenerator[Any, None]]:
             scenario_name = name or fn.__name__
-            # Sanitize env name for URI scheme (no underscores allowed)
-            safe_env_name = self.name.replace("_", "-")
-            scenario_id = f"{safe_env_name}:{scenario_name}"
+
+            # Validate scenario name - colons are reserved as env:scenario separator
+            if ":" in scenario_name:
+                raise ValueError(
+                    f"Scenario name '{scenario_name}' cannot contain ':' "
+                    "(reserved as separator between environment and scenario names)"
+                )
+
+            # self.name is already normalized (lowercase, hyphens) by Environment.__init__
+            scenario_id = f"{self.name}:{scenario_name}"
             scenario_desc = description or fn.__doc__ or f"Scenario: {scenario_name}"
 
             # Capture source code for reproducibility
@@ -381,7 +481,6 @@ class ScenarioMixin:
             # Register PROMPT - runs setup, returns prompt messages
             # We need a reference to self and the outer variables
             scenario_self = self
-            scenario_fn = fn
             scenario_name_ref = scenario_name
 
             # Resolve parameter type hints for deserialization
@@ -448,26 +547,15 @@ class ScenarioMixin:
                     # Keep as string
                     deserialized_args[arg_name] = arg_value
 
-                # Create generator instance with deserialized args
-                gen = scenario_fn(**deserialized_args)
-
-                # Run setup phase (code before first yield)
-                prompt_text = await gen.__anext__()
-
-                # Store generator with session ID
-                session_id = uuid.uuid4().hex[:8]
-                scenario_self._scenario_sessions[session_id] = gen
-                scenario_self._scenario_latest[scenario_name_ref] = session_id
-
-                logger.debug(
-                    "Scenario %s setup complete, session=%s, prompt=%s",
-                    scenario_name_ref,
-                    session_id,
-                    prompt_text[:50] if isinstance(prompt_text, str) else prompt_text,
+                # Delegate to run_scenario_setup (consolidates client/server logic)
+                prompt_text = await scenario_self.run_scenario_setup(
+                    scenario_name_ref, deserialized_args
                 )
 
+                if prompt_text is None:
+                    raise ValueError(f"Scenario '{scenario_name_ref}' setup returned no prompt")
+
                 # Return just the string - FastMCP wraps it in PromptMessage
-                # Don't return dict or it gets JSON-serialized as text content
                 return [str(prompt_text)]
 
             # Register prompt using FastMCP - create FunctionPrompt directly
@@ -495,40 +583,11 @@ class ScenarioMixin:
 
             # Register RESOURCE - runs evaluate, returns reward
             async def resource_handler() -> str:
-                # Get latest session for this scenario
-                session_id = scenario_self._scenario_latest.get(scenario_name_ref)
-                if not session_id:
-                    raise ValueError(
-                        f"No active session for scenario '{scenario_name_ref}'. "
-                        "Call the prompt first to run setup."
-                    )
+                # Delegate to run_scenario_evaluate (consolidates client/server logic)
+                reward = await scenario_self.run_scenario_evaluate(scenario_name_ref)
 
-                gen = scenario_self._scenario_sessions.pop(session_id, None)
-                if gen is None:
-                    raise ValueError(f"Session '{session_id}' not found or already evaluated.")
-
-                # Get submitted answer (if any)
-                answer = scenario_self._scenario_answers.pop(scenario_name_ref, None)
-
-                # Run evaluate phase (code after first yield)
-                # Use asend to pass the answer (or None if not submitted)
-                try:
-                    reward = await gen.asend(answer)
-                except StopAsyncIteration:
-                    # Generator ended without second yield - assume success
-                    reward = 1.0
-
-                logger.debug(
-                    "Scenario %s evaluate complete, session=%s, answer=%s, reward=%s",
-                    scenario_name_ref,
-                    session_id,
-                    answer[:50] if answer and len(answer) > 50 else answer,
-                    reward,
-                )
-
-                # Clean up latest pointer if it matches
-                if scenario_self._scenario_latest.get(scenario_name_ref) == session_id:
-                    del scenario_self._scenario_latest[scenario_name_ref]
+                if reward is None:
+                    raise ValueError(f"Scenario '{scenario_name_ref}' evaluation failed")
 
                 return json.dumps({"reward": float(reward)})
 

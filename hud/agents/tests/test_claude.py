@@ -22,7 +22,7 @@ from hud.types import MCPToolCall, MCPToolResult
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from anthropic.types.beta import BetaImageBlockParam, BetaMessageParam, BetaTextBlockParam
+    from anthropic.types.beta import BetaMessageParam
 
 
 class MockEvalContext(EvalContext):
@@ -123,9 +123,7 @@ class TestClaudeHelperFunctions:
     def test_tool_use_content_block(self) -> None:
         """Test tool result content block creation."""
         tool_use_id = "tool_123"
-        content: list[BetaTextBlockParam | BetaImageBlockParam] = [
-            text_to_content_block("Result text")
-        ]
+        content = [text_to_content_block("Result text")]
 
         result = tool_use_content_block(tool_use_id, content)
 
