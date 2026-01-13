@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
@@ -162,14 +161,14 @@ class MCPRouter:
 
         logger.debug("Router: %d tools (%d local)", len(self._tools), len(self._local_tool_names))
 
-    async def build_prompts(
+    def build_prompts(
         self,
         local_prompts: list[mcp_types.Prompt],
         connections: dict[str, Connector],
     ) -> None:
         """Build prompt routing from local prompts and connections.
 
-        Fetches prompts from all connections in parallel for performance.
+        Uses cached prompts from connections (populated during __aenter__).
         """
         self._prompts.clear()
         self._prompt_routing.clear()
@@ -182,17 +181,10 @@ class MCPRouter:
             self._prompt_routing[prompt.name] = LOCAL_CONNECTION
             self._prompts.append(prompt)
 
-        # Fetch remote prompts in parallel
-        async def fetch_prompts(
-            conn_name: str, conn: Connector
-        ) -> tuple[str, list[mcp_types.Prompt]]:
-            try:
-                return conn_name, conn.cached_prompts or await conn.list_prompts()
-            except Exception as e:
-                logger.debug("Failed to list prompts from %s: %s", conn_name, e)
-                return conn_name, []
-
-        results = await asyncio.gather(*[fetch_prompts(n, c) for n, c in connections.items()])
+        # Use cached prompts from each connection (populated during __aenter__)
+        results: list[tuple[str, list[mcp_types.Prompt]]] = [
+            (conn_name, conn.cached_prompts) for conn_name, conn in connections.items()
+        ]
 
         # Process results in connection order (dict preserves insertion order)
         for conn_name, remote_prompts in results:
@@ -213,14 +205,14 @@ class MCPRouter:
 
         logger.debug("Router: %d prompts", len(self._prompts))
 
-    async def build_resources(
+    def build_resources(
         self,
         local_resources: list[mcp_types.Resource],
         connections: dict[str, Connector],
     ) -> None:
         """Build resource routing from local resources and connections.
 
-        Fetches resources from all connections in parallel for performance.
+        Uses cached resources from connections (populated during __aenter__).
         """
         self._resources.clear()
         self._resource_routing.clear()
@@ -234,17 +226,10 @@ class MCPRouter:
             self._resource_routing[uri] = LOCAL_CONNECTION
             self._resources.append(resource)
 
-        # Fetch remote resources in parallel
-        async def fetch_resources(
-            conn_name: str, conn: Connector
-        ) -> tuple[str, list[mcp_types.Resource]]:
-            try:
-                return conn_name, conn.cached_resources or await conn.list_resources()
-            except Exception as e:
-                logger.debug("Failed to list resources from %s: %s", conn_name, e)
-                return conn_name, []
-
-        results = await asyncio.gather(*[fetch_resources(n, c) for n, c in connections.items()])
+        # Use cached resources from each connection (populated during __aenter__)
+        results: list[tuple[str, list[mcp_types.Resource]]] = [
+            (conn_name, conn.cached_resources) for conn_name, conn in connections.items()
+        ]
 
         # Process results in connection order (dict preserves insertion order)
         for conn_name, remote_resources in results:

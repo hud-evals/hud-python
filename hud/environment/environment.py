@@ -455,14 +455,14 @@ class Environment(
         """Build prompt routing from local prompts and connections."""
         local_prompts_dict = await self._prompt_manager.get_prompts()
         local_prompts = [p.to_mcp_prompt() for p in local_prompts_dict.values()]
-        await self._router.build_prompts(local_prompts, self._connections)
+        self._router.build_prompts(local_prompts, self._connections)
         self._prompt_routing_built = True
 
     async def _build_resource_routing(self) -> None:
         """Build resource routing from local resources and connections."""
         local_resources_dict = await self._resource_manager.get_resources()
         local_resources = [r.to_mcp_resource() for r in local_resources_dict.values()]
-        await self._router.build_resources(local_resources, self._connections)
+        self._router.build_resources(local_resources, self._connections)
         self._resource_routing_built = True
 
     # =========================================================================
@@ -540,7 +540,7 @@ class Environment(
     async def list_resources(self) -> list[mcp_types.Resource]:
         """Refresh resources from all connections and rebuild resource routing."""
         if self._connections:
-            await asyncio.gather(*[c.list_resources(refresh=True) for c in self._connections.values()])
+            await asyncio.gather(*[c.list_resources() for c in self._connections.values()])
         await self._build_resource_routing()
         return self._router.resources
 
@@ -588,7 +588,7 @@ class Environment(
     async def list_prompts(self) -> list[mcp_types.Prompt]:
         """Refresh prompts from all connections and rebuild prompt routing."""
         if self._connections:
-            await asyncio.gather(*[c.list_prompts(refresh=True) for c in self._connections.values()])
+            await asyncio.gather(*[c.list_prompts() for c in self._connections.values()])
         await self._build_prompt_routing()
         return self._router.prompts
 

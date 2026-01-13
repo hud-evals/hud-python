@@ -214,6 +214,14 @@ class TestEnvironmentMCPProtocol:
             def cached_tools(self) -> list[mcp_types.Tool]:
                 return self._tools_cache
 
+            @property
+            def cached_prompts(self) -> list[mcp_types.Prompt]:
+                return []
+
+            @property
+            def cached_resources(self) -> list[mcp_types.Resource]:
+                return []
+
             async def connect(self) -> None:
                 pass
 
@@ -293,6 +301,14 @@ class TestEnvironmentMCPProtocol:
             @property
             def cached_tools(self) -> list[mcp_types.Tool]:
                 return self._tools_cache
+
+            @property
+            def cached_prompts(self) -> list[mcp_types.Prompt]:
+                return []
+
+            @property
+            def cached_resources(self) -> list[mcp_types.Resource]:
+                return []
 
             async def connect(self) -> None:
                 pass

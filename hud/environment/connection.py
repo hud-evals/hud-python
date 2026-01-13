@@ -134,7 +134,11 @@ class Connector:
         self._resources_cache = None
 
     async def list_tools(self) -> list[mcp_types.Tool]:
-        """Fetch tools from server, apply filters/transforms/prefix, and cache."""
+        """Fetch tools from server, apply filters/transforms/prefix, and cache.
+
+        Always fetches fresh data from the server (no caching check).
+        The result is cached for use by router.build() via cached_tools property.
+        """
         if self.client is None:
             raise RuntimeError("Not connected - call connect() first")
         tools = await self.client.list_tools()
@@ -189,21 +193,25 @@ class Connector:
             name = name[len(self.config.prefix) + 1 :]
         return await self.client.call_tool_mcp(name, arguments or {})
 
-    async def list_resources(self, *, refresh: bool = False) -> list[mcp_types.Resource]:
-        """Fetch resources from server and cache."""
+    async def list_resources(self) -> list[mcp_types.Resource]:
+        """Fetch resources from server and cache.
+
+        Always fetches fresh data from the server (no caching check).
+        The result is cached for use by router.build_resources() via cached_resources property.
+        """
         if self.client is None:
             raise RuntimeError("Not connected - call connect() first")
-        if self._resources_cache is not None and not refresh:
-            return self._resources_cache
         self._resources_cache = await self.client.list_resources()
         return self._resources_cache
 
-    async def list_prompts(self, *, refresh: bool = False) -> list[mcp_types.Prompt]:
-        """Fetch prompts from server and cache."""
+    async def list_prompts(self) -> list[mcp_types.Prompt]:
+        """Fetch prompts from server and cache.
+
+        Always fetches fresh data from the server (no caching check).
+        The result is cached for use by router.build_prompts() via cached_prompts property.
+        """
         if self.client is None:
             raise RuntimeError("Not connected - call connect() first")
-        if self._prompts_cache is not None and not refresh:
-            return self._prompts_cache
         self._prompts_cache = await self.client.list_prompts()
         return self._prompts_cache
 
