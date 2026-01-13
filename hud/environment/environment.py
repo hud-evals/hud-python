@@ -662,7 +662,7 @@ class Environment(
         For v4 format: requires mcp_config, prompt, AND evaluate_tool
         """
         # Check for local tools (registered via @env.tool)
-        if self._router._local_names:
+        if self._router._local_tool_names:
             return False
         # Check for local scenarios (registered via @env.scenario)
         if getattr(self, "_scenarios", {}):
@@ -699,10 +699,10 @@ class Environment(
             task.env.to_config()  # {"prompt": "...", "mcp_config": {...}, ...}
             ```
         """
-        if self._router._local_names:
+        if self._router._local_tool_names:
             raise ValueError(
                 f"Cannot serialize Environment with local tools: "
-                f"{list(self._router._local_names)}. "
+                f"{list(self._router._local_tool_names)}. "
                 "Local tools require local execution. For remote submission, "
                 "use dict config or connect to a remote hub."
             )

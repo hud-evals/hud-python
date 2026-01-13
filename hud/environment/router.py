@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
     from hud.environment.connection import Connector
 
-__all__ = ["LOCAL_CONNECTION", "ConflictResolution", "ToolRouter", "MCPRouter"]
+__all__ = ["LOCAL_CONNECTION", "ConflictResolution", "MCPRouter", "ToolRouter"]
 
 logger = logging.getLogger(__name__)
 
@@ -192,9 +192,7 @@ class MCPRouter:
                 logger.debug("Failed to list prompts from %s: %s", conn_name, e)
                 return conn_name, []
 
-        results = await asyncio.gather(
-            *[fetch_prompts(n, c) for n, c in connections.items()]
-        )
+        results = await asyncio.gather(*[fetch_prompts(n, c) for n, c in connections.items()])
 
         # Process results in connection order (dict preserves insertion order)
         for conn_name, remote_prompts in results:
@@ -246,9 +244,7 @@ class MCPRouter:
                 logger.debug("Failed to list resources from %s: %s", conn_name, e)
                 return conn_name, []
 
-        results = await asyncio.gather(
-            *[fetch_resources(n, c) for n, c in connections.items()]
-        )
+        results = await asyncio.gather(*[fetch_resources(n, c) for n, c in connections.items()])
 
         # Process results in connection order (dict preserves insertion order)
         for conn_name, remote_resources in results:

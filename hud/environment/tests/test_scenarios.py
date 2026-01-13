@@ -961,6 +961,7 @@ class TestScenarioRegistration:
         prompt = await env.run_scenario_setup("one-yield", {})
         assert prompt == "Prompt"
 
+        assert env._active_session is not None
         env._active_session.answer = "test"
         # Evaluate should handle StopAsyncIteration and return 1.0
         reward = await env.run_scenario_evaluate("one-yield")
@@ -980,6 +981,7 @@ class TestScenarioRegistration:
         prompt = await env.run_scenario_setup("three-yields", {})
         assert prompt == "Prompt"
 
+        assert env._active_session is not None
         env._active_session.answer = "test"
         reward = await env.run_scenario_evaluate("three-yields")
         assert reward == 0.5
@@ -1025,6 +1027,7 @@ class TestScenarioSessionState:
             yield 0.75
 
         await env.run_scenario_setup("test", {})
+        assert env._active_session is not None
         env._active_session.answer = "answer"
 
         reward1 = await env.run_scenario_evaluate("test")
@@ -1070,10 +1073,12 @@ class TestScenarioSessionState:
             yield 0.5
 
         await env.run_scenario_setup("first", {})
+        assert env._active_session is not None
         assert env._active_session.local_name == "first"
 
         # Start second without evaluating first
         await env.run_scenario_setup("second", {})
+        assert env._active_session is not None
         assert env._active_session.local_name == "second"
 
         env._active_session.answer = "answer"

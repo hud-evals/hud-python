@@ -5,7 +5,6 @@ from __future__ import annotations
 import inspect
 import json
 import logging
-import uuid
 from typing import TYPE_CHECKING, Any, get_type_hints
 
 from pydantic import BaseModel, ConfigDict
@@ -101,7 +100,7 @@ class ScenarioMixin:
 
         if not self._active_session:
             raise ValueError(
-                f"No active scenario session. Call run_scenario_setup() before submit()."
+                "No active scenario session. Call run_scenario_setup() before submit()."
             )
 
         if self._active_session.local_name != local_name:
@@ -483,7 +482,6 @@ class ScenarioMixin:
             # Register PROMPT - runs setup, returns prompt messages
             # We need a reference to self and the outer variables
             scenario_self = self
-            scenario_fn = fn
             scenario_name_ref = scenario_name
 
             # Resolve parameter type hints for deserialization
