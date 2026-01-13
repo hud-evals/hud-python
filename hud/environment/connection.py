@@ -198,10 +198,21 @@ class Connector:
 
         Always fetches fresh data from the server (no caching check).
         The result is cached for use by router.build_resources() via cached_resources property.
+
+        Note: resources/list is optional in the MCP spec. If the server doesn't
+        implement it, we return an empty list gracefully.
         """
         if self.client is None:
             raise RuntimeError("Not connected - call connect() first")
-        self._resources_cache = await self.client.list_resources()
+        try:
+            self._resources_cache = await self.client.list_resources()
+        except Exception as e:
+            # Handle servers that don't implement resources/list (optional in MCP spec)
+            if "Method not found" in str(e):
+                logger.debug("Server %s does not support resources/list", self.name)
+                self._resources_cache = []
+            else:
+                raise
         return self._resources_cache
 
     async def list_prompts(self) -> list[mcp_types.Prompt]:
@@ -209,10 +220,21 @@ class Connector:
 
         Always fetches fresh data from the server (no caching check).
         The result is cached for use by router.build_prompts() via cached_prompts property.
+
+        Note: prompts/list is optional in the MCP spec. If the server doesn't
+        implement it, we return an empty list gracefully.
         """
         if self.client is None:
             raise RuntimeError("Not connected - call connect() first")
-        self._prompts_cache = await self.client.list_prompts()
+        try:
+            self._prompts_cache = await self.client.list_prompts()
+        except Exception as e:
+            # Handle servers that don't implement prompts/list (optional in MCP spec)
+            if "Method not found" in str(e):
+                logger.debug("Server %s does not support prompts/list", self.name)
+                self._prompts_cache = []
+            else:
+                raise
         return self._prompts_cache
 
     async def read_resource(

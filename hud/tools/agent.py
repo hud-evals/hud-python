@@ -180,6 +180,7 @@ class AgentTool(BaseTool):
         """Execute the task with a fresh agent."""
         from hud.eval.context import get_current_trace_id
         from hud.eval.manager import run_eval
+        from hud.telemetry.instrument import instrument
 
         # Filter to visible params only
         filtered = {k: v for k, v in kwargs.items() if k in self._visible_params}
@@ -198,19 +199,25 @@ class AgentTool(BaseTool):
         # Trace if explicitly requested AND not nested (nested uses parent trace)
         should_trace = self._trace and not is_nested
 
-        async with run_eval(
-            task,
-            trace=should_trace,
-            trace_id=parent_trace_id,
-            quiet=True,
-        ) as ctx:
-            if self._model:
-                from hud.agents import create_agent
+        # Wrap execution with instrumentation to mark as subagent
+        # Platform uses category="subagent" to detect and render subagent tool calls
+        @instrument(category="subagent", name=self.name)
+        async def _run_subagent() -> ToolResult:
+            async with run_eval(
+                task,
+                trace=should_trace,
+                trace_id=parent_trace_id,
+                quiet=True,
+            ) as ctx:
+                if self._model:
+                    from hud.agents import create_agent
 
-                agent = create_agent(self._model, **self._agent_params)
-            else:
-                agent = self._agent_cls.create(**self._agent_params)  # type: ignore
+                    agent = create_agent(self._model, **self._agent_params)
+                else:
+                    agent = self._agent_cls.create(**self._agent_params)  # type: ignore
 
-            result = await agent.run(ctx)
-            content = result.content if hasattr(result, "content") and result.content else ""
-            return ToolResult(content=[TextContent(type="text", text=content)])
+                result = await agent.run(ctx)
+                content = result.content if hasattr(result, "content") and result.content else ""
+                return ToolResult(content=[TextContent(type="text", text=content)])
+
+        return await _run_subagent()

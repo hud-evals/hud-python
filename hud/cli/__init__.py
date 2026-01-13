@@ -757,7 +757,8 @@ def build(
         hud build environments/text_2048 -e API_KEY=secret
         hud build . --tag my-env:v1.0 -e VAR1=value1 -e VAR2=value2
         hud build . --no-cache       # Force rebuild
-        hud build . --remote-cache my-cache-repo   # Use ECR remote cache (requires AWS_ACCOUNT_ID and AWS_DEFAULT_REGION)[/not dim]
+        hud build . --remote-cache my-cache-repo   # Use ECR remote cache (requires AWS_ACCOUNT_ID and AWS_DEFAULT_REGION)
+        hud build . --build-arg NODE_ENV=production  # Pass Docker build args[/not dim]
     """  # noqa: E501
     # Parse directory and extra arguments
     if params:
@@ -767,8 +768,9 @@ def build(
         directory = "."
         extra_args = []
 
-    # Parse environment variables from extra args
+    # Parse environment variables and build args from extra args
     env_vars = {}
+    build_args = {}
     i = 0
     while i < len(extra_args):
         if extra_args[i] == "-e" and i + 1 < len(extra_args):
@@ -792,10 +794,26 @@ def build(
                 key, value = env_arg.split("=", 1)
                 env_vars[key] = value
             i += 2
+        elif extra_args[i] == "--build-arg" and i + 1 < len(extra_args):
+            # Parse --build-arg KEY=VALUE format
+            build_arg = extra_args[i + 1]
+            if "=" in build_arg:
+                key, value = build_arg.split("=", 1)
+                build_args[key] = value
+            i += 2
+        elif extra_args[i].startswith("--build-arg="):
+            # Parse --build-arg=KEY=VALUE format
+            build_arg = extra_args[i][12:]  # Remove --build-arg=
+            if "=" in build_arg:
+                key, value = build_arg.split("=", 1)
+                build_args[key] = value
+            i += 1
         else:
             i += 1
 
-    build_command(directory, tag, no_cache, verbose, env_vars, platform, remote_cache)
+    build_command(
+        directory, tag, no_cache, verbose, env_vars, platform, remote_cache, build_args or None
+    )
 
 
 @app.command()
