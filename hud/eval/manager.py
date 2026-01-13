@@ -63,7 +63,8 @@ def _send_job_enter(
     group: int,
     api_key: str | None,
     taskset: str | None = None,
-) -> None:
+    tasks: list[dict[str, Any]] | None = None,
+) -> list[str] | None:
     """Send job enter payload (sync request before traces start)."""
     import httpx
 
@@ -72,24 +73,35 @@ def _send_job_enter(
 
     api_key = api_key or settings.api_key
     if not settings.telemetry_enabled or not api_key:
-        return
+        return None
 
     payload = JobEnterPayload(
         name=name,
         variants=variants,
         group=group,
         taskset=taskset,
+        tasks=tasks if taskset else None,  # only send tasks if taskset specified
     )
 
     try:
-        httpx.post(
+        resp = httpx.post(
             f"{settings.hud_api_url}/trace/job/{job_id}/enter",
             json=payload.model_dump(exclude_none=True),
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=10.0,
         )
+        if resp.is_success:
+            try:
+                data = resp.json()
+            except Exception:
+                return None
+            if isinstance(data, dict):
+                ids = data.get("task_version_ids")
+                if isinstance(ids, list) and all(isinstance(x, str) for x in ids):
+                    return ids
     except Exception as e:
         logger.warning("Failed to send job enter: %s", e)
+    return None
 
 
 @asynccontextmanager
@@ -276,14 +288,33 @@ async def run_eval(
         job_url = f"https://hud.ai/jobs/{implicit_job_id}"
 
         # Send job enter (sync request before traces start)
-        _send_job_enter(
+        # Serialize tasks for auto-add to taskset (only tasks without existing backend id).
+        # For v5 scenario tasks, the backend task_version_id is carried in Task.id.
+        tasks_data = None
+        tasks_to_create: list[Task] = []
+        if taskset and tasks:
+            tasks_to_create = [t for t in tasks if not t.id]
+            tasks_data = [
+                t.model_dump(mode="json", exclude_none=True)
+                for t in tasks
+                if not t.id  # skip tasks that already exist in platform
+            ]
+        created_task_version_ids = _send_job_enter(
             job_id=implicit_job_id,
             name=eval_name,
             variants=variants,
             group=group,
             api_key=api_key,
             taskset=taskset,
+            tasks=tasks_data,
         )
+        if created_task_version_ids and tasks_to_create:
+            # Assign backend IDs back onto the in-memory tasks so trace enter includes
+            # task_version_id.
+            for task_obj, task_version_id in zip(
+                tasks_to_create, created_task_version_ids, strict=False
+            ):
+                task_obj.id = task_version_id
 
         # Print job URL (not individual trace URLs)
         if not quiet:
