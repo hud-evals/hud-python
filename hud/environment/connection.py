@@ -68,6 +68,8 @@ class Connector:
         self.connection_type = connection_type
         self.client: FastMCPClient[Any] | None = None
         self._tools_cache: list[mcp_types.Tool] | None = None
+        self._prompts_cache: list[mcp_types.Prompt] | None = None
+        self._resources_cache: list[mcp_types.Resource] | None = None
 
     def copy(self) -> Connector:
         """Create a copy of this connector with fresh (unconnected) state.
@@ -101,6 +103,14 @@ class Connector:
     def cached_tools(self) -> list[mcp_types.Tool]:
         return self._tools_cache or []
 
+    @property
+    def cached_prompts(self) -> list[mcp_types.Prompt]:
+        return self._prompts_cache or []
+
+    @property
+    def cached_resources(self) -> list[mcp_types.Resource]:
+        return self._resources_cache or []
+
     async def connect(self) -> None:
         """Create FastMCP client and connect.
 
@@ -115,11 +125,13 @@ class Connector:
         await self.client.__aenter__()
 
     async def disconnect(self) -> None:
-        """Disconnect and clear cache."""
+        """Disconnect and clear all caches."""
         if self.client is not None and self.is_connected:
             await self.client.__aexit__(None, None, None)
         self.client = None
         self._tools_cache = None
+        self._prompts_cache = None
+        self._resources_cache = None
 
     async def list_tools(self) -> list[mcp_types.Tool]:
         """Fetch tools from server, apply filters/transforms/prefix, and cache."""
@@ -177,15 +189,23 @@ class Connector:
             name = name[len(self.config.prefix) + 1 :]
         return await self.client.call_tool_mcp(name, arguments or {})
 
-    async def list_resources(self) -> list[mcp_types.Resource]:
+    async def list_resources(self, *, refresh: bool = False) -> list[mcp_types.Resource]:
+        """Fetch resources from server and cache."""
         if self.client is None:
             raise RuntimeError("Not connected - call connect() first")
-        return await self.client.list_resources()
+        if self._resources_cache is not None and not refresh:
+            return self._resources_cache
+        self._resources_cache = await self.client.list_resources()
+        return self._resources_cache
 
-    async def list_prompts(self) -> list[mcp_types.Prompt]:
+    async def list_prompts(self, *, refresh: bool = False) -> list[mcp_types.Prompt]:
+        """Fetch prompts from server and cache."""
         if self.client is None:
             raise RuntimeError("Not connected - call connect() first")
-        return await self.client.list_prompts()
+        if self._prompts_cache is not None and not refresh:
+            return self._prompts_cache
+        self._prompts_cache = await self.client.list_prompts()
+        return self._prompts_cache
 
     async def read_resource(
         self, uri: str

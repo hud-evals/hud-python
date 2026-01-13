@@ -154,8 +154,9 @@ class TestScenarioExecution:
         assert prompt is not None
         await prompt.render({})
 
-        # Check session was stored
-        assert "test" in env._scenario_latest
+        # Check session was stored in _active_session
+        assert env._active_session is not None
+        assert env._active_session.local_name == "test"
 
     @pytest.mark.asyncio
     async def test_scenario_full_flow(self) -> None:
@@ -214,7 +215,7 @@ class TestScenarioSubmit:
 
     @pytest.mark.asyncio
     async def test_submit_stores_answer(self) -> None:
-        """submit() stores answer for scenario."""
+        """submit() stores answer in active session."""
         env = Environment("test-env")
 
         @env.scenario("test")
@@ -222,15 +223,15 @@ class TestScenarioSubmit:
             yield "What is 2+2?"
             yield 1.0
 
-        # Run setup
-        prompt = env._prompt_manager._prompts.get("test-env:test")
-        assert prompt is not None
-        await prompt.render({})
+        # Run setup via proper API (creates _active_session)
+        await env.run_scenario_setup("test", {})
 
         # Submit answer
         await env.submit("test", "4")
 
-        assert env._scenario_answers.get("test") == "4"
+        # Answer is stored in active session (not _scenario_answers for client-side)
+        assert env._active_session is not None
+        assert env._active_session.answer == "4"
 
     @pytest.mark.asyncio
     async def test_scenario_receives_answer(self) -> None:
@@ -245,13 +246,14 @@ class TestScenarioSubmit:
             received_answer = answer
             yield 1.0 if answer == "4" else 0.0
 
-        # Run setup
+        # Run setup (creates _active_session)
         prompt = env._prompt_manager._prompts.get("test-env:qa")
         assert prompt is not None
         await prompt.render({})
 
-        # Submit answer
-        env._scenario_answers["qa"] = "4"
+        # Submit answer via _active_session
+        assert env._active_session is not None
+        env._active_session.answer = "4"
 
         # Run evaluate
         resource = env._resource_manager._resources.get("test-env:qa")
@@ -270,16 +272,57 @@ class TestScenarioSubmit:
             answer = yield "What is the capital of France?"
             yield 1.0 if "paris" in answer.lower() else 0.0
 
-        # Run setup
+        # Run setup (creates _active_session)
         prompt = env._prompt_manager._prompts.get("test-env:grading")
         assert prompt is not None
         await prompt.render({})
 
-        # Submit correct answer
-        env._scenario_answers["grading"] = "Paris"
+        # Submit correct answer via _active_session
+        assert env._active_session is not None
+        env._active_session.answer = "Paris"
 
         # Run evaluate
         resource = env._resource_manager._resources.get("test-env:grading")
+        assert resource is not None
+        result = await resource.read()
+
+        import json
+
+        data = json.loads(result)
+        assert data["reward"] == 1.0
+
+    @pytest.mark.asyncio
+    async def test_hud_submit_normalizes_prefixed_scenario_name(self) -> None:
+        """_hud_submit with prefixed name stores answer in _active_session.
+
+        Regression test: answers submitted with "env:scenario" prefix must
+        match the active session's local_name for storage.
+        """
+        env = Environment("my-env")
+
+        @env.scenario("greet")
+        async def greet_scenario():
+            answer = yield "Say hello"
+            yield 1.0 if answer == "hello" else 0.0
+
+        # Run setup via prompt (creates _active_session)
+        prompt = env._prompt_manager._prompts.get("my-env:greet")
+        assert prompt is not None
+        await prompt.render({})
+
+        # Verify session exists before _hud_submit
+        assert env._active_session is not None
+        assert env._active_session.local_name == "greet"
+
+        # Simulate _hud_submit with PREFIXED scenario name (as happens in remote calls)
+        # This should normalize to "greet" and match the active session
+        await env.call_tool("_hud_submit", scenario="my-env:greet", answer="hello")
+
+        # Verify answer was stored in _active_session
+        assert env._active_session.answer == "hello"
+
+        # Verify evaluation works
+        resource = env._resource_manager._resources.get("my-env:greet")
         assert resource is not None
         result = await resource.read()
 
@@ -747,3 +790,292 @@ class TestScenarioJsonSerialization:
         assert all(isinstance(item, _Item) for item in received_items)
         assert received_items[0].name == "Apple"
         assert received_items[1].name == "Banana"
+
+
+class TestScenarioNameNormalization:
+    """Test edge cases for environment and scenario name handling."""
+
+    @pytest.mark.asyncio
+    async def test_env_name_with_underscores_normalizes(self) -> None:
+        """Environment name with underscores normalizes to hyphens."""
+        env = Environment("my_test_env")
+        assert env.name == "my-test-env"
+
+        @env.scenario("greet")
+        async def greet():
+            yield "Hello"
+            yield 1.0
+
+        # Scenario should be registered with normalized name
+        assert "my-test-env:greet" in [p.name for p in env._prompt_manager._prompts.values()]
+
+    @pytest.mark.asyncio
+    async def test_env_name_with_spaces_normalizes(self) -> None:
+        """Environment name with spaces normalizes to hyphens."""
+        env = Environment("my test env")
+        assert env.name == "my-test-env"
+
+    @pytest.mark.asyncio
+    async def test_env_name_with_caps_normalizes(self) -> None:
+        """Environment name with capitals normalizes to lowercase."""
+        env = Environment("MyTestEnv")
+        assert env.name == "mytestenv"
+
+    @pytest.mark.asyncio
+    async def test_env_name_mixed_formatting(self) -> None:
+        """Environment name with mixed formatting normalizes correctly."""
+        env = Environment("My_Test Env")
+        assert env.name == "my-test-env"
+
+    @pytest.mark.asyncio
+    async def test_prefix_matches_normalized_name(self) -> None:
+        """Scenario prefix should match normalized env name."""
+        env = Environment("my_env")  # Normalizes to "my-env"
+
+        @env.scenario("test")
+        async def test_scenario():
+            yield "Prompt"
+            yield 1.0
+
+        # Calling with normalized prefix should work as local
+        prompt = await env.run_scenario_setup("my-env:test", {})
+        assert prompt == "Prompt"
+        assert env._active_session is not None
+        assert env._active_session.is_local is True
+
+    @pytest.mark.asyncio
+    async def test_unnormalized_prefix_treated_as_remote(self) -> None:
+        """Calling with unnormalized prefix treats as remote (different env)."""
+        env = Environment("my_env")  # Normalizes to "my-env"
+
+        @env.scenario("test")
+        async def test_scenario():
+            yield "Prompt"
+            yield 1.0
+
+        # Calling with "my_env:test" (underscore) won't match "my-env"
+        # So it's treated as remote - which will fail since no connection
+        with pytest.raises(ValueError, match="Scenario not found"):
+            await env.run_scenario_setup("my_env:test", {})
+
+
+class TestScenarioMalformedNames:
+    """Test handling of malformed scenario names."""
+
+    @pytest.mark.asyncio
+    async def test_empty_scenario_name_rejected(self) -> None:
+        """Empty scenario name should be handled gracefully."""
+        env = Environment("test-env")
+
+        @env.scenario("valid")
+        async def valid_scenario():
+            yield "Prompt"
+            yield 1.0
+
+        # Empty name - should fail since not registered
+        with pytest.raises((ValueError, KeyError)):
+            await env.run_scenario_setup("", {})
+
+    @pytest.mark.asyncio
+    async def test_only_colon_handled(self) -> None:
+        """Scenario name that is just ':' should be handled."""
+        env = Environment("test-env")
+
+        # ":" splits to prefix="" and short_name=""
+        with pytest.raises((ValueError, KeyError)):
+            await env.run_scenario_setup(":", {})
+
+    @pytest.mark.asyncio
+    async def test_colon_in_scenario_name_rejected_at_registration(self) -> None:
+        """Scenario names with colons are rejected at registration time."""
+        env = Environment("test-env")
+
+        # Colons are reserved as the separator between env and scenario names
+        with pytest.raises(ValueError, match="cannot contain ':'"):
+
+            @env.scenario("invalid:name")
+            async def scenario_with_colon():
+                yield "Prompt"
+                yield 1.0
+
+    @pytest.mark.asyncio
+    async def test_whitespace_in_scenario_name(self) -> None:
+        """Scenario names with whitespace should work (not normalized)."""
+        env = Environment("test-env")
+
+        @env.scenario("my scenario")
+        async def scenario_with_space():
+            yield "Prompt"
+            yield 1.0
+
+        # Scenario names are NOT normalized (only env names are)
+        prompt = await env.run_scenario_setup("my scenario", {})
+        assert prompt == "Prompt"
+
+
+class TestScenarioRegistration:
+    """Test scenario registration edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_duplicate_scenario_name_overwrites(self) -> None:
+        """Registering same scenario name twice should overwrite."""
+        env = Environment("test-env")
+
+        @env.scenario("greet")
+        async def greet_v1():
+            yield "Hello v1"
+            yield 1.0
+
+        @env.scenario("greet")
+        async def greet_v2():
+            yield "Hello v2"
+            yield 1.0
+
+        # Should use v2
+        prompt = await env.run_scenario_setup("greet", {})
+        assert prompt == "Hello v2"
+
+    @pytest.mark.asyncio
+    async def test_scenario_with_special_chars(self) -> None:
+        """Scenario names can contain special characters."""
+        env = Environment("test-env")
+
+        @env.scenario("test-scenario_v2.0")
+        async def special_scenario():
+            yield "Prompt"
+            yield 1.0
+
+        prompt = await env.run_scenario_setup("test-scenario_v2.0", {})
+        assert prompt == "Prompt"
+
+    @pytest.mark.asyncio
+    async def test_scenario_that_yields_once(self) -> None:
+        """Scenario that yields only once (no evaluate) should handle gracefully."""
+        env = Environment("test-env")
+
+        @env.scenario("one-yield")
+        async def one_yield_scenario():
+            yield "Prompt"
+            # No second yield!
+
+        prompt = await env.run_scenario_setup("one-yield", {})
+        assert prompt == "Prompt"
+
+        env._active_session.answer = "test"
+        # Evaluate should handle StopAsyncIteration and return 1.0
+        reward = await env.run_scenario_evaluate("one-yield")
+        assert reward == 1.0
+
+    @pytest.mark.asyncio
+    async def test_scenario_that_yields_three_times(self) -> None:
+        """Scenario that yields more than twice - third yield ignored."""
+        env = Environment("test-env")
+
+        @env.scenario("three-yields")
+        async def three_yield_scenario():
+            yield "Prompt"
+            yield 0.5
+            yield "This should be ignored"
+
+        prompt = await env.run_scenario_setup("three-yields", {})
+        assert prompt == "Prompt"
+
+        env._active_session.answer = "test"
+        reward = await env.run_scenario_evaluate("three-yields")
+        assert reward == 0.5
+
+
+class TestScenarioSessionState:
+    """Test session state management edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_submit_before_setup_raises(self) -> None:
+        """Calling submit() before run_scenario_setup() should raise."""
+        env = Environment("test-env")
+
+        @env.scenario("test")
+        async def test_scenario():
+            yield "Prompt"
+            yield 1.0
+
+        with pytest.raises(ValueError, match="No active scenario session"):
+            await env.submit("test", "answer")
+
+    @pytest.mark.asyncio
+    async def test_evaluate_before_setup_returns_none(self) -> None:
+        """Calling evaluate() before setup() should return None."""
+        env = Environment("test-env")
+
+        @env.scenario("test")
+        async def test_scenario():
+            yield "Prompt"
+            yield 1.0
+
+        result = await env.run_scenario_evaluate("test")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_double_evaluate_returns_none(self) -> None:
+        """Calling evaluate() twice should return None on second call."""
+        env = Environment("test-env")
+
+        @env.scenario("test")
+        async def test_scenario():
+            yield "Prompt"
+            yield 0.75
+
+        await env.run_scenario_setup("test", {})
+        env._active_session.answer = "answer"
+
+        reward1 = await env.run_scenario_evaluate("test")
+        assert reward1 == 0.75
+
+        # Second call - session cleared
+        reward2 = await env.run_scenario_evaluate("test")
+        assert reward2 is None
+
+    @pytest.mark.asyncio
+    async def test_submit_wrong_scenario_raises(self) -> None:
+        """Submitting answer for wrong scenario should raise."""
+        env = Environment("test-env")
+
+        @env.scenario("scenario-a")
+        async def scenario_a():
+            yield "Prompt A"
+            yield 1.0
+
+        @env.scenario("scenario-b")
+        async def scenario_b():
+            yield "Prompt B"
+            yield 1.0
+
+        await env.run_scenario_setup("scenario-a", {})
+
+        with pytest.raises(ValueError, match="Scenario mismatch"):
+            await env.submit("scenario-b", "answer")
+
+    @pytest.mark.asyncio
+    async def test_second_setup_overwrites_first(self) -> None:
+        """Starting a new scenario before evaluating previous one overwrites."""
+        env = Environment("test-env")
+
+        @env.scenario("first")
+        async def first_scenario():
+            yield "First"
+            yield 1.0
+
+        @env.scenario("second")
+        async def second_scenario():
+            yield "Second"
+            yield 0.5
+
+        await env.run_scenario_setup("first", {})
+        assert env._active_session.local_name == "first"
+
+        # Start second without evaluating first
+        await env.run_scenario_setup("second", {})
+        assert env._active_session.local_name == "second"
+
+        env._active_session.answer = "answer"
+        reward = await env.run_scenario_evaluate("second")
+        assert reward == 0.5
