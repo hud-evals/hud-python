@@ -183,7 +183,7 @@ async def main() -> None:
             "gold_file_url": "https://gahludmjcsmszgyufydt.supabase.co//storage/v1/object/public/sheetbench/c6ddeb9a-0c16-4f5e-8a06-f148ebb4be8a/gold_solution_2.xlsx?",
         },
         agent_config={
-            "allowed_tools": ["*"],
+            "allowed_tools": ["computer"],
             "disallowed_tools": ["setup", "evaluate"],
             "initial_screenshot": True,
             "append_setup_output": True,

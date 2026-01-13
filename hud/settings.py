@@ -142,6 +142,18 @@ class Settings(BaseSettings):
         validation_alias="PRIME_API_KEY",
     )
 
+    tinker_api_key: str | None = Field(
+        default=None,
+        description="API key for Tinker service",
+        validation_alias="TINKER_API_KEY",
+    )
+
+    tinker_base_url: str | None = Field(
+        default=None,
+        description="Base URL for Tinker service",
+        validation_alias="TINKER_BASE_URL",
+    )
+
     telemetry_enabled: bool = Field(
         default=True,
         description="Enable telemetry for the HUD SDK",

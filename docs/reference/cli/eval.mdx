@@ -7,7 +7,7 @@ icon: "robot"
 The `hud eval` command runs an agent on a tasks file or HuggingFace dataset.
 
 <Note>
-**Local Execution Dependencies**: Running Claude or Gemini agents locally requires additional packages:
+**Local Execution Dependencies**: Running Claude, Gemini, or Tinker agents locally requires additional packages:
 ```bash
 uv add "hud-python[agents]"
 ```
@@ -27,7 +27,7 @@ hud eval [SOURCE] [AGENT] [OPTIONS]
 </ParamField>
 
 <ParamField path="agent" type="string">
-  Agent to use: `claude`, `openai`, `operator`, `gemini`, `openai_compatible`. If omitted, an interactive preset selector appears.
+  Agent to use: `claude`, `openai`, `operator`, `gemini`, `gemini_cua`, `tinker`, `openai_compatible`. If omitted, an interactive preset selector appears.
 </ParamField>
 
 ## Options
@@ -133,6 +133,13 @@ On first run, a template is created:
 # model = "gemini-2.5-pro"
 # temperature = 1.0
 
+[tinker]
+# model = "Qwen/Qwen3-4B-Instruct-2507"
+# renderer_name = "qwen3_instruct"
+# base_url = "http://localhost:8000"
+# max_new_tokens = 1024
+# temperature = 0.7
+
 [openai_compatible]
 # model = "my-model"
 # base_url = "http://localhost:8000/v1"
@@ -188,6 +195,7 @@ When agent is omitted, an interactive selector shows presets:
   GPT-5
   Operator (OpenAI Computer Use)
   Gemini 2.5 Computer Use
+  Tinker (Sampling API)
   Grok 4.1 Fast
 ```
 

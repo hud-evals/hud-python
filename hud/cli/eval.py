@@ -65,6 +65,18 @@ _AGENT_PRESETS: list[AgentPreset] = [
         AgentType.GEMINI_CUA,
         "gemini-2.5-computer-use-preview",
     ),
+    AgentPreset(
+        "Tinker VLM (Qwen3-VL-235B)",
+        AgentType.TINKER,
+        "Qwen/Qwen3-VL-235B-A22B-Instruct",
+        {
+            "tinker": {
+                "renderer_name": "qwen3_vl_instruct",
+                "max_new_tokens": 1024,
+                "max_context_tokens": 200000,
+            }
+        },
+    ),
     # HUD Gateway presets (models via HUD Inference API)
     AgentPreset(
         "Grok 4-1 Fast (xAI)",
@@ -127,6 +139,15 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # top_p = 0.95
 # excluded_predefined_functions = []
 
+[tinker]
+# model = "Qwen/Qwen3-VL-235B-A22B-Instruct"  # Vision-language model for computer use
+# renderer_name = "qwen3_vl_instruct"  # VL renderer for vision models
+# base_url = ""  # Leave empty to use TINKER_BASE_URL env var
+# max_new_tokens = 1024
+# temperature = 0.7
+# lora_rank = 32
+# max_context_tokens = 200000
+
 [openai_compatible]
 # base_url = "http://localhost:8000/v1"
 # model = "my-model"
@@ -139,6 +160,7 @@ _API_KEY_REQUIREMENTS: dict[AgentType, tuple[str, str]] = {
     AgentType.GEMINI_CUA: ("gemini_api_key", "GEMINI_API_KEY"),
     AgentType.OPENAI: ("openai_api_key", "OPENAI_API_KEY"),
     AgentType.OPERATOR: ("openai_api_key", "OPENAI_API_KEY"),
+    AgentType.TINKER: ("tinker_api_key", "TINKER_API_KEY"),
 }
 
 
@@ -333,6 +355,7 @@ class EvalConfig(BaseModel):
             AgentType.OPERATOR,
             AgentType.GEMINI,
             AgentType.GEMINI_CUA,
+            AgentType.TINKER,
         ):
             kwargs["validate_api_key"] = False
 
@@ -719,7 +742,7 @@ def eval_command(
     source: str | None = typer.Argument(None, help="HuggingFace dataset or task JSON file"),
     agent: str | None = typer.Argument(
         None,
-        help="Agent: claude, openai, operator, gemini, gemini_cua, openai_compatible, integration_test",  # noqa: E501
+        help="Agent: claude, openai, operator, gemini, gemini_cua, tinker, openai_compatible, integration_test",  # noqa: E501
     ),
     all: bool = typer.Option(False, "--all", help="Run all problems instead of just 1"),
     full: bool = typer.Option(

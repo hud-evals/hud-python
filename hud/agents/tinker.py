@@ -196,8 +196,8 @@ class TinkerConfig(BaseAgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "Tinker"
-    model: str = "Qwen/Qwen3-4B-Instruct-2507"
-    renderer_name: str = "qwen3_instruct"
+    model: str = "Qwen/Qwen3-VL-235B-A22B-Instruct"
+    renderer_name: str = "qwen3_vl_instruct"
     base_url: str | None = None
     max_new_tokens: int = 1024
     temperature: float = 0.7
@@ -208,9 +208,16 @@ class TinkerConfig(BaseAgentConfig):
     renderer: Any | None = None  # tinker_cookbook.renderers.Renderer
     tokenizer: Any | None = None  # tinker_cookbook.tokenizer_utils.Tokenizer
     completion_store: TinkerCompletionStore | None = None
+    training_client: Any | None = None  # tinker.TrainingClient (for lazy init)
+
+    # LoRA configuration for lazy init
+    lora_rank: int = 32
 
     # Computer use settings
     computer_tool_name: str = "computer"
+
+    # API key validation (not used by Tinker, but needed for CLI compatibility)
+    validate_api_key: bool = False
 
 
 class TinkerCreateParams(BaseCreateParams, TinkerConfig):
@@ -245,15 +252,86 @@ class TinkerAgent(MCPAgent):
         super().__init__(params, **kwargs)
         self.config: TinkerConfig
 
-        # Store Tinker components
+        # Store Tinker components (may be None for lazy init)
         self._sampling_client = self.config.sampling_client
         self._renderer = self.config.renderer
         self._tokenizer = self.config.tokenizer
+        self._training_client = self.config.training_client
         self._store = self.config.completion_store or TinkerCompletionStore()
         self._computer_tool_name = self.config.computer_tool_name
+        self._tinker_initialized = False  # Separate flag from base class's _initialized
 
         # Message history for context
         self._messages: list[dict[str, Any]] = []
+
+    async def _ensure_initialized(self) -> None:
+        """Lazily initialize Tinker components if not provided.
+
+        This allows CLI usage where the sampling_client, renderer, and tokenizer
+        are not provided upfront. The components are created from the config
+        settings (model, renderer_name, base_url, lora_rank).
+        """
+        if self._tinker_initialized:
+            return
+
+        # Check if we need to create components - if all are already set, mark as initialized
+        if self._sampling_client is not None and self._renderer is not None and self._tokenizer is not None:
+            self._tinker_initialized = True
+            return
+
+        # Import Tinker dependencies
+        try:
+            import tinker
+            from tinker_cookbook import renderers
+            from tinker_cookbook.image_processing_utils import get_image_processor
+        except ImportError as e:
+            raise ImportError(
+                f"Tinker dependencies not available: {e}. "
+                "Install with: pip install tinker tinker-cookbook"
+            ) from e
+
+        # Get settings for API key and base URL
+        from hud.settings import settings as hud_settings
+
+        # Create service client
+        base_url = self.config.base_url or hud_settings.tinker_base_url
+        api_key = hud_settings.tinker_api_key
+
+        logger.info("Initializing Tinker components for model: %s", self.config.model)
+
+        service_client = tinker.ServiceClient(
+            base_url=base_url,
+            api_key=api_key,
+        )
+
+        # Create training client if not provided
+        if self._training_client is None:
+            self._training_client = await service_client.create_lora_training_client_async(
+                self.config.model,
+                rank=self.config.lora_rank,
+            )
+            logger.info("Created training client with LoRA rank: %d", self.config.lora_rank)
+
+        # Get tokenizer if not provided
+        if self._tokenizer is None:
+            self._tokenizer = self._training_client.get_tokenizer()
+
+        # Get renderer if not provided
+        if self._renderer is None:
+            image_processor = get_image_processor(self.config.model)
+            self._renderer = renderers.get_renderer(
+                self.config.renderer_name,
+                self._tokenizer,
+                image_processor,
+            )
+            logger.info("Created renderer: %s", self.config.renderer_name)
+
+        # Get sampling client if not provided
+        if self._sampling_client is None:
+            self._sampling_client = await self._training_client.save_weights_and_get_sampling_client_async()
+            logger.info("Created sampling client")
+
+        self._tinker_initialized = True
 
     @property
     def completion_store(self) -> TinkerCompletionStore:
@@ -515,20 +593,24 @@ class TinkerAgent(MCPAgent):
 
     async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
         """Get response from Tinker sampling API."""
+        # Lazily initialize Tinker components if not provided
+        await self._ensure_initialized()
+
+        # These should now be set after initialization
         if self._sampling_client is None:
             raise ValueError(
                 "TinkerAgent requires a sampling_client. "
-                "Provide it via TinkerConfig or use update_sampling_client()."
+                "Provide it via TinkerConfig or set TINKER_API_KEY for lazy initialization."
             )
         if self._renderer is None:
             raise ValueError(
                 "TinkerAgent requires a renderer. "
-                "Provide it via TinkerConfig."
+                "Provide it via TinkerConfig or set TINKER_API_KEY for lazy initialization."
             )
         if self._tokenizer is None:
             raise ValueError(
                 "TinkerAgent requires a tokenizer. "
-                "Provide it via TinkerConfig."
+                "Provide it via TinkerConfig or set TINKER_API_KEY for lazy initialization."
             )
 
         import tinker
