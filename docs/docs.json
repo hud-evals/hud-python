@@ -213,7 +213,14 @@
           {
             "group": "Guides",
             "pages": [
-              "platform/publishing-leaderboards"
+              "platform/publishing-leaderboards",
+              "platform/subagent"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "platform/slack"
             ]
           }
         ]
