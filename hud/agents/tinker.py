@@ -14,6 +14,7 @@ Key features:
 from __future__ import annotations
 
 import base64
+import contextlib
 import contextvars
 import io
 import json
@@ -24,11 +25,14 @@ import uuid
 from collections import deque
 from dataclasses import dataclass
 from threading import Lock
-from typing import TYPE_CHECKING, Any, ClassVar, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import mcp.types as types
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 from PIL import Image
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict
 from tinker_cookbook.renderers.base import ToolCall
 
 from hud.tools.computer.settings import computer_settings
@@ -36,9 +40,6 @@ from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.types import with_signature
 
 from .base import BaseCreateParams, MCPAgent
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -95,16 +96,12 @@ class TinkerCompletionStore:
         with self._lock:
             record = self._records.pop(completion_id, None)
             if record:
-                try:
+                with contextlib.suppress(ValueError):
                     self._order.remove(completion_id)
-                except ValueError:
-                    pass
                 episode_id = self._completion_episode.pop(completion_id, None)
                 if episode_id:
-                    try:
+                    with contextlib.suppress(ValueError):
                         self._episodes.get(episode_id, deque()).remove(completion_id)
-                    except ValueError:
-                        pass
                     if episode_id in self._episodes and not self._episodes[episode_id]:
                         self._episodes.pop(episode_id, None)
             return record
@@ -115,16 +112,12 @@ class TinkerCompletionStore:
             for completion_id in completion_ids:
                 record = self._records.pop(completion_id, None)
                 if record:
-                    try:
+                    with contextlib.suppress(ValueError):
                         self._order.remove(completion_id)
-                    except ValueError:
-                        pass
                     episode_id = self._completion_episode.pop(completion_id, None)
                     if episode_id:
-                        try:
+                        with contextlib.suppress(ValueError):
                             self._episodes.get(episode_id, deque()).remove(completion_id)
-                        except ValueError:
-                            pass
                         if episode_id in self._episodes and not self._episodes[episode_id]:
                             self._episodes.pop(episode_id, None)
                     popped.append(record)
@@ -142,10 +135,8 @@ class TinkerCompletionStore:
                 self._completion_episode.pop(completion_id, None)
                 record = self._records.pop(completion_id, None)
                 if record:
-                    try:
+                    with contextlib.suppress(ValueError):
                         self._order.remove(completion_id)
-                    except ValueError:
-                        pass
                     popped.append(record)
         return popped
 
@@ -157,10 +148,8 @@ class TinkerCompletionStore:
                 if record:
                     episode_id = self._completion_episode.pop(completion_id, None)
                     if episode_id:
-                        try:
+                        with contextlib.suppress(ValueError):
                             self._episodes.get(episode_id, deque()).remove(completion_id)
-                        except ValueError:
-                            pass
                         if episode_id in self._episodes and not self._episodes[episode_id]:
                             self._episodes.pop(episode_id, None)
                     return record
@@ -275,7 +264,11 @@ class TinkerAgent(MCPAgent):
             return
 
         # Check if we need to create components - if all are already set, mark as initialized
-        if self._sampling_client is not None and self._renderer is not None and self._tokenizer is not None:
+        if (
+            self._sampling_client is not None
+            and self._renderer is not None
+            and self._tokenizer is not None
+        ):
             self._tinker_initialized = True
             return
 
@@ -328,7 +321,9 @@ class TinkerAgent(MCPAgent):
 
         # Get sampling client if not provided
         if self._sampling_client is None:
-            self._sampling_client = await self._training_client.save_weights_and_get_sampling_client_async()
+            self._sampling_client = (
+                await self._training_client.save_weights_and_get_sampling_client_async()
+            )
             logger.info("Created sampling client")
 
         self._tinker_initialized = True
@@ -362,9 +357,7 @@ class TinkerAgent(MCPAgent):
                 if pil_image:
                     content.append({"type": "image", "image": pil_image})
                 else:
-                    content.append(
-                        {"type": "image_url", "image_url": {"url": data_url}}
-                    )
+                    content.append({"type": "image_url", "image_url": {"url": data_url}})
 
         if not content:
             content = [{"type": "text", "text": ""}]
@@ -511,8 +504,7 @@ class TinkerAgent(MCPAgent):
             return None
 
         has_computer_tool = any(
-            tool.get("function", {}).get("name") == self._computer_tool_name
-            for tool in tools
+            tool.get("function", {}).get("name") == self._computer_tool_name for tool in tools
         )
 
         lines = ["Available tools:", ""]
@@ -565,14 +557,23 @@ class TinkerAgent(MCPAgent):
             "",
             "Examples of CORRECT computer tool calls:",
             "",
-            '- Click a button: {"name": "computer", "args": {"type": "click", "x": 475, "y": 325}}',
-            '- Double-click: {"name": "computer", "args": {"type": "double_click", "x": 300, "y": 150}}',
-            '- Scroll at position: {"name": "computer", "args": {"type": "scroll", "x": 400, "y": 300, "scroll_y": -3}}',
-            '- Type text: {"name": "computer", "args": {"type": "type", "text": "hello world"}}',
-            '- Press keys: {"name": "computer", "args": {"type": "keypress", "keys": ["ctrl", "c"]}}',
-            '- Take screenshot: {"name": "computer", "args": {"type": "screenshot"}}',
+            "- Click a button:",
+            '  {"name": "computer", "args": {"type": "click", "x": 475, "y": 325}}',
+            "- Double-click:",
+            '  {"name": "computer", "args": {"type": "double_click", "x": 300, "y": 150}}',
+            "- Scroll at position:",
+            (
+                '  {"name": "computer", "args": '
+                '{"type": "scroll", "x": 400, "y": 300, "scroll_y": -3}}'
+            ),
+            "- Type text:",
+            '  {"name": "computer", "args": {"type": "type", "text": "hello world"}}',
+            "- Press keys:",
+            '  {"name": "computer", "args": {"type": "keypress", "keys": ["ctrl", "c"]}}',
+            "- Take screenshot:",
+            '  {"name": "computer", "args": {"type": "screenshot"}}',
             "",
-            "IMPORTANT: x and y MUST be separate integer fields, not arrays or combined values.",
+            "IMPORTANT: x and y MUST be separate integer fields, not arrays or combined.",
         ]
 
     def get_tool_schemas(self) -> list[dict[str, Any]]:
@@ -623,17 +624,16 @@ class TinkerAgent(MCPAgent):
 
         # Build prompt with optional context truncation
         max_tokens_value = self.config.max_new_tokens
-        prompt = self._build_prompt_with_truncation(
-            rendered_messages, max_tokens=max_tokens_value
-        )
+        prompt = self._build_prompt_with_truncation(rendered_messages, max_tokens=max_tokens_value)
 
-        # Get stop sequences from renderer
-        base_stop = self._renderer.get_stop_sequences()
+        # Get stop sequences from renderer (token IDs)
+        raw_stop = self._renderer.get_stop_sequences()
+        base_stop: list[int] = [s for s in raw_stop if isinstance(s, int)]
 
         # Add </tool_call> to stop sequences to prevent multiple tool calls
-        tool_call_end_token = self._tokenizer.encode("</tool_call>")
-        if tool_call_end_token and tool_call_end_token[0] not in base_stop:
-            base_stop = list(base_stop) + [tool_call_end_token[0]]
+        tool_call_end_tokens: list[int] = self._tokenizer.encode("</tool_call>")
+        if tool_call_end_tokens and tool_call_end_tokens[0] not in base_stop:
+            base_stop = [*base_stop, tool_call_end_tokens[0]]
 
         sampling_params = tinker.SamplingParams(
             temperature=self.config.temperature,
@@ -648,9 +648,11 @@ class TinkerAgent(MCPAgent):
         )
 
         sequence = result.sequences[0]
-        tokens = sequence.tokens
-        logprobs = sequence.logprobs
-        assistant_message, _ = self._renderer.parse_response(tokens)
+        tokens: list[int] = sequence.tokens
+        logprobs: list[float] | None = sequence.logprobs
+        parsed_message, _ = self._renderer.parse_response(tokens)
+        # parse_response returns a dict-like Message object
+        assistant_message: dict[str, Any] = dict(parsed_message)  # type: ignore[arg-type]
         assistant_message = self._normalize_tool_call_text(assistant_message)
 
         completion_id = f"tinker-{uuid.uuid4().hex}"
@@ -696,9 +698,7 @@ class TinkerAgent(MCPAgent):
                     if name == self._computer_tool_name:
                         args = self._normalize_computer_tool_args(args)
 
-                    tool_calls.append(
-                        MCPToolCall(name=name, arguments=args, id=call_id)
-                    )
+                    tool_calls.append(MCPToolCall(name=name, arguments=args, id=call_id))
 
         # Add assistant message to message history
         assistant_msg: dict[str, Any] = {"role": "assistant", "content": content}
@@ -727,8 +727,11 @@ class TinkerAgent(MCPAgent):
         self, rendered_messages: list[dict[str, Any]], *, max_tokens: int
     ) -> Any:
         """Build prompt with optional context truncation."""
+        # _renderer is guaranteed to be non-None when called from get_response
+        assert self._renderer is not None
+
         messages_for_prompt = list(rendered_messages)
-        prompt = self._renderer.build_generation_prompt(messages_for_prompt)
+        prompt = self._renderer.build_generation_prompt(messages_for_prompt)  # type: ignore[arg-type]
 
         if self.config.max_context_tokens is None:
             return prompt
@@ -746,7 +749,7 @@ class TinkerAgent(MCPAgent):
             and len(messages_for_prompt) > system_prefix_len + 1
         ):
             messages_for_prompt.pop(system_prefix_len)
-            prompt = self._renderer.build_generation_prompt(messages_for_prompt)
+            prompt = self._renderer.build_generation_prompt(messages_for_prompt)  # type: ignore[arg-type]
 
         return prompt
 
@@ -775,9 +778,7 @@ class TinkerAgent(MCPAgent):
                     args = payload.get("args") or payload.get("arguments")
                     if isinstance(name, str) and isinstance(args, dict):
                         args = self._normalize_computer_tool_args(args)
-                        assistant_message["tool_calls"] = [
-                            {"name": name, "args": args, "id": None}
-                        ]
+                        assistant_message["tool_calls"] = [{"name": name, "args": args, "id": None}]
 
         return assistant_message
 
@@ -880,11 +881,11 @@ class TinkerAgent(MCPAgent):
 # Type exports for external use
 __all__ = [
     "TinkerAgent",
+    "TinkerCompletionStore",
     "TinkerConfig",
     "TinkerCreateParams",
-    "TinkerCompletionStore",
     "TinkerSampleRecord",
     "get_current_episode_id",
-    "set_current_episode_id",
     "reset_current_episode_id",
+    "set_current_episode_id",
 ]
