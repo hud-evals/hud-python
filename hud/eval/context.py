@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextvars
 import logging
 import uuid
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Self
 
 from hud.environment import Environment
@@ -20,6 +21,7 @@ from hud.shared import make_request
 from hud.telemetry import flush, instrument
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from types import TracebackType
 
     from hud.eval.task import Task
@@ -56,6 +58,20 @@ def get_current_trace_id() -> str | None:
     if headers:
         return headers.get("Trace-Id")
     return None
+
+
+@contextmanager
+def set_trace_context(trace_id: str) -> Generator[None, None, None]:
+    """Temporarily set trace context from an external trace_id.
+
+    Used by MCP tool handlers to propagate parent trace context into sub-processes.
+    """
+    headers = {"Trace-Id": trace_id}
+    token = _current_trace_headers.set(headers)
+    try:
+        yield
+    finally:
+        _current_trace_headers.reset(token)
 
 
 def get_current_api_key() -> str | None:
@@ -724,4 +740,5 @@ __all__ = [
     "get_current_api_key",
     "get_current_trace_headers",
     "get_current_trace_id",
+    "set_trace_context",
 ]
