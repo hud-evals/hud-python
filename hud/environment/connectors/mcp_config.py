@@ -50,6 +50,7 @@ class MCPConfigConnectorMixin(BaseConnectorMixin):
             ```
         """
         from hud.environment.connection import ConnectionType
+        from hud.settings import settings
 
         name = alias or next(iter(config.keys()), "mcp")
         server_config = next(iter(config.values()), {})
@@ -57,9 +58,18 @@ class MCPConfigConnectorMixin(BaseConnectorMixin):
         is_local = "command" in server_config or "args" in server_config
         conn_type = ConnectionType.LOCAL if is_local else ConnectionType.REMOTE
 
+        transport: Any = config
+        if not is_local and "url" in server_config:
+            max_request_timeout = 840
+            server_config.setdefault(
+                "sse_read_timeout",
+                min(settings.client_timeout, max_request_timeout) if settings.client_timeout > 0 else max_request_timeout,
+            )
+            transport = _build_transport(server_config)
+
         return self._add_connection(
             name,
-            config,
+            transport,
             connection_type=conn_type,
             prefix=prefix,
             include=include,
@@ -107,3 +117,19 @@ class MCPConfigConnectorMixin(BaseConnectorMixin):
         for server_name, server_config in mcp_config.items():
             self.connect_mcp({server_name: server_config}, alias=server_name, **kwargs)
         return self
+
+
+def _build_transport(server_config: dict[str, Any]) -> Any:
+    from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+    from fastmcp.mcp_config import infer_transport_type_from_url
+
+    url = server_config["url"]
+    transport_type = server_config.get("transport") or infer_transport_type_from_url(url)
+    transport_cls = SSETransport if transport_type == "sse" else StreamableHttpTransport
+
+    return transport_cls(
+        url=url,
+        headers=server_config.get("headers"),
+        auth=server_config.get("auth"),
+        sse_read_timeout=server_config.get("sse_read_timeout"),
+    )
