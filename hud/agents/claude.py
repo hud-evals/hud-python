@@ -25,7 +25,6 @@ from anthropic.types.beta import (
     BetaToolTextEditor20250728Param,
     BetaToolUnionParam,
 )
-from pydantic import ConfigDict
 
 from hud.settings import settings
 from hud.tools.computer.settings import computer_settings
@@ -33,27 +32,13 @@ from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
 
-from .base import BaseCreateParams, MCPAgent
+from .base import MCPAgent
+from .types import ClaudeConfig, ClaudeCreateParams
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
-
-
-class ClaudeConfig(BaseAgentConfig):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    model_name: str = "Claude"
-    model: str = "claude-sonnet-4-5"
-    model_client: AsyncAnthropic | AsyncAnthropicBedrock | None = None
-    max_tokens: int = 16384
-    use_computer_beta: bool = True
-    validate_api_key: bool = True
-
-
-class ClaudeCreateParams(BaseCreateParams, ClaudeConfig):
-    pass
 
 
 class ClaudeAgent(MCPAgent):
