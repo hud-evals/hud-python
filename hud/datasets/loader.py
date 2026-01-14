@@ -14,6 +14,10 @@ import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
+import httpx
+
+from hud.settings import settings
+
 if TYPE_CHECKING:
     from hud.eval.task import Task
 
@@ -106,10 +110,6 @@ def _load_from_huggingface(dataset_name: str) -> list[Task]:
 
 def _load_raw_from_api(dataset_name: str) -> list[dict[str, Any]]:
     """Load raw task dicts from HUD API."""
-    import httpx
-
-    from hud.settings import settings
-
     headers = {}
     if settings.api_key:
         headers["Authorization"] = f"Bearer {settings.api_key}"
@@ -271,10 +271,6 @@ def save_tasks(
         TypeError: If any task is not a v5 Task object (must have 'scenario')
         ValueError: If API key is not set or save fails
     """
-    import httpx
-
-    from hud.settings import settings
-
     if not settings.api_key:
         raise ValueError("HUD_API_KEY is required to save tasks")
 

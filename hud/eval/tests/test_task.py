@@ -143,3 +143,110 @@ class TestTaskValidation:
 
         assert isinstance(task.agent_config, TaskAgentConfig)
         assert task.agent_config.system_prompt == "Hello"
+
+
+class TestV4AgentConfigToolFilters:
+    """Tests for v4 agent_config.allowed_tools and disallowed_tools processing."""
+
+    def test_v4_extracts_allowed_tools(self) -> None:
+        """v4 allowed_tools is extracted and stored on Environment."""
+        v4_dict = {
+            "prompt": "Test prompt",
+            "mcp_config": {"server": {"url": "http://localhost"}},
+            "evaluate_tool": {"name": "check", "arguments": {}},
+            "agent_config": {
+                "allowed_tools": ["browser_*", "file_read"],
+            },
+        }
+
+        task = Task.from_v4(v4_dict)
+
+        assert task.env is not None
+        assert task.env._agent_include == ["browser_*", "file_read"]
+
+    def test_v4_extracts_disallowed_tools(self) -> None:
+        """v4 disallowed_tools is extracted and stored on Environment."""
+        v4_dict = {
+            "prompt": "Test prompt",
+            "mcp_config": {"server": {"url": "http://localhost"}},
+            "evaluate_tool": {"name": "check", "arguments": {}},
+            "agent_config": {
+                "disallowed_tools": ["*setup*", "*evaluate*", "checkout_branch"],
+            },
+        }
+
+        task = Task.from_v4(v4_dict)
+
+        assert task.env is not None
+        assert task.env._agent_exclude == ["*setup*", "*evaluate*", "checkout_branch"]
+
+    def test_v4_wildcard_star_allowed_converts_to_none(self) -> None:
+        """v4 allowed_tools=['*'] converts to None (meaning include all)."""
+        v4_dict = {
+            "prompt": "Test prompt",
+            "mcp_config": {"server": {"url": "http://localhost"}},
+            "evaluate_tool": {"name": "check", "arguments": {}},
+            "agent_config": {
+                "allowed_tools": ["*"],
+            },
+        }
+
+        task = Task.from_v4(v4_dict)
+
+        assert task.env is not None
+        # ["*"] should be converted to None
+        assert task.env._agent_include is None
+
+    def test_v4_both_allowed_and_disallowed(self) -> None:
+        """v4 supports both allowed_tools and disallowed_tools together."""
+        v4_dict = {
+            "prompt": "Test prompt",
+            "mcp_config": {"server": {"url": "http://localhost"}},
+            "evaluate_tool": {"name": "check", "arguments": {}},
+            "agent_config": {
+                "allowed_tools": ["*"],
+                "disallowed_tools": ["*setup*", "*evaluate*"],
+            },
+        }
+
+        task = Task.from_v4(v4_dict)
+
+        assert task.env is not None
+        assert task.env._agent_include is None  # ["*"] → None
+        assert task.env._agent_exclude == ["*setup*", "*evaluate*"]
+
+    @pytest.mark.asyncio
+    async def test_v4_tool_filters_applied_in_as_tools(self) -> None:
+        """v4 tool filters are applied when calling env.as_tools()."""
+        v4_dict = {
+            "prompt": "Test prompt",
+            "mcp_config": {"server": {"url": "http://localhost"}},
+            "evaluate_tool": {"name": "check", "arguments": {}},
+            "agent_config": {
+                "allowed_tools": ["*"],
+                "disallowed_tools": ["*setup*"],
+            },
+        }
+
+        task = Task.from_v4(v4_dict)
+        env = task.env
+        assert env is not None
+
+        # Add local tools to test filtering
+        @env.tool()
+        def my_setup_tool() -> str:
+            """Should be filtered out."""
+            return "setup"
+
+        @env.tool()
+        def run_query() -> str:
+            """Should be visible."""
+            return "query"
+
+        await env._build_routing()
+
+        tools = env.as_tools()
+        tool_names = [t.name for t in tools]
+
+        assert "my_setup_tool" not in tool_names
+        assert "run_query" in tool_names

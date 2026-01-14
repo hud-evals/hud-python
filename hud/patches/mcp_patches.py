@@ -48,17 +48,33 @@ def patch_streamable_http_error_handling() -> None:
 
             async def handle_request_async(ctx: RequestContext, is_resumption: bool) -> None:
                 msg = ctx.session_message.message
-                deadline = (
-                    time.monotonic() + settings.client_timeout
-                    if settings.client_timeout > 0
-                    else None
-                )
+                # Use configured timeout, minimum 30s to prevent instant failures
+                timeout = max(settings.client_timeout, 15.0)
+                deadline = time.monotonic() + timeout
                 retryable = (
                     httpx.ConnectError,
                     httpx.ReadError,
                     httpx.TimeoutException,
                     ssl.SSLError,
                 )
+
+                async def send_error_response(exc: Exception) -> None:
+                    """Send an error response to the client."""
+                    if isinstance(msg.root, JSONRPCRequest):
+                        error_response = JSONRPCError(
+                            jsonrpc="2.0",
+                            id=msg.root.id,
+                            error=ErrorData(
+                                code=-32000,
+                                message=f"Transport error: {type(exc).__name__}",
+                                data={"error_type": type(exc).__name__, "detail": str(exc)},
+                            ),
+                        )
+                        await ctx.read_stream_writer.send(
+                            SessionMessage(JSONRPCMessage(error_response))
+                        )
+                    else:
+                        await ctx.read_stream_writer.send(exc)
 
                 while True:
                     try:
@@ -68,29 +84,17 @@ def patch_streamable_http_error_handling() -> None:
                             await self._handle_post_request(ctx)
                         return
                     except retryable as e:
-                        if deadline and time.monotonic() >= deadline:
-                            raise
+                        if time.monotonic() >= deadline:
+                            logger.error("MCP request failed after timeout: %s", e)
+                            await send_error_response(e)
+                            return
                         logger.warning("Retrying MCP request after error: %s", e)
                         await asyncio.sleep(2.0)
                     except asyncio.CancelledError:
                         raise
                     except Exception as e:
                         logger.exception("Request handler error: %s", e)
-                        if isinstance(msg.root, JSONRPCRequest):
-                            error_response = JSONRPCError(
-                                jsonrpc="2.0",
-                                id=msg.root.id,
-                                error=ErrorData(
-                                    code=-32000,
-                                    message=f"Transport error: {type(e).__name__}",
-                                    data={"error_type": type(e).__name__, "detail": str(e)},
-                                ),
-                            )
-                            await ctx.read_stream_writer.send(
-                                SessionMessage(JSONRPCMessage(error_response))
-                            )
-                        else:
-                            await ctx.read_stream_writer.send(e)
+                        await send_error_response(e)
                         return
 
             try:
