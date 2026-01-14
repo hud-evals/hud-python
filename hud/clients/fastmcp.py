@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 from contextlib import AsyncExitStack
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastmcp import Client as FastMCPClient
 from mcp import Implementation, types
@@ -136,12 +136,41 @@ class FastMCPHUDClient(BaseHUDClient):
         if self._client is None:
             raise ValueError("Client is not connected, call initialize() first")
 
+        # Inject trace context via MCP meta when supported.
+        # Avoid modifying tool arguments to prevent schema validation errors on servers
+        # that don't expect extra fields.
+        from hud.eval.context import get_current_trace_id
+
+        arguments = dict(tool_call.arguments or {})
+        meta: dict[str, str] | None = None
+        trace_id = get_current_trace_id()
+        if trace_id:
+            meta = {"_hud_trace_id": trace_id}
+
         # FastMCP returns a different result type, convert it
-        result = await self._client.call_tool(
-            name=tool_call.name,
-            arguments=tool_call.arguments or {},
-            raise_on_error=False,  # Don't raise, return error in result
-        )
+        client = cast("Any", self._client)
+        # Only pass _meta if we have trace context to avoid test/API issues
+        if meta:
+            try:
+                result = await client.call_tool(
+                    name=tool_call.name,
+                    arguments=arguments,
+                    meta=meta,
+                    raise_on_error=False,  # Don't raise, return error in result
+                )
+            except TypeError:
+                # Fallback for clients that don't accept _meta
+                result = await client.call_tool(
+                    name=tool_call.name,
+                    arguments=arguments,
+                    raise_on_error=False,
+                )
+        else:
+            result = await client.call_tool(
+                name=tool_call.name,
+                arguments=arguments,
+                raise_on_error=False,
+            )
 
         # Convert FastMCP result to MCPToolResult
         return MCPToolResult(

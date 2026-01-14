@@ -9,6 +9,8 @@ import pytest
 from hud.eval.context import (
     EvalContext,
     get_current_trace_headers,
+    get_current_trace_id,
+    set_trace_context,
 )
 
 
@@ -89,6 +91,15 @@ class TestEvalContext:
                 _current_trace_headers.reset(token)
 
             assert get_current_trace_headers() is None
+
+    def test_set_trace_context(self) -> None:
+        """set_trace_context sets and resets Trace-Id."""
+        assert get_current_trace_id() is None
+
+        with set_trace_context("test-trace-123"):
+            assert get_current_trace_id() == "test-trace-123"
+
+        assert get_current_trace_id() is None
 
     def test_repr(self) -> None:
         """__repr__ shows useful info."""
