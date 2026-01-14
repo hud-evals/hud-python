@@ -189,18 +189,25 @@ class Environment(
         """Return tools in MCP format (base format).
 
         Applies agent-level include/exclude filtering if set.
+        Supports fnmatch-style wildcards (e.g., "*setup*", "browser_*").
         """
+        import fnmatch
+
         tools = self._router.tools
 
         # Apply agent-level filtering (from v4 allowed_tools/disallowed_tools)
         if self._agent_include is not None or self._agent_exclude is not None:
             filtered = []
             for tool in tools:
-                # Include filter: None means include all
-                if self._agent_include is not None and tool.name not in self._agent_include:
+                # Include filter: None means include all, check if matches any pattern
+                if self._agent_include is not None and not any(
+                    fnmatch.fnmatch(tool.name, pattern) for pattern in self._agent_include
+                ):
                     continue
-                # Exclude filter
-                if self._agent_exclude is not None and tool.name in self._agent_exclude:
+                # Exclude filter: skip if tool matches any exclude pattern
+                if self._agent_exclude is not None and any(
+                    fnmatch.fnmatch(tool.name, pattern) for pattern in self._agent_exclude
+                ):
                     continue
                 filtered.append(tool)
             return filtered
