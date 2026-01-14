@@ -56,7 +56,7 @@ def _get_eval_name(tasks: list[Task] | None = None) -> str:
     return "eval"
 
 
-def _send_job_enter(
+async def _send_job_enter(
     job_id: str,
     name: str,
     variants: dict[str, Any] | None,
@@ -65,7 +65,7 @@ def _send_job_enter(
     taskset: str | None = None,
     tasks: list[dict[str, Any]] | None = None,
 ) -> list[str] | None:
-    """Send job enter payload (sync request before traces start)."""
+    """Send job enter payload (async request before traces start)."""
     import httpx
 
     from hud.eval.types import JobEnterPayload
@@ -84,12 +84,12 @@ def _send_job_enter(
     )
 
     try:
-        resp = httpx.post(
-            f"{settings.hud_api_url}/trace/job/{job_id}/enter",
-            json=payload.model_dump(exclude_none=True),
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=10.0,
-        )
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{settings.hud_api_url}/trace/job/{job_id}/enter",
+                json=payload.model_dump(exclude_none=True),
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
         if resp.is_success:
             try:
                 data = resp.json()
@@ -262,7 +262,7 @@ async def run_eval(
                 if not tasks[0].id:
                     task_data = [tasks[0].model_dump(mode="json", exclude_none=True)]
 
-                created_task_version_ids = _send_job_enter(
+                created_task_version_ids = await _send_job_enter(
                     job_id=job_id_for_run,
                     name=eval_name,
                     variants=variants,
@@ -323,7 +323,7 @@ async def run_eval(
                 for t in tasks
                 if not t.id  # skip tasks that already exist in platform
             ]
-        created_task_version_ids = _send_job_enter(
+        created_task_version_ids = await _send_job_enter(
             job_id=implicit_job_id,
             name=eval_name,
             variants=variants,
