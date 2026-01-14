@@ -64,9 +64,14 @@ class MCPUseHUDClient(BaseHUDClient):
             return
 
         # Use configurable timeout for SSE read operations to support long-running tool calls.
+        max_request_timeout = 840
         for server_cfg in mcp_config.values():
             if "sse_read_timeout" not in server_cfg:
-                server_cfg["sse_read_timeout"] = settings.client_timeout
+                server_cfg["sse_read_timeout"] = (
+                    min(settings.client_timeout, max_request_timeout)
+                    if settings.client_timeout > 0
+                    else max_request_timeout
+                )
 
         # If a server target matches HUD's MCP host and no auth is provided,
         # inject the HUD API key as a Bearer token to avoid OAuth browser flow.
