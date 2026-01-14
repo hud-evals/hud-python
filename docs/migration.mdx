@@ -40,7 +40,45 @@ That's it. Your Dockerfile, your tools, your `run()` call—all unchanged. Envir
 
 ## Migrating Tasks: Prompt Passthrough Pattern
 
-The recommended migration uses the **prompt passthrough pattern**—scenario arguments become the prompt content:
+The recommended migration uses the **prompt passthrough pattern**—scenario arguments become the prompt content.
+
+### Local Environments (Most Common)
+
+For local environments where tools are defined in the same file, **call tool functions directly**:
+
+```python
+from hud import Environment
+
+env = Environment("shopping")
+
+@env.tool()
+def navigate(url: str) -> str:
+    """Navigate to a URL."""
+    return f"Navigated to {url}"
+
+@env.tool()
+def check_cart() -> dict:
+    """Check the shopping cart."""
+    return {"has_items": True, "total": 99.99}
+
+@env.scenario("buy-item")
+async def buy_item(instruction: str, start_url: str = "https://example.com"):
+    # Call tools directly as functions
+    navigate(url=start_url)
+    
+    answer = yield instruction
+    
+    result = check_cart()
+    yield 1.0 if result["has_items"] else 0.0
+
+# Create tasks
+task1 = env("buy-item", instruction="Add a laptop to cart")
+task2 = env("buy-item", instruction="Find the cheapest item", start_url="https://store.example.com")
+```
+
+### Remote Environments
+
+When connecting to a remote environment via `connect_hub()`, use `call_tool()` since tools are defined remotely:
 
 ```python
 from hud import Environment
@@ -49,25 +87,20 @@ env = Environment("browser").connect_hub("hud-evals/browser")
 
 @env.scenario("web-task")
 async def web_task(instruction: str, start_url: str = "https://example.com"):
-    """
-    The instruction arg passes through directly to the prompt.
-    One scenario, infinite test cases.
-    """
-    # Setup phase (before yield)
+    # Use call_tool for remote tools
     await env.call_tool("navigate", url=start_url)
     
-    # Prompt - the instruction IS the prompt
     answer = yield instruction
     
-    # Evaluate phase (after yield)
     result = await env.call_tool("check_completion")
     yield 1.0 if result["success"] else 0.0
 
-# Create tasks by passing the actual prompt as an arg
 task1 = env("web-task", instruction="Find the contact page and extract the support email")
-task2 = env("web-task", instruction="Add a MacBook Pro to cart", start_url="https://store.example.com")
-task3 = env("web-task", instruction="Fill out the signup form with test data")
 ```
+
+<Note>
+**Direct calls vs `call_tool()`**: Use direct function calls for local tools (defined in the same Environment). Use `call_tool()` only when connecting to remote environments where tools are defined elsewhere.
+</Note>
 
 This pattern:
 - **Args ARE the prompt**: The instruction flows directly through as the agent's task
@@ -86,14 +119,14 @@ task = LegacyTask(
     evaluate_tool={"name": "check_cart", "arguments": {}}
 )
 
-# AFTER - Prompt passthrough pattern
+# AFTER - Prompt passthrough pattern (local environment)
 @env.scenario("shopping")
 async def shopping(task: str, shop_url: str):
-    await env.call_tool("navigate", url=shop_url)
+    navigate(url=shop_url)  # Direct function call
     
     answer = yield task  # The task arg IS the prompt
     
-    result = await env.call_tool("check_cart")
+    result = check_cart()  # Direct function call
     yield 1.0 if result["has_items"] else 0.0
 
 # Now create multiple tasks with different instructions
@@ -121,15 +154,15 @@ setup_tool=[
     {"name": "login", "arguments": {"user": "..."}},
 ]
 
-# AFTER
+# AFTER (local environment - direct calls)
 @env.scenario("authenticated-task")
 async def authenticated_task(instruction: str, username: str):
-    await env.call_tool("navigate", url="https://app.example.com")
-    await env.call_tool("login", user=username)
+    navigate(url="https://app.example.com")
+    login(user=username)
     
     answer = yield instruction
     
-    result = await env.call_tool("check_completion")
+    result = check_completion()
     yield 1.0 if result else 0.0
 ```
 
