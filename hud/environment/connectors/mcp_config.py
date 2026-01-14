@@ -63,7 +63,9 @@ class MCPConfigConnectorMixin(BaseConnectorMixin):
             max_request_timeout = 840
             server_config.setdefault(
                 "sse_read_timeout",
-                min(settings.client_timeout, max_request_timeout) if settings.client_timeout > 0 else max_request_timeout,
+                min(settings.client_timeout, max_request_timeout)
+                if settings.client_timeout > 0
+                else max_request_timeout,
             )
             transport = _build_transport(server_config)
 

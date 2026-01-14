@@ -68,7 +68,9 @@ class MCPUseHUDClient(BaseHUDClient):
         for server_cfg in mcp_config.values():
             if "sse_read_timeout" not in server_cfg:
                 server_cfg["sse_read_timeout"] = (
-                    min(settings.client_timeout, max_request_timeout) if settings.client_timeout > 0 else max_request_timeout
+                    min(settings.client_timeout, max_request_timeout)
+                    if settings.client_timeout > 0
+                    else max_request_timeout
                 )
 
         # If a server target matches HUD's MCP host and no auth is provided,

@@ -48,8 +48,17 @@ def patch_streamable_http_error_handling() -> None:
 
             async def handle_request_async(ctx: RequestContext, is_resumption: bool) -> None:
                 msg = ctx.session_message.message
-                deadline = time.monotonic() + settings.client_timeout if settings.client_timeout > 0 else None
-                retryable = (httpx.ConnectError, httpx.ReadError, httpx.TimeoutException, ssl.SSLError)
+                deadline = (
+                    time.monotonic() + settings.client_timeout
+                    if settings.client_timeout > 0
+                    else None
+                )
+                retryable = (
+                    httpx.ConnectError,
+                    httpx.ReadError,
+                    httpx.TimeoutException,
+                    ssl.SSLError,
+                )
 
                 while True:
                     try:
@@ -77,7 +86,9 @@ def patch_streamable_http_error_handling() -> None:
                                     data={"error_type": type(e).__name__, "detail": str(e)},
                                 ),
                             )
-                            await ctx.read_stream_writer.send(SessionMessage(JSONRPCMessage(error_response)))
+                            await ctx.read_stream_writer.send(
+                                SessionMessage(JSONRPCMessage(error_response))
+                            )
                         else:
                             await ctx.read_stream_writer.send(e)
                         return
