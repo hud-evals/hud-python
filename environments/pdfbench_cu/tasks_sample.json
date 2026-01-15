@@ -1,0 +1,48 @@
+[
+  {
+    "id": "pdfbench_cu_eyemed_x001",
+    "prompt": "You are looking at an EyeMed vision enrollment form in a browser (Firefox PDF.js viewer). Fill out the form with the following information:\n\n**Employer Information:**\n- Company name: GREENFIELD MANUFACTURING CORP\n- Group number: 78432\n- Effective date: 01/01/2025\n\n**Employee Information:**\n- Last name: MITCHELL\n- First name: ROBERT\n- Middle initial: J\n- Date of birth: 03/15/1988\n- Address: 4521 OAKWOOD DRIVE, APARTMENT 12B\n- City: COLUMBUS\n- State: OH\n- ZIP: 43215\n- Phone: 614-555-8823\n- Last four of SSN: 4472\n- Email: rob.mitchell88@gmail.com\n- Check the male checkbox\n- Check the \"Add\" option for change type\n\n**Dependent (Spouse):**\n- Last name: MITCHELL\n- First name: SARAH\n- Date of birth: 07/22/1990\n- Last four of SSN: 6619\n- Check spouse relationship\n- Check female checkbox\n- Check enrolled/add checkbox\n\nUse the playwright tool to interact with the PDF form:\n1. First take a screenshot to see the form\n2. Use click with CSS selectors to focus on form fields\n3. Use type with CSS selectors to fill in text values\n4. For PDF.js forms, fields are typically: input[name=\"fieldname\"] or .textWidgetAnnotation input\n5. Take screenshots periodically to verify your progress",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "-v", "/Users/erikq/Documents/bytedance/harbor-pdfbench/harbor_tasks/pdfbench_eyemed_x001/environment/pdfs:/app/pdfs:ro",
+          "-v", "/Users/erikq/Documents/bytedance/harbor-pdfbench/harbor_tasks/pdfbench_eyemed_x001/environment/solution.json:/opt/tbench/solution.json:ro",
+          "-e", "PDF_PATH=/app/pdfs/eyemed.pdf",
+          "-e", "SOLUTION_PATH=/opt/tbench/solution.json",
+          "hud-pdfbench-cu:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "load_pdf",
+        "arguments": {
+          "pdf_path": "/app/pdfs/eyemed.pdf",
+          "solution_path": "/opt/tbench/solution.json"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "verify_fields",
+        "arguments": {
+          "solution_path": "/opt/tbench/solution.json",
+          "fuzzy_match": true,
+          "partial_credit": true
+        }
+      }
+    },
+    "metadata": {
+      "source": "harbor-pdfbench",
+      "task_name": "pdfbench_eyemed_x001",
+      "interface": "playwright",
+      "category": "pdf-form-filling"
+    }
+  }
+]
