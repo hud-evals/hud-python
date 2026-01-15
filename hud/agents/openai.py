@@ -77,11 +77,11 @@ class OpenAIAgent(MCPAgent):
             except Exception as exc:  # pragma: no cover - network validation
                 raise ValueError(f"OpenAI API key is invalid: {exc}") from exc
 
-        self.openai_client = model_client
+        self.openai_client: AsyncOpenAI = model_client
         self._model = self.config.model
         self.max_output_tokens = self.config.max_output_tokens
         self.temperature = self.config.temperature
-        self.reasoning = self.config.reasoning
+        self.reasoning: Reasoning | None = self.config.reasoning
         self.tool_choice: ToolChoice | None = self.config.tool_choice
         self.parallel_tool_calls = self.config.parallel_tool_calls
         self.truncation: Literal["auto", "disabled"] | None = self.config.truncation

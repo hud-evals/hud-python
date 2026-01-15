@@ -12,6 +12,7 @@ from hud.tools.computer.settings import computer_settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.types import with_signature
 
+from .base import MCPAgent
 from .gemini import GeminiAgent
 from .types import GeminiCUAConfig, GeminiCUACreateParams
 

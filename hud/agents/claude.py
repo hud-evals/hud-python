@@ -79,7 +79,7 @@ class ClaudeAgent(MCPAgent):
                     "or ANTHROPIC_API_KEY for direct Anthropic access."
                 )
 
-        self.anthropic_client = model_client
+        self.anthropic_client: AsyncAnthropic | AsyncAnthropicBedrock = model_client
         self.max_tokens = self.config.max_tokens
         self.use_computer_beta = self.config.use_computer_beta
         self.hud_console = HUDConsole(logger=logger)

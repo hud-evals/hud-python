@@ -65,6 +65,7 @@ class OpenAIChatAgent(MCPAgent):
                 "Use HUD_API_KEY for gateway auth and BYOK headers for provider keys."
             )
 
+        self.oai: AsyncOpenAI
         if self.config.openai_client is not None:
             self.oai = self.config.openai_client
         elif self.config.api_key is not None or self.config.base_url is not None:

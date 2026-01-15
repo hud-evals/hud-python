@@ -61,7 +61,7 @@ class GeminiAgent(MCPAgent):
             except Exception as e:
                 raise ValueError(f"Gemini API key is invalid: {e}") from e
 
-        self.gemini_client = model_client
+        self.gemini_client: genai.Client = model_client
         self.temperature = self.config.temperature
         self.top_p = self.config.top_p
         self.top_k = self.config.top_k
