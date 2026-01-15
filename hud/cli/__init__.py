@@ -224,13 +224,7 @@ def debug(
         first_param = params[0]
         docker_args = params[1:] if len(params) > 1 else []
 
-        # Check if it's a directory (folder-mode).
-        #
-        # NOTE: `hud debug` should support env directories that only have
-        # `Dockerfile.hud` (or `Dockerfile`) even if they don't have a
-        # `pyproject.toml` yet. Using the stricter `is_environment_directory()`
-        # would incorrectly treat `.` as an image name, leading to:
-        #   docker: invalid reference format
+        # Check if it's a directory with a Dockerfile
         p = Path(first_param)
         if p.exists() and p.is_dir() and find_dockerfile(p) is not None:
             # Directory mode - like hud dev

@@ -121,22 +121,11 @@ def image_exists(image_name: str) -> bool:
 
 
 def find_dockerfile(directory: Path) -> Path | None:
-    """Find the Dockerfile in a directory, preferring Dockerfile.hud.
-
-    Checks for Dockerfile.hud first (HUD-specific), then falls back to Dockerfile.
-
-    Args:
-        directory: Directory to search in
-
-    Returns:
-        Path to the Dockerfile if found, None otherwise
-    """
-    # Prefer Dockerfile.hud for HUD environments
+    """Find Dockerfile in a directory, preferring Dockerfile.hud over Dockerfile."""
     hud_dockerfile = directory / "Dockerfile.hud"
     if hud_dockerfile.exists():
         return hud_dockerfile
 
-    # Fall back to standard Dockerfile
     standard_dockerfile = directory / "Dockerfile"
     if standard_dockerfile.exists():
         return standard_dockerfile
