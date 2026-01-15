@@ -7,14 +7,14 @@ from typing import Any, ClassVar
 
 import mcp.types as types
 from google.genai import types as genai_types
-from pydantic import ConfigDict, Field
 
 from hud.tools.computer.settings import computer_settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.types import with_signature
 
-from .base import BaseCreateParams, MCPAgent
-from .gemini import GeminiAgent, GeminiConfig
+from .base import MCPAgent
+from .gemini import GeminiAgent
+from .types import GeminiCUAConfig, GeminiCUACreateParams
 
 logger = logging.getLogger(__name__)
 
@@ -54,20 +54,6 @@ You are an autonomous computer-using agent. Follow these guidelines:
 Remember: You are expected to complete tasks autonomously. The user trusts you to do
 what they asked.
 """.strip()
-
-
-class GeminiCUAConfig(GeminiConfig):
-    """Configuration for `GeminiCUAAgent`."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    model_name: str = "GeminiCUA"
-    model: str = "gemini-2.5-computer-use-preview-10-2025"
-    excluded_predefined_functions: list[str] = Field(default_factory=list)
-
-
-class GeminiCUACreateParams(BaseCreateParams, GeminiCUAConfig):
-    pass
 
 
 class GeminiCUAAgent(GeminiAgent):

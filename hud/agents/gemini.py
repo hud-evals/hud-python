@@ -8,35 +8,16 @@ from typing import Any, ClassVar, cast
 import mcp.types as types
 from google import genai
 from google.genai import types as genai_types
-from pydantic import ConfigDict
 
 from hud.settings import settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
 
-from .base import BaseCreateParams, MCPAgent
+from .base import MCPAgent
+from .types import GeminiConfig, GeminiCreateParams
 
 logger = logging.getLogger(__name__)
-
-
-class GeminiConfig(BaseAgentConfig):
-    """Configuration for `GeminiAgent`."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    model_name: str = "Gemini"
-    model: str = "gemini-3-pro-preview"
-    model_client: genai.Client | None = None
-    temperature: float = 1.0
-    top_p: float = 0.95
-    top_k: int = 40
-    max_output_tokens: int = 8192
-    validate_api_key: bool = True
-
-
-class GeminiCreateParams(BaseCreateParams, GeminiConfig):
-    pass
 
 
 class GeminiAgent(MCPAgent):
@@ -80,7 +61,7 @@ class GeminiAgent(MCPAgent):
             except Exception as e:
                 raise ValueError(f"Gemini API key is invalid: {e}") from e
 
-        self.gemini_client = model_client
+        self.gemini_client: genai.Client = model_client
         self.temperature = self.config.temperature
         self.top_p = self.config.top_p
         self.top_k = self.config.top_k

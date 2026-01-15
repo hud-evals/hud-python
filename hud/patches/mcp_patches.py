@@ -165,6 +165,98 @@ def patch_client_session_validation() -> None:
         logger.warning("Failed to patch client session: %s", e)
 
 
+def patch_server_output_validation() -> None:
+    """
+    Patch MCP server to skip structured output validation and auto-generate
+    structuredContent for FastMCP tools with x-fastmcp-wrap-result.
+    """
+    try:
+        import json
+
+        import mcp.types as types
+        from mcp.server.lowlevel.server import Server
+
+        def patched_call_tool(
+            self: Any, validate_input: bool = True, validate_output: bool = False
+        ) -> Any:
+            """Patched call_tool that skips output validation."""
+
+            def decorator(func: Any) -> Any:
+                async def handler(req: types.CallToolRequest) -> Any:
+                    try:
+                        tool_name = req.params.name
+                        arguments = req.params.arguments or {}
+                        tool = await self._get_cached_tool_definition(tool_name)
+
+                        if validate_input and tool:
+                            try:
+                                import jsonschema
+
+                                jsonschema.validate(instance=arguments, schema=tool.inputSchema)
+                            except jsonschema.ValidationError as e:
+                                return self._make_error_result(
+                                    f"Input validation error: {e.message}"
+                                )
+
+                        results = await func(tool_name, arguments)
+
+                        # output normalization
+                        unstructured_content: list[Any]
+                        maybe_structured_content: dict[str, Any] | None
+                        if isinstance(results, types.CallToolResult):
+                            return types.ServerResult(results)
+                        elif isinstance(results, tuple) and len(results) == 2:
+                            unstructured_content, maybe_structured_content = results
+                        elif isinstance(results, dict):
+                            maybe_structured_content = results
+                            text = json.dumps(results, indent=2)
+                            unstructured_content = [types.TextContent(type="text", text=text)]
+                        elif hasattr(results, "__iter__"):
+                            unstructured_content = list(results)
+                            maybe_structured_content = None
+                        else:
+                            return self._make_error_result(
+                                f"Unexpected return type: {type(results).__name__}"
+                            )
+
+                        # Auto-generate structuredContent for FastMCP tools
+                        # FastMCP generates outputSchema but doesn't populate it
+                        if maybe_structured_content is None and tool:
+                            output_schema = getattr(tool, "outputSchema", None)
+                            if output_schema and output_schema.get("x-fastmcp-wrap-result"):
+                                for item in unstructured_content:
+                                    if isinstance(item, types.TextContent):
+                                        try:
+                                            parsed = json.loads(item.text)
+                                            maybe_structured_content = {"result": parsed}
+                                        except json.JSONDecodeError:
+                                            maybe_structured_content = {"result": item.text}
+                                        break
+
+                        return types.ServerResult(
+                            types.CallToolResult(
+                                content=list(unstructured_content),
+                                structuredContent=maybe_structured_content,
+                                isError=False,
+                            )
+                        )
+                    except Exception as e:
+                        return self._make_error_result(str(e))
+
+                self.request_handlers[types.CallToolRequest] = handler
+                return func
+
+            return decorator
+
+        Server.call_tool = patched_call_tool
+        logger.debug("Patched Server.call_tool to skip output validation")
+
+    except ImportError:
+        logger.debug("mcp.server.lowlevel.server not available, skipping patch")
+    except Exception as e:
+        logger.warning("Failed to patch server output validation: %s", e)
+
+
 def suppress_fastmcp_logging(level: int = logging.WARNING) -> None:
     """
     Suppress verbose fastmcp logging.
@@ -190,5 +282,6 @@ def apply_all_patches() -> None:
     """Apply all MCP patches."""
     patch_streamable_http_error_handling()
     patch_client_session_validation()
+    patch_server_output_validation()
     suppress_fastmcp_logging()
     logger.debug("All MCP patches applied")
