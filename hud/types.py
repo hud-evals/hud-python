@@ -81,6 +81,7 @@ class AgentType(str, Enum):
             AgentType.GEMINI: GeminiConfig,
             AgentType.GEMINI_CUA: GeminiCUAConfig,
             AgentType.OPENAI_COMPATIBLE: OpenAIChatConfig,
+            AgentType.INTEGRATION_TEST: BaseAgentConfig,
         }
         if self not in mapping:
             raise ValueError(f"Unsupported agent type for config: {self}")
