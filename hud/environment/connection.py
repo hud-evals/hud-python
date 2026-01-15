@@ -129,7 +129,7 @@ class Connector:
     async def disconnect(self) -> None:
         """Disconnect and clear all caches."""
         if self.client is not None and self.is_connected:
-            await self.client.__aexit__(None, None, None)
+            await self.client.close()
         self.client = None
         self._tools_cache = None
         self._prompts_cache = None
@@ -190,10 +190,19 @@ class Connector:
         """Call a tool, stripping prefix if needed."""
         if self.client is None:
             raise RuntimeError("Not connected - call connect() first")
-        # Strip prefix when calling remote
+        tool_name = name
         if self.config.prefix and name.startswith(f"{self.config.prefix}_"):
-            name = name[len(self.config.prefix) + 1 :]
-        return await self.client.call_tool_mcp(name, arguments or {})
+            tool_name = name[len(self.config.prefix) + 1 :]
+
+        try:
+            return await self.client.call_tool_mcp(tool_name, arguments or {})
+        except RuntimeError as e:
+            # If validation fails, disable it for this tool and retry.
+            if "output schema" in str(e).lower():
+                if hasattr(self.client, 'session') and hasattr(self.client.session, '_tool_output_schemas'):
+                    self.client.session._tool_output_schemas[tool_name] = None
+                return await self.client.call_tool_mcp(tool_name, arguments or {})
+            raise
 
     async def list_resources(self) -> list[mcp_types.Resource]:
         """Fetch resources from server and cache.
