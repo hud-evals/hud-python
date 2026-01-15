@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 import mcp.types as types
 from mcp.types import CallToolRequestParams, CallToolResult
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from hud.settings import settings
 from hud.utils.env import resolve_env_vars as _resolve_env_vars
@@ -99,10 +99,6 @@ class BaseAgentConfig(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", populate_by_name=True)
 
-    # Model identifier - use 'model' (preferred) or 'checkpoint_name' (alias)
-    model: str = Field(validation_alias=AliasChoices("model", "checkpoint_name"))
-    model_name: str = "Agent"  # Human-readable display name
-
     # LLM-specific setting
     system_prompt: str | None = None
 
@@ -113,11 +109,6 @@ class BaseAgentConfig(BaseModel):
     append_setup_output: bool = True
     append_setup_tool: bool = True  # Alias for append_setup_output (backwards compat)
     initial_screenshot: bool = True
-
-    @property
-    def checkpoint_name(self) -> str:
-        """Alias for model (for backwards compatibility)."""
-        return self.model
 
 
 class LegacyTask(BaseModel):
