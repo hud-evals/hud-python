@@ -85,7 +85,11 @@ class TestTaskSerialization:
         task = Task.from_v4(v4_dict)
         data = task.model_dump(mode="json")
 
-        assert data.get("agent_config") == {"system_prompt": "Custom system prompt"}
+        # agent_config should preserve system_prompt and include default allowed_tools
+        assert data.get("agent_config") == {
+            "system_prompt": "Custom system prompt",
+            "allowed_tools": ["*"],  # Default when no allowed_tools specified
+        }
 
         # Roundtrip
         task2 = Task(**data)
@@ -250,3 +254,31 @@ class TestV4AgentConfigToolFilters:
 
         assert "my_setup_tool" not in tool_names
         assert "run_query" in tool_names
+
+    def test_v4_tool_filters_preserved_in_serialization(self) -> None:
+        """v4 tool filters are preserved when serializing for remote execution."""
+        v4_dict = {
+            "prompt": "Test prompt",
+            "mcp_config": {"server": {"url": "http://localhost"}},
+            "evaluate_tool": {"name": "check", "arguments": {}},
+            "agent_config": {
+                "allowed_tools": ["*"],
+                "disallowed_tools": ["*setup*", "*evaluate*", "*grade*"],
+            },
+        }
+
+        task = Task.from_v4(v4_dict)
+
+        # Serialize (this is what gets sent to remote execution)
+        data = task.model_dump(mode="json")
+
+        # agent_config must include the tool filters for remote execution
+        assert "agent_config" in data
+        assert data["agent_config"]["allowed_tools"] == ["*"]
+        assert data["agent_config"]["disallowed_tools"] == ["*setup*", "*evaluate*", "*grade*"]
+
+        # Verify roundtrip works (remote worker will deserialize this)
+        task2 = Task(**data)
+        assert task2.env is not None
+        assert task2.env._agent_include is None  # ["*"] → None
+        assert task2.env._agent_exclude == ["*setup*", "*evaluate*", "*grade*"]

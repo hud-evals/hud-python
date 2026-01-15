@@ -287,8 +287,20 @@ class Task(BaseModel):
                 ]
 
             # Preserve agent_config
+            agent_config: dict[str, Any] = {}
             if data.get("agent_config"):
-                result["agent_config"] = data["agent_config"]
+                agent_config.update(data["agent_config"])
+            # Restore tool filters from Environment (they were extracted during v4 conversion)
+            if self.env is not None:
+                if getattr(self.env, "_agent_include", None) is not None:
+                    agent_config["allowed_tools"] = self.env._agent_include
+                elif "_agent_include" not in agent_config:
+                    # ["*"] was converted to None, restore it for serialization
+                    agent_config["allowed_tools"] = ["*"]
+                if getattr(self.env, "_agent_exclude", None) is not None:
+                    agent_config["disallowed_tools"] = self.env._agent_exclude
+            if agent_config:
+                result["agent_config"] = agent_config
 
             # Preserve metadata
             if data.get("metadata"):
