@@ -8,9 +8,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from hud.types import BaseAgentConfig
+
+# Alias to accept both 'model' and 'checkpoint_name' (backwards compat)
+_model_alias = AliasChoices("model", "checkpoint_name")
 
 
 class BaseCreateParams(BaseModel):
@@ -32,7 +35,7 @@ class ClaudeConfig(BaseAgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "Claude"
-    model: str = "claude-sonnet-4-5"
+    model: str = Field(default="claude-sonnet-4-5", validation_alias=_model_alias)
     model_client: Any = None  # AsyncAnthropic | AsyncAnthropicBedrock
     max_tokens: int = 16384
     use_computer_beta: bool = True
@@ -54,7 +57,7 @@ class GeminiConfig(BaseAgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "Gemini"
-    model: str = "gemini-3-pro-preview"
+    model: str = Field(default="gemini-3-pro-preview", validation_alias=_model_alias)
     model_client: Any = None  # genai.Client
     temperature: float = 1.0
     top_p: float = 0.95
@@ -73,7 +76,9 @@ class GeminiCUAConfig(GeminiConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "GeminiCUA"
-    model: str = "gemini-2.5-computer-use-preview-10-2025"
+    model: str = Field(
+        default="gemini-2.5-computer-use-preview-10-2025", validation_alias=_model_alias
+    )
     excluded_predefined_functions: list[str] = Field(default_factory=list)
 
 
@@ -92,7 +97,7 @@ class OpenAIConfig(BaseAgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "OpenAI"
-    model: str = "gpt-5.1"
+    model: str = Field(default="gpt-5.1", validation_alias=_model_alias)
     model_client: Any = None  # AsyncOpenAI
     max_output_tokens: int | None = None
     temperature: float | None = None
@@ -113,7 +118,7 @@ class OpenAIChatConfig(BaseAgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "OpenAI Chat"
-    model: str = "gpt-5-mini"
+    model: str = Field(default="gpt-5-mini", validation_alias=_model_alias)
     openai_client: Any = None  # AsyncOpenAI
     api_key: str | None = None
     base_url: str | None = None
@@ -135,7 +140,7 @@ class OperatorConfig(OpenAIConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "Operator"
-    model: str = "computer-use-preview"
+    model: str = Field(default="computer-use-preview", validation_alias=_model_alias)
     environment: Literal["windows", "mac", "linux", "ubuntu", "browser"] = "linux"
 
 

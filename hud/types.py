@@ -100,9 +100,7 @@ class BaseAgentConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", populate_by_name=True)
 
     # Model identifier - use 'model' (preferred) or 'checkpoint_name' (alias)
-    model: str | None = Field(
-        default=None, validation_alias=AliasChoices("model", "checkpoint_name")
-    )
+    model: str = Field(validation_alias=AliasChoices("model", "checkpoint_name"))
     model_name: str = "Agent"  # Human-readable display name
 
     # LLM-specific setting
@@ -117,7 +115,7 @@ class BaseAgentConfig(BaseModel):
     initial_screenshot: bool = True
 
     @property
-    def checkpoint_name(self) -> str | None:
+    def checkpoint_name(self) -> str:
         """Alias for model (for backwards compatibility)."""
         return self.model
 
