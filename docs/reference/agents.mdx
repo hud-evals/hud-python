@@ -96,28 +96,19 @@ Claude-specific implementation using Anthropic's API.
 **Example:**
 
 ```python
+from hud import Environment
 from hud.agents import ClaudeAgent
-from hud.datasets import LegacyTask
+
+env = Environment("browser").connect_hub("hud-evals/browser")
 
 agent = ClaudeAgent.create(
     checkpoint_name="claude-sonnet-4-5",
     max_tokens=8192,
 )
 
-result = await agent.run(
-    LegacyTask(
-        prompt="Navigate to example.com",
-        mcp_config={
-            "hud": {
-                "url": "https://mcp.hud.ai/v3/mcp",
-                "headers": {
-                    "Authorization": "Bearer ${HUD_API_KEY}",
-                    "Mcp-Image": "hudpython/hud-remote-browser:latest"
-                }
-            }
-        },
-    )
-)
+# Create task from scenario
+task = env("navigate", url="https://example.com")
+result = await agent.run(task)
 ```
 
 ### OpenAIAgent
@@ -241,55 +232,40 @@ agent = OpenAIChatAgent.create(
 
 ## Usage Examples
 
-### Basic Task Execution
+### With Scenarios
 
 ```python
+from hud import Environment
 from hud.agents import ClaudeAgent
-from hud.datasets import LegacyTask
 
+# Define environment with scenario
+env = Environment("browser").connect_hub("hud-evals/browser")
+
+@env.scenario("shopping")
+async def shopping(instruction: str, start_url: str):
+    navigate(url=start_url)  # Direct function call for local tools
+    answer = yield instruction
+    result = check_cart()
+    yield 1.0 if result["has_items"] else 0.0
+
+# Run agent on task
 agent = ClaudeAgent.create()
-
-result = await agent.run(
-    LegacyTask(
-        prompt="Click the submit button",
-        mcp_config={
-            "hud": {
-                "url": "https://mcp.hud.ai/v3/mcp",
-                "headers": {
-                    "Authorization": "Bearer ${HUD_API_KEY}",
-                    "Mcp-Image": "hudpython/hud-remote-browser:latest"
-                }
-            }
-        }
-    ),
-    max_steps=5,
-)
+task = env("shopping", instruction="Add laptop to cart", start_url="https://shop.example.com")
+result = await agent.run(task, max_steps=20)
 print(f"Reward: {result.reward}, Done: {result.done}")
 ```
 
-### With Setup and Evaluation
+### With Remote Environment
 
 ```python
-task = LegacyTask(
-    prompt="Find the price of the product",
-    mcp_config={
-        "hud": {
-            "url": "https://mcp.hud.ai/v3/mcp",
-            "headers": {
-                "Authorization": "Bearer ${HUD_API_KEY}",
-                "Mcp-Image": "hudpython/hud-remote-browser:latest"
-            }
-        }
-    },
-    setup_tool={
-        "name": "setup",
-        "arguments": {"url": "https://example.com"}
-    },
-    evaluate_tool={
-        "name": "evaluate", 
-        "arguments": {"check": "price_found"}
-    }
-)
+from hud import Environment
+from hud.agents import OperatorAgent
+
+# Connect to a remote environment
+env = Environment("browser").connect_hub("hud-evals/browser")
+
+# Create task from remote scenario
+task = env("web-task", instruction="Find the price of the product")
 
 agent = OperatorAgent.create()
 result = await agent.run(task, max_steps=20)
@@ -308,6 +284,6 @@ agent = ClaudeAgent.create(
 
 ## See Also
 
+- [Environments Reference](/reference/environments) - Environment and scenario configuration
 - [Types Reference](/reference/types) - Trace, Task, MCPToolCall, and other types
-- [Tasks Reference](/reference/tasks) - Task configuration details
 - [`hud eval`](/reference/cli/eval) - Run agents on tasks/datasets
