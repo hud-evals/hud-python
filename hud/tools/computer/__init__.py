@@ -23,7 +23,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> type:
     """Lazy import computer tools."""
     if name == "AnthropicComputerTool":
         from .anthropic import AnthropicComputerTool
