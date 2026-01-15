@@ -33,7 +33,7 @@
         "icon": "code",
         "versions": [
           {
-            "version": "0.5.9",
+            "version": "0.5.10",
             "groups": [
               {
                 "group": "Get Started",
@@ -82,87 +82,6 @@
                   "reference/mcpserver",
                   "reference/agents",
                   "reference/types"
-                ]
-              },
-              {
-                "group": "CLI Reference",
-                "pages": [
-                  "reference/cli/overview",
-                  "reference/cli/init",
-                  "reference/cli/dev",
-                  "reference/cli/build",
-                  "reference/cli/push",
-                  "reference/cli/analyze",
-                  "reference/cli/debug",
-                  "reference/cli/run",
-                  "reference/cli/eval",
-                  "reference/cli/rft",
-                  "reference/cli/misc"
-                ]
-              },
-              {
-                "group": "Community",
-                "pages": [
-                  "contributing"
-                ]
-              }
-            ]
-          },
-          {
-            "version": "0.4.73",
-            "groups": [
-              {
-                "group": "Get Started",
-                "pages": [
-                  "index-legacy",
-                  "quickstart",
-                  "llm-quickstart"
-                ]
-              },
-              {
-                "group": "Core Concepts",
-                "pages": [
-                  "core-concepts/architecture",
-                  "core-concepts/mcp-protocol",
-                  "core-concepts/task-system"
-                ]
-              },
-              {
-                "group": "SDK Reference",
-                "pages": [
-                  "reference/eval",
-                  "reference/tools",
-                  "reference/agents",
-                  "reference/types",
-                  "reference/mcpserver",
-                  "reference/tasks"
-                ]
-              },
-              {
-                "group": "Environments",
-                "pages": [
-                  "build-environments/index",
-                  "build-environments/spec"
-                ]
-              },
-              {
-                "group": "HUD Gateway",
-                "pages": [
-                  "gateway/index-legacy"
-                ]
-              },
-              {
-                "group": "Beta Features",
-                "pages": [
-                  "beta/index",
-                  "beta/rft"
-                ]
-              },
-              {
-                "group": "Agents",
-                "pages": [
-                  "evaluate-agents/create-agents",
-                  "evaluate-agents/benchmarks"
                 ]
               },
               {

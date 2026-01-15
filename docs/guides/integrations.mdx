@@ -336,7 +336,7 @@ async with hud.eval(eval) as ctx:
         llm=llm
     )
     
-    task = LegacyTask(
+    task = Task(
         description=ctx.prompt,
         expected_output="The initials of the CEO",
         agent=researcher
