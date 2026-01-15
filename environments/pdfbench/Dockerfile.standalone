@@ -1,0 +1,113 @@
+# Standalone Dockerfile that doesn't depend on hud-base
+FROM python:3.13-slim-bookworm
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    pymupdf>=1.25.0 \
+    mcp>=1.0.0 \
+    pydantic>=2.0.0
+
+# Copy the hud server module (minimal version)
+COPY src/ ./src/
+
+# Create a minimal hud.server module for standalone operation
+RUN mkdir -p /app/hud_stub/hud/server /app/hud_stub/hud/tools
+COPY <<'EOF' /app/hud_stub/hud/__init__.py
+"""Minimal HUD stub for standalone operation."""
+EOF
+
+COPY <<'EOF' /app/hud_stub/hud/server/__init__.py
+"""Minimal MCP server wrapper."""
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
+class MCPServer:
+    def __init__(self, name: str, instructions: str = ""):
+        self.name = name
+        self.instructions = instructions
+        self._server = Server(name)
+        self._tools = {}
+        self._init_handler = None
+        self._shutdown_handler = None
+        self._mounted_hubs = []
+
+    def tool(self, func):
+        """Decorator to register a tool."""
+        self._tools[func.__name__] = func
+        return func
+
+    def initialize(self, func):
+        """Decorator for initialization handler."""
+        self._init_handler = func
+        return func
+
+    def shutdown(self, func):
+        """Decorator for shutdown handler."""
+        self._shutdown_handler = func
+        return func
+
+    def mount(self, hub):
+        """Mount a tool hub."""
+        self._mounted_hubs.append(hub)
+
+    def add_tool(self, tool):
+        """Add a tool instance."""
+        self._tools[tool.name] = tool
+
+    def run(self):
+        """Run the MCP server."""
+        asyncio.run(self._run_async())
+
+    async def _run_async(self):
+        async with stdio_server() as (read_stream, write_stream):
+            await self._server.run(read_stream, write_stream, self._server.create_initialization_options())
+EOF
+
+COPY <<'EOF' /app/hud_stub/hud/tools/__init__.py
+"""Tool utilities."""
+
+class ToolHub:
+    def __init__(self, name: str, title: str = "", description: str = ""):
+        self.name = name
+        self.title = title
+        self.description = description
+        self._tools = {}
+        self.env = None
+
+    def tool(self, name: str):
+        def decorator(func):
+            self._tools[name] = func
+            return func
+        return decorator
+EOF
+
+COPY <<'EOF' /app/hud_stub/hud/tools/types.py
+"""Tool types."""
+from pydantic import BaseModel
+from typing import Any
+
+class EvaluationResult(BaseModel):
+    reward: float = 0.0
+    done: bool = False
+    content: str | None = None
+    info: dict[str, Any] = {}
+    isError: bool = False
+EOF
+
+ENV PYTHONPATH=/app/hud_stub:/app/src
+
+# Create directories
+RUN mkdir -p /app/pdfs /opt/tbench /tmp
+
+CMD ["python", "-m", "hud_pdfbench.server"]

@@ -1,0 +1,22 @@
+[project]
+name = "hud-pdfbench"
+version = "0.1.0"
+description = "PDF form filling environment for hud"
+requires-python = ">=3.11"
+dependencies = ["hud-python", "pymupdf>=1.25.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.optional-dependencies]
+test = ["pytest>=7.0", "pytest-asyncio>=0.20"]
+
+[tool.hud]
+image = "hud-pdfbench:dev"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hud_pdfbench"]

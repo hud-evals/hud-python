@@ -9,6 +9,9 @@ COPY src/ ./src/
 
 ENV HUD_LOG_STREAM=stderr
 ENV DISPLAY=":1"
+# Set display dimensions to match browser viewport (avoids coordinate scaling)
+ENV DISPLAY_WIDTH=1280
+ENV DISPLAY_HEIGHT=800
 
 # Install dependencies using uv (available in base image)
 RUN uv pip install --system --break-system-packages -e .

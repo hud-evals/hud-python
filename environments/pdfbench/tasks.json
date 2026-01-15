@@ -1,0 +1,277 @@
+[
+  {
+    "id": "pdfbench_eyemed_x001",
+    "prompt": "Hey, I need help filling out this EyeMed vision enrollment form for my new job at Greenfield Manufacturing Corp. Here are all the details:\n\n**Employer Information:**\n- Company name: GREENFIELD MANUFACTURING CORP\n- Group number: 78432\n- Effective date: January 1, 2025 (that's 01/01/2025)\n- No subgroup or location code needed\n\n**My Information (Employee):**\n- Last name: MITCHELL\n- First name: ROBERT\n- Middle initial: J\n- Date of birth: March 15, 1988 (03/15/1988)\n- Address line 1: 4521 OAKWOOD DRIVE\n- Address line 2: APARTMENT 12B\n- City: COLUMBUS\n- State: OH\n- ZIP: 43215\n- Phone: 614-555-8823\n- Last four of SSN: 4472\n- Email: rob.mitchell88@gmail.com\n- I'm male, so check the male checkbox\n- For change type, check the \"Add\" option since this is a new enrollment\n\n**Dependent Information (my wife):**\n- Last name: MITCHELL\n- First name: SARAH\n- No middle initial\n- Date of birth: July 22, 1990 (07/22/1990)\n- Last four of SSN: 6619\n- For her relationship, check that she's a spouse\n- Check the box indicating she's female\n- Check the box to indicate she's being enrolled/added to the plan\n\nPlease only fill in these specific fields and leave everything else blank.\n\nSave the completed form to /tmp/eyemed_pdfbench_eyemed_x001_filled.pdf\n\nPlease use the available tools to:\n1. First call list_fields to see all available form fields\n2. Use fill_field to fill each field with the appropriate value\n3. Call save_pdf when done\n4. The evaluation will automatically verify your work",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "-v",
+          "/Users/erikq/Documents/bytedance/harbor-pdfbench/harbor_tasks/pdfbench_eyemed_x001/environment/pdfs:/app/pdfs:ro",
+          "-v",
+          "/Users/erikq/Documents/bytedance/harbor-pdfbench/harbor_tasks/pdfbench_eyemed_x001/environment/solution.json:/opt/tbench/solution.json:ro",
+          "-e",
+          "PDF_PATH=/app/pdfs/eyemed.pdf",
+          "-e",
+          "OUTPUT_PATH=/tmp/pdfbench_eyemed_x001_filled.pdf",
+          "-e",
+          "SOLUTION_PATH=/opt/tbench/solution.json",
+          "hud-pdfbench:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "load_pdf",
+        "arguments": {
+          "pdf_path": "/app/pdfs/eyemed.pdf",
+          "output_path": "/tmp/pdfbench_eyemed_x001_filled.pdf",
+          "solution_path": "/opt/tbench/solution.json"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "verify_fields",
+        "arguments": {
+          "solution_path": "/opt/tbench/solution.json",
+          "fuzzy_match": true,
+          "partial_credit": true,
+          "strict_empty": true
+        }
+      }
+    },
+    "metadata": {
+      "source": "harbor-pdfbench",
+      "task_name": "pdfbench_eyemed_x001",
+      "pdf_source": "eyemed.pdf",
+      "field_count": 32,
+      "category": "pdf-form-filling"
+    }
+  },
+  {
+    "id": "pdfbench_eyemed_x002",
+    "prompt": "Hi there! I'm the HR coordinator at Bright Horizons Consulting and I need to process an enrollment change for one of our employees.\n\nFor the employer information section, the employer name is \"BRIGHT HORIZONS CONSULTING\" and the effective date is February 1, 2025. Our group number is 55219, subgroup is EXEC, and the location/division is \"SDCA-04\".\n\nThe employee is Patricia A. Wong (last name Wong, first name Patricia, middle initial A). Her Member ID is EMP00458823. She was born November 3, 1975, and she is female. Her address is 892 Magnolia Lane, San Diego, CA 92101. Phone number is (858) 442-7731. The last four digits of her Social Security Number are 8856. Her email is pwong@brighthorizons.com. Please indicate that this is a change to existing coverage and that she is female.\n\nFor the family information section, we have two dependents to process:\n\nDependent 1 is being TERMINATED from coverage. His last name is Wong, first name Kevin, middle initial L. Date of birth is May 28, 2002. He is male. The last four of his SSN are 3341. Mark him for termination and indicate he is male.\n\nDependent 2 is being ADDED. Her last name is Rhodes, first name Jennifer, middle initial M. Date of birth is February 14, 1978. Her full SSN is 602-44-9127. She is female and her relationship to the employee is domestic partner. Please indicate she is female and select domestic partner as the relationship.\n\nLeave all other fields blank.\n\nSave the completed form to /tmp/eyemed_pdfbench_eyemed_x002_filled.pdf\n\nPlease use the available tools to:\n1. First call list_fields to see all available form fields\n2. Use fill_field to fill each field with the appropriate value\n3. Call save_pdf when done\n4. The evaluation will automatically verify your work",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "-v",
+          "/Users/erikq/Documents/bytedance/harbor-pdfbench/harbor_tasks/pdfbench_eyemed_x002/environment/pdfs:/app/pdfs:ro",
+          "-v",
+          "/Users/erikq/Documents/bytedance/harbor-pdfbench/harbor_tasks/pdfbench_eyemed_x002/environment/solution.json:/opt/tbench/solution.json:ro",
+          "-e",
+          "PDF_PATH=/app/pdfs/eyemed.pdf",
+          "-e",
+          "OUTPUT_PATH=/tmp/pdfbench_eyemed_x002_filled.pdf",
+          "-e",
+          "SOLUTION_PATH=/opt/tbench/solution.json",
+          "hud-pdfbench:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "load_pdf",
+        "arguments": {
+          "pdf_path": "/app/pdfs/eyemed.pdf",
+          "output_path": "/tmp/pdfbench_eyemed_x002_filled.pdf",
+          "solution_path": "/opt/tbench/solution.json"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "verify_fields",
+        "arguments": {
+          "solution_path": "/opt/tbench/solution.json",
+          "fuzzy_match": true,
+          "partial_credit": true,
+          "strict_empty": true
+        }
+      }
+    },
+    "metadata": {
+      "source": "harbor-pdfbench",
+      "task_name": "pdfbench_eyemed_x002",
+      "pdf_source": "eyemed.pdf",
+      "field_count": 47,
+      "category": "pdf-form-filling"
+    }
+  },
+  {
+    "id": "pdfbench_eyemed_x003",
+    "prompt": "Good afternoon. I need help completing an EyeMed vision enrollment form for myself and my family.\n\nFor the employer information section, the employer name is \"ANDERSON & PRICE LEGAL ASSOCIATES\" with group number \"33087\". The effective date is March 15, 2025.\n\nI am a new employee being added to coverage, so please mark the \"Add\" option under change type. I am male.\n\nMy last name is \"CARPENTER\" and my first name is \"THEODORE\" with middle initial \"W\". My date of birth is September 8, 1982. My address is \"1776 CONSTITUTION AVENUE\" on the first line and \"SUITE 400\" on the second line. The city is \"PHILADELPHIA\", state \"PA\", and zip code \"19103\". My phone number is 215-663-9001. The last four digits of my SSN are \"2290\". My email address is \"t.carpenter@andersonprice.law\".\n\nFor my first dependent, last name \"CARPENTER\", first name \"MARGARET\", middle initial \"R\". She is my spouse (mark the spouse checkbox), female, born December 1, 1984. Her SSN last four digits are \"7713\". Please mark that she is being added to coverage.\n\nFor my second dependent, last name \"CARPENTER\", first name \"WILLIAM\", middle initial \"T\". This is my son (mark the child checkbox), male, born June 19, 2012. His SSN last four digits are \"5528\". Please mark that he is being added to coverage.\n\nFor my third dependent, last name \"CARPENTER\", first name \"ELIZABETH\", middle initial \"G\". This is my daughter (mark the child checkbox), female, born January 30, 2016. Her SSN last four digits are \"5531\". Please mark that she is being added to coverage.\n\nSave the completed form to /tmp/eyemed_pdfbench_eyemed_x003_filled.pdf\n\nPlease use the available tools to:\n1. First call list_fields to see all available form fields\n2. Use fill_field to fill each field with the appropriate value\n3. Call save_pdf when done\n4. The evaluation will automatically verify your work",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "-v",
+          "/Users/erikq/Documents/bytedance/harbor-pdfbench/harbor_tasks/pdfbench_eyemed_x003/environment/pdfs:/app/pdfs:ro",
+          "-v",
+          "/Users/erikq/Documents/bytedance/harbor-pdfbench/harbor_tasks/pdfbench_eyemed_x003/environment/solution.json:/opt/tbench/solution.json:ro",
+          "-e",
+          "PDF_PATH=/app/pdfs/eyemed.pdf",
+          "-e",
+          "OUTPUT_PATH=/tmp/pdfbench_eyemed_x003_filled.pdf",
+          "-e",
+          "SOLUTION_PATH=/opt/tbench/solution.json",
+          "hud-pdfbench:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "load_pdf",
+        "arguments": {
+          "pdf_path": "/app/pdfs/eyemed.pdf",
+          "output_path": "/tmp/pdfbench_eyemed_x003_filled.pdf",
+          "solution_path": "/opt/tbench/solution.json"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "verify_fields",
+        "arguments": {
+          "solution_path": "/opt/tbench/solution.json",
+          "fuzzy_match": true,
+          "partial_credit": true,
+          "strict_empty": true
+        }
+      }
+    },
+    "metadata": {
+      "source": "harbor-pdfbench",
+      "task_name": "pdfbench_eyemed_x003",
+      "pdf_source": "eyemed.pdf",
+      "field_count": 53,
+      "category": "pdf-form-filling"
+    }
+  },
+  {
+    "id": "pdfbench_eyemed_x004",
+    "prompt": "Hey, I need help filling out this EyeMed enrollment form - my HR is bugging me about it!\n\nI'm updating my information for an address change. The employer name is QUICKSERVE LOGISTICS with group number 91124. The effective date should be 12/01/2024 (that's December 1st, 2024). My member ID is QSL-7821, and yes this is an update to existing coverage.\n\nFor my info: Last name SANTOS, first name MARIA. Date of birth is 04/20/1995. I'm female. Phone number is 323-555-0147. My new address is 3847 SUNSET BLVD, second line is APT 7, city is LOS ANGELES, state CA, zip 90028. For my SSN, just put 6233 in the last four digits field only.\n\nI'm also adding my husband as a dependent! His last name is SANTOS, first name DIEGO. His date of birth is 08/11/1993 and he's male. His full SSN is 545-89-1122 (so 545, then 89, then 1122 in those three boxes). For his relationship, mark that he's a spouse and also mark that he's being added as a new dependent.\n\nLeave everything else blank - no email, no subgroup, no location code, and don't fill in any other dependent sections.\n\nSave the completed form to /tmp/eyemed_pdfbench_eyemed_x004_filled.pdf\n\nPlease use the available tools to:\n1. First call list_fields to see all available form fields\n2. Use fill_field to fill each field with the appropriate value\n3. Call save_pdf when done\n4. The evaluation will automatically verify your work",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "-v",
+          "/Users/erikq/Documents/bytedance/harbor-pdfbench/harbor_tasks/pdfbench_eyemed_x004/environment/pdfs:/app/pdfs:ro",
+          "-v",
+          "/Users/erikq/Documents/bytedance/harbor-pdfbench/harbor_tasks/pdfbench_eyemed_x004/environment/solution.json:/opt/tbench/solution.json:ro",
+          "-e",
+          "PDF_PATH=/app/pdfs/eyemed.pdf",
+          "-e",
+          "OUTPUT_PATH=/tmp/pdfbench_eyemed_x004_filled.pdf",
+          "-e",
+          "SOLUTION_PATH=/opt/tbench/solution.json",
+          "hud-pdfbench:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "load_pdf",
+        "arguments": {
+          "pdf_path": "/app/pdfs/eyemed.pdf",
+          "output_path": "/tmp/pdfbench_eyemed_x004_filled.pdf",
+          "solution_path": "/opt/tbench/solution.json"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "verify_fields",
+        "arguments": {
+          "solution_path": "/opt/tbench/solution.json",
+          "fuzzy_match": true,
+          "partial_credit": true,
+          "strict_empty": true
+        }
+      }
+    },
+    "metadata": {
+      "source": "harbor-pdfbench",
+      "task_name": "pdfbench_eyemed_x004",
+      "pdf_source": "eyemed.pdf",
+      "field_count": 33,
+      "category": "pdf-form-filling"
+    }
+  },
+  {
+    "id": "pdfbench_eyemed_x005",
+    "prompt": "Hello, I'm helping my father fill out his vision insurance paperwork and he's not very good with computers, so I'm typing this up for him.\n\nHis name is Harold Eugene Patterson (just use the initial \"E\" for his middle name). He works for Midwest Agricultural Supply. He's been there forever but is just now signing up for the vision plan - he finally admitted he needs glasses! The group number is 42876 and there's a subgroup code of FIELD. His member ID is MAS-00234. The coverage should start July 1, 2025.\n\nDad lives at 15892 Rural Route 7, Topeka, Kansas 66612. His phone number is 785-234-8890. He was born February 28, 1958 and is male. The last four digits of his Social Security number are 1847. He doesn't have an email address.\n\nSince he's just now enrolling, please mark this as an \"Add\" for the change type - he's being added to coverage. He just wants coverage for himself - no dependents. He's a widower so it's just him.\n\nPlease leave any fields I haven't provided information for blank.\n\nThank you for your patience with this!\n\nSave the completed form to /tmp/eyemed_pdfbench_eyemed_x005_filled.pdf\n\nPlease use the available tools to:\n1. First call list_fields to see all available form fields\n2. Use fill_field to fill each field with the appropriate value\n3. Call save_pdf when done\n4. The evaluation will automatically verify your work",
+    "mcp_config": {
+      "local": {
+        "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "-v",
+          "/Users/erikq/Documents/bytedance/harbor-pdfbench/harbor_tasks/pdfbench_eyemed_x005/environment/pdfs:/app/pdfs:ro",
+          "-v",
+          "/Users/erikq/Documents/bytedance/harbor-pdfbench/harbor_tasks/pdfbench_eyemed_x005/environment/solution.json:/opt/tbench/solution.json:ro",
+          "-e",
+          "PDF_PATH=/app/pdfs/eyemed.pdf",
+          "-e",
+          "OUTPUT_PATH=/tmp/pdfbench_eyemed_x005_filled.pdf",
+          "-e",
+          "SOLUTION_PATH=/opt/tbench/solution.json",
+          "hud-pdfbench:latest"
+        ]
+      }
+    },
+    "setup_tool": {
+      "name": "setup",
+      "arguments": {
+        "name": "load_pdf",
+        "arguments": {
+          "pdf_path": "/app/pdfs/eyemed.pdf",
+          "output_path": "/tmp/pdfbench_eyemed_x005_filled.pdf",
+          "solution_path": "/opt/tbench/solution.json"
+        }
+      }
+    },
+    "evaluate_tool": {
+      "name": "evaluate",
+      "arguments": {
+        "name": "verify_fields",
+        "arguments": {
+          "solution_path": "/opt/tbench/solution.json",
+          "fuzzy_match": true,
+          "partial_credit": true,
+          "strict_empty": true
+        }
+      }
+    },
+    "metadata": {
+      "source": "harbor-pdfbench",
+      "task_name": "pdfbench_eyemed_x005",
+      "pdf_source": "eyemed.pdf",
+      "field_count": 23,
+      "category": "pdf-form-filling"
+    }
+  }
+]
