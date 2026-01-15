@@ -56,15 +56,11 @@ def create_agent(model: str, **kwargs: Any) -> MCPAgent:
     if gateway_info:
         provider = gateway_info.get("provider") or "openai"
     else:
-        # Map agent class to provider for known types
-        from hud.agents.claude import ClaudeAgent
-        from hud.agents.gemini import GeminiAgent
-
-        _AGENT_TO_PROVIDER = {
-            ClaudeAgent: "anthropic",
-            GeminiAgent: "google",
-        }
-        provider = _AGENT_TO_PROVIDER.get(agent_cls, "openai")
+        provider = "openai"
+        if agent_cls.__name__ == "ClaudeAgent":
+            provider = "anthropic"
+        elif agent_cls.__name__ in ("GeminiAgent", "GeminiCUAAgent"):
+            provider = "gemini"
 
     client = build_gateway_client(provider)
 

@@ -9,10 +9,11 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import mcp.types as types
-from pydantic import BaseModel, ConfigDict
 
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
 from hud.utils.hud_console import HUDConsole
+
+from .types import BaseCreateParams
 
 if TYPE_CHECKING:
     from hud.environment import Environment
@@ -20,18 +21,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-class BaseCreateParams(BaseModel):
-    """Runtime parameters for agent creation."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    # Primary way to bind agent to execution context (v5)
-    ctx: Any | None = None  # EvalContext or Environment - agent uses this for tool calls
-
-    auto_respond: bool = False
-    verbose: bool = False
 
 
 class MCPAgent(ABC):

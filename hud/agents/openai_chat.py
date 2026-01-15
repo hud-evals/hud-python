@@ -22,37 +22,20 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import mcp.types as types
 from openai import AsyncOpenAI
-from pydantic import ConfigDict, Field
 
 from hud.settings import settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
 
-from .base import BaseCreateParams, MCPAgent
+from .base import MCPAgent
+from .types import OpenAIChatConfig, OpenAIChatCreateParams
 
 if TYPE_CHECKING:
     from openai.types.chat import ChatCompletionToolParam
 
 
 logger = logging.getLogger(__name__)
-
-
-class OpenAIChatConfig(BaseAgentConfig):
-    """Configuration for `OpenAIChatAgent`."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    model_name: str = "OpenAI Chat"
-    model: str = "gpt-5-mini"
-    openai_client: AsyncOpenAI | None = None
-    api_key: str | None = None
-    base_url: str | None = None
-    completion_kwargs: dict[str, Any] = Field(default_factory=dict)
-
-
-class OpenAIChatCreateParams(BaseCreateParams, OpenAIChatConfig):
-    pass
 
 
 class OpenAIChatAgent(MCPAgent):
@@ -82,6 +65,7 @@ class OpenAIChatAgent(MCPAgent):
                 "Use HUD_API_KEY for gateway auth and BYOK headers for provider keys."
             )
 
+        self.oai: AsyncOpenAI
         if self.config.openai_client is not None:
             self.oai = self.config.openai_client
         elif self.config.api_key is not None or self.config.base_url is not None:

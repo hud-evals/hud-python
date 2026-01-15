@@ -31,26 +31,60 @@ class AgentType(str, Enum):
 
     @property
     def cls(self) -> type:
-        from hud.agents import OpenAIAgent, OperatorAgent
-        from hud.agents.claude import ClaudeAgent
-        from hud.agents.gemini import GeminiAgent
-        from hud.agents.gemini_cua import GeminiCUAAgent
-        from hud.agents.openai_chat import OpenAIChatAgent
+        if self == AgentType.CLAUDE:
+            from hud.agents.claude import ClaudeAgent
 
-        mapping: dict[AgentType, type] = {
-            AgentType.CLAUDE: ClaudeAgent,
-            AgentType.OPENAI: OpenAIAgent,
-            AgentType.OPERATOR: OperatorAgent,
-            AgentType.GEMINI: GeminiAgent,
-            AgentType.GEMINI_CUA: GeminiCUAAgent,
-            AgentType.OPENAI_COMPATIBLE: OpenAIChatAgent,
-        }
-        if self == AgentType.INTEGRATION_TEST:
+            return ClaudeAgent
+        elif self == AgentType.OPENAI:
+            from hud.agents import OpenAIAgent
+
+            return OpenAIAgent
+        elif self == AgentType.OPERATOR:
+            from hud.agents import OperatorAgent
+
+            return OperatorAgent
+        elif self == AgentType.GEMINI:
+            from hud.agents.gemini import GeminiAgent
+
+            return GeminiAgent
+        elif self == AgentType.GEMINI_CUA:
+            from hud.agents.gemini_cua import GeminiCUAAgent
+
+            return GeminiCUAAgent
+        elif self == AgentType.OPENAI_COMPATIBLE:
+            from hud.agents.openai_chat import OpenAIChatAgent
+
+            return OpenAIChatAgent
+        elif self == AgentType.INTEGRATION_TEST:
             from hud.agents.misc.integration_test_agent import IntegrationTestRunner
 
             return IntegrationTestRunner
-        if self not in mapping:
+        else:
             raise ValueError(f"Unsupported agent type: {self}")
+
+    @property
+    def config_cls(self) -> type:
+        """Get config class without importing agent (avoids SDK dependency)."""
+        from hud.agents.types import (
+            ClaudeConfig,
+            GeminiConfig,
+            GeminiCUAConfig,
+            OpenAIChatConfig,
+            OpenAIConfig,
+            OperatorConfig,
+        )
+
+        mapping: dict[AgentType, type] = {
+            AgentType.CLAUDE: ClaudeConfig,
+            AgentType.OPENAI: OpenAIConfig,
+            AgentType.OPERATOR: OperatorConfig,
+            AgentType.GEMINI: GeminiConfig,
+            AgentType.GEMINI_CUA: GeminiCUAConfig,
+            AgentType.OPENAI_COMPATIBLE: OpenAIChatConfig,
+            AgentType.INTEGRATION_TEST: BaseAgentConfig,
+        }
+        if self not in mapping:
+            raise ValueError(f"Unsupported agent type for config: {self}")
         return mapping[self]
 
 
