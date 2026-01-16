@@ -85,17 +85,24 @@ class TestTaskSerialization:
         task = Task.from_v4(v4_dict)
         data = task.model_dump(mode="json")
 
-        # agent_config should preserve system_prompt and include default allowed_tools
-        assert data.get("agent_config") == {
-            "system_prompt": "Custom system prompt",
-            "allowed_tools": ["*"],  # Default when no allowed_tools specified
-        }
+        # agent_config should preserve system_prompt and restore tool filters
+        agent_config = data.get("agent_config")
+        assert agent_config is not None
+        assert agent_config["system_prompt"] == "Custom system prompt"
+        # allowed_tools defaults to ["*"] when not specified (restored during serialization)
+        assert agent_config["allowed_tools"] == ["*"]
+        # These have default False values from TaskAgentConfig
+        assert agent_config["append_setup_output"] is False
+        assert agent_config["append_setup_tool"] is False
 
         # Roundtrip
         task2 = Task(**data)
         assert task2.agent_config is not None
         assert isinstance(task2.agent_config, TaskAgentConfig)
         assert task2.agent_config.system_prompt == "Custom system prompt"
+        # Tool filters should be on Environment after roundtrip
+        assert task2.env is not None
+        assert task2.env._agent_include is None  # ["*"] → None
 
     def test_v4_preserves_metadata(self) -> None:
         """v4 Task preserves metadata through roundtrip."""
