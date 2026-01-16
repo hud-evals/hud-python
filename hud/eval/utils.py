@@ -138,6 +138,7 @@ def build_env_from_v4(source: dict[str, Any] | Any) -> dict[str, Any]:
     }
 
     # Map integration_test_tool → validation (same concept: tool calls to verify)
+    # Also populate _integration_test_calls for IntegrationTestRunner compatibility
     if legacy.integration_test_tool:
         int_test = legacy.integration_test_tool
         if not isinstance(int_test, list):
@@ -147,10 +148,20 @@ def build_env_from_v4(source: dict[str, Any] | Any) -> dict[str, Any]:
             call if isinstance(call, MCPToolCall) else MCPToolCall(**call.model_dump())
             for call in int_test
         ]
+        # Populate _integration_test_calls on env for IntegrationTestRunner
+        env._integration_test_calls = [(call.name, call.arguments or {}) for call in int_test]
 
-    # Extract agent_config (just system_prompt for now)
-    if legacy.agent_config and legacy.agent_config.system_prompt:
-        result["agent_config"] = {"system_prompt": legacy.agent_config.system_prompt}
+    # Extract agent_config fields that need to be passed through
+    if legacy.agent_config:
+        agent_config_dict: dict[str, Any] = {}
+        if legacy.agent_config.system_prompt:
+            agent_config_dict["system_prompt"] = legacy.agent_config.system_prompt
+        if legacy.agent_config.append_setup_output:
+            agent_config_dict["append_setup_output"] = legacy.agent_config.append_setup_output
+        if legacy.agent_config.append_setup_tool:
+            agent_config_dict["append_setup_tool"] = legacy.agent_config.append_setup_tool
+        if agent_config_dict:
+            result["agent_config"] = agent_config_dict
 
     # Preserve metadata
     if legacy.metadata:

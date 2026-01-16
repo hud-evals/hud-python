@@ -197,7 +197,21 @@ class MCPAgent(ABC):
             await self._initialize_from_ctx(ctx)
 
         try:
-            result = await self._run_context(text_to_blocks(ctx.prompt), max_steps=max_steps)
+            # Build initial context - optionally append setup tool output
+            # Check ctx first (task-level override), then fall back to agent config
+            append_setup = getattr(ctx, "append_setup_output", False) or getattr(
+                self.config, "append_setup_output", False
+            )
+            initial_prompt = ctx.prompt
+            if append_setup:
+                setup_output = getattr(ctx, "setup_output", None)
+                if setup_output:
+                    initial_prompt = f"{initial_prompt}\n\n{setup_output}"
+
+            # Build initial blocks (text prompt + optional screenshot)
+            initial_blocks = text_to_blocks(initial_prompt)
+
+            result = await self._run_context(initial_blocks, max_steps=max_steps)
 
             # Propagate error state to context for platform visibility
             if result.isError and hasattr(ctx, "error"):
@@ -331,8 +345,17 @@ class MCPAgent(ABC):
             is_error = False
 
         # Ensure all parameters are the correct type
+        # Use ctx.reward if already set (e.g., from scenario evaluate), otherwise 0.0
+        # Note: For v4 tasks with evaluate_tool, reward is set in __aexit__ after this returns,
+        # so callers should prefer ctx.reward over Trace.reward for the final result.
+        reward = 0.0
+        if self.ctx is not None:
+            ctx_reward = getattr(self.ctx, "reward", None)
+            if ctx_reward is not None:
+                reward = ctx_reward
+
         trace_params = {
-            "reward": 0.0,
+            "reward": reward,
             "done": True,
             "messages": messages,
             "content": final_response.content if final_response else error,
@@ -508,8 +531,14 @@ def find_reward(result: MCPToolResult) -> float:
 
     Agent accepts "reward", "grade", "score", or weighted subscores
 
+    If isError is True, return 0.0 (error results should not contribute positive reward).
     If not found, return 0.0
     """
+    # Error results should return 0.0 - don't extract reward from error responses
+    if result.isError:
+        logger.warning("Evaluate tool returned error, using reward=0.0")
+        return 0.0
+
     accept_keys = ["reward", "grade", "score"]
 
     # Check for direct reward/grade/score keys

@@ -102,13 +102,16 @@ class BaseAgentConfig(BaseModel):
     # LLM-specific setting
     system_prompt: str | None = None
 
-    # Deprecated: kept for backwards compat with v4 task configs, not applied by agent
+    # Deprecated: kept for backwards compat with v4 task configs
+    # allowed_tools/disallowed_tools are applied at Environment level
+    # append_setup_output is applied by EvalContext -> agent
+    # response_tool_name and initial_screenshot are parsed but NOT implemented
     allowed_tools: list[str] | None = None
     disallowed_tools: list[str] | None = None
-    response_tool_name: str | None = None
-    append_setup_output: bool = True
-    append_setup_tool: bool = True  # Alias for append_setup_output (backwards compat)
-    initial_screenshot: bool = True
+    response_tool_name: str | None = None  # Not implemented
+    append_setup_output: bool = False
+    append_setup_tool: bool = False  # Alias for append_setup_output
+    initial_screenshot: bool = False  # Not implemented
 
 
 class LegacyTask(BaseModel):
