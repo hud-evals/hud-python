@@ -543,8 +543,7 @@ class Environment(
             result = await self._tool_manager.call_tool(name, arguments)
             return MCPToolResult(
                 content=result.content,
-                structuredContent=result.structured_content,
-                isError=result.isError,
+                structuredContent=result.structured_content
             )
 
         connection_name = self._router.get_connection(name)

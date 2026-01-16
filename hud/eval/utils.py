@@ -149,9 +149,7 @@ def build_env_from_v4(source: dict[str, Any] | Any) -> dict[str, Any]:
             for call in int_test
         ]
         # Populate _integration_test_calls on env for IntegrationTestRunner
-        env._integration_test_calls = [
-            (call.name, call.arguments or {}) for call in int_test
-        ]
+        env._integration_test_calls = [(call.name, call.arguments or {}) for call in int_test]
 
     # Extract agent_config fields that need to be passed through
     if legacy.agent_config:

@@ -459,9 +459,11 @@ class EvalContext(Environment):
         output_parts: list[str] = []
         for result in setup_results:
             if result.content:
-                for block in result.content:
-                    if isinstance(block, mcp_types.TextContent):
-                        output_parts.append(block.text)
+                output_parts.extend(
+                    block.text
+                    for block in result.content
+                    if isinstance(block, mcp_types.TextContent)
+                )
 
         if not output_parts:
             return None
