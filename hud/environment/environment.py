@@ -394,6 +394,10 @@ class Environment(
                         if isinstance(block, mcp_types.TextContent):
                             error_msg = block.text
                             break
+                # Clean up connections before raising (since __aexit__ won't be called)
+                for conn in self._connections.values():
+                    if conn.is_connected:
+                        await conn.disconnect()
                 raise RuntimeError(f"Setup tool '{name}' failed: {error_msg}")
 
         return self
