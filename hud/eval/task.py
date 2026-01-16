@@ -53,6 +53,9 @@ class TaskAgentConfig(BaseModel):
     """Agent configuration for a Task.
 
     Contains settings that should be passed to the agent when running this task.
+
+    Note: allowed_tools/disallowed_tools are handled at the Environment level
+    (via env.include()/env.exclude() for v5, or extracted by build_env_from_v4() for v4).
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -62,12 +65,26 @@ class TaskAgentConfig(BaseModel):
         description="Custom system prompt to pass to the agent",
     )
 
+    # Agent behavior settings (from v4 agent_config, applied by EvalContext)
+    append_setup_output: bool = Field(
+        default=False,
+        description="Append setup tool output to the agent's initial prompt",
+    )
+    append_setup_tool: bool = Field(
+        default=False,
+        description="Alias for append_setup_output (backwards compat)",
+    )
+
     @model_validator(mode="before")
     @classmethod
     def warn_extra_fields(cls, data: Any) -> Any:
         """Warn about extra fields that will be ignored."""
         if isinstance(data, dict):
-            known_fields = {"system_prompt"}
+            known_fields = {
+                "system_prompt",
+                "append_setup_output",
+                "append_setup_tool",
+            }
             extra = set(data.keys()) - known_fields
             if extra:
                 logger.warning(

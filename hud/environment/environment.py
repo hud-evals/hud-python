@@ -160,6 +160,9 @@ class Environment(
         # Tool call queues - run after connections established
         self._setup_calls: list[tuple[str, dict[str, Any]]] = []
         self._evaluate_calls: list[tuple[str, dict[str, Any]]] = []
+        self._integration_test_calls: list[tuple[str, dict[str, Any]]] = []
+        # Store setup tool results for append_setup_output feature
+        self._setup_results: list[MCPToolResult] = []
 
         # Default prompt (EvalContext has per-run prompt)
         self.prompt: str | None = None
@@ -377,9 +380,21 @@ class Environment(
 
         await self._build_routing()
 
-        # Setup tool calls (after connections)
+        # Setup tool calls (after connections) - abort if any setup tool fails
+        # Store results for append_setup_output feature
+        self._setup_results = []
         for name, args in self._setup_calls:
-            await self._execute_tool(name, args)
+            result = await self._execute_tool(name, args)
+            self._setup_results.append(result)
+            if result.isError:
+                # Extract error message from result content
+                error_msg = "Setup tool failed"
+                if result.content:
+                    for block in result.content:
+                        if isinstance(block, mcp_types.TextContent):
+                            error_msg = block.text
+                            break
+                raise RuntimeError(f"Setup tool '{name}' failed: {error_msg}")
 
         return self
 
@@ -400,6 +415,8 @@ class Environment(
                 rewards.append(find_reward(result))
             except Exception as e:
                 logger.warning("Evaluate tool %s failed: %s", name, e)
+                # Record 0.0 for failed evaluate tools so they affect the average
+                rewards.append(0.0)
 
         # Store average reward from evaluate tools
         self._evaluate_reward: float | None = None
@@ -527,6 +544,7 @@ class Environment(
             return MCPToolResult(
                 content=result.content,
                 structuredContent=result.structured_content,
+                isError=result.isError,
             )
 
         connection_name = self._router.get_connection(name)
