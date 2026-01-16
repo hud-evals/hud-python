@@ -546,8 +546,7 @@ class Environment(
             # Call tool manager directly to avoid FastMCP context requirement
             result = await self._tool_manager.call_tool(name, arguments)
             return MCPToolResult(
-                content=result.content,
-                structuredContent=result.structured_content
+                content=result.content, structuredContent=result.structured_content
             )
 
         connection_name = self._router.get_connection(name)
