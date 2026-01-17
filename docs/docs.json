@@ -64,6 +64,7 @@
                 "group": "Cookbooks",
                 "pages": [
                   "cookbooks/codex-coding",
+                  "cookbooks/multi-agent",
                   "cookbooks/ops-diagnostics"
                 ]
               },

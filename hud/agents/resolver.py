@@ -15,6 +15,12 @@ _models_cache: list[dict[str, Any]] | None = None
 _PROVIDER_TO_AGENT = {"anthropic": "claude"}
 
 
+def _is_codex_capable_model(model_id: str) -> bool:
+    """Check if model is Codex-capable (needs OpenAIAgent for native tools)."""
+    m = (model_id or "").lower()
+    return m in {"gpt-5.1", "gpt-5.1-codex"} or "codex" in m
+
+
 def _fetch_gateway_models() -> list[dict[str, Any]]:
     """Fetch available models from HUD gateway (cached)."""
     global _models_cache
@@ -59,7 +65,12 @@ def resolve_cls(model: str) -> tuple[type[MCPAgent], dict[str, Any] | None]:
 
     # Gateway lookup
     for m in _fetch_gateway_models():
-        if model in (m.get("id"), m.get("name"), m.get("model")):
+        candidate_ids = (m.get("id"), m.get("name"), m.get("model"))
+        if model in candidate_ids:
+            # Only check if the matched model string is codex-capable
+            if _is_codex_capable_model(model):
+                return AgentType.OPENAI.cls, m
+
             provider = (m.get("provider") or "openai_compatible").lower()
             agent_str = _PROVIDER_TO_AGENT.get(provider, provider)
             try:
