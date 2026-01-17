@@ -140,7 +140,7 @@ dev = [
     "dotenv>=0.9.9",
     # Testing and linting
     "ruff >=0.11.8",
-    "pytest >=8.1.1,<9",
+    "pytest >=8.1.1",
     "pytest-asyncio",
     "pytest-mock",
     "pytest-cov",
