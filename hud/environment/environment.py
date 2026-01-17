@@ -512,9 +512,26 @@ class Environment(
             await self._build_tool_routing()
         return self._router.tools
 
-    async def _env_call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> list[Any]:
+    async def _env_call_tool(
+        self, name: str, arguments: dict[str, Any] | None = None, **kwargs: Any
+    ) -> list[Any]:
         """Route tool calls through our router (handles both local and connector tools)."""
-        result = await self._execute_tool(name, arguments or {})
+        args = dict(arguments or {})
+
+        # Extract trace context propagated via MCP request (meta or arguments)
+        trace_id = args.pop("_hud_trace_id", None)
+        meta = kwargs.get("_meta") or kwargs.get("meta")
+        if not trace_id and isinstance(meta, dict):
+            trace_id = meta.get("_hud_trace_id") or meta.get("trace_id")
+
+        if trace_id:
+            from hud.eval.context import set_trace_context
+
+            with set_trace_context(trace_id):
+                result = await self._execute_tool(name, args)
+        else:
+            result = await self._execute_tool(name, args)
+
         return result.content or []
 
     # =========================================================================

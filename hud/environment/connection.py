@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import mcp.types as mcp_types
 
@@ -193,7 +193,44 @@ class Connector:
         # Strip prefix when calling remote
         if self.config.prefix and name.startswith(f"{self.config.prefix}_"):
             name = name[len(self.config.prefix) + 1 :]
-        return await self.client.call_tool_mcp(name, arguments or {})
+
+        from hud.eval.context import get_current_trace_id
+
+        args = dict(arguments or {})
+        trace_id = get_current_trace_id()
+        meta = {"_hud_trace_id": trace_id} if trace_id else None
+
+        client = cast("Any", self.client)
+        if meta:
+            try:
+                result = await client.call_tool(name=name, arguments=args, meta=meta)
+            except TypeError:
+                # Fallback for clients that don't accept meta
+                try:
+                    result = await client.call_tool(name=name, arguments=args, _meta=meta)
+                except TypeError:
+                    result = await client.call_tool(name=name, arguments=args)
+        else:
+            result = await client.call_tool(name=name, arguments=args)
+
+        # FastMCP and mcp-python use slightly different result shapes/types.
+        # Normalize to mcp.types.CallToolResult for the rest of HUD.
+        is_error = getattr(result, "isError", None)
+        if is_error is None:
+            is_error = getattr(result, "is_error", False)
+        structured = getattr(result, "structuredContent", None)
+        if structured is None:
+            structured = getattr(result, "structured_content", None)
+
+        content = getattr(result, "content", None)
+        if content is None:
+            content = []
+
+        return mcp_types.CallToolResult(
+            content=content,
+            isError=bool(is_error),
+            structuredContent=structured,
+        )
 
     async def list_resources(self) -> list[mcp_types.Resource]:
         """Fetch resources from server and cache.

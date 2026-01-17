@@ -229,11 +229,30 @@ class MCPUseHUDClient(BaseHUDClient):
         if session.connector.client_session is None:
             raise ValueError(f"Client session not initialized for {server_name}")
 
+        from hud.eval.context import get_current_trace_id
+
+        arguments = dict(tool_call.arguments or {})
+        trace_id = get_current_trace_id()
+        meta = {"_hud_trace_id": trace_id} if trace_id else None
+
         # Call tool (retry logic is handled at transport level)
-        result = await session.connector.client_session.call_tool(
-            name=original_tool.name,  # Use original tool name, not prefixed
-            arguments=tool_call.arguments or {},
-        )
+        if meta:
+            try:
+                result = await session.connector.client_session.call_tool(
+                    name=original_tool.name,  # Use original tool name, not prefixed
+                    arguments=arguments,
+                    meta=meta,
+                )
+            except TypeError:
+                result = await session.connector.client_session.call_tool(
+                    name=original_tool.name,  # Use original tool name, not prefixed
+                    arguments=arguments,
+                )
+        else:
+            result = await session.connector.client_session.call_tool(
+                name=original_tool.name,  # Use original tool name, not prefixed
+                arguments=arguments,
+            )
 
         if self.verbose:
             hud_console.debug(f"Tool '{tool_call.name}' result: {result}")

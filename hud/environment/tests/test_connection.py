@@ -281,13 +281,13 @@ class TestConnector:
 
         mock_result = mcp_types.CallToolResult(content=[], isError=False)
         mock_client = MagicMock()
-        mock_client.call_tool_mcp = AsyncMock(return_value=mock_result)
+        mock_client.call_tool = AsyncMock(return_value=mock_result)
         connector.client = mock_client
 
         await connector.call_tool("myprefix_tool1", {"arg": "value"})
 
         # Prefix should be stripped
-        mock_client.call_tool_mcp.assert_called_once_with("tool1", {"arg": "value"})
+        mock_client.call_tool.assert_called_once_with(name="tool1", arguments={"arg": "value"})
 
     @pytest.mark.asyncio
     async def test_call_tool_raises_when_not_connected(self) -> None:
