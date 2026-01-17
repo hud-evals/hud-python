@@ -6,7 +6,17 @@
   </picture>
 </div>
 
-The HUD SDK is an open-source Python toolkit for building, evaluating, and training AI agents. Use a unified API for any model provider, wrap your code as MCP environments, run A/B evals at scale, and train with reinforcement learning.
+**You can't improve what you can't measure.**
+
+HUD is infrastructure for the agent improvement loop: run evals at scale, see what works, improve your model or environment, repeat. We don't tell you how to build your agent—that's just a for-loop. We give you the infrastructure to make it better.
+
+```mermaid
+flowchart LR
+    A["Run Evals<br/><i>(any agent)</i>"] --> B["See Results<br/><i>(traces)</i>"]
+    B --> C["Find Gaps<br/><i>(what fails)</i>"]
+    C --> D["Train Model<br/>or Improve Env"]
+    D --> A
+```
 
 To learn more, check out our [Documentation](https://docs.hud.ai) and [API Reference](https://docs.hud.ai/reference).
 
@@ -37,30 +47,46 @@ export HUD_API_KEY=your-key-here
 
 ## Usage
 
-### Unified Model API
+### The Agent is Just a For-Loop
 
-Use Claude, GPT, Gemini, or Grok through one OpenAI-compatible endpoint:
+An agent is a loop that calls tools until it's done. You don't need a framework—just call tools and submit:
 
 ```python
-from openai import AsyncOpenAI
 import os
+import hud
+from openai import AsyncOpenAI
 
-client = AsyncOpenAI(
-    base_url="https://inference.hud.ai",
-    api_key=os.environ["HUD_API_KEY"]
-)
+client = AsyncOpenAI(base_url="https://inference.hud.ai", api_key=os.environ["HUD_API_KEY"])
 
-response = await client.chat.completions.create(
-    model="claude-sonnet-4-5",  # or gpt-4o, gemini-2.5-pro (https://hud.ai/models)
-    messages=[{"role": "user", "content": "Hello!"}]
-)
+async with hud.eval(task) as ctx:
+    messages = [{"role": "user", "content": ctx.prompt}]
+    
+    while True:  # The whole agent is this loop
+        response = await client.chat.completions.create(
+            model="claude-sonnet-4-5",
+            messages=messages,
+            tools=ctx.as_openai_chat_tools()
+        )
+        msg = response.choices[0].message
+        messages.append(msg)
+        
+        if not msg.tool_calls:
+            break  # Model is done
+        
+        for tc in msg.tool_calls:
+            result = await ctx.call_tool(tc)  # Returns OpenAI-formatted tool message
+            messages.append(result)
+    
+    await ctx.submit(msg.content)
+
+print(ctx.reward)  # Scored by the scenario
 ```
 
-Every call is traced at [hud.ai](https://hud.ai). → [Docs](https://docs.hud.ai/quick-links/gateway)
+That's it. 99% of the work is in the model and the environment. HUD gives you the infrastructure to measure and improve both.
 
-### Environments
+### Environments: Action Spaces, Not Abstractions
 
-Turn your code into tools agents can call. Define how to evaluate them:
+Environments define what agents can do and how to score them. Give models maximum capability, then restrict based on what you learn from evals:
 
 ```python
 from hud import Environment
@@ -68,63 +94,68 @@ from hud import Environment
 env = Environment("my-env")
 
 @env.tool()
-def add(a: int, b: int) -> int:
-    """Add two numbers."""
-    return a + b
+def search(query: str) -> str:
+    """Search the knowledge base."""
+    return db.search(query)
 
-@env.scenario("solve-math")
-async def solve_math(problem: str, answer: int):
-    response = yield problem                    # Prompt
-    yield 1.0 if str(answer) in response else 0.0  # Reward
-
-async with env("solve-math", problem="What is 2+2?", answer=4) as ctx:
-    # Your agent logic here - call tools, get response
-    result = await ctx.call_tool("add", a=2, b=2)
-    await ctx.submit(f"The answer is {result}")
-
-print(ctx.reward)  # 1.0
+@env.scenario("find-answer")
+async def find_answer(question: str, expected: str):
+    answer = yield f"Find the answer to: {question}"  # Prompt to agent
+    yield 1.0 if expected.lower() in answer.lower() else 0.0  # Score result
 ```
 
-The agent runs between the yields. First yield sends the prompt, second yield scores the result. → [Docs](https://docs.hud.ai/quick-links/environments) · [Templates](https://hud.ai/environments)
+Scenarios are the atomic skills your agent must get right. If it can't pass a scenario reliably, that's a gap to close. → [Docs](https://docs.hud.ai/quick-links/environments) · [Templates](https://hud.ai/environments)
 
-### A/B Evals
+### A/B Evals: Find What Works
 
-Test different models. Repeat runs to see the distribution:
+Test different models, prompts, or configurations. Repeat runs to see the distribution:
+
+```python
+async with hud.eval(
+    env("find-answer", question="What is 2+2?", expected="4"),
+    variants={"model": ["gpt-4o", "claude-sonnet-4-5"]},
+    group=10  # Run each variant 10 times
+) as ctx:
+    # Your agent loop here (or use a reference agent)
+    ...
+```
+
+**Variants** test configurations. **Groups** repeat for statistical confidence. Results stream to [hud.ai](https://hud.ai). → [Docs](https://docs.hud.ai/quick-links/ab-testing)
+
+### The Loop: Evals → Improve Model or Environment
+
+Every eval generates training data. Use it to improve:
+
+```bash
+hud init                              # Scaffold environment
+git push                              # Push to GitHub
+hud eval my-eval --model gpt-4o -n 100  # Run 100 evals
+
+# On hud.ai: select traces → Train → Launch RFT job
+# Or: improve your environment's tools and scenarios based on what you learned
+```
+
+This is the loop: run evals, find gaps, improve the model or the environment, repeat. → [Docs](https://docs.hud.ai/quick-links/deploy)
+
+### Gateway: Any Model, One API
+
+Stop juggling API keys. Point any OpenAI-compatible client at `inference.hud.ai`:
 
 ```python
 from openai import AsyncOpenAI
-import os
 
 client = AsyncOpenAI(
     base_url="https://inference.hud.ai",
     api_key=os.environ["HUD_API_KEY"]
 )
 
-# Using the env from above
-async with env("solve-math", problem="What is 2+2?", answer=4, variants={"model": ["gpt-4o", "claude-sonnet-4-5"]}, group=5) as ctx:
-    response = await client.chat.completions.create(
-        model=ctx.variants["model"],
-        messages=[{"role": "user", "content": ctx.prompt}],
-        tools=ctx.tools  # Environment tools available to the model
-    )
-    await ctx.submit(response.choices[0].message.content)
+response = await client.chat.completions.create(
+    model="claude-sonnet-4-5",  # or gpt-4o, gemini-2.5-pro, grok-4-1-fast
+    messages=[{"role": "user", "content": "Hello!"}]
+)
 ```
 
-**Variants** test configurations. **Groups** repeat for distribution. Results stream to [hud.ai](https://hud.ai). → [Docs](https://docs.hud.ai/quick-links/ab-testing)
-
-### Deploy & Train
-
-Push to GitHub, connect on hud.ai, run at scale:
-
-```bash
-hud init                  # Scaffold environment
-git push                  # Push to GitHub
-# Connect on hud.ai → New → Environment
-hud eval my-eval --model gpt-4o --group-size 100
-# Or create and run tasks on the platform
-```
-
-Every run generates training data. Use it to fine-tune or run RL. → [Docs](https://docs.hud.ai/quick-links/deploy)
+Every call is traced at [hud.ai](https://hud.ai). → [Docs](https://docs.hud.ai/quick-links/gateway)
 
 ## Links
 
