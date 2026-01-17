@@ -8,6 +8,7 @@ from .agent import AgentTool
 from .base import BaseHub, BaseTool
 from .bash import BashTool
 from .edit import EditTool
+from .memory import MemoryTool
 from .playwright import PlaywrightTool
 from .response import ResponseTool
 from .submit import SubmitTool
@@ -34,6 +35,7 @@ __all__ = [
     "PlaywrightTool",
     "QwenComputerTool",
     "ResponseTool",
+    "MemoryTool",
     "SubmitTool",
 ]
 
