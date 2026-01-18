@@ -555,6 +555,7 @@ def build_docker_image(
     verbose: bool = False,
     build_args: dict[str, str] | None = None,
     platform: str | None = None,
+    secrets: list[str] | None = None,
     remote_cache: str | None = None,
 ) -> bool:
     """Build a Docker image from a directory."""
