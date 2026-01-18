@@ -561,6 +561,7 @@ def build_docker_image(
     """Build a Docker image from a directory."""
     hud_console = HUDConsole()
     build_args = build_args or {}
+    secrets = secrets or []
 
     # Check if Dockerfile exists (prefer Dockerfile.hud)
     dockerfile = find_dockerfile(directory)
@@ -630,6 +631,10 @@ def build_docker_image(
     for key, value in build_args.items():
         cmd.extend(["--build-arg", f"{key}={value}"])
 
+    # Add secrets
+    for secret in secrets:
+        cmd.extend(["--secret", secret])
+
     cmd.append(str(directory))
 
     # Always show build output
@@ -637,7 +642,10 @@ def build_docker_image(
 
     try:
         # Use Docker's native output formatting - no capture, let Docker handle display
-        result = subprocess.run(cmd, check=False)  # noqa: S603
+        env = os.environ.copy()
+        if secrets:
+            env["DOCKER_BUILDKIT"] = "1"
+        result = subprocess.run(cmd, check=False, env=env)  # noqa: S603
         return result.returncode == 0
     except Exception as e:
         hud_console.error(f"Build error: {e}")
@@ -651,6 +659,7 @@ def build_environment(
     verbose: bool = False,
     env_vars: dict[str, str] | None = None,
     platform: str | None = None,
+    secrets: list[str] | None = None,
     remote_cache: str | None = None,
     build_args: dict[str, str] | None = None,
 ) -> None:
@@ -726,6 +735,7 @@ def build_environment(
         verbose,
         build_args=build_args or None,
         platform=platform,
+        secrets=secrets,
         remote_cache=remote_cache,
     ):
         hud_console.error("Docker build failed")
@@ -1112,10 +1122,15 @@ def build_command(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
     env_vars: dict[str, str] | None = None,
     platform: str | None = None,
+    secrets: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--secret",
+        help=("Docker build secret (repeatable), e.g. --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN"),
+    ),
     remote_cache: str | None = None,
     build_args: dict[str, str] | None = None,
 ) -> None:
     """Build a HUD environment and generate lock file."""
     build_environment(
-        directory, tag, no_cache, verbose, env_vars, platform, remote_cache, build_args
+        directory, tag, no_cache, verbose, env_vars, platform, secrets, remote_cache, build_args
     )

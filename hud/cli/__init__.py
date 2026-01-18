@@ -741,6 +741,11 @@ def build(
     platform: str | None = typer.Option(
         None, "--platform", help="Set Docker target platform (e.g., linux/amd64)"
     ),
+    secrets: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--secret",
+        help=("Docker build secret (repeatable), e.g. --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN"),
+    ),
     remote_cache: str | None = typer.Option(
         None, "--remote-cache", help="Enable remote cache using Amazon ECR with specified repo name"
     ),
@@ -812,7 +817,15 @@ def build(
             i += 1
 
     build_command(
-        directory, tag, no_cache, verbose, env_vars, platform, remote_cache, build_args or None
+        directory,
+        tag,
+        no_cache,
+        verbose,
+        env_vars,
+        platform,
+        secrets,
+        remote_cache,
+        build_args or None,
     )
 
 
