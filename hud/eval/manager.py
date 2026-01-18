@@ -335,6 +335,14 @@ async def run_eval(
         if created_task_version_ids and tasks_to_create:
             # Assign backend IDs back onto the in-memory tasks so trace enter includes
             # task_version_id.
+            # Platform guarantees ordered one-to-one mapping, but warn if counts differ.
+            if len(created_task_version_ids) != len(tasks_to_create):
+                logger.warning(
+                    "Task count mismatch: sent %d tasks, received %d IDs. "
+                    "Some tasks may not be linked to the taskset.",
+                    len(tasks_to_create),
+                    len(created_task_version_ids),
+                )
             for task_obj, task_version_id in zip(
                 tasks_to_create, created_task_version_ids, strict=False
             ):

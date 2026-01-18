@@ -289,6 +289,7 @@ class ScenarioMixin:
         self,
         name: str | None = None,
         description: str | None = None,
+        required_env_vars: list[str] | None = None,
     ) -> Callable[
         [Callable[..., AsyncGenerator[Any, None]]],
         Callable[..., AsyncGenerator[Any, None]],
@@ -303,19 +304,21 @@ class ScenarioMixin:
         Args:
             name: Optional name for the scenario (defaults to function name)
             description: Optional description of what the scenario does
+            required_env_vars: Optional list of environment variable names this scenario requires.
+                These are used by the HUD platform to check if users have configured the
+                necessary API keys/credentials before running this specific scenario.
 
         Example:
-            @env.scenario()
-            async def search_cats(url: str):
-                await env.call_tool("navigate", url=url)
-                yield "Find cat images"
-                result = await env.call_tool("count_cats")
-                yield float(result > 0)
+            @env.scenario(required_env_vars=["OPENAI_API_KEY"])
+            async def chat(query: str):
+                yield f"Answer this question: {query}"
+                # ... evaluate
+                yield 1.0
 
             # MCP client usage:
-            # 1. get_prompt("{env_name}:search_cats", {url: "..."}) -> prompt messages
+            # 1. get_prompt("{env_name}:chat", {query: "..."}) -> prompt messages
             # 2. agent runs...
-            # 3. read_resource("{env_name}:search_cats") -> {"reward": 0.95}
+            # 3. read_resource("{env_name}:chat") -> {"reward": 0.95}
         """
 
         def decorator(
@@ -480,6 +483,8 @@ class ScenarioMixin:
                 scenario_meta["code"] = source_code
             if prompt_args:
                 scenario_meta["arguments"] = prompt_args
+            if required_env_vars:
+                scenario_meta["required_env_vars"] = required_env_vars
 
             prompt = FunctionPrompt(
                 name=scenario_id,

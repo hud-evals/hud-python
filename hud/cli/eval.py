@@ -684,6 +684,11 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
                 tasks=tasks_data,
             )
             if ids:
+                if len(ids) != len(tasks_to_create):
+                    hud_console.warning(
+                        f"Task count mismatch: sent {len(tasks_to_create)} tasks, "
+                        f"received {len(ids)} IDs. Some tasks may not be linked."
+                    )
                 for task_obj, task_version_id in zip(tasks_to_create, ids, strict=False):
                     task_obj.id = task_version_id
 
