@@ -164,6 +164,7 @@ class EvalConfig(BaseModel):
         "auto_respond",
         "quiet",
         "gateway",
+        "taskset",
     }
     # Fields loaded from [agent] section
     _AGENT_FIELDS: ClassVar[set[str]] = {"allowed_tools", "disallowed_tools"}
@@ -184,6 +185,7 @@ class EvalConfig(BaseModel):
     remote: bool = False
     quiet: bool = False  # Suppress opening browser for eval links
     gateway: bool = False  # Use HUD Gateway for LLM API calls
+    taskset: str | None = None  # Taskset slug to associate job with
 
     # Base agent config (these merge with task's agent_config)
     allowed_tools: list[str] | None = None
@@ -655,15 +657,40 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         agent_kwargs = {
             k: v for k, v in agent_kwargs.items() if k not in ("api_key", "model_client")
         }
-        # Create a job ID for tracking
         import uuid
 
         from hud.datasets.utils import submit_rollouts
+        from hud.eval.manager import _send_job_enter
 
         job_id = str(uuid.uuid4())
         hud_console.info(
             f"Submitting {len(tasks)} task(s) for remote execution (job_id: {job_id})…"
         )
+
+        if cfg.taskset:
+            tasks_to_create = [t for t in tasks if not t.id]
+            tasks_data = (
+                [t.model_dump(mode="json", exclude_none=True) for t in tasks_to_create]
+                if tasks_to_create
+                else None
+            )
+            ids = await _send_job_enter(
+                job_id=job_id,
+                name=f"eval ({cfg.source})" if cfg.source else "eval",
+                variants=None,
+                group=cfg.group_size,
+                api_key=None,
+                taskset=cfg.taskset,
+                tasks=tasks_data,
+            )
+            if ids:
+                if len(ids) != len(tasks_to_create):
+                    hud_console.warning(
+                        f"Task count mismatch: sent {len(tasks_to_create)} tasks, "
+                        f"received {len(ids)} IDs. Some tasks may not be linked."
+                    )
+                for task_obj, task_version_id in zip(tasks_to_create, ids, strict=False):
+                    task_obj.id = task_version_id
 
         await submit_rollouts(
             tasks=tasks,
@@ -701,6 +728,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         max_concurrent=cfg.max_concurrent,
         group_size=cfg.group_size,
         quiet=cfg.quiet,
+        taskset=cfg.taskset,
     )
 
     # Show reward for single task
@@ -767,6 +795,9 @@ def eval_command(
     gateway: bool = typer.Option(
         False, "--gateway", "-g", help="Route LLM API calls through HUD Gateway"
     ),
+    taskset: str | None = typer.Option(
+        None, "--taskset", "-t", help="Taskset slug to associate job with"
+    ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
 
@@ -801,6 +832,7 @@ def eval_command(
         byok=byok,
         quiet=quiet,
         gateway=gateway,
+        taskset=taskset,
     )
 
     # Find source if not provided

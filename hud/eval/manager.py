@@ -56,14 +56,16 @@ def _get_eval_name(tasks: list[Task] | None = None) -> str:
     return "eval"
 
 
-def _send_job_enter(
+async def _send_job_enter(
     job_id: str,
     name: str,
     variants: dict[str, Any] | None,
     group: int,
     api_key: str | None,
-) -> None:
-    """Send job enter payload (sync request before traces start)."""
+    taskset: str | None = None,
+    tasks: list[dict[str, Any]] | None = None,
+) -> list[str] | None:
+    """Send job enter payload (async request before traces start)."""
     import httpx
 
     from hud.eval.types import JobEnterPayload
@@ -71,23 +73,35 @@ def _send_job_enter(
 
     api_key = api_key or settings.api_key
     if not settings.telemetry_enabled or not api_key:
-        return
+        return None
 
     payload = JobEnterPayload(
         name=name,
         variants=variants,
         group=group,
+        taskset=taskset,
+        tasks=tasks if taskset else None,  # only send tasks if taskset specified
     )
 
     try:
-        httpx.post(
-            f"{settings.hud_api_url}/trace/job/{job_id}/enter",
-            json=payload.model_dump(exclude_none=True),
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=10.0,
-        )
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{settings.hud_api_url}/trace/job/{job_id}/enter",
+                json=payload.model_dump(exclude_none=True),
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+        if resp.is_success:
+            try:
+                data = resp.json()
+            except Exception:
+                return None
+            if isinstance(data, dict):
+                ids = data.get("task_version_ids")
+                if isinstance(ids, list) and all(isinstance(x, str) for x in ids):
+                    return ids
     except Exception as e:
         logger.warning("Failed to send job enter: %s", e)
+    return None
 
 
 @asynccontextmanager
@@ -105,6 +119,7 @@ async def run_eval(
     max_concurrent: int | None = None,
     trace: bool = True,
     quiet: bool = False,
+    taskset: str | None = None,
 ) -> AsyncGenerator[EvalContext, None]:
     """Standalone eval context manager.
 
@@ -235,13 +250,37 @@ async def run_eval(
 
     if total_evals == 1:
         if tasks:
+            # Even for single-task evals, --taskset requires a job_enter call so the run
+            # and task are linked to the taskset (via job_id + task_version_id).
+            job_id_for_run = job_id
+            if taskset:
+                eval_name = _get_eval_name(tasks=tasks)
+                if job_id_for_run is None:
+                    job_id_for_run = str(uuid.uuid4())
+
+                task_data = None
+                if not tasks[0].id:
+                    task_data = [tasks[0].model_dump(mode="json", exclude_none=True)]
+
+                created_task_version_ids = await _send_job_enter(
+                    job_id=job_id_for_run,
+                    name=eval_name,
+                    variants=variants,
+                    group=group,
+                    api_key=api_key,
+                    taskset=taskset,
+                    tasks=task_data,
+                )
+                if created_task_version_ids and not tasks[0].id:
+                    tasks[0].id = created_task_version_ids[0]
+
             # Single task - use EvalContext.from_task()
             ctx = EvalContext.from_task(
                 tasks[0],
                 name=name,
                 trace_id=trace_id,
                 api_key=api_key,
-                job_id=job_id,
+                job_id=job_id_for_run,
                 group_id=group_id,
                 variants=variant_combos[0],
                 code_snippet=code_snippet,
@@ -273,13 +312,41 @@ async def run_eval(
         job_url = f"https://hud.ai/jobs/{implicit_job_id}"
 
         # Send job enter (sync request before traces start)
-        _send_job_enter(
+        # Serialize tasks for auto-add to taskset (only tasks without existing backend id).
+        # For v5 scenario tasks, the backend task_version_id is carried in Task.id.
+        tasks_data = None
+        tasks_to_create: list[Task] = []
+        if taskset and tasks:
+            tasks_to_create = [t for t in tasks if not t.id]
+            tasks_data = (
+                [t.model_dump(mode="json", exclude_none=True) for t in tasks_to_create]
+                if tasks_to_create
+                else None
+            )
+        created_task_version_ids = await _send_job_enter(
             job_id=implicit_job_id,
             name=eval_name,
             variants=variants,
             group=group,
             api_key=api_key,
+            taskset=taskset,
+            tasks=tasks_data,
         )
+        if created_task_version_ids and tasks_to_create:
+            # Assign backend IDs back onto the in-memory tasks so trace enter includes
+            # task_version_id.
+            # Platform guarantees ordered one-to-one mapping, but warn if counts differ.
+            if len(created_task_version_ids) != len(tasks_to_create):
+                logger.warning(
+                    "Task count mismatch: sent %d tasks, received %d IDs. "
+                    "Some tasks may not be linked to the taskset.",
+                    len(tasks_to_create),
+                    len(created_task_version_ids),
+                )
+            for task_obj, task_version_id in zip(
+                tasks_to_create, created_task_version_ids, strict=False
+            ):
+                task_obj.id = task_version_id
 
         # Print job URL (not individual trace URLs)
         if not quiet:
