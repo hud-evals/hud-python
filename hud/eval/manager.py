@@ -318,11 +318,11 @@ async def run_eval(
         tasks_to_create: list[Task] = []
         if taskset and tasks:
             tasks_to_create = [t for t in tasks if not t.id]
-            tasks_data = [
-                t.model_dump(mode="json", exclude_none=True)
-                for t in tasks
-                if not t.id  # skip tasks that already exist in platform
-            ]
+            tasks_data = (
+                [t.model_dump(mode="json", exclude_none=True) for t in tasks_to_create]
+                if tasks_to_create
+                else None
+            )
         created_task_version_ids = await _send_job_enter(
             job_id=implicit_job_id,
             name=eval_name,
