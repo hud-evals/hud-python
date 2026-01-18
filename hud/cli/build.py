@@ -1019,16 +1019,23 @@ def build_environment(
     for key, value in build_args.items():
         label_cmd.extend(["--build-arg", f"{key}={value}"])
 
+    # Add secrets to final image build (same as initial build)
+    for secret in secrets or []:
+        label_cmd.extend(["--secret", secret])
+
     label_cmd.append(str(env_dir))
 
     # Run rebuild using Docker's native output formatting
+    env = os.environ.copy()
+    if secrets:
+        env["DOCKER_BUILDKIT"] = "1"
     if verbose:
         # Show Docker's native output when verbose
-        result = subprocess.run(label_cmd, check=False)  # noqa: S603
+        result = subprocess.run(label_cmd, check=False, env=env)  # noqa: S603
     else:
         # Capture output for error reporting, but don't show unless it fails
         result = subprocess.run(  # noqa: S603
-            label_cmd, capture_output=True, text=True, check=False
+            label_cmd, capture_output=True, text=True, check=False, env=env
         )
 
     if result.returncode != 0:
