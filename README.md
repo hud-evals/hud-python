@@ -6,17 +6,7 @@
   </picture>
 </div>
 
-**You can't improve what you can't measure.**
-
 HUD is infrastructure for the agent improvement loop: run evals at scale, see what works, improve your model or environment, repeat. We don't tell you how to build your agent—that's just a for-loop. We give you the infrastructure to make it better.
-
-```mermaid
-flowchart LR
-    A["Run Evals<br/><i>(any agent)</i>"] --> B["See Results<br/><i>(traces)</i>"]
-    B --> C["Find Gaps<br/><i>(what fails)</i>"]
-    C --> D["Train Model<br/>or Improve Env"]
-    D --> A
-```
 
 To learn more, check out our [Documentation](https://docs.hud.ai) and [API Reference](https://docs.hud.ai/reference).
 

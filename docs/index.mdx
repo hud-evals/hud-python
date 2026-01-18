@@ -4,9 +4,7 @@ description: "The agent improvement loop: evals, traces, training, repeat."
 icon: "book"
 ---
 
-**You can't improve what you can't measure.**
-
-HUD is infrastructure for the agent improvement loop. We don't tell you how to build your agent—that's just a for-loop of tool calls. We give you the infrastructure to measure what works, find what doesn't, and improve both your model and your environment.
+HUD is infrastructure for the agent improvement loop. We give you the infrastructure to measure what works, find what doesn't, and improve both your model and your environment.
 
 ```mermaid
 flowchart LR
@@ -30,7 +28,7 @@ Get your API key at [hud.ai/project/api-keys](https://hud.ai/project/api-keys).
 
 ## 1. Your Agent is Just a For-Loop
 
-An agent is a loop that calls tools until it's done. You don't need an agent framework:
+An agent is a loop that calls tools until it's done:
 
 ```python
 import os
