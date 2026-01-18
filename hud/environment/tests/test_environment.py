@@ -214,6 +214,14 @@ class TestEnvironmentMCPProtocol:
             def cached_tools(self) -> list[mcp_types.Tool]:
                 return self._tools_cache
 
+            @property
+            def cached_prompts(self) -> list[mcp_types.Prompt]:
+                return []
+
+            @property
+            def cached_resources(self) -> list[mcp_types.Resource]:
+                return []
+
             async def connect(self) -> None:
                 pass
 
@@ -294,6 +302,14 @@ class TestEnvironmentMCPProtocol:
             def cached_tools(self) -> list[mcp_types.Tool]:
                 return self._tools_cache
 
+            @property
+            def cached_prompts(self) -> list[mcp_types.Prompt]:
+                return []
+
+            @property
+            def cached_resources(self) -> list[mcp_types.Resource]:
+                return []
+
             async def connect(self) -> None:
                 pass
 
@@ -327,3 +343,251 @@ class TestEnvironmentMCPProtocol:
         assert hasattr(env, "_env_call_tool")
         assert callable(env._env_list_tools)
         assert callable(env._env_call_tool)
+
+
+class TestEnvironmentToolFiltering:
+    """Tests for agent-level tool filtering with wildcard support (v4 backwards compat)."""
+
+    @pytest.mark.asyncio
+    async def test_as_tools_no_filter(self) -> None:
+        """as_tools returns all tools when no filter is set."""
+        from hud.environment import Environment
+
+        env = Environment("test")
+
+        @env.tool()
+        def tool_a() -> str:
+            """Tool A."""
+            return "a"
+
+        @env.tool()
+        def tool_b() -> str:
+            """Tool B."""
+            return "b"
+
+        await env._build_routing()
+
+        tools = env.as_tools()
+        tool_names = [t.name for t in tools]
+
+        assert "tool_a" in tool_names
+        assert "tool_b" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_as_tools_exact_include(self) -> None:
+        """as_tools filters with exact include list."""
+        from hud.environment import Environment
+
+        env = Environment("test")
+
+        @env.tool()
+        def tool_a() -> str:
+            """Tool A."""
+            return "a"
+
+        @env.tool()
+        def tool_b() -> str:
+            """Tool B."""
+            return "b"
+
+        env._agent_include = ["tool_a"]
+        await env._build_routing()
+
+        tools = env.as_tools()
+        tool_names = [t.name for t in tools]
+
+        assert "tool_a" in tool_names
+        assert "tool_b" not in tool_names
+
+    @pytest.mark.asyncio
+    async def test_as_tools_exact_exclude(self) -> None:
+        """as_tools filters with exact exclude list."""
+        from hud.environment import Environment
+
+        env = Environment("test")
+
+        @env.tool()
+        def tool_a() -> str:
+            """Tool A."""
+            return "a"
+
+        @env.tool()
+        def tool_b() -> str:
+            """Tool B."""
+            return "b"
+
+        env._agent_exclude = ["tool_a"]
+        await env._build_routing()
+
+        tools = env.as_tools()
+        tool_names = [t.name for t in tools]
+
+        assert "tool_a" not in tool_names
+        assert "tool_b" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_as_tools_wildcard_exclude_prefix(self) -> None:
+        """as_tools filters with wildcard prefix pattern (e.g., 'setup_*')."""
+        from hud.environment import Environment
+
+        env = Environment("test")
+
+        @env.tool()
+        def setup_database() -> str:
+            """Setup tool."""
+            return "setup"
+
+        @env.tool()
+        def setup_user() -> str:
+            """Another setup tool."""
+            return "setup"
+
+        @env.tool()
+        def run_query() -> str:
+            """Regular tool."""
+            return "query"
+
+        env._agent_exclude = ["setup_*"]
+        await env._build_routing()
+
+        tools = env.as_tools()
+        tool_names = [t.name for t in tools]
+
+        assert "setup_database" not in tool_names
+        assert "setup_user" not in tool_names
+        assert "run_query" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_as_tools_wildcard_exclude_contains(self) -> None:
+        """as_tools filters with wildcard contains pattern (e.g., '*setup*')."""
+        from hud.environment import Environment
+
+        env = Environment("test")
+
+        @env.tool()
+        def hud_setup() -> str:
+            """Contains setup."""
+            return "setup"
+
+        @env.tool()
+        def setup_env() -> str:
+            """Starts with setup."""
+            return "setup"
+
+        @env.tool()
+        def my_setup_tool() -> str:
+            """Contains setup in middle."""
+            return "setup"
+
+        @env.tool()
+        def run_query() -> str:
+            """No setup in name."""
+            return "query"
+
+        env._agent_exclude = ["*setup*"]
+        await env._build_routing()
+
+        tools = env.as_tools()
+        tool_names = [t.name for t in tools]
+
+        assert "hud_setup" not in tool_names
+        assert "setup_env" not in tool_names
+        assert "my_setup_tool" not in tool_names
+        assert "run_query" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_as_tools_multiple_wildcard_patterns(self) -> None:
+        """as_tools filters with multiple wildcard patterns."""
+        from hud.environment import Environment
+
+        env = Environment("test")
+
+        @env.tool()
+        def setup_db() -> str:
+            """Setup tool."""
+            return "setup"
+
+        @env.tool()
+        def evaluate_result() -> str:
+            """Evaluate tool."""
+            return "evaluate"
+
+        @env.tool()
+        def checkout_branch() -> str:
+            """Checkout tool."""
+            return "checkout"
+
+        @env.tool()
+        def run_query() -> str:
+            """Regular tool."""
+            return "query"
+
+        env._agent_exclude = ["*setup*", "*evaluate*", "checkout_branch"]
+        await env._build_routing()
+
+        tools = env.as_tools()
+        tool_names = [t.name for t in tools]
+
+        assert "setup_db" not in tool_names
+        assert "evaluate_result" not in tool_names
+        assert "checkout_branch" not in tool_names
+        assert "run_query" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_as_tools_wildcard_include_all(self) -> None:
+        """as_tools with ['*'] include pattern matches all tools."""
+        from hud.environment import Environment
+
+        env = Environment("test")
+
+        @env.tool()
+        def tool_a() -> str:
+            """Tool A."""
+            return "a"
+
+        @env.tool()
+        def tool_b() -> str:
+            """Tool B."""
+            return "b"
+
+        env._agent_include = ["*"]
+        await env._build_routing()
+
+        tools = env.as_tools()
+        tool_names = [t.name for t in tools]
+
+        assert "tool_a" in tool_names
+        assert "tool_b" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_as_tools_include_and_exclude_combined(self) -> None:
+        """as_tools applies both include and exclude filters."""
+        from hud.environment import Environment
+
+        env = Environment("test")
+
+        @env.tool()
+        def browser_navigate() -> str:
+            """Browser tool."""
+            return "nav"
+
+        @env.tool()
+        def browser_setup() -> str:
+            """Browser setup - should be excluded."""
+            return "setup"
+
+        @env.tool()
+        def file_read() -> str:
+            """File tool - not included."""
+            return "read"
+
+        env._agent_include = ["browser_*"]
+        env._agent_exclude = ["*setup*"]
+        await env._build_routing()
+
+        tools = env.as_tools()
+        tool_names = [t.name for t in tools]
+
+        assert "browser_navigate" in tool_names
+        assert "browser_setup" not in tool_names  # Excluded by *setup*
+        assert "file_read" not in tool_names  # Not included by browser_*

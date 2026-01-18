@@ -99,8 +99,13 @@ async def run_dataset(
         quiet=quiet,
         taskset=taskset,
     ) as ctx:
+        # Build agent params - use system_prompt from ctx (set from task.agent_config)
+        final_agent_params = dict(agent_params or {})
+        if ctx.system_prompt and "system_prompt" not in final_agent_params:
+            final_agent_params["system_prompt"] = ctx.system_prompt
+
         # Create agent using AgentType.cls.create()
-        agent = agent_type.cls.create(**(agent_params or {}))
+        agent = agent_type.cls.create(**final_agent_params)
         await agent.run(ctx, max_steps=max_steps)
         # Reward is computed by EvalContext.__aexit__ from evaluate tools
 

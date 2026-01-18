@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from hud.environment.connection import ConnectionType, Connector
 
@@ -180,39 +180,26 @@ class TestRemoteConnectorMixin:
         conn = env._connections["example"]
         assert conn._auth == "Bearer my-token"
 
-    @patch("httpx.Client")
-    def test_connect_hub_fetches_config(self, mock_httpx_cls: MagicMock) -> None:
-        """connect_hub fetches mcp_config from API."""
+    def test_connect_hub_creates_connection(self) -> None:
+        """connect_hub creates connection with correct config."""
         from hud.environment.connectors.remote import RemoteConnectorMixin
 
         class TestEnv(RemoteConnectorMixin):
             def __init__(self) -> None:
                 self._connections: dict[str, Connector] = {}
+                self._hub_config: dict[str, Any] | None = None
 
             def mount(self, server: Any, *, prefix: str | None = None) -> None:
                 pass
 
-        # Mock httpx response
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "mcp_config": {
-                "browser": {"url": "https://mcp.hud.ai/browser"},
-            }
-        }
-        mock_response.raise_for_status = MagicMock()
-
-        mock_client = MagicMock()
-        mock_client.get.return_value = mock_response
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=None)
-        mock_httpx_cls.return_value = mock_client
-
         env = TestEnv()
         with patch("hud.settings.settings") as mock_settings:
-            mock_settings.hud_api_url = "https://api.hud.so"
-            mock_settings.api_key = "test-key"
+            mock_settings.hud_mcp_url = "https://mcp.hud.ai"
+            mock_settings.client_timeout = 300  # Used in connect_mcp for sse_read_timeout
 
-            env.connect_hub("hud/browser")
+            env.connect_hub("browser")
 
-        # connect_hub creates a connection named "hud" (the server name)
+        # connect_hub creates a connection named "hud" (from mcp_config key)
         assert "hud" in env._connections
+        # Verify hub config is stored for serialization
+        assert env._hub_config == {"name": "browser"}

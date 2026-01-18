@@ -12,8 +12,8 @@ from hud.datasets.loader import load_tasks
 class TestLoadTasks:
     """Tests for load_tasks() function."""
 
-    @patch("httpx.Client")
-    @patch("hud.settings.settings")
+    @patch("hud.datasets.loader.httpx.Client")
+    @patch("hud.datasets.loader.settings")
     def test_load_tasks_success(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
@@ -62,8 +62,8 @@ class TestLoadTasks:
             params={"all": "true"},
         )
 
-    @patch("httpx.Client")
-    @patch("hud.settings.settings")
+    @patch("hud.datasets.loader.httpx.Client")
+    @patch("hud.datasets.loader.settings")
     def test_load_tasks_single_task(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
@@ -97,8 +97,8 @@ class TestLoadTasks:
         assert tasks[0].scenario == "checkout"
         assert tasks[0].id == "task-1"
 
-    @patch("httpx.Client")
-    @patch("hud.settings.settings")
+    @patch("hud.datasets.loader.httpx.Client")
+    @patch("hud.datasets.loader.settings")
     def test_load_tasks_no_api_key(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
@@ -129,8 +129,8 @@ class TestLoadTasks:
             params={"all": "true"},
         )
 
-    @patch("httpx.Client")
-    @patch("hud.settings.settings")
+    @patch("hud.datasets.loader.httpx.Client")
+    @patch("hud.datasets.loader.settings")
     def test_load_tasks_http_error(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
@@ -149,8 +149,8 @@ class TestLoadTasks:
         with pytest.raises(ValueError, match="Failed to load tasks"):
             load_tasks("test-org/test-dataset")
 
-    @patch("httpx.Client")
-    @patch("hud.settings.settings")
+    @patch("hud.datasets.loader.httpx.Client")
+    @patch("hud.datasets.loader.settings")
     def test_load_tasks_json_error(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
@@ -171,8 +171,8 @@ class TestLoadTasks:
         with pytest.raises(ValueError, match="Failed to load tasks"):
             load_tasks("test-org/test-dataset")
 
-    @patch("httpx.Client")
-    @patch("hud.settings.settings")
+    @patch("hud.datasets.loader.httpx.Client")
+    @patch("hud.datasets.loader.settings")
     def test_load_tasks_empty(self, mock_settings: MagicMock, mock_client_class: MagicMock) -> None:
         """load_tasks() handles empty dataset."""
         mock_settings.hud_api_url = "https://api.hud.ai"
@@ -192,8 +192,8 @@ class TestLoadTasks:
 
         assert len(tasks) == 0
 
-    @patch("httpx.Client")
-    @patch("hud.settings.settings")
+    @patch("hud.datasets.loader.httpx.Client")
+    @patch("hud.datasets.loader.settings")
     def test_load_tasks_missing_fields(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:

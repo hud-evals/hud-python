@@ -75,15 +75,16 @@ Start from a pre-built template:
 - **Browser** — Browser automation with Playwright
 - **Deep Research** — Web research and analysis tools
 
-### Push via CLI
+### Push via CLI (Advanced)
 
-Develop locally and push directly:
+For automated pipelines or custom registries, you can push directly via CLI:
 
 ```bash
-hud init          # Scaffold a new environment
-hud dev           # Test locally with hot reload
-hud push          # Deploy to platform
+hud build         # Build Docker image
+hud push          # Push to registry (requires HUD_API_KEY)
 ```
+
+See [`hud push`](/reference/cli/push) for details.
 
 ## Environment Details
 

@@ -651,10 +651,12 @@ def build_environment(
     env_vars: dict[str, str] | None = None,
     platform: str | None = None,
     remote_cache: str | None = None,
+    build_args: dict[str, str] | None = None,
 ) -> None:
     """Build a HUD environment and generate lock file."""
     hud_console = HUDConsole()
     env_vars = env_vars or {}
+    build_args = build_args or {}
     hud_console.header("HUD Environment Build")
 
     # Resolve directory
@@ -721,7 +723,7 @@ def build_environment(
         temp_tag,
         no_cache,
         verbose,
-        build_args=None,
+        build_args=build_args or None,
         platform=platform,
         remote_cache=remote_cache,
     ):
@@ -1002,6 +1004,10 @@ def build_environment(
     if image_tag and image_tag not in [version_tag, latest_tag]:
         label_cmd.extend(["-t", image_tag])
 
+    # Add build args to final image build (same as initial build)
+    for key, value in build_args.items():
+        label_cmd.extend(["--build-arg", f"{key}={value}"])
+
     label_cmd.append(str(env_dir))
 
     # Run rebuild using Docker's native output formatting
@@ -1106,6 +1112,9 @@ def build_command(
     env_vars: dict[str, str] | None = None,
     platform: str | None = None,
     remote_cache: str | None = None,
+    build_args: dict[str, str] | None = None,
 ) -> None:
     """Build a HUD environment and generate lock file."""
-    build_environment(directory, tag, no_cache, verbose, env_vars, platform, remote_cache)
+    build_environment(
+        directory, tag, no_cache, verbose, env_vars, platform, remote_cache, build_args
+    )

@@ -566,7 +566,7 @@ class EvalConfig(BaseModel):
             table.add_row("", "")
             table.add_row(f"[dim]{self.agent_type.value} config[/dim]", "")
 
-            config_cls = self.agent_type.cls.config_cls
+            config_cls = self.agent_type.config_cls
             defaults = config_cls()
             overrides = self.agent_config.get(self.agent_type.value, {})
             skip = {

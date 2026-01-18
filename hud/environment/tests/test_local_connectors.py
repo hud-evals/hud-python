@@ -11,13 +11,10 @@ from hud.environment.connection import ConnectionType, Connector
 class TestConnectImage:
     """Tests for LocalConnectorMixin.connect_image."""
 
-    @patch("hud.cli.utils.docker.create_docker_run_command")
-    def test_connect_image_creates_local_connection(self, mock_docker_cmd: MagicMock) -> None:
+    def test_connect_image_creates_local_connection(self) -> None:
         """connect_image creates LOCAL connection with docker command."""
         from hud.environment.connectors.local import LocalConnectorMixin
 
-        mock_docker_cmd.return_value = ["docker", "run", "-i", "--rm", "mcp/fetch"]
-
         class TestEnv(LocalConnectorMixin):
             def __init__(self) -> None:
                 self._connections: dict[str, Connector] = {}
@@ -25,21 +22,32 @@ class TestConnectImage:
             def mount(self, server: Any, *, prefix: str | None = None) -> None:
                 pass
 
-        env = TestEnv()
-        env.connect_image("mcp/fetch")
+        # Mock the import that happens inside connect_image
+        mock_docker_utils = MagicMock()
+        mock_docker_utils.create_docker_run_command.return_value = [
+            "docker",
+            "run",
+            "-i",
+            "--rm",
+            "mcp/fetch",
+        ]
 
-        assert "mcp/fetch" in env._connections
-        conn = env._connections["mcp/fetch"]
-        assert conn.connection_type == ConnectionType.LOCAL
-        mock_docker_cmd.assert_called_once()
+        with patch.dict(
+            "sys.modules",
+            {"hud.cli.utils.docker": mock_docker_utils},
+        ):
+            env = TestEnv()
+            env.connect_image("mcp/fetch")
 
-    @patch("hud.cli.utils.docker.create_docker_run_command")
-    def test_connect_image_with_alias(self, mock_docker_cmd: MagicMock) -> None:
+            assert "mcp/fetch" in env._connections
+            conn = env._connections["mcp/fetch"]
+            assert conn.connection_type == ConnectionType.LOCAL
+            mock_docker_utils.create_docker_run_command.assert_called_once()
+
+    def test_connect_image_with_alias(self) -> None:
         """connect_image uses alias for connection name."""
         from hud.environment.connectors.local import LocalConnectorMixin
 
-        mock_docker_cmd.return_value = ["docker", "run", "-i", "--rm", "mcp/fetch"]
-
         class TestEnv(LocalConnectorMixin):
             def __init__(self) -> None:
                 self._connections: dict[str, Connector] = {}
@@ -47,19 +55,29 @@ class TestConnectImage:
             def mount(self, server: Any, *, prefix: str | None = None) -> None:
                 pass
 
-        env = TestEnv()
-        env.connect_image("mcp/fetch", alias="fetcher")
+        mock_docker_utils = MagicMock()
+        mock_docker_utils.create_docker_run_command.return_value = [
+            "docker",
+            "run",
+            "-i",
+            "--rm",
+            "mcp/fetch",
+        ]
 
-        assert "fetcher" in env._connections
-        assert "mcp/fetch" not in env._connections
+        with patch.dict(
+            "sys.modules",
+            {"hud.cli.utils.docker": mock_docker_utils},
+        ):
+            env = TestEnv()
+            env.connect_image("mcp/fetch", alias="fetcher")
 
-    @patch("hud.cli.utils.docker.create_docker_run_command")
-    def test_connect_image_with_prefix(self, mock_docker_cmd: MagicMock) -> None:
+            assert "fetcher" in env._connections
+            assert "mcp/fetch" not in env._connections
+
+    def test_connect_image_with_prefix(self) -> None:
         """connect_image passes prefix to config."""
         from hud.environment.connectors.local import LocalConnectorMixin
 
-        mock_docker_cmd.return_value = ["docker", "run", "-i", "--rm", "mcp/fetch"]
-
         class TestEnv(LocalConnectorMixin):
             def __init__(self) -> None:
                 self._connections: dict[str, Connector] = {}
@@ -67,19 +85,29 @@ class TestConnectImage:
             def mount(self, server: Any, *, prefix: str | None = None) -> None:
                 pass
 
-        env = TestEnv()
-        env.connect_image("mcp/fetch", prefix="fetch")
+        mock_docker_utils = MagicMock()
+        mock_docker_utils.create_docker_run_command.return_value = [
+            "docker",
+            "run",
+            "-i",
+            "--rm",
+            "mcp/fetch",
+        ]
 
-        conn = env._connections["mcp/fetch"]
-        assert conn.config.prefix == "fetch"
+        with patch.dict(
+            "sys.modules",
+            {"hud.cli.utils.docker": mock_docker_utils},
+        ):
+            env = TestEnv()
+            env.connect_image("mcp/fetch", prefix="fetch")
 
-    @patch("hud.cli.utils.docker.create_docker_run_command")
-    def test_connect_image_returns_self(self, mock_docker_cmd: MagicMock) -> None:
+            conn = env._connections["mcp/fetch"]
+            assert conn.config.prefix == "fetch"
+
+    def test_connect_image_returns_self(self) -> None:
         """connect_image returns self for chaining."""
         from hud.environment.connectors.local import LocalConnectorMixin
 
-        mock_docker_cmd.return_value = ["docker", "run", "-i", "--rm", "mcp/fetch"]
-
         class TestEnv(LocalConnectorMixin):
             def __init__(self) -> None:
                 self._connections: dict[str, Connector] = {}
@@ -87,10 +115,23 @@ class TestConnectImage:
             def mount(self, server: Any, *, prefix: str | None = None) -> None:
                 pass
 
-        env = TestEnv()
-        result = env.connect_image("mcp/fetch")
+        mock_docker_utils = MagicMock()
+        mock_docker_utils.create_docker_run_command.return_value = [
+            "docker",
+            "run",
+            "-i",
+            "--rm",
+            "mcp/fetch",
+        ]
 
-        assert result is env
+        with patch.dict(
+            "sys.modules",
+            {"hud.cli.utils.docker": mock_docker_utils},
+        ):
+            env = TestEnv()
+            result = env.connect_image("mcp/fetch")
+
+            assert result is env
 
 
 class TestConnectServer:

@@ -29,37 +29,16 @@ from openai.types.responses import (
 from openai.types.responses.response_create_params import ToolChoice  # noqa: TC002
 from openai.types.responses.response_input_param import FunctionCallOutput, Message
 from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
-from pydantic import ConfigDict
 
 from hud.settings import settings
 from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
 from hud.utils.strict_schema import ensure_strict_json_schema
 from hud.utils.types import with_signature
 
-from .base import BaseCreateParams, MCPAgent
+from .base import MCPAgent
+from .types import OpenAIConfig, OpenAICreateParams
 
 logger = logging.getLogger(__name__)
-
-
-class OpenAIConfig(BaseAgentConfig):
-    """Configuration model for `OpenAIAgent`."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    model_name: str = "OpenAI"
-    model: str = "gpt-5.1"
-    model_client: AsyncOpenAI | None = None
-    max_output_tokens: int | None = None
-    temperature: float | None = None
-    reasoning: Reasoning | None = None
-    tool_choice: ToolChoice | None = None
-    truncation: Literal["auto", "disabled"] | None = None
-    parallel_tool_calls: bool | None = None
-    validate_api_key: bool = True
-
-
-class OpenAICreateParams(BaseCreateParams, OpenAIConfig):
-    pass
 
 
 class OpenAIAgent(MCPAgent):
@@ -98,11 +77,11 @@ class OpenAIAgent(MCPAgent):
             except Exception as exc:  # pragma: no cover - network validation
                 raise ValueError(f"OpenAI API key is invalid: {exc}") from exc
 
-        self.openai_client = model_client
+        self.openai_client: AsyncOpenAI = model_client
         self._model = self.config.model
         self.max_output_tokens = self.config.max_output_tokens
         self.temperature = self.config.temperature
-        self.reasoning = self.config.reasoning
+        self.reasoning: Reasoning | None = self.config.reasoning
         self.tool_choice: ToolChoice | None = self.config.tool_choice
         self.parallel_tool_calls = self.config.parallel_tool_calls
         self.truncation: Literal["auto", "disabled"] | None = self.config.truncation

@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 import mcp.types as types
 from mcp.types import CallToolRequestParams, CallToolResult
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from hud.settings import settings
 from hud.utils.env import resolve_env_vars as _resolve_env_vars
@@ -31,26 +31,60 @@ class AgentType(str, Enum):
 
     @property
     def cls(self) -> type:
-        from hud.agents import OpenAIAgent, OperatorAgent
-        from hud.agents.claude import ClaudeAgent
-        from hud.agents.gemini import GeminiAgent
-        from hud.agents.gemini_cua import GeminiCUAAgent
-        from hud.agents.openai_chat import OpenAIChatAgent
+        if self == AgentType.CLAUDE:
+            from hud.agents.claude import ClaudeAgent
 
-        mapping: dict[AgentType, type] = {
-            AgentType.CLAUDE: ClaudeAgent,
-            AgentType.OPENAI: OpenAIAgent,
-            AgentType.OPERATOR: OperatorAgent,
-            AgentType.GEMINI: GeminiAgent,
-            AgentType.GEMINI_CUA: GeminiCUAAgent,
-            AgentType.OPENAI_COMPATIBLE: OpenAIChatAgent,
-        }
-        if self == AgentType.INTEGRATION_TEST:
+            return ClaudeAgent
+        elif self == AgentType.OPENAI:
+            from hud.agents import OpenAIAgent
+
+            return OpenAIAgent
+        elif self == AgentType.OPERATOR:
+            from hud.agents import OperatorAgent
+
+            return OperatorAgent
+        elif self == AgentType.GEMINI:
+            from hud.agents.gemini import GeminiAgent
+
+            return GeminiAgent
+        elif self == AgentType.GEMINI_CUA:
+            from hud.agents.gemini_cua import GeminiCUAAgent
+
+            return GeminiCUAAgent
+        elif self == AgentType.OPENAI_COMPATIBLE:
+            from hud.agents.openai_chat import OpenAIChatAgent
+
+            return OpenAIChatAgent
+        elif self == AgentType.INTEGRATION_TEST:
             from hud.agents.misc.integration_test_agent import IntegrationTestRunner
 
             return IntegrationTestRunner
-        if self not in mapping:
+        else:
             raise ValueError(f"Unsupported agent type: {self}")
+
+    @property
+    def config_cls(self) -> type:
+        """Get config class without importing agent (avoids SDK dependency)."""
+        from hud.agents.types import (
+            ClaudeConfig,
+            GeminiConfig,
+            GeminiCUAConfig,
+            OpenAIChatConfig,
+            OpenAIConfig,
+            OperatorConfig,
+        )
+
+        mapping: dict[AgentType, type] = {
+            AgentType.CLAUDE: ClaudeConfig,
+            AgentType.OPENAI: OpenAIConfig,
+            AgentType.OPERATOR: OperatorConfig,
+            AgentType.GEMINI: GeminiConfig,
+            AgentType.GEMINI_CUA: GeminiCUAConfig,
+            AgentType.OPENAI_COMPATIBLE: OpenAIChatConfig,
+            AgentType.INTEGRATION_TEST: BaseAgentConfig,
+        }
+        if self not in mapping:
+            raise ValueError(f"Unsupported agent type for config: {self}")
         return mapping[self]
 
 
@@ -65,27 +99,19 @@ class BaseAgentConfig(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", populate_by_name=True)
 
-    # Model identifier - use 'model' (preferred) or 'checkpoint_name' (alias)
-    model: str | None = Field(
-        default=None, validation_alias=AliasChoices("model", "checkpoint_name")
-    )
-    model_name: str = "Agent"  # Human-readable display name
-
     # LLM-specific setting
     system_prompt: str | None = None
 
-    # Deprecated: kept for backwards compat with v4 task configs, not applied by agent
+    # Deprecated: kept for backwards compat with v4 task configs
+    # allowed_tools/disallowed_tools are applied at Environment level
+    # append_setup_output is applied by EvalContext -> agent
+    # response_tool_name and initial_screenshot are parsed but NOT implemented
     allowed_tools: list[str] | None = None
     disallowed_tools: list[str] | None = None
-    response_tool_name: str | None = None
-    append_setup_output: bool = True
-    append_setup_tool: bool = True  # Alias for append_setup_output (backwards compat)
-    initial_screenshot: bool = True
-
-    @property
-    def checkpoint_name(self) -> str | None:
-        """Alias for model (for backwards compatibility)."""
-        return self.model
+    response_tool_name: str | None = None  # Not implemented
+    append_setup_output: bool = False
+    append_setup_tool: bool = False  # Alias for append_setup_output
+    initial_screenshot: bool = False  # Not implemented
 
 
 class LegacyTask(BaseModel):

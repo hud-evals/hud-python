@@ -7,12 +7,11 @@ icon: "terminal"
 The HUD CLI provides a complete toolkit for creating, developing, and running MCP environments. Commands are organized into two main workflows:
 
 <CardGroup cols={2}>
-<Card title="Build & Ship" icon="hammer" color="#6b21a8">
-  **Directory-based commands** for creating and sharing environments:
+<Card title="Build & Develop" icon="hammer" color="#6b21a8">
+  **Directory-based commands** for creating environments:
   - `hud init` — Create new environment
   - `hud dev` — Develop with hot‑reload
   - `hud build` — Build and generate lock file
-  - `hud push` — Share to registry
 </Card>
 
 <Card title="Run & Evaluate" icon="play" color="#0891b2">
@@ -52,7 +51,6 @@ hud --version
 | `hud init` | Directory | Create new environment | `hud init my-env` |
 | `hud dev` | Directory | Hot-reload development | `hud dev . --interactive` |
 | `hud build` | Directory | Build image & lock file | `hud build . --tag v1.0` |
-| `hud push` | Directory | Share to registry | `hud push . --tag prod` |
 
 ### Running Workflow
 | Command | Input | Description | Example |
@@ -102,12 +100,13 @@ hud build
 Generates `hud.lock.yaml` with metadata and labels image for reproducibility.
 </Step>
 
-<Step title="Push">
-Share to Docker and HUD registries:
+<Step title="Deploy">
+Push to GitHub and connect on [hud.ai](https://hud.ai):
 ```bash
-hud push
+git push
+# Connect on hud.ai → New → Environment
 ```
-Requires `HUD_API_KEY`. Auto-detects registry from Docker login.
+HUD automatically rebuilds when you push changes, like Vercel.
 </Step>
 </Steps>
 
@@ -279,10 +278,6 @@ export ANCHOR_API_KEY=...
 
 <Card title="Build Command" icon="hammer" href="/reference/cli/build">
   Build images and generate lock files
-</Card>
-
-<Card title="Push Command" icon="upload" href="/reference/cli/push">
-  Share environments to registry
 </Card>
 </CardGroup>
 

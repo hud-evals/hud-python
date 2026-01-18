@@ -155,6 +155,9 @@ class EvalContext(Environment):
         self.answer: str | None = None  # Agent's submitted answer
         self.system_prompt: str | None = None  # From task.agent_config, passed to agent
 
+        # Agent config overrides from task (applied by agent when running)
+        self.append_setup_output: bool = False  # Whether to append setup tool output to prompt
+
         # Error tracking
         self.error: BaseException | None = None
 
@@ -230,13 +233,13 @@ class EvalContext(Environment):
         # using the contextvar set in __aenter__ (supports api_key passed to hud.eval())
         ctx._setup_calls = env._setup_calls.copy()
         ctx._evaluate_calls = env._evaluate_calls.copy()
+        ctx._integration_test_calls = getattr(env, "_integration_test_calls", []).copy()
+        ctx._setup_results = getattr(env, "_setup_results", []).copy()
 
         # Copy scenarios (definitions) by reference - they don't change
         ctx._scenarios = getattr(env, "_scenarios", {})
         # Create fresh session state for this eval (parallel evals each need their own)
-        ctx._scenario_sessions = {}
-        ctx._scenario_latest = {}
-        ctx._scenario_answers = {}
+        ctx._active_session = None
 
         # Store source env name for remote scenario lookups
         ctx._source_env_name = env.name
@@ -338,13 +341,26 @@ class EvalContext(Environment):
         # Store task info for scenario execution
         ctx._task = task
 
-        # Set system_prompt from task.agent_config
+        # Copy agent_config fields from task to ctx (these override agent defaults)
         if task.agent_config:
-            if isinstance(task.agent_config, dict):
-                if task.agent_config.get("system_prompt"):
-                    ctx.system_prompt = task.agent_config["system_prompt"]
-            elif task.agent_config.system_prompt:
-                ctx.system_prompt = task.agent_config.system_prompt
+            agent_config = task.agent_config
+            if isinstance(agent_config, dict):
+                if agent_config.get("system_prompt"):
+                    ctx.system_prompt = agent_config["system_prompt"]
+                if agent_config.get("append_setup_output"):
+                    ctx.append_setup_output = agent_config["append_setup_output"]
+                # Also check append_setup_tool alias
+                if agent_config.get("append_setup_tool"):
+                    ctx.append_setup_output = agent_config["append_setup_tool"]
+            else:
+                # It's a BaseAgentConfig or TaskAgentConfig object
+                if getattr(agent_config, "system_prompt", None):
+                    ctx.system_prompt = agent_config.system_prompt
+                if getattr(agent_config, "append_setup_output", False):
+                    ctx.append_setup_output = agent_config.append_setup_output
+                # Also check append_setup_tool alias
+                if getattr(agent_config, "append_setup_tool", False):
+                    ctx.append_setup_output = True
 
         return ctx
 
@@ -426,6 +442,33 @@ class EvalContext(Environment):
     def has_scenario(self) -> bool:
         """True if a scenario is running and can accept submissions."""
         return self._task is not None and self._task.scenario is not None
+
+    @property
+    def setup_output(self) -> str | None:
+        """Get setup tool output as formatted string for prepending to agent context.
+
+        Returns None if no setup tools were executed or all results were empty.
+        Used by agents when append_setup_output is enabled.
+        """
+        import mcp.types as mcp_types
+
+        setup_results = getattr(self, "_setup_results", [])
+        if not setup_results:
+            return None
+
+        output_parts: list[str] = []
+        for result in setup_results:
+            if result.content:
+                output_parts.extend(
+                    block.text
+                    for block in result.content
+                    if isinstance(block, mcp_types.TextContent)
+                )
+
+        if not output_parts:
+            return None
+
+        return "\n".join(output_parts)
 
     # =========================================================================
     # Backend Integration
