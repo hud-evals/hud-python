@@ -667,30 +667,43 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             f"Submitting {len(tasks)} task(s) for remote execution (job_id: {job_id})…"
         )
 
-        if cfg.taskset:
-            tasks_to_create = [t for t in tasks if not t.id]
-            tasks_data = (
-                [t.model_dump(mode="json", exclude_none=True) for t in tasks_to_create]
-                if tasks_to_create
-                else None
-            )
-            ids = await _send_job_enter(
-                job_id=job_id,
-                name=f"eval ({cfg.source})" if cfg.source else "eval",
-                variants=None,
-                group=cfg.group_size,
-                api_key=None,
-                taskset=cfg.taskset,
-                tasks=tasks_data,
-            )
-            if ids:
-                if len(ids) != len(tasks_to_create):
-                    hud_console.warning(
-                        f"Task count mismatch: sent {len(tasks_to_create)} tasks, "
-                        f"received {len(ids)} IDs. Some tasks may not be linked."
-                    )
-                for task_obj, task_version_id in zip(tasks_to_create, ids, strict=False):
-                    task_obj.id = task_version_id
+        # Build a replayable eval config (best-effort sanitize; never include secrets)
+        eval_cfg_dict = cfg.model_dump(mode="json", exclude_none=True)
+        if isinstance(eval_cfg_dict, dict):
+            agent_cfg = eval_cfg_dict.get("agent_config")
+            if isinstance(agent_cfg, dict):
+                eval_cfg_dict["agent_config"] = {
+                    k: v
+                    for k, v in agent_cfg.items()
+                    if not (isinstance(k, str) and "api_key" in k.lower())
+                }
+
+        tasks_to_create = [t for t in tasks if cfg.taskset and not t.id]
+        tasks_data = (
+            [t.model_dump(mode="json", exclude_none=True) for t in tasks_to_create]
+            if tasks_to_create
+            else None
+        )
+
+        ids = await _send_job_enter(
+            job_id=job_id,
+            name=f"eval ({cfg.source})" if cfg.source else "eval",
+            variants=None,
+            group=cfg.group_size,
+            api_key=None,
+            taskset=cfg.taskset,
+            tasks=tasks_data,
+            hud_eval_config=eval_cfg_dict,
+        )
+
+        if cfg.taskset and ids:
+            if len(ids) != len(tasks_to_create):
+                hud_console.warning(
+                    f"Task count mismatch: sent {len(tasks_to_create)} tasks, "
+                    f"received {len(ids)} IDs. Some tasks may not be linked."
+                )
+            for task_obj, task_version_id in zip(tasks_to_create, ids, strict=False):
+                task_obj.id = task_version_id
 
         await submit_rollouts(
             tasks=tasks,
@@ -759,6 +772,11 @@ def eval_command(
     config: list[str] | None = typer.Option(  # noqa: B008
         None, "--config", "-c", help="Agent config: key=value"
     ),
+    from_json: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--from-json",
+        help="Load full eval configuration from a JSON file (e.g. exported from a HUD job).",
+    ),
     # Task-overridable settings
     allowed_tools: str | None = typer.Option(
         None, "--allowed-tools", help="Comma-separated allowed tools"
@@ -811,8 +829,17 @@ def eval_command(
     """
     hud_console.info("🔧 Initializing evaluation...")
 
-    # Load config and merge CLI args
-    cfg = EvalConfig.load().merge_cli(
+    # Load config (TOML by default), optionally override with a JSON config, then merge CLI args
+    if from_json is not None:
+        try:
+            cfg = EvalConfig.model_validate_json(from_json.read_text(encoding="utf-8"))
+        except Exception as e:
+            hud_console.error(f"Failed to load JSON config from {from_json}: {e}")
+            raise typer.Exit(1) from None
+    else:
+        cfg = EvalConfig.load()
+
+    cfg = cfg.merge_cli(
         source=source,
         agent=agent,
         model=model,

@@ -64,6 +64,7 @@ async def _send_job_enter(
     api_key: str | None,
     taskset: str | None = None,
     tasks: list[dict[str, Any]] | None = None,
+    hud_eval_config: dict[str, Any] | None = None,
 ) -> list[str] | None:
     """Send job enter payload (async request before traces start)."""
     import httpx
@@ -81,6 +82,7 @@ async def _send_job_enter(
         group=group,
         taskset=taskset,
         tasks=tasks if taskset else None,  # only send tasks if taskset specified
+        hud_eval_config=hud_eval_config,
     )
 
     try:
