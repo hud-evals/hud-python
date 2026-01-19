@@ -13,6 +13,7 @@ from .environment import Environment
 from .eval import EvalContext
 from .eval import run_eval as eval
 from .telemetry.instrument import instrument
+from .telemetry.parallel_group import parallel_agent_group
 
 
 def trace(*args: object, **kwargs: object) -> EvalContext:
@@ -34,6 +35,7 @@ __all__ = [
     "EvalContext",
     "eval",
     "instrument",
+    "parallel_agent_group",
     "trace",  # Deprecated alias for eval
 ]
 
