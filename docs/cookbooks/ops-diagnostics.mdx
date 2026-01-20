@@ -10,14 +10,14 @@ This cookbook walks through how we built it—focusing on **environment design**
 
 ## Why Hierarchical?
 
-When you connect multiple MCP servers to a single environment, the agent sees all tools at once. For diagnostics across four services, this meant 60+ tools in a flat list. The cognitive load made it harder for the model to select the right tool for the job.
+When you connect multiple MCP servers to a single environment, the agent sees all tools at once. For diagnostics across six services, this meant 60+ tools in a flat list. The cognitive load made it harder for the model to select the right tool for the job.
 
 We restructured into a hierarchy: an orchestrator that delegates to specialized subagents.
 
 ```mermaid
 flowchart TD
     subgraph orch["Orchestrator"]
-        O["4 subagent tools"]
+        O["Up to 6 subagent tools"]
     end
     
     subgraph sentry["Sentry Agent"]
@@ -44,13 +44,25 @@ flowchart TD
         K3["describe_pod"]
     end
     
+    subgraph docs["Docs Agent"]
+        D1["search_docs"]
+    end
+    
+    subgraph github["GitHub Agent"]
+        G1["search_code"]
+        G2["get_issues"]
+        G3["get_workflows"]
+    end
+    
     O --> sentry
     O --> supabase
     O --> railway
     O --> kubectl
+    O --> docs
+    O --> github
 ```
 
-The orchestrator sees only 4 tools—one per specialist. Each specialist has a focused toolset for its domain.
+The orchestrator sees only a handful of tools—one per specialist. Each specialist has a focused toolset for its domain. And crucially, **only subagents with valid credentials are registered**.
 
 ## Environment Design
 
@@ -179,51 +191,95 @@ Provide findings, root cause analysis, and recommended fixes."""
 
 ## Building the Orchestrator
 
-The orchestrator wraps each subagent's scenario as an `AgentTool`:
+### Dynamic Subagent Detection
+
+A key pattern: **only register subagents for which credentials are present**. This lets you run the same orchestrator code with different configurations—maybe you only have Sentry and Supabase credentials locally, but the full set in production.
 
 ```python
 # orchestrator.py
 from hud import Environment
 from hud.tools import AgentTool
-from hud.agents import create_agent
-import hud
+import os
 
-from environments import sentry_env, supabase_env, railway_env, kubectl_env
+orch_env = Environment(name="ops-orchestrator")
 
+# Define subagents with their required env vars
+# Format: (tool_name, module_attr, description, required_env_vars)
+_subagent_configs = [
+    ("investigate_sentry", "sentry_env", "Check error monitoring", ["SENTRY_AUTH_TOKEN"]),
+    ("investigate_supabase", "supabase_env", "Check database/auth", ["SUPABASE_ACCESS_TOKEN"]),
+    ("investigate_railway", "railway_env", "Check deployments", ["RAILWAY_API_TOKEN"]),
+    ("investigate_kubernetes", "kubectl_env", "Check cluster health", ["KUBECONFIG_B64", "KUBECONFIG"]),
+    ("search_docs", "docs_env", "Search internal documentation", ["DOCS_MCP"]),
+    ("investigate_github", "github_env", "Search code and issues", ["GITHUB_PAT"]),
+]
 
-async def diagnose(query: str, model: str = "claude-sonnet-4-5"):
-    orchestrator = Environment(name="ops-orchestrator")
+# Only register subagents with valid credentials
+_subagents = []
+for name, module_attr, desc, required_vars in _subagent_configs:
+    # Check if ANY of the required vars are set (OR logic for alternatives like KUBECONFIG_B64 or KUBECONFIG)
+    if not any(os.getenv(var) for var in required_vars):
+        continue
     
-    # Wrap each subagent as a tool
-    for name, env, desc in [
-        ("investigate_sentry", sentry_env, "Check error monitoring"),
-        ("investigate_supabase", supabase_env, "Check database/auth"),
-        ("investigate_railway", railway_env, "Check deployments"),
-        ("investigate_kubernetes", kubectl_env, "Check cluster health"),
-    ]:
-        tool = AgentTool(
-            env("investigate"),
-            model=model,
-            name=name,
-            description=desc,
-        )
-        orchestrator.add_tool(tool.mcp)
-    
-    @orchestrator.scenario("diagnose")
-    async def run_diagnosis(issue: str):
-        yield f"""You are an ops diagnostics orchestrator.
+    import environments
+    env = getattr(environments, module_attr)
+    _subagents.append((name, env, desc))
 
-**Issue:** {issue}
-
-You have READ-ONLY subagents for Sentry, Supabase, Railway, and Kubernetes.
-Investigate systematically and correlate findings across services."""
-    
-    task = orchestrator("diagnose", issue=query)
-    
-    async with hud.eval(task) as ctx:
-        agent = create_agent(model)
-        return await agent.run(ctx, max_steps=20)
+# Add only the available subagents to the orchestrator
+for name, env, desc in _subagents:
+    tool = AgentTool(
+        env("investigate"),
+        model=os.getenv("ORCH_MODEL", "gpt-4o-mini"),
+        name=name,
+        description=desc,
+    )
+    orch_env.add_tool(tool.mcp)
 ```
+
+Now the orchestrator only exposes tools for services you actually have access to. No more confusing "tool not available" errors.
+
+### Configurable Documentation Search
+
+The docs subagent connects to any MCP server that provides documentation search. Set `DOCS_MCP` to the URL of your docs MCP server:
+
+```python
+# environments/docs.py
+docs_env = Environment(name="docs-agent")
+
+docs_mcp_url = os.getenv("DOCS_MCP")
+if docs_mcp_url:
+    docs_env.connect_mcp_config({
+        "docs": {"url": docs_mcp_url}
+    })
+```
+
+This makes the orchestrator reusable across different organizations—just point `DOCS_MCP` at your own documentation.
+
+### The Scenario
+
+The orchestrator wraps each subagent's scenario as an `AgentTool`:
+
+```python
+def _format_subagent_list():
+    """Dynamically list available subagents for the prompt."""
+    return "\n".join(f"- **{name}**: {desc}" for name, _, desc in _subagents)
+
+@orch_env.scenario("diagnose")
+async def orch_diagnose(query: str):
+    subagent_list = _format_subagent_list()
+    
+    yield f"""You are an ops diagnostics orchestrator with specialized subagents:
+
+{subagent_list}
+
+**Issue to diagnose:** {query}
+
+**IMPORTANT: All subagents are READ-ONLY.**
+
+Investigate systematically and correlate findings across services."""
+```
+
+The prompt dynamically lists only the available subagents, so the agent knows exactly what tools it has.
 
 ### Trace Continuity
 
@@ -470,6 +526,10 @@ The entire investigation—from initial query to actionable recommendations—to
 2. **Scenarios are contracts.** They define what the orchestrator can ask and what the subagent returns.
 
 3. **Custom tools fill gaps.** When MCP servers don't fit your auth model, build direct API integrations.
+
+4. **Dynamic detection enables flexibility.** Only registering subagents with valid credentials means the same code works across different environments—dev, staging, production—with different service access.
+
+5. **Configurable integrations improve reusability.** Making things like `DOCS_MCP` configurable via env vars lets others use your orchestrator with their own services.
 
 ## See Also
 
