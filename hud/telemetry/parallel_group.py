@@ -177,7 +177,7 @@ class ParallelAgentGroup:
             return {}
 
         now = _now_iso()
-        end_time = now if final else self._start_time
+        end_time = now
 
         # Build attributes using TraceStep
         attributes = TraceStep(

@@ -200,15 +200,26 @@ class AgentTool(BaseTool):
         # Tool calls are still recorded via the shared trace_id's context
         is_nested = parent_trace_id is not None
 
-        # If nested, only create a new sub-trace when explicitly requested.
-        use_parent_trace = is_nested and not self._trace_subagent
-        should_trace = self._trace_subagent if is_nested else (self._trace or self._trace_subagent)
+        # Decide how this tool call should be traced:
+        # - inherit: reuse parent trace_id but skip enter/exit registration
+        # - new: start a new trace for this subagent
+        # - none: no tracing
+        if is_nested:
+            trace_mode = "new" if self._trace_subagent else "inherit"
+        else:
+            trace_mode = "new" if (self._trace or self._trace_subagent) else "none"
 
-        trace_id: str | None = None
-        if use_parent_trace:
+        trace_id: str | None
+        trace_enabled: bool
+        if trace_mode == "inherit":
             trace_id = parent_trace_id
-        elif should_trace:
+            trace_enabled = False
+        elif trace_mode == "new":
             trace_id = str(uuid.uuid4())
+            trace_enabled = True
+        else:
+            trace_id = None
+            trace_enabled = False
 
         # Wrap execution with instrumentation to mark as subagent
         # Platform uses category="subagent" to detect and render subagent tool calls
@@ -217,11 +228,14 @@ class AgentTool(BaseTool):
             nonlocal trace_id
             async with run_eval(
                 task,
-                trace=should_trace,
+                trace=trace_enabled,
                 trace_id=trace_id,
                 quiet=True,
             ) as ctx:
-                trace_id = ctx.trace_id
+                # Only update trace_id from ctx when creating a new trace (not reusing parent)
+                if trace_mode == "new":
+                    trace_id = ctx.trace_id
+
                 if self._model:
                     from hud.agents import create_agent
 
