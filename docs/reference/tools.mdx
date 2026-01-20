@@ -152,6 +152,10 @@ async with hud.eval(task) as ctx:
     # All subagent activity appears in this single trace
 ```
 
+To create a separate trace per AgentTool call (useful for parallel subagents),
+set `trace_subagent=True`. The tool result includes the sub-trace id in
+`result.meta["trace_id"]`.
+
 **See Also:** [Ops Diagnostics Cookbook](/cookbook/ops-diagnostics) for a complete hierarchical agent example.
 
 ---

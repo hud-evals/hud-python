@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -159,9 +159,7 @@ class TestParallelAgentGroup:
             agents=[],
         )
 
-        with patch(
-            "hud.telemetry.parallel_group._get_trace_id", return_value=None
-        ):
+        with patch("hud.telemetry.parallel_group._get_trace_id", return_value=None):
             span = group._build_span()
             assert span == {}
 
@@ -219,12 +217,15 @@ class TestParallelAgentGroupContextManager:
         """Test basic context manager usage."""
         queued_spans: list[dict[str, Any]] = []
 
-        with patch(
-            "hud.telemetry.parallel_group.queue_span",
-            side_effect=lambda s: queued_spans.append(s),
-        ), patch(
-            "hud.telemetry.parallel_group._get_trace_id",
-            return_value="test-trace-12345678901234567890",
+        with (
+            patch(
+                "hud.telemetry.parallel_group.queue_span",
+                side_effect=lambda s: queued_spans.append(s),
+            ),
+            patch(
+                "hud.telemetry.parallel_group._get_trace_id",
+                return_value="test-trace-12345678901234567890",
+            ),
         ):
             async with parallel_agent_group(
                 title="Test Group",
@@ -244,12 +245,15 @@ class TestParallelAgentGroupContextManager:
         """Test that status updates emit spans."""
         queued_spans: list[dict[str, Any]] = []
 
-        with patch(
-            "hud.telemetry.parallel_group.queue_span",
-            side_effect=lambda s: queued_spans.append(s),
-        ), patch(
-            "hud.telemetry.parallel_group._get_trace_id",
-            return_value="test-trace-12345678901234567890",
+        with (
+            patch(
+                "hud.telemetry.parallel_group.queue_span",
+                side_effect=lambda s: queued_spans.append(s),
+            ),
+            patch(
+                "hud.telemetry.parallel_group._get_trace_id",
+                return_value="test-trace-12345678901234567890",
+            ),
         ):
             async with parallel_agent_group(
                 title="Test",
@@ -269,11 +273,12 @@ class TestParallelAgentGroupContextManager:
     @pytest.mark.asyncio
     async def test_agent_name_defaults(self) -> None:
         """Test that agent names default correctly."""
-        with patch(
-            "hud.telemetry.parallel_group.queue_span"
-        ), patch(
-            "hud.telemetry.parallel_group._get_trace_id",
-            return_value="test-trace-12345678901234567890",
+        with (
+            patch("hud.telemetry.parallel_group.queue_span"),
+            patch(
+                "hud.telemetry.parallel_group._get_trace_id",
+                return_value="test-trace-12345678901234567890",
+            ),
         ):
             async with parallel_agent_group(
                 title="Test",
@@ -288,11 +293,12 @@ class TestParallelAgentGroupContextManager:
         """Test typical parallel execution pattern."""
         results: list[str] = []
 
-        with patch(
-            "hud.telemetry.parallel_group.queue_span"
-        ), patch(
-            "hud.telemetry.parallel_group._get_trace_id",
-            return_value="test-trace-12345678901234567890",
+        with (
+            patch("hud.telemetry.parallel_group.queue_span"),
+            patch(
+                "hud.telemetry.parallel_group._get_trace_id",
+                return_value="test-trace-12345678901234567890",
+            ),
         ):
             async with parallel_agent_group(
                 title="Parallel Work",
@@ -316,20 +322,23 @@ class TestParallelAgentGroupContextManager:
         """Test that exceptions propagate and final span is still emitted."""
         queued_spans: list[dict[str, Any]] = []
 
-        with patch(
-            "hud.telemetry.parallel_group.queue_span",
-            side_effect=lambda s: queued_spans.append(s),
-        ), patch(
-            "hud.telemetry.parallel_group._get_trace_id",
-            return_value="test-trace-12345678901234567890",
+        with (
+            patch(
+                "hud.telemetry.parallel_group.queue_span",
+                side_effect=lambda s: queued_spans.append(s),
+            ),
+            patch(
+                "hud.telemetry.parallel_group._get_trace_id",
+                return_value="test-trace-12345678901234567890",
+            ),
+            pytest.raises(ValueError, match="Test error"),
         ):
-            with pytest.raises(ValueError, match="Test error"):
-                async with parallel_agent_group(
-                    title="Test",
-                    description="Test",
-                    agents=[{"name": "Worker"}],
-                ) as group:
-                    raise ValueError("Test error")
+            async with parallel_agent_group(
+                title="Test",
+                description="Test",
+                agents=[{"name": "Worker"}],
+            ):
+                raise ValueError("Test error")
 
         # Final span should still be emitted
         assert len(queued_spans) >= 2

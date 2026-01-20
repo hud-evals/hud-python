@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import inspect
+import uuid
 from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
 from fastmcp.tools.tool import FunctionTool, ToolResult
@@ -88,6 +90,7 @@ class AgentTool(BaseTool):
         name: str | None = None,
         description: str | None = None,
         trace: bool = False,
+        trace_subagent: bool = False,
     ) -> None:
         if not model and agent is None:
             raise ValueError("Must provide either 'model' or 'agent'")
@@ -99,6 +102,7 @@ class AgentTool(BaseTool):
         self._agent_cls = agent
         self._agent_params = agent_params or {}
         self._trace = trace
+        self._trace_subagent = trace_subagent
 
         # Get visible params from scenario function
         self._visible_params: set[str] = set()
@@ -196,19 +200,28 @@ class AgentTool(BaseTool):
         # Tool calls are still recorded via the shared trace_id's context
         is_nested = parent_trace_id is not None
 
-        # Trace if explicitly requested AND not nested (nested uses parent trace)
-        should_trace = self._trace and not is_nested
+        # If nested, only create a new sub-trace when explicitly requested.
+        use_parent_trace = is_nested and not self._trace_subagent
+        should_trace = self._trace_subagent if is_nested else (self._trace or self._trace_subagent)
+
+        trace_id: str | None = None
+        if use_parent_trace:
+            trace_id = parent_trace_id
+        elif self._trace or self._trace_subagent:
+            trace_id = str(uuid.uuid4())
 
         # Wrap execution with instrumentation to mark as subagent
         # Platform uses category="subagent" to detect and render subagent tool calls
         @instrument(category="subagent", name=self.name)
         async def _run_subagent() -> ToolResult:
+            nonlocal trace_id
             async with run_eval(
                 task,
                 trace=should_trace,
-                trace_id=parent_trace_id,
+                trace_id=trace_id,
                 quiet=True,
             ) as ctx:
+                trace_id = ctx.trace_id
                 if self._model:
                     from hud.agents import create_agent
 
@@ -218,6 +231,15 @@ class AgentTool(BaseTool):
 
                 result = await agent.run(ctx)
                 content = result.content if hasattr(result, "content") and result.content else ""
-                return ToolResult(content=[TextContent(type="text", text=content)])
+                return ToolResult(
+                    content=[TextContent(type="text", text=content)],
+                    meta={"trace_id": trace_id} if trace_id else None,
+                )
 
-        return await _run_subagent()
+        try:
+            return await _run_subagent()
+        except Exception as e:
+            if trace_id:
+                with contextlib.suppress(Exception):
+                    e.trace_id = trace_id  # type: ignore[attr-defined]
+            raise
