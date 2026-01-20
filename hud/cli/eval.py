@@ -667,19 +667,20 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             f"Submitting {len(tasks)} task(s) for remote execution (job_id: {job_id})…"
         )
 
-        # Build a replayable eval config (best-effort sanitize; never include secrets)
+        # Build a replayable eval config
         eval_cfg_dict = cfg.model_dump(mode="json", exclude_none=True)
+        sensitive_keys = {"api_key", "api_secret", "token", "password", "secret"}
         if isinstance(eval_cfg_dict, dict):
             agent_cfg = eval_cfg_dict.get("agent_config")
             if isinstance(agent_cfg, dict):
-                # Filter api_key from nested agent configs
+                # Filter sensitive fields from nested agent configs
                 sanitized = {}
                 for agent_name, agent_settings in agent_cfg.items():
                     if isinstance(agent_settings, dict):
                         sanitized[agent_name] = {
                             k: v
                             for k, v in agent_settings.items()
-                            if not (isinstance(k, str) and "api_key" in k.lower())
+                            if not any(s in k.lower() for s in sensitive_keys)
                         }
                     else:
                         sanitized[agent_name] = agent_settings
