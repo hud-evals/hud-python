@@ -25,6 +25,7 @@ class TestInitModule:
             "EvalContext",
             "eval",
             "instrument",
+            "parallel_agent_group",
             "trace",  # Deprecated alias for eval
         ]
 
