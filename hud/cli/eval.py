@@ -672,11 +672,18 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         if isinstance(eval_cfg_dict, dict):
             agent_cfg = eval_cfg_dict.get("agent_config")
             if isinstance(agent_cfg, dict):
-                eval_cfg_dict["agent_config"] = {
-                    k: v
-                    for k, v in agent_cfg.items()
-                    if not (isinstance(k, str) and "api_key" in k.lower())
-                }
+                # Filter api_key from nested agent configs
+                sanitized = {}
+                for agent_name, agent_settings in agent_cfg.items():
+                    if isinstance(agent_settings, dict):
+                        sanitized[agent_name] = {
+                            k: v
+                            for k, v in agent_settings.items()
+                            if not (isinstance(k, str) and "api_key" in k.lower())
+                        }
+                    else:
+                        sanitized[agent_name] = agent_settings
+                eval_cfg_dict["agent_config"] = sanitized
 
         tasks_to_create = [t for t in tasks if cfg.taskset and not t.id]
         tasks_data = (
