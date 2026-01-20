@@ -207,7 +207,7 @@ class AgentTool(BaseTool):
         trace_id: str | None = None
         if use_parent_trace:
             trace_id = parent_trace_id
-        elif self._trace or self._trace_subagent:
+        elif should_trace:
             trace_id = str(uuid.uuid4())
 
         # Wrap execution with instrumentation to mark as subagent
