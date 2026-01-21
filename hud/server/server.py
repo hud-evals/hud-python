@@ -35,10 +35,47 @@ _sigterm_received = False
 
 
 def _run_with_sigterm(coro_fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
-    """Run *coro_fn* via anyio.run() and cancel on SIGTERM or SIGINT (POSIX)."""
+    """Run *coro_fn* via anyio.run() and cancel on SIGTERM or SIGINT (POSIX).
+
+    Uses SYNCHRONOUS signal handlers (signal.signal) to guarantee _sigterm_received
+    is set even when the event loop is blocked on I/O (e.g., stdin for stdio transport).
+
+    The async handlers (loop.add_signal_handler) are still registered to trigger
+    graceful cancellation, but the sync handlers are the primary mechanism for
+    setting the shutdown flag.
+    """
     global _sigterm_received
 
     sys.stderr.flush()
+
+    # Track original handlers for cleanup
+    _original_sigterm: Any = None
+    _original_sigint: Any = None
+
+    # Register SYNCHRONOUS signal handlers BEFORE starting the event loop.
+    # This is critical: loop.add_signal_handler only works when the event loop
+    # is actively polling, but with stdio transport the loop is often blocked
+    # on stdin reads. The sync handler fires immediately when the signal arrives.
+    if sys.platform != "win32" and os.getenv("FASTMCP_DISABLE_SIGTERM_HANDLER") != "1":
+
+        def _sync_sigterm_handler(signum: Any, frame: Any) -> None:
+            global _sigterm_received
+            _sigterm_received = True
+            logger.info("SIGTERM received (sync handler), setting shutdown flag")
+            sys.stderr.flush()
+
+        def _sync_sigint_handler(signum: Any, frame: Any) -> None:
+            # SIGINT is for hot-reload, don't set _sigterm_received
+            logger.info("SIGINT received (sync handler)")
+            sys.stderr.flush()
+
+        try:
+            _original_sigterm = signal.signal(signal.SIGTERM, _sync_sigterm_handler)
+            _original_sigint = signal.signal(signal.SIGINT, _sync_sigint_handler)
+            logger.info("Synchronous signal handlers registered")
+            sys.stderr.flush()
+        except (ValueError, OSError) as e:
+            logger.warning("Could not register synchronous signal handlers: %s", e)
 
     # Check if we're already in an event loop
     try:
@@ -49,17 +86,8 @@ def _run_with_sigterm(coro_fn: Callable[..., Any], *args: Any, **kwargs: Any) ->
             "Consider using await hub.run_async() instead of hub.run() in async contexts."
         )
 
-        task = loop.create_task(coro_fn(*args, **kwargs))
-
-        # Try to handle SIGTERM if possible
-        if sys.platform != "win32":
-
-            def handle_sigterm(signum: Any, frame: Any) -> None:
-                logger.info("SIGTERM received in async context, cancelling task...")
-                loop.call_soon_threadsafe(task.cancel)
-
-            signal.signal(signal.SIGTERM, handle_sigterm)
-
+        loop.create_task(coro_fn(*args, **kwargs))  # noqa: RUF006
+        # Sync handlers are already registered above, they will set _sigterm_received
         return
 
     except RuntimeError:
@@ -71,32 +99,33 @@ def _run_with_sigterm(coro_fn: Callable[..., Any], *args: Any, **kwargs: Any) ->
             loop = asyncio.get_running_loop()
             stop_evt = asyncio.Event()
 
-            # Handle SIGTERM for production shutdown
-            def handle_sigterm() -> None:
+            # Async handlers for graceful cancellation (in addition to sync handlers)
+            # These trigger the stop_evt to cancel the task group cleanly
+            def handle_sigterm_async() -> None:
                 global _sigterm_received
-                _sigterm_received = True
-                logger.info("Received SIGTERM signal, setting shutdown flag")
+                _sigterm_received = True  # Redundant with sync handler, but safe
+                logger.info("SIGTERM received (async handler), triggering shutdown")
+                sys.stderr.flush()
                 stop_evt.set()
 
-            # Handle SIGINT for hot-reload
-            def handle_sigint() -> None:
-                logger.info("Received SIGINT signal, triggering hot reload...")
-                # Don't set _sigterm_received for SIGINT
+            def handle_sigint_async() -> None:
+                logger.info("SIGINT received (async handler), triggering hot reload")
+                sys.stderr.flush()
                 stop_evt.set()
 
-            # Handle both SIGTERM and SIGINT for graceful shutdown
-            # In Docker containers, we always want to register our handlers
+            # Register async handlers - these may or may not fire depending on
+            # event loop state, but the sync handlers guarantee the flag is set
             try:
-                loop.add_signal_handler(signal.SIGTERM, handle_sigterm)
-                logger.info("SIGTERM handler registered")
+                loop.add_signal_handler(signal.SIGTERM, handle_sigterm_async)
+                logger.info("SIGTERM async handler registered")
             except (ValueError, OSError) as e:
-                logger.warning("Could not register SIGTERM handler: %s", e)
+                logger.warning("Could not register SIGTERM async handler: %s", e)
 
             try:
-                loop.add_signal_handler(signal.SIGINT, handle_sigint)
-                logger.info("SIGINT handler registered")
+                loop.add_signal_handler(signal.SIGINT, handle_sigint_async)
+                logger.info("SIGINT async handler registered")
             except (ValueError, OSError) as e:
-                logger.warning("Could not register SIGINT handler: %s", e)
+                logger.warning("Could not register SIGINT async handler: %s", e)
 
         try:
             async with anyio.create_task_group() as tg:
@@ -109,14 +138,27 @@ def _run_with_sigterm(coro_fn: Callable[..., Any], *args: Any, **kwargs: Any) ->
                         if stop_evt is not None:
                             await stop_evt.wait()
                         logger.info("Shutdown signal received, initiating graceful shutdown...")
+                        sys.stderr.flush()
                         tg.cancel_scope.cancel()
 
                     tg.start_soon(_watch)
         except* asyncio.CancelledError:
             # This ensures the task group cleans up properly
             logger.info("Task group cancelled, cleaning up...")
+            sys.stderr.flush()
 
-    anyio.run(_runner)
+    try:
+        anyio.run(_runner)
+    finally:
+        # Restore original signal handlers
+        if sys.platform != "win32":
+            try:
+                if _original_sigterm is not None:
+                    signal.signal(signal.SIGTERM, _original_sigterm)
+                if _original_sigint is not None:
+                    signal.signal(signal.SIGINT, _original_sigint)
+            except (ValueError, OSError):
+                pass
 
 
 class MCPServer(FastMCP):

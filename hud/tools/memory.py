@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import logging
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from mcp.types import ContentBlock, TextContent
@@ -73,7 +74,7 @@ class MemoryTool(BaseTool):
                 from qdrant_client import QdrantClient
                 from qdrant_client.http.models import Distance, VectorParams
             except Exception:
-                pass
+                logging.warning("Qdrant is not installed, using in-memory store")
             else:
                 client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
                 try:
