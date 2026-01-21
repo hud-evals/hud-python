@@ -22,8 +22,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Context server uses UNIX domain sockets",
+    sys.platform in ("win32", "darwin"),
+    reason="Context server uses UNIX domain sockets (Windows) / multiprocessing spawn issues (macOS)",
 )
 
 

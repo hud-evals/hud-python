@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path  # noqa: TC003
 from typing import Any
@@ -44,18 +45,19 @@ async def analyze_environment(docker_cmd: list[str], output_format: str, verbose
     ) as progress:
         task = progress.add_task("Initializing MCP client...", total=None)
 
-        # Use FastMCP client directly - no mcp_use deprecation warnings
-        from hud.clients.fastmcp import FastMCPHUDClient
+        from fastmcp import Client as FastMCPClient
 
-        client = FastMCPHUDClient(mcp_config=mcp_config, verbose=verbose, auto_trace=False)
+        from hud.cli.utils.mcp import analyze_environment as mcp_analyze
+
+        client = FastMCPClient(transport=mcp_config)
 
         try:
-            await client.initialize()
+            await client.__aenter__()
             progress.update(task, description="[green]✓ Client initialized[/green]")
 
             # Analyze environment
             progress.update(task, description="Analyzing environment...")
-            analysis = await client.analyze_environment()
+            analysis = await mcp_analyze(client, verbose)
             progress.update(task, description="[green]✓ Analysis complete[/green]")
 
         except Exception as e:
@@ -73,7 +75,8 @@ async def analyze_environment(docker_cmd: list[str], output_format: str, verbose
 
             return
         finally:
-            await client.shutdown()
+            if client.is_connected():
+                await client.close()
 
     # Display results based on format
     if output_format == "json":
@@ -95,11 +98,11 @@ def display_interactive(analysis: dict) -> None:
     # Check if this is a live analysis (has metadata) or metadata-only analysis
     if "metadata" in analysis:
         # Live analysis format
-        for server in analysis["metadata"]["servers"]:
+        for server in analysis["metadata"].get("servers", []):
             meta_table.add_row("Server", f"[green]{server}[/green]")
         meta_table.add_row(
             "Initialized",
-            "[green]✓[/green]" if analysis["metadata"]["initialized"] else "[red]✗[/red]",
+            "[green]✓[/green]" if analysis["metadata"].get("initialized") else "[red]✗[/red]",
         )
     else:
         # Metadata-only format
@@ -254,8 +257,10 @@ def display_markdown(analysis: dict) -> None:
 
     # Check if this is live analysis or metadata-only
     if "metadata" in analysis:
-        md.append(f"- **Servers**: {', '.join(analysis['metadata']['servers'])}")
-        md.append(f"- **Initialized**: {'✓' if analysis['metadata']['initialized'] else '✗'}")
+        servers = analysis["metadata"].get("servers", [])
+        if servers:
+            md.append(f"- **Servers**: {', '.join(servers)}")
+        md.append(f"- **Initialized**: {'✓' if analysis['metadata'].get('initialized') else '✗'}")
     else:
         # Metadata-only format
         if "image" in analysis:
@@ -379,25 +384,27 @@ async def _analyze_with_config(
     ) as progress:
         task = progress.add_task("Initializing MCP client...", total=None)
 
-        # Use FastMCP client directly - no mcp_use deprecation warnings
-        from hud.clients.fastmcp import FastMCPHUDClient
+        from fastmcp import Client as FastMCPClient
 
-        client = FastMCPHUDClient(mcp_config=mcp_config, verbose=verbose)
+        from hud.cli.utils.mcp import analyze_environment as mcp_analyze
+
+        client = FastMCPClient(transport=mcp_config)
 
         try:
-            await client.initialize()
+            await client.__aenter__()
             progress.update(task, description="[green]✓ Client initialized[/green]")
 
             # Analyze environment
             progress.update(task, description="Analyzing environment...")
-            analysis = await client.analyze_environment()
+            analysis = await mcp_analyze(client, verbose)
             progress.update(task, description="[green]✓ Analysis complete[/green]")
 
         except Exception as e:
             progress.update(task, description=f"[red]✗ Failed: {e}[/red]")
             return
         finally:
-            await client.shutdown()
+            if client.is_connected():
+                await client.close()
 
     # Display results based on format
     if output_format == "json":

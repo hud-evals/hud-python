@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager, suppress
 import anyio
 import pytest
 
-from hud.clients import MCPClient
+from fastmcp import Client as MCPClient
 from hud.server import MCPServer
 from hud.server import server as server_mod  # to toggle _sigterm_received
 
@@ -142,8 +142,8 @@ async def test_last_initialize_handler_wins_and_ctx_shape_exists() -> None:
 
     try:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c = MCPClient(mcp_config=cfg, verbose=False)
-        await c.initialize()
+        c = MCPClient({"mcpServers": cfg})
+        await c.__aenter__()
 
         # Call a tool to ensure init didn't break anything
         res = await c.call_tool(name="echo", arguments={"text": "ping"})
@@ -152,7 +152,7 @@ async def test_last_initialize_handler_wins_and_ctx_shape_exists() -> None:
             text = text[0].text
         assert text == "echo:ping"
 
-        await c.shutdown()
+        await c.__aexit__(None, None, None)
     finally:
         with suppress(asyncio.CancelledError):
             task.cancel()

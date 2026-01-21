@@ -50,16 +50,18 @@ class TestAnalyzeEnvironment:
         }
 
         with (
-            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
+            patch("fastmcp.Client") as MockClient,
+            patch("hud.cli.utils.mcp.analyze_environment", new_callable=AsyncMock) as mock_mcp_analyze,
             patch("hud.cli.analyze.console"),
             patch("hud.cli.analyze.display_interactive") as mock_interactive,
         ):
-            # Setup mock client - return an instance with async methods
+            # Setup mock client
             mock_client = MagicMock()
-            mock_client.initialize = AsyncMock()
-            mock_client.analyze_environment = AsyncMock(return_value=mock_analysis)
-            mock_client.shutdown = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.is_connected = MagicMock(return_value=True)
+            mock_client.close = AsyncMock()
             MockClient.return_value = mock_client
+            mock_mcp_analyze.return_value = mock_analysis
 
             await analyze_environment(
                 ["docker", "run", "test"],
@@ -69,9 +71,9 @@ class TestAnalyzeEnvironment:
 
             # Check client was used correctly
             MockClient.assert_called_once()
-            mock_client.initialize.assert_called_once()
-            mock_client.analyze_environment.assert_called_once()
-            mock_client.shutdown.assert_called_once()
+            mock_client.__aenter__.assert_called_once()
+            mock_mcp_analyze.assert_called_once()
+            mock_client.close.assert_called_once()
 
             # Check interactive display was called
             mock_interactive.assert_called_once_with(mock_analysis)
@@ -80,14 +82,15 @@ class TestAnalyzeEnvironment:
     async def test_analyze_environment_failure(self) -> None:
         """Test handling analysis failure."""
         with (
-            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
+            patch("fastmcp.Client") as MockClient,
             patch("hud.cli.analyze.console") as mock_console,
             patch("platform.system", return_value="Windows"),
         ):
             # Setup mock client that will raise exception during initialization
             mock_client = MagicMock()
-            mock_client.initialize = AsyncMock(side_effect=RuntimeError("Connection failed"))
-            mock_client.shutdown = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(side_effect=RuntimeError("Connection failed"))
+            mock_client.is_connected = MagicMock(return_value=True)
+            mock_client.close = AsyncMock()
             MockClient.return_value = mock_client
 
             # Test should not raise exception
@@ -98,8 +101,8 @@ class TestAnalyzeEnvironment:
             )
 
             # Check error was handled
-            mock_client.initialize.assert_called_once()
-            mock_client.shutdown.assert_called_once()
+            mock_client.__aenter__.assert_called_once()
+            mock_client.close.assert_called_once()
 
             # Check console printed Windows-specific error hints
             calls = mock_console.print.call_args_list
@@ -119,17 +122,19 @@ class TestAnalyzeEnvironment:
 
         for output_format in ["json", "markdown", "interactive"]:
             with (
-                patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
+                patch("fastmcp.Client") as MockClient,
+                patch("hud.cli.utils.mcp.analyze_environment", new_callable=AsyncMock) as mock_mcp_analyze,
                 patch("hud.cli.analyze.console") as mock_console,
                 patch("hud.cli.analyze.display_interactive") as mock_interactive,
                 patch("hud.cli.analyze.display_markdown") as mock_markdown,
             ):
                 # Setup mock client
                 mock_client = MagicMock()
-                mock_client.initialize = AsyncMock()
-                mock_client.analyze_environment = AsyncMock(return_value=mock_analysis)
-                mock_client.shutdown = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.is_connected = MagicMock(return_value=True)
+                mock_client.close = AsyncMock()
                 MockClient.return_value = mock_client
+                mock_mcp_analyze.return_value = mock_analysis
 
                 # Run analysis
                 await analyze_environment(
@@ -163,16 +168,18 @@ class TestAnalyzeWithConfig:
         }
 
         with (
-            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
+            patch("fastmcp.Client") as MockClient,
+            patch("hud.cli.utils.mcp.analyze_environment", new_callable=AsyncMock) as mock_mcp_analyze,
             patch("hud.cli.analyze.console"),
             patch("hud.cli.analyze.display_interactive") as mock_interactive,
         ):
             # Setup mock client
             mock_client = MagicMock()
-            mock_client.initialize = AsyncMock()
-            mock_client.analyze_environment = AsyncMock(return_value=mock_analysis)
-            mock_client.shutdown = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.is_connected = MagicMock(return_value=True)
+            mock_client.close = AsyncMock()
             MockClient.return_value = mock_client
+            mock_mcp_analyze.return_value = mock_analysis
 
             await _analyze_with_config(
                 mock_config,
@@ -181,7 +188,7 @@ class TestAnalyzeWithConfig:
             )
 
             # Check client was created with correct config
-            MockClient.assert_called_once_with(mcp_config=mock_config, verbose=False)
+            MockClient.assert_called_once_with(transport=mock_config)
             mock_interactive.assert_called_once_with(mock_analysis)
 
     @pytest.mark.asyncio
@@ -190,13 +197,14 @@ class TestAnalyzeWithConfig:
         mock_config = {"server": {"command": "test"}}
 
         with (
-            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
+            patch("fastmcp.Client") as MockClient,
             patch("hud.cli.analyze.console"),
         ):
             # Setup mock client that fails
             mock_client = MagicMock()
-            mock_client.initialize = AsyncMock(side_effect=Exception("Test error"))
-            mock_client.shutdown = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(side_effect=Exception("Test error"))
+            mock_client.is_connected = MagicMock(return_value=True)
+            mock_client.close = AsyncMock()
             MockClient.return_value = mock_client
 
             # Should not raise
@@ -206,7 +214,7 @@ class TestAnalyzeWithConfig:
                 verbose=False,
             )
 
-            mock_client.shutdown.assert_called_once()
+            mock_client.close.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_analyze_environment_from_config(self) -> None:

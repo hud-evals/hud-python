@@ -142,7 +142,7 @@ class TestConnector:
 
     @pytest.mark.asyncio
     async def test_disconnect_clears_client(self) -> None:
-        """disconnect() exits client context and clears state."""
+        """disconnect() closes client and clears state."""
         connector = Connector(
             transport={},
             config=ConnectionConfig(),
@@ -151,14 +151,14 @@ class TestConnector:
         )
 
         mock_client = MagicMock()
-        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.close = AsyncMock(return_value=None)
         mock_client.is_connected = MagicMock(return_value=True)
         connector.client = mock_client
         connector._tools_cache = [MagicMock()]
 
         await connector.disconnect()
 
-        mock_client.__aexit__.assert_called_once_with(None, None, None)
+        mock_client.close.assert_called_once()
         assert connector.client is None
         assert connector._tools_cache is None
 

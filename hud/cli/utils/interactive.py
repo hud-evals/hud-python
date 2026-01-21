@@ -16,7 +16,7 @@ from rich.tree import Tree
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
-    from hud.clients import MCPClient
+    from fastmcp import Client
 
 console = Console()
 
@@ -33,25 +33,20 @@ class InteractiveMCPTester:
         """
         self.server_url = server_url
         self.verbose = verbose
-        self.client: MCPClient | None = None
+        self.client: Client | None = None
         self.tools: list[Any] = []
         self.console = HUDConsole()
 
     async def connect(self) -> bool:
         """Connect to the MCP server."""
         try:
-            # Lazy import to avoid loading mcp_use on simple CLI commands
-            from hud.clients import MCPClient
+            from fastmcp import Client as FastMCPClient
 
             # Create MCP config for HTTP transport
-            # Note: We explicitly set auth to None to prevent OAuth discovery attempts
-            config = {"server": {"url": self.server_url, "auth": None}}
+            config = {"server": {"url": self.server_url}}
 
-            self.client = MCPClient(
-                mcp_config=config,
-                verbose=self.verbose,
-            )
-            await self.client.initialize()
+            self.client = FastMCPClient(transport=config)
+            await self.client.__aenter__()
 
             # Fetch available tools
             self.tools = await self.client.list_tools()
@@ -63,9 +58,9 @@ class InteractiveMCPTester:
 
     async def disconnect(self) -> None:
         """Disconnect from the MCP server."""
-        if self.client:
-            await self.client.shutdown()
-            self.client = None
+        if self.client and self.client.is_connected():
+            await self.client.close()
+        self.client = None
 
     def display_tools(self) -> None:
         """Display available tools in a nice format."""

@@ -9,12 +9,13 @@ from hud.cli.utils.interactive import InteractiveMCPTester
 
 
 @pytest.mark.asyncio
-@patch("hud.clients.MCPClient")
+@patch("fastmcp.Client")
 async def test_connect_and_disconnect(MockClient):
     client = AsyncMock()
-    client.initialize.return_value = None
+    client.__aenter__ = AsyncMock(return_value=client)
     client.list_tools.return_value = []
-    client.shutdown.return_value = None
+    client.is_connected.return_value = True
+    client.close = AsyncMock()
     MockClient.return_value = client
 
     tester = InteractiveMCPTester("http://localhost:8765/mcp", verbose=False)
@@ -22,6 +23,7 @@ async def test_connect_and_disconnect(MockClient):
     assert ok is True
     assert tester.tools == []
     await tester.disconnect()
+    client.close.assert_called_once()
 
 
 def test_display_tools_handles_empty(capfd):
