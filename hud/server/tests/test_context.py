@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.skipif(
     sys.platform in ("win32", "darwin"),
-    reason="Context server uses UNIX domain sockets (Windows) / multiprocessing spawn issues (macOS)",
+    reason="UNIX domain sockets (Windows) / multiprocessing spawn issues (macOS)",
 )
 
 

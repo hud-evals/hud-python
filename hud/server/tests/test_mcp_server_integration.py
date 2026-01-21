@@ -6,8 +6,8 @@ from contextlib import suppress
 from typing import Any, cast
 
 import pytest
-
 from fastmcp import Client as MCPClient
+
 from hud.server import MCPServer
 from hud.server import server as server_mod  # for toggling _sigterm_received
 from hud.server.low_level import LowLevelServerWithInit

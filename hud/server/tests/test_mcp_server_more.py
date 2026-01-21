@@ -6,8 +6,8 @@ from contextlib import asynccontextmanager, suppress
 
 import anyio
 import pytest
-
 from fastmcp import Client as MCPClient
+
 from hud.server import MCPServer
 from hud.server import server as server_mod  # to toggle _sigterm_received
 

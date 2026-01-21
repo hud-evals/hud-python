@@ -75,7 +75,7 @@ class MemoryTool(BaseTool):
                     Distance,
                     VectorParams,
                 )
-            except Exception:
+            except Exception:  # noqa: S110
                 pass
             else:
                 client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
