@@ -282,8 +282,11 @@ class OpenAIChatAgent(MCPAgent):
         messages.append(assistant_msg)
 
         if return_token_ids:
-            self._continuation_token_ids = list(choice.prompt_token_ids) + list(choice.token_ids)
-            self._continuation_message_count = len(messages)
+            prompt_token_ids = getattr(choice, "prompt_token_ids", None)
+            token_ids = getattr(choice, "token_ids", None)
+            if prompt_token_ids is not None and token_ids is not None:
+                self._continuation_token_ids = list(prompt_token_ids) + list(token_ids)
+                self._continuation_message_count = len(messages)
 
         tool_calls = []
         if msg.tool_calls:
