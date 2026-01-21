@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from mcp.types import ContentBlock, TextContent
@@ -70,8 +70,11 @@ class MemoryTool(BaseTool):
     ) -> Any:
         if qdrant_url:
             try:
-                from qdrant_client import QdrantClient
-                from qdrant_client.http.models import Distance, VectorParams
+                from qdrant_client import QdrantClient  # type: ignore[import-not-found]
+                from qdrant_client.http.models import (  # type: ignore[import-not-found]
+                    Distance,
+                    VectorParams,
+                )
             except Exception:
                 pass
             else:
@@ -141,7 +144,7 @@ class QdrantBackend:
 
     def _load_embedder(self) -> Any:
         try:
-            from sentence_transformers import SentenceTransformer
+            from sentence_transformers import SentenceTransformer  # type: ignore[import-not-found]
         except Exception as e:
             raise RuntimeError("sentence-transformers is required for Qdrant backend") from e
         return SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")

@@ -121,8 +121,9 @@ async def _get_hub_tools(client: Client, hub_name: str, verbose: bool) -> list[s
         result = await client.read_resource(f"file:///{hub_name}/functions")
         if result:
             content = result[0] if result else None
-            if content and hasattr(content, "text"):
-                return json.loads(content.text)
+            text = getattr(content, "text", None) if content else None
+            if text:
+                return json.loads(text)
     except Exception as e:
         if verbose:
             logger.debug("Could not read hub functions for '%s': %s", hub_name, e)

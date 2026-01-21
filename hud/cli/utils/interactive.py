@@ -359,7 +359,7 @@ class InteractiveMCPTester:
             # Display results
             console.print("\n[green]✓ Tool executed successfully[/green]")
 
-            if result.isError:
+            if result.is_error:
                 console.print("[red]Error result:[/red]")
 
             # Display content blocks
@@ -369,7 +369,7 @@ class InteractiveMCPTester:
                         Panel(
                             content.text,
                             title="Result",
-                            border_style="green" if not result.isError else "red",
+                            border_style="green" if not result.is_error else "red",
                         )
                     )
                 elif isinstance(content, ImageContent):
@@ -379,7 +379,7 @@ class InteractiveMCPTester:
                         Panel(
                             f"📷 Image ({mime_type})\nSize: {data_length:,} bytes (base64 encoded)",
                             title="Result",
-                            border_style="green" if not result.isError else "red",
+                            border_style="green" if not result.is_error else "red",
                         )
                     )
                 else:

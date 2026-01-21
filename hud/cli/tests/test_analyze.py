@@ -51,7 +51,9 @@ class TestAnalyzeEnvironment:
 
         with (
             patch("fastmcp.Client") as MockClient,
-            patch("hud.cli.utils.mcp.analyze_environment", new_callable=AsyncMock) as mock_mcp_analyze,
+            patch(
+                "hud.cli.utils.mcp.analyze_environment", new_callable=AsyncMock
+            ) as mock_mcp_analyze,
             patch("hud.cli.analyze.console"),
             patch("hud.cli.analyze.display_interactive") as mock_interactive,
         ):
@@ -123,7 +125,9 @@ class TestAnalyzeEnvironment:
         for output_format in ["json", "markdown", "interactive"]:
             with (
                 patch("fastmcp.Client") as MockClient,
-                patch("hud.cli.utils.mcp.analyze_environment", new_callable=AsyncMock) as mock_mcp_analyze,
+                patch(
+                    "hud.cli.utils.mcp.analyze_environment", new_callable=AsyncMock
+                ) as mock_mcp_analyze,
                 patch("hud.cli.analyze.console") as mock_console,
                 patch("hud.cli.analyze.display_interactive") as mock_interactive,
                 patch("hud.cli.analyze.display_markdown") as mock_markdown,
@@ -169,7 +173,9 @@ class TestAnalyzeWithConfig:
 
         with (
             patch("fastmcp.Client") as MockClient,
-            patch("hud.cli.utils.mcp.analyze_environment", new_callable=AsyncMock) as mock_mcp_analyze,
+            patch(
+                "hud.cli.utils.mcp.analyze_environment", new_callable=AsyncMock
+            ) as mock_mcp_analyze,
             patch("hud.cli.analyze.console"),
             patch("hud.cli.analyze.display_interactive") as mock_interactive,
         ):

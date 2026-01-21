@@ -24,6 +24,7 @@ async def test_memory_tool_add_and_search() -> None:
     assert isinstance(out_add[0], TextContent)
 
     out_search = await tool(action="search", text="alpha")
+    assert isinstance(out_search[0], TextContent)
     assert out_search[0].text.startswith("1.")
 
 
@@ -31,4 +32,5 @@ async def test_memory_tool_add_and_search() -> None:
 async def test_memory_tool_unknown_action() -> None:
     tool = MemoryTool()
     res = await tool(action="noop", text="x")
+    assert isinstance(res[0], TextContent)
     assert res[0].text == "unknown action"
