@@ -194,9 +194,9 @@ def debug(
 
     from .utils.environment import (
         build_environment,
-        find_dockerfile,
         get_image_name,
         image_exists,
+        is_debuggable_directory,
     )
 
     hud_console = HUDConsole()
@@ -224,9 +224,9 @@ def debug(
         first_param = params[0]
         docker_args = params[1:] if len(params) > 1 else []
 
-        # Check if it's a directory with a Dockerfile
+        # Check if it's a directory with a Dockerfile (permissive check for debug)
         p = Path(first_param)
-        if p.exists() and p.is_dir() and find_dockerfile(p) is not None:
+        if is_debuggable_directory(p):
             # Directory mode - like hud dev
             directory = first_param
 

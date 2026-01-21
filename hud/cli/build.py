@@ -17,35 +17,12 @@ from typing import Any
 import typer
 import yaml
 
+from hud.cli.utils.environment import find_dockerfile
 from hud.cli.utils.source_hash import compute_source_hash, list_source_files
 from hud.utils.hud_console import HUDConsole
 from hud.version import __version__ as hud_version
 
 from .utils.registry import save_to_registry
-
-
-def find_dockerfile(directory: Path) -> Path | None:
-    """Find the Dockerfile in a directory, preferring Dockerfile.hud.
-
-    Checks for Dockerfile.hud first (HUD-specific), then falls back to Dockerfile.
-
-    Args:
-        directory: Directory to search in
-
-    Returns:
-        Path to the Dockerfile if found, None otherwise
-    """
-    # Prefer Dockerfile.hud for HUD environments
-    hud_dockerfile = directory / "Dockerfile.hud"
-    if hud_dockerfile.exists():
-        return hud_dockerfile
-
-    # Fall back to standard Dockerfile
-    standard_dockerfile = directory / "Dockerfile"
-    if standard_dockerfile.exists():
-        return standard_dockerfile
-
-    return None
 
 
 def parse_version(version_str: str) -> tuple[int, int, int]:

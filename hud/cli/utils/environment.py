@@ -79,7 +79,20 @@ def build_environment(directory: str | Path, image_name: str, no_cache: bool = F
         True if build succeeded, False otherwise
     """
     dir_path = Path(directory)
+
+    # Validate directory exists and is a directory
+    if not dir_path.exists():
+        hud_console.error(f"Directory does not exist: {directory}")
+        return False
+    if not dir_path.is_dir():
+        hud_console.error(f"Not a directory: {directory}")
+        return False
+
     dockerfile_path = find_dockerfile(dir_path)
+    if dockerfile_path is None:
+        hud_console.error(f"No Dockerfile found in {directory}")
+        hud_console.info("Expected: Dockerfile.hud or Dockerfile")
+        return False
 
     build_cmd = ["docker", "build", "-t", image_name]
 
@@ -134,12 +147,14 @@ def find_dockerfile(directory: Path) -> Path | None:
 
 
 def is_environment_directory(path: str | Path) -> bool:
-    """Check if a path looks like an environment directory.
+    """Check if a path looks like a full environment directory.
 
     An environment directory should have:
     - A Dockerfile (Dockerfile.hud or Dockerfile)
     - A pyproject.toml file
     - Optionally a src directory
+
+    For a more permissive check (Dockerfile only), use is_debuggable_directory.
     """
     dir_path = Path(path)
     if not dir_path.is_dir():
@@ -151,3 +166,22 @@ def is_environment_directory(path: str | Path) -> bool:
 
     # Must have pyproject.toml
     return (dir_path / "pyproject.toml").exists()
+
+
+def is_debuggable_directory(path: str | Path) -> bool:
+    """Check if a directory can be debugged with 'hud debug'.
+
+    This is a more permissive check than is_environment_directory.
+    A debuggable directory only requires a Dockerfile (Dockerfile.hud or Dockerfile).
+    It does NOT require pyproject.toml, allowing debugging of simpler Docker-based
+    MCP servers that don't follow the full HUD environment structure.
+
+    Use is_environment_directory for stricter validation (e.g., for hud build/push).
+    """
+    dir_path = Path(path)
+    if not dir_path.exists():
+        return False
+    if not dir_path.is_dir():
+        return False
+
+    return find_dockerfile(dir_path) is not None
