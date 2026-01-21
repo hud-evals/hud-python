@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 from contextlib import AsyncExitStack
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from fastmcp import Client as FastMCPClient
 from mcp import Implementation, types
@@ -148,25 +148,26 @@ class FastMCPHUDClient(BaseHUDClient):
             meta = {"_hud_trace_id": trace_id}
 
         # FastMCP returns a different result type, convert it
-        client = cast("Any", self._client)
-        # Only pass _meta if we have trace context to avoid test/API issues
+        # Only pass meta if we have trace context to avoid test/API issues
         if meta:
+            meta_kwargs: dict[str, Any] = {"meta": meta}
             try:
-                result = await client.call_tool(
+                result = await self._client.call_tool(
                     name=tool_call.name,
                     arguments=arguments,
-                    meta=meta,
                     raise_on_error=False,  # Don't raise, return error in result
+                    **meta_kwargs,
                 )
-            except TypeError:
-                # Fallback for clients that don't accept _meta
-                result = await client.call_tool(
+            except TypeError as e:
+                if "unexpected keyword argument" not in str(e):
+                    raise
+                result = await self._client.call_tool(
                     name=tool_call.name,
                     arguments=arguments,
                     raise_on_error=False,
                 )
         else:
-            result = await client.call_tool(
+            result = await self._client.call_tool(
                 name=tool_call.name,
                 arguments=arguments,
                 raise_on_error=False,

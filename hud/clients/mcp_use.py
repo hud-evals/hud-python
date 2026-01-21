@@ -243,7 +243,9 @@ class MCPUseHUDClient(BaseHUDClient):
                     arguments=arguments,
                     meta=meta,
                 )
-            except TypeError:
+            except TypeError as e:
+                if "unexpected keyword argument" not in str(e):
+                    raise
                 result = await session.connector.client_session.call_tool(
                     name=original_tool.name,  # Use original tool name, not prefixed
                     arguments=arguments,
