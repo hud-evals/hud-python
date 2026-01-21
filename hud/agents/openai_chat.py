@@ -86,6 +86,9 @@ class OpenAIChatAgent(MCPAgent):
         self.mcp_schemas: list[ChatCompletionToolParam] = []
         self.hud_console = HUDConsole(logger=logger)
 
+        self._continuation_token_ids: list[int] | None = None
+        self._continuation_message_count: int | None = None
+
     @staticmethod
     def _oai_to_mcp(tool_call: Any) -> MCPToolCall:  # type: ignore[valid-type]
         """Convert an OpenAI ``tool_call`` to :class:`MCPToolCall`."""
@@ -230,6 +233,13 @@ class OpenAIChatAgent(MCPAgent):
 
         protected_keys = {"model", "messages", "tools"}
         extra = {k: v for k, v in (self.completion_kwargs or {}).items() if k not in protected_keys}
+        extra_body = extra.get("extra_body") or {}
+        return_token_ids = extra_body.get("return_token_ids")
+
+        if return_token_ids and self._continuation_token_ids and self._continuation_message_count:
+            extra_body["prompt_token_ids"] = self._continuation_token_ids
+            extra_body["continuation_from"] = self._continuation_message_count
+            extra["extra_body"] = extra_body
 
         try:
             response = await self._invoke_chat_completion(
@@ -270,6 +280,13 @@ class OpenAIChatAgent(MCPAgent):
             assistant_msg["tool_calls"] = serialized_tool_calls
 
         messages.append(assistant_msg)
+
+        if return_token_ids:
+            prompt_token_ids = getattr(choice, "prompt_token_ids", None)
+            token_ids = getattr(choice, "token_ids", None)
+            if prompt_token_ids is not None and token_ids is not None:
+                self._continuation_token_ids = list(prompt_token_ids) + list(token_ids)
+                self._continuation_message_count = len(messages)
 
         tool_calls = []
         if msg.tool_calls:
