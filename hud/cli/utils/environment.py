@@ -78,12 +78,22 @@ def build_environment(directory: str | Path, image_name: str, no_cache: bool = F
     Returns:
         True if build succeeded, False otherwise
     """
+    dir_path = Path(directory)
+    dockerfile_path = find_dockerfile(dir_path)
+
     build_cmd = ["docker", "build", "-t", image_name]
+
+    # Specify the Dockerfile path if using Dockerfile.hud
+    if dockerfile_path is not None and dockerfile_path.name != "Dockerfile":
+        build_cmd.extend(["-f", str(dockerfile_path)])
+
     if no_cache:
         build_cmd.append("--no-cache")
     build_cmd.append(str(directory))
 
     hud_console.info(f"🔨 Building image: {image_name}{' (no cache)' if no_cache else ''}")
+    if dockerfile_path is not None and dockerfile_path.name != "Dockerfile":
+        hud_console.info(f"Using {dockerfile_path.name}")
     hud_console.info("")  # Empty line before Docker output
 
     # Just run Docker build directly - it has its own nice live display
@@ -110,11 +120,24 @@ def image_exists(image_name: str) -> bool:
     return result.returncode == 0
 
 
+def find_dockerfile(directory: Path) -> Path | None:
+    """Find Dockerfile in a directory, preferring Dockerfile.hud over Dockerfile."""
+    hud_dockerfile = directory / "Dockerfile.hud"
+    if hud_dockerfile.exists():
+        return hud_dockerfile
+
+    standard_dockerfile = directory / "Dockerfile"
+    if standard_dockerfile.exists():
+        return standard_dockerfile
+
+    return None
+
+
 def is_environment_directory(path: str | Path) -> bool:
     """Check if a path looks like an environment directory.
 
     An environment directory should have:
-    - A Dockerfile
+    - A Dockerfile (Dockerfile.hud or Dockerfile)
     - A pyproject.toml file
     - Optionally a src directory
     """
@@ -122,8 +145,8 @@ def is_environment_directory(path: str | Path) -> bool:
     if not dir_path.is_dir():
         return False
 
-    # Must have Dockerfile
-    if not (dir_path / "Dockerfile").exists():
+    # Must have Dockerfile.hud or Dockerfile
+    if find_dockerfile(dir_path) is None:
         return False
 
     # Must have pyproject.toml
