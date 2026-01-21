@@ -151,14 +151,14 @@ class TestConnector:
         )
 
         mock_client = MagicMock()
-        mock_client.close = AsyncMock(return_value=None)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.is_connected = MagicMock(return_value=True)
         connector.client = mock_client
         connector._tools_cache = [MagicMock()]
 
         await connector.disconnect()
 
-        mock_client.close.assert_called_once()
+        mock_client.__aexit__.assert_called_once_with(None, None, None)
         assert connector.client is None
         assert connector._tools_cache is None
 
