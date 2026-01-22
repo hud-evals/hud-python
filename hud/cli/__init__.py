@@ -224,8 +224,9 @@ def debug(
         first_param = params[0]
         docker_args = params[1:] if len(params) > 1 else []
 
-        # Check if it's a directory
-        if Path(first_param).exists() and is_environment_directory(first_param):
+        # Check if it's a valid environment directory (Dockerfile + pyproject.toml)
+        p = Path(first_param)
+        if is_environment_directory(p):
             # Directory mode - like hud dev
             directory = first_param
 

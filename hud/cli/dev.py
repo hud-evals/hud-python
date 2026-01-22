@@ -477,6 +477,13 @@ def run_with_reload(
     def handle_signal(signum: int, frame: Any) -> None:
         if process:
             process.terminate()
+            try:
+                # Wait for child to gracefully shutdown (run @mcp.shutdown handlers)
+                # Critical for container environments where PID 1 exit kills all processes
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, handle_signal)
@@ -510,6 +517,7 @@ def run_with_reload(
 
         try:
             stop_event = threading.Event()
+            intentional_reload = False  # Track if we terminated intentionally for reload
 
             def _wait_and_set(
                 stop_event: threading.Event, process: subprocess.Popen[bytes]
@@ -537,6 +545,7 @@ def run_with_reload(
                         for change_type, path in relevant_changes:
                             hud_console.info(f"  {change_type}: {path}")
 
+                    intentional_reload = True  # Mark as intentional reload
                     if process is not None:
                         process.terminate()
                     try:
@@ -551,6 +560,17 @@ def run_with_reload(
 
                     time.sleep(0.1)
                     break
+
+            # Only stop if process crashed (not intentional reload)
+            # On Windows, terminate() gives positive exit code, so we can't rely on returncode alone
+            if (
+                not intentional_reload
+                and process is not None
+                and process.returncode is not None
+                and process.returncode != 0
+            ):
+                # Process failed with error, don't restart
+                break
 
         except KeyboardInterrupt:
             if process:
@@ -978,7 +998,12 @@ def run_mcp_dev_server(
     is_child = os.environ.get("_HUD_DEV_CHILD") == "1"
 
     if is_child:
-        asyncio.run(run_mcp_module(module, transport, port, verbose, False, False, new_trace))
+        # Use _run_with_sigterm to ensure proper signal handling in child process.
+        # This allows @mcp.shutdown handlers to run when the parent terminates us
+        # during hot-reload (process.terminate() sends SIGTERM on Unix).
+        from hud.server.server import _run_with_sigterm
+
+        _run_with_sigterm(run_mcp_module, module, transport, port, verbose, False, False, new_trace)
     else:
         run_with_reload(
             module, watch_paths, transport, port, verbose, inspector, interactive, new_trace

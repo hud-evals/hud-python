@@ -17,35 +17,12 @@ from typing import Any
 import typer
 import yaml
 
+from hud.cli.utils.environment import find_dockerfile
 from hud.cli.utils.source_hash import compute_source_hash, list_source_files
 from hud.utils.hud_console import HUDConsole
 from hud.version import __version__ as hud_version
 
 from .utils.registry import save_to_registry
-
-
-def find_dockerfile(directory: Path) -> Path | None:
-    """Find the Dockerfile in a directory, preferring Dockerfile.hud.
-
-    Checks for Dockerfile.hud first (HUD-specific), then falls back to Dockerfile.
-
-    Args:
-        directory: Directory to search in
-
-    Returns:
-        Path to the Dockerfile if found, None otherwise
-    """
-    # Prefer Dockerfile.hud for HUD environments
-    hud_dockerfile = directory / "Dockerfile.hud"
-    if hud_dockerfile.exists():
-        return hud_dockerfile
-
-    # Fall back to standard Dockerfile
-    standard_dockerfile = directory / "Dockerfile"
-    if standard_dockerfile.exists():
-        return standard_dockerfile
-
-    return None
 
 
 def parse_version(version_str: str) -> tuple[int, int, int]:
@@ -448,13 +425,16 @@ async def analyze_mcp_environment(
     from hud.cli.analyze import parse_docker_command
 
     mcp_config = parse_docker_command(docker_cmd)
+    # Extract server name for display (first key in mcp_config)
+    server_name = next(iter(mcp_config.keys()), None)
 
     # Initialize client and measure timing
-    # Use FastMCP client directly - no mcp_use deprecation warnings
-    from hud.clients.fastmcp import FastMCPHUDClient
+    from fastmcp import Client as FastMCPClient
+
+    from hud.cli.utils.mcp import analyze_environment
 
     start_time = time.time()
-    client = FastMCPHUDClient(mcp_config=mcp_config, verbose=verbose)
+    client = FastMCPClient(transport=mcp_config)
     initialized = False
 
     try:
@@ -462,12 +442,12 @@ async def analyze_mcp_environment(
             hud_console.info("Initializing MCP client...")
 
         # Add timeout to fail fast instead of hanging (60 seconds)
-        await asyncio.wait_for(client.initialize(), timeout=60.0)
+        await asyncio.wait_for(client.__aenter__(), timeout=60.0)
         initialized = True
         initialize_ms = int((time.time() - start_time) * 1000)
 
         # Delegate to standard analysis helper
-        full_analysis = await client.analyze_environment()
+        full_analysis = await analyze_environment(client, verbose, server_name=server_name)
 
         # Normalize and enrich with internalTools if a hub map is present
         tools_list = full_analysis.get("tools", [])
@@ -540,9 +520,9 @@ async def analyze_mcp_environment(
         raise HudException from e
     finally:
         # Only shutdown if we successfully initialized
-        if initialized:
+        if initialized and client.is_connected():
             try:
-                await client.shutdown()
+                await client.close()
             except Exception:
                 # Ignore shutdown errors
                 hud_console.warning("Failed to shutdown MCP client")

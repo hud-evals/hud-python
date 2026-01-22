@@ -16,7 +16,7 @@ from rich.tree import Tree
 from hud.utils.hud_console import HUDConsole
 
 if TYPE_CHECKING:
-    from hud.clients import MCPClient
+    from fastmcp import Client
 
 console = Console()
 
@@ -33,25 +33,21 @@ class InteractiveMCPTester:
         """
         self.server_url = server_url
         self.verbose = verbose
-        self.client: MCPClient | None = None
+        self.client: Client | None = None
         self.tools: list[Any] = []
         self.console = HUDConsole()
 
     async def connect(self) -> bool:
         """Connect to the MCP server."""
         try:
-            # Lazy import to avoid loading mcp_use on simple CLI commands
-            from hud.clients import MCPClient
+            from fastmcp import Client as FastMCPClient
 
             # Create MCP config for HTTP transport
-            # Note: We explicitly set auth to None to prevent OAuth discovery attempts
+            # Note: auth=None prevents OAuth discovery attempts on local servers
             config = {"server": {"url": self.server_url, "auth": None}}
 
-            self.client = MCPClient(
-                mcp_config=config,
-                verbose=self.verbose,
-            )
-            await self.client.initialize()
+            self.client = FastMCPClient(transport=config)
+            await self.client.__aenter__()
 
             # Fetch available tools
             self.tools = await self.client.list_tools()
@@ -59,13 +55,14 @@ class InteractiveMCPTester:
             return True
         except Exception as e:
             self.console.error(f"Failed to connect: {e}")
+            await self.disconnect()
             return False
 
     async def disconnect(self) -> None:
         """Disconnect from the MCP server."""
-        if self.client:
-            await self.client.shutdown()
-            self.client = None
+        if self.client and self.client.is_connected():
+            await self.client.close()
+        self.client = None
 
     def display_tools(self) -> None:
         """Display available tools in a nice format."""
@@ -364,7 +361,7 @@ class InteractiveMCPTester:
             # Display results
             console.print("\n[green]✓ Tool executed successfully[/green]")
 
-            if result.isError:
+            if result.is_error:
                 console.print("[red]Error result:[/red]")
 
             # Display content blocks
@@ -374,7 +371,7 @@ class InteractiveMCPTester:
                         Panel(
                             content.text,
                             title="Result",
-                            border_style="green" if not result.isError else "red",
+                            border_style="green" if not result.is_error else "red",
                         )
                     )
                 elif isinstance(content, ImageContent):
@@ -384,7 +381,7 @@ class InteractiveMCPTester:
                         Panel(
                             f"📷 Image ({mime_type})\nSize: {data_length:,} bytes (base64 encoded)",
                             title="Result",
-                            border_style="green" if not result.isError else "red",
+                            border_style="green" if not result.is_error else "red",
                         )
                     )
                 else:

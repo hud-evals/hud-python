@@ -18,6 +18,8 @@ async def test_bash_tool_echo():
     from hud.tools.types import ContentResult
 
     class _FakeSession:
+        _started: bool = True  # Pretend session is already started
+
         async def run(self, cmd: str):
             return ContentResult(output=f"mocked: {cmd}")
 
@@ -41,6 +43,8 @@ async def test_bash_tool_restart_and_no_command():
     from hud.tools.types import ContentResult
 
     class _FakeSession:
+        _started: bool = True  # Pretend session is already started
+
         async def run(self, cmd: str):
             return ContentResult(output="ran")
 

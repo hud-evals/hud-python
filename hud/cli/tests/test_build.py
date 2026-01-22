@@ -60,12 +60,12 @@ class TestIncrementVersion:
     def test_increment_minor(self):
         """Test incrementing minor version."""
         assert increment_version("1.2.3", "minor") == "1.3.0"
-        assert increment_version("0.5.14", "minor") == "0.6.0"
+        assert increment_version("0.5.15", "minor") == "0.6.0"
 
     def test_increment_major(self):
         """Test incrementing major version."""
         assert increment_version("1.2.3", "major") == "2.0.0"
-        assert increment_version("0.5.14", "major") == "1.0.0"
+        assert increment_version("0.5.15", "major") == "1.0.0"
 
     def test_increment_with_v_prefix(self):
         """Test incrementing version with v prefix."""
@@ -206,31 +206,25 @@ RUN pip install fastmcp
 class TestAnalyzeMcpEnvironment:
     """Test analyzing MCP environment."""
 
-    @mock.patch("hud.clients.fastmcp.FastMCPHUDClient")
-    async def test_analyze_success(self, mock_client_class):
+    @mock.patch("hud.cli.utils.mcp.analyze_environment")
+    @mock.patch("fastmcp.Client")
+    async def test_analyze_success(self, mock_client_class, mock_mcp_analyze):
         """Test successful environment analysis."""
         # Setup mock client
-        mock_client = mock.AsyncMock()
+        mock_client = mock.MagicMock()
+        mock_client.__aenter__ = mock.AsyncMock(return_value=mock_client)
+        mock_client.is_connected = mock.MagicMock(return_value=True)
+        mock_client.close = mock.AsyncMock()
         mock_client_class.return_value = mock_client
 
-        # Mock tool
-        mock_tool = mock.Mock()
-        mock_tool.name = "test_tool"
-        mock_tool.description = "Test tool"
-        mock_tool.inputSchema = {"type": "object"}
-
-        # Prefer analyze_environment path (aligns with analyze CLI tests)
-        mock_client.analyze_environment = mock.AsyncMock(
-            return_value={
-                "metadata": {"servers": ["local"], "initialized": True},
-                "tools": [{"name": "test_tool", "description": "Test tool"}],
-                "hub_tools": {},
-                "resources": [],
-                "telemetry": {},
-            }
-        )
-        # Fallback still defined for completeness
-        mock_client.list_tools.return_value = [mock_tool]
+        # Mock analyze_environment return value
+        mock_mcp_analyze.return_value = {
+            "metadata": {"servers": ["local"], "initialized": True},
+            "tools": [{"name": "test_tool", "description": "Test tool"}],
+            "hub_tools": {},
+            "resources": [],
+            "telemetry": {},
+        }
 
         result = await analyze_mcp_environment("test:latest")
 
@@ -240,34 +234,37 @@ class TestAnalyzeMcpEnvironment:
         assert result["tools"][0]["name"] == "test_tool"
         assert "initializeMs" in result
 
-    @mock.patch("hud.clients.fastmcp.FastMCPHUDClient")
+    @mock.patch("fastmcp.Client")
     async def test_analyze_failure(self, mock_client_class):
         """Test failed environment analysis."""
-        # Setup mock client to fail
-        mock_client = mock.AsyncMock()
+        # Setup mock client to fail on __aenter__
+        mock_client = mock.MagicMock()
+        mock_client.__aenter__ = mock.AsyncMock(side_effect=ConnectionError("Connection failed"))
+        mock_client.is_connected = mock.MagicMock(return_value=True)
+        mock_client.close = mock.AsyncMock()
         mock_client_class.return_value = mock_client
-        mock_client.initialize.side_effect = ConnectionError("Connection failed")
 
         from hud.shared.exceptions import HudException
 
         with pytest.raises(HudException, match="Connection failed"):
             await analyze_mcp_environment("test:latest")
 
-    @mock.patch("hud.clients.fastmcp.FastMCPHUDClient")
-    async def test_analyze_verbose_mode(self, mock_client_class):
+    @mock.patch("hud.cli.utils.mcp.analyze_environment")
+    @mock.patch("fastmcp.Client")
+    async def test_analyze_verbose_mode(self, mock_client_class, mock_mcp_analyze):
         """Test analysis in verbose mode."""
-        mock_client = mock.AsyncMock()
+        mock_client = mock.MagicMock()
+        mock_client.__aenter__ = mock.AsyncMock(return_value=mock_client)
+        mock_client.is_connected = mock.MagicMock(return_value=True)
+        mock_client.close = mock.AsyncMock()
         mock_client_class.return_value = mock_client
-        mock_client.analyze_environment = mock.AsyncMock(
-            return_value={
-                "metadata": {"servers": ["local"], "initialized": True},
-                "tools": [],
-                "hub_tools": {},
-                "resources": [],
-                "telemetry": {},
-            }
-        )
-        mock_client.list_tools.return_value = []
+        mock_mcp_analyze.return_value = {
+            "metadata": {"servers": ["local"], "initialized": True},
+            "tools": [],
+            "hub_tools": {},
+            "resources": [],
+            "telemetry": {},
+        }
 
         # Just test that it runs without error in verbose mode
         result = await analyze_mcp_environment("test:latest", verbose=True)
