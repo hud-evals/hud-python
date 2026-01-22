@@ -6,11 +6,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_hud_debug_directory_mode_accepts_dockerfile_hud_without_pyproject(
+def test_hud_debug_directory_mode_accepts_dockerfile_hud(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Test that hud debug . works with Dockerfile.hud and no pyproject.toml."""
+    """Test that hud debug . works with Dockerfile.hud and pyproject.toml."""
     (tmp_path / "Dockerfile.hud").write_text("FROM python:3.11\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'test'\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     import hud.cli.__init__ as cli

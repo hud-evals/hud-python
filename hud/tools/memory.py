@@ -76,7 +76,7 @@ class MemoryTool(BaseTool):
                     Distance,
                     VectorParams,
                 )
-            except Exception:  # noqa: S110
+            except Exception:
                 logging.warning("Qdrant is not installed, using in-memory store")
             else:
                 client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
