@@ -55,7 +55,7 @@ async def test_get_tool_arguments_no_schema(mock_console):
 @patch("hud.cli.utils.interactive.console")
 async def test_call_tool_success(mock_console):
     tester = InteractiveMCPTester("http://x")
-    fake_result = SimpleNamespace(isError=False, content=[SimpleNamespace(text="ok")])
+    fake_result = SimpleNamespace(is_error=False, content=[SimpleNamespace(text="ok")])
     tester.client = AsyncMock()
     tester.client.call_tool.return_value = fake_result
     await tester.call_tool(SimpleNamespace(name="t"), {"a": 1})
