@@ -1003,9 +1003,7 @@ def run_mcp_dev_server(
         # during hot-reload (process.terminate() sends SIGTERM on Unix).
         from hud.server.server import _run_with_sigterm
 
-        _run_with_sigterm(
-            run_mcp_module, module, transport, port, verbose, False, False, new_trace
-        )
+        _run_with_sigterm(run_mcp_module, module, transport, port, verbose, False, False, new_trace)
     else:
         run_with_reload(
             module, watch_paths, transport, port, verbose, inspector, interactive, new_trace
