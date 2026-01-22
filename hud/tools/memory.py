@@ -71,9 +71,12 @@ class MemoryTool(BaseTool):
     ) -> Any:
         if qdrant_url:
             try:
-                from qdrant_client import QdrantClient
-                from qdrant_client.http.models import Distance, VectorParams
-            except Exception:
+                from qdrant_client import QdrantClient  # type: ignore[import-not-found]
+                from qdrant_client.http.models import (  # type: ignore[import-not-found]
+                    Distance,
+                    VectorParams,
+                )
+            except Exception:  # noqa: S110
                 logging.warning("Qdrant is not installed, using in-memory store")
             else:
                 client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
@@ -142,7 +145,7 @@ class QdrantBackend:
 
     def _load_embedder(self) -> Any:
         try:
-            from sentence_transformers import SentenceTransformer
+            from sentence_transformers import SentenceTransformer  # type: ignore[import-not-found]
         except Exception as e:
             raise RuntimeError("sentence-transformers is required for Qdrant backend") from e
         return SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")

@@ -552,6 +552,10 @@ def run_with_reload(
                     time.sleep(0.1)
                     break
 
+            if process is not None and process.returncode is not None and process.returncode > 0:
+                # Process failed with error, don't restart
+                break
+
         except KeyboardInterrupt:
             if process:
                 process.terminate()

@@ -299,10 +299,8 @@ class TestExceptionIntegration:
     @pytest.mark.asyncio
     async def test_client_initialization_flow(self):
         """Test exception flow during client initialization."""
-        from hud.clients.base import BaseHUDClient
-
         # Mock a client that fails initialization
-        client = Mock(spec=BaseHUDClient)
+        client = Mock()
 
         # Simulate missing config
         try:

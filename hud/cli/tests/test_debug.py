@@ -207,13 +207,14 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
+            patch("fastmcp.Client") as MockClient,
         ):
             mock_client = MockClient.return_value
-            mock_client.initialize = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.list_tools = AsyncMock(return_value=mock_tools)
             mock_client.list_resources = AsyncMock(return_value=[])
-            mock_client.shutdown = AsyncMock()
+            mock_client.is_connected = MagicMock(return_value=True)
+            mock_client.close = AsyncMock()
 
             phases = await debug_mcp_stdio(["test-cmd"], logger, max_phase=3)
             assert phases == 3
@@ -240,12 +241,13 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
+            patch("fastmcp.Client") as MockClient,
         ):
             mock_client = MockClient.return_value
-            mock_client.initialize = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.list_tools = AsyncMock(return_value=[])
-            mock_client.shutdown = AsyncMock()
+            mock_client.is_connected = MagicMock(return_value=True)
+            mock_client.close = AsyncMock()
 
             phases = await debug_mcp_stdio(["test-cmd"], logger, max_phase=5)
             assert phases == 2
@@ -277,14 +279,15 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
+            patch("fastmcp.Client") as MockClient,
         ):
             mock_client = MockClient.return_value
-            mock_client.initialize = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.list_tools = AsyncMock(return_value=mock_tools)
             mock_client.list_resources = AsyncMock(return_value=[])
             mock_client.call_tool = AsyncMock()
-            mock_client.shutdown = AsyncMock()
+            mock_client.is_connected = MagicMock(return_value=True)
+            mock_client.close = AsyncMock()
 
             with patch(
                 "hud.cli.debug.time.time", side_effect=[0, 5, 5, 5, 5]
@@ -313,16 +316,17 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
+            patch("fastmcp.Client") as MockClient,
         ):
             mock_client = MockClient.return_value
-            mock_client.initialize = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             # Create proper mock tool
             test_tool = Mock()
             test_tool.name = "test"
             mock_client.list_tools = AsyncMock(return_value=[test_tool])
             mock_client.list_resources = AsyncMock(return_value=[])
-            mock_client.shutdown = AsyncMock()
+            mock_client.is_connected = MagicMock(return_value=True)
+            mock_client.close = AsyncMock()
 
             # Simulate slow init (>30s)
             # time.time() is called at start and after phase 3
@@ -351,19 +355,20 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
+            patch("fastmcp.Client") as MockClient,
         ):
             # Create different mock instances for each client
             mock_clients = []
             for i in range(4):  # 1 main + 3 concurrent
                 mock_client = MagicMock()
-                mock_client.initialize = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
                 # Create proper mock tool
                 test_tool = Mock()
                 test_tool.name = "test"
                 mock_client.list_tools = AsyncMock(return_value=[test_tool])
                 mock_client.list_resources = AsyncMock(return_value=[])
-                mock_client.shutdown = AsyncMock()
+                mock_client.is_connected = MagicMock(return_value=True)
+                mock_client.close = AsyncMock()
                 mock_clients.append(mock_client)
 
             MockClient.side_effect = mock_clients
@@ -376,7 +381,7 @@ class TestDebugMCPStdio:
 
             # Verify all clients were shut down
             for client in mock_clients:
-                client.shutdown.assert_called()
+                client.close.assert_called()
 
     @pytest.mark.asyncio
     async def test_phase_5_concurrent_failure(self) -> None:
@@ -395,7 +400,7 @@ class TestDebugMCPStdio:
         with (
             patch("subprocess.run", return_value=mock_run_result),
             patch("subprocess.Popen", return_value=mock_proc),
-            patch("hud.clients.fastmcp.FastMCPHUDClient") as MockClient,
+            patch("fastmcp.Client") as MockClient,
         ):
             # Set up for phase 1-4 success first
             test_tool = Mock()
@@ -403,21 +408,24 @@ class TestDebugMCPStdio:
 
             # Phase 1-4 client
             phase_client = MagicMock()
-            phase_client.initialize = AsyncMock()
+            phase_client.__aenter__ = AsyncMock(return_value=phase_client)
             phase_client.list_tools = AsyncMock(return_value=[test_tool])
             phase_client.list_resources = AsyncMock(return_value=[])
-            phase_client.shutdown = AsyncMock()
+            phase_client.is_connected = MagicMock(return_value=True)
+            phase_client.close = AsyncMock()
 
             # Phase 5 clients - first succeeds, second fails
             mock_client1 = MagicMock()
-            mock_client1.initialize = AsyncMock()
+            mock_client1.__aenter__ = AsyncMock(return_value=mock_client1)
             mock_client1.list_tools = AsyncMock(return_value=[test_tool])
             mock_client1.list_resources = AsyncMock(return_value=[])
-            mock_client1.shutdown = AsyncMock()
+            mock_client1.is_connected = MagicMock(return_value=True)
+            mock_client1.close = AsyncMock()
 
             mock_client2 = MagicMock()
-            mock_client2.initialize = AsyncMock(side_effect=Exception("Connection failed"))
-            mock_client2.shutdown = AsyncMock()
+            mock_client2.__aenter__ = AsyncMock(side_effect=Exception("Connection failed"))
+            mock_client2.is_connected = MagicMock(return_value=False)
+            mock_client2.close = AsyncMock()
 
             MockClient.side_effect = [phase_client, mock_client1, mock_client2]
 

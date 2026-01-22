@@ -142,7 +142,7 @@ class TestConnector:
 
     @pytest.mark.asyncio
     async def test_disconnect_clears_client(self) -> None:
-        """disconnect() exits client context and clears state."""
+        """disconnect() closes client and clears state."""
         connector = Connector(
             transport={},
             config=ConnectionConfig(),

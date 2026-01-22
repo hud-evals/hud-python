@@ -29,34 +29,37 @@ def test_parse_docker_command():
 
 
 @pytest.mark.asyncio
-@patch("hud.clients.fastmcp.FastMCPHUDClient")
+@patch("hud.cli.utils.mcp.analyze_environment")
+@patch("fastmcp.Client")
 @patch("hud.cli.analyze.console")
-async def test_analyze_environment_success_json(mock_console, MockClient):
-    client = AsyncMock()
-    client.initialize.return_value = None
-    client.analyze_environment.return_value = {"tools": [], "resources": []}
-    client.shutdown.return_value = None
+async def test_analyze_environment_success_json(mock_console, MockClient, mock_mcp_analyze):
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.is_connected = MagicMock(return_value=True)
+    client.close = AsyncMock()
     MockClient.return_value = client
+    mock_mcp_analyze.return_value = {"tools": [], "resources": []}
 
     await analyze_environment(["docker", "run", "img"], output_format="json", verbose=False)
-    assert client.initialize.awaited
-    assert client.analyze_environment.awaited
-    assert client.shutdown.awaited
+    assert client.__aenter__.awaited
+    assert mock_mcp_analyze.awaited
+    assert client.close.awaited
     assert mock_console.print_json.called
 
 
 @pytest.mark.asyncio
-@patch("hud.clients.fastmcp.FastMCPHUDClient")
+@patch("fastmcp.Client")
 @patch("hud.cli.analyze.console")
 async def test_analyze_environment_failure(mock_console, MockClient):
-    client = AsyncMock()
-    client.initialize.side_effect = RuntimeError("boom")
-    client.shutdown.return_value = None
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(side_effect=RuntimeError("boom"))
+    client.is_connected = MagicMock(return_value=True)
+    client.close = AsyncMock()
     MockClient.return_value = client
 
     # Should swallow exception and return without raising
     await analyze_environment(["docker", "run", "img"], output_format="json", verbose=True)
-    assert client.shutdown.awaited
+    assert client.close.awaited
     assert mock_console.print_json.called is False
 
 
@@ -93,28 +96,32 @@ def test_display_markdown_both_paths(capsys):
     assert "MCP Environment Analysis" in captured.out
 
 
-@patch("hud.clients.fastmcp.FastMCPHUDClient")
-async def test_analyze_environment_from_config(MockClient, tmp_path: Path):
-    client = AsyncMock()
-    client.initialize.return_value = None
-    client.analyze_environment.return_value = {"tools": [], "resources": []}
-    client.shutdown.return_value = None
+@patch("hud.cli.utils.mcp.analyze_environment")
+@patch("fastmcp.Client")
+async def test_analyze_environment_from_config(MockClient, mock_mcp_analyze, tmp_path: Path):
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.is_connected = MagicMock(return_value=True)
+    client.close = AsyncMock()
     MockClient.return_value = client
+    mock_mcp_analyze.return_value = {"tools": [], "resources": []}
 
     cfg = tmp_path / "mcp.json"
     cfg.write_text('{"local": {"command": "docker", "args": ["run", "img"]}}')
     await analyze_environment_from_config(cfg, output_format="json", verbose=False)
-    assert client.initialize.awaited and client.shutdown.awaited
+    assert client.__aenter__.awaited and client.close.awaited
 
 
-@patch("hud.clients.fastmcp.FastMCPHUDClient")
-async def test_analyze_environment_from_mcp_config(MockClient):
-    client = AsyncMock()
-    client.initialize.return_value = None
-    client.analyze_environment.return_value = {"tools": [], "resources": []}
-    client.shutdown.return_value = None
+@patch("hud.cli.utils.mcp.analyze_environment")
+@patch("fastmcp.Client")
+async def test_analyze_environment_from_mcp_config(MockClient, mock_mcp_analyze):
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.is_connected = MagicMock(return_value=True)
+    client.close = AsyncMock()
     MockClient.return_value = client
+    mock_mcp_analyze.return_value = {"tools": [], "resources": []}
 
     mcp_config = {"local": {"command": "docker", "args": ["run", "img"]}}
     await analyze_environment_from_mcp_config(mcp_config, output_format="json", verbose=False)
-    assert client.initialize.awaited and client.shutdown.awaited
+    assert client.__aenter__.awaited and client.close.awaited
