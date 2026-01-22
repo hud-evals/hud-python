@@ -141,9 +141,10 @@ class Connector:
         Always fetches fresh data from the server (no caching check).
         The result is cached for use by router.build() via cached_tools property.
         """
-        if self.client is None:
+        client = self.client
+        if client is None:
             raise RuntimeError("Not connected - call connect() first")
-        tools = await self.client.list_tools()
+        tools = await client.list_tools()
 
         result: list[mcp_types.Tool] = []
         for tool in tools:
@@ -188,12 +189,54 @@ class Connector:
         self, name: str, arguments: dict[str, Any] | None = None
     ) -> mcp_types.CallToolResult:
         """Call a tool, stripping prefix if needed."""
-        if self.client is None:
+        client = self.client
+        if client is None:
             raise RuntimeError("Not connected - call connect() first")
         # Strip prefix when calling remote
         if self.config.prefix and name.startswith(f"{self.config.prefix}_"):
             name = name[len(self.config.prefix) + 1 :]
-        return await self.client.call_tool_mcp(name, arguments or {})
+
+        from hud.eval.context import get_current_trace_id
+
+        args = dict(arguments or {})
+        trace_id = get_current_trace_id()
+        meta = {"_hud_trace_id": trace_id} if trace_id else None
+
+        if meta:
+            try:
+                meta_kwargs: dict[str, Any] = {"meta": meta}
+                result = await client.call_tool(name=name, arguments=args, **meta_kwargs)
+            except TypeError as e:
+                if "unexpected keyword argument" not in str(e):
+                    raise
+                try:
+                    meta_kwargs = {"_meta": meta}
+                    result = await client.call_tool(name=name, arguments=args, **meta_kwargs)
+                except TypeError as e2:
+                    if "unexpected keyword argument" not in str(e2):
+                        raise
+                    result = await client.call_tool(name=name, arguments=args)
+        else:
+            result = await client.call_tool(name=name, arguments=args)
+
+        # FastMCP and mcp-python use slightly different result shapes/types.
+        # Normalize to mcp.types.CallToolResult for the rest of HUD.
+        is_error = getattr(result, "isError", None)
+        if is_error is None:
+            is_error = getattr(result, "is_error", False)
+        structured = getattr(result, "structuredContent", None)
+        if structured is None:
+            structured = getattr(result, "structured_content", None)
+
+        content = getattr(result, "content", None)
+        if content is None:
+            content = []
+
+        return mcp_types.CallToolResult(
+            content=content,
+            isError=bool(is_error),
+            structuredContent=structured,
+        )
 
     async def list_resources(self) -> list[mcp_types.Resource]:
         """Fetch resources from server and cache.
