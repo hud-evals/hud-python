@@ -53,7 +53,7 @@ class VersionInfo(NamedTuple):
 
 
 def _is_in_virtualenv() -> bool:
-    if "uv/tools/" in sys.prefix:
+    if "uv/tools/" in sys.prefix.replace("\\", "/"):
         return False
     if sys.prefix != sys.base_prefix:
         return True
