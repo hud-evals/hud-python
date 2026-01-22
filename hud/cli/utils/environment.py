@@ -147,16 +147,16 @@ def find_dockerfile(directory: Path) -> Path | None:
 
 
 def is_environment_directory(path: str | Path) -> bool:
-    """Check if a path looks like a full environment directory.
+    """Check if a path looks like an environment directory.
 
     An environment directory should have:
     - A Dockerfile (Dockerfile.hud or Dockerfile)
     - A pyproject.toml file
     - Optionally a src directory
-
-    For a more permissive check (Dockerfile only), use is_debuggable_directory.
     """
     dir_path = Path(path)
+    if not dir_path.exists():
+        return False
     if not dir_path.is_dir():
         return False
 
@@ -166,22 +166,3 @@ def is_environment_directory(path: str | Path) -> bool:
 
     # Must have pyproject.toml
     return (dir_path / "pyproject.toml").exists()
-
-
-def is_debuggable_directory(path: str | Path) -> bool:
-    """Check if a directory can be debugged with 'hud debug'.
-
-    This is a more permissive check than is_environment_directory.
-    A debuggable directory only requires a Dockerfile (Dockerfile.hud or Dockerfile).
-    It does NOT require pyproject.toml, allowing debugging of simpler Docker-based
-    MCP servers that don't follow the full HUD environment structure.
-
-    Use is_environment_directory for stricter validation (e.g., for hud build/push).
-    """
-    dir_path = Path(path)
-    if not dir_path.exists():
-        return False
-    if not dir_path.is_dir():
-        return False
-
-    return find_dockerfile(dir_path) is not None

@@ -669,6 +669,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
 
         # Build a replayable eval config
         eval_cfg_dict = cfg.model_dump(mode="json", exclude_none=True)
+        # Use exact key matching to avoid filtering legitimate fields like max_tokens
         sensitive_keys = {"api_key", "api_secret", "token", "password", "secret"}
         if isinstance(eval_cfg_dict, dict):
             agent_cfg = eval_cfg_dict.get("agent_config")
@@ -680,7 +681,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
                         sanitized[agent_name] = {
                             k: v
                             for k, v in agent_settings.items()
-                            if not any(s in k.lower() for s in sensitive_keys)
+                            if k.lower() not in sensitive_keys
                         }
                     else:
                         sanitized[agent_name] = agent_settings
