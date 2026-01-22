@@ -127,33 +127,43 @@ class TestBashTool:
 
     @pytest.mark.asyncio
     async def test_call_restart_with_existing_session(self):
-        """Test restarting the tool when there's an existing session."""
-        from hud.tools.bash import _BashSession
-
+        """Test restarting the tool when there's an existing session calls stop()."""
         tool = BashTool()
 
-        # Create a real _BashSession (not started) so type() works correctly
-        old_session = _BashSession()
-        tool.session = old_session
+        # Track calls across instances of our fake session class
+        stop_called = []
+        start_called = []
 
-        # Mock new session
-        new_session = MagicMock()
-        new_session.start = AsyncMock()
+        class FakeSession:
+            """Fake session that tracks stop/start calls."""
 
-        # Patch _BashSession to return our mock when instantiated
-        # Also patch stop on the old session to avoid errors
-        with (
-            patch("hud.tools.bash._BashSession", return_value=new_session),
-            patch.object(old_session, "stop"),
-        ):
-            result = await tool(restart=True)
+            async def start(self) -> None:
+                start_called.append(True)
 
-            assert isinstance(result, list)
-            assert len(result) == 1
-            assert isinstance(result[0], TextContent)
-            assert result[0].text == "Bash session restarted."
-            new_session.start.assert_called_once()
-            assert tool.session == new_session
+            def stop(self) -> None:
+                stop_called.append(True)
+
+        # Set up existing session
+        old_session = FakeSession()
+        tool.session = old_session  # type: ignore[assignment]
+
+        result = await tool(restart=True)
+
+        # Verify old session was stopped
+        assert len(stop_called) == 1, "stop() should be called on old session"
+
+        # Verify new session was started
+        assert len(start_called) == 1, "start() should be called on new session"
+
+        # Verify result
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert isinstance(result[0], TextContent)
+        assert result[0].text == "Bash session restarted."
+
+        # Verify new session is a FakeSession (type preserved)
+        assert isinstance(tool.session, FakeSession)
+        assert tool.session is not old_session
 
     @pytest.mark.asyncio
     async def test_call_no_command_error(self):
