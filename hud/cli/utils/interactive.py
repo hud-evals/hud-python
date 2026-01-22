@@ -43,7 +43,8 @@ class InteractiveMCPTester:
             from fastmcp import Client as FastMCPClient
 
             # Create MCP config for HTTP transport
-            config = {"server": {"url": self.server_url}}
+            # Note: auth=None prevents OAuth discovery attempts on local servers
+            config = {"server": {"url": self.server_url, "auth": None}}
 
             self.client = FastMCPClient(transport=config)
             await self.client.__aenter__()
@@ -54,6 +55,7 @@ class InteractiveMCPTester:
             return True
         except Exception as e:
             self.console.error(f"Failed to connect: {e}")
+            await self.disconnect()
             return False
 
     async def disconnect(self) -> None:
