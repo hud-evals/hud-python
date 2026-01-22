@@ -49,6 +49,8 @@ async def analyze_environment(docker_cmd: list[str], output_format: str, verbose
         from hud.cli.utils.mcp import analyze_environment as mcp_analyze
 
         client = FastMCPClient(transport=mcp_config)
+        # Extract server name for display (first key in mcp_config)
+        server_name = next(iter(mcp_config.keys()), None)
 
         try:
             await client.__aenter__()
@@ -56,7 +58,7 @@ async def analyze_environment(docker_cmd: list[str], output_format: str, verbose
 
             # Analyze environment
             progress.update(task, description="Analyzing environment...")
-            analysis = await mcp_analyze(client, verbose)
+            analysis = await mcp_analyze(client, verbose, server_name=server_name)
             progress.update(task, description="[green]✓ Analysis complete[/green]")
 
         except Exception as e:

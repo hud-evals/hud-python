@@ -425,6 +425,8 @@ async def analyze_mcp_environment(
     from hud.cli.analyze import parse_docker_command
 
     mcp_config = parse_docker_command(docker_cmd)
+    # Extract server name for display (first key in mcp_config)
+    server_name = next(iter(mcp_config.keys()), None)
 
     # Initialize client and measure timing
     from fastmcp import Client as FastMCPClient
@@ -445,7 +447,7 @@ async def analyze_mcp_environment(
         initialize_ms = int((time.time() - start_time) * 1000)
 
         # Delegate to standard analysis helper
-        full_analysis = await analyze_environment(client, verbose)
+        full_analysis = await analyze_environment(client, verbose, server_name=server_name)
 
         # Normalize and enrich with internalTools if a hub map is present
         tools_list = full_analysis.get("tools", [])

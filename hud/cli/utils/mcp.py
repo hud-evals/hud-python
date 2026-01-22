@@ -12,16 +12,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def analyze_environment(client: Client, verbose: bool = False) -> dict[str, Any]:
+async def analyze_environment(
+    client: Client, verbose: bool = False, server_name: str | None = None
+) -> dict[str, Any]:
     """Analyze an MCP environment via a connected client.
 
     Args:
         client: An initialized fastmcp.Client
         verbose: Enable verbose logging
+        server_name: Optional server name for display
 
     Returns:
-        Dictionary containing tools, hub_tools, resources, prompts, scenarios
+        Dictionary containing tools, hub_tools, resources, prompts, scenarios, telemetry
     """
+    servers = [server_name] if server_name else []
     analysis: dict[str, Any] = {
         "tools": [],
         "hub_tools": {},
@@ -29,7 +33,7 @@ async def analyze_environment(client: Client, verbose: bool = False) -> dict[str
         "prompts": [],
         "scenarios": [],
         "verbose": verbose,
-        "metadata": {"initialized": True},
+        "metadata": {"initialized": True, "servers": servers},
     }
 
     # Get all tools with schemas
