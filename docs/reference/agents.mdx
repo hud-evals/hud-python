@@ -14,7 +14,7 @@ Use the `create()` factory method to instantiate agents with typed parameters:
 from hud.agents import ClaudeAgent
 
 agent = ClaudeAgent.create(
-    checkpoint_name="claude-sonnet-4-5",
+    model="claude-sonnet-4-5",
     max_tokens=8192,
     verbose=True,
 )
@@ -87,7 +87,7 @@ Claude-specific implementation using Anthropic's API.
 
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
-| `checkpoint_name` | `str` | Claude model to use | `"claude-sonnet-4-5"` |
+| `model` | `str` | Claude model to use | `"claude-sonnet-4-5"` |
 | `model_client` | `AsyncAnthropic` | Anthropic client | Auto-created |
 | `max_tokens` | `int` | Maximum response tokens | `16384` |
 | `use_computer_beta` | `bool` | Enable computer-use beta features | `True` |
@@ -102,7 +102,7 @@ from hud.agents import ClaudeAgent
 env = Environment("browser").connect_hub("hud-evals/browser")
 
 agent = ClaudeAgent.create(
-    checkpoint_name="claude-sonnet-4-5",
+    model="claude-sonnet-4-5",
     max_tokens=8192,
 )
 
@@ -123,7 +123,7 @@ OpenAI agent using the Responses API for function calling.
 
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
-| `checkpoint_name` | `str` | Model to use | `"gpt-5.1"` |
+| `model` | `str` | Model to use | `"gpt-5.1"` |
 | `model_client` | `AsyncOpenAI` | OpenAI client | Auto-created |
 | `max_output_tokens` | `int` | Maximum response tokens | `None` |
 | `temperature` | `float` | Sampling temperature | `None` |
@@ -136,7 +136,7 @@ OpenAI agent using the Responses API for function calling.
 
 ```python
 agent = OpenAIAgent.create(
-    checkpoint_name="gpt-4o",
+    model="gpt-4o",
     max_output_tokens=2048,
     temperature=0.7,
 )
@@ -154,7 +154,7 @@ OpenAI Operator-style agent with computer-use capabilities. Extends `OpenAIAgent
 
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
-| `checkpoint_name` | `str` | Model to use | `"computer-use-preview"` |
+| `model` | `str` | Model to use | `"computer-use-preview"` |
 | `environment` | `Literal["windows","mac","linux","browser"]` | Computer environment | `"linux"` |
 
 Inherits all `OpenAIAgent` parameters.
@@ -165,29 +165,81 @@ Inherits all `OpenAIAgent` parameters.
 from hud.agents import GeminiAgent
 ```
 
-Google Gemini agent with native computer-use capabilities.
+Google Gemini agent for standard tool-calling tasks.
 
 **Config Parameters:**
 
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
-| `checkpoint_name` | `str` | Gemini model to use | `"gemini-2.5-computer-use-preview-10-2025"` |
+| `model` | `str` | Gemini model to use | `"gemini-3-pro-preview"` |
 | `model_client` | `genai.Client` | Gemini client | Auto-created |
 | `temperature` | `float` | Sampling temperature | `1.0` |
 | `top_p` | `float` | Top-p sampling | `0.95` |
 | `top_k` | `int` | Top-k sampling | `40` |
 | `max_output_tokens` | `int` | Maximum response tokens | `8192` |
-| `excluded_predefined_functions` | `list[str]` | Predefined functions to exclude | `[]` |
 | `validate_api_key` | `bool` | Validate key on init | `True` |
 
 **Example:**
 
 ```python
 agent = GeminiAgent.create(
-    checkpoint_name="gemini-2.5-computer-use-preview-10-2025",
+    model="gemini-2.5-pro",
     temperature=0.7,
     max_output_tokens=4096,
 )
+```
+
+### GeminiCUAAgent
+
+```python
+from hud.agents import GeminiCUAAgent
+```
+
+Google Gemini Computer Use Agent with native computer-use capabilities. Extends `GeminiAgent` with support for Gemini's predefined computer actions (click, type, scroll, etc.).
+
+<Note>
+Use `GeminiCUAAgent` for computer-use tasks (browser automation, desktop interaction). Use `GeminiAgent` for standard tool-calling tasks.
+</Note>
+
+<Warning>
+Requires the `gemini_computer` tool to be available in the environment. The agent will fail to initialize if this tool is not present.
+</Warning>
+
+**Config Parameters:**
+
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `model` | `str` | Gemini CUA model | `"gemini-2.5-computer-use-preview-10-2025"` |
+| `excluded_predefined_functions` | `list[str]` | Predefined Gemini actions to disable | `[]` |
+
+Inherits all `GeminiAgent` parameters.
+
+**Predefined Functions:**
+
+GeminiCUAAgent supports these native Gemini computer actions:
+- `click_at`, `hover_at`, `type_text_at`
+- `scroll_document`, `scroll_at`
+- `drag_and_drop`
+- `navigate`, `go_back`, `go_forward`, `search`
+- `key_combination`
+- `wait_5_seconds`
+- `open_web_browser`
+
+**Example:**
+
+```python
+from hud import Environment
+from hud.agents import GeminiCUAAgent
+
+env = Environment("browser").connect_hub("hud-evals/browser")
+
+agent = GeminiCUAAgent.create(
+    model="gemini-2.5-computer-use-preview",
+    temperature=0.7,
+)
+
+task = env("navigate", url="https://example.com")
+result = await agent.run(task, max_steps=20)
 ```
 
 ### OpenAIChatAgent
@@ -202,7 +254,7 @@ OpenAI-compatible chat.completions agent. Works with any endpoint implementing t
 
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
-| `checkpoint_name` | `str` | Model name | `"gpt-5-mini"` |
+| `model` | `str` | Model name | `"gpt-5-mini"` |
 | `openai_client` | `AsyncOpenAI` | OpenAI-compatible client | `None` |
 | `api_key` | `str` | API key (if not using client) | `None` |
 | `base_url` | `str` | Base URL (if not using client) | `None` |
@@ -217,7 +269,7 @@ from hud.agents import OpenAIChatAgent
 agent = OpenAIChatAgent.create(
     base_url="http://localhost:11434/v1",  # Ollama
     api_key="not-needed",
-    checkpoint_name="llama3.1",
+    model="llama3.1",
     completion_kwargs={"temperature": 0.2},
 )
 
@@ -226,7 +278,7 @@ from openai import AsyncOpenAI
 
 agent = OpenAIChatAgent.create(
     openai_client=AsyncOpenAI(base_url="http://localhost:8000/v1"),
-    checkpoint_name="served-model",
+    model="served-model",
 )
 ```
 
