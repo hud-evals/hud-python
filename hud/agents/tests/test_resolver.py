@@ -163,6 +163,7 @@ class TestResolveCls:
             # computer-use-preview has sdk_agent_type="operator" but provider default is "openai"
             cls, info = resolve_cls("computer-use-preview")
             assert cls == OperatorAgent
+            assert info is not None
             assert info["provider"]["default_sdk_agent_type"] == "openai"
             assert info["sdk_agent_type"] == "operator"
 
