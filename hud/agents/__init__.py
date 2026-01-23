@@ -47,14 +47,14 @@ def create_agent(model: str, **kwargs: Any) -> MCPAgent:
     # Resolve class and gateway info
     agent_cls, gateway_info = resolve_cls(model)
 
-    # Get model ID from gateway info or use input
+    # Get model name from gateway info or use input
     model_id = model
     if gateway_info:
-        model_id = gateway_info.get("model") or gateway_info.get("id") or model
+        model_id = gateway_info.get("model_name") or model
 
     # Determine provider: from gateway info, or infer from agent class
     if gateway_info:
-        provider = gateway_info.get("provider") or "openai"
+        provider = gateway_info["provider"]["name"]
     else:
         provider = "openai"
         if agent_cls.__name__ == "ClaudeAgent":
