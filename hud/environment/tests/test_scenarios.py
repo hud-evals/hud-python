@@ -1252,6 +1252,7 @@ class TestEvaluationResultDefaults:
             yield 0.8  # Float yield
 
         await env.run_scenario_setup("float-done", {})
+        assert env._active_session is not None
         env._active_session.answer = "done"
         result = await env.run_scenario_evaluate("float-done")
 
@@ -1272,6 +1273,7 @@ class TestEvaluationResultDefaults:
             yield EvaluationResult(reward=0.25, done=False)
 
         await env.run_scenario_setup("partial-progress", {})
+        assert env._active_session is not None
         env._active_session.answer = "partial"
         result = await env.run_scenario_evaluate("partial-progress")
 
@@ -1304,11 +1306,13 @@ class TestSubscoreUsage:
             )
 
         await env.run_scenario_setup("weighted", {})
+        assert env._active_session is not None
         env._active_session.answer = "result"
         result = await env.run_scenario_evaluate("weighted")
 
         assert result is not None
         assert result.reward == 0.75
+        assert result.subscores is not None
         assert len(result.subscores) == 3
         # Verify subscores preserved order and values
         assert result.subscores[0].name == "correctness"
@@ -1337,11 +1341,13 @@ class TestSubscoreUsage:
             )
 
         await env.run_scenario_setup("explained", {})
+        assert env._active_session is not None
         env._active_session.answer = "found 3 items"
         result = await env.run_scenario_evaluate("explained")
 
         assert result is not None
         assert result.content == "Found 3 of 5 items correctly"
+        assert result.subscores is not None
         assert len(result.subscores) == 2
 
 
@@ -1372,6 +1378,7 @@ class TestNormalizationEdgeCases:
             yield 0.0
 
         await env.run_scenario_setup("zero-reward", {})
+        assert env._active_session is not None
         env._active_session.answer = "failed"
         result = await env.run_scenario_evaluate("zero-reward")
 
@@ -1392,6 +1399,7 @@ class TestNormalizationEdgeCases:
             yield EvaluationResult(reward=-0.5, done=True, content="Caused damage")
 
         await env.run_scenario_setup("penalty", {})
+        assert env._active_session is not None
         env._active_session.answer = "broke it"
         result = await env.run_scenario_evaluate("penalty")
 
@@ -1409,6 +1417,7 @@ class TestNormalizationEdgeCases:
             yield 1.5  # Exceptional performance
 
         await env.run_scenario_setup("bonus", {})
+        assert env._active_session is not None
         env._active_session.answer = "exceeded"
         result = await env.run_scenario_evaluate("bonus")
 

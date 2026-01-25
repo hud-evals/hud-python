@@ -364,7 +364,7 @@ def test_subscore_forbids_extra_fields():
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        SubScore(name="test", value=0.5, extra_field="not allowed")
+        SubScore(name="test", value=0.5, extra_field="not allowed")  # type: ignore[call-arg]
 
 
 def test_subscore_requires_name():
@@ -373,7 +373,7 @@ def test_subscore_requires_name():
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        SubScore(value=0.5)  # Missing name
+        SubScore(value=0.5)  # type: ignore[call-arg]  # Missing name
 
 
 def test_subscore_requires_value():
@@ -382,7 +382,7 @@ def test_subscore_requires_value():
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        SubScore(name="test")  # Missing value
+        SubScore(name="test")  # type: ignore[call-arg]  # Missing value
 
 
 # Tests for EvaluationResult with info dict

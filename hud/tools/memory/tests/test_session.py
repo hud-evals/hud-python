@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 from mcp.types import TextContent
 
@@ -187,6 +185,7 @@ class TestSessionMemoryToolAddSearch:
         await tool(action="add", text="rust programming language")
 
         result = await tool(action="search", text="programming")
+        assert isinstance(result[0], TextContent)
         text = result[0].text
 
         assert "1." in text
@@ -202,6 +201,7 @@ class TestSessionMemoryToolAddSearch:
             await tool(action="add", text=f"item number {i}")
 
         result = await tool(action="search", text="item", top_k=2)
+        assert isinstance(result[0], TextContent)
         lines = [line for line in result[0].text.split("\n") if line.strip()]
         assert len(lines) == 2
 
