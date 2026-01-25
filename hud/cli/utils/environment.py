@@ -70,7 +70,7 @@ def get_environment_name(
                 if "/" in name:
                     name = name.split("/")[-1]
                 return normalize_environment_name(name), "config"
-        except Exception:
+        except Exception:  # noqa: S110
             pass
 
     # Auto-generate from directory name

@@ -7,12 +7,12 @@ icon: "terminal"
 The HUD CLI provides a complete toolkit for creating, developing, and running MCP environments. Commands are organized into two main workflows:
 
 <CardGroup cols={2}>
-<Card title="Build & Deploy" icon="rocket" color="#6b21a8">
+<Card title="Create & Deploy" icon="rocket" color="#6b21a8">
   **Directory-based commands** for creating environments:
   - `hud init` — Create new environment
-  - `hud dev` — Develop with hot‑reload
-  - `hud build` — Build locally
-  - `hud deploy` — Build & deploy to platform
+  - `hud deploy` — Build remotely & deploy to platform
+  - `hud dev` — Local development with hot‑reload
+  - `hud build` — Local build for validation
 </Card>
 
 <Card title="Run & Evaluate" icon="play" color="#0891b2">
@@ -46,14 +46,18 @@ hud --version
 
 ## Commands
 
-### Building Workflow
+### Create & Deploy
 | Command | Input | Description | Example |
 |---------|-------|-------------|---------|
 | `hud init` | Directory | Create new environment | `hud init my-env` |
-| `hud dev` | Directory | Hot-reload development | `hud dev . --interactive` |
-| `hud build` | Directory | Build image locally | `hud build . --tag v1.0` |
-| `hud deploy` | Directory | Build & deploy to platform | `hud deploy .` |
+| `hud deploy` | Directory | Build remotely & deploy to platform | `hud deploy .` |
 | `hud link` | Directory | Link to existing environment | `hud link --id abc123` |
+
+### Local Development
+| Command | Input | Description | Example |
+|---------|-------|-------------|---------|
+| `hud dev` | Directory | Hot-reload development | `hud dev . --interactive` |
+| `hud build` | Directory | Build image locally (for validation) | `hud build . --tag v1.0` |
 
 ### Running Workflow
 | Command | Input | Description | Example |
@@ -76,7 +80,7 @@ hud --version
 
 ## Complete Workflows
 
-### Building an Environment
+### Creating & Deploying an Environment
 
 <Steps>
 <Step title="Initialize">
@@ -87,30 +91,28 @@ hud init my-env && cd my-env
 Creates `Dockerfile`, `pyproject.toml`, `controller/` (MCP server), optional `environment/` backend, `tasks.json`.
 </Step>
 
-<Step title="Develop">
-Run with hot-reload and interactive testing:
-```bash
-hud dev
-```
-Your changes reload automatically. Test tools interactively with arrow keys.
-</Step>
-
-<Step title="Build">
-Create production image and lock file:
-```bash
-hud build
-```
-Generates `hud.lock.yaml` with metadata and labels image for reproducibility.
-</Step>
-
 <Step title="Deploy">
 Deploy directly to the HUD platform:
 ```bash
 hud deploy
 ```
-Or push to GitHub and connect on [hud.ai](https://hud.ai) for automatic rebuilds.
+This builds your environment remotely on HUD's infrastructure and deploys it. Or push to GitHub and connect on [hud.ai](https://hud.ai) for automatic rebuilds.
 </Step>
 </Steps>
+
+### Local Development (Optional)
+
+Use these commands when iterating on your environment locally before deploying:
+
+```bash
+# Hot-reload development with interactive tool testing
+hud dev
+
+# Build locally to validate before deploying
+hud build
+```
+
+`hud dev` reloads your changes automatically and lets you test tools interactively. `hud build` creates a local Docker image and generates `hud.lock.yaml` for validation.
 
 ### Running an Environment
 
@@ -268,22 +270,25 @@ export ANCHOR_API_KEY=...
 
 ## Next Steps
 
-### Building Commands
+### Create & Deploy
 <CardGroup cols={2}>
 <Card title="Init Command" icon="sparkles" href="/reference/cli/init">
   Create new environments from scratch
 </Card>
 
+<Card title="Deploy Command" icon="rocket" href="/reference/cli/deploy">
+  Build remotely and deploy to HUD platform
+</Card>
+</CardGroup>
+
+### Local Development
+<CardGroup cols={2}>
 <Card title="Dev Command" icon="code" href="/reference/cli/dev">
   Develop with hot-reload and interactive testing
 </Card>
 
 <Card title="Build Command" icon="hammer" href="/reference/cli/build">
-  Build images locally
-</Card>
-
-<Card title="Deploy Command" icon="rocket" href="/reference/cli/deploy">
-  Build and deploy to HUD platform
+  Build images locally for validation
 </Card>
 </CardGroup>
 

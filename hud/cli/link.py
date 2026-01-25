@@ -51,7 +51,7 @@ def link_environment(
                 if not yes and not typer.confirm("Unlink and link to a different environment?"):
                     hud_console.info("Aborted.")
                     raise typer.Exit(0)
-        except Exception:
+        except Exception:  # noqa: S110
             pass
 
     # If no registry_id provided, list available environments

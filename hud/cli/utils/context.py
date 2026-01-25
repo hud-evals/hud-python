@@ -33,7 +33,7 @@ def parse_ignore_file(ignore_path: Path) -> list[str]:
                 if not line or line.startswith("#"):
                     continue
                 patterns.append(line)
-    except Exception:
+    except Exception:  # noqa: S110
         pass  # Best effort - ignore parse errors
 
     return patterns
@@ -184,7 +184,7 @@ def create_build_context_tarball(
         hud_console.info(f"Loaded ignore patterns from: {', '.join(loaded_sources)}")
 
     # Create temporary file for tarball
-    temp_file = tempfile.NamedTemporaryFile(
+    temp_file = tempfile.NamedTemporaryFile(  # noqa: SIM115
         suffix=".tar.gz",
         delete=False,
         prefix="hud-build-context-",

@@ -160,7 +160,7 @@ def deploy_environment(
             registry_id = deploy_link.get("registryId")
             if registry_id:
                 hud_console.info(f"Rebuilding existing environment: {registry_id[:8]}...")
-        except Exception:
+        except Exception:  # noqa: S110
             pass
 
     # Determine environment name from pyproject.toml or directory
@@ -188,9 +188,9 @@ def deploy_environment(
         hud_console.error(f"Failed to create build context: {e}")
         raise typer.Exit(1) from e
 
-    hud_console.success(
-        f"Created tarball: {format_size(tarball_size)} ({file_count} files) [{tarball_duration:.1f}s]"
-    )
+    size_str = format_size(tarball_size)
+    msg = f"Created tarball: {size_str} ({file_count} files) [{tarball_duration:.1f}s]"
+    hud_console.success(msg)
 
     # Run async deployment
     try:
@@ -281,7 +281,7 @@ async def _deploy_async(
         step_start = time.time()
 
         try:
-            with open(tarball_path, "rb") as f:
+            with open(tarball_path, "rb") as f:  # noqa: ASYNC230
                 tarball_data = f.read()
 
             # Use a separate client for S3 (different timeout)
@@ -326,7 +326,7 @@ async def _deploy_async(
                 error_detail = e.response.json().get("detail", "")
                 if error_detail:
                     console.error(f"Error: {error_detail}")
-            except Exception:
+            except Exception:  # noqa: S110
                 pass
             return {"success": False}
         except Exception as e:
@@ -446,7 +446,7 @@ def deploy_command(
         "-n",
         help="Environment display name (defaults to directory name)",
     ),
-    env: list[str] | None = typer.Option(
+    env: list[str] | None = typer.Option(  # noqa: B008
         None,
         "--env",
         "-e",

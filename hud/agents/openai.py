@@ -283,10 +283,14 @@ class OpenAIAgent(MCPAgent):
             arguments = json.loads(item.arguments)
             return MCPToolCall(name=target_name, arguments=arguments, id=item.call_id)
         elif item.type == "shell_call":
-            return MCPToolCall(name="shell", arguments=item.action.to_dict(), id=item.call_id)
+            # Use mapping to get actual MCP tool name (handles legacy suffix patterns)
+            target_name = self._tool_name_map.get("shell", "shell")
+            return MCPToolCall(name=target_name, arguments=item.action.to_dict(), id=item.call_id)
         elif item.type == "apply_patch_call":
+            # Use mapping to get actual MCP tool name (handles legacy suffix patterns)
+            target_name = self._tool_name_map.get("apply_patch", "apply_patch")
             return MCPToolCall(
-                name="apply_patch", arguments=item.operation.to_dict(), id=item.call_id
+                name=target_name, arguments=item.operation.to_dict(), id=item.call_id
             )
         return None
 

@@ -35,7 +35,6 @@ def display_build_summary(
     duration = status_response.get("duration_seconds")
     image_name = status_response.get("image_name")
     uri = status_response.get("uri")
-    digest = status_response.get("digest")
     lock_data = status_response.get("lock")
 
     # Format duration

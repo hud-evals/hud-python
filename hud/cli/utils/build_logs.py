@@ -156,7 +156,7 @@ def _print_log_line(
             elif isinstance(timestamp, str):
                 dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
                 prefix = f"[{dt.strftime('%H:%M:%S')}] "
-        except Exception:
+        except Exception:  # noqa: S110
             pass  # Timestamp parsing is best-effort
 
     # Colorize based on content - be smart about what's actually an error
@@ -178,17 +178,16 @@ def _print_log_line(
     )
 
     # Actual error indicators (not just containing "error" somewhere)
+    stripped_msg = message.strip()
     is_actual_error = not is_error_handling and (
-        lower_msg.startswith("error:")
-        or lower_msg.startswith("error ")
+        lower_msg.startswith(("error:", "error "))
         or "exit status 1" in lower_msg
         or "exit code: 1" in lower_msg
         or "command did not exit successfully" in lower_msg
         or "failed to" in lower_msg
         or ": FAILED" in message  # Case-sensitive for status
         or "State: FAILED" in message
-        or message.strip().startswith("OSError:")
-        or message.strip().startswith("Exception:")
+        or stripped_msg.startswith(("OSError:", "Exception:"))
     )
 
     if is_actual_error:

@@ -338,7 +338,7 @@ class ClaudeAgent(MCPAgent):
             logger.debug("Skipping tool %s: %s", tool.name, reason)
 
         # Log skipped hosted tools (Claude doesn't support hosted tools currently)
-        for tool, spec in categorized.hosted:
+        for tool, _spec in categorized.hosted:
             logger.debug("Skipping hosted tool %s for Claude", tool.name)
 
         # Process native tools
