@@ -963,9 +963,11 @@ class TestScenarioRegistration:
 
         assert env._active_session is not None
         env._active_session.answer = "test"
-        # Evaluate should handle StopAsyncIteration and return 1.0
-        reward = await env.run_scenario_evaluate("one-yield")
-        assert reward == 1.0
+        # Evaluate should handle StopAsyncIteration and return EvaluationResult with reward=1.0
+        result = await env.run_scenario_evaluate("one-yield")
+        assert result is not None
+        assert result.reward == 1.0
+        assert result.done is True
 
     @pytest.mark.asyncio
     async def test_scenario_that_yields_three_times(self) -> None:
@@ -983,8 +985,9 @@ class TestScenarioRegistration:
 
         assert env._active_session is not None
         env._active_session.answer = "test"
-        reward = await env.run_scenario_evaluate("three-yields")
-        assert reward == 0.5
+        result = await env.run_scenario_evaluate("three-yields")
+        assert result is not None
+        assert result.reward == 0.5
 
 
 class TestScenarioSessionState:
@@ -1030,12 +1033,13 @@ class TestScenarioSessionState:
         assert env._active_session is not None
         env._active_session.answer = "answer"
 
-        reward1 = await env.run_scenario_evaluate("test")
-        assert reward1 == 0.75
+        result1 = await env.run_scenario_evaluate("test")
+        assert result1 is not None
+        assert result1.reward == 0.75
 
         # Second call - session cleared
-        reward2 = await env.run_scenario_evaluate("test")
-        assert reward2 is None
+        result2 = await env.run_scenario_evaluate("test")
+        assert result2 is None
 
     @pytest.mark.asyncio
     async def test_submit_wrong_scenario_raises(self) -> None:
@@ -1082,5 +1086,145 @@ class TestScenarioSessionState:
         assert env._active_session.local_name == "second"
 
         env._active_session.answer = "answer"
-        reward = await env.run_scenario_evaluate("second")
-        assert reward == 0.5
+        result = await env.run_scenario_evaluate("second")
+        assert result is not None
+        assert result.reward == 0.5
+
+
+class TestEvaluationResultYield:
+    """Test scenarios that yield EvaluationResult instead of float."""
+
+    @pytest.mark.asyncio
+    async def test_yield_evaluation_result(self) -> None:
+        """Scenario can yield EvaluationResult directly."""
+        from hud.tools.types import EvaluationResult
+
+        env = Environment("test-env")
+
+        @env.scenario("eval-result")
+        async def eval_result_scenario():
+            answer = yield "Do the task"
+            yield EvaluationResult(
+                reward=0.85,
+                done=True,
+                content=f"Received: {answer}",
+            )
+
+        prompt = await env.run_scenario_setup("eval-result", {})
+        assert prompt == "Do the task"
+
+        assert env._active_session is not None
+        env._active_session.answer = "completed"
+        result = await env.run_scenario_evaluate("eval-result")
+
+        assert result is not None
+        assert result.reward == 0.85
+        assert result.done is True
+        assert result.content == "Received: completed"
+
+    @pytest.mark.asyncio
+    async def test_yield_evaluation_result_with_subscores(self) -> None:
+        """Scenario can yield EvaluationResult with subscores."""
+        from hud.tools.types import EvaluationResult, SubScore
+
+        env = Environment("test-env")
+
+        @env.scenario("with-subscores")
+        async def subscores_scenario():
+            yield "Complete the task"
+            yield EvaluationResult(
+                reward=0.75,
+                done=True,
+                subscores=[
+                    SubScore(name="accuracy", weight=0.6, value=0.8),
+                    SubScore(name="speed", weight=0.4, value=0.7),
+                ],
+            )
+
+        await env.run_scenario_setup("with-subscores", {})
+        assert env._active_session is not None
+        env._active_session.answer = "done"
+        result = await env.run_scenario_evaluate("with-subscores")
+
+        assert result is not None
+        assert result.reward == 0.75
+        assert result.subscores is not None
+        assert len(result.subscores) == 2
+        assert result.subscores[0].name == "accuracy"
+        assert result.subscores[0].weight == 0.6
+        assert result.subscores[0].value == 0.8
+
+    @pytest.mark.asyncio
+    async def test_yield_evaluation_result_partial_done(self) -> None:
+        """Scenario can indicate partial completion with done=False."""
+        from hud.tools.types import EvaluationResult
+
+        env = Environment("test-env")
+
+        @env.scenario("partial")
+        async def partial_scenario():
+            yield "Start the task"
+            yield EvaluationResult(
+                reward=0.3,
+                done=False,  # Task not complete
+                content="Partial progress",
+            )
+
+        await env.run_scenario_setup("partial", {})
+        assert env._active_session is not None
+        env._active_session.answer = "in progress"
+        result = await env.run_scenario_evaluate("partial")
+
+        assert result is not None
+        assert result.reward == 0.3
+        assert result.done is False
+
+
+class TestPromptYieldTypes:
+    """Test scenarios that yield different types for the prompt."""
+
+    @pytest.mark.asyncio
+    async def test_yield_text_content(self) -> None:
+        """Scenario can yield TextContent for the prompt."""
+        from mcp.types import TextContent
+
+        env = Environment("test-env")
+
+        @env.scenario("text-content")
+        async def text_content_scenario():
+            yield TextContent(text="Prompt from TextContent", type="text")
+            yield 1.0
+
+        prompt = await env.run_scenario_setup("text-content", {})
+        assert prompt == "Prompt from TextContent"
+
+    @pytest.mark.asyncio
+    async def test_yield_list_of_strings(self) -> None:
+        """Scenario can yield a list of strings (joined with newlines)."""
+        env = Environment("test-env")
+
+        @env.scenario("list-strings")
+        async def list_strings_scenario():
+            yield ["Line 1", "Line 2", "Line 3"]
+            yield 1.0
+
+        prompt = await env.run_scenario_setup("list-strings", {})
+        assert prompt == "Line 1\nLine 2\nLine 3"
+
+    @pytest.mark.asyncio
+    async def test_yield_list_of_text_content(self) -> None:
+        """Scenario can yield a list of TextContent blocks."""
+        from mcp.types import TextContent
+
+        env = Environment("test-env")
+
+        @env.scenario("list-text-content")
+        async def list_text_content_scenario():
+            yield [
+                TextContent(text="First part", type="text"),
+                TextContent(text="Second part", type="text"),
+            ]
+            yield 1.0
+
+        prompt = await env.run_scenario_setup("list-text-content", {})
+        assert prompt == "First part\nSecond part"

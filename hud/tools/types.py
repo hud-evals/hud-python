@@ -18,16 +18,66 @@ class Coordinate(BaseModel):
     y: int = Field(..., description="Y coordinate")
 
 
-class EvaluationResult(BaseModel):
-    """Standard evaluation result format."""
+class SubScore(BaseModel):
+    """Individual subscore for debugging and transparency.
 
-    reward: float = Field(default=0.0, description="Usually a value between 0.0 and 1.0")
+    SubScores allow breaking down the final reward into component parts,
+    making it easier to understand what contributed to the evaluation.
+
+    Example:
+        subscores=[
+            SubScore(name="correctness", weight=0.6, value=1.0),
+            SubScore(name="efficiency", weight=0.3, value=0.8),
+            SubScore(name="style", weight=0.1, value=0.5),
+        ]
+        # Final reward could be: 0.6*1.0 + 0.3*0.8 + 0.1*0.5 = 0.89
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., description="Name of this subscore component")
+    weight: float = Field(default=1.0, description="Weight of this subscore (for weighted average)")
+    value: float = Field(..., description="Value of this subscore, usually 0.0 to 1.0")
+
+
+class EvaluationResult(BaseModel):
+    """Standard evaluation result format.
+
+    Used as the second yield in scenarios to provide detailed evaluation results.
+    Can include subscores for debugging and transparency.
+
+    Example:
+        yield EvaluationResult(
+            reward=0.85,
+            done=True,
+            content="Found 17 of 20 items",
+            subscores=[
+                SubScore(name="detection", weight=0.7, value=0.85),
+                SubScore(name="accuracy", weight=0.3, value=1.0),
+            ],
+        )
+    """
+
+    reward: float = Field(default=0.0, description="Final score, usually 0.0 to 1.0")
     done: bool = Field(default=False, description="Whether the task/episode is complete")
-    content: str | None = Field(default=None, description="Additional information")
-    info: dict[str, Any] = Field(default_factory=dict, description="Additional information")
-    isError: bool = Field(default=False, description="Whether the evaluation failed")
+    content: str | None = Field(default=None, description="Human-readable explanation")
+    info: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    isError: bool = Field(default=False, description="Whether the evaluation itself failed")
+    subscores: list[SubScore] | None = Field(
+        default=None,
+        description="Optional breakdown of score components for debugging",
+    )
 
     model_config = ConfigDict(extra="allow")
+
+    @classmethod
+    def from_float(cls, value: float) -> EvaluationResult:
+        """Create an EvaluationResult from a simple float reward.
+
+        Convenience method for backward compatibility with float yields.
+        Sets done=True since a float yield typically indicates completion.
+        """
+        return cls(reward=value, done=True)
 
 
 class ContentResult(BaseModel):

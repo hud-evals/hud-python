@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from mcp.types import ImageContent, TextContent
 
-from hud.tools.types import ContentResult, EvaluationResult, ToolError
+from hud.tools.types import ContentResult, EvaluationResult, SubScore, ToolError
 
 
 def test_evaluation_result_defaults():
@@ -191,3 +191,67 @@ def test_tool_error():
 
     assert isinstance(error, Exception)
     assert str(error) == "Test error message"
+
+
+def test_subscore_basic():
+    """Test SubScore with required fields."""
+    subscore = SubScore(name="accuracy", value=0.85)
+
+    assert subscore.name == "accuracy"
+    assert subscore.weight == 1.0  # Default
+    assert subscore.value == 0.85
+
+
+def test_subscore_with_weight():
+    """Test SubScore with custom weight."""
+    subscore = SubScore(name="speed", weight=0.3, value=0.9)
+
+    assert subscore.name == "speed"
+    assert subscore.weight == 0.3
+    assert subscore.value == 0.9
+
+
+def test_evaluation_result_with_subscores():
+    """Test EvaluationResult with subscores."""
+    result = EvaluationResult(
+        reward=0.82,
+        done=True,
+        subscores=[
+            SubScore(name="accuracy", weight=0.6, value=0.9),
+            SubScore(name="speed", weight=0.4, value=0.7),
+        ],
+    )
+
+    assert result.reward == 0.82
+    assert result.subscores is not None
+    assert len(result.subscores) == 2
+    assert result.subscores[0].name == "accuracy"
+    assert result.subscores[1].name == "speed"
+
+
+def test_evaluation_result_from_float():
+    """Test EvaluationResult.from_float() convenience method."""
+    result = EvaluationResult.from_float(0.75)
+
+    assert result.reward == 0.75
+    assert result.done is True
+    assert result.content is None
+    assert result.subscores is None
+
+
+def test_evaluation_result_model_dump():
+    """Test that EvaluationResult serializes correctly."""
+    result = EvaluationResult(
+        reward=0.9,
+        done=True,
+        content="Test content",
+        subscores=[SubScore(name="test", value=0.9)],
+    )
+
+    data = result.model_dump(exclude_none=True)
+
+    assert data["reward"] == 0.9
+    assert data["done"] is True
+    assert data["content"] == "Test content"
+    assert len(data["subscores"]) == 1
+    assert data["subscores"][0]["name"] == "test"

@@ -354,7 +354,28 @@ class TestToolWithoutNativeSpecs:
 class TestLegacyNameFallback:
     """Test that old environments without native_tools metadata work via name-based fallback."""
 
-    def test_claude_legacy_computer_fallback(self) -> None:
+    @pytest.fixture
+    def mock_anthropic(self) -> Any:
+        """Create a mock Anthropic client."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        return MagicMock(spec=["messages", "beta"])
+
+    @pytest.fixture
+    def mock_openai(self) -> Any:
+        """Create a mock OpenAI client."""
+        from unittest.mock import MagicMock
+
+        return MagicMock(spec=["responses", "chat"])
+
+    @pytest.fixture
+    def mock_gemini(self) -> Any:
+        """Create a mock Gemini client."""
+        from unittest.mock import MagicMock
+
+        return MagicMock()
+
+    def test_claude_legacy_computer_fallback(self, mock_anthropic: Any) -> None:
         """Test Claude agent detects anthropic_computer by name without metadata."""
         from mcp import types as mcp_types
 
@@ -368,7 +389,7 @@ class TestLegacyNameFallback:
             # Note: NO _meta field at all!
         )
 
-        agent = ClaudeAgent.create(validate_api_key=False)
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
         agent._available_tools = [legacy_tool]
 
         # The legacy fallback should detect this as a computer tool
@@ -383,7 +404,7 @@ class TestLegacyNameFallback:
         assert categorized.native[0][0].name == "anthropic_computer"
         assert categorized.native[0][1].api_type == "computer_20250124"
 
-    def test_claude_legacy_bash_fallback(self) -> None:
+    def test_claude_legacy_bash_fallback(self, mock_anthropic: Any) -> None:
         """Test Claude agent detects bash by name without metadata."""
         from mcp import types as mcp_types
 
@@ -395,14 +416,14 @@ class TestLegacyNameFallback:
             inputSchema={"type": "object", "properties": {}},
         )
 
-        agent = ClaudeAgent.create(validate_api_key=False)
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
         agent._available_tools = [legacy_tool]
 
         spec = agent.resolve_native_spec(legacy_tool)
         assert spec is not None, "Legacy fallback should detect bash"
         assert spec.api_type == "bash_20250124"
 
-    def test_claude_legacy_editor_fallback(self) -> None:
+    def test_claude_legacy_editor_fallback(self, mock_anthropic: Any) -> None:
         """Test Claude agent detects str_replace_based_edit_tool by name."""
         from mcp import types as mcp_types
 
@@ -414,14 +435,14 @@ class TestLegacyNameFallback:
             inputSchema={"type": "object", "properties": {}},
         )
 
-        agent = ClaudeAgent.create(validate_api_key=False)
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
         agent._available_tools = [legacy_tool]
 
         spec = agent.resolve_native_spec(legacy_tool)
         assert spec is not None, "Legacy fallback should detect editor"
         assert spec.api_type == "text_editor_20250728"
 
-    def test_claude_legacy_suffix_match(self) -> None:
+    def test_claude_legacy_suffix_match(self, mock_anthropic: Any) -> None:
         """Test Claude agent detects prefixed tool names like mcp_anthropic_computer."""
         from mcp import types as mcp_types
 
@@ -433,14 +454,14 @@ class TestLegacyNameFallback:
             inputSchema={"type": "object", "properties": {}},
         )
 
-        agent = ClaudeAgent.create(validate_api_key=False)
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
         agent._available_tools = [legacy_tool]
 
         spec = agent.resolve_native_spec(legacy_tool)
         assert spec is not None, "Legacy fallback should detect prefixed computer tool"
         assert spec.api_type == "computer_20250124"
 
-    def test_gemini_legacy_computer_fallback(self) -> None:
+    def test_gemini_legacy_computer_fallback(self, mock_gemini: Any) -> None:
         """Test Gemini agent detects gemini_computer by name without metadata."""
         from mcp import types as mcp_types
 
@@ -452,7 +473,7 @@ class TestLegacyNameFallback:
             inputSchema={"type": "object", "properties": {}},
         )
 
-        agent = GeminiAgent.create(validate_api_key=False)
+        agent = GeminiAgent.create(model_client=mock_gemini, validate_api_key=False)
         agent._available_tools = [legacy_tool]
 
         spec = agent.resolve_native_spec(legacy_tool)
@@ -460,7 +481,7 @@ class TestLegacyNameFallback:
         assert spec.api_type == "computer_use"
         assert spec.role == "computer"
 
-    def test_gemini_cua_legacy_computer_fallback(self) -> None:
+    def test_gemini_cua_legacy_computer_fallback(self, mock_gemini: Any) -> None:
         """Test GeminiCUAAgent detects gemini_computer by name without metadata."""
         from mcp import types as mcp_types
 
@@ -472,7 +493,7 @@ class TestLegacyNameFallback:
             inputSchema={"type": "object", "properties": {}},
         )
 
-        agent = GeminiCUAAgent.create(validate_api_key=False)
+        agent = GeminiCUAAgent.create(model_client=mock_gemini, validate_api_key=False)
         agent._available_tools = [legacy_tool]
 
         spec = agent.resolve_native_spec(legacy_tool)
@@ -480,7 +501,7 @@ class TestLegacyNameFallback:
         assert spec.api_type == "computer_use"
         assert spec.role == "computer"
 
-    def test_openai_legacy_shell_fallback(self) -> None:
+    def test_openai_legacy_shell_fallback(self, mock_openai: Any) -> None:
         """Test OpenAI agent detects shell by name without metadata."""
         from mcp import types as mcp_types
 
@@ -492,14 +513,14 @@ class TestLegacyNameFallback:
             inputSchema={"type": "object", "properties": {}},
         )
 
-        agent = OpenAIAgent.create(validate_api_key=False)
+        agent = OpenAIAgent.create(model_client=mock_openai, validate_api_key=False)
         agent._available_tools = [legacy_tool]
 
         spec = agent.resolve_native_spec(legacy_tool)
         assert spec is not None, "Legacy fallback should detect shell"
         assert spec.api_type == "shell"
 
-    def test_openai_legacy_apply_patch_fallback(self) -> None:
+    def test_openai_legacy_apply_patch_fallback(self, mock_openai: Any) -> None:
         """Test OpenAI agent detects apply_patch by name without metadata."""
         from mcp import types as mcp_types
 
@@ -511,14 +532,14 @@ class TestLegacyNameFallback:
             inputSchema={"type": "object", "properties": {}},
         )
 
-        agent = OpenAIAgent.create(validate_api_key=False)
+        agent = OpenAIAgent.create(model_client=mock_openai, validate_api_key=False)
         agent._available_tools = [legacy_tool]
 
         spec = agent.resolve_native_spec(legacy_tool)
         assert spec is not None, "Legacy fallback should detect apply_patch"
         assert spec.api_type == "apply_patch"
 
-    def test_metadata_takes_precedence_over_legacy(self) -> None:
+    def test_metadata_takes_precedence_over_legacy(self, mock_anthropic: Any) -> None:
         """Test that explicit native_tools metadata takes precedence over name matching."""
         from mcp import types as mcp_types
 
@@ -542,7 +563,7 @@ class TestLegacyNameFallback:
             },
         )
 
-        agent = ClaudeAgent.create(validate_api_key=False)
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
         agent._available_tools = [tool_with_metadata]
 
         spec = agent.resolve_native_spec(tool_with_metadata)
@@ -556,7 +577,16 @@ class TestLegacyNameFallback:
 class TestBackwardsCompatibility:
     """Test backwards compatibility with old-style tools and settings fallbacks."""
 
-    def test_computer_tool_without_display_dims_uses_fallback(self) -> None:
+    @pytest.fixture
+    def mock_anthropic(self) -> Any:
+        """Create a mock Anthropic client."""
+        from unittest.mock import MagicMock
+
+        return MagicMock(spec=["messages", "beta"])
+
+    def test_computer_tool_without_display_dims_uses_fallback(
+        self, mock_anthropic: Any
+    ) -> None:
         """Test that a native spec without display dimensions falls back to settings."""
         import warnings
 
@@ -583,7 +613,7 @@ class TestBackwardsCompatibility:
         )
 
         # Create agent and get native spec
-        agent = ClaudeAgent.create(validate_api_key=False)
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
         agent._available_tools = [computer_tool]
         spec = agent.resolve_native_spec(computer_tool)
 
@@ -614,7 +644,7 @@ class TestBackwardsCompatibility:
         assert tool_dict["display_width_px"] == computer_settings.ANTHROPIC_COMPUTER_WIDTH
         assert tool_dict["display_height_px"] == computer_settings.ANTHROPIC_COMPUTER_HEIGHT
 
-    def test_new_style_tool_with_display_dims_no_warning(self) -> None:
+    def test_new_style_tool_with_display_dims_no_warning(self, mock_anthropic: Any) -> None:
         """Test that a new-style tool with display dimensions doesn't emit warning."""
         import warnings
 
@@ -643,7 +673,7 @@ class TestBackwardsCompatibility:
             },
         )
 
-        agent = ClaudeAgent.create(validate_api_key=False)
+        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
         agent._available_tools = [computer_tool]
         spec = agent.resolve_native_spec(computer_tool)
 
