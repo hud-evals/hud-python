@@ -357,7 +357,7 @@ class TestLegacyNameFallback:
     @pytest.fixture
     def mock_anthropic(self) -> Any:
         """Create a mock Anthropic client."""
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import MagicMock
 
         return MagicMock(spec=["messages", "beta"])
 
@@ -584,9 +584,7 @@ class TestBackwardsCompatibility:
 
         return MagicMock(spec=["messages", "beta"])
 
-    def test_computer_tool_without_display_dims_uses_fallback(
-        self, mock_anthropic: Any
-    ) -> None:
+    def test_computer_tool_without_display_dims_uses_fallback(self, mock_anthropic: Any) -> None:
         """Test that a native spec without display dimensions falls back to settings."""
         import warnings
 
