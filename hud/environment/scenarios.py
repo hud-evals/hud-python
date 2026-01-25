@@ -468,11 +468,8 @@ class ScenarioMixin:
                     first = contents[0]
                     if hasattr(first, "text") and isinstance(first.text, str):  # type: ignore[union-attr]
                         data = json.loads(first.text)  # type: ignore[union-attr]
-                        # Backward compatibility: old environments only return {"reward": x}
-                        # In that case, assume done=True since it was a final result
-                        if "done" not in data:
-                            data["done"] = True
-                        # Parse as EvaluationResult (handles both old and new format)
+                        # Parse as EvaluationResult (handles both old {"reward": x} and new format)
+                        # Default for done is True, so old environments work correctly
                         result = EvaluationResult(**data)
                         logger.debug(
                             "Remote scenario %s evaluate: result=%s",
