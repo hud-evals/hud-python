@@ -11,7 +11,7 @@ def test_evaluation_result_defaults():
     result = EvaluationResult()
 
     assert result.reward == 0.0
-    assert result.done is False
+    assert result.done is True  # Default is True (task complete)
     assert result.content is None
     assert result.info == {}
     assert result.isError is False
