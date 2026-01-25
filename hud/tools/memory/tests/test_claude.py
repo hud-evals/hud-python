@@ -105,6 +105,7 @@ class TestClaudeMemoryView:
         result = await tool(command="view")
 
         assert len(result) == 1
+        assert isinstance(result[0], TextContent)
         assert "files and directories" in result[0].text
 
 
@@ -220,6 +221,7 @@ class TestClaudeMemoryDelete:
         tool = ClaudeMemoryTool(memories_dir=str(tmp_path))
         result = await tool(command="delete", path="/memories/to_delete.txt")
 
+        assert isinstance(result[0], TextContent)
         assert "Successfully deleted" in result[0].text
         assert not file_path.exists()
 
