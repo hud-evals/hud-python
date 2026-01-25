@@ -175,6 +175,33 @@ await tool(action="click", selector="button.submit")
 await tool(action="type", selector="input#search", text="query")
 ```
 
+### MemoryTool
+
+```python
+from hud.tools import MemoryTool
+```
+
+Store and search short-term memory with a simple add/search interface.
+
+**Backends:**
+- In-memory (default)
+- Qdrant (set `QDRANT_URL`; optional `QDRANT_API_KEY`)
+
+**Tool Parameters:**
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `action` | `"add" \| "search"` | Store or query memory | Required |
+| `text` | `str` | Content to store or query | Required |
+| `metadata` | `dict` | Optional metadata | `{}` |
+| `top_k` | `int` | Results for `search` | `5` |
+
+**Example:**
+```python
+memory = MemoryTool()
+await memory(action="add", text="User prefers CSV output", metadata={"user_id": "123"})
+result = await memory(action="search", text="csv output")
+```
+
 ## Computer Control Tools
 
 ### HudComputerTool
