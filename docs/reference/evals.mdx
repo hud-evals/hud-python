@@ -39,7 +39,7 @@ The `source` parameter accepts:
 # 1. Direct environment entry (recommended)
 env = Environment("my-env")
 async with env("checkout", product="laptop") as ctx:
-    await agent.run(ctx.prompt)
+    await agent.run(ctx)
 
 # 2. Blank eval - manual setup and reward
 async with hud.eval() as ctx:
@@ -192,7 +192,7 @@ for result in ctx.results:
 ## See Also
 
 - [Environments](/reference/environments) - Environment class reference
-- [A/B Evals](/quick-links/ab-testing) - Variants and groups guide
+- [Testing Environments](/advanced/testing-environments) - Variants, groups, and mock mode
 - [Deploy](/quick-links/deploy) - Running evals at scale
 - [`hud eval` CLI](/reference/cli/eval) - Command-line interface
 

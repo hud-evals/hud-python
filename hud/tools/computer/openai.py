@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from mcp import ErrorData, McpError
 from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ContentBlock, TextContent
 from pydantic import Field
 
 from hud.tools.computer.settings import computer_settings
+from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult, Coordinate
+from hud.types import AgentType
 
 from .hud import HudComputerTool
 
@@ -52,6 +54,19 @@ class OpenAIComputerTool(HudComputerTool):
     OpenAI Computer Use tool for interacting with the computer.
     """
 
+    native_specs: ClassVar[NativeToolSpecs] = {
+        AgentType.OPENAI: NativeToolSpec(
+            api_type="computer_use_preview",
+            api_name="computer",
+            role="computer",  # Mutually exclusive with other computer tools when native
+        ),
+        AgentType.OPERATOR: NativeToolSpec(
+            api_type="computer_use_preview",
+            api_name="computer",
+            role="computer",  # Mutually exclusive with other computer tools when native
+        ),
+    }
+
     def __init__(
         self,
         # Define within environment based on platform
@@ -59,8 +74,10 @@ class OpenAIComputerTool(HudComputerTool):
         platform_type: Literal["auto", "xdo", "pyautogui"] = "auto",
         display_num: int | None = None,
         # Overrides for what dimensions the agent thinks it operates in
-        width: int = computer_settings.OPENAI_COMPUTER_WIDTH,
-        height: int = computer_settings.OPENAI_COMPUTER_HEIGHT,
+        display_width: int | None = None,
+        display_height: int | None = None,
+        width: int | None = None,  # Deprecated: use display_width
+        height: int | None = None,  # Deprecated: use display_height
         rescale_images: bool = computer_settings.OPENAI_RESCALE_IMAGES,
         name: str | None = None,
         title: str | None = None,
@@ -71,23 +88,52 @@ class OpenAIComputerTool(HudComputerTool):
         Initialize with OpenAI's default dimensions.
 
         Args:
-            width: Target width for rescaling (default: 1024 for OpenAI)
-            height: Target height for rescaling (default: 768 for OpenAI)
+            display_width: Width for agent coordinate system
+            display_height: Height for agent coordinate system
+            width: Deprecated, use display_width
+            height: Deprecated, use display_height
             rescale_images: If True, rescale screenshots. If False, only rescale action coordinates
             name: Tool name for MCP registration (auto-generated from class name if not provided)
             title: Human-readable display name for the tool (auto-generated from class name)
             description: Tool description (auto-generated from docstring if not provided)
         """
+        # Handle deprecated width/height params
+        actual_width = display_width or width or computer_settings.OPENAI_COMPUTER_WIDTH
+        actual_height = display_height or height or computer_settings.OPENAI_COMPUTER_HEIGHT
+
+        # Create instance-level native_specs with display dimensions
+        instance_native_specs = {
+            AgentType.OPENAI: NativeToolSpec(
+                api_type="computer_use_preview",
+                api_name="computer",
+                role="computer",
+                extra={
+                    "display_width": actual_width,
+                    "display_height": actual_height,
+                },
+            ),
+            AgentType.OPERATOR: NativeToolSpec(
+                api_type="computer_use_preview",
+                api_name="computer",
+                role="computer",
+                extra={
+                    "display_width": actual_width,
+                    "display_height": actual_height,
+                },
+            ),
+        }
+
         super().__init__(
             executor=executor,
             platform_type=platform_type,
             display_num=display_num,
-            width=width,
-            height=height,
+            width=actual_width,
+            height=actual_height,
             rescale_images=rescale_images,
             name=name or "openai_computer",
             title=title or "OpenAI Computer Tool",
             description=description or "Control computer with mouse, keyboard, and screenshots",
+            native_specs=instance_native_specs,
             **kwargs,
         )
 

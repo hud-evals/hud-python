@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from hud.agents.base import MCPAgent
-from hud.types import AgentResponse, BaseAgentConfig, Trace
+from hud.types import AgentResponse, AgentType, BaseAgentConfig, Trace
 
 if TYPE_CHECKING:
     from hud.eval.context import EvalContext
@@ -18,6 +18,11 @@ class IntegrationTestRunner(MCPAgent):
 
     metadata: ClassVar[dict[str, Any] | None] = {}
     config_cls: ClassVar[type[BaseAgentConfig]] = BaseAgentConfig
+
+    @classmethod
+    def agent_type(cls) -> AgentType:
+        """Return the AgentType for integration test runner."""
+        return AgentType.INTEGRATION_TEST
 
     def __init__(self, **kwargs: Any) -> None:
         kwargs["auto_trace"] = False

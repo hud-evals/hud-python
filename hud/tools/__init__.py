@@ -6,9 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 from .agent import AgentTool
 from .base import BaseHub, BaseTool
-from .bash import BashTool
-from .edit import EditTool
+from .bash import BashTool  # Claude-native bash
+from .coding import ApplyPatchTool, ShellTool  # OpenAI-native shell/patch
+from .edit import EditTool  # Claude-native edit
+from .hosted import CodeExecutionTool, GoogleSearchTool, HostedTool, UrlContextTool
 from .memory import MemoryTool
+from .native_types import NativeToolSpec, NativeToolSpecs
 from .playwright import PlaywrightTool
 from .response import ResponseTool
 from .submit import SubmitTool
@@ -23,18 +26,33 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
+    # Base classes
     "AgentTool",
-    "AnthropicComputerTool",
     "BaseHub",
     "BaseTool",
-    "BashTool",
-    "EditTool",
+    "HostedTool",
+    # Native tool types
+    "NativeToolSpec",
+    "NativeToolSpecs",
+    # Computer tools
+    "AnthropicComputerTool",
     "GeminiComputerTool",
     "HudComputerTool",
-    "MemoryTool",
     "OpenAIComputerTool",
-    "PlaywrightTool",
     "QwenComputerTool",
+    # Shell/editor tools (Claude style)
+    "BashTool",
+    "EditTool",
+    # Shell/editor tools (OpenAI style)
+    "ShellTool",
+    "ApplyPatchTool",
+    # Hosted tools
+    "CodeExecutionTool",
+    "GoogleSearchTool",
+    "UrlContextTool",
+    # Other tools
+    "MemoryTool",
+    "PlaywrightTool",
     "ResponseTool",
     "SubmitTool",
 ]

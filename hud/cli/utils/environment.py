@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -12,9 +13,74 @@ from hud.utils.hud_console import HUDConsole
 hud_console = HUDConsole()
 
 
-def get_image_name(directory: str | Path, image_override: str | None = None) -> tuple[str, str]:
+def normalize_environment_name(name: str) -> str:
+    """Normalize environment name to match SDK's Environment class.
+
+    This ensures the name used in CLI matches what Environment.__init__()
+    and the platform backend use, so scenario names are consistent.
+
+    Rules:
+    - Lowercase
+    - Replace spaces and underscores with hyphens
+    - Remove any non-alphanumeric chars except hyphens
+    - Collapse multiple hyphens
+    - Strip leading/trailing hyphens
     """
-    Resolve image name with source tracking.
+    normalized = name.strip().lower()
+    normalized = normalized.replace(" ", "-").replace("_", "-")
+    normalized = re.sub(r"[^a-z0-9-]", "", normalized)
+    normalized = re.sub(r"-+", "-", normalized)
+    return normalized.strip("-") or "environment"
+
+
+def get_environment_name(directory: str | Path, name_override: str | None = None) -> tuple[str, str]:
+    """Resolve environment name with source tracking.
+
+    Checks in order:
+    1. Explicit override
+    2. [tool.hud].name in pyproject.toml
+    3. Directory name (sanitized)
+
+    All names are normalized to match SDK's Environment class normalization,
+    ensuring scenario prefixes are consistent between local and deployed envs.
+
+    Returns:
+        Tuple of (normalized_name, source) where source is "override", "config", or "auto"
+    """
+    if name_override:
+        return normalize_environment_name(name_override), "override"
+
+    # Check pyproject.toml for [tool.hud].name
+    pyproject_path = Path(directory) / "pyproject.toml"
+    if pyproject_path.exists():
+        try:
+            with open(pyproject_path) as f:
+                config = toml.load(f)
+            hud_config = config.get("tool", {}).get("hud", {})
+            # Check for explicit name first
+            if hud_config.get("name"):
+                return normalize_environment_name(hud_config["name"]), "config"
+            # Fall back to image name (without tag)
+            if hud_config.get("image"):
+                image = hud_config["image"]
+                name = image.split(":")[0] if ":" in image else image
+                # Remove org prefix if present
+                if "/" in name:
+                    name = name.split("/")[-1]
+                return normalize_environment_name(name), "config"
+        except Exception:
+            pass
+
+    # Auto-generate from directory name
+    dir_path = Path(directory).resolve()
+    dir_name = dir_path.name
+    if not dir_name or dir_name == ".":
+        dir_name = dir_path.parent.name
+    return normalize_environment_name(dir_name), "auto"
+
+
+def get_image_name(directory: str | Path, image_override: str | None = None) -> tuple[str, str]:
+    """Resolve image name with source tracking.
 
     Returns:
         Tuple of (image_name, source) where source is "override", "cache", or "auto"

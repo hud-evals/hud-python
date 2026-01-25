@@ -1,10 +1,10 @@
 ---
 title: "Testing Environments"
-description: "Test scenarios, tools, and environment logic locally"
+description: "Local testing, variants, mock mode, and debugging"
 icon: "flask-vial"
 ---
 
-Before deploying, test locally. See [Sandboxing](/guides/sandboxing) for Docker vs no-Docker patterns.
+Before deploying, test locally. This page covers local testing patterns, A/B testing with variants and groups, mock mode, and debugging.
 
 ## Local Testing
 
@@ -21,38 +21,103 @@ async with env:
     result = await env.call_tool("my_tool", arg="val")  # Call a tool
 ```
 
+## Variants
+
+LLM outputs vary from run to run—ask the same question twice and you might get different quality answers. **Variants** let you test different configurations side-by-side:
+
+```python
+import hud
+
+async with hud.eval(task, variants={"model": ["gpt-4o", "claude-sonnet-4-5"]}) as ctx:
+    response = await client.chat.completions.create(
+        model=ctx.variants["model"],  # Current variant
+        messages=[{"role": "user", "content": ctx.prompt}]
+    )
+    ctx.reward = 1.0 if "correct" in response.choices[0].message.content else 0.0
+
+for result in ctx.results:
+    print(f"{result.variants}: reward={result.reward}")
+```
+
+Lists expand to all combinations:
+
+```python
+variants = {
+    "model": ["gpt-4o", "claude"],
+    "temperature": [0.0, 0.7],
+}
+# Creates 4 combinations: gpt-4o+0.0, gpt-4o+0.7, claude+0.0, claude+0.7
+```
+
+## Groups
+
+Run each variant multiple times to see the distribution, not just one lucky or unlucky result:
+
+```python
+async with hud.eval(
+    task,
+    variants={"model": ["gpt-4o", "claude-sonnet-4-5"]},
+    group=5  # 10 runs total: 2 models × 5 each
+) as ctx:
+    ...
+```
+
+The `hud.eval` manager parallelizes automatically. Total runs = `len(tasks) × len(variant_combinations) × group`.
+
+## Mock Mode
+
+`env.mock()` intercepts at the tool layer. Agents only see tools, so this is usually all you need for testing agent logic without hitting real services:
+
+```python
+env.mock()  # All tools return schema-based fake responses
+env.mock_tool("send_email", {"status": "sent", "id": "mock-123"})
+env.mock_tool("charge_card", {"success": True, "transaction_id": "tx-mock"})
+
+# Check mock state
+assert env.is_mock == True
+```
+
+For stateful mocking (tracking what happened for assertions):
+
+```python
+class MockPaymentService:
+    def __init__(self):
+        self.charges = []
+    
+    async def charge(self, amount: int, card_token: str) -> dict:
+        self.charges.append({"amount": amount, "token": card_token})
+        return {"success": True, "id": f"ch-{len(self.charges)}"}
+
+payments = MockPaymentService()
+
+@env.scenario("checkout")
+async def checkout(cart_total: int):
+    _ = yield f"Complete checkout for ${cart_total}"
+    yield 1.0 if any(c["amount"] == cart_total for c in payments.charges) else 0.0
+```
+
+Your agent code stays the same—toggle `env.mock()` for testing.
+
 ## Testing Scenarios Directly
 
-Scenarios are async generators. `hud.eval()` drives them automatically, but you can test the logic directly—this is exactly what runs at the start and end of `hud.eval()`:
+Scenarios are async generators. `hud.eval()` drives them automatically, but you can test the logic directly:
 
 ```python
 async def checkout(user_id: str, amount: int = 100):
-    # Setup + prompt (first yield) — runs at hud.eval() start
+    # Setup + prompt (first yield)
     answer = yield f"Complete checkout for {user_id}, ${amount}"
     
-    # Evaluation (second yield) — runs after agent submits
+    # Evaluation (second yield)
     yield 1.0 if "success" in answer.lower() else 0.0
 
 async def test():
     gen = checkout("alice", 50)
-    prompt = await anext(gen)           # What hud.eval() does at start
+    prompt = await anext(gen)            # What hud.eval() does at start
     reward = await gen.asend("Success!") # What hud.eval() does after submit
     assert reward == 1.0
 ```
 
 If your scenario tests pass, `hud.eval()` will behave identically.
-
-## Mocking
-
-`env.mock()` intercepts at the tool layer—agents only see tools:
-
-```python
-env.mock()  # All tools return fake responses
-env.mock_tool("send_email", {"status": "sent"})
-
-# Check mock state
-assert env.is_mock == True
-```
 
 ## Hot-Reload
 
@@ -66,13 +131,14 @@ System services (postgres, VNC, browsers) persist across reloads.
 
 ## Debugging Build Failures
 
-`hud build` runs the exact same pipeline as **New → Environment** on [hud.ai](https://hud.ai)—so if it passes locally, it'll work in production. If the build fails or the container crashes on startup, use `hud debug` to run a 5-phase compliance test:
+`hud build` runs the exact same pipeline as **New → Environment** on [hud.ai](https://hud.ai)—so if it passes locally, it'll work in production. If the build fails or the container crashes on startup, use `hud debug`:
 
 ```bash
 hud debug my-env:latest
 ```
 
 Output shows exactly which phase failed:
+
 ```
 ✓ Phase 1: Docker image exists
 ✓ Phase 2: MCP server responds to initialize
@@ -149,3 +215,15 @@ env.is_connected       # True if in async context
 await env.list_resources()  # MCP resources
 await env.list_prompts()    # MCP prompts
 ```
+
+## See Also
+
+<CardGroup cols={2}>
+<Card title="Sandboxing" icon="shield" href="/guides/sandboxing">
+  Make databases and services safe for testing
+</Card>
+
+<Card title="hud debug CLI" icon="bug" href="/reference/cli/debug">
+  Full debug command reference
+</Card>
+</CardGroup>

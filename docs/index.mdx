@@ -4,7 +4,7 @@ description: "Build, evaluate, and train AI agents."
 icon: "book"
 ---
 
-HUD gives you three things: a unified API for every model, a way to turn your code into agent-callable tools, and infrastructure to run evaluations at scale.
+HUD gives you three things: access to every model through one API, a way to turn your code into agent-callable tools, and infrastructure to run evaluations and training at scale.
 
 ## Install
 
@@ -18,9 +18,9 @@ hud set HUD_API_KEY=your-key-here
 
 Get your API key at [hud.ai/project/api-keys](https://hud.ai/project/api-keys).
 
-## 1. Gateway: Any Model, One API
+## 1. Models: Any Model, One API
 
-Stop juggling API keys. Point any OpenAI-compatible client at `inference.hud.ai` and use Claude, GPT, Gemini, or Grok:
+Stop juggling API keys. Point any OpenAI-compatible client at `inference.hud.ai` and use Claude, GPT, Gemini, or Grok. Browse all available models at [hud.ai/models](https://hud.ai/models).
 
 ```python
 from openai import AsyncOpenAI
@@ -39,7 +39,7 @@ response = await client.chat.completions.create(
 
 Every call is traced. View them at [hud.ai/home](https://hud.ai/home).
 
-→ [More on Gateway](/quick-links/gateway)
+→ [More on Models](/quick-links/models)
 
 ## 2. Environments: Your Code, Agent-Ready
 
@@ -63,61 +63,41 @@ async def find_answer(question: str):
     yield 1.0 if "correct" in answer.lower() else 0.0
 ```
 
-**Scenarios are the atomic skills your agent must get right.** Each one defines a prompt (first yield) and scoring logic (second yield). If your agent can't reliably pass a scenario, that's a gap to close—through prompting, fine-tuning, or tool design.
-
-→ [More on Environments](/quick-links/environments)
-
-## 3. Evals: Test and Improve
-
-Run your scenario with different models. Compare results:
-
-```python
-import hud
-
-task = env("find-answer", question="What is 2+2?")
-
-async with hud.eval(task, variants={"model": ["gpt-4o", "claude-sonnet-4-5"]}, group=5) as ctx:
-    response = await client.chat.completions.create(
-        model=ctx.variants["model"],
-        messages=[{"role": "user", "content": ctx.prompt}]
-    )
-    await ctx.submit(response.choices[0].message.content)
-```
-
-**Variants** test different configurations. **Groups** repeat each to see the distribution. Results show up on [hud.ai](https://hud.ai/home) with scores, traces, and side-by-side comparisons.
-
-→ [More on A/B Evals](/quick-links/ab-testing)
-
-## 4. Deploy and Scale
-
-Push your environment to GitHub, connect it on [hud.ai](https://hud.ai), and run thousands of evals in parallel. Every run generates training data.
+Iterate locally with `hud dev`, then deploy to the platform:
 
 ```bash
-hud init                    # Scaffold environment
-git push                    # Push to GitHub
-# Connect on hud.ai → New → Environment
-hud eval my-eval --model gpt-4o --group-size 100
+hud init          # Scaffold environment
+hud dev env:env   # Run as MCP server (Cursor/Claude Code can connect)
+hud deploy        # Deploy to platform → run evals at scale
 ```
 
-→ [More on Deploy](/quick-links/deploy)
+Once deployed, your environment is live—agents can run against it in parallel, all traced, all generating training data.
+
+→ [More on Environments](/quick-links/environments) · [Hosted Running](/quick-links/deploy)
+
+## 3. Tasks & Training: Test and Train
+
+Create tasks from your scenarios on [hud.ai](https://hud.ai). Run evaluations across models. Train on successful completions. The same model string works before and after training—just better at your tasks.
+
+→ [More on Tasks & Training](/quick-links/evals)
 
 ## Next Steps
 
 <CardGroup cols={2}>
-<Card title="Gateway" icon="server" href="/quick-links/gateway">
-  One endpoint for every model. Full observability.
+<Card title="Models" icon="robot" href="/quick-links/models">
+  One endpoint for every model. Native tools.
 </Card>
 
 <Card title="Environments" icon="cube" href="/quick-links/environments">
-  Tools, Scenarios, and local testing.
+  Tools, scenarios, and iteration.
 </Card>
 
-<Card title="A/B Evals" icon="flask-vial" href="/quick-links/ab-testing">
-  Variants, groups, and finding what works.
+<Card title="Hosted Running" icon="rocket" href="/quick-links/deploy">
+  Push to platform. Run at scale.
 </Card>
 
-<Card title="Deploy" icon="rocket" href="/quick-links/deploy">
-  Run at scale. Generate training data.
+<Card title="Tasks & Training" icon="flask-vial" href="/quick-links/evals">
+  Evaluate and train models.
 </Card>
 </CardGroup>
 

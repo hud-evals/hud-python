@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import ClassVar, Literal
 
-from .base import BaseTool
-from .native_types import NativeToolSpec, NativeToolSpecs
+from hud.tools.base import BaseTool
+from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.types import AgentType
 
 
@@ -431,6 +431,7 @@ class ApplyPatchTool(BaseTool):
         AgentType.OPENAI: NativeToolSpec(
             api_type="apply_patch",
             api_name="apply_patch",
+            role="editor",
         ),
     }
 

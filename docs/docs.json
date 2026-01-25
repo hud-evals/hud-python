@@ -45,10 +45,10 @@
               {
                 "group": "Essentials",
                 "pages": [
-                  "quick-links/gateway",
-                  "quick-links/ab-testing",
+                  "quick-links/models",
                   "quick-links/environments",
-                  "quick-links/deploy"
+                  "quick-links/deploy",
+                  "quick-links/evals"
                 ]
               },
               {
@@ -91,6 +91,8 @@
                   "reference/cli/init",
                   "reference/cli/dev",
                   "reference/cli/build",
+                  "reference/cli/deploy",
+                  "reference/cli/link",
                   "reference/cli/push",
                   "reference/cli/analyze",
                   "reference/cli/debug",

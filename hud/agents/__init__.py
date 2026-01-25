@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import MCPAgent
+from .base import CategorizedTools, MCPAgent
 from .openai import OpenAIAgent
 from .openai_chat import OpenAIChatAgent
 from .operator import OperatorAgent
 
 __all__ = [
+    "CategorizedTools",
     "MCPAgent",
     "OpenAIAgent",
     "OpenAIChatAgent",

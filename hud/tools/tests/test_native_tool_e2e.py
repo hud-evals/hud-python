@@ -1,0 +1,729 @@
+"""End-to-end tests for native tool spec propagation through MCP.
+
+These tests verify that:
+1. Tools with native_specs correctly embed meta data when served via MCPServer
+2. Agents can retrieve and parse these native specs from MCP tools
+3. Role-based exclusion works correctly end-to-end
+"""
+
+from __future__ import annotations
+
+import asyncio
+import socket
+from contextlib import suppress
+from typing import Any, ClassVar, cast
+
+import pytest
+from fastmcp import Client as MCPClient
+
+from hud.agents.base import CategorizedTools, MCPAgent
+from hud.server import MCPServer
+from hud.tools.base import BaseTool
+from hud.tools.bash import BashTool
+from hud.tools.computer.anthropic import AnthropicComputerTool
+from hud.tools.hosted import GoogleSearchTool
+from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
+from hud.types import AgentResponse, AgentType
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+async def _start_http_server(mcp: MCPServer, port: int) -> asyncio.Task[None]:
+    task = asyncio.create_task(
+        mcp.run_async(
+            transport="http",
+            host="127.0.0.1",
+            port=port,
+            path="/mcp",
+            log_level="ERROR",
+            show_banner=False,
+        )
+    )
+    await asyncio.sleep(0.05)
+    return task
+
+
+class TestNativeToolSpecE2E:
+    """Test native tool specs are properly transmitted via MCP."""
+
+    @pytest.mark.asyncio
+    async def test_bash_tool_meta_transmitted(self) -> None:
+        """Test that BashTool's native_specs are transmitted via MCP meta field."""
+        port = _free_port()
+        mcp = MCPServer(name="BashToolTest")
+
+        # Register BashTool which has native_specs for Claude
+        bash_tool = BashTool()
+        mcp.add_tool(bash_tool)
+
+        server_task = await _start_http_server(mcp, port)
+
+        try:
+            cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
+            client = MCPClient({"mcpServers": cfg})
+            await client.__aenter__()
+
+            tools = await client.list_tools()
+            bash_tools = [t for t in tools if t.name == "bash"]
+            assert len(bash_tools) == 1
+
+            tool = bash_tools[0]
+            assert tool.meta is not None, "Tool should have meta field"
+            assert "native_tools" in tool.meta, "Meta should contain native_tools"
+            assert "claude" in tool.meta["native_tools"], "Should have Claude spec"
+
+            claude_spec = tool.meta["native_tools"]["claude"]
+            assert claude_spec["api_type"] == "bash_20250124"
+            assert claude_spec["api_name"] == "bash"
+
+            await client.__aexit__(None, None, None)
+        finally:
+            with suppress(asyncio.CancelledError):
+                server_task.cancel()
+                await server_task
+
+    @pytest.mark.asyncio
+    async def test_computer_tool_meta_with_display_dimensions(self) -> None:
+        """Test that computer tool transmits display dimensions in extra field."""
+        port = _free_port()
+        mcp = MCPServer(name="ComputerToolTest")
+
+        # Create AnthropicComputerTool with custom dimensions
+        computer_tool = AnthropicComputerTool(
+            display_width=1920,
+            display_height=1080,
+        )
+        mcp.add_tool(computer_tool)
+
+        server_task = await _start_http_server(mcp, port)
+
+        try:
+            cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
+            client = MCPClient({"mcpServers": cfg})
+            await client.__aenter__()
+
+            tools = await client.list_tools()
+            computer_tools = [t for t in tools if "computer" in t.name]
+            assert len(computer_tools) == 1
+
+            tool = computer_tools[0]
+            assert tool.meta is not None
+
+            # Verify native_tools contains Claude spec with display dimensions
+            native_tools = tool.meta.get("native_tools", {})
+            assert "claude" in native_tools
+
+            claude_spec = native_tools["claude"]
+            assert claude_spec["api_type"] == "computer_20250124"
+            assert claude_spec["role"] == "computer"
+
+            # Display dimensions should be in extra field
+            extra = claude_spec.get("extra", {})
+            assert extra.get("display_width") == 1920
+            assert extra.get("display_height") == 1080
+
+            await client.__aexit__(None, None, None)
+        finally:
+            with suppress(asyncio.CancelledError):
+                server_task.cancel()
+                await server_task
+
+    @pytest.mark.asyncio
+    async def test_hosted_tool_meta_transmitted(self) -> None:
+        """Test that hosted tools transmit hosted=True in native specs."""
+        # Test hosted tool without MCP server (direct instantiation)
+        google_tool = GoogleSearchTool(dynamic_threshold=0.5)
+
+        # Check meta is properly set
+        assert google_tool.meta is not None
+        native_tools = google_tool.meta.get("native_tools", {})
+
+        # Should have specs for Gemini agents
+        assert "gemini" in native_tools
+        gemini_spec = native_tools["gemini"]
+        assert gemini_spec["api_type"] == "google_search"
+        assert gemini_spec["hosted"] is True
+        assert gemini_spec["extra"]["dynamic_threshold"] == 0.5
+
+
+class TestNativeToolSpecAgentIntegration:
+    """Test that agents correctly interpret native tool specs from MCP."""
+
+    @pytest.mark.asyncio
+    async def test_agent_categorizes_tools_from_mcp(self) -> None:
+        """Test that an agent can categorize tools received from MCP server."""
+        port = _free_port()
+        mcp = MCPServer(name="AgentCategorizeTest")
+
+        # Register tools
+        bash_tool = BashTool()
+        mcp.add_tool(bash_tool)
+
+        @mcp.tool()
+        async def generic_tool(text: str) -> str:
+            """A generic tool without native specs."""
+            return f"echo: {text}"
+
+        server_task = await _start_http_server(mcp, port)
+
+        try:
+            cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
+            client = MCPClient({"mcpServers": cfg})
+            await client.__aenter__()
+
+            tools = await client.list_tools()
+            assert len(tools) == 2
+
+            # Create a mock agent to test categorization
+            class TestClaudeAgent(MCPAgent):
+                @classmethod
+                def agent_type(cls) -> AgentType:
+                    return AgentType.CLAUDE
+
+                def get_system_messages(self) -> list[Any]:
+                    return []
+
+                async def get_response(self, messages: list[Any]) -> AgentResponse:
+                    return AgentResponse(content="test", done=True)
+
+                def format_blocks(self, blocks: list[Any]) -> list[Any]:
+                    return blocks
+
+                def format_tool_results(self, results: list[Any]) -> list[Any]:
+                    return results
+
+            agent = TestClaudeAgent.create()
+            agent._available_tools = list(tools)
+
+            categorized = agent.categorize_tools()
+
+            # BashTool should be categorized as native for Claude
+            assert len(categorized.native) == 1
+            assert categorized.native[0][0].name == "bash"
+            assert categorized.native[0][1].api_type == "bash_20250124"
+
+            # generic_tool should be categorized as generic
+            assert len(categorized.generic) == 1
+            assert categorized.generic[0].name == "generic_tool"
+
+            await client.__aexit__(None, None, None)
+        finally:
+            with suppress(asyncio.CancelledError):
+                server_task.cancel()
+                await server_task
+
+    @pytest.mark.asyncio
+    async def test_role_exclusion_works_e2e(self) -> None:
+        """Test that role-based exclusion works with mocked MCP tools."""
+        from mcp import types as mcp_types
+
+        # Create mock MCP tools as if they came from a server
+        claude_computer_tool = mcp_types.Tool(
+            name="anthropic_computer",
+            description="Anthropic computer tool",
+            inputSchema={},
+            _meta={
+                "native_tools": {
+                    "claude": {
+                        "api_type": "computer_20250124",
+                        "api_name": "computer",
+                        "role": "computer",
+                    }
+                }
+            },
+        )
+
+        gemini_computer_tool = mcp_types.Tool(
+            name="gemini_computer",
+            description="Gemini computer tool",
+            inputSchema={},
+            _meta={
+                "native_tools": {
+                    "gemini": {
+                        "api_type": "computer_use",
+                        "api_name": "gemini_computer",
+                        "role": "computer",
+                    }
+                }
+            },
+        )
+
+        tools = [claude_computer_tool, gemini_computer_tool]
+
+        # Test Claude agent - should use AnthropicComputerTool, skip Gemini one
+        class TestClaudeAgent(MCPAgent):
+            @classmethod
+            def agent_type(cls) -> AgentType:
+                return AgentType.CLAUDE
+
+            def get_system_messages(self) -> list[Any]:
+                return []
+
+            async def get_response(self, messages: list[Any]) -> AgentResponse:
+                return AgentResponse(content="test", done=True)
+
+            def format_blocks(self, blocks: list[Any]) -> list[Any]:
+                return blocks
+
+            def format_tool_results(self, results: list[Any]) -> list[Any]:
+                return results
+
+        claude_agent = TestClaudeAgent.create()
+        claude_agent._available_tools = tools
+        categorized = claude_agent.categorize_tools()
+
+        # Claude should have one native computer tool
+        assert len(categorized.native) == 1
+        assert "anthropic_computer" in categorized.native[0][0].name
+
+        # Gemini computer tool should be skipped (role claimed)
+        assert len(categorized.skipped) == 1
+        assert "gemini_computer" in categorized.skipped[0][0].name
+
+
+class TestToolWithoutNativeSpecs:
+    """Test backwards compatibility with tools that don't have native specs."""
+
+    @pytest.mark.asyncio
+    async def test_generic_tool_without_meta(self) -> None:
+        """Test that tools without native_specs still work as generic tools."""
+        port = _free_port()
+        mcp = MCPServer(name="GenericToolTest")
+
+        @mcp.tool()
+        async def simple_tool(text: str) -> str:
+            """A simple tool with no native specs."""
+            return f"result: {text}"
+
+        server_task = await _start_http_server(mcp, port)
+
+        try:
+            cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
+            client = MCPClient({"mcpServers": cfg})
+            await client.__aenter__()
+
+            tools = await client.list_tools()
+            assert len(tools) == 1
+
+            tool = tools[0]
+            assert tool.name == "simple_tool"
+
+            # meta might be None or empty - both are valid
+            native_tools = (tool.meta or {}).get("native_tools", {})
+            assert native_tools == {}
+
+            # Test that agent handles this correctly
+            class TestAgent(MCPAgent):
+                @classmethod
+                def agent_type(cls) -> AgentType:
+                    return AgentType.CLAUDE
+
+                def get_system_messages(self) -> list[Any]:
+                    return []
+
+                async def get_response(self, messages: list[Any]) -> AgentResponse:
+                    return AgentResponse(content="test", done=True)
+
+                def format_blocks(self, blocks: list[Any]) -> list[Any]:
+                    return blocks
+
+                def format_tool_results(self, results: list[Any]) -> list[Any]:
+                    return results
+
+            agent = TestAgent.create()
+            agent._available_tools = list(tools)
+            categorized = agent.categorize_tools()
+
+            # Tool should be categorized as generic
+            assert len(categorized.native) == 0
+            assert len(categorized.hosted) == 0
+            assert len(categorized.generic) == 1
+            assert categorized.generic[0].name == "simple_tool"
+
+            await client.__aexit__(None, None, None)
+        finally:
+            with suppress(asyncio.CancelledError):
+                server_task.cancel()
+                await server_task
+
+
+class TestLegacyNameFallback:
+    """Test that old environments without native_tools metadata work via name-based fallback."""
+
+    def test_claude_legacy_computer_fallback(self) -> None:
+        """Test Claude agent detects anthropic_computer by name without metadata."""
+        from mcp import types as mcp_types
+        from hud.agents.claude import ClaudeAgent
+
+        # Create a tool with NO native_tools metadata - just a name
+        legacy_tool = mcp_types.Tool(
+            name="anthropic_computer",
+            description="Old-style computer tool without native_tools metadata",
+            inputSchema={"type": "object", "properties": {}},
+            # Note: NO _meta field at all!
+        )
+
+        agent = ClaudeAgent.create()
+        agent._available_tools = [legacy_tool]
+
+        # The legacy fallback should detect this as a computer tool
+        spec = agent.resolve_native_spec(legacy_tool)
+        assert spec is not None, "Legacy fallback should detect anthropic_computer"
+        assert spec.api_type == "computer_20250124"
+        assert spec.role == "computer"
+
+        # Categorize should work
+        categorized = agent.categorize_tools()
+        assert len(categorized.native) == 1
+        assert categorized.native[0][0].name == "anthropic_computer"
+        assert categorized.native[0][1].api_type == "computer_20250124"
+
+    def test_claude_legacy_bash_fallback(self) -> None:
+        """Test Claude agent detects bash by name without metadata."""
+        from mcp import types as mcp_types
+        from hud.agents.claude import ClaudeAgent
+
+        legacy_tool = mcp_types.Tool(
+            name="bash",
+            description="Old-style bash tool",
+            inputSchema={"type": "object", "properties": {}},
+        )
+
+        agent = ClaudeAgent.create()
+        agent._available_tools = [legacy_tool]
+
+        spec = agent.resolve_native_spec(legacy_tool)
+        assert spec is not None, "Legacy fallback should detect bash"
+        assert spec.api_type == "bash_20250124"
+
+    def test_claude_legacy_editor_fallback(self) -> None:
+        """Test Claude agent detects str_replace_based_edit_tool by name."""
+        from mcp import types as mcp_types
+        from hud.agents.claude import ClaudeAgent
+
+        legacy_tool = mcp_types.Tool(
+            name="str_replace_based_edit_tool",
+            description="Old-style editor tool",
+            inputSchema={"type": "object", "properties": {}},
+        )
+
+        agent = ClaudeAgent.create()
+        agent._available_tools = [legacy_tool]
+
+        spec = agent.resolve_native_spec(legacy_tool)
+        assert spec is not None, "Legacy fallback should detect editor"
+        assert spec.api_type == "text_editor_20250728"
+
+    def test_claude_legacy_suffix_match(self) -> None:
+        """Test Claude agent detects prefixed tool names like mcp_anthropic_computer."""
+        from mcp import types as mcp_types
+        from hud.agents.claude import ClaudeAgent
+
+        legacy_tool = mcp_types.Tool(
+            name="mcp_anthropic_computer",
+            description="Prefixed computer tool from MCP server",
+            inputSchema={"type": "object", "properties": {}},
+        )
+
+        agent = ClaudeAgent.create()
+        agent._available_tools = [legacy_tool]
+
+        spec = agent.resolve_native_spec(legacy_tool)
+        assert spec is not None, "Legacy fallback should detect prefixed computer tool"
+        assert spec.api_type == "computer_20250124"
+
+    def test_gemini_legacy_computer_fallback(self) -> None:
+        """Test Gemini agent detects gemini_computer by name without metadata."""
+        from mcp import types as mcp_types
+        from hud.agents.gemini import GeminiAgent
+
+        legacy_tool = mcp_types.Tool(
+            name="gemini_computer",
+            description="Old-style Gemini computer tool",
+            inputSchema={"type": "object", "properties": {}},
+        )
+
+        agent = GeminiAgent.create(validate_api_key=False)
+        agent._available_tools = [legacy_tool]
+
+        spec = agent.resolve_native_spec(legacy_tool)
+        assert spec is not None, "Legacy fallback should detect gemini_computer"
+        assert spec.api_type == "computer_use"
+        assert spec.role == "computer"
+
+    def test_gemini_cua_legacy_computer_fallback(self) -> None:
+        """Test GeminiCUAAgent detects gemini_computer by name without metadata."""
+        from mcp import types as mcp_types
+        from hud.agents.gemini_cua import GeminiCUAAgent
+
+        legacy_tool = mcp_types.Tool(
+            name="gemini_computer",
+            description="Old-style Gemini CUA computer tool",
+            inputSchema={"type": "object", "properties": {}},
+        )
+
+        agent = GeminiCUAAgent.create(validate_api_key=False)
+        agent._available_tools = [legacy_tool]
+
+        spec = agent.resolve_native_spec(legacy_tool)
+        assert spec is not None, "Legacy fallback should detect gemini_computer for CUA"
+        assert spec.api_type == "computer_use"
+        assert spec.role == "computer"
+
+    def test_openai_legacy_shell_fallback(self) -> None:
+        """Test OpenAI agent detects shell by name without metadata."""
+        from mcp import types as mcp_types
+        from hud.agents.openai import OpenAIAgent
+
+        legacy_tool = mcp_types.Tool(
+            name="shell",
+            description="Old-style shell tool",
+            inputSchema={"type": "object", "properties": {}},
+        )
+
+        agent = OpenAIAgent.create(validate_api_key=False)
+        agent._available_tools = [legacy_tool]
+
+        spec = agent.resolve_native_spec(legacy_tool)
+        assert spec is not None, "Legacy fallback should detect shell"
+        assert spec.api_type == "shell"
+
+    def test_openai_legacy_apply_patch_fallback(self) -> None:
+        """Test OpenAI agent detects apply_patch by name without metadata."""
+        from mcp import types as mcp_types
+        from hud.agents.openai import OpenAIAgent
+
+        legacy_tool = mcp_types.Tool(
+            name="apply_patch",
+            description="Old-style apply_patch tool",
+            inputSchema={"type": "object", "properties": {}},
+        )
+
+        agent = OpenAIAgent.create(validate_api_key=False)
+        agent._available_tools = [legacy_tool]
+
+        spec = agent.resolve_native_spec(legacy_tool)
+        assert spec is not None, "Legacy fallback should detect apply_patch"
+        assert spec.api_type == "apply_patch"
+
+    def test_metadata_takes_precedence_over_legacy(self) -> None:
+        """Test that explicit native_tools metadata takes precedence over name matching."""
+        from mcp import types as mcp_types
+        from hud.agents.claude import ClaudeAgent
+
+        # Tool named "computer" but with custom metadata
+        tool_with_metadata = mcp_types.Tool(
+            name="computer",
+            description="Computer tool with explicit metadata",
+            inputSchema={"type": "object", "properties": {}},
+            _meta={
+                "native_tools": {
+                    "claude": {
+                        "api_type": "computer_20250124",
+                        "api_name": "computer",
+                        "role": "computer",
+                        "display_width": 1920,  # Custom dimensions
+                        "display_height": 1080,
+                    }
+                }
+            },
+        )
+
+        agent = ClaudeAgent.create()
+        agent._available_tools = [tool_with_metadata]
+
+        spec = agent.resolve_native_spec(tool_with_metadata)
+        assert spec is not None
+        assert spec.api_type == "computer_20250124"
+        # Metadata should be used, including custom dimensions
+        assert spec.extra.get("display_width") == 1920
+        assert spec.extra.get("display_height") == 1080
+
+
+class TestBackwardsCompatibility:
+    """Test backwards compatibility with old-style tools and settings fallbacks."""
+
+    def test_computer_tool_without_display_dims_uses_fallback(self) -> None:
+        """Test that a native spec without display dimensions falls back to settings."""
+        from mcp import types as mcp_types
+
+        import warnings
+        from hud.agents.claude import ClaudeAgent
+        from hud.tools.computer.settings import computer_settings
+
+        # Create a mock tool with native spec but NO display dimensions in extra
+        computer_tool = mcp_types.Tool(
+            name="computer",
+            description="Old-style computer tool without display dims",
+            inputSchema={},
+            _meta={
+                "native_tools": {
+                    "claude": {
+                        "api_type": "computer_20250124",
+                        "api_name": "computer",
+                        "role": "computer",
+                        # Note: NO display_width or display_height in extra
+                    }
+                }
+            },
+        )
+
+        # Create agent and get native spec
+        agent = ClaudeAgent.create()
+        agent._available_tools = [computer_tool]
+        spec = agent.resolve_native_spec(computer_tool)
+
+        assert spec is not None
+        assert spec.api_type == "computer_20250124"
+
+        # The spec.extra should be empty (no display dimensions)
+        assert spec.extra.get("display_width") is None
+        assert spec.extra.get("display_height") is None
+
+        # When building native tool, it should fall back to computer_settings
+        # and emit a deprecation warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            claude_tool = agent._build_native_tool(computer_tool, spec)
+
+            # Should have emitted deprecation warning
+            deprecation_warnings = [
+                warning for warning in w if issubclass(warning.category, DeprecationWarning)
+            ]
+            assert len(deprecation_warnings) >= 1
+            assert "display dimensions" in str(deprecation_warnings[0].message).lower()
+            assert "v0.6.0" in str(deprecation_warnings[0].message)
+
+        # Tool should still work with fallback dimensions
+        # Cast to Any for TypedDict union access
+        tool_dict = cast(dict[str, Any], claude_tool)
+        assert tool_dict["display_width_px"] == computer_settings.ANTHROPIC_COMPUTER_WIDTH
+        assert tool_dict["display_height_px"] == computer_settings.ANTHROPIC_COMPUTER_HEIGHT
+
+    def test_new_style_tool_with_display_dims_no_warning(self) -> None:
+        """Test that a new-style tool with display dimensions doesn't emit warning."""
+        from mcp import types as mcp_types
+
+        import warnings
+        from hud.agents.claude import ClaudeAgent
+
+        # Create a tool with display dimensions at the top level (non-standard fields go to extra)
+        # This is how NativeToolSpec.model_dump() serializes it
+        computer_tool = mcp_types.Tool(
+            name="computer",
+            description="New-style computer tool with display dims",
+            inputSchema={},
+            _meta={
+                "native_tools": {
+                    "claude": {
+                        "api_type": "computer_20250124",
+                        "api_name": "computer",
+                        "role": "computer",
+                        # display_width/height are non-standard fields,
+                        # so resolve_native_spec puts them in extra
+                        "display_width": 1920,
+                        "display_height": 1080,
+                    }
+                }
+            },
+        )
+
+        agent = ClaudeAgent.create()
+        agent._available_tools = [computer_tool]
+        spec = agent.resolve_native_spec(computer_tool)
+
+        assert spec is not None
+        assert spec.extra.get("display_width") == 1920
+        assert spec.extra.get("display_height") == 1080
+
+        # Should NOT emit deprecation warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            claude_tool = agent._build_native_tool(computer_tool, spec)
+
+            deprecation_warnings = [
+                warning for warning in w if issubclass(warning.category, DeprecationWarning)
+            ]
+            assert len(deprecation_warnings) == 0
+
+        # Tool should use provided dimensions
+        # Cast to Any for TypedDict union access
+        tool_dict = cast(dict[str, Any], claude_tool)
+        assert tool_dict["display_width_px"] == 1920
+        assert tool_dict["display_height_px"] == 1080
+
+
+class TestToolNativeSpecs:
+    """Tests for native_specs on tool classes."""
+
+    def test_shell_tool_has_openai_native_spec(self) -> None:
+        """Test ShellTool has native_specs for OpenAI."""
+        from hud.tools.shell import ShellTool
+        from hud.types import AgentType
+
+        assert hasattr(ShellTool, "native_specs")
+        assert AgentType.OPENAI in ShellTool.native_specs
+        spec = ShellTool.native_specs[AgentType.OPENAI]
+        assert spec.api_type == "shell"
+        assert spec.api_name == "shell"
+
+    def test_apply_patch_tool_has_openai_native_spec(self) -> None:
+        """Test ApplyPatchTool has native_specs for OpenAI."""
+        from hud.tools.apply_patch import ApplyPatchTool
+        from hud.types import AgentType
+
+        assert hasattr(ApplyPatchTool, "native_specs")
+        assert AgentType.OPENAI in ApplyPatchTool.native_specs
+        spec = ApplyPatchTool.native_specs[AgentType.OPENAI]
+        assert spec.api_type == "apply_patch"
+        assert spec.api_name == "apply_patch"
+
+    def test_bash_tool_has_claude_native_spec(self) -> None:
+        """Test BashTool has native_specs for Claude."""
+        from hud.tools.bash import BashTool
+        from hud.types import AgentType
+
+        assert hasattr(BashTool, "native_specs")
+        assert AgentType.CLAUDE in BashTool.native_specs
+        spec = BashTool.native_specs[AgentType.CLAUDE]
+        assert spec.api_type == "bash_20250124"
+        assert spec.api_name == "bash"
+
+    def test_edit_tool_has_claude_native_spec(self) -> None:
+        """Test EditTool has native_specs for Claude."""
+        from hud.tools.edit import EditTool
+        from hud.types import AgentType
+
+        assert hasattr(EditTool, "native_specs")
+        assert AgentType.CLAUDE in EditTool.native_specs
+        spec = EditTool.native_specs[AgentType.CLAUDE]
+        assert spec.api_type == "text_editor_20250728"
+        assert spec.api_name == "str_replace_based_edit_tool"
+
+    def test_shell_tools_have_mutual_exclusion_role(self) -> None:
+        """Test BashTool and ShellTool both have role='shell' for mutual exclusion."""
+        from hud.tools.bash import BashTool
+        from hud.tools.coding import ShellTool
+        from hud.types import AgentType
+
+        bash_spec = BashTool.native_specs[AgentType.CLAUDE]
+        shell_spec = ShellTool.native_specs[AgentType.OPENAI]
+
+        assert bash_spec.role == "shell"
+        assert shell_spec.role == "shell"
+
+    def test_editor_tools_have_mutual_exclusion_role(self) -> None:
+        """Test EditTool and ApplyPatchTool both have role='editor' for mutual exclusion."""
+        from hud.tools.coding import ApplyPatchTool
+        from hud.tools.edit import EditTool
+        from hud.types import AgentType
+
+        edit_spec = EditTool.native_specs[AgentType.CLAUDE]
+        apply_patch_spec = ApplyPatchTool.native_specs[AgentType.OPENAI]
+
+        assert edit_spec.role == "editor"
+        assert apply_patch_spec.role == "editor"

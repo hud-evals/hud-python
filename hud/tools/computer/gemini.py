@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import logging
 import platform
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from mcp import ErrorData, McpError
 from mcp.types import INVALID_PARAMS, ContentBlock
 from pydantic import Field
 
+from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult
+from hud.types import AgentType
 
 from .hud import HudComputerTool
 from .settings import computer_settings
@@ -47,6 +49,19 @@ class GeminiComputerTool(HudComputerTool):
     search, navigate, key_combination, drag_and_drop) to executor actions.
     """
 
+    native_specs: ClassVar[NativeToolSpecs] = {
+        AgentType.GEMINI: NativeToolSpec(
+            api_type="computer_use",
+            api_name="gemini_computer",
+            role="computer",  # Mutually exclusive with other computer tools when native
+        ),
+        AgentType.GEMINI_CUA: NativeToolSpec(
+            api_type="computer_use",
+            api_name="gemini_computer",
+            role="computer",  # Mutually exclusive with other computer tools when native
+        ),
+    }
+
     def __init__(
         self,
         # Define within environment based on platform
@@ -54,8 +69,10 @@ class GeminiComputerTool(HudComputerTool):
         platform_type: Literal["auto", "xdo", "pyautogui"] = "auto",
         display_num: int | None = None,
         # Overrides for what dimensions the agent thinks it operates in
-        width: int = computer_settings.GEMINI_COMPUTER_WIDTH,
-        height: int = computer_settings.GEMINI_COMPUTER_HEIGHT,
+        display_width: int | None = None,
+        display_height: int | None = None,
+        width: int | None = None,  # Deprecated: use display_width
+        height: int | None = None,  # Deprecated: use display_height
         rescale_images: bool = computer_settings.GEMINI_RESCALE_IMAGES,
         # What the agent sees as the tool's name, title, and description
         name: str | None = None,
@@ -65,17 +82,50 @@ class GeminiComputerTool(HudComputerTool):
     ) -> None:
         """
         Initialize with Gemini's default dimensions.
+
+        Args:
+            display_width: Width for agent coordinate system
+            display_height: Height for agent coordinate system
+            width: Deprecated, use display_width
+            height: Deprecated, use display_height
         """
+        # Handle deprecated width/height params
+        actual_width = display_width or width or computer_settings.GEMINI_COMPUTER_WIDTH
+        actual_height = display_height or height or computer_settings.GEMINI_COMPUTER_HEIGHT
+
+        # Create instance-level native_specs with display dimensions
+        instance_native_specs = {
+            AgentType.GEMINI: NativeToolSpec(
+                api_type="computer_use",
+                api_name="gemini_computer",
+                role="computer",
+                extra={
+                    "display_width": actual_width,
+                    "display_height": actual_height,
+                },
+            ),
+            AgentType.GEMINI_CUA: NativeToolSpec(
+                api_type="computer_use",
+                api_name="gemini_computer",
+                role="computer",
+                extra={
+                    "display_width": actual_width,
+                    "display_height": actual_height,
+                },
+            ),
+        }
+
         super().__init__(
             executor=executor,
             platform_type=platform_type,
             display_num=display_num,
-            width=width,
-            height=height,
+            width=actual_width,
+            height=actual_height,
             rescale_images=rescale_images,
             name=name or "gemini_computer",
             title=title or "Gemini Computer Tool",
             description=description or "Control computer with mouse, keyboard, and screenshots",
+            native_specs=instance_native_specs,
             **kwargs,
         )
 

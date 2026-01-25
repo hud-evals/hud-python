@@ -6,11 +6,13 @@ import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import mcp.types as types
 
-from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
+from hud.tools.native_types import NativeToolSpec
+from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
 from hud.utils.hud_console import HUDConsole
 
 from .types import BaseCreateParams
@@ -21,6 +23,30 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CategorizedTools:
+    """Result of categorizing tools by native spec availability.
+
+    Used by agents to efficiently process tools with shared logic for
+    role-based mutual exclusion.
+    """
+
+    native: list[tuple[types.Tool, NativeToolSpec]] = field(default_factory=list)
+    """Tools with native specs for this agent (tool, spec) pairs."""
+
+    hosted: list[tuple[types.Tool, NativeToolSpec]] = field(default_factory=list)
+    """Hosted tools with native specs for this agent (tool, spec) pairs."""
+
+    generic: list[types.Tool] = field(default_factory=list)
+    """Tools without native specs that aren't role-blocked."""
+
+    claimed_roles: set[str] = field(default_factory=set)
+    """Roles claimed by native tools."""
+
+    skipped: list[tuple[types.Tool, str]] = field(default_factory=list)
+    """Tools skipped due to role conflicts (tool, reason) pairs."""
 
 
 class MCPAgent(ABC):
@@ -40,6 +66,151 @@ class MCPAgent(ABC):
     metadata: ClassVar[dict[str, Any] | None] = None
     required_tools: ClassVar[list[str]] = []  # Tools that must be available
     config_cls: ClassVar[type[BaseAgentConfig]] = BaseAgentConfig
+
+    @classmethod
+    @abstractmethod
+    def agent_type(cls) -> AgentType:
+        """Return the AgentType for this agent.
+
+        Subclasses must implement this to return their corresponding AgentType enum value.
+        This is used for resolving native tool specifications.
+
+        Returns:
+            AgentType enum value for this agent
+        """
+        raise NotImplementedError
+
+    def resolve_native_spec(self, tool: types.Tool) -> NativeToolSpec | None:
+        """Check if a tool has a native spec for this agent type.
+
+        Looks up the tool's meta.native_tools field for a spec matching this agent's type.
+        If found, returns a NativeToolSpec that can be used to register the tool with
+        the provider's native API format.
+
+        Falls back to legacy name-based detection for backwards compatibility with
+        old environments that don't emit native_tools metadata.
+
+        Args:
+            tool: MCP Tool object to check for native specs
+
+        Returns:
+            NativeToolSpec if the tool has a native spec for this agent, None otherwise
+        """
+        # First try metadata-based resolution
+        if tool.meta:
+            native_tools = tool.meta.get("native_tools", {})
+            spec_dict = native_tools.get(self.agent_type().value)
+
+            if spec_dict:
+                # Extract known fields and put the rest in extra
+                known_fields = {"api_type", "api_name", "beta", "hosted", "role"}
+                extra = {k: v for k, v in spec_dict.items() if k not in known_fields}
+
+                return NativeToolSpec(
+                    api_type=spec_dict["api_type"],
+                    api_name=spec_dict.get("api_name"),
+                    beta=spec_dict.get("beta"),
+                    hosted=spec_dict.get("hosted", False),
+                    role=spec_dict.get("role"),
+                    extra=extra,
+                )
+
+        # Fall back to legacy name-based detection for old environments
+        return self._legacy_native_spec_fallback(tool)
+
+    def _legacy_native_spec_fallback(self, tool: types.Tool) -> NativeToolSpec | None:
+        """Detect native tools by name for backwards compatibility.
+
+        Override in subclasses to support old environments that expose tools
+        without native_tools metadata.
+
+        Args:
+            tool: MCP Tool object to check
+
+        Returns:
+            NativeToolSpec if the tool matches a known legacy pattern, None otherwise
+        """
+        return None
+
+    def get_tool_role(self, tool: types.Tool) -> str | None:
+        """Get the role of a tool from any of its native specs.
+
+        The role is used for mutual exclusion - when an agent accepts a tool
+        natively, other tools with the same role are excluded.
+
+        Args:
+            tool: MCP Tool object to check
+
+        Returns:
+            The role string if any native spec defines one, None otherwise
+        """
+        if not tool.meta:
+            return None
+
+        native_tools = tool.meta.get("native_tools", {})
+        if not native_tools:
+            return None
+
+        # Check all specs for a role (they should all have the same role)
+        for spec_dict in native_tools.values():
+            if isinstance(spec_dict, dict) and spec_dict.get("role"):
+                return spec_dict["role"]
+
+        return None
+
+    def categorize_tools(
+        self, tools: list[types.Tool] | None = None
+    ) -> CategorizedTools:
+        """Categorize tools by native spec availability with role-based exclusion.
+
+        This shared method implements the two-pass tool processing logic:
+        1. First pass: identify native/hosted tools and claim their roles
+        2. Second pass: include generic tools if their role isn't claimed
+
+        Args:
+            tools: List of MCP tools to categorize. If None, uses get_available_tools()
+
+        Returns:
+            CategorizedTools with native, hosted, generic, and skipped tools
+        """
+        if tools is None:
+            tools = self.get_available_tools()
+
+        result = CategorizedTools()
+
+        # First pass: process tools with native specs for this agent
+        for tool in tools:
+            spec = self.resolve_native_spec(tool)
+            if not spec:
+                continue
+
+            # Claim role if specified
+            if spec.role:
+                result.claimed_roles.add(spec.role)
+
+            if spec.hosted:
+                result.hosted.append((tool, spec))
+            else:
+                result.native.append((tool, spec))
+
+        # Second pass: process tools without native specs (generic function tools)
+        for tool in tools:
+            spec = self.resolve_native_spec(tool)
+            if spec:
+                # Already processed in first pass
+                continue
+
+            # Check if this tool's role is already claimed by a native tool
+            tool_role = self.get_tool_role(tool)
+            if tool_role and tool_role in result.claimed_roles:
+                result.skipped.append(
+                    (tool, f"role '{tool_role}' already claimed by native tool")
+                )
+                continue
+
+            result.generic.append(tool)
+
+        return result
 
     def __init__(self, params: BaseCreateParams | None = None, **kwargs: Any) -> None:
         if params is None:

@@ -28,7 +28,8 @@ from anthropic.types.beta import (
 
 from hud.settings import settings
 from hud.tools.computer.settings import computer_settings
-from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.tools.native_types import NativeToolSpec
+from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
 
@@ -54,6 +55,57 @@ class ClaudeAgent(MCPAgent):
         "display_height": computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
     }
     config_cls: ClassVar[type[BaseAgentConfig]] = ClaudeConfig
+
+    @classmethod
+    def agent_type(cls) -> AgentType:
+        """Return the AgentType for Claude."""
+        return AgentType.CLAUDE
+
+    # Legacy tool name patterns for backwards compatibility
+    _LEGACY_COMPUTER_NAMES = ("anthropic_computer", "computer_anthropic", "computer")
+    _LEGACY_BASH_NAMES = ("bash",)
+    _LEGACY_EDITOR_NAMES = ("str_replace_based_edit_tool", "text_editor", "edit")
+
+    def _legacy_native_spec_fallback(self, tool: types.Tool) -> NativeToolSpec | None:
+        """Detect Claude native tools by name for backwards compatibility.
+
+        Supports old environments that expose tools like 'anthropic_computer',
+        'bash', or 'str_replace_based_edit_tool' without native_tools metadata.
+        """
+        name = tool.name
+
+        # Check for computer tool patterns
+        for pattern in self._LEGACY_COMPUTER_NAMES:
+            if name == pattern or name.endswith(f"_{pattern}"):
+                logger.debug("Legacy fallback: detected %s as computer tool", name)
+                return NativeToolSpec(
+                    api_type="computer_20250124",
+                    api_name="computer",
+                    beta="computer-use-2025-01-24",
+                    role="computer",
+                )
+
+        # Check for bash tool patterns
+        for pattern in self._LEGACY_BASH_NAMES:
+            if name == pattern or name.endswith(f"_{pattern}"):
+                logger.debug("Legacy fallback: detected %s as bash tool", name)
+                return NativeToolSpec(
+                    api_type="bash_20250124",
+                    api_name="bash",
+                    beta="computer-use-2025-01-24",
+                )
+
+        # Check for text editor tool patterns
+        for pattern in self._LEGACY_EDITOR_NAMES:
+            if name == pattern or name.endswith(f"_{pattern}"):
+                logger.debug("Legacy fallback: detected %s as text_editor tool", name)
+                return NativeToolSpec(
+                    api_type="text_editor_20250728",
+                    api_name="str_replace_based_edit_tool",
+                    beta="computer-use-2025-01-24",
+                )
+
+        return None
 
     @with_signature(ClaudeCreateParams)
     @classmethod
@@ -135,10 +187,8 @@ class ClaudeAgent(MCPAgent):
         """Get response from Claude including any tool calls."""
         messages_cached = self._add_prompt_caching(messages)
 
-        # betas to use
-        betas = ["fine-grained-tool-streaming-2025-05-14"]
-        if self.has_computer_tool:
-            betas.append("computer-use-2025-01-24")
+        # betas to use - collected during tool conversion based on native specs
+        betas = list(self._required_betas)
 
         # Bedrock doesn't support .stream() - use create(stream=True) instead
         if isinstance(self.anthropic_client, AsyncAnthropicBedrock):
@@ -271,50 +321,40 @@ class ClaudeAgent(MCPAgent):
         return BetaMessageParam(role="user", content=text)
 
     def _convert_tools_for_claude(self) -> None:
-        """Convert MCP tools to Claude API tools."""
+        """Convert MCP tools to Claude API tools using native specs.
 
-        # First pass: identify all computer tools and find the longest match
-        available_tools = self.get_available_tools()
+        Uses shared categorize_tools() for role-based exclusion.
+        """
+        self.has_computer_tool = False
+        self.tool_mapping: dict[str, str] = {}
+        self.claude_tools: list[BetaToolUnionParam] = []
+        self._required_betas: set[str] = {"fine-grained-tool-streaming-2025-05-14"}
 
-        # find potential computer tools by priority
-        selected_computer_tool = None
-        computer_tool_names_by_priority = ["anthropic_computer", "computer_anthropic", "computer"]
-        for computer_tool_name in computer_tool_names_by_priority:
-            for tool in available_tools:
-                # Check both exact match and suffix match (for prefixed tools)
-                if tool.name == computer_tool_name or tool.name.endswith(f"_{computer_tool_name}"):
-                    selected_computer_tool = tool
-                    break
-            if selected_computer_tool:
-                break
+        categorized = self.categorize_tools()
 
-        def to_api_tool(tool: types.Tool) -> BetaToolUnionParam | None:
-            if tool.name == "str_replace_based_edit_tool":
-                return BetaToolTextEditor20250728Param(
-                    type="text_editor_20250728",
-                    name="str_replace_based_edit_tool",
-                )
-            if tool.name == "bash":
-                return BetaToolBash20250124Param(
-                    type="bash_20250124",
-                    name="bash",
-                )
-            if selected_computer_tool is not None:
-                if tool.name == selected_computer_tool.name:
-                    return BetaToolComputerUse20250124Param(
-                        type="computer_20250124",
-                        name="computer",
-                        display_number=1,
-                        display_width_px=computer_settings.ANTHROPIC_COMPUTER_WIDTH,
-                        display_height_px=computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
-                    )
-                elif tool.name == "computer" or tool.name.endswith("_computer"):
-                    logger.warning(
-                        "Renamed tool %s to 'computer', dropping original 'computer' tool",
-                        selected_computer_tool.name,
-                    )
-                    return None
+        # Log skipped tools
+        for tool, reason in categorized.skipped:
+            logger.debug("Skipping tool %s: %s", tool.name, reason)
 
+        # Log skipped hosted tools (Claude doesn't support hosted tools currently)
+        for tool, spec in categorized.hosted:
+            logger.debug("Skipping hosted tool %s for Claude", tool.name)
+
+        # Process native tools
+        for tool, spec in categorized.native:
+            claude_tool = self._build_native_tool(tool, spec)
+            if spec.beta:
+                self._required_betas.add(spec.beta)
+
+            api_name = self._get_native_api_name(spec)
+            self.tool_mapping[api_name] = tool.name
+            self.claude_tools.append(claude_tool)
+
+            if spec.api_type.startswith("computer"):
+                self.has_computer_tool = True
+
+        # Process generic tools
+        for tool in categorized.generic:
             if tool.description is None or tool.inputSchema is None:
                 raise ValueError(
                     cleandoc(f"""MCP tool {tool.name} requires both a description and inputSchema.
@@ -324,26 +364,96 @@ class ClaudeAgent(MCPAgent):
                     """)
                 )
 
-            return BetaToolParam(
+            claude_tool = BetaToolParam(
                 name=tool.name,
                 description=tool.description,
                 input_schema=tool.inputSchema,
             )
-
-        self.has_computer_tool = False
-        self.tool_mapping = {}
-        self.claude_tools = []
-        for tool in available_tools:
-            claude_tool = to_api_tool(tool)
-            if claude_tool is None:
-                continue
-            tool_name = claude_tool.get("name")
-            if tool_name is None:
-                continue
-            if tool_name == "computer":
-                self.has_computer_tool = True
-            self.tool_mapping[tool_name] = tool.name
+            self.tool_mapping[tool.name] = tool.name
             self.claude_tools.append(claude_tool)
+
+    def _get_native_api_name(self, spec: NativeToolSpec) -> str:
+        """Get the literal API name for a native tool spec.
+
+        Claude's native tools have fixed names that must be used exactly.
+        """
+        match spec.api_type:
+            case "computer_20250124":
+                return "computer"
+            case "bash_20250124":
+                return "bash"
+            case "text_editor_20250728":
+                return "str_replace_based_edit_tool"
+            case _:
+                return spec.api_name or spec.api_type
+
+    def _build_native_tool(
+        self, tool: types.Tool, spec: NativeToolSpec
+    ) -> BetaToolUnionParam:
+        """Build a Claude native tool from a NativeToolSpec.
+
+        Args:
+            tool: The MCP tool
+            spec: The native spec for Claude
+
+        Returns:
+            Claude-specific tool parameter
+        """
+        match spec.api_type:
+            case "computer_20250124":
+                # Get display dimensions from spec.extra, fallback to settings
+                display_width = spec.extra.get("display_width")
+                display_height = spec.extra.get("display_height")
+
+                if display_width is None or display_height is None:
+                    import warnings
+
+                    warnings.warn(
+                        "Computer tool missing display dimensions in native_specs.extra. "
+                        "Falling back to computer_settings. This fallback will be removed "
+                        "in v0.6.0. Update your tool to pass display_width/display_height.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                    display_width = display_width or computer_settings.ANTHROPIC_COMPUTER_WIDTH
+                    display_height = display_height or computer_settings.ANTHROPIC_COMPUTER_HEIGHT
+
+                # Claude expects name to be literal "computer"
+                return BetaToolComputerUse20250124Param(
+                    type="computer_20250124",
+                    name="computer",
+                    display_number=1,
+                    display_width_px=display_width,
+                    display_height_px=display_height,
+                )
+            case "bash_20250124":
+                # Claude expects name to be literal "bash"
+                return BetaToolBash20250124Param(
+                    type="bash_20250124",
+                    name="bash",
+                )
+            case "text_editor_20250728":
+                # Claude expects name to be literal "str_replace_based_edit_tool"
+                return BetaToolTextEditor20250728Param(
+                    type="text_editor_20250728",
+                    name="str_replace_based_edit_tool",
+                )
+            case _:
+                # Unknown native type - fall back to generic function tool
+                logger.warning(
+                    "Unknown native tool type %s for tool %s, using generic format",
+                    spec.api_type,
+                    tool.name,
+                )
+                if tool.description is None or tool.inputSchema is None:
+                    raise ValueError(
+                        f"MCP tool {tool.name} requires both a description and inputSchema."
+                    )
+                return BetaToolParam(
+                    name=tool.name,
+                    description=tool.description,
+                    input_schema=tool.inputSchema,
+                )
 
     def _add_prompt_caching(self, messages: list[BetaMessageParam]) -> list[BetaMessageParam]:
         """Add prompt caching to messages."""

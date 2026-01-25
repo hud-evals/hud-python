@@ -1,12 +1,16 @@
+"""Bash tool for executing shell commands."""
+
 from __future__ import annotations
 
 import asyncio
 import os
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
-from .base import BaseTool
-from .types import ContentResult, ToolError
+from hud.tools.base import BaseTool
+from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
+from hud.tools.types import ContentResult, ToolError
+from hud.types import AgentType
 
 if TYPE_CHECKING:
     from mcp.types import ContentBlock
@@ -32,20 +36,22 @@ class _BashSession:
             await asyncio.sleep(0)
             return
 
-        # Platform-specific subprocess creation
-        kwargs = {
-            "shell": True,
-            "bufsize": 0,
-            "stdin": asyncio.subprocess.PIPE,
-            "stdout": asyncio.subprocess.PIPE,
-            "stderr": asyncio.subprocess.PIPE,
-        }
-
         # Only use setsid on Unix-like systems
         if sys.platform != "win32":
-            kwargs["preexec_fn"] = os.setsid
-
-        self._process = await asyncio.create_subprocess_shell(self.command, **kwargs)
+            self._process = await asyncio.create_subprocess_shell(
+                self.command,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                preexec_fn=os.setsid,
+            )
+        else:
+            self._process = await asyncio.create_subprocess_shell(
+                self.command,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
 
         self._started = True
 
@@ -115,6 +121,15 @@ class BashTool(BaseTool):
     The tool maintains a persistent bash session that can be restarted.
     """
 
+    native_specs: ClassVar[NativeToolSpecs] = {
+        AgentType.CLAUDE: NativeToolSpec(
+            api_type="bash_20250124",
+            api_name="bash",
+            beta="computer-use-2025-01-24",
+            role="shell",
+        ),
+    }
+
     def __init__(self, session: _BashSession | None = None) -> None:
         """Initialize BashTool with an optional session.
 
@@ -164,3 +179,6 @@ class BashTool(BaseTool):
             return result.to_content_blocks()
 
         raise ToolError("No command provided.")
+
+
+__all__ = ["BashTool", "_BashSession"]

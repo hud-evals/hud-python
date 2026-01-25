@@ -24,7 +24,7 @@ import mcp.types as types
 from openai import AsyncOpenAI
 
 from hud.settings import settings
-from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
 
@@ -43,6 +43,11 @@ class OpenAIChatAgent(MCPAgent):
 
     metadata: ClassVar[dict[str, Any] | None] = None
     config_cls: ClassVar[type[BaseAgentConfig]] = OpenAIChatConfig
+
+    @classmethod
+    def agent_type(cls) -> AgentType:
+        """Return the AgentType for OpenAI-compatible agents."""
+        return AgentType.OPENAI_COMPATIBLE
 
     @with_signature(OpenAIChatCreateParams)
     @classmethod

@@ -7,15 +7,19 @@ Key features:
 - Dynamic timeout via timeout_ms from agent
 - Dynamic max_output_length from agent (passed back, not truncated locally)
 - Output conforms to shell_call_output format
+- Native specs for OpenAI (shell) and Claude (bash)
 """
 
 import asyncio
 import os
 import sys
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
+from .base import BaseTool
+from .native_types import NativeToolSpec, NativeToolSpecs
 from .types import ToolError
+from hud.types import AgentType
 
 
 @dataclass
@@ -195,7 +199,7 @@ class _BashSession:
         )
 
 
-class ShellTool:
+class ShellTool(BaseTool):
     """
     A tool that allows the agent to run shell commands.
     Conforms to OpenAI's shell tool specification.
@@ -205,12 +209,26 @@ class ShellTool:
     - Dynamic timeout via timeout_ms parameter
     - Dynamic max_output_length (passed back to API, no local truncation)
     - Supports concurrent command execution
+    - Native specs for OpenAI (shell) and Claude (bash)
     """
+
+    native_specs: ClassVar[NativeToolSpecs] = {
+        AgentType.OPENAI: NativeToolSpec(
+            api_type="shell",
+            api_name="shell",
+        ),
+    }
 
     _session: _BashSession | None
 
-    def __init__(self) -> None:
-        self._session = None
+    def __init__(self, session: _BashSession | None = None) -> None:
+        super().__init__(
+            env=session,
+            name="shell",
+            title="Shell",
+            description="Execute shell commands in a persistent bash session",
+        )
+        self._session = session
 
     async def _ensure_session(self) -> tuple[_BashSession, str | None]:
         """Ensure a working session exists, auto-restarting if needed.

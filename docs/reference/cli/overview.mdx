@@ -7,11 +7,12 @@ icon: "terminal"
 The HUD CLI provides a complete toolkit for creating, developing, and running MCP environments. Commands are organized into two main workflows:
 
 <CardGroup cols={2}>
-<Card title="Build & Develop" icon="hammer" color="#6b21a8">
+<Card title="Build & Deploy" icon="rocket" color="#6b21a8">
   **Directory-based commands** for creating environments:
   - `hud init` — Create new environment
   - `hud dev` — Develop with hot‑reload
-  - `hud build` — Build and generate lock file
+  - `hud build` — Build locally
+  - `hud deploy` — Build & deploy to platform
 </Card>
 
 <Card title="Run & Evaluate" icon="play" color="#0891b2">
@@ -50,7 +51,9 @@ hud --version
 |---------|-------|-------------|---------|
 | `hud init` | Directory | Create new environment | `hud init my-env` |
 | `hud dev` | Directory | Hot-reload development | `hud dev . --interactive` |
-| `hud build` | Directory | Build image & lock file | `hud build . --tag v1.0` |
+| `hud build` | Directory | Build image locally | `hud build . --tag v1.0` |
+| `hud deploy` | Directory | Build & deploy to platform | `hud deploy .` |
+| `hud link` | Directory | Link to existing environment | `hud link --id abc123` |
 
 ### Running Workflow
 | Command | Input | Description | Example |
@@ -101,12 +104,11 @@ Generates `hud.lock.yaml` with metadata and labels image for reproducibility.
 </Step>
 
 <Step title="Deploy">
-Push to GitHub and connect on [hud.ai](https://hud.ai):
+Deploy directly to the HUD platform:
 ```bash
-git push
-# Connect on hud.ai → New → Environment
+hud deploy
 ```
-HUD automatically rebuilds when you push changes, like Vercel.
+Or push to GitHub and connect on [hud.ai](https://hud.ai) for automatic rebuilds.
 </Step>
 </Steps>
 
@@ -277,7 +279,11 @@ export ANCHOR_API_KEY=...
 </Card>
 
 <Card title="Build Command" icon="hammer" href="/reference/cli/build">
-  Build images and generate lock files
+  Build images locally
+</Card>
+
+<Card title="Deploy Command" icon="rocket" href="/reference/cli/deploy">
+  Build and deploy to HUD platform
 </Card>
 </CardGroup>
 

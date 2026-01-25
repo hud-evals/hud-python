@@ -19,7 +19,7 @@ from openai.types.responses.response_input_param import (
 from openai.types.shared_params.reasoning import Reasoning
 
 from hud.tools.computer.settings import computer_settings
-from hud.types import BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.types import AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.types import with_signature
 
 from .base import MCPAgent
@@ -62,6 +62,11 @@ class OperatorAgent(OpenAIAgent):
     # base class will ensure that the computer tool is available
     required_tools: ClassVar[list[str]] = ["openai_computer"]
     config_cls: ClassVar[type[BaseAgentConfig]] = OperatorConfig
+
+    @classmethod
+    def agent_type(cls) -> AgentType:
+        """Return the AgentType for Operator."""
+        return AgentType.OPERATOR
 
     @with_signature(OperatorCreateParams)
     @classmethod

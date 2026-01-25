@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from fastmcp import FastMCP
 
+from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentBlock, EvaluationResult
 
 if TYPE_CHECKING:
@@ -13,6 +14,8 @@ if TYPE_CHECKING:
 
     from fastmcp.tools import FunctionTool
     from fastmcp.tools.tool import Tool, ToolResult
+
+    from hud.types import AgentType
 
 # Basic result types for tools
 BaseResult = list[ContentBlock] | EvaluationResult
@@ -33,7 +36,25 @@ class BaseTool(ABC):
     Tools that return miscallaneous content should return a pydantic model such as EvaluationResult.
     Both of these types of tools are processed via structuredContent.
     Any other type of tool will not be processed well by the client.
+
+    NATIVE SPECS:
+    Subclasses can define a `native_specs` class variable to declare framework-specific
+    native tool configurations. These are embedded in the tool's meta field and used by
+    agents to register tools with their provider's native API format.
+
+    Example:
+        class BashTool(BaseTool):
+            native_specs: ClassVar[NativeToolSpecs] = {
+                AgentType.CLAUDE: NativeToolSpec(
+                    api_type="bash_20250124",
+                    api_name="bash",
+                    beta="computer-use-2025-01-24",
+                ),
+            }
     """
+
+    # Class-level native tool specifications (override in subclasses)
+    native_specs: ClassVar[NativeToolSpecs] = {}
 
     def __init__(
         self,
@@ -42,6 +63,7 @@ class BaseTool(ABC):
         title: str | None = None,
         description: str | None = None,
         meta: dict[str, Any] | None = None,
+        native_specs: NativeToolSpecs | None = None,
     ) -> None:
         """Initialize the tool.
 
@@ -55,21 +77,46 @@ class BaseTool(ABC):
             title: Human-readable display name for the tool (auto-generated from class name)
             description: Tool description (auto-generated from docstring if not provided)
             meta: Metadata to include in MCP tool listing (e.g., resolution info)
+            native_specs: Instance-level native specs to merge with class-level specs
         """
         self.env = env
         self.name = name or self.__class__.__name__.lower().replace("tool", "")
         self.title = title or self.__class__.__name__.replace("Tool", "").replace("_", " ").title()
         self.description = description or (self.__doc__.strip() if self.__doc__ else None)
-        self.meta = meta
+        self.meta = meta or {}
         self._callbacks: dict[
             str,
             list[Callable[..., Awaitable[Any]]],
         ] = {}  # {"event_name": [callback_functions]}
 
+        # Merge class-level and instance-level native specs
+        self._native_specs: NativeToolSpecs = {
+            **self.__class__.native_specs,
+            **(native_specs or {}),
+        }
+
+        # Embed native specs in meta for MCP transport
+        if self._native_specs:
+            self.meta["native_tools"] = {
+                agent_type.value: spec.model_dump(exclude_none=True)
+                for agent_type, spec in self._native_specs.items()
+            }
+
         # Expose attributes FastMCP expects when registering an instance directly
         self.__name__ = self.name  # FastMCP uses fn.__name__ if name param omitted
         if self.description:
             self.__doc__ = self.description
+
+    def get_native_spec(self, agent_type: AgentType) -> NativeToolSpec | None:
+        """Get the native tool spec for a specific agent type.
+
+        Args:
+            agent_type: The agent type to get the spec for
+
+        Returns:
+            NativeToolSpec if one exists for the agent type, None otherwise
+        """
+        return self._native_specs.get(agent_type)
 
     @abstractmethod
     async def __call__(self, **kwargs: Any) -> ToolResult:

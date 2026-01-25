@@ -1,12 +1,18 @@
+"""Edit tool for file viewing and editing."""
+
+from __future__ import annotations
+
 from collections import defaultdict
 from pathlib import Path
-from typing import Literal, get_args
+from typing import ClassVar, Literal, get_args
 
 from mcp.types import ContentBlock
 
-from .base import BaseTool
-from .types import ContentResult, ToolError
-from .utils import maybe_truncate, run
+from hud.tools.base import BaseTool
+from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
+from hud.tools.types import ContentResult, ToolError
+from hud.tools.utils import maybe_truncate, run
+from hud.types import AgentType
 
 Command = Literal[
     "view",
@@ -24,6 +30,15 @@ class EditTool(BaseTool):
     Maintains a history of file edits for undo functionality.
     """
 
+    native_specs: ClassVar[NativeToolSpecs] = {
+        AgentType.CLAUDE: NativeToolSpec(
+            api_type="text_editor_20250728",
+            api_name="str_replace_based_edit_tool",
+            beta="computer-use-2025-01-24",
+            role="editor",
+        ),
+    }
+
     def __init__(self, file_history: dict[Path, list[str]] | None = None) -> None:
         """Initialize EditTool with optional file history.
 
@@ -33,7 +48,7 @@ class EditTool(BaseTool):
         """
         super().__init__(
             env=file_history or defaultdict(list),
-            name="edit",
+            name="str_replace_based_edit_tool",
             title="File Editor",
             description="View, create, and edit files with undo support",
         )
@@ -308,3 +323,6 @@ class EditTool(BaseTool):
         return (
             f"Here's the result of running `cat -n` on {file_descriptor}:\n" + file_content + "\n"
         )
+
+
+__all__ = ["EditTool", "Command", "SNIPPET_LINES"]
