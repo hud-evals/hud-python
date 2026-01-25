@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -158,10 +157,10 @@ class TestDeployAsync:
     @pytest.mark.asyncio
     async def test_upload_url_failure(self) -> None:
         """Test handling of upload URL failure."""
+        import httpx
+
         from hud.cli.deploy import _deploy_async
         from hud.utils.hud_console import HUDConsole
-
-        import httpx
 
         console = HUDConsole()
 
