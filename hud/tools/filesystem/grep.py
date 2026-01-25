@@ -1,6 +1,6 @@
-"""Grep tool for searching file contents.
+"""Grep tool for searching file contents (OpenCode-style).
 
-Matches OpenCode's grep tool specification exactly:
+Matches OpenCode's grep tool specification:
 https://github.com/anomalyco/opencode
 
 Key features:
@@ -12,26 +12,18 @@ Key features:
 
 from __future__ import annotations
 
-import fnmatch
-import os
-import re
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
-from mcp.types import ContentBlock  # noqa: TC002
-
-from hud.tools.base import BaseTool
-from hud.tools.coding.utils import resolve_path_safely
+from hud.tools.filesystem.base import BaseSearchTool, FileMatch
 from hud.tools.types import ContentResult, ToolError
 
 if TYPE_CHECKING:
+    from mcp.types import ContentBlock
+
     from hud.tools.native_types import NativeToolSpecs
 
-MAX_LINE_LENGTH = 2000
-MAX_RESULTS = 100
 
-
-class GrepTool(BaseTool):
+class GrepTool(BaseSearchTool):
     """Search file contents matching OpenCode's grep tool.
 
     Fast content search tool that searches file contents using regex.
@@ -50,22 +42,23 @@ class GrepTool(BaseTool):
 
     native_specs: ClassVar[NativeToolSpecs] = {}  # Function calling only
 
-    _base_path: Path
-    _max_files: int
-
     def __init__(
         self,
         base_path: str = ".",
+        max_results: int = 100,
         max_files: int = 1000,
     ) -> None:
         """Initialize GrepTool.
 
         Args:
             base_path: Base directory for relative paths
-            max_files: Maximum files to search (default: 1000)
+            max_results: Maximum matching lines to return
+            max_files: Maximum files to search
         """
         super().__init__(
-            env=None,
+            base_path=base_path,
+            max_results=max_results,
+            max_files=max_files,
             name="grep",
             title="Grep",
             description=(
@@ -74,8 +67,42 @@ class GrepTool(BaseTool):
                 "Returns file paths and line numbers sorted by modification time."
             ),
         )
-        self._base_path = Path(base_path).resolve()
-        self._max_files = max_files
+
+    def format_output(self, matches: list[FileMatch], pattern: str) -> str:
+        """Format output in OpenCode style (grouped by file, sorted by mtime).
+
+        Args:
+            matches: List of FileMatch objects
+            pattern: Original search pattern
+
+        Returns:
+            Formatted output grouped by file
+        """
+        if not matches:
+            return "No files found"
+
+        # Sort by mtime (most recent first) - OpenCode behavior
+        sorted_matches = sorted(matches, key=lambda x: x.mtime, reverse=True)
+        truncated = len(matches) >= self._max_results
+
+        lines = [f"Found {len(sorted_matches)} matches"]
+        lines.append("")
+
+        current_file = ""
+        for match in sorted_matches:
+            if current_file != match.path:
+                if current_file:
+                    lines.append("")
+                current_file = match.path
+                lines.append(f"{current_file}:")
+
+            lines.append(f"  Line {match.line_num}: {match.line_text}")
+
+        if truncated:
+            lines.append("")
+            lines.append("(Results are truncated. Consider using a more specific path or pattern.)")
+
+        return "\n".join(lines)
 
     async def __call__(
         self,
@@ -93,106 +120,14 @@ class GrepTool(BaseTool):
         Returns:
             List of ContentBlocks with matching lines grouped by file
         """
-        if not pattern:
-            raise ToolError("pattern is required")
-
-        try:
-            regex = re.compile(pattern)
-        except re.error as e:
-            raise ToolError(f"Invalid regex pattern: {e}") from None
-
-        search_path = resolve_path_safely(path or ".", self._base_path)
+        regex = self.compile_pattern(pattern)
+        search_path = self.resolve_path(path or ".")
 
         if not search_path.exists():
             raise ToolError(f"Path not found: {path or '.'}")
 
-        # Collect files to search
-        if search_path.is_file():
-            files = [search_path]
-        else:
-            files = []
-            for f in search_path.rglob("*"):
-                if len(files) >= self._max_files:
-                    break
-                if not f.is_file():
-                    continue
-                # Skip hidden files and common non-text directories
-                if any(part.startswith(".") for part in f.parts):
-                    continue
-                if any(
-                    part in ("node_modules", "__pycache__", ".git", "venv", ".venv")
-                    for part in f.parts
-                ):
-                    continue
-                if include and not fnmatch.fnmatch(f.name, include):
-                    continue
-                files.append(f)
-
-        # Search files and collect matches with mtime
-        matches: list[dict[str, str | int | float]] = []
-
-        for file in files:
-            try:
-                content = file.read_text(encoding="utf-8")
-                mtime = os.path.getmtime(file)
-            except (UnicodeDecodeError, PermissionError, OSError):
-                continue
-
-            try:
-                rel_path = str(file.relative_to(self._base_path))
-            except ValueError:
-                rel_path = str(file)
-
-            for i, line in enumerate(content.split("\n"), 1):
-                if regex.search(line):
-                    # Truncate long lines (OpenCode max 2000 chars)
-                    line_text = line.strip()
-                    if len(line_text) > MAX_LINE_LENGTH:
-                        line_text = line_text[:MAX_LINE_LENGTH] + "..."
-
-                    matches.append({
-                        "path": rel_path,
-                        "mtime": mtime,
-                        "line_num": i,
-                        "line_text": line_text,
-                    })
-
-                    if len(matches) >= MAX_RESULTS:
-                        break
-
-            if len(matches) >= MAX_RESULTS:
-                break
-
-        # Sort by modification time (most recent first) - OpenCode behavior
-        matches.sort(key=lambda x: float(x["mtime"]), reverse=True)
-
-        truncated = len(matches) >= MAX_RESULTS
-        final_matches = matches[:MAX_RESULTS]
-
-        # Format output (grouped by file like OpenCode)
-        if not final_matches:
-            output = "No files found"
-        else:
-            lines = [f"Found {len(final_matches)} matches"]
-            lines.append("")
-
-            current_file = ""
-            for match in final_matches:
-                if current_file != match["path"]:
-                    if current_file:
-                        lines.append("")
-                    current_file = str(match["path"])
-                    lines.append(f"{current_file}:")
-
-                lines.append(f"  Line {match['line_num']}: {match['line_text']}")
-
-            if truncated:
-                lines.append("")
-                lines.append(
-                    "(Results are truncated. Consider using a more specific path or pattern.)"
-                )
-
-            output = "\n".join(lines)
+        matches = self.search_files(search_path, regex, include)
+        output = self.format_output(matches, pattern)
 
         return ContentResult(output=output).to_content_blocks()
 

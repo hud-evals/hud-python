@@ -41,6 +41,7 @@ from hud.tools.memory import ClaudeMemoryCommand as MemoryCommand
 from hud.tools.memory import ClaudeMemoryTool
 
 __all__ = [
+    "SNIPPET_LINES",
     "ApplyPatchResult",
     "ApplyPatchTool",
     "BashSession",
@@ -54,7 +55,6 @@ __all__ = [
     "GeminiShellOutput",
     "GeminiShellTool",
     "MemoryCommand",
-    "SNIPPET_LINES",
     "ShellCallOutcome",
     "ShellCommandOutput",
     "ShellResult",

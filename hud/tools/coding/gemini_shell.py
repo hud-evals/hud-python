@@ -114,7 +114,7 @@ class GeminiShellTool(BaseTool):
         if sys.platform == "win32":
             shell_desc = (
                 "Execute a shell command as `powershell.exe -NoProfile -Command <command>`. "
-                "Command can start background processes using Start-Process -NoNewWindow or Start-Job."
+                "Command can start background processes using Start-Process or Start-Job."
             )
         else:
             shell_desc = (

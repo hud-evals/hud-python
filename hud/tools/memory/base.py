@@ -106,12 +106,7 @@ class BaseFileMemoryTool(BaseMemoryTool):
         Raises:
             ValueError: If path escapes the base directory
         """
-        if path.startswith("/"):
-            # Absolute path - make relative to base
-            relative = path.lstrip("/")
-        else:
-            relative = path
-
+        relative = path.lstrip("/") if path.startswith("/") else path
         resolved = (self._base_path / relative).resolve()
 
         # Security check - prevent traversal
@@ -209,8 +204,7 @@ class BaseSessionMemoryTool(BaseMemoryTool):
         """
         q_tokens = self.tokenize(query)
         scored = [
-            (entry, self.jaccard_similarity(q_tokens, entry.tokens))
-            for entry in self._entries
+            (entry, self.jaccard_similarity(q_tokens, entry.tokens)) for entry in self._entries
         ]
         scored.sort(key=lambda x: x[1], reverse=True)
         return [entry for entry, score in scored[:top_k] if score > 0.0]

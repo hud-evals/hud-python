@@ -7,6 +7,8 @@ Two styles are available:
 - OpenCode-style (default): ReadTool, GrepTool, GlobTool, ListTool
 - Gemini CLI-style: GeminiReadTool, GeminiSearchTool, GeminiGlobTool, GeminiListTool
 
+Both styles share common base classes that can be extended for custom tools.
+
 OpenCode-style usage:
     from hud.tools.filesystem import ReadTool, GrepTool, GlobTool, ListTool
 
@@ -26,7 +28,26 @@ Gemini CLI-style usage:
     env.add_tool(GeminiSearchTool(base_path="./workspace"))
     env.add_tool(GeminiGlobTool(base_path="./workspace"))
     env.add_tool(GeminiListTool(base_path="./workspace"))
+
+Custom tools:
+    from hud.tools.filesystem import BaseReadTool, ReadResult
+
+    class MyReadTool(BaseReadTool):
+        def format_output(self, result: ReadResult, path: str) -> str:
+            # Custom formatting
+            return "\\n".join(result.lines)
 """
+
+# Base classes for custom tools
+from hud.tools.filesystem.base import (
+    BaseFilesystemTool,
+    BaseGlobTool,
+    BaseListTool,
+    BaseReadTool,
+    BaseSearchTool,
+    FileMatch,
+    ReadResult,
+)
 
 # Gemini CLI-style tools
 from hud.tools.filesystem.gemini import (
@@ -43,6 +64,12 @@ from hud.tools.filesystem.list import ListTool
 from hud.tools.filesystem.read import ReadTool
 
 __all__ = [
+    "BaseFilesystemTool",
+    "BaseGlobTool",
+    "BaseListTool",
+    "BaseReadTool",
+    "BaseSearchTool",
+    "FileMatch",
     "GeminiGlobTool",
     "GeminiListTool",
     "GeminiReadTool",
@@ -50,5 +77,6 @@ __all__ = [
     "GlobTool",
     "GrepTool",
     "ListTool",
+    "ReadResult",
     "ReadTool",
 ]

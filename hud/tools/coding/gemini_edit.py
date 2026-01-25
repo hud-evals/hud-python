@@ -19,7 +19,6 @@ from hud.tools.types import ContentResult, ToolError
 from hud.types import AgentType
 
 from .utils import (
-    SNIPPET_LINES,
     read_file_sync,
     write_file_sync,
 )
@@ -223,12 +222,6 @@ class GeminiEditTool(BaseTool):
 
         # Handle occurrence count mismatch
         if occurrences != expected_replacements:
-            # Find lines where occurrences appear
-            lines_with_match = [
-                idx + 1
-                for idx, line in enumerate(file_content.split("\n"))
-                if old_string_norm in line
-            ]
             occurrence_term = "occurrence" if expected_replacements == 1 else "occurrences"
             raise ToolError(
                 f"Failed to edit, Expected {expected_replacements} {occurrence_term} "
@@ -247,16 +240,6 @@ class GeminiEditTool(BaseTool):
 
         # Save to history for potential undo
         self._file_history[path].append(original_content)
-
-        # Create snippet around the edit
-        replacement_line = (
-            file_content.split(old_string_norm)[0].count("\n")
-            if old_string_norm in file_content
-            else 0
-        )
-        start_line = max(0, replacement_line - SNIPPET_LINES)
-        end_line = replacement_line + SNIPPET_LINES + new_string_norm.count("\n")
-        snippet = "\n".join(new_content.split("\n")[start_line : end_line + 1])
 
         # Build Gemini CLI-style success response
         result = f"Successfully modified file: {file_path} ({occurrences} replacements)."

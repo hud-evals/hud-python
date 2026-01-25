@@ -183,9 +183,7 @@ class _QdrantBackend:
         try:
             from sentence_transformers import SentenceTransformer  # type: ignore[import-not-found]
         except ImportError as e:
-            raise RuntimeError(
-                "sentence-transformers is required for Qdrant backend"
-            ) from e
+            raise RuntimeError("sentence-transformers is required for Qdrant backend") from e
         return SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
     def add(self, text: str, metadata: dict[str, Any] | None = None) -> None:

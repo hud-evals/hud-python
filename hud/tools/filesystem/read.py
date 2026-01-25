@@ -1,6 +1,6 @@
-"""Read tool for filesystem access.
+"""Read tool for filesystem access (OpenCode-style).
 
-Matches OpenCode's read tool specification exactly:
+Matches OpenCode's read tool specification:
 https://github.com/anomalyco/opencode
 
 Key features:
@@ -14,25 +14,18 @@ Key features:
 
 from __future__ import annotations
 
-import base64
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
-from mcp.types import ContentBlock  # noqa: TC002
-
-from hud.tools.base import BaseTool
-from hud.tools.coding.utils import resolve_path_safely
+from hud.tools.filesystem.base import BaseReadTool, ReadResult
 from hud.tools.types import ContentResult, ToolError
 
 if TYPE_CHECKING:
+    from mcp.types import ContentBlock
+
     from hud.tools.native_types import NativeToolSpecs
 
-DEFAULT_READ_LIMIT = 2000
-MAX_LINE_LENGTH = 2000
-MAX_BYTES = 50 * 1024  # 50KB
 
-
-class ReadTool(BaseTool):
+class ReadTool(BaseReadTool):
     """Read file contents matching OpenCode's read tool.
 
     Reads a file from the local filesystem with pagination support.
@@ -51,19 +44,14 @@ class ReadTool(BaseTool):
 
     native_specs: ClassVar[NativeToolSpecs] = {}  # Function calling only
 
-    _base_path: Path
-
-    def __init__(
-        self,
-        base_path: str = ".",
-    ) -> None:
+    def __init__(self, base_path: str = ".") -> None:
         """Initialize ReadTool.
 
         Args:
             base_path: Base directory for relative paths
         """
         super().__init__(
-            env=None,
+            base_path=base_path,
             name="read",
             title="Read",
             description=(
@@ -72,11 +60,47 @@ class ReadTool(BaseTool):
                 "for pagination. Lines longer than 2000 chars are truncated."
             ),
         )
-        self._base_path = Path(base_path).resolve()
+
+    def format_output(self, result: ReadResult, path: str) -> str:
+        """Format output in OpenCode style with <file> tags and line numbers.
+
+        Args:
+            result: ReadResult from read_with_pagination
+            path: Original path string for display
+
+        Returns:
+            Formatted output with line numbers and <file> tags
+        """
+        # Format with 5-digit zero-padded line numbers (OpenCode format: 00001|)
+        numbered_lines = [
+            f"{(i + result.start_offset + 1):05d}| {line}" for i, line in enumerate(result.lines)
+        ]
+
+        output = "<file>\n"
+        output += "\n".join(numbered_lines)
+
+        last_read_line = result.start_offset + len(result.lines)
+        has_more_lines = result.total_lines > last_read_line
+
+        if result.truncated_by_bytes:
+            output += (
+                f"\n\n(Output truncated at {self._max_bytes} bytes. "
+                f"Use 'offset' parameter to read beyond line {last_read_line})"
+            )
+        elif has_more_lines or result.truncated:
+            output += (
+                f"\n\n(File has more lines. "
+                f"Use 'offset' parameter to read beyond line {last_read_line})"
+            )
+        else:
+            output += f"\n\n(End of file - total {result.total_lines} lines)"
+
+        output += "\n</file>"
+        return output
 
     async def __call__(
         self,
-        filePath: str,  # noqa: N803 - matches OpenCode param name
+        filePath: str,
         offset: int | None = None,
         limit: int | None = None,
     ) -> list[ContentBlock]:
@@ -93,97 +117,26 @@ class ReadTool(BaseTool):
         if not filePath:
             raise ToolError("filePath is required")
 
-        path = resolve_path_safely(filePath, self._base_path)
+        path = self.resolve_path(filePath)
 
         if not path.exists():
             raise ToolError(f"File not found: {filePath}")
         if path.is_dir():
             raise ToolError(f"Path is a directory: {filePath}")
 
-        # Check for image files
-        suffix = path.suffix.lower()
-        if suffix in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"):
-            try:
-                image_data = path.read_bytes()
-                b64_content = base64.b64encode(image_data).decode("utf-8")
-                mime_types = {
-                    ".png": "image/png",
-                    ".jpg": "image/jpeg",
-                    ".jpeg": "image/jpeg",
-                    ".gif": "image/gif",
-                    ".webp": "image/webp",
-                    ".bmp": "image/bmp",
-                    ".svg": "image/svg+xml",
-                }
-                mime = mime_types.get(suffix, "application/octet-stream")
-                return ContentResult(
-                    output=f"Image read successfully: {filePath}",
-                    system=f"data:{mime};base64,{b64_content[:100]}...",
-                ).to_content_blocks()
-            except Exception as e:
-                raise ToolError(f"Failed to read image: {e}") from None
+        # Handle images
+        if self.is_image(path):
+            result = self.read_image(path)
+            return result.to_content_blocks()
 
-        # Check for binary files
-        try:
-            content = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            raise ToolError(f"Cannot read binary file: {filePath}") from None
-        except PermissionError:
-            raise ToolError(f"Permission denied: {filePath}") from None
+        # Read with pagination
+        result = self.read_with_pagination(
+            path,
+            offset=offset or 0,
+            limit=limit,
+        )
 
-        lines = content.split("\n")
-        total_lines = len(lines)
-
-        # Apply offset/limit (OpenCode uses 0-based offset)
-        read_limit = limit if limit is not None else DEFAULT_READ_LIMIT
-        start_offset = offset if offset is not None else 0
-
-        # Collect lines with byte limit
-        raw: list[str] = []
-        total_bytes = 0
-        truncated_by_bytes = False
-
-        for i in range(start_offset, min(total_lines, start_offset + read_limit)):
-            line = lines[i]
-            # Truncate long lines (OpenCode max 2000 chars)
-            if len(line) > MAX_LINE_LENGTH:
-                line = line[:MAX_LINE_LENGTH] + "..."
-
-            line_bytes = len(line.encode("utf-8")) + (1 if raw else 0)
-            if total_bytes + line_bytes > MAX_BYTES:
-                truncated_by_bytes = True
-                break
-
-            raw.append(line)
-            total_bytes += line_bytes
-
-        # Format with 5-digit zero-padded line numbers (OpenCode format: 00001|)
-        numbered_lines = [
-            f"{(i + start_offset + 1):05d}| {line}" for i, line in enumerate(raw)
-        ]
-
-        # Build output with <file> tags (OpenCode format)
-        output = "<file>\n"
-        output += "\n".join(numbered_lines)
-
-        last_read_line = start_offset + len(raw)
-        has_more_lines = total_lines > last_read_line
-
-        if truncated_by_bytes:
-            output += (
-                f"\n\n(Output truncated at {MAX_BYTES} bytes. "
-                f"Use 'offset' parameter to read beyond line {last_read_line})"
-            )
-        elif has_more_lines:
-            output += (
-                f"\n\n(File has more lines. "
-                f"Use 'offset' parameter to read beyond line {last_read_line})"
-            )
-        else:
-            output += f"\n\n(End of file - total {total_lines} lines)"
-
-        output += "\n</file>"
-
+        output = self.format_output(result, filePath)
         return ContentResult(output=output).to_content_blocks()
 
 

@@ -1,6 +1,6 @@
-"""List tool for directory contents.
+"""List tool for directory contents (OpenCode-style).
 
-Matches OpenCode's list tool specification exactly:
+Matches OpenCode's list tool specification:
 https://github.com/anomalyco/opencode
 
 Key features:
@@ -12,21 +12,21 @@ Key features:
 
 from __future__ import annotations
 
-import fnmatch
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
-from mcp.types import ContentBlock  # noqa: TC002
+if TYPE_CHECKING:
+    from pathlib import Path
 
-from hud.tools.base import BaseTool
-from hud.tools.coding.utils import resolve_path_safely
+from hud.tools.filesystem.base import BaseListTool
 from hud.tools.types import ContentResult, ToolError
 
 if TYPE_CHECKING:
+    from mcp.types import ContentBlock
+
     from hud.tools.native_types import NativeToolSpecs
 
 # OpenCode's default ignore patterns
-IGNORE_PATTERNS = [
+OPENCODE_IGNORE_PATTERNS = [
     "node_modules/",
     "__pycache__/",
     ".git/",
@@ -52,10 +52,8 @@ IGNORE_PATTERNS = [
     "env/",
 ]
 
-MAX_ENTRIES = 100
 
-
-class ListTool(BaseTool):
+class ListTool(BaseListTool):
     """List directory contents matching OpenCode's list tool.
 
     Lists files and directories in a tree structure with indentation.
@@ -73,19 +71,20 @@ class ListTool(BaseTool):
 
     native_specs: ClassVar[NativeToolSpecs] = {}  # Function calling only
 
-    _base_path: Path
-
     def __init__(
         self,
         base_path: str = ".",
+        max_entries: int = 100,
     ) -> None:
         """Initialize ListTool.
 
         Args:
             base_path: Base directory for relative paths
+            max_entries: Maximum entries to return
         """
         super().__init__(
-            env=None,
+            base_path=base_path,
+            max_entries=max_entries,
             name="list",
             title="List",
             description=(
@@ -94,7 +93,49 @@ class ListTool(BaseTool):
                 "You can optionally provide an array of glob patterns to ignore."
             ),
         )
-        self._base_path = Path(base_path).resolve()
+
+    def format_output(
+        self,
+        entries: list[tuple[str, bool]],
+        directory: Path,
+        path_str: str,
+    ) -> str:
+        """Format output in OpenCode style (tree with indentation).
+
+        Args:
+            entries: List of (relative_path, is_dir) tuples
+            directory: Directory that was listed
+            path_str: Original path string for display
+
+        Returns:
+            Formatted tree output
+        """
+        if not entries:
+            return f"Empty directory: {path_str or '.'}"
+
+        truncated = len(entries) >= self._max_entries
+
+        # Build tree with indentation
+        lines = [f"{directory}/"]
+
+        for file_path, is_dir in entries:
+            # Count depth by number of /
+            parts = file_path.rstrip("/").split("/")
+            depth = len(parts) - 1
+            indent = "  " * (depth + 1)
+            name = parts[-1]
+
+            if is_dir:
+                lines.append(f"{indent}{name}/")
+            else:
+                lines.append(f"{indent}{name}")
+
+        output = "\n".join(lines)
+
+        if truncated:
+            output += f"\n\n(Limited to {self._max_entries} entries)"
+
+        return output
 
     async def __call__(
         self,
@@ -110,7 +151,7 @@ class ListTool(BaseTool):
         Returns:
             List of ContentBlocks with directory tree
         """
-        search_path = resolve_path_safely(path or ".", self._base_path)
+        search_path = self.resolve_path(path or ".")
 
         if not search_path.exists():
             raise ToolError(f"Directory not found: {path or '.'}")
@@ -118,92 +159,10 @@ class ListTool(BaseTool):
             raise ToolError(f"Not a directory: {path or '.'}")
 
         # Combine default and custom ignore patterns
-        ignore_patterns = list(IGNORE_PATTERNS) + (ignore or [])
+        ignore_patterns = list(OPENCODE_IGNORE_PATTERNS) + (ignore or [])
 
-        def should_ignore(name: str, is_dir: bool) -> bool:
-            """Check if a file/directory should be ignored."""
-            # Skip hidden files
-            if name.startswith("."):
-                return True
-
-            for pattern in ignore_patterns:
-                # Handle directory patterns ending with /
-                if pattern.endswith("/"):
-                    if is_dir and fnmatch.fnmatch(name, pattern.rstrip("/")):
-                        return True
-                else:
-                    if fnmatch.fnmatch(name, pattern):
-                        return True
-            return False
-
-        # Collect files using recursive walk (like OpenCode's ripgrep approach)
-        files: list[str] = []
-
-        def collect_files(dir_path: Path, prefix: str = "") -> None:
-            """Recursively collect files."""
-            if len(files) >= MAX_ENTRIES:
-                return
-
-            try:
-                entries = list(dir_path.iterdir())
-            except PermissionError:
-                return
-
-            # Sort: directories first, then files, alphabetically
-            dirs = []
-            regular_files = []
-            for entry in entries:
-                if should_ignore(entry.name, entry.is_dir()):
-                    continue
-                if entry.is_dir():
-                    dirs.append(entry)
-                else:
-                    regular_files.append(entry)
-
-            dirs.sort(key=lambda x: x.name.lower())
-            regular_files.sort(key=lambda x: x.name.lower())
-
-            # Process directories first
-            for d in dirs:
-                if len(files) >= MAX_ENTRIES:
-                    break
-                rel_path = prefix + d.name + "/"
-                files.append(rel_path)
-                collect_files(d, rel_path)
-
-            # Then files
-            for f in regular_files:
-                if len(files) >= MAX_ENTRIES:
-                    break
-                files.append(prefix + f.name)
-
-        collect_files(search_path)
-
-        truncated = len(files) >= MAX_ENTRIES
-
-        # Build tree structure output (OpenCode format)
-        if not files:
-            output = f"Empty directory: {path or '.'}"
-        else:
-            # Build tree with indentation
-            lines = [f"{search_path}/"]
-
-            for file_path in files:
-                # Count depth by number of /
-                parts = file_path.rstrip("/").split("/")
-                depth = len(parts) - 1
-                indent = "  " * (depth + 1)
-                name = parts[-1]
-
-                if file_path.endswith("/"):
-                    lines.append(f"{indent}{name}/")
-                else:
-                    lines.append(f"{indent}{name}")
-
-            output = "\n".join(lines)
-
-            if truncated:
-                output += f"\n\n(Limited to {MAX_ENTRIES} entries)"
+        entries = self.list_directory(search_path, ignore=ignore_patterns)
+        output = self.format_output(entries, search_path, path or ".")
 
         return ContentResult(output=output).to_content_blocks()
 

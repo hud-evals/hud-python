@@ -11,8 +11,10 @@ See: https://github.com/google-gemini/gemini-cli
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from hud.tools.memory.base import BaseFileMemoryTool
 from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
@@ -113,18 +115,13 @@ class GeminiMemoryTool(BaseFileMemoryTool):
         if header_index == -1:
             # Header not found - append header and entry
             separator = self._ensure_newline_separation(current_content)
-            return (
-                current_content
-                + f"{separator}{MEMORY_SECTION_HEADER}\n{new_memory_item}\n"
-            )
+            return current_content + f"{separator}{MEMORY_SECTION_HEADER}\n{new_memory_item}\n"
         else:
             # Header found - find where to insert new memory entry
             start_of_section_content = header_index + len(MEMORY_SECTION_HEADER)
 
             # Find next section (## ) or end of file
-            next_section_index = current_content.find(
-                "\n## ", start_of_section_content
-            )
+            next_section_index = current_content.find("\n## ", start_of_section_content)
             if next_section_index == -1:
                 end_of_section_index = len(current_content)
             else:
@@ -139,10 +136,7 @@ class GeminiMemoryTool(BaseFileMemoryTool):
             # Append new memory item
             section_content += f"\n{new_memory_item}"
 
-            return (
-                f"{before_section}\n{section_content.lstrip()}\n{after_section}".rstrip()
-                + "\n"
-            )
+            return f"{before_section}\n{section_content.lstrip()}\n{after_section}".rstrip() + "\n"
 
     async def __call__(
         self,
@@ -191,10 +185,7 @@ class GeminiMemoryTool(BaseFileMemoryTool):
 
         # Find next section or end
         next_section = content.find("\n## ", start)
-        if next_section == -1:
-            section = content[start:]
-        else:
-            section = content[start:next_section]
+        section = content[start:] if next_section == -1 else content[start:next_section]
 
         # Parse bullet points
         memories = []

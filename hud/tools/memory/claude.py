@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import shutil
 from collections import defaultdict
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Literal, get_args
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from hud.tools.coding.edit import EditTool
 from hud.tools.coding.utils import write_file_async
@@ -172,9 +174,7 @@ class ClaudeMemoryTool(EditTool, BaseFileMemoryTool):
                 )
             result = await self.str_replace(resolved, old_str, new_str)
             if result.output:
-                result = ContentResult(
-                    output=result.output.replace("The file", "The memory file")
-                )
+                result = ContentResult(output=result.output.replace("The file", "The memory file"))
             return result.to_content_blocks()
 
         elif command == "insert":
@@ -207,16 +207,12 @@ class ClaudeMemoryTool(EditTool, BaseFileMemoryTool):
         allowed = ", ".join(get_args(ClaudeMemoryCommand))
         raise ToolError(f"Unrecognized command {command}. Allowed commands: {allowed}")
 
-    async def _memory_view(
-        self, path: str, view_range: list[int] | None = None
-    ) -> ContentResult:
+    async def _memory_view(self, path: str, view_range: list[int] | None = None) -> ContentResult:
         """View directory contents or file contents with memory-specific formatting."""
         resolved = self._resolve_memory_path(path)
 
         if not resolved.exists():
-            raise ToolError(
-                f"The path {path} does not exist. Please provide a valid path."
-            )
+            raise ToolError(f"The path {path} does not exist. Please provide a valid path.")
 
         if resolved.is_dir():
             if view_range:

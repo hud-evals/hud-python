@@ -4,29 +4,36 @@ These tools match the interface and output format of Gemini CLI:
 https://github.com/google-gemini/gemini-cli
 
 Key differences from OpenCode-style tools:
-- read_file: Uses offset/limit (0-based) instead of start_line/end_line (1-based)
+- read_file: Uses offset/limit (0-based), different truncation message
 - search_file_content: Named differently, grouped output by file
-- glob: Adds case_sensitive, respect_git_ignore options
+- glob: Adds case_sensitive, respect_git_ignore options, absolute paths
 - list_directory: Uses dir_path, ignore[] params, DIR/file output format
 """
 
 from __future__ import annotations
 
-import fnmatch
-import re
-from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
-from mcp.types import ContentBlock  # noqa: TC002
+if TYPE_CHECKING:
+    from pathlib import Path
 
-from hud.tools.base import BaseTool
-from hud.tools.coding.utils import resolve_path_safely
+from hud.tools.filesystem.base import (
+    BaseGlobTool,
+    BaseListTool,
+    BaseReadTool,
+    BaseSearchTool,
+    FileMatch,
+    ReadResult,
+)
 from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult, ToolError
 from hud.types import AgentType
 
+if TYPE_CHECKING:
+    from mcp.types import ContentBlock
 
-class GeminiReadTool(BaseTool):
+
+class GeminiReadTool(BaseReadTool):
     """Gemini CLI-style file reading tool.
 
     Reads file contents with offset/limit pagination (0-based).
@@ -44,9 +51,6 @@ class GeminiReadTool(BaseTool):
         AgentType.GEMINI: NativeToolSpec(role="reader"),
     }
 
-    _base_path: Path
-    _max_lines: int
-
     def __init__(
         self,
         base_path: str = ".",
@@ -59,7 +63,8 @@ class GeminiReadTool(BaseTool):
             max_lines: Maximum lines before truncation (default: 2000)
         """
         super().__init__(
-            env=None,
+            base_path=base_path,
+            max_lines=max_lines,
             name="read_file",
             title="ReadFile",
             description=(
@@ -68,8 +73,37 @@ class GeminiReadTool(BaseTool):
                 "paginate through large files."
             ),
         )
-        self._base_path = Path(base_path).resolve()
-        self._max_lines = max_lines
+
+    def format_output(self, result: ReadResult, path: str) -> str:
+        """Format output in Gemini CLI style (truncation warning at top).
+
+        Args:
+            result: ReadResult from read_with_pagination
+            path: Original path string for display
+
+        Returns:
+            Formatted output with truncation message if needed
+        """
+        file_content = "\n".join(result.lines)
+
+        lines_shown_start = result.start_offset + 1
+        lines_shown_end = result.start_offset + len(result.lines)
+        has_more = result.total_lines > lines_shown_end or result.truncated
+
+        is_partial = (result.start_offset > 0) or has_more or result.truncated_by_bytes
+
+        if is_partial:
+            next_offset = lines_shown_end
+            return (
+                f"IMPORTANT: The file content has been truncated.\n"
+                f"Status: Showing lines {lines_shown_start}-{lines_shown_end} "
+                f"of {result.total_lines} total lines.\n"
+                f"Action: To read more, use 'offset' and 'limit' parameters. "
+                f"Example: offset: {next_offset}.\n\n"
+                f"--- FILE CONTENT (truncated) ---\n{file_content}"
+            )
+        else:
+            return file_content
 
     async def __call__(
         self,
@@ -90,7 +124,7 @@ class GeminiReadTool(BaseTool):
         if not file_path or file_path.strip() == "":
             raise ToolError("The 'file_path' parameter must be non-empty.")
 
-        path = resolve_path_safely(file_path, self._base_path)
+        path = self.resolve_path(file_path)
 
         if not path.exists():
             raise ToolError(f"File not found: {file_path}")
@@ -102,48 +136,18 @@ class GeminiReadTool(BaseTool):
         if limit is not None and limit <= 0:
             raise ToolError("Limit must be a positive number")
 
-        try:
-            content = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            raise ToolError(f"Cannot read binary file: {file_path}") from None
-        except PermissionError:
-            raise ToolError(f"Permission denied: {file_path}") from None
+        # Handle images
+        if self.is_image(path):
+            result = self.read_image(path)
+            return result.to_content_blocks()
 
-        lines = content.split("\n")
-        total_lines = len(lines)
+        result = self.read_with_pagination(path, offset=offset or 0, limit=limit)
+        output = self.format_output(result, file_path)
 
-        # Apply offset/limit
-        start_line = offset if offset is not None else 0
-        end_line = min(start_line + limit, total_lines) if limit is not None else total_lines
-
-        selected_lines = lines[start_line:end_line]
-        lines_shown_start = start_line + 1
-        lines_shown_end = start_line + len(selected_lines)
-
-        # Check truncation
-        truncated = False
-        if len(selected_lines) > self._max_lines:
-            selected_lines = selected_lines[: self._max_lines]
-            lines_shown_end = start_line + self._max_lines
-            truncated = True
-
-        file_content = "\n".join(selected_lines)
-        is_partial = (start_line > 0) or (end_line < total_lines) or truncated
-
-        if is_partial:
-            next_offset = lines_shown_end
-            truncation_msg = f"""IMPORTANT: The file content has been truncated.
-Status: Showing lines {lines_shown_start}-{lines_shown_end} of {total_lines} total lines.
-Action: To read more, use 'offset' and 'limit' parameters. Example: offset: {next_offset}.
-
---- FILE CONTENT (truncated) ---
-{file_content}"""
-            return ContentResult(output=truncation_msg).to_content_blocks()
-        else:
-            return ContentResult(output=file_content).to_content_blocks()
+        return ContentResult(output=output).to_content_blocks()
 
 
-class GeminiSearchTool(BaseTool):
+class GeminiSearchTool(BaseSearchTool):
     """Gemini CLI-style file content search tool.
 
     Searches file contents using regex patterns.
@@ -159,10 +163,6 @@ class GeminiSearchTool(BaseTool):
         AgentType.GEMINI: NativeToolSpec(role="searcher"),
     }
 
-    _base_path: Path
-    _max_results: int
-    _max_files: int
-
     def __init__(
         self,
         base_path: str = ".",
@@ -177,7 +177,9 @@ class GeminiSearchTool(BaseTool):
             max_files: Maximum files to search
         """
         super().__init__(
-            env=None,
+            base_path=base_path,
+            max_results=max_results,
+            max_files=max_files,
             name="search_file_content",
             title="Search",
             description=(
@@ -185,9 +187,43 @@ class GeminiSearchTool(BaseTool):
                 "Returns matching lines grouped by file with line numbers."
             ),
         )
-        self._base_path = Path(base_path).resolve()
-        self._max_results = max_results
-        self._max_files = max_files
+
+    def format_output(self, matches: list[FileMatch], pattern: str) -> str:
+        """Format output in Gemini CLI style (grouped by file).
+
+        Args:
+            matches: List of FileMatch objects
+            pattern: Original search pattern
+
+        Returns:
+            Formatted output grouped by file
+        """
+        if not matches:
+            return f"No matches found for pattern: {pattern}"
+
+        truncated = len(matches) >= self._max_results
+
+        # Group by file
+        file_matches: dict[str, list[FileMatch]] = {}
+        for match in matches:
+            if match.path not in file_matches:
+                file_matches[match.path] = []
+            file_matches[match.path].append(match)
+
+        lines = [f"Found {len(matches)} matches in {len(file_matches)} files"]
+        lines.append("")
+
+        for file_path, file_group in file_matches.items():
+            lines.append(f"{file_path}:")
+            lines.extend(
+                f"  Line {match.line_num}: {match.line_text}" for match in file_group
+            )
+            lines.append("")
+
+        if truncated:
+            lines.append("(Results are truncated. Consider using a more specific pattern.)")
+
+        return "\n".join(lines)
 
     async def __call__(
         self,
@@ -205,90 +241,19 @@ class GeminiSearchTool(BaseTool):
         Returns:
             List of ContentBlocks with matching lines grouped by file
         """
-        if not pattern:
-            raise ToolError("The 'pattern' parameter must be non-empty.")
-
-        try:
-            regex = re.compile(pattern)
-        except re.error as e:
-            raise ToolError(f"Invalid regex pattern: {e}") from None
-
-        search_path = resolve_path_safely(dir_path or ".", self._base_path)
+        regex = self.compile_pattern(pattern)
+        search_path = self.resolve_path(dir_path or ".")
 
         if not search_path.exists():
             raise ToolError(f"Directory not found: {dir_path or '.'}")
 
-        # Collect files
-        if search_path.is_file():
-            files = [search_path]
-        else:
-            files = []
-            for f in search_path.rglob("*"):
-                if len(files) >= self._max_files:
-                    break
-                if not f.is_file():
-                    continue
-                if any(part.startswith(".") for part in f.parts):
-                    continue
-                if any(
-                    part in ("node_modules", "__pycache__", ".git", "venv", ".venv")
-                    for part in f.parts
-                ):
-                    continue
-                if include and not fnmatch.fnmatch(f.name, include):
-                    continue
-                files.append(f)
-
-        # Search and group by file
-        file_matches: dict[str, list[tuple[int, str]]] = {}
-        total_matches = 0
-
-        for file in files:
-            try:
-                content = file.read_text(encoding="utf-8")
-            except (UnicodeDecodeError, PermissionError):
-                continue
-
-            try:
-                rel_path = str(file.relative_to(self._base_path))
-            except ValueError:
-                rel_path = str(file)
-
-            for i, line in enumerate(content.split("\n"), 1):
-                if regex.search(line):
-                    if rel_path not in file_matches:
-                        file_matches[rel_path] = []
-                    file_matches[rel_path].append((i, line.strip()))
-                    total_matches += 1
-
-                    if total_matches >= self._max_results:
-                        break
-
-            if total_matches >= self._max_results:
-                break
-
-        # Format output (grouped by file like Gemini CLI)
-        if not file_matches:
-            output = f"No matches found for pattern: {pattern}"
-        else:
-            lines = [f"Found {total_matches} matches in {len(file_matches)} files"]
-            lines.append("")
-
-            for file_path, matches in file_matches.items():
-                lines.append(f"{file_path}:")
-                for line_num, line_text in matches:
-                    lines.append(f"  Line {line_num}: {line_text}")
-                lines.append("")
-
-            if total_matches >= self._max_results:
-                lines.append("(Results are truncated. Consider using a more specific pattern.)")
-
-            output = "\n".join(lines)
+        matches = self.search_files(search_path, regex, include)
+        output = self.format_output(matches, pattern)
 
         return ContentResult(output=output).to_content_blocks()
 
 
-class GeminiGlobTool(BaseTool):
+class GeminiGlobTool(BaseGlobTool):
     """Gemini CLI-style file globbing tool.
 
     Finds files matching a glob pattern.
@@ -305,9 +270,6 @@ class GeminiGlobTool(BaseTool):
         AgentType.GEMINI: NativeToolSpec(role="finder"),
     }
 
-    _base_path: Path
-    _max_results: int
-
     def __init__(
         self,
         base_path: str = ".",
@@ -320,7 +282,8 @@ class GeminiGlobTool(BaseTool):
             max_results: Maximum files to return (default: 100)
         """
         super().__init__(
-            env=None,
+            base_path=base_path,
+            max_results=max_results,
             name="glob",
             title="Glob",
             description=(
@@ -328,8 +291,33 @@ class GeminiGlobTool(BaseTool):
                 "sorted alphabetically. Use ** for recursive matching."
             ),
         )
-        self._base_path = Path(base_path).resolve()
-        self._max_results = max_results
+
+    def format_output(self, matches: list[tuple[Path, float]], pattern: str) -> str:
+        """Format output in Gemini CLI style (absolute paths, alphabetical).
+
+        Args:
+            matches: List of (path, mtime) tuples
+            pattern: Original glob pattern
+
+        Returns:
+            Formatted output with absolute paths
+        """
+        if not matches:
+            return f"No files found matching: {pattern}"
+
+        truncated = len(matches) >= self._max_results
+
+        # Sort alphabetically (Gemini CLI behavior, not by mtime)
+        sorted_matches = sorted(matches, key=lambda x: str(x[0]))
+
+        # Return absolute paths (Gemini CLI format)
+        abs_paths = [str(m.resolve()) for m, _mtime in sorted_matches]
+        output = "\n".join(abs_paths)
+
+        if truncated:
+            output += "\n\n(Results are truncated. Consider using a more specific pattern.)"
+
+        return output
 
     async def __call__(
         self,
@@ -349,51 +337,20 @@ class GeminiGlobTool(BaseTool):
         Returns:
             List of ContentBlocks with matching file paths
         """
-        if not pattern:
-            raise ToolError("The 'pattern' parameter must be non-empty.")
-
-        base = resolve_path_safely(dir_path or ".", self._base_path)
+        base = self.resolve_path(dir_path or ".")
 
         if not base.exists():
             raise ToolError(f"Directory not found: {dir_path or '.'}")
         if not base.is_dir():
             raise ToolError(f"Not a directory: {dir_path or '.'}")
 
-        # Find matches
-        matches: list[Path] = []
-        try:
-            for match in base.glob(pattern):
-                if any(part.startswith(".") for part in match.parts):
-                    continue
-                if respect_git_ignore and any(
-                    part in ("node_modules", "__pycache__", "venv", ".venv", "dist", "build")
-                    for part in match.parts
-                ):
-                    continue
-
-                matches.append(match)
-                if len(matches) >= self._max_results:
-                    break
-        except Exception as e:
-            raise ToolError(f"Invalid glob pattern: {e}") from None
-
-        # Sort alphabetically (Gemini CLI behavior)
-        matches.sort()
-
-        if not matches:
-            output = f"No files found matching: {pattern}"
-        else:
-            # Return absolute paths (Gemini CLI format)
-            abs_paths = [str(m.resolve()) for m in matches]
-            output = "\n".join(abs_paths)
-
-            if len(matches) >= self._max_results:
-                output += "\n\n(Results are truncated. Consider using a more specific pattern.)"
+        matches = self.find_files(base, pattern, include_ignored=not respect_git_ignore)
+        output = self.format_output(matches, pattern)
 
         return ContentResult(output=output).to_content_blocks()
 
 
-class GeminiListTool(BaseTool):
+class GeminiListTool(BaseListTool):
     """Gemini CLI-style directory listing tool.
 
     Lists directory contents with DIR/file format.
@@ -408,9 +365,6 @@ class GeminiListTool(BaseTool):
         AgentType.GEMINI: NativeToolSpec(role="lister"),
     }
 
-    _base_path: Path
-    _max_entries: int
-
     def __init__(
         self,
         base_path: str = ".",
@@ -423,7 +377,8 @@ class GeminiListTool(BaseTool):
             max_entries: Maximum entries to return (default: 500)
         """
         super().__init__(
-            env=None,
+            base_path=base_path,
+            max_entries=max_entries,
             name="list_directory",
             title="ListDirectory",
             description=(
@@ -431,8 +386,44 @@ class GeminiListTool(BaseTool):
                 "with DIR prefix for directories. Hidden files are excluded by default."
             ),
         )
-        self._base_path = Path(base_path).resolve()
-        self._max_entries = max_entries
+
+    def format_output(
+        self,
+        entries: list[tuple[str, bool]],
+        directory: Path,
+        path_str: str,
+    ) -> str:
+        """Format output in Gemini CLI style (DIR/filename format).
+
+        Args:
+            entries: List of (relative_path, is_dir) tuples
+            directory: Directory that was listed
+            path_str: Original path string for display
+
+        Returns:
+            Formatted output with DIR prefix for directories
+        """
+        if not entries:
+            return f"Empty directory: {path_str}"
+
+        truncated = len(entries) >= self._max_entries
+
+        # Format as DIR/filename (Gemini CLI format)
+        lines = []
+        for name, is_dir in entries:
+            # Extract just the name (not full relative path)
+            simple_name = name.rstrip("/").split("/")[-1]
+            if is_dir:
+                lines.append(f"DIR  {simple_name}")
+            else:
+                lines.append(f"     {simple_name}")
+
+        output = "\n".join(lines)
+
+        if truncated:
+            output += f"\n\n(Limited to {self._max_entries} entries)"
+
+        return output
 
     async def __call__(
         self,
@@ -451,55 +442,15 @@ class GeminiListTool(BaseTool):
         if not dir_path:
             raise ToolError("The 'dir_path' parameter must be non-empty.")
 
-        path = resolve_path_safely(dir_path, self._base_path)
+        path = self.resolve_path(dir_path)
 
         if not path.exists():
             raise ToolError(f"Directory not found: {dir_path}")
         if not path.is_dir():
             raise ToolError(f"Path is not a directory: {dir_path}")
 
-        ignore_patterns = ignore or []
-
-        # Collect entries
-        entries: list[tuple[str, bool]] = []  # (name, is_dir)
-
-        for entry in path.iterdir():
-            # Skip hidden
-            if entry.name.startswith("."):
-                continue
-
-            # Check ignore patterns
-            should_ignore = False
-            for pattern in ignore_patterns:
-                if fnmatch.fnmatch(entry.name, pattern):
-                    should_ignore = True
-                    break
-            if should_ignore:
-                continue
-
-            entries.append((entry.name, entry.is_dir()))
-
-            if len(entries) >= self._max_entries:
-                break
-
-        # Sort: directories first, then files, alphabetically
-        entries.sort(key=lambda x: (not x[1], x[0].lower()))
-
-        # Format output (Gemini CLI format: DIR/filename)
-        if not entries:
-            output = f"Empty directory: {dir_path}"
-        else:
-            lines = []
-            for name, is_dir in entries:
-                if is_dir:
-                    lines.append(f"DIR  {name}")
-                else:
-                    lines.append(f"     {name}")
-
-            output = "\n".join(lines)
-
-            if len(entries) >= self._max_entries:
-                output += f"\n\n(Limited to {self._max_entries} entries)"
+        entries = self.list_directory(path, ignore=ignore, recursive=False)
+        output = self.format_output(entries, path, dir_path)
 
         return ContentResult(output=output).to_content_blocks()
 

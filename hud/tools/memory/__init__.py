@@ -38,17 +38,13 @@ from hud.tools.memory.gemini import GeminiMemoryTool
 from hud.tools.memory.session import MemoryTool, SessionMemoryTool
 
 __all__ = [
-    # Base classes
     "BaseFileMemoryTool",
     "BaseMemoryTool",
     "BaseSessionMemoryTool",
-    "MemoryEntry",
-    # Claude
     "ClaudeMemoryCommand",
     "ClaudeMemoryTool",
-    # Gemini
     "GeminiMemoryTool",
-    # Session (default)
+    "MemoryEntry",
     "MemoryTool",
     "SessionMemoryTool",
 ]
