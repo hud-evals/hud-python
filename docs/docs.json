@@ -64,7 +64,8 @@
                 "group": "Cookbooks",
                 "pages": [
                   "cookbooks/codex-coding",
-                  "cookbooks/ops-diagnostics"
+                  "cookbooks/ops-diagnostics",
+                  "cookbooks/opencode-agent"
                 ]
               },
               {
@@ -76,12 +77,13 @@
               {
                 "group": "Tools",
                 "pages": [
-                  "native-tools/index",
-                  "native-tools/computer",
-                  "native-tools/coding",
-                  "native-tools/memory",
-                  "native-tools/web",
-                  "native-tools/grounding"
+                  "tools/index",
+                  "tools/agents",
+                  "tools/computer",
+                  "tools/coding",
+                  "tools/memory",
+                  "tools/web",
+                  "tools/grounding"
                 ]
               },
               {

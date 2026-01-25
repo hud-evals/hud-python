@@ -52,21 +52,23 @@ class CodeExecutionTool(HostedTool):
                 if hasattr(candidate, "content") and candidate.content:
                     for part in candidate.content.parts or []:
                         if hasattr(part, "executable_code") and part.executable_code:
-                            results.append({
-                                "type": "code",
-                                "language": getattr(
-                                    part.executable_code, "language", "python"
-                                ),
-                                "code": part.executable_code.code,
-                            })
+                            results.append(
+                                {
+                                    "type": "code",
+                                    "language": getattr(part.executable_code, "language", "python"),
+                                    "code": part.executable_code.code,
+                                }
+                            )
                         if hasattr(part, "code_execution_result") and part.code_execution_result:
-                            results.append({
-                                "type": "result",
-                                "outcome": getattr(
-                                    part.code_execution_result, "outcome", "unknown"
-                                ),
-                                "output": part.code_execution_result.output,
-                            })
+                            results.append(
+                                {
+                                    "type": "result",
+                                    "outcome": getattr(
+                                        part.code_execution_result, "outcome", "unknown"
+                                    ),
+                                    "output": part.code_execution_result.output,
+                                }
+                            )
 
             return {"executions": results} if results else {}
         except Exception:

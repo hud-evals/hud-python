@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
@@ -140,7 +142,7 @@ class TestBaseToolNativeSpecs:
 
         # Create a simple test tool
         class TestTool(BaseTool):
-            native_specs: dict[AgentType, NativeToolSpec] = {
+            native_specs: ClassVar[dict[AgentType, NativeToolSpec]] = {
                 AgentType.CLAUDE: NativeToolSpec(api_type="test_class"),
             }
 

@@ -7,8 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from hud.tools.coding import BashTool, _BashSession
-from hud.tools.types import ContentResult, ToolError
-from hud.tools.types import TextContent
+from hud.tools.types import ContentResult, TextContent, ToolError
 
 
 class TestBashSession:
@@ -94,7 +93,7 @@ class TestBashTool:
         mock_session.start = AsyncMock()
 
         # Mock _BashSession creation
-        with patch("hud.tools.bash._BashSession") as mock_session_class:
+        with patch("hud.tools.coding.bash.ClaudeBashSession") as mock_session_class:
             mock_session_class.return_value = mock_session
 
             result = await tool(command="echo test")
@@ -116,7 +115,7 @@ class TestBashTool:
         new_session.start = AsyncMock()
 
         # When session is None, restart uses _BashSession class directly
-        with patch("hud.tools.bash._BashSession", return_value=new_session):
+        with patch("hud.tools.coding.bash.ClaudeBashSession", return_value=new_session):
             result = await tool(restart=True)
 
             assert isinstance(result, list)

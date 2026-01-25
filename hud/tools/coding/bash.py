@@ -12,15 +12,14 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar
+
+from mcp.types import ContentBlock  # noqa: TC002
 
 from hud.tools.base import BaseTool
 from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult, ToolError
 from hud.types import AgentType
-
-if TYPE_CHECKING:
-    from mcp.types import ContentBlock
 
 
 class ClaudeBashSession:

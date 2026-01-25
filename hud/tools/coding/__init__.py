@@ -19,18 +19,17 @@ Gemini/Generic tools (function calling only):
 """
 
 # Claude-native tools
-from hud.tools.coding.bash import BashTool, ClaudeBashSession, _BashSession
-from hud.tools.coding.edit import Command, EditTool
-from hud.tools.coding.memory import ClaudeMemoryTool, MemoryCommand
-
 # OpenAI-native tools
 from hud.tools.coding.apply_patch import ApplyPatchResult, ApplyPatchTool, DiffError
-from hud.tools.coding.session import BashSession, ShellCallOutcome, ShellCommandOutput
-from hud.tools.coding.shell import ShellResult, ShellTool
+from hud.tools.coding.bash import BashTool, ClaudeBashSession, _BashSession
+from hud.tools.coding.edit import Command, EditTool
 
 # Gemini/Generic tools
 from hud.tools.coding.gemini_edit import GeminiEditTool
 from hud.tools.coding.gemini_shell import GeminiShellTool, ShellOutput
+from hud.tools.coding.memory import ClaudeMemoryTool, MemoryCommand
+from hud.tools.coding.session import BashSession, ShellCallOutcome, ShellCommandOutput
+from hud.tools.coding.shell import ShellResult, ShellTool
 
 # Shared utilities
 from hud.tools.coding.utils import (
@@ -45,35 +44,30 @@ from hud.tools.coding.utils import (
 )
 
 __all__ = [
-    # Claude tools
+    "SNIPPET_LINES",
+    "ApplyPatchResult",
+    "ApplyPatchTool",
+    "BashSession",
     "BashTool",
     "ClaudeBashSession",
-    "_BashSession",
-    "EditTool",
-    "Command",
     "ClaudeMemoryTool",
-    "MemoryCommand",
-    # OpenAI tools
-    "ShellTool",
-    "ShellResult",
-    "ApplyPatchTool",
-    "ApplyPatchResult",
+    "Command",
     "DiffError",
-    # Session types
-    "BashSession",
+    "EditTool",
+    "GeminiEditTool",
+    "GeminiShellTool",
+    "MemoryCommand",
     "ShellCallOutcome",
     "ShellCommandOutput",
-    # Gemini tools
-    "GeminiShellTool",
-    "GeminiEditTool",
     "ShellOutput",
-    # Utils
-    "SNIPPET_LINES",
+    "ShellResult",
+    "ShellTool",
+    "_BashSession",
     "make_snippet",
     "maybe_truncate",
     "read_file_async",
     "read_file_sync",
+    "validate_path",
     "write_file_async",
     "write_file_sync",
-    "validate_path",
 ]

@@ -134,9 +134,7 @@ class OpenAIAgent(MCPAgent):
         """Build OpenAI-specific tool mappings after tools are discovered."""
         self._convert_tools_for_openai()
 
-    def _build_native_tool(
-        self, tool: types.Tool, spec: NativeToolSpec
-    ) -> ToolParam | None:
+    def _build_native_tool(self, tool: types.Tool, spec: NativeToolSpec) -> ToolParam | None:
         """Build an OpenAI native tool from a NativeToolSpec.
 
         Args:
@@ -240,7 +238,7 @@ class OpenAIAgent(MCPAgent):
 
         categorized = self.categorize_tools()
 
-        # Log skipped tools
+        # Log skipped tools at debug level
         for tool, reason in categorized.skipped:
             logger.debug("Skipping tool %s: %s", tool.name, reason)
 
@@ -266,6 +264,12 @@ class OpenAIAgent(MCPAgent):
             if openai_tool:
                 self._tool_name_map[tool.name] = tool.name
                 self._openai_tools.append(openai_tool)
+
+        # Log actual tools being used
+        tool_names = sorted(self._tool_name_map.keys())
+        self.console.info(
+            f"Agent initialized with {len(tool_names)} tools: {', '.join(tool_names)}"
+        )
 
     def _extract_tool_call(self, item: Any) -> MCPToolCall | None:
         """Extract an MCPToolCall from a response output item.

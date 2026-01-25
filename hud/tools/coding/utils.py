@@ -150,9 +150,7 @@ def validate_path(path: Path, must_exist: bool = True, allow_dir: bool = False) 
         ToolError: If validation fails
     """
     if not path.is_absolute():
-        raise ToolError(
-            f"Path {path} is not absolute. Use an absolute path starting with '/'."
-        )
+        raise ToolError(f"Path {path} is not absolute. Use an absolute path starting with '/'.")
     if must_exist and not path.exists():
         raise ToolError(f"Path {path} does not exist.")
     if path.exists() and path.is_dir() and not allow_dir:

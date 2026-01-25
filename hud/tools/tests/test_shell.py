@@ -7,18 +7,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from hud.tools.coding import (
-    ShellTool,
     ShellResult,
+    ShellTool,
 )
 from hud.tools.coding.session import (
     BashSession,
     ShellCallOutcome,
     ShellCommandOutput,
 )
+from hud.tools.types import ToolError
 
 # Alias for backward-compatible tests
 _BashSession = BashSession
-from hud.tools.types import ToolError
 
 
 class TestShellCallOutcome:

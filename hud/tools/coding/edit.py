@@ -10,14 +10,14 @@ from collections import defaultdict
 from pathlib import Path
 from typing import ClassVar, Literal, get_args
 
-from mcp.types import ContentBlock
+from mcp.types import ContentBlock  # noqa: TC002 - used at runtime by FunctionTool
 
 from hud.tools.base import BaseTool
 from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult, ToolError
 from hud.types import AgentType
 
-from .utils import make_snippet, read_file_async, write_file_async, SNIPPET_LINES
+from .utils import SNIPPET_LINES, make_snippet, read_file_async, write_file_async
 
 Command = Literal[
     "view",
@@ -56,7 +56,7 @@ class EditTool(BaseTool):
         """
         super().__init__(
             env=file_history or defaultdict(list),
-            name="str_replace_based_edit_tool",
+            name="edit",  # Generic name; Claude uses api_name override
             title="File Editor",
             description="View, create, and edit files with undo support",
         )
@@ -139,6 +139,7 @@ class EditTool(BaseTool):
                     "The `view_range` parameter is not allowed when `path` points to a directory."
                 )
             import shlex
+
             from hud.tools.utils import run
 
             safe_path = shlex.quote(str(path))
@@ -271,9 +272,8 @@ class EditTool(BaseTool):
         await write_file_async(path, old_text)
 
         return ContentResult(
-            output=f"Last edit to {path} undone successfully. "
-            f"{make_snippet(old_text, str(path))}"
+            output=f"Last edit to {path} undone successfully. {make_snippet(old_text, str(path))}"
         )
 
 
-__all__ = ["EditTool", "Command", "SNIPPET_LINES"]
+__all__ = ["SNIPPET_LINES", "Command", "EditTool"]

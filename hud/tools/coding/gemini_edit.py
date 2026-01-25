@@ -13,7 +13,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import ClassVar
 
-from mcp.types import ContentBlock
+from mcp.types import ContentBlock  # noqa: TC002 - used at runtime by FunctionTool
 
 from hud.tools.base import BaseTool
 from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
@@ -23,7 +23,6 @@ from hud.types import AgentType
 from .utils import (
     SNIPPET_LINES,
     make_snippet,
-    maybe_truncate,
     read_file_sync,
     write_file_sync,
 )

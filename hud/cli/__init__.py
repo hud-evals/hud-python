@@ -21,8 +21,8 @@ from .clone import clone_repository, get_clone_message, print_error, print_tutor
 from .debug import debug_mcp_stdio
 from .deploy import deploy_command
 from .dev import run_mcp_dev_server
-from .link import link_command
 from .eval import eval_command
+from .link import link_command
 from .pull import pull_command
 from .push import push_command
 from .remove import remove_command

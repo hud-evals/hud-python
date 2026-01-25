@@ -32,13 +32,6 @@ from .response import ResponseTool
 from .submit import SubmitTool
 
 if TYPE_CHECKING:
-    from .computer import (
-        AnthropicComputerTool,
-        GeminiComputerTool,
-        HudComputerTool,
-        OpenAIComputerTool,
-        QwenComputerTool,
-    )
     from .coding import (
         ApplyPatchTool,
         BashTool,
@@ -46,6 +39,13 @@ if TYPE_CHECKING:
         GeminiEditTool,
         GeminiShellTool,
         ShellTool,
+    )
+    from .computer import (
+        AnthropicComputerTool,
+        GeminiComputerTool,
+        HudComputerTool,
+        OpenAIComputerTool,
+        QwenComputerTool,
     )
     from .filesystem import (
         GlobTool,
@@ -55,43 +55,36 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
-    # Base classes
     "AgentTool",
+    "AnthropicComputerTool",
+    "ApplyPatchTool",
     "BaseHub",
     "BaseTool",
+    "BashTool",
+    "CodeExecutionTool",
+    "EditTool",
+    "GeminiComputerTool",
+    "GeminiEditTool",
+    "GeminiShellTool",
+    "GlobTool",
+    "GoogleSearchTool",
+    "GrepTool",
     "HostedTool",
-    # Native tool types
+    "HudComputerTool",
+    "ListTool",
+    "MemoryTool",
     "NativeToolSpec",
     "NativeToolSpecs",
-    # Computer tools (lazy import)
-    "AnthropicComputerTool",
-    "GeminiComputerTool",
-    "HudComputerTool",
     "OpenAIComputerTool",
+    "PlaywrightTool",
     "QwenComputerTool",
-    # Coding tools (lazy import)
-    "BashTool",
-    "EditTool",
-    "ShellTool",
-    "ApplyPatchTool",
-    "GeminiShellTool",
-    "GeminiEditTool",
-    # Filesystem tools (lazy import)
     "ReadTool",
-    "GrepTool",
-    "GlobTool",
-    "ListTool",
-    # Hosted tools
-    "CodeExecutionTool",
-    "GoogleSearchTool",
+    "ResponseTool",
+    "ShellTool",
+    "SubmitTool",
     "UrlContextTool",
     "WebFetchTool",
     "WebSearchTool",
-    # Other tools
-    "MemoryTool",
-    "PlaywrightTool",
-    "ResponseTool",
-    "SubmitTool",
 ]
 
 
@@ -106,6 +99,7 @@ def __getattr__(name: str) -> Any:
         "QwenComputerTool",
     ):
         from . import computer
+
         return getattr(computer, name)
 
     # Coding tools
@@ -118,6 +112,7 @@ def __getattr__(name: str) -> Any:
         "GeminiEditTool",
     ):
         from . import coding
+
         return getattr(coding, name)
 
     # Filesystem tools
@@ -128,6 +123,7 @@ def __getattr__(name: str) -> Any:
         "ListTool",
     ):
         from . import filesystem
+
         return getattr(filesystem, name)
 
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

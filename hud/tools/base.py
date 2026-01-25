@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from fastmcp import FastMCP
 
-from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
+from hud.tools.native_types import NativeToolSpec, NativeToolSpecs  # noqa: TC001
 from hud.tools.types import ContentBlock, EvaluationResult
 
 if TYPE_CHECKING:
@@ -181,6 +181,7 @@ class BaseTool(ABC):
             ```python
             bash = BashTool()
 
+
             @bash.before
             async def validate(command: str | None = None, **kwargs):
                 if command and "rm -rf" in command:
@@ -191,9 +192,7 @@ class BaseTool(ABC):
         self._callbacks.setdefault("before", []).append(fn)
         return fn
 
-    def after(
-        self, fn: Callable[..., Awaitable[Any]]
-    ) -> Callable[..., Awaitable[Any]]:
+    def after(self, fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
         """Decorator to run a function after tool execution.
 
         The callback receives tool kwargs plus `result=` and can:
@@ -203,6 +202,7 @@ class BaseTool(ABC):
         Example:
             ```python
             bash = BashTool()
+
 
             @bash.after
             async def log_execution(command: str | None = None, result=None, **kwargs):

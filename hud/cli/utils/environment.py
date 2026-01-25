@@ -33,7 +33,9 @@ def normalize_environment_name(name: str) -> str:
     return normalized.strip("-") or "environment"
 
 
-def get_environment_name(directory: str | Path, name_override: str | None = None) -> tuple[str, str]:
+def get_environment_name(
+    directory: str | Path, name_override: str | None = None
+) -> tuple[str, str]:
     """Resolve environment name with source tracking.
 
     Checks in order:

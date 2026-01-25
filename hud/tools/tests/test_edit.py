@@ -110,9 +110,7 @@ class TestEditTool:
 
         # Patch module-level functions
         with (
-            patch(
-                "hud.tools.coding.edit.read_file_async", new_callable=AsyncMock
-            ) as mock_read,
+            patch("hud.tools.coding.edit.read_file_async", new_callable=AsyncMock) as mock_read,
             patch.object(tool, "validate_path"),
         ):
             mock_read.return_value = file_content
@@ -136,9 +134,7 @@ class TestEditTool:
         file_content = "\n".join([f"Line {i}" for i in range(1, 11)])
 
         with (
-            patch(
-                "hud.tools.coding.edit.read_file_async", new_callable=AsyncMock
-            ) as mock_read,
+            patch("hud.tools.coding.edit.read_file_async", new_callable=AsyncMock) as mock_read,
             patch.object(tool, "validate_path"),
         ):
             mock_read.return_value = file_content
@@ -167,12 +163,8 @@ class TestEditTool:
         expected_content = "Hello, Universe!\nThis is a test."
 
         with (
-            patch(
-                "hud.tools.coding.edit.read_file_async", new_callable=AsyncMock
-            ) as mock_read,
-            patch(
-                "hud.tools.coding.edit.write_file_async", new_callable=AsyncMock
-            ) as mock_write,
+            patch("hud.tools.coding.edit.read_file_async", new_callable=AsyncMock) as mock_read,
+            patch("hud.tools.coding.edit.write_file_async", new_callable=AsyncMock) as mock_write,
             patch.object(tool, "validate_path"),
         ):
             mock_read.return_value = file_content
@@ -197,9 +189,7 @@ class TestEditTool:
         file_content = "Hello, World!"
 
         with (
-            patch(
-                "hud.tools.coding.edit.read_file_async", new_callable=AsyncMock
-            ) as mock_read,
+            patch("hud.tools.coding.edit.read_file_async", new_callable=AsyncMock) as mock_read,
             patch.object(tool, "validate_path"),
         ):
             mock_read.return_value = file_content
@@ -222,9 +212,7 @@ class TestEditTool:
         file_content = "Test test\nAnother test line"
 
         with (
-            patch(
-                "hud.tools.coding.edit.read_file_async", new_callable=AsyncMock
-            ) as mock_read,
+            patch("hud.tools.coding.edit.read_file_async", new_callable=AsyncMock) as mock_read,
             patch.object(tool, "validate_path"),
         ):
             mock_read.return_value = file_content

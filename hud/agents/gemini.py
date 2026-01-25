@@ -276,7 +276,7 @@ class GeminiAgent(MCPAgent):
 
         categorized = self.categorize_tools()
 
-        # Log skipped tools
+        # Log skipped tools at debug level
         for tool, reason in categorized.skipped:
             logger.debug("Skipping tool %s: %s", tool.name, reason)
 
@@ -301,6 +301,12 @@ class GeminiAgent(MCPAgent):
                 self._gemini_to_mcp_tool_map[tool.name] = tool.name
                 self.gemini_tools.append(gemini_tool)
 
+        # Log actual tools being used
+        tool_names = sorted(self._gemini_to_mcp_tool_map.keys())
+        self.console.info(
+            f"Agent initialized with {len(tool_names)} tools: {', '.join(tool_names)}"
+        )
+
     def _build_hosted_tool(self, spec: NativeToolSpec) -> genai_types.Tool | None:
         """Build a Gemini hosted tool from a NativeToolSpec.
 
@@ -312,24 +318,16 @@ class GeminiAgent(MCPAgent):
         """
         match spec.api_type:
             case "google_search":
-                return genai_types.Tool(
-                    google_search=genai_types.GoogleSearch(**spec.extra)
-                )
+                return genai_types.Tool(google_search=genai_types.GoogleSearch(**spec.extra))
             case "code_execution":
-                return genai_types.Tool(
-                    code_execution=genai_types.ToolCodeExecution()
-                )
+                return genai_types.Tool(code_execution=genai_types.ToolCodeExecution())
             case "url_context":
-                return genai_types.Tool(
-                    url_context=genai_types.UrlContext()
-                )
+                return genai_types.Tool(url_context=genai_types.UrlContext())
             case _:
                 logger.warning("Unknown hosted tool type: %s", spec.api_type)
                 return None
 
-    def _build_native_tool(
-        self, tool: types.Tool, spec: NativeToolSpec
-    ) -> genai_types.Tool | None:
+    def _build_native_tool(self, tool: types.Tool, spec: NativeToolSpec) -> genai_types.Tool | None:
         """Build a Gemini native tool from a NativeToolSpec.
 
         Args:

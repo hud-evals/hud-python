@@ -201,9 +201,7 @@ def create_build_context_tarball(
 
                 # Filter directories in-place to skip ignored ones
                 dirs[:] = [
-                    d
-                    for d in dirs
-                    if not should_ignore(root_path / d, directory, ignore_patterns)
+                    d for d in dirs if not should_ignore(root_path / d, directory, ignore_patterns)
                 ]
 
                 for file in files:

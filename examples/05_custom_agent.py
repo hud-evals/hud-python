@@ -39,14 +39,14 @@ class MyAgent(MCPAgent):
 
     def __init__(
         self,
-        checkpoint_name: str = "anthropic/claude-sonnet-4-5-20250929",
+        model: str = "anthropic/claude-sonnet-4-5-20250929",
         max_tokens: int = 4096,
         temperature: float = 0.7,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
 
-        self.checkpoint_name = checkpoint_name
+        self.model_name = model
         self.max_tokens = max_tokens
         self.temperature = temperature
 
@@ -98,7 +98,7 @@ class MyAgent(MCPAgent):
 
         try:
             response = await self.client.chat.completions.create(
-                model=self.checkpoint_name,
+                model=self.model_name,
                 messages=messages,
                 tools=tools if tools else None,  # type: ignore[arg-type]
                 max_tokens=self.max_tokens,
@@ -200,7 +200,7 @@ async def main() -> None:
 
     # Create agent with Claude via Gateway
     agent = MyAgent(
-        checkpoint_name="anthropic/claude-sonnet-4-5-20250929",
+        model="anthropic/claude-sonnet-4-5-20250929",
         max_tokens=2048,
         temperature=0.5,
         verbose=True,

@@ -140,6 +140,7 @@ class ClaudeAgent(MCPAgent):
         self.has_computer_tool = False
         self.tool_mapping: dict[str, str] = {}
         self.claude_tools: list[BetaToolUnionParam] = []
+        self._required_betas: set[str] = {"fine-grained-tool-streaming-2025-05-14"}
 
     def _on_tools_ready(self) -> None:
         """Build Claude-specific tool mappings after tools are discovered."""
@@ -332,7 +333,7 @@ class ClaudeAgent(MCPAgent):
 
         categorized = self.categorize_tools()
 
-        # Log skipped tools
+        # Log skipped tools at debug level
         for tool, reason in categorized.skipped:
             logger.debug("Skipping tool %s: %s", tool.name, reason)
 
@@ -350,7 +351,7 @@ class ClaudeAgent(MCPAgent):
             self.tool_mapping[api_name] = tool.name
             self.claude_tools.append(claude_tool)
 
-            if spec.api_type.startswith("computer"):
+            if spec.api_type and spec.api_type.startswith("computer"):
                 self.has_computer_tool = True
 
         # Process generic tools
@@ -372,6 +373,12 @@ class ClaudeAgent(MCPAgent):
             self.tool_mapping[tool.name] = tool.name
             self.claude_tools.append(claude_tool)
 
+        # Log actual tools being used
+        tool_names = sorted(self.tool_mapping.keys())
+        self.console.info(
+            f"Agent initialized with {len(tool_names)} tools: {', '.join(tool_names)}"
+        )
+
     def _get_native_api_name(self, spec: NativeToolSpec) -> str:
         """Get the literal API name for a native tool spec.
 
@@ -385,11 +392,9 @@ class ClaudeAgent(MCPAgent):
             case "text_editor_20250728":
                 return "str_replace_based_edit_tool"
             case _:
-                return spec.api_name or spec.api_type
+                return spec.api_name or spec.api_type or "unknown"
 
-    def _build_native_tool(
-        self, tool: types.Tool, spec: NativeToolSpec
-    ) -> BetaToolUnionParam:
+    def _build_native_tool(self, tool: types.Tool, spec: NativeToolSpec) -> BetaToolUnionParam:
         """Build a Claude native tool from a NativeToolSpec.
 
         Args:

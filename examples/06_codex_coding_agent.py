@@ -95,15 +95,14 @@ async def run_coding_task_local(
             "Use a model that supports native shell/apply_patch tools."
         )
 
-    # Create working directory
+    # Set base path - use current directory by default
     if work_dir:
-        os.makedirs(work_dir, exist_ok=True)
         base_path = os.path.abspath(work_dir)
     else:
-        # Default to ./codex_output
-        work_dir = "./codex_output"
-        os.makedirs(work_dir, exist_ok=True)
-        base_path = os.path.abspath(work_dir)
+        base_path = os.getcwd()
+
+    if not os.path.exists(base_path):
+        raise ValueError(f"Directory not found: {base_path}")
 
     print(f"📁 Working directory: {base_path}")
 
@@ -163,13 +162,6 @@ Work in the current directory. When done, verify your work runs correctly."""
     print("=" * 60)
     print("✅ Task completed!")
     print(f"📊 Reward: {ctx.reward}")
-    print(f"📁 Files created in: {base_path}")
-
-    # List created files
-    if os.path.exists(base_path):
-        files = os.listdir(base_path)
-        if files:
-            print(f"📄 Files: {', '.join(files)}")
 
 
 # =============================================================================
@@ -323,7 +315,7 @@ Examples:
         "--work-dir",
         type=str,
         default=None,
-        help="Working directory for file operations (local mode only, default: ./codex_output)",
+        help="Working directory for file operations (default: current directory)",
     )
     parser.add_argument(
         "--verbose",

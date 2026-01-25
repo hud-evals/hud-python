@@ -185,9 +185,7 @@ class ClaudeMemoryTool(EditTool):
             result = await self.str_replace(resolved, old_str, new_str)
             # Modify output to say "memory file" instead of just file
             if result.output:
-                result = ContentResult(
-                    output=result.output.replace("The file", "The memory file")
-                )
+                result = ContentResult(output=result.output.replace("The file", "The memory file"))
             return result.to_content_blocks()
 
         elif command == "insert":

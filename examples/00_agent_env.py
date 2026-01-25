@@ -44,7 +44,8 @@ async def main() -> None:
     """Connect to the environment and call the sum tool."""
     # Use hud.eval() with env() to create a task and run it
     async with hud.eval(env(), trace=False) as ctx:
-        result = await ctx.call_tool(name="sum", arguments={"a": 3, "b": 4})
+        # call_tool accepts: string + kwargs, tuple, or MCPToolCall
+        result = await ctx.call_tool("sum", a=3, b=4)
         print("3 + 4 =", result)
 
 

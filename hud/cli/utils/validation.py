@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path  # noqa: TC003 - used at runtime
 
 
 @dataclass
@@ -111,18 +111,11 @@ def validate_pyproject_references(directory: Path) -> list[ValidationIssue]:
             includes = target_config.get("include", [])
             for pattern in includes:
                 # Only check non-glob patterns
-                is_literal = (
-                    isinstance(pattern, str)
-                    and "*" not in pattern
-                    and "?" not in pattern
-                )
+                is_literal = isinstance(pattern, str) and "*" not in pattern and "?" not in pattern
                 if is_literal:
                     include_path = directory / pattern
                     if not include_path.exists():
-                        hint = (
-                            f"Referenced in "
-                            f"[tool.hatch.build.targets.{target_name}].include"
-                        )
+                        hint = f"Referenced in [tool.hatch.build.targets.{target_name}].include"
                         issues.append(
                             ValidationIssue(
                                 severity="warning",
@@ -199,9 +192,7 @@ def validate_dockerfile(directory: Path) -> list[ValidationIssue]:
 
     # If uv sync runs before COPY . ., check pyproject.toml references
     if has_uv_sync_before_full_copy and (directory / "pyproject.toml").exists():
-        issues.extend(
-            _check_pyproject_copy_order(directory, copied_files, dockerfile_path.name)
-        )
+        issues.extend(_check_pyproject_copy_order(directory, copied_files, dockerfile_path.name))
 
     return issues
 
@@ -244,10 +235,7 @@ def _check_pyproject_copy_order(
         # Check if README is referenced but not copied early
         readme = project.get("readme")
         if isinstance(readme, str) and readme not in copied_files:
-            hint = (
-                f"Add 'COPY {readme} ./' before the RUN command, "
-                "or builds may fail"
-            )
+            hint = f"Add 'COPY {readme} ./' before the RUN command, or builds may fail"
             issues.append(
                 ValidationIssue(
                     severity="warning",
@@ -256,7 +244,7 @@ def _check_pyproject_copy_order(
                     hint=hint,
                 )
             )
-    except Exception:
+    except Exception:  # noqa: S110 - best effort validation, errors are expected
         pass  # Best effort - tomllib may not parse all files
 
     return issues

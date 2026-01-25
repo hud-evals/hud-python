@@ -6,14 +6,16 @@ Matches the `glob` tool from OpenCode and similar coding agents.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
-from mcp.types import ContentBlock
+from mcp.types import ContentBlock  # noqa: TC002
 
 from hud.tools.base import BaseTool
 from hud.tools.coding.utils import resolve_path_safely
-from hud.tools.native_types import NativeToolSpecs
 from hud.tools.types import ContentResult, ToolError
+
+if TYPE_CHECKING:
+    from hud.tools.native_types import NativeToolSpecs
 
 
 class GlobTool(BaseTool):
@@ -93,8 +95,7 @@ class GlobTool(BaseTool):
                     continue
                 # Skip common non-source directories
                 if any(
-                    part in ("node_modules", "__pycache__", "venv", ".venv")
-                    for part in match.parts
+                    part in ("node_modules", "__pycache__", "venv", ".venv") for part in match.parts
                 ):
                     continue
 
@@ -102,7 +103,7 @@ class GlobTool(BaseTool):
                 if len(matches) >= self._max_results:
                     break
         except Exception as e:
-            raise ToolError(f"Invalid glob pattern: {e}")
+            raise ToolError(f"Invalid glob pattern: {e}") from None
 
         # Sort and format output
         matches.sort()

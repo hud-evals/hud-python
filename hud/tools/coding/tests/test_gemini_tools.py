@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -165,7 +164,7 @@ class TestGeminiEditTool:
             test_file.write_text("hello hello hello")
 
             tool = GeminiEditTool(base_directory=tmpdir)
-            with pytest.raises(ToolError, match="Expected 1 replacement.*found 3"):
+            with pytest.raises(ToolError, match=r"Expected 1 replacement.*found 3"):
                 await tool(
                     file_path="test.txt",
                     instruction="test edit",
@@ -204,7 +203,7 @@ class TestGeminiEditTool:
             test_file.write_text("hello hello hello")
 
             tool = GeminiEditTool(base_directory=tmpdir)
-            result = await tool(
+            await tool(
                 file_path="test.txt",
                 instruction="Replace all hello with world",
                 old_string="hello",

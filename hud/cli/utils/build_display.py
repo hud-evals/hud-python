@@ -151,13 +151,9 @@ def _display_lock_details(
             rich_console.print()
             env_lines = []
             if required_vars:
-                env_lines.append(
-                    f"[bold]Required:[/bold] {', '.join(required_vars)}"
-                )
+                env_lines.append(f"[bold]Required:[/bold] {', '.join(required_vars)}")
             if optional_vars:
-                env_lines.append(
-                    f"[bold]Optional:[/bold] {', '.join(optional_vars)}"
-                )
+                env_lines.append(f"[bold]Optional:[/bold] {', '.join(optional_vars)}")
 
             rich_console.print(
                 Panel(
@@ -186,7 +182,7 @@ def _display_lock_details(
         )
 
 
-def _format_duration(seconds: int | float) -> str:
+def _format_duration(seconds: float) -> str:
     """Format duration in seconds to human-readable string.
 
     Args:

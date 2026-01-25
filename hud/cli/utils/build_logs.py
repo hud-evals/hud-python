@@ -178,20 +178,17 @@ def _print_log_line(
     )
 
     # Actual error indicators (not just containing "error" somewhere)
-    is_actual_error = (
-        not is_error_handling
-        and (
-            lower_msg.startswith("error:")
-            or lower_msg.startswith("error ")
-            or "exit status 1" in lower_msg
-            or "exit code: 1" in lower_msg
-            or "command did not exit successfully" in lower_msg
-            or "failed to" in lower_msg
-            or ": FAILED" in message  # Case-sensitive for status
-            or "State: FAILED" in message
-            or message.strip().startswith("OSError:")
-            or message.strip().startswith("Exception:")
-        )
+    is_actual_error = not is_error_handling and (
+        lower_msg.startswith("error:")
+        or lower_msg.startswith("error ")
+        or "exit status 1" in lower_msg
+        or "exit code: 1" in lower_msg
+        or "command did not exit successfully" in lower_msg
+        or "failed to" in lower_msg
+        or ": FAILED" in message  # Case-sensitive for status
+        or "State: FAILED" in message
+        or message.strip().startswith("OSError:")
+        or message.strip().startswith("Exception:")
     )
 
     if is_actual_error:

@@ -500,12 +500,9 @@ def push_command(
 
     # Deprecation warning
     hud_console.warning(
-        "hud push is deprecated for platform builds. "
-        "Use 'hud deploy' instead for remote builds."
+        "hud push is deprecated for platform builds. Use 'hud deploy' instead for remote builds."
     )
-    hud_console.info(
-        "'hud push' pushes to Docker Hub. For platform builds, use 'hud deploy'."
-    )
+    hud_console.info("'hud push' pushes to Docker Hub. For platform builds, use 'hud deploy'.")
     hud_console.info("")
 
     push_environment(directory, image, tag, sign, yes, verbose)

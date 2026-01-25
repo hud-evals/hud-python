@@ -452,7 +452,10 @@ class TestClaudeAgentBedrock:
             )
 
             # Enable computer tool to verify betas list includes computer-use in Bedrock mode.
+            # In real usage, this beta is added by _convert_tools_for_claude when it detects
+            # a computer tool. Here we manually set both flags to simulate that.
             agent.has_computer_tool = True
+            agent._required_betas.add("computer-use-2025-01-24")
 
             mock_response = MagicMock()
             text_block = MagicMock()

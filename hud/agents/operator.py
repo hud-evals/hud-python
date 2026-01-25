@@ -6,11 +6,9 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import mcp.types as types
 from openai.types.responses import (
-    ApplyPatchToolParam,
     ComputerToolParam,
-    FunctionShellToolParam,
-    FunctionToolParam,
     ResponseComputerToolCallOutputScreenshotParam,
+    ToolParam,
 )
 from openai.types.responses.response_input_param import (
     ComputerCallOutput,
@@ -19,6 +17,7 @@ from openai.types.responses.response_input_param import (
 from openai.types.shared_params.reasoning import Reasoning
 
 from hud.tools.computer.settings import computer_settings
+from hud.tools.native_types import NativeToolSpec
 from hud.types import AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.types import with_signature
 
@@ -108,11 +107,9 @@ class OperatorAgent(OpenAIAgent):
         self.pending_call_id = None
         self.pending_safety_checks = []
 
-    def _to_openai_tool(
-        self, tool: types.Tool
-    ) -> (
-        FunctionShellToolParam | ApplyPatchToolParam | FunctionToolParam | ComputerToolParam | None
-    ):
+    def _build_native_tool(self, tool: types.Tool, spec: NativeToolSpec) -> ToolParam | None:
+        """Override to handle computer tools specially for Operator API."""
+        # Use Operator's computer_use_preview for the designated computer tool
         if tool.name == self._operator_computer_tool_name:
             return ComputerToolParam(
                 type="computer_use_preview",
@@ -120,9 +117,11 @@ class OperatorAgent(OpenAIAgent):
                 display_height=self._operator_display_height,
                 environment=self._operator_environment,
             )
+        # Skip other computer tools (only one computer tool allowed)
         if tool.name == "computer" or tool.name.endswith("_computer"):
             return None
-        return super()._to_openai_tool(tool)
+        # Delegate to parent for shell, apply_patch, etc.
+        return super()._build_native_tool(tool, spec)
 
     def _extract_tool_call(self, item: Any) -> MCPToolCall | None:
         """Route computer_call to the OpenAI-specific computer tool."""

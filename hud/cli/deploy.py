@@ -154,6 +154,7 @@ def deploy_environment(
     if deploy_link_path.exists() and not registry_id:
         try:
             import json
+
             with open(deploy_link_path) as f:
                 deploy_link = json.load(f)
             registry_id = deploy_link.get("registryId")

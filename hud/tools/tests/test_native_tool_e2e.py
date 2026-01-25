@@ -11,18 +11,16 @@ from __future__ import annotations
 import asyncio
 import socket
 from contextlib import suppress
-from typing import Any, ClassVar, cast
+from typing import Any, cast
 
 import pytest
 from fastmcp import Client as MCPClient
 
-from hud.agents.base import CategorizedTools, MCPAgent
+from hud.agents.base import MCPAgent
 from hud.server import MCPServer
-from hud.tools.base import BaseTool
 from hud.tools.coding import BashTool
 from hud.tools.computer.anthropic import AnthropicComputerTool
 from hud.tools.hosted import GoogleSearchTool
-from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.types import AgentResponse, AgentType
 
 
@@ -357,6 +355,7 @@ class TestLegacyNameFallback:
     def test_claude_legacy_computer_fallback(self) -> None:
         """Test Claude agent detects anthropic_computer by name without metadata."""
         from mcp import types as mcp_types
+
         from hud.agents.claude import ClaudeAgent
 
         # Create a tool with NO native_tools metadata - just a name
@@ -367,7 +366,7 @@ class TestLegacyNameFallback:
             # Note: NO _meta field at all!
         )
 
-        agent = ClaudeAgent.create()
+        agent = ClaudeAgent.create(validate_api_key=False)
         agent._available_tools = [legacy_tool]
 
         # The legacy fallback should detect this as a computer tool
@@ -385,6 +384,7 @@ class TestLegacyNameFallback:
     def test_claude_legacy_bash_fallback(self) -> None:
         """Test Claude agent detects bash by name without metadata."""
         from mcp import types as mcp_types
+
         from hud.agents.claude import ClaudeAgent
 
         legacy_tool = mcp_types.Tool(
@@ -393,7 +393,7 @@ class TestLegacyNameFallback:
             inputSchema={"type": "object", "properties": {}},
         )
 
-        agent = ClaudeAgent.create()
+        agent = ClaudeAgent.create(validate_api_key=False)
         agent._available_tools = [legacy_tool]
 
         spec = agent.resolve_native_spec(legacy_tool)
@@ -403,6 +403,7 @@ class TestLegacyNameFallback:
     def test_claude_legacy_editor_fallback(self) -> None:
         """Test Claude agent detects str_replace_based_edit_tool by name."""
         from mcp import types as mcp_types
+
         from hud.agents.claude import ClaudeAgent
 
         legacy_tool = mcp_types.Tool(
@@ -411,7 +412,7 @@ class TestLegacyNameFallback:
             inputSchema={"type": "object", "properties": {}},
         )
 
-        agent = ClaudeAgent.create()
+        agent = ClaudeAgent.create(validate_api_key=False)
         agent._available_tools = [legacy_tool]
 
         spec = agent.resolve_native_spec(legacy_tool)
@@ -421,6 +422,7 @@ class TestLegacyNameFallback:
     def test_claude_legacy_suffix_match(self) -> None:
         """Test Claude agent detects prefixed tool names like mcp_anthropic_computer."""
         from mcp import types as mcp_types
+
         from hud.agents.claude import ClaudeAgent
 
         legacy_tool = mcp_types.Tool(
@@ -429,7 +431,7 @@ class TestLegacyNameFallback:
             inputSchema={"type": "object", "properties": {}},
         )
 
-        agent = ClaudeAgent.create()
+        agent = ClaudeAgent.create(validate_api_key=False)
         agent._available_tools = [legacy_tool]
 
         spec = agent.resolve_native_spec(legacy_tool)
@@ -439,6 +441,7 @@ class TestLegacyNameFallback:
     def test_gemini_legacy_computer_fallback(self) -> None:
         """Test Gemini agent detects gemini_computer by name without metadata."""
         from mcp import types as mcp_types
+
         from hud.agents.gemini import GeminiAgent
 
         legacy_tool = mcp_types.Tool(
@@ -458,6 +461,7 @@ class TestLegacyNameFallback:
     def test_gemini_cua_legacy_computer_fallback(self) -> None:
         """Test GeminiCUAAgent detects gemini_computer by name without metadata."""
         from mcp import types as mcp_types
+
         from hud.agents.gemini_cua import GeminiCUAAgent
 
         legacy_tool = mcp_types.Tool(
@@ -477,6 +481,7 @@ class TestLegacyNameFallback:
     def test_openai_legacy_shell_fallback(self) -> None:
         """Test OpenAI agent detects shell by name without metadata."""
         from mcp import types as mcp_types
+
         from hud.agents.openai import OpenAIAgent
 
         legacy_tool = mcp_types.Tool(
@@ -495,6 +500,7 @@ class TestLegacyNameFallback:
     def test_openai_legacy_apply_patch_fallback(self) -> None:
         """Test OpenAI agent detects apply_patch by name without metadata."""
         from mcp import types as mcp_types
+
         from hud.agents.openai import OpenAIAgent
 
         legacy_tool = mcp_types.Tool(
@@ -513,6 +519,7 @@ class TestLegacyNameFallback:
     def test_metadata_takes_precedence_over_legacy(self) -> None:
         """Test that explicit native_tools metadata takes precedence over name matching."""
         from mcp import types as mcp_types
+
         from hud.agents.claude import ClaudeAgent
 
         # Tool named "computer" but with custom metadata
@@ -533,7 +540,7 @@ class TestLegacyNameFallback:
             },
         )
 
-        agent = ClaudeAgent.create()
+        agent = ClaudeAgent.create(validate_api_key=False)
         agent._available_tools = [tool_with_metadata]
 
         spec = agent.resolve_native_spec(tool_with_metadata)
@@ -549,9 +556,10 @@ class TestBackwardsCompatibility:
 
     def test_computer_tool_without_display_dims_uses_fallback(self) -> None:
         """Test that a native spec without display dimensions falls back to settings."""
+        import warnings
+
         from mcp import types as mcp_types
 
-        import warnings
         from hud.agents.claude import ClaudeAgent
         from hud.tools.computer.settings import computer_settings
 
@@ -573,7 +581,7 @@ class TestBackwardsCompatibility:
         )
 
         # Create agent and get native spec
-        agent = ClaudeAgent.create()
+        agent = ClaudeAgent.create(validate_api_key=False)
         agent._available_tools = [computer_tool]
         spec = agent.resolve_native_spec(computer_tool)
 
@@ -600,15 +608,16 @@ class TestBackwardsCompatibility:
 
         # Tool should still work with fallback dimensions
         # Cast to Any for TypedDict union access
-        tool_dict = cast(dict[str, Any], claude_tool)
+        tool_dict = cast("dict[str, Any]", claude_tool)
         assert tool_dict["display_width_px"] == computer_settings.ANTHROPIC_COMPUTER_WIDTH
         assert tool_dict["display_height_px"] == computer_settings.ANTHROPIC_COMPUTER_HEIGHT
 
     def test_new_style_tool_with_display_dims_no_warning(self) -> None:
         """Test that a new-style tool with display dimensions doesn't emit warning."""
+        import warnings
+
         from mcp import types as mcp_types
 
-        import warnings
         from hud.agents.claude import ClaudeAgent
 
         # Create a tool with display dimensions at the top level (non-standard fields go to extra)
@@ -632,7 +641,7 @@ class TestBackwardsCompatibility:
             },
         )
 
-        agent = ClaudeAgent.create()
+        agent = ClaudeAgent.create(validate_api_key=False)
         agent._available_tools = [computer_tool]
         spec = agent.resolve_native_spec(computer_tool)
 
@@ -652,7 +661,7 @@ class TestBackwardsCompatibility:
 
         # Tool should use provided dimensions
         # Cast to Any for TypedDict union access
-        tool_dict = cast(dict[str, Any], claude_tool)
+        tool_dict = cast("dict[str, Any]", claude_tool)
         assert tool_dict["display_width_px"] == 1920
         assert tool_dict["display_height_px"] == 1080
 
@@ -706,8 +715,7 @@ class TestToolNativeSpecs:
 
     def test_shell_tools_have_mutual_exclusion_role(self) -> None:
         """Test BashTool and ShellTool both have role='shell' for mutual exclusion."""
-        from hud.tools.coding import BashTool
-        from hud.tools.coding import ShellTool
+        from hud.tools.coding import BashTool, ShellTool
         from hud.types import AgentType
 
         bash_spec = BashTool.native_specs[AgentType.CLAUDE]
@@ -718,8 +726,7 @@ class TestToolNativeSpecs:
 
     def test_editor_tools_have_mutual_exclusion_role(self) -> None:
         """Test EditTool and ApplyPatchTool both have role='editor' for mutual exclusion."""
-        from hud.tools.coding import ApplyPatchTool
-        from hud.tools.coding import EditTool
+        from hud.tools.coding import ApplyPatchTool, EditTool
         from hud.types import AgentType
 
         edit_spec = EditTool.native_specs[AgentType.CLAUDE]
@@ -729,7 +736,7 @@ class TestToolNativeSpecs:
         assert apply_patch_spec.role == "editor"
 
     def test_gemini_tools_have_role_but_not_native(self) -> None:
-        """Test GeminiShellTool and GeminiEditTool have roles for mutual exclusion but no native API."""
+        """Test GeminiShellTool and GeminiEditTool have roles but no native API."""
         from hud.tools.coding import GeminiEditTool, GeminiShellTool
         from hud.types import AgentType
 

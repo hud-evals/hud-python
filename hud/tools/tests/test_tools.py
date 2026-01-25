@@ -5,9 +5,8 @@ import sys
 import pytest
 from mcp.types import ImageContent, TextContent
 
-from hud.tools.coding import BashTool
+from hud.tools.coding import BashTool, EditTool
 from hud.tools.computer.hud import HudComputerTool
-from hud.tools.coding import EditTool
 
 
 @pytest.mark.asyncio

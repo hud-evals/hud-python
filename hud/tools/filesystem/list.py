@@ -7,14 +7,16 @@ from __future__ import annotations
 
 import fnmatch
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
-from mcp.types import ContentBlock
+from mcp.types import ContentBlock  # noqa: TC002
 
 from hud.tools.base import BaseTool
 from hud.tools.coding.utils import resolve_path_safely
-from hud.tools.native_types import NativeToolSpecs
 from hud.tools.types import ContentResult, ToolError
+
+if TYPE_CHECKING:
+    from hud.tools.native_types import NativeToolSpecs
 
 
 class ListTool(BaseTool):
@@ -88,10 +90,7 @@ class ListTool(BaseTool):
         # Collect entries
         entries: list[tuple[str, Path]] = []
 
-        if recursive:
-            iterator = dir_path.rglob("*")
-        else:
-            iterator = dir_path.iterdir()
+        iterator = dir_path.rglob("*") if recursive else dir_path.iterdir()
 
         for entry in iterator:
             # Skip hidden files
@@ -99,8 +98,7 @@ class ListTool(BaseTool):
                 continue
             # Skip common non-source directories
             if any(
-                part in ("node_modules", "__pycache__", "venv", ".venv")
-                for part in entry.parts
+                part in ("node_modules", "__pycache__", "venv", ".venv") for part in entry.parts
             ):
                 continue
             # Apply pattern filter

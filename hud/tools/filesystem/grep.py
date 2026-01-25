@@ -8,14 +8,16 @@ from __future__ import annotations
 import fnmatch
 import re
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
-from mcp.types import ContentBlock
+from mcp.types import ContentBlock  # noqa: TC002
 
 from hud.tools.base import BaseTool
 from hud.tools.coding.utils import resolve_path_safely
-from hud.tools.native_types import NativeToolSpecs
 from hud.tools.types import ContentResult, ToolError
+
+if TYPE_CHECKING:
+    from hud.tools.native_types import NativeToolSpecs
 
 
 class GrepTool(BaseTool):
@@ -89,7 +91,7 @@ class GrepTool(BaseTool):
         try:
             regex = re.compile(pattern)
         except re.error as e:
-            raise ToolError(f"Invalid regex pattern: {e}")
+            raise ToolError(f"Invalid regex pattern: {e}") from None
 
         search_path = resolve_path_safely(path, self._base_path)
 

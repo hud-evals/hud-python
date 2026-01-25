@@ -40,7 +40,7 @@ load_dotenv()
 
 import hud
 from hud.agents import create_agent
-from hud.tools.coding import EditTool, ShellTool
+from hud.tools.coding import ApplyPatchTool, EditTool, ShellTool
 from hud.tools.filesystem import GlobTool, GrepTool, ListTool, ReadTool
 
 
@@ -69,23 +69,27 @@ async def run_build_mode(
         verbose: Enable verbose output
         work_dir: Working directory for file operations
     """
-    # Create working directory
+    # Set base path - use current directory by default (like plan mode)
     if work_dir:
-        os.makedirs(work_dir, exist_ok=True)
         base_path = os.path.abspath(work_dir)
     else:
-        work_dir = "./opencode_output"
-        os.makedirs(work_dir, exist_ok=True)
-        base_path = os.path.abspath(work_dir)
+        base_path = os.getcwd()
+
+    if not os.path.exists(base_path):
+        raise ValueError(f"Directory not found: {base_path}")
 
     print(f"📁 Working directory: {base_path}")
 
     # Create environment with OpenCode tools
     env = hud.Environment("opencode-build")
 
-    # Coding tools
-    env.add_tool(ShellTool())
+    # Coding tools - add both shell tools and both editor tools
+    # Role-based exclusion will pick the right one for the model:
+    # - Claude: EditTool (str_replace), ShellTool falls back to generic
+    # - OpenAI: ApplyPatchTool (unified diff), ShellTool (native)
+    env.add_tool(ShellTool(cwd=base_path))
     env.add_tool(EditTool())
+    env.add_tool(ApplyPatchTool(base_path=base_path))
 
     # Filesystem exploration tools
     env.add_tool(ReadTool(base_path=base_path))
@@ -107,15 +111,7 @@ async def run_build_mode(
 
 {task_description}
 
-Available tools:
-- `shell` - Run bash commands
-- `str_replace_based_edit_tool` - Edit files using str_replace
-- `read` - Read file contents with line numbers
-- `grep` - Search file contents with regex
-- `glob` - Find files by pattern
-- `list` - List directory contents
-
-Explore the codebase first using read/grep/glob/list, then make changes."""
+Use the available tools to explore the codebase first, then make changes."""
         yield 1.0
 
     # Run the agent
@@ -127,13 +123,6 @@ Explore the codebase first using read/grep/glob/list, then make changes."""
     print("=" * 60)
     print("✅ Task completed!")
     print(f"📊 Reward: {ctx.reward}")
-    print(f"📁 Files in workspace: {base_path}")
-
-    # List created files
-    if os.path.exists(base_path):
-        files = os.listdir(base_path)
-        if files:
-            print(f"📄 Files: {', '.join(files)}")
 
 
 # =============================================================================
@@ -269,7 +258,7 @@ Examples:
         "--work-dir",
         type=str,
         default=None,
-        help="Working directory (default: ./opencode_output for build, cwd for plan)",
+        help="Working directory (default: current directory)",
     )
     parser.add_argument(
         "--verbose",

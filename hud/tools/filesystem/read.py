@@ -6,14 +6,16 @@ Matches the `read` tool from OpenCode and similar coding agents.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
-from mcp.types import ContentBlock
+from mcp.types import ContentBlock  # noqa: TC002
 
 from hud.tools.base import BaseTool
 from hud.tools.coding.utils import resolve_path_safely
-from hud.tools.native_types import NativeToolSpecs
 from hud.tools.types import ContentResult, ToolError
+
+if TYPE_CHECKING:
+    from hud.tools.native_types import NativeToolSpecs
 
 
 class ReadTool(BaseTool):
@@ -90,9 +92,9 @@ class ReadTool(BaseTool):
         try:
             content = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
-            raise ToolError(f"Cannot read binary file: {file_path}")
+            raise ToolError(f"Cannot read binary file: {file_path}") from None
         except PermissionError:
-            raise ToolError(f"Permission denied: {file_path}")
+            raise ToolError(f"Permission denied: {file_path}") from None
 
         lines = content.split("\n")
         total_lines = len(lines)
@@ -114,9 +116,7 @@ class ReadTool(BaseTool):
             truncated = False
 
         # Format with line numbers
-        numbered_lines = [
-            f"{i + line_offset:4d} | {line}" for i, line in enumerate(lines)
-        ]
+        numbered_lines = [f"{i + line_offset:4d} | {line}" for i, line in enumerate(lines)]
         output = "\n".join(numbered_lines)
 
         # Add metadata

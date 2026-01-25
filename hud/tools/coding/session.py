@@ -73,7 +73,8 @@ class BashSession:
     _process: asyncio.subprocess.Process
     _timed_out: bool
 
-    command: str = "/bin/bash"
+    # Platform-specific shell command
+    command: str = "cmd.exe" if sys.platform == "win32" else "/bin/bash"
     _output_delay: float = 0.2  # seconds for polling mode
     _sentinel: str = "<<exit>>"
     _default_timeout: float = 120.0  # seconds
@@ -177,10 +178,17 @@ class BashSession:
         assert self._process.stderr
 
         # Send command with sentinel for exit code capture
-        if capture_exit_code:
-            cmd_line = f"{command}; echo '{self._sentinel}'$?\n"
+        # Platform-specific syntax for command chaining and exit code
+        if sys.platform == "win32":
+            if capture_exit_code:
+                cmd_line = f"{command} & echo {self._sentinel}%errorlevel%\n"
+            else:
+                cmd_line = f"{command} & echo {self._sentinel}\n"
         else:
-            cmd_line = f"{command}; echo '{self._sentinel}'\n"
+            if capture_exit_code:
+                cmd_line = f"{command}; echo '{self._sentinel}'$?\n"
+            else:
+                cmd_line = f"{command}; echo '{self._sentinel}'\n"
 
         self._process.stdin.write(cmd_line.encode())
         await self._process.stdin.drain()

@@ -158,9 +158,7 @@ class MCPAgent(ABC):
 
         return None
 
-    def categorize_tools(
-        self, tools: list[types.Tool] | None = None
-    ) -> CategorizedTools:
+    def categorize_tools(self, tools: list[types.Tool] | None = None) -> CategorizedTools:
         """Categorize tools by native spec availability with role-based exclusion.
 
         This shared method implements the two-pass tool processing logic:
@@ -209,9 +207,7 @@ class MCPAgent(ABC):
             # Check if this tool's role is already claimed by a native tool
             tool_role = self.get_tool_role(tool)
             if tool_role and tool_role in result.claimed_roles:
-                result.skipped.append(
-                    (tool, f"role '{tool_role}' already claimed by native tool")
-                )
+                result.skipped.append((tool, f"role '{tool_role}' already claimed by native tool"))
                 continue
 
             result.generic.append(tool)
@@ -295,8 +291,8 @@ class MCPAgent(ABC):
                 f"Available tools: {sorted(available_tool_names)}"
             )
 
-        self.console.info(
-            f"Agent initialized with {len(self._available_tools)} tools: "
+        self.console.debug(
+            f"Discovered {len(self._available_tools)} tools from environment: "
             f"{', '.join([t.name for t in self._available_tools])}"
         )
 

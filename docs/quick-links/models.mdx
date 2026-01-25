@@ -67,7 +67,7 @@ Same interface, improving performance as you train.
 
 ## Every Agent Framework Is Building an Environment
 
-An agent is just a for-loop of tool calls. When you connect a model to an environment, that combination *becomes* an agent. All agent frameworks—LangChain, CrewAI, AutoGen—are different ways to expose tools to a model, but 99% of the work happens inside the model itself. You don't need complex orchestration. You need the right model with the right tools.
+An agent is just a for-loop of tool calls. When you connect a model to an environment, that combination *becomes* an agent. All agent frameworks—LangChain, CrewAI, AutoGen—are different ways to expose tools to a model.
 
 This is [The Bitter Lesson of Agent Frameworks](https://browser-use.com/posts/bitter-lesson-agent-frameworks): every framework is ultimately building an environment. HUD makes the environment explicit—define your tools, define your scenarios, train the model, and get better at your specific tasks.
 

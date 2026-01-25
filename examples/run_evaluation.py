@@ -43,10 +43,10 @@ async def main() -> None:
     # Determine agent type and params
     if args.agent == "operator":
         agent_type = "operator"
-        agent_params = {"checkpoint_name": args.model or "computer-use-preview"}
+        agent_params = {"model": args.model or "computer-use-preview"}
     else:
         agent_type = "claude"
-        agent_params = {"checkpoint_name": args.model or "claude-sonnet-4-20250514"}
+        agent_params = {"model": args.model or "claude-sonnet-4-20250514"}
 
     # Run evaluation using run_dataset
     # Note: run_dataset creates agents fresh per task for proper tool initialization
