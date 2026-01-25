@@ -4,21 +4,32 @@ description: "Persistent storage across conversations"
 icon: "brain"
 ---
 
-Memory tools let agents store and retrieve information that persists beyond a single request. Two options: file-based (Claude's native memory) or semantic search (any agent).
+Memory tools let agents store and retrieve information that persists beyond a single request. Options include file-based storage (Claude's native memory), session-based key-value storage, and semantic search.
 
 ## Quick Reference
 
 | Tool | Agent | Storage | Persistence |
 |------|-------|---------|-------------|
 | `ClaudeMemoryTool` | Claude | Files in `/memories` | Across conversations |
-| `MemoryTool` | Any | In-memory or Qdrant | Session or persistent |
+| `SessionMemoryTool` | Any | In-memory dict | Session only |
+| `GeminiMemoryTool` | Gemini | In-memory dict | Session only |
+
+All memory tools are in the `hud.tools.memory` module:
+
+```python
+from hud.tools.memory import (
+    ClaudeMemoryTool,
+    SessionMemoryTool,
+    GeminiMemoryTool,
+)
+```
 
 ## ClaudeMemoryTool
 
 File-based memory for Claude. Uses native `memory_20250818` API. Stores files in a `/memories` directory.
 
 ```python
-from hud.tools.coding import ClaudeMemoryTool
+from hud.tools.memory import ClaudeMemoryTool
 
 memory = ClaudeMemoryTool(memories_dir="/memories")
 ```
@@ -60,42 +71,53 @@ await memory(
 
 Paths must start with `/memories`. Directory traversal is blocked.
 
-## MemoryTool
+## SessionMemoryTool
 
-Session-based memory with semantic search. Works with any agent. Uses simple token overlap for retrieval, or Qdrant for vector search.
-
-```python
-from hud.tools import MemoryTool
-
-# In-memory (session only)
-memory = MemoryTool()
-
-# With Qdrant (persistent)
-memory = MemoryTool(
-    collection="my_memories",
-    qdrant_url="http://localhost:6333",
-)
-```
-
-**Actions**: `add`, `search`
+Simple key-value memory for any agent. Stores data in an in-memory dictionary.
 
 ```python
-# Store memory
-await memory(
-    action="add",
-    text="User prefers TypeScript over JavaScript",
-    metadata={"category": "preferences"},
-)
+from hud.tools.memory import SessionMemoryTool
 
-# Search
-result = await memory(
-    action="search",
-    text="What language does the user prefer?",
-    top_k=3,
-)
+memory = SessionMemoryTool()
 ```
 
-In-memory uses token overlap (Jaccard similarity). Qdrant uses sentence-transformer embeddings for semantic search.
+**Actions**: `add`, `query`, `list`
+
+```python
+# Store memory with a key
+await memory(action="add", key="user_lang", value="Python is their preferred language")
+
+# Query by key
+result = await memory(action="query", key="user_lang")
+
+# List all keys
+result = await memory(action="list")
+```
+
+Useful for simple session context that doesn't need semantic search or persistence.
+
+## GeminiMemoryTool
+
+Gemini CLI-style memory with read/write operations. Uses in-memory storage.
+
+```python
+from hud.tools.memory import GeminiMemoryTool
+
+memory = GeminiMemoryTool()
+```
+
+**Actions**: `read`, `write`, `list`
+
+```python
+# Write memory
+await memory(action="write", key="context", value="User is working on a web app")
+
+# Read memory
+result = await memory(action="read", key="context")
+
+# List all memories
+result = await memory(action="list")
+```
 
 ## When to Use Which
 
@@ -103,20 +125,47 @@ In-memory uses token overlap (Jaccard similarity). Qdrant uses sentence-transfor
 |----------|------|
 | Claude with native API | `ClaudeMemoryTool` |
 | Structured file storage | `ClaudeMemoryTool` |
-| Any agent, simple storage | `MemoryTool` |
-| Semantic search | `MemoryTool` + Qdrant |
+| Simple key-value storage | `SessionMemoryTool` |
+| Gemini agents | `GeminiMemoryTool` |
 
 ## Typical Setup
+
+For Claude:
 
 ```python
 from hud import Environment
 from hud.tools import BashTool, EditTool
-from hud.tools.coding import ClaudeMemoryTool
+from hud.tools.memory import ClaudeMemoryTool
 
-env = Environment("persistent-env")
+env = Environment("claude-env")
 env.add_tool(BashTool())
 env.add_tool(EditTool())
 env.add_tool(ClaudeMemoryTool())
+```
+
+For Gemini:
+
+```python
+from hud import Environment
+from hud.tools.coding import GeminiShellTool, GeminiEditTool
+from hud.tools.memory import GeminiMemoryTool
+
+env = Environment("gemini-env")
+env.add_tool(GeminiShellTool())
+env.add_tool(GeminiEditTool())
+env.add_tool(GeminiMemoryTool())
+```
+
+For any agent with simple memory:
+
+```python
+from hud import Environment
+from hud.tools import BashTool
+from hud.tools.memory import SessionMemoryTool
+
+env = Environment("generic-env")
+env.add_tool(BashTool())
+env.add_tool(SessionMemoryTool())
 ```
 
 ## Custom Memory

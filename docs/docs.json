@@ -81,6 +81,7 @@
                   "tools/agents",
                   "tools/computer",
                   "tools/coding",
+                  "tools/filesystem",
                   "tools/memory",
                   "tools/web",
                   "tools/grounding"

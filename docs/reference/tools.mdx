@@ -1,444 +1,174 @@
 ---
 title: "Tools"
-description: "SDK reference for HUD tools and executors"
+description: "SDK reference for building and extending HUD tools"
 icon: "wrench"
 ---
 
-The HUD SDK provides a comprehensive set of tools for environment interaction. All tools inherit from `BaseTool` and return standardized MCP content blocks.
+<Info>
+**Looking for specific tool implementations?**
 
-## Base Classes
+This reference covers the tool system architecture and how to build custom tools. For documentation on built-in tools, see the [Tools Guide](/tools/index):
 
-### BaseTool
+- [Coding Tools](/tools/coding) — Shell execution, file editing
+- [Filesystem Tools](/tools/filesystem) — Read, search, glob, list
+- [Memory Tools](/tools/memory) — Persistent storage
+- [Computer Tools](/tools/computer) — Mouse, keyboard, screenshots
+- [Web Tools](/tools/web) — Browser automation
+</Info>
+
+## How Tools Work
+
+HUD tools are async functions that:
+
+1. **Receive structured input** from agents (via MCP or native APIs)
+2. **Execute actions** against an environment, filesystem, or service
+3. **Return `ContentBlock` lists** — standardized MCP output (text, images, etc.)
+
+```
+Agent → Tool Call → BaseTool.__call__() → list[ContentBlock] → Agent
+```
+
+Tools integrate with providers through **native specs** — when Claude calls `bash`, it uses Anthropic's native `bash_20250124` API. When OpenAI calls `shell`, it uses their native format. HUD translates automatically.
+
+## BaseTool
+
+All tools inherit from `BaseTool`. Implement `__call__` to define behavior.
 
 ```python
 from hud.tools import BaseTool
+from mcp.types import ContentBlock, TextContent
+
+class MyTool(BaseTool):
+    def __init__(self, config: str = "default"):
+        super().__init__(
+            name="my_tool",
+            title="My Tool",
+            description="Does something useful",
+        )
+        self.config = config
+    
+    async def __call__(self, query: str) -> list[ContentBlock]:
+        result = await self._do_work(query)
+        return [TextContent(text=result, type="text")]
+    
+    async def _do_work(self, query: str) -> str:
+        return f"Processed: {query} with {self.config}"
 ```
 
-Abstract base class for all MCP tools. Provides standardized output formatting and MCP registration.
-
 **Constructor Parameters:**
+
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
-| `env` | `Any` | Optional stateful context (game, executor, browser) | `None` |
+| `env` | `Any` | Stateful context (executor, browser, etc.) | `None` |
 | `name` | `str` | Tool name for MCP registration | Auto from class |
 | `title` | `str` | Human-readable display name | Auto from class |
-| `description` | `str` | Tool description | Auto from docstring |
-
-**Abstract Methods:**
-```python
-async def __call__(self, **kwargs: Any) -> list[ContentBlock]
-```
+| `description` | `str` | Tool description for agents | Auto from docstring |
 
 **Properties:**
-- `mcp` - FastMCP FunctionTool wrapper for registration
 
-**Usage:**
-```python
-class MyTool(BaseTool):
-    async def __call__(self, param: str) -> list[ContentBlock]:
-        result = await self.env.do_something(param)
-        return [TextContent(text=result, type="text")]
+- `mcp` — FastMCP `FunctionTool` wrapper for server registration
+- `native_specs` — Dict mapping `AgentType` to `NativeToolSpec`
 
-# MCPServer automatically handles BaseTool instances
-tool = MyTool(env=my_context)
-mcp_server.add_tool(tool)  # No need for .mcp property
-```
-
-### BaseHub
+**Registration:**
 
 ```python
-from hud.tools import BaseHub
+from hud.server import MCPServer
+
+mcp = MCPServer(name="my-env")
+mcp.add_tool(MyTool())  # Automatically wraps with .mcp
 ```
 
-A composition-friendly FastMCP server for organizing tools into nested namespaces.
+## Native Tool Specs
 
-**Key Features:**
-- Internal tool dispatcher pattern
-- Automatic resource catalog generation
-- Hidden internal tools from MCP clients
-
-**Usage:**
-```python
-hub = BaseHub("evaluators")
-
-@hub.tool()  # Internal tool, hidden from agents
-async def url_match(url: str) -> EvaluationResult:
-    return EvaluationResult(reward=1.0, done=True)
-
-# Access via dispatcher when mounted on server
-# Agents call: evaluators(name="url_match", arguments={"url": "..."})
-```
-
-## Agent Tools
-
-### AgentTool
+Tools can declare native API mappings for specific providers. This enables zero-translation tool calls for supported agents.
 
 ```python
-from hud.tools import AgentTool
+from hud.tools import BaseTool
+from hud.tools.native_types import NativeToolSpec
+from hud.types import AgentType
+
+class BashTool(BaseTool):
+    native_specs = {
+        AgentType.CLAUDE: NativeToolSpec(
+            api_type="bash_20250124",
+            api_name="bash",
+            beta="computer-use-2025-01-24",
+            role="shell",
+        ),
+    }
 ```
 
-Wraps a scenario as a tool that can be called by another agent. Essential for building **hierarchical agent systems** where an orchestrator delegates to specialized subagents.
+**NativeToolSpec Fields:**
 
-**Constructor Parameters:**
-| Parameter | Type | Description | Default |
-|-----------|------|-------------|---------|
-| `task` | `Task` | Task template from `env("scenario_name")` | Required |
-| `model` | `str` | Model for subagent (via gateway) | `None` |
-| `agent` | `type[MCPAgent]` | Custom agent class | `None` |
-| `agent_params` | `dict` | Additional agent parameters | `{}` |
-| `name` | `str` | Tool name for orchestrator | From scenario |
-| `description` | `str` | Tool description | Auto-generated |
-| `trace` | `bool` | Enable tracing for standalone runs | `False` |
+| Field | Type | Description |
+|-------|------|-------------|
+| `api_type` | `str` | Provider's tool type identifier |
+| `api_name` | `str` | Provider's tool name |
+| `beta` | `str \| None` | Required beta header (Anthropic) |
+| `role` | `str \| None` | Logical role for exclusion (`"shell"`, `"editor"`, `"memory"`) |
+| `supported_models` | `list[str] \| None` | Glob patterns for compatible models |
 
-<Note>Must provide either `model` or `agent`, not both.</Note>
+**Role Exclusion:**
 
-**Eval-Only Parameters:**
-
-Parameters with `| None = None` are hidden from the orchestrator but available for evaluation:
+Tools with the same `role` are mutually exclusive — you can't have both `BashTool` (Claude) and `ShellTool` (OpenAI) active. When an agent accepts one natively, others with the same role are excluded.
 
 ```python
-@env.scenario("investigate")
-async def investigate(
-    query: str,                          # Visible - orchestrator passes this
-    expected_finding: str | None = None, # Hidden - only used in eval scoring
-):
-    response = yield f"Investigate: {query}"
-    
-    # Scoring uses expected_finding but orchestrator never sees it
-    if expected_finding and response:
-        yield 1.0 if expected_finding in response else 0.5
-    else:
-        yield 1.0 if response else 0.0
+# Both have role="shell" — only one registers natively
+env.add_tool(BashTool())    # Claude gets this natively
+env.add_tool(ShellTool())   # OpenAI gets this natively
 ```
 
-**Usage:**
-```python
-from hud import Environment
-from hud.tools import AgentTool
+## Tool Hooks
 
-# Subagent environment with scenario
-sentry_env = Environment(name="sentry-agent")
-
-@sentry_env.scenario("investigate")
-async def investigate_sentry(query: str):
-    yield f"Investigate Sentry: {query}"
-
-# Create orchestrator
-orchestrator = Environment(name="orchestrator")
-
-# Wrap subagent scenario as tool
-tool = AgentTool(
-    sentry_env("investigate"),  # Task template
-    model="gpt-4o-mini",
-    name="investigate_sentry",
-    description="Investigate errors in Sentry",
-)
-orchestrator.add_tool(tool.mcp)
-
-# Now orchestrator agent can call investigate_sentry(query="...")
-```
-
-**Trace Continuity:**
-
-When called from within an eval context, AgentTool automatically:
-1. Inherits the parent's trace_id
-2. Skips duplicate trace registration
-3. Routes all inference/tool calls to the parent trace
-
-```python
-async with hud.eval(task) as ctx:
-    agent = create_agent("gpt-4o")
-    result = await agent.run(ctx)
-    # All subagent activity appears in this single trace
-```
-
-**See Also:** [Ops Diagnostics Cookbook](/cookbook/ops-diagnostics) for a complete hierarchical agent example.
-
----
-
-## Core Tools
-
-### BashTool
+Modify tool behavior without subclassing using `@tool.before` and `@tool.after`:
 
 ```python
 from hud.tools import BashTool
-```
+from hud.tools.types import ToolError
 
-Execute bash commands in a persistent shell session.
-
-**Constructor Parameters:**
-| Parameter | Type | Description | Default |
-|-----------|------|-------------|---------|
-| `session` | `_BashSession` | Pre-configured bash session | `None` |
-
-**Tool Parameters:**
-| Parameter | Type | Description | Default |
-|-----------|------|-------------|---------|
-| `command` | `str` | Bash command to execute | Required |
-| `restart` | `bool` | Restart the bash session | `False` |
-
-**Example:**
-```python
 bash = BashTool()
-result = await bash(command="ls -la")
-# Returns: [TextContent(text="file1.txt\nfile2.txt", type="text")]
 
-# Restart session
-await bash(restart=True)
+@bash.before
+async def validate(command: str | None = None, **kwargs):
+    """Runs before execution. Raise to block, return dict to modify args."""
+    if command and "rm -rf /" in command:
+        raise ToolError("Blocked dangerous command")
+    # Return modified kwargs, or None to proceed unchanged
+    return {"command": command.strip()} if command else None
+
+@bash.after
+async def audit(command: str | None = None, result=None, **kwargs):
+    """Runs after execution. Return to modify result, None to keep original."""
+    print(f"Executed: {command}")
+    return None  # Keep original result
 ```
 
-### EditTool
+**`@tool.before`:**
+- Receives all tool arguments as kwargs
+- Return `dict` to modify arguments before execution
+- Return `None` to proceed unchanged
+- Raise exception to block execution
+
+**`@tool.after`:**
+- Receives tool arguments plus `result=` (the return value)
+- Return modified result to change output
+- Return `None` to keep original result
+
+Hooks stack in registration order:
 
 ```python
-from hud.tools import EditTool
-```
+@bash.before
+async def first_validation(**kwargs): ...
 
-File system editor with undo support.
-
-**Constructor Parameters:**
-| Parameter | Type | Description | Default |
-|-----------|------|-------------|---------|
-| `file_history` | `dict[Path, list[str]]` | Edit history per file | `None` |
-
-**Commands:**
-| Command | Parameters | Description |
-|---------|-----------|-------------|
-| `view` | `path`, `view_range` | View file or directory contents |
-| `create` | `path`, `file_text` | Create new file |
-| `str_replace` | `path`, `old_str`, `new_str` | Replace string in file |
-| `insert` | `path`, `insert_line`, `new_str` | Insert text at line |
-| `undo_edit` | `path` | Undo last edit |
-
-**Example:**
-```python
-editor = EditTool()
-
-# View file
-await editor(command="view", path="/path/to/file.py", view_range=[1, 20])
-
-# Create file
-await editor(command="create", path="/new/file.py", file_text="print('hello')")
-
-# Replace text
-await editor(command="str_replace", path="/file.py", 
-            old_str="old_text", new_str="new_text")
-```
-
-### PlaywrightTool
-
-```python
-from hud.tools import PlaywrightTool
-```
-
-Web automation using Playwright browser.
-
-**Constructor Parameters:**
-| Parameter | Type | Description | Default |
-|-----------|------|-------------|---------|
-| `page` | `Page` | Existing Playwright page | `None` |
-| `cdp_url` | `str` | Chrome DevTools Protocol URL | `None` |
-
-**Actions:**
-| Action | Parameters | Description |
-|--------|-----------|-------------|
-| `navigate` | `url`, `wait_for_load_state` | Navigate to URL |
-| `screenshot` | - | Capture page screenshot |
-| `click` | `selector` | Click element |
-| `type` | `selector`, `text` | Type text in element |
-| `get_page_info` | - | Get page title and URL |
-| `wait_for_element` | `selector` | Wait for element to appear |
-
-**Example:**
-```python
-tool = PlaywrightTool()
-
-# Navigate
-await tool(action="navigate", url="https://example.com")
-
-# Click button
-await tool(action="click", selector="button.submit")
-
-# Type text
-await tool(action="type", selector="input#search", text="query")
-```
-
-### JupyterTool
-
-```python
-from hud.tools import JupyterTool
-```
-
-Execute Python code in a Jupyter kernel.
-
-**Constructor Parameters:**
-| Parameter | Type | Description | Default |
-|-----------|------|-------------|---------|
-| `url_suffix` | `str` | (Optional) Kernel gateway host:port | "localhost:8888" |
-| `kernel_name` | `str` | (Optional) Kernel name | "python3" |
-| `kernel_id` | `str` | (Optional) If set, connect to the existed kernel with `kernel_id` | ""(empty string) |
-
-**Tool Parameters:**
-| Parameter | Type | Description | Default |
-|-----------|------|-------------|---------|
-| `code` | `str` | Python code to execute | Required |
-| `execution_timeout` | `int` | Execution timeout in seconds | 15 |
-
-**Example: Tool Calling**
-```python
-jupyter_tool = JupyterTool()
-result = await jupyter_tool(code="print(\"hello world!\")")
-# Returns: [TextContent(text="hello world\n", type="text")]
-```
-**Example: Reuse the same kernel**
-
-```python
-# When initializing, register the kernel
-jupyter_tool = JupyterTool()
-JupyterTool.register_shared_kernel("my-jupyter", jupyter_tool.get_kernel_id())
-
-# Reuse the same kernel in other places:
-jupyter_tool_reuse = JupyterTool.from_shared_kernel("my-jupyter")
-```
-
-## Computer Control Tools
-
-### HudComputerTool
-
-```python
-from hud.tools import HudComputerTool
-```
-
-Universal computer control with automatic scaling and executor selection.
-
-**Constructor Parameters:**
-| Parameter | Type | Description | Default |
-|-----------|------|-------------|---------|
-| `executor` | `BaseExecutor` | Executor to use | Auto-detect |
-| `platform_type` | `"auto"`, `"xdo"`, `"pyautogui"` | Executor type | `"auto"` |
-| `display_num` | `int` | X display number | From env |
-| `width` | `int` | Agent screen width | 1280 |
-| `height` | `int` | Agent screen height | 720 |
-| `rescale_images` | `bool` | Rescale screenshots | `True` |
-
-**Actions:**
-| Action | Parameters | Description |
-|--------|-----------|-------------|
-| `screenshot` | - | Capture screen |
-| `click` | `x`, `y`, `button`, `pattern`, `hold_keys` | Mouse click |
-| `write` | `text`, `enter_after`, `delay` | Type text |
-| `press` | `keys` | Press key combination |
-| `scroll` | `x`, `y`, `scroll_x`, `scroll_y` | Scroll |
-| `drag` | `start_x`, `start_y`, `end_x`, `end_y` | Drag mouse |
-
-**Example:**
-```python
-computer = HudComputerTool()
-
-# Take screenshot
-await computer(action="screenshot")
-
-# Click at coordinates
-await computer(action="click", x=100, y=200)
-
-# Type text
-await computer(action="write", text="Hello World", enter_after=True)
-
-# Press hotkey
-await computer(action="press", keys=["ctrl", "c"])
-```
-
-### AnthropicComputerTool
-
-```python
-from hud.tools import AnthropicComputerTool
-```
-
-Computer control optimized for Anthropic's Claude models.
-
-**Features:**
-- Pre-configured for 1280x720 resolution
-- Optimized action names for Claude
-- Built-in screenshot scaling
-
-### OpenAIComputerTool
-
-```python
-from hud.tools import OpenAIComputerTool
-```
-
-Computer control optimized for OpenAI models.
-
-**Features:**
-- Pre-configured for 1920x1080 resolution
-- Simplified action interface
-- No automatic screenshot scaling
-
-## Executors
-
-Executors provide platform-specific implementations for computer control actions.
-
-### BaseExecutor
-
-```python
-from hud.tools.executors import BaseExecutor
-```
-
-Abstract base providing simulation mode for all actions.
-
-**Core Methods:**
-- `click(x, y, button, pattern, hold_keys)` - Mouse click
-- `write(text, enter_after, delay)` - Type text
-- `press(keys)` - Press key combination
-- `scroll(x, y, scroll_x, scroll_y)` - Scroll
-- `drag(start_x, start_y, end_x, end_y)` - Drag mouse
-- `screenshot()` - Capture screen
-- `get_screen_size()` - Get display dimensions
-
-### PyAutoGUIExecutor
-
-```python
-from hud.tools.executors import PyAutoGUIExecutor
-```
-
-Cross-platform executor using PyAutoGUI library.
-
-**Features:**
-- Works on Windows, macOS, Linux
-- Real mouse/keyboard control
-- Screenshot capture
-- Automatic failsafe
-
-**Example:**
-```python
-executor = PyAutoGUIExecutor()
-computer = HudComputerTool(executor=executor)
-```
-
-### XDOExecutor
-
-```python
-from hud.tools.executors import XDOExecutor
-```
-
-Linux/X11 executor using xdotool.
-
-**Features:**
-- Native X11 integration
-- Faster than PyAutoGUI on Linux
-- Support for X display selection
-- Window management capabilities
-
-**Example:**
-```python
-executor = XDOExecutor(display_num=1)
-computer = HudComputerTool(executor=executor)
+@bash.before  
+async def second_validation(**kwargs): ...  # Runs after first
 ```
 
 ## Common Types
 
 ### ContentBlock
 
-MCP standard output format (from `mcp.types`):
+MCP standard output format. Tools return `list[ContentBlock]`.
 
 ```python
 from mcp.types import TextContent, ImageContent
@@ -450,78 +180,59 @@ TextContent(text="Operation complete", type="text")
 ImageContent(data="base64_data", mimeType="image/png", type="image")
 ```
 
+### ContentResult
+
+Helper for building tool outputs with multiple content types:
+
+```python
+from hud.tools.types import ContentResult
+
+result = ContentResult(
+    output="Success message",
+    error="Error details if any",
+    base64_image="screenshot_data",
+)
+
+# Convert to list[ContentBlock]
+blocks = result.to_content_blocks()
+
+# For text-only output (returns list[TextContent])
+text_blocks = result.to_text_blocks()
+```
+
+### ToolError
+
+Raise to return an error to the agent:
+
+```python
+from hud.tools.types import ToolError
+
+async def __call__(self, path: str) -> list[ContentBlock]:
+    if not path:
+        raise ToolError("path is required")
+    # ...
+```
+
+`ToolError` messages are returned to the agent as text content, not raised as exceptions.
+
 ### EvaluationResult
+
+For evaluation/scoring tools:
 
 ```python
 from hud.tools.types import EvaluationResult
 
 result = EvaluationResult(
     reward=0.8,        # Score 0-1
-    done=True,         # Task complete
-    content="Details", # Optional text
+    done=True,         # Task complete?
+    content="Details", # Optional explanation
     info={"score": 80} # Metadata
 )
 ```
 
-### ContentResult
+## BaseHub
 
-```python
-from hud.tools.types import ContentResult
-
-# Helper for building complex outputs
-result = ContentResult(
-    output="Success message",
-    error="Error if any",
-    base64_image="screenshot_data",
-    system="System message"
-)
-
-# Convert to ContentBlocks
-blocks = result.to_content_blocks()
-```
-
-## Integration Examples
-
-### Adding Tools to Environment
-
-```python
-from hud.server import MCPServer
-from hud.tools import BashTool, EditTool
-
-mcp = MCPServer(name="my-env")
-
-# MCPServer handles BaseTool instances automatically
-bash = BashTool()
-mcp.add_tool(bash)  # Internally uses bash.mcp
-
-editor = EditTool()
-mcp.add_tool(editor)  # Same here
-```
-
-### Custom Tool Implementation
-
-```python
-from hud.tools import BaseTool
-from mcp.types import TextContent
-
-class DatabaseTool(BaseTool):
-    def __init__(self, db_connection):
-        super().__init__(
-            env=db_connection,
-            name="database",
-            title="Database Query Tool",
-            description="Execute SQL queries"
-        )
-    
-    async def __call__(self, query: str) -> list[ContentBlock]:
-        try:
-            results = await self.env.execute(query)
-            return [TextContent(text=str(results), type="text")]
-        except Exception as e:
-            return [TextContent(text=f"Error: {e}", type="text")]
-```
-
-### Hub Pattern for Evaluators
+Organize related tools into namespaced groups with a dispatcher pattern:
 
 ```python
 from hud.tools import BaseHub
@@ -534,63 +245,206 @@ async def check_text(text: str, target: str) -> EvaluationResult:
     return EvaluationResult(
         reward=1.0 if target in text else 0.0,
         done=True,
-        content=f"Checking if '{target}' in text"
     )
 
-# Use in environment
-@mcp.tool()
-async def evaluate(name: str, **kwargs):
-    return await evaluators.call_tool(name, kwargs)
+@evaluators.tool("url_matches")
+async def check_url(url: str, expected: str) -> EvaluationResult:
+    return EvaluationResult(
+        reward=1.0 if url == expected else 0.0,
+        done=True,
+    )
+
+# Mount on server — agents call: evaluate(name="text_contains", ...)
+mcp.mount(evaluators)
 ```
 
-### Callback Functions
+**Key Features:**
+- Internal tools are hidden from MCP clients
+- Single dispatcher endpoint for all hub tools
+- Automatic resource catalog generation
 
-Callback functions help you monitor certain types of actions and hook 
-behaviors to them. You can manage callbacks using three main methods,
+## AgentTool
+
+Wrap a scenario as a callable tool for hierarchical agent systems:
+
 ```python
-add_callback(self, event_type: str, callback: Callable)
-remove_callback(self, event_type: str, callback: Callable)
-_trigger_callbacks(self, event_type: str, **kwargs)  
+from hud import Environment
+from hud.tools import AgentTool
+
+# Subagent environment
+researcher = Environment(name="researcher")
+
+@researcher.scenario("search")
+async def search_web(query: str):
+    yield f"Search for: {query}"
+    # ... agent interaction ...
+
+# Create orchestrator and add subagent as tool
+orchestrator = Environment(name="orchestrator")
+
+tool = AgentTool(
+    researcher("search"),  # Task template
+    model="gpt-4o-mini",
+    name="web_search",
+    description="Search the web for information",
+)
+orchestrator.add_tool(tool)
 ```
-*Special note*: Make sure the callback functions are defined by `async def`
 
-For example, when you want to take a screenshot every 
-time the webpage changes in `Playwright`
- ```python
-from hud.tools.playwright import PlaywrightTool
-import base64
+**Constructor Parameters:**
 
-class MyPlaywrightTool(PlaywrightTool):
-    def __init__(self, context: Any = None, cdp_url: str | None = None) -> None:
-        super().__init__(cdp_url=cdp_url)
-        self.screenshots: List = []
-        self.add_callback("webpage_change", self._on_webpage_change)
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `task` | `Task` | Task template from `env("scenario")` |
+| `model` | `str` | Model for subagent (via gateway) |
+| `agent` | `type[MCPAgent]` | Custom agent class (alternative to model) |
+| `name` | `str` | Tool name for orchestrator |
+| `description` | `str` | Tool description |
 
-    async def _on_webpage_change(self, **kwargs) -> None:
-        """Callback to capture screenshots on webpage changes"""
+**Eval-Only Parameters:**
+
+Parameters with `| None = None` are hidden from the orchestrator but available for evaluation scoring:
+
+```python
+@env.scenario("investigate")
+async def investigate(
+    query: str,                          # Visible to orchestrator
+    expected_finding: str | None = None, # Hidden — only for eval
+):
+    response = yield f"Investigate: {query}"
+    if expected_finding:
+        yield 1.0 if expected_finding in response else 0.0
+```
+
+## Executors
+
+Executors provide platform-specific implementations for computer control tools.
+
+### BaseExecutor
+
+Abstract base for all executors:
+
+```python
+from hud.tools.executors import BaseExecutor
+
+class MyExecutor(BaseExecutor):
+    async def click(self, x: int, y: int, **kwargs) -> None: ...
+    async def write(self, text: str, **kwargs) -> None: ...
+    async def press(self, keys: list[str]) -> None: ...
+    async def screenshot(self) -> bytes: ...
+    async def get_screen_size(self) -> tuple[int, int]: ...
+```
+
+### Built-in Executors
+
+| Executor | Platform | Features |
+|----------|----------|----------|
+| `PyAutoGUIExecutor` | Cross-platform | Real mouse/keyboard, screenshots |
+| `XDOExecutor` | Linux/X11 | Native X11, faster on Linux |
+
+```python
+from hud.tools.executors import PyAutoGUIExecutor, XDOExecutor
+from hud.tools import HudComputerTool
+
+# Cross-platform
+computer = HudComputerTool(executor=PyAutoGUIExecutor())
+
+# Linux with specific display
+computer = HudComputerTool(executor=XDOExecutor(display_num=1))
+```
+
+## Callback Functions
+
+Monitor and hook into tool actions:
+
+```python
+class MyTool(BaseTool):
+    def __init__(self):
+        super().__init__(name="my_tool")
+        self.add_callback("action_complete", self._on_complete)
+    
+    async def _on_complete(self, **kwargs) -> None:
+        print(f"Action completed: {kwargs}")
+    
+    async def __call__(self, action: str) -> list[ContentBlock]:
+        result = await self._do_action(action)
+        await self._trigger_callbacks("action_complete", action=action)
+        return result
+```
+
+**Callback Methods:**
+
+```python
+add_callback(event_type: str, callback: Callable)
+remove_callback(event_type: str, callback: Callable)
+_trigger_callbacks(event_type: str, **kwargs)  # Call from tool methods
+```
+
+Callbacks must be `async def`.
+
+## Complete Example
+
+Custom database tool with validation and logging:
+
+```python
+from hud.tools import BaseTool
+from hud.tools.types import ContentResult, ToolError
+from mcp.types import ContentBlock
+
+class DatabaseTool(BaseTool):
+    def __init__(self, connection_string: str):
+        super().__init__(
+            name="database",
+            title="Database Query",
+            description="Execute read-only SQL queries",
+        )
+        self.conn_string = connection_string
+        self._conn = None
+    
+    async def __call__(
+        self,
+        query: str,
+        limit: int = 100,
+    ) -> list[ContentBlock]:
+        if not query.strip().upper().startswith("SELECT"):
+            raise ToolError("Only SELECT queries are allowed")
+        
         try:
-            await self._ensure_browser()
-            if self.page:
-                screenshot_bytes = await self.page.screenshot(full_page=True)
-                screenshot_b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
-                self.screenshots.append(screenshot_b64)
+            conn = await self._get_connection()
+            results = await conn.fetch(f"{query} LIMIT {limit}")
+            
+            return ContentResult(
+                output=self._format_results(results)
+            ).to_content_blocks()
+            
         except Exception as e:
-            pass
+            raise ToolError(f"Query failed: {e}")
+    
+    async def _get_connection(self):
+        if not self._conn:
+            import asyncpg
+            self._conn = await asyncpg.connect(self.conn_string)
+        return self._conn
+    
+    def _format_results(self, rows: list) -> str:
+        if not rows:
+            return "No results"
+        return "\n".join(str(dict(row)) for row in rows)
 
-    async def navigate(self, url: str, wait_for_load_state="networkidle"):
-        result = await super().navigate(url, wait_for_load_state)
-        # Trigger callbacks with event data
-        await self._trigger_callbacks("webpage_change")
-        return result
+# Usage with hooks
+db = DatabaseTool("postgresql://...")
 
-    async def click(self, selector: str, **kwargs):
-        result = await super().click(selector, **kwargs)
-        await self._trigger_callbacks("webpage_change")
-        return result
+@db.before
+async def audit_query(query: str = "", **kwargs):
+    print(f"Executing: {query[:50]}...")
+
+@db.after  
+async def log_result(result=None, **kwargs):
+    print(f"Returned {len(result)} blocks")
 ```
 
 ## See Also
 
-- [Build Environments](/build-environments) - Using tools in environments
-- [Architecture](/core-concepts/architecture) - How tools fit in HUD
-- [Adapting Software](/build-environments/adapting-software) - Tool patterns
+- [Tools Guide](/tools/index) — Built-in tool implementations
+- [Environments](/reference/environments) — Adding tools to environments
+- [Agents](/reference/agents) — How agents use tools

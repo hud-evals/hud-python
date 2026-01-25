@@ -4,6 +4,10 @@ description: "Pre-built capabilities for computer control, shell execution, and 
 icon: "toolbox"
 ---
 
+<Tip>
+**Building custom tools?** See the [Tools SDK Reference](/reference/tools) for architecture details, base classes, native specs, and complete implementation examples.
+</Tip>
+
 Native tools are pre-built capabilities you add to environments—computer control, shell execution, file editing, web browsing. Each provider (Anthropic, OpenAI, Google) has its own tool specification. HUD handles the translation.
 
 ## Why Native Tools?
@@ -53,17 +57,27 @@ Match tools to your agent:
 | Agent | Computer | Shell | Editor | Memory |
 |-------|----------|-------|--------|--------|
 | Claude | `AnthropicComputerTool` | `BashTool` | `EditTool` | `ClaudeMemoryTool` |
-| OpenAI | `OpenAIComputerTool` | `ShellTool` | `ApplyPatchTool` | — |
-| Gemini | `GeminiComputerTool` | `GeminiShellTool` | `GeminiEditTool` | — |
+| OpenAI | `OpenAIComputerTool` | `ShellTool` | `ApplyPatchTool` | `SessionMemoryTool` |
+| Gemini | `GeminiComputerTool` | `GeminiShellTool` | `GeminiEditTool` | `GeminiMemoryTool` |
+
+Filesystem tools are agent-agnostic. Choose based on output style:
+
+| Style | Read | Search | Glob | List |
+|-------|------|--------|------|------|
+| OpenCode | `ReadTool` | `GrepTool` | `GlobTool` | `ListTool` |
+| Gemini CLI | `GeminiReadTool` | `GeminiSearchTool` | `GeminiGlobTool` | `GeminiListTool` |
 
 ```python
 from hud import Environment
 from hud.tools import AnthropicComputerTool, BashTool, EditTool
+from hud.tools.filesystem import ReadTool, GrepTool
 
 env = Environment("claude-env")
 env.add_tool(AnthropicComputerTool())
 env.add_tool(BashTool())
 env.add_tool(EditTool())
+env.add_tool(ReadTool())
+env.add_tool(GrepTool())
 ```
 
 ## Customizing Tools
@@ -188,6 +202,9 @@ class MyShellTool(BaseTool):
   </Card>
   <Card title="Coding" icon="code" href="/tools/coding">
     Shell execution, file editing
+  </Card>
+  <Card title="Filesystem" icon="folder-open" href="/tools/filesystem">
+    Read, search, and list files
   </Card>
   <Card title="Memory" icon="brain" href="/tools/memory">
     Persistent storage
