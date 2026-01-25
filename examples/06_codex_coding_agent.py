@@ -31,8 +31,7 @@ Usage:
 
 Requirements:
   - Install deps: `uv sync`
-  - For local mode: OPENAI_API_KEY environment variable
-  - For hub mode: HUD_API_KEY environment variable
+  - HUD_API_KEY environment variable (for both local and hub modes)
 """
 
 import argparse
@@ -46,7 +45,6 @@ from openai import AsyncOpenAI
 load_dotenv()
 
 import hud
-from hud.agents import create_agent
 from hud.agents.openai import OpenAIAgent
 from hud.settings import settings
 from hud.tools.coding import ApplyPatchTool, ShellTool
@@ -109,13 +107,32 @@ async def run_coding_task_local(
 
     print(f"📁 Working directory: {base_path}")
 
+    # Require HUD_API_KEY for gateway access
+    if not settings.api_key:
+        raise ValueError(
+            "HUD_API_KEY is required.\n"
+            "Get yours at: https://hud.ai/project/api-keys\n"
+            "Then: export HUD_API_KEY='sk-hud-...'"
+        )
+
     # Create environment with Codex tools - 1:1 match with OpenAI's Codex CLI
+    # Both tools use the same working directory for consistency
     env = hud.Environment("local-codex")
-    env.add_tool(ShellTool())
+    env.add_tool(ShellTool(cwd=base_path))
     env.add_tool(ApplyPatchTool(base_path=base_path))
 
-    # Create agent using create_agent (automatically routes to OpenAIAgent for gpt-* models)
-    agent = create_agent(model, verbose=verbose)
+    # Create agent using HUD Gateway (uses HUD_API_KEY)
+    model_client = AsyncOpenAI(
+        base_url=settings.hud_gateway_url,
+        api_key=settings.api_key,
+    )
+    agent = OpenAIAgent.create(
+        model=model,
+        model_client=model_client,
+        validate_api_key=False,  # HUD key won't validate against OpenAI
+        verbose=verbose,
+    )
+    print("🌐 Using HUD Gateway for inference")
 
     print(f"🤖 Model: {model}")
     print(f"📋 Task: {task}")
@@ -183,13 +200,12 @@ async def run_coding_task_hub(
         hub_name: Hub environment name (default: codex_environment_sandbox)
         verbose: Enable verbose output
     """
-    # Require HUD_API_KEY for hub mode
+    # Require HUD_API_KEY for gateway access
     if not settings.api_key:
         raise ValueError(
-            "HUD_API_KEY is required for hub mode.\n"
+            "HUD_API_KEY is required.\n"
             "Get yours at: https://hud.ai/project/api-keys\n"
-            "Then: export HUD_API_KEY='sk-hud-...'\n\n"
-            "Or use --local flag to run without HUD infrastructure."
+            "Then: export HUD_API_KEY='sk-hud-...'"
         )
 
     print(f"🌐 Connecting to hub: {hub_name}")

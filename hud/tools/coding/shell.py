@@ -60,13 +60,17 @@ class ShellTool(BaseTool):
     }
 
     _session: BashSession | None
+    _cwd: str | None
 
-    def __init__(self, session: BashSession | None = None) -> None:
+    def __init__(self, session: BashSession | None = None, cwd: str | None = None) -> None:
         """Initialize ShellTool with an optional session.
 
         Args:
             session: Optional pre-configured bash session. If not provided,
                      a new session will be created on first use.
+            cwd: Working directory for the shell session. Commands will execute
+                 in this directory. If not provided, uses the process's current
+                 working directory.
         """
         super().__init__(
             env=session,
@@ -75,6 +79,7 @@ class ShellTool(BaseTool):
             description="Execute shell commands in a persistent bash session",
         )
         self._session = session
+        self._cwd = cwd
 
     async def _ensure_session(self) -> tuple[BashSession, str | None]:
         """Ensure a working session exists, auto-restarting if needed.
@@ -100,7 +105,7 @@ class ShellTool(BaseTool):
             self._session = None
 
         if self._session is None:
-            self._session = BashSession()
+            self._session = BashSession(cwd=self._cwd)
             await self._session.start()
 
         return self._session, restart_message
@@ -110,7 +115,6 @@ class ShellTool(BaseTool):
         commands: list[str] | None = None,
         timeout_ms: int | None = None,
         max_output_length: int | None = None,
-        **kwargs: object,
     ) -> ShellResult:
         """Execute shell commands.
 
@@ -160,4 +164,4 @@ class ShellTool(BaseTool):
         )
 
 
-__all__ = ["ShellTool", "ShellResult"]
+__all__ = ["ShellResult", "ShellTool"]

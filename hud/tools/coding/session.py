@@ -78,9 +78,10 @@ class BashSession:
     _sentinel: str = "<<exit>>"
     _default_timeout: float = 120.0  # seconds
 
-    def __init__(self) -> None:
+    def __init__(self, cwd: str | None = None) -> None:
         self._started = False
         self._timed_out = False
+        self._cwd = cwd
 
     async def start(self) -> None:
         """Start the bash session."""
@@ -111,6 +112,7 @@ class BashSession:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 preexec_fn=preexec_fn,
+                cwd=self._cwd,
             )
         else:
             self._process = await asyncio.create_subprocess_shell(
@@ -118,6 +120,7 @@ class BashSession:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                cwd=self._cwd,
             )
 
         self._started = True

@@ -518,7 +518,6 @@ class ApplyPatchTool(BaseTool):
         type: str | None = None,
         path: str | None = None,
         diff: str | None = None,
-        **kwargs: object,
     ) -> ApplyPatchResult:
         """
         Apply a patch operation.

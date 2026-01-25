@@ -101,13 +101,13 @@ class MCPAgent(ABC):
             native_tools = tool.meta.get("native_tools", {})
             spec_dict = native_tools.get(self.agent_type().value)
 
-            if spec_dict:
+            if spec_dict and isinstance(spec_dict, dict):
                 # Extract known fields and put the rest in extra
                 known_fields = {"api_type", "api_name", "beta", "hosted", "role"}
                 extra = {k: v for k, v in spec_dict.items() if k not in known_fields}
 
                 return NativeToolSpec(
-                    api_type=spec_dict["api_type"],
+                    api_type=spec_dict.get("api_type"),
                     api_name=spec_dict.get("api_name"),
                     beta=spec_dict.get("beta"),
                     hosted=spec_dict.get("hosted", False),
@@ -184,8 +184,14 @@ class MCPAgent(ABC):
             if not spec:
                 continue
 
-            # Claim role if specified
+            # Check for role conflicts between native tools
             if spec.role:
+                if spec.role in result.claimed_roles:
+                    # Another native tool already claimed this role - skip this one
+                    result.skipped.append(
+                        (tool, f"role '{spec.role}' already claimed by another native tool")
+                    )
+                    continue
                 result.claimed_roles.add(spec.role)
 
             if spec.hosted:
