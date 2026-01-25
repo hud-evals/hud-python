@@ -20,6 +20,7 @@ class TestNativeToolSpec:
         assert spec.api_name is None
         assert spec.beta is None
         assert spec.hosted is False
+        assert spec.supported_models is None
         assert spec.extra == {}
 
     def test_full_creation(self) -> None:
@@ -79,6 +80,115 @@ class TestNativeToolSpec:
         with pytest.raises(Exception):  # ValidationError for frozen model
             spec.api_type = "modified"  # type: ignore[misc]
 
+    def test_supported_models_creation(self) -> None:
+        """Test creating a NativeToolSpec with supported_models."""
+        spec = NativeToolSpec(
+            api_type="bash_20250124",
+            supported_models=("claude-3-5-sonnet-*", "claude-3-7-sonnet-*"),
+        )
+        assert spec.supported_models == ("claude-3-5-sonnet-*", "claude-3-7-sonnet-*")
+
+    def test_supported_models_serialization(self) -> None:
+        """Test that supported_models serializes to a list."""
+        spec = NativeToolSpec(
+            api_type="bash_20250124",
+            supported_models=("claude-3-5-sonnet-*", "claude-3-7-sonnet-*"),
+        )
+        dumped = spec.model_dump(exclude_none=True)
+        # Pydantic serializes tuples as lists
+        assert dumped["supported_models"] == ["claude-3-5-sonnet-*", "claude-3-7-sonnet-*"]
+
+
+class TestSupportsModel:
+    """Tests for NativeToolSpec.supports_model() method."""
+
+    def test_no_restrictions_supports_all(self) -> None:
+        """Test that spec without supported_models supports all models."""
+        spec = NativeToolSpec(api_type="test")
+        assert spec.supports_model("any-model") is True
+        assert spec.supports_model("gpt-4o") is True
+        assert spec.supports_model("claude-3-5-sonnet-20241022") is True
+
+    def test_no_model_defaults_to_supported(self) -> None:
+        """Test that None/empty model defaults to supported."""
+        spec = NativeToolSpec(
+            api_type="test",
+            supported_models=("claude-*",),
+        )
+        assert spec.supports_model(None) is True
+        assert spec.supports_model("") is True
+
+    def test_exact_match(self) -> None:
+        """Test exact model name matching."""
+        spec = NativeToolSpec(
+            api_type="test",
+            supported_models=("gpt-4o", "gpt-4o-mini"),
+        )
+        assert spec.supports_model("gpt-4o") is True
+        assert spec.supports_model("gpt-4o-mini") is True
+        assert spec.supports_model("gpt-4o-2024-05-13") is False
+
+    def test_wildcard_suffix_match(self) -> None:
+        """Test wildcard suffix pattern matching."""
+        spec = NativeToolSpec(
+            api_type="test",
+            supported_models=("claude-3-5-sonnet-*",),
+        )
+        assert spec.supports_model("claude-3-5-sonnet-20241022") is True
+        assert spec.supports_model("claude-3-5-sonnet-latest") is True
+        assert spec.supports_model("claude-3-5-sonnet-") is True
+        assert spec.supports_model("claude-3-7-sonnet-20250219") is False
+
+    def test_wildcard_prefix_match(self) -> None:
+        """Test wildcard prefix pattern matching."""
+        spec = NativeToolSpec(
+            api_type="test",
+            supported_models=("*-sonnet",),
+        )
+        assert spec.supports_model("claude-3-5-sonnet") is True
+        assert spec.supports_model("claude-3-7-sonnet") is True
+        assert spec.supports_model("claude-3-5-sonnet-20241022") is False
+
+    def test_multiple_patterns(self) -> None:
+        """Test matching against multiple patterns."""
+        spec = NativeToolSpec(
+            api_type="test",
+            supported_models=(
+                "claude-3-5-sonnet-*",
+                "claude-3-7-sonnet-*",
+                "claude-sonnet-4-*",
+            ),
+        )
+        assert spec.supports_model("claude-3-5-sonnet-20241022") is True
+        assert spec.supports_model("claude-3-7-sonnet-20250219") is True
+        assert spec.supports_model("claude-sonnet-4-20250514") is True
+        assert spec.supports_model("claude-3-opus-20240229") is False
+
+    def test_case_insensitive(self) -> None:
+        """Test that matching is case-insensitive."""
+        spec = NativeToolSpec(
+            api_type="test",
+            supported_models=("Claude-3-5-Sonnet-*",),
+        )
+        assert spec.supports_model("claude-3-5-sonnet-20241022") is True
+        assert spec.supports_model("CLAUDE-3-5-SONNET-20241022") is True
+        assert spec.supports_model("Claude-3-5-Sonnet-20241022") is True
+
+    def test_openai_gpt5_models(self) -> None:
+        """Test OpenAI GPT-5.x model patterns."""
+        spec = NativeToolSpec(
+            api_type="shell",
+            supported_models=("gpt-5.1", "gpt-5.1-*", "gpt-5.2", "gpt-5.2-*"),
+        )
+        assert spec.supports_model("gpt-5.1") is True
+        assert spec.supports_model("gpt-5.1-pro") is True
+        assert spec.supports_model("gpt-5.1-2025-11-13") is True
+        assert spec.supports_model("gpt-5.2") is True
+        assert spec.supports_model("gpt-5.2-2026-01-15") is True
+        assert spec.supports_model("gpt-4o") is False
+        assert spec.supports_model("gpt-4o-mini") is False
+        assert spec.supports_model("o3") is False
+
 
 class TestNativeToolSpecs:
     """Tests for NativeToolSpecs type alias."""
@@ -135,6 +245,9 @@ class TestBaseToolNativeSpecs:
         assert "claude" in tool.meta["native_tools"]
         assert tool.meta["native_tools"]["claude"]["api_type"] == "bash_20250124"
         assert tool.meta["native_tools"]["claude"]["api_name"] == "bash"
+        # Check that supported_models is included
+        assert "supported_models" in tool.meta["native_tools"]["claude"]
+        assert "claude-3-5-sonnet-*" in tool.meta["native_tools"]["claude"]["supported_models"]
 
     def test_tool_with_instance_native_specs(self) -> None:
         """Test that instance-level native_specs merge with class-level."""

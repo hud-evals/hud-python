@@ -36,6 +36,7 @@ class EditTool(BaseTool):
 
     Native specs: Claude (text_editor_20250728)
     Role: "editor" (mutually exclusive with ApplyPatchTool)
+    Supported models: Claude 3.5 Sonnet, 3.7 Sonnet, Sonnet 4, Opus 4
     """
 
     native_specs: ClassVar[NativeToolSpecs] = {
@@ -44,6 +45,16 @@ class EditTool(BaseTool):
             api_name="str_replace_based_edit_tool",
             beta="computer-use-2025-01-24",
             role="editor",
+            # Claude models that support computer use / text editor tool
+            # https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/text-editor-tool
+            supported_models=(
+                "claude-3-5-sonnet-*",
+                "claude-3-7-sonnet-*",
+                "claude-sonnet-4-*",
+                "claude-opus-4-*",
+                "claude-4-5-sonnet-*",
+                "claude-4-5-opus-*",
+            ),
         ),
     }
 

@@ -49,6 +49,7 @@ class ShellTool(BaseTool):
     - Supports concurrent command execution
 
     Native specs: OpenAI (shell)
+    Supported models: GPT-5.1, GPT-5.2
     """
 
     native_specs: ClassVar[NativeToolSpecs] = {
@@ -56,6 +57,14 @@ class ShellTool(BaseTool):
             api_type="shell",
             api_name="shell",
             role="shell",
+            # OpenAI models that support native shell tool (introduced with GPT-5.1)
+            # https://platform.openai.com/docs/guides/tools-shell
+            supported_models=(
+                "gpt-5.1",
+                "gpt-5.1-*",
+                "gpt-5.2",
+                "gpt-5.2-*",
+            ),
         ),
     }
 

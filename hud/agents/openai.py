@@ -72,6 +72,7 @@ class OpenAIAgent(MCPAgent):
                 return NativeToolSpec(
                     api_type="shell",
                     api_name="shell",
+                    role="shell",
                 )
 
         # Check for apply_patch tool patterns
@@ -81,6 +82,7 @@ class OpenAIAgent(MCPAgent):
                 return NativeToolSpec(
                     api_type="apply_patch",
                     api_name="apply_patch",
+                    role="editor",
                 )
 
         return None
@@ -103,17 +105,16 @@ class OpenAIAgent(MCPAgent):
                 model_client = build_gateway_client("openai")
             elif settings.openai_api_key:
                 model_client = AsyncOpenAI(api_key=settings.openai_api_key)
+                if self.config.validate_api_key:
+                    try:
+                        OpenAI(api_key=settings.openai_api_key).models.list()
+                    except Exception as exc:  # pragma: no cover - network validation
+                        raise ValueError(f"OpenAI API key is invalid: {exc}") from exc
             else:
                 raise ValueError(
                     "No API key found. Set HUD_API_KEY for HUD gateway, "
                     "or OPENAI_API_KEY for direct OpenAI access."
                 )
-
-        if self.config.validate_api_key:
-            try:
-                OpenAI(api_key=model_client.api_key).models.list()
-            except Exception as exc:  # pragma: no cover - network validation
-                raise ValueError(f"OpenAI API key is invalid: {exc}") from exc
 
         self.openai_client: AsyncOpenAI = model_client
         self._model = self.config.model

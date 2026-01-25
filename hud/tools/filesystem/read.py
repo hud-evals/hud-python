@@ -1,10 +1,20 @@
 """Read tool for filesystem access.
 
-Matches the `read` tool from OpenCode and similar coding agents.
+Matches OpenCode's read tool specification exactly:
+https://github.com/anomalyco/opencode
+
+Key features:
+- Absolute path required for filePath
+- 0-based offset, default 2000 line limit
+- 5-digit zero-padded line numbers (00001|)
+- Max 2000 char line length (truncated)
+- Output wrapped in <file>...</file> tags
+- Image support via base64
 """
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -17,116 +27,164 @@ from hud.tools.types import ContentResult, ToolError
 if TYPE_CHECKING:
     from hud.tools.native_types import NativeToolSpecs
 
+DEFAULT_READ_LIMIT = 2000
+MAX_LINE_LENGTH = 2000
+MAX_BYTES = 50 * 1024  # 50KB
+
 
 class ReadTool(BaseTool):
-    """Read file contents with optional line range support.
+    """Read file contents matching OpenCode's read tool.
 
-    This tool provides read-only access to files, matching the `read` tool
-    from OpenCode and similar coding agents.
+    Reads a file from the local filesystem with pagination support.
+    Returns content with 5-digit zero-padded line numbers.
 
     Parameters:
-        file_path: Path to the file to read (required)
-        start_line: Optional starting line (1-indexed)
-        end_line: Optional ending line (1-indexed, inclusive)
+        filePath: Absolute path to the file to read (required)
+        offset: 0-based line number to start reading from (optional)
+        limit: Number of lines to read, defaults to 2000 (optional)
 
     Example:
         >>> tool = ReadTool(base_path="./workspace")
-        >>> result = await tool(file_path="src/main.py")
-        >>> result = await tool(file_path="src/main.py", start_line=10, end_line=20)
+        >>> result = await tool(filePath="/path/to/file.py")
+        >>> result = await tool(filePath="/path/to/file.py", offset=100, limit=50)
     """
 
     native_specs: ClassVar[NativeToolSpecs] = {}  # Function calling only
 
     _base_path: Path
-    _max_lines: int
 
     def __init__(
         self,
         base_path: str = ".",
-        max_lines: int = 10000,
     ) -> None:
         """Initialize ReadTool.
 
         Args:
             base_path: Base directory for relative paths
-            max_lines: Maximum lines to return (default: 10000)
         """
         super().__init__(
             env=None,
             name="read",
-            title="Read File",
+            title="Read",
             description=(
-                "Read file contents. Use start_line/end_line for large files. "
-                "Returns file content with line numbers."
+                "Reads a file from the local filesystem. The filePath parameter must be "
+                "an absolute path. By default reads up to 2000 lines. Use offset and limit "
+                "for pagination. Lines longer than 2000 chars are truncated."
             ),
         )
         self._base_path = Path(base_path).resolve()
-        self._max_lines = max_lines
 
     async def __call__(
         self,
-        file_path: str,
-        start_line: int | None = None,
-        end_line: int | None = None,
+        filePath: str,  # noqa: N803 - matches OpenCode param name
+        offset: int | None = None,
+        limit: int | None = None,
     ) -> list[ContentBlock]:
         """Read file contents.
 
         Args:
-            file_path: Path to the file to read
-            start_line: Optional starting line (1-indexed)
-            end_line: Optional ending line (1-indexed, inclusive)
+            filePath: Absolute path to the file to read
+            offset: 0-based line number to start reading from
+            limit: Number of lines to read (default: 2000)
 
         Returns:
             List of ContentBlocks with file contents
         """
-        if not file_path:
-            raise ToolError("file_path is required")
+        if not filePath:
+            raise ToolError("filePath is required")
 
-        path = resolve_path_safely(file_path, self._base_path)
+        path = resolve_path_safely(filePath, self._base_path)
 
         if not path.exists():
-            raise ToolError(f"File not found: {file_path}")
+            raise ToolError(f"File not found: {filePath}")
         if path.is_dir():
-            raise ToolError(f"Path is a directory: {file_path}")
+            raise ToolError(f"Path is a directory: {filePath}")
 
+        # Check for image files
+        suffix = path.suffix.lower()
+        if suffix in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"):
+            try:
+                image_data = path.read_bytes()
+                b64_content = base64.b64encode(image_data).decode("utf-8")
+                mime_types = {
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".gif": "image/gif",
+                    ".webp": "image/webp",
+                    ".bmp": "image/bmp",
+                    ".svg": "image/svg+xml",
+                }
+                mime = mime_types.get(suffix, "application/octet-stream")
+                return ContentResult(
+                    output=f"Image read successfully: {filePath}",
+                    system=f"data:{mime};base64,{b64_content[:100]}...",
+                ).to_content_blocks()
+            except Exception as e:
+                raise ToolError(f"Failed to read image: {e}") from None
+
+        # Check for binary files
         try:
             content = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
-            raise ToolError(f"Cannot read binary file: {file_path}") from None
+            raise ToolError(f"Cannot read binary file: {filePath}") from None
         except PermissionError:
-            raise ToolError(f"Permission denied: {file_path}") from None
+            raise ToolError(f"Permission denied: {filePath}") from None
 
         lines = content.split("\n")
         total_lines = len(lines)
 
-        # Apply line range if specified
-        if start_line is not None or end_line is not None:
-            start = max(0, (start_line or 1) - 1)  # Convert to 0-indexed
-            end = min(total_lines, end_line or total_lines)
-            lines = lines[start:end]
-            line_offset = start + 1
+        # Apply offset/limit (OpenCode uses 0-based offset)
+        read_limit = limit if limit is not None else DEFAULT_READ_LIMIT
+        start_offset = offset if offset is not None else 0
+
+        # Collect lines with byte limit
+        raw: list[str] = []
+        total_bytes = 0
+        truncated_by_bytes = False
+
+        for i in range(start_offset, min(total_lines, start_offset + read_limit)):
+            line = lines[i]
+            # Truncate long lines (OpenCode max 2000 chars)
+            if len(line) > MAX_LINE_LENGTH:
+                line = line[:MAX_LINE_LENGTH] + "..."
+
+            line_bytes = len(line.encode("utf-8")) + (1 if raw else 0)
+            if total_bytes + line_bytes > MAX_BYTES:
+                truncated_by_bytes = True
+                break
+
+            raw.append(line)
+            total_bytes += line_bytes
+
+        # Format with 5-digit zero-padded line numbers (OpenCode format: 00001|)
+        numbered_lines = [
+            f"{(i + start_offset + 1):05d}| {line}" for i, line in enumerate(raw)
+        ]
+
+        # Build output with <file> tags (OpenCode format)
+        output = "<file>\n"
+        output += "\n".join(numbered_lines)
+
+        last_read_line = start_offset + len(raw)
+        has_more_lines = total_lines > last_read_line
+
+        if truncated_by_bytes:
+            output += (
+                f"\n\n(Output truncated at {MAX_BYTES} bytes. "
+                f"Use 'offset' parameter to read beyond line {last_read_line})"
+            )
+        elif has_more_lines:
+            output += (
+                f"\n\n(File has more lines. "
+                f"Use 'offset' parameter to read beyond line {last_read_line})"
+            )
         else:
-            line_offset = 1
+            output += f"\n\n(End of file - total {total_lines} lines)"
 
-        # Truncate if too many lines
-        if len(lines) > self._max_lines:
-            lines = lines[: self._max_lines]
-            truncated = True
-        else:
-            truncated = False
+        output += "\n</file>"
 
-        # Format with line numbers
-        numbered_lines = [f"{i + line_offset:4d} | {line}" for i, line in enumerate(lines)]
-        output = "\n".join(numbered_lines)
-
-        # Add metadata
-        header = f"File: {file_path} ({total_lines} lines total)"
-        if start_line or end_line:
-            header += f" [showing lines {line_offset}-{line_offset + len(lines) - 1}]"
-        if truncated:
-            header += f" [truncated to {self._max_lines} lines]"
-
-        return ContentResult(output=f"{header}\n\n{output}").to_content_blocks()
+        return ContentResult(output=output).to_content_blocks()
 
 
 __all__ = ["ReadTool"]

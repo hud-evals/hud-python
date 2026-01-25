@@ -1,10 +1,18 @@
 """Glob tool for finding files by pattern.
 
-Matches the `glob` tool from OpenCode and similar coding agents.
+Matches OpenCode's glob tool specification exactly:
+https://github.com/anomalyco/opencode
+
+Key features:
+- Fast file pattern matching
+- Results sorted by modification time (recent first)
+- Supports glob patterns like "**/*.js"
+- Max 100 results
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -17,16 +25,18 @@ from hud.tools.types import ContentResult, ToolError
 if TYPE_CHECKING:
     from hud.tools.native_types import NativeToolSpecs
 
+MAX_RESULTS = 100
+
 
 class GlobTool(BaseTool):
-    """Find files matching a glob pattern.
+    """Find files matching OpenCode's glob tool.
 
-    This tool finds files by pattern, matching the `glob` tool
-    from OpenCode and similar coding agents.
+    Fast file pattern matching tool that works with any codebase size.
+    Returns matching file paths sorted by modification time (most recent first).
 
     Parameters:
         pattern: Glob pattern (e.g., "**/*.py", "src/*.ts") (required)
-        path: Base directory to search from (default: ".")
+        path: Base directory to search from (optional, defaults to workspace)
 
     Example:
         >>> tool = GlobTool(base_path="./workspace")
@@ -37,41 +47,37 @@ class GlobTool(BaseTool):
     native_specs: ClassVar[NativeToolSpecs] = {}  # Function calling only
 
     _base_path: Path
-    _max_results: int
 
     def __init__(
         self,
         base_path: str = ".",
-        max_results: int = 500,
     ) -> None:
         """Initialize GlobTool.
 
         Args:
             base_path: Base directory for relative paths
-            max_results: Maximum files to return (default: 500)
         """
         super().__init__(
             env=None,
             name="glob",
-            title="Find Files",
+            title="Glob",
             description=(
-                "Find files matching a glob pattern. "
-                "Use **/ for recursive search (e.g., '**/*.py')."
+                "Fast file pattern matching tool. Supports glob patterns like '**/*.js' "
+                "or 'src/**/*.ts'. Returns matching file paths sorted by modification time."
             ),
         )
         self._base_path = Path(base_path).resolve()
-        self._max_results = max_results
 
     async def __call__(
         self,
         pattern: str,
-        path: str = ".",
+        path: str | None = None,
     ) -> list[ContentBlock]:
         """Find files matching a glob pattern.
 
         Args:
             pattern: Glob pattern (e.g., "**/*.py", "src/*.ts")
-            path: Base directory to search from
+            path: Base directory to search from (defaults to workspace)
 
         Returns:
             List of ContentBlocks with matching file paths
@@ -79,15 +85,15 @@ class GlobTool(BaseTool):
         if not pattern:
             raise ToolError("pattern is required")
 
-        base = resolve_path_safely(path, self._base_path)
+        base = resolve_path_safely(path or ".", self._base_path)
 
         if not base.exists():
-            raise ToolError(f"Directory not found: {path}")
+            raise ToolError(f"Directory not found: {path or '.'}")
         if not base.is_dir():
-            raise ToolError(f"Not a directory: {path}")
+            raise ToolError(f"Not a directory: {path or '.'}")
 
-        # Find matching files
-        matches: list[Path] = []
+        # Find matching files with mtime
+        matches: list[tuple[Path, float]] = []
         try:
             for match in base.glob(pattern):
                 # Skip hidden files/directories
@@ -95,35 +101,46 @@ class GlobTool(BaseTool):
                     continue
                 # Skip common non-source directories
                 if any(
-                    part in ("node_modules", "__pycache__", "venv", ".venv") for part in match.parts
+                    part in ("node_modules", "__pycache__", "venv", ".venv")
+                    for part in match.parts
                 ):
                     continue
 
-                matches.append(match)
-                if len(matches) >= self._max_results:
+                if not match.is_file():
+                    continue
+
+                try:
+                    mtime = os.path.getmtime(match)
+                except OSError:
+                    mtime = 0
+
+                matches.append((match, mtime))
+
+                if len(matches) >= MAX_RESULTS:
                     break
         except Exception as e:
             raise ToolError(f"Invalid glob pattern: {e}") from None
 
-        # Sort and format output
-        matches.sort()
+        # Sort by modification time (most recent first) - OpenCode behavior
+        matches.sort(key=lambda x: x[1], reverse=True)
+
+        truncated = len(matches) >= MAX_RESULTS
 
         if not matches:
-            output = f"No files found matching: {pattern}"
+            output = "No files found"
         else:
             # Convert to relative paths
             rel_paths = []
-            for m in matches:
+            for m, _mtime in matches:
                 try:
                     rel_paths.append(str(m.relative_to(self._base_path)))
                 except ValueError:
                     rel_paths.append(str(m))
 
-            header = f"Found {len(matches)} files matching: {pattern}"
-            if len(matches) >= self._max_results:
-                header += f" [limited to {self._max_results} results]"
+            output = "\n".join(rel_paths)
 
-            output = f"{header}\n\n" + "\n".join(rel_paths)
+            if truncated:
+                output += "\n\n(Results are truncated. Consider using a more specific path or pattern.)"
 
         return ContentResult(output=output).to_content_blocks()
 

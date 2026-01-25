@@ -139,6 +139,7 @@ class BashTool(BaseTool):
 
     Native specs: Claude (bash_20250124)
     Role: "shell" (mutually exclusive with ShellTool)
+    Supported models: Claude 3.5 Sonnet, 3.7 Sonnet, Sonnet 4, Opus 4
     """
 
     native_specs: ClassVar[NativeToolSpecs] = {
@@ -147,6 +148,16 @@ class BashTool(BaseTool):
             api_name="bash",
             beta="computer-use-2025-01-24",
             role="shell",
+            # Claude models that support computer use / bash tool
+            # https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/bash-tool
+            supported_models=(
+                "claude-3-5-sonnet-*",
+                "claude-3-7-sonnet-*",
+                "claude-sonnet-4-*",
+                "claude-opus-4-*",
+                "claude-4-5-sonnet-*",
+                "claude-4-5-opus-*",
+            ),
         ),
     }
 

@@ -81,10 +81,11 @@ class MCPAgent(ABC):
         raise NotImplementedError
 
     def resolve_native_spec(self, tool: types.Tool) -> NativeToolSpec | None:
-        """Check if a tool has a native spec for this agent type.
+        """Check if a tool has a native spec for this agent type and model.
 
         Looks up the tool's meta.native_tools field for a spec matching this agent's type.
-        If found, returns a NativeToolSpec that can be used to register the tool with
+        If found, validates that the current model supports this native spec.
+        Returns a NativeToolSpec that can be used to register the tool with
         the provider's native API format.
 
         Falls back to legacy name-based detection for backwards compatibility with
@@ -94,8 +95,13 @@ class MCPAgent(ABC):
             tool: MCP Tool object to check for native specs
 
         Returns:
-            NativeToolSpec if the tool has a native spec for this agent, None otherwise
+            NativeToolSpec if the tool has a native spec for this agent and the
+            current model supports it, None otherwise. When the model doesn't
+            match supported_models, returns None so the tool falls back to
+            generic function calling.
         """
+        spec: NativeToolSpec | None = None
+
         # First try metadata-based resolution
         if tool.meta:
             native_tools = tool.meta.get("native_tools", {})
@@ -103,20 +109,46 @@ class MCPAgent(ABC):
 
             if spec_dict and isinstance(spec_dict, dict):
                 # Extract known fields and put the rest in extra
-                known_fields = {"api_type", "api_name", "beta", "hosted", "role"}
+                known_fields = {
+                    "api_type",
+                    "api_name",
+                    "beta",
+                    "hosted",
+                    "role",
+                    "supported_models",
+                }
                 extra = {k: v for k, v in spec_dict.items() if k not in known_fields}
 
-                return NativeToolSpec(
+                # Convert supported_models list to tuple for frozen model
+                supported_models_raw = spec_dict.get("supported_models")
+                supported_models: tuple[str, ...] | None = None
+                if supported_models_raw:
+                    supported_models = tuple(supported_models_raw)
+
+                spec = NativeToolSpec(
                     api_type=spec_dict.get("api_type"),
                     api_name=spec_dict.get("api_name"),
                     beta=spec_dict.get("beta"),
                     hosted=spec_dict.get("hosted", False),
                     role=spec_dict.get("role"),
+                    supported_models=supported_models,
                     extra=extra,
                 )
 
         # Fall back to legacy name-based detection for old environments
-        return self._legacy_native_spec_fallback(tool)
+        if spec is None:
+            spec = self._legacy_native_spec_fallback(tool)
+
+        # Check if current model supports this native spec
+        if spec is not None and not spec.supports_model(self.model):
+            logger.debug(
+                "Model %s not in supported_models for native spec %s, falling back to functions",
+                self.model,
+                spec.api_type,
+            )
+            return None
+
+        return spec
 
     def _legacy_native_spec_fallback(self, tool: types.Tool) -> NativeToolSpec | None:
         """Detect native tools by name for backwards compatibility.

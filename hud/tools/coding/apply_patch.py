@@ -425,6 +425,7 @@ class ApplyPatchTool(BaseTool):
     - Returns apply_patch_call_output format
     - Path validation to prevent directory traversal
     - Native specs for OpenAI
+    - Supported models: GPT-5.1, GPT-5.2
     """
 
     native_specs: ClassVar[NativeToolSpecs] = {
@@ -432,6 +433,14 @@ class ApplyPatchTool(BaseTool):
             api_type="apply_patch",
             api_name="apply_patch",
             role="editor",
+            # OpenAI models that support native apply_patch tool (introduced with GPT-5.1)
+            # https://platform.openai.com/docs/guides/tools-apply-patch
+            supported_models=(
+                "gpt-5.1",
+                "gpt-5.1-*",
+                "gpt-5.2",
+                "gpt-5.2-*",
+            ),
         ),
     }
 

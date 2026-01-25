@@ -93,6 +93,7 @@ class ClaudeAgent(MCPAgent):
                     api_type="bash_20250124",
                     api_name="bash",
                     beta="computer-use-2025-01-24",
+                    role="shell",
                 )
 
         # Check for text editor tool patterns
@@ -103,6 +104,7 @@ class ClaudeAgent(MCPAgent):
                     api_type="text_editor_20250728",
                     api_name="str_replace_based_edit_tool",
                     beta="computer-use-2025-01-24",
+                    role="editor",
                 )
 
         return None
