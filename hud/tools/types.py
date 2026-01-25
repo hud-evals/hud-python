@@ -59,7 +59,7 @@ class EvaluationResult(BaseModel):
     """
 
     reward: float = Field(default=0.0, description="Final score, usually 0.0 to 1.0")
-    done: bool = Field(default=False, description="Whether the task/episode is complete")
+    done: bool = Field(default=True, description="Whether the task/episode is complete")
     content: str | None = Field(default=None, description="Human-readable explanation")
     info: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
     isError: bool = Field(default=False, description="Whether the evaluation itself failed")
