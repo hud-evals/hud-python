@@ -1,9 +1,9 @@
 """Claude Memory tool for persistent storage across conversations.
 
-This tool extends EditTool with memory-specific functionality:
+This tool provides file-based memory storage with Claude's native memory API:
 - Path validation to restrict access to /memories directory
-- Additional delete and rename commands
-- Custom directory listing
+- Commands: view, create, str_replace, insert, delete, rename
+- Custom directory listing with file sizes
 
 See: https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/memory-tool
 """
@@ -15,17 +15,17 @@ from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Literal, get_args
 
+from hud.tools.coding.edit import EditTool
+from hud.tools.coding.utils import write_file_async
+from hud.tools.memory.base import BaseFileMemoryTool
 from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult, ToolError
 from hud.types import AgentType
 
-from .edit import EditTool
-from .utils import write_file_async
-
 if TYPE_CHECKING:
     from mcp.types import ContentBlock
 
-MemoryCommand = Literal[
+ClaudeMemoryCommand = Literal[
     "view",
     "create",
     "str_replace",
@@ -35,7 +35,7 @@ MemoryCommand = Literal[
 ]
 
 
-class ClaudeMemoryTool(EditTool):
+class ClaudeMemoryTool(EditTool, BaseFileMemoryTool):
     """Persistent memory tool for Claude agents.
 
     Extends EditTool with memory-specific functionality:
@@ -66,8 +66,6 @@ class ClaudeMemoryTool(EditTool):
         ),
     }
 
-    _memories_dir: Path
-
     def __init__(
         self,
         memories_dir: str | Path = "/memories",
@@ -77,53 +75,44 @@ class ClaudeMemoryTool(EditTool):
 
         Args:
             memories_dir: Base directory for memory files (default: /memories)
-            file_history: Optional dictionary tracking edit history per file.
+            file_history: Optional dictionary tracking edit history per file
         """
-        # Initialize parent with file history
-        super().__init__(file_history=file_history or defaultdict(list))
+        # Initialize EditTool with file history
+        EditTool.__init__(self, file_history=file_history or defaultdict(list))
+
+        # Initialize BaseFileMemoryTool for path handling
+        BaseFileMemoryTool.__init__(
+            self,
+            base_path=memories_dir,
+            memory_section_header="## Memories",
+        )
 
         # Override name/title/description for memory
         self.name = "memory"
         self.title = "Memory"
         self.description = "Store and retrieve persistent information across conversations"
 
-        self._memories_dir = Path(memories_dir).resolve()
-
-        # Ensure memories directory exists
-        self._memories_dir.mkdir(parents=True, exist_ok=True)
-
     def _resolve_memory_path(self, path: str) -> Path:
         """Validate and resolve a path within the memories directory.
 
-        Prevents directory traversal attacks by ensuring the resolved path
-        is within the memories directory.
+        For backwards compatibility - delegates to resolve_path().
         """
-        # Ensure path starts with /memories
-        if not path.startswith("/memories"):
-            raise ToolError(f"Path must start with /memories, got: {path}")
+        # Handle /memories prefix
+        if path.startswith("/memories"):
+            relative_path = path[len("/memories") :].lstrip("/")
+        else:
+            relative_path = path.lstrip("/")
 
-        # Resolve relative to root (as if /memories is the real path)
-        relative_path = path[len("/memories") :].lstrip("/")
-        resolved = (self._memories_dir / relative_path).resolve()
-
-        # Prevent directory traversal
-        try:
-            resolved.relative_to(self._memories_dir)
-        except ValueError:
-            raise ToolError(f"Path traversal detected: {path}") from None
-
-        return resolved
+        return self.resolve_path(relative_path)
 
     def validate_path(self, command: str, path: Path) -> None:
         """Override parent validation - we use _resolve_memory_path instead."""
-        # Memory tool uses _resolve_memory_path for validation
-        # This override prevents parent's absolute path check
         return
 
     async def __call__(
         self,
         *,
-        command: MemoryCommand,  # type: ignore[override]
+        command: ClaudeMemoryCommand,  # type: ignore[override]
         path: str | None = None,
         view_range: list[int] | None = None,
         file_text: str | None = None,
@@ -181,11 +170,11 @@ class ClaudeMemoryTool(EditTool):
                 raise ToolError(
                     f"Error: The path {path} does not exist. Please provide a valid path."
                 )
-            # Reuse parent's str_replace logic
             result = await self.str_replace(resolved, old_str, new_str)
-            # Modify output to say "memory file" instead of just file
             if result.output:
-                result = ContentResult(output=result.output.replace("The file", "The memory file"))
+                result = ContentResult(
+                    output=result.output.replace("The file", "The memory file")
+                )
             return result.to_content_blocks()
 
         elif command == "insert":
@@ -198,7 +187,6 @@ class ClaudeMemoryTool(EditTool):
             resolved = self._resolve_memory_path(path)
             if not resolved.exists() or resolved.is_dir():
                 raise ToolError(f"Error: The path {path} does not exist")
-            # Reuse parent's insert logic
             result = await self.insert(resolved, insert_line, insert_text)
             return result.to_content_blocks()
 
@@ -216,15 +204,19 @@ class ClaudeMemoryTool(EditTool):
             result = await self._memory_rename(old_path, new_path)
             return result.to_content_blocks()
 
-        allowed = ", ".join(get_args(MemoryCommand))
+        allowed = ", ".join(get_args(ClaudeMemoryCommand))
         raise ToolError(f"Unrecognized command {command}. Allowed commands: {allowed}")
 
-    async def _memory_view(self, path: str, view_range: list[int] | None = None) -> ContentResult:
+    async def _memory_view(
+        self, path: str, view_range: list[int] | None = None
+    ) -> ContentResult:
         """View directory contents or file contents with memory-specific formatting."""
         resolved = self._resolve_memory_path(path)
 
         if not resolved.exists():
-            raise ToolError(f"The path {path} does not exist. Please provide a valid path.")
+            raise ToolError(
+                f"The path {path} does not exist. Please provide a valid path."
+            )
 
         if resolved.is_dir():
             if view_range:
@@ -288,11 +280,10 @@ class ClaudeMemoryTool(EditTool):
         if new_resolved.exists():
             raise ToolError(f"Error: The destination {new_path} already exists")
 
-        # Create parent directories if needed
         new_resolved.parent.mkdir(parents=True, exist_ok=True)
         old_resolved.rename(new_resolved)
 
         return ContentResult(output=f"Successfully renamed {old_path} to {new_path}")
 
 
-__all__ = ["ClaudeMemoryTool", "MemoryCommand"]
+__all__ = ["ClaudeMemoryCommand", "ClaudeMemoryTool"]

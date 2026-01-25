@@ -25,7 +25,12 @@ from .hosted import (
     WebFetchTool,
     WebSearchTool,
 )
-from .memory import MemoryTool
+from .memory import (
+    ClaudeMemoryTool,
+    GeminiMemoryTool,
+    MemoryTool,
+    SessionMemoryTool,
+)
 from .native_types import NativeToolSpec, NativeToolSpecs
 from .playwright import PlaywrightTool
 from .response import ResponseTool
@@ -72,7 +77,10 @@ __all__ = [
     "HostedTool",
     "HudComputerTool",
     "ListTool",
+    "ClaudeMemoryTool",
+    "GeminiMemoryTool",
     "MemoryTool",
+    "SessionMemoryTool",
     "NativeToolSpec",
     "NativeToolSpecs",
     "OpenAIComputerTool",

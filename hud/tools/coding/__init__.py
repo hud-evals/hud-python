@@ -18,20 +18,13 @@ Gemini/Generic tools (function calling only):
     - GeminiEditTool: Simple edit style with instruction
 """
 
-# Claude-native tools
-# OpenAI-native tools
 from hud.tools.coding.apply_patch import ApplyPatchResult, ApplyPatchTool, DiffError
 from hud.tools.coding.bash import BashTool, ClaudeBashSession, _BashSession
 from hud.tools.coding.edit import Command, EditTool
-
-# Gemini/Generic tools
 from hud.tools.coding.gemini_edit import GeminiEditTool
-from hud.tools.coding.gemini_shell import GeminiShellTool, ShellOutput
-from hud.tools.coding.memory import ClaudeMemoryTool, MemoryCommand
+from hud.tools.coding.gemini_shell import GeminiShellOutput, GeminiShellTool
 from hud.tools.coding.session import BashSession, ShellCallOutcome, ShellCommandOutput
 from hud.tools.coding.shell import ShellResult, ShellTool
-
-# Shared utilities
 from hud.tools.coding.utils import (
     SNIPPET_LINES,
     make_snippet,
@@ -43,8 +36,11 @@ from hud.tools.coding.utils import (
     write_file_sync,
 )
 
+# Memory tools (re-exported from hud.tools.memory for backwards compatibility)
+from hud.tools.memory import ClaudeMemoryCommand as MemoryCommand
+from hud.tools.memory import ClaudeMemoryTool
+
 __all__ = [
-    "SNIPPET_LINES",
     "ApplyPatchResult",
     "ApplyPatchTool",
     "BashSession",
@@ -55,11 +51,12 @@ __all__ = [
     "DiffError",
     "EditTool",
     "GeminiEditTool",
+    "GeminiShellOutput",
     "GeminiShellTool",
     "MemoryCommand",
+    "SNIPPET_LINES",
     "ShellCallOutcome",
     "ShellCommandOutput",
-    "ShellOutput",
     "ShellResult",
     "ShellTool",
     "_BashSession",
