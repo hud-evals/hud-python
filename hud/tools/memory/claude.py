@@ -79,8 +79,11 @@ class ClaudeMemoryTool(EditTool, BaseFileMemoryTool):
             memories_dir: Base directory for memory files (default: /memories)
             file_history: Optional dictionary tracking edit history per file
         """
+        # Store file history before parent inits (BaseFileMemoryTool may reset self.env)
+        _file_history = file_history or defaultdict(list)
+
         # Initialize EditTool with file history
-        EditTool.__init__(self, file_history=file_history or defaultdict(list))
+        EditTool.__init__(self, file_history=_file_history)
 
         # Initialize BaseFileMemoryTool for path handling
         BaseFileMemoryTool.__init__(
@@ -88,6 +91,9 @@ class ClaudeMemoryTool(EditTool, BaseFileMemoryTool):
             base_path=memories_dir,
             memory_section_header="## Memories",
         )
+
+        # Restore file history (BaseFileMemoryTool may have reset self.env)
+        self.env = _file_history
 
         # Override name/title/description for memory
         self.name = "memory"

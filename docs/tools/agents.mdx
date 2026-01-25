@@ -42,9 +42,8 @@ researcher_env.add_tool(WebSearchTool())
 
 @researcher_env.scenario()
 async def investigate(issue_id: str):
-    yield f"Research issue {issue_id} and summarize findings"
-    response = yield  # Agent's response
-    yield 1.0  # Evaluation
+    response = yield f"Research issue {issue_id} and summarize findings"
+    yield 1.0  # Evaluation based on response
 
 # Create tool from task template
 research_tool = AgentTool(
@@ -84,8 +83,7 @@ async def investigate(
     issue_id: str,                      # Orchestrator sees this
     expected_cause: str | None = None,  # Hidden - for eval only
 ):
-    yield f"Research issue {issue_id}"
-    response = yield
+    response = yield f"Research issue {issue_id}"
     
     # Use expected_cause in evaluation
     if expected_cause and expected_cause in response:
