@@ -14,12 +14,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
+from mcp.types import TextContent  # noqa: TC002
+
 from hud.tools.filesystem.base import BaseSearchTool, FileMatch
 from hud.tools.types import ContentResult, ToolError
 
 if TYPE_CHECKING:
-    from mcp.types import ContentBlock
-
     from hud.tools.native_types import NativeToolSpecs
 
 
@@ -109,7 +109,7 @@ class GrepTool(BaseSearchTool):
         pattern: str,
         path: str | None = None,
         include: str | None = None,
-    ) -> list[ContentBlock]:
+    ) -> list[TextContent]:
         """Search file contents for a pattern.
 
         Args:
@@ -118,7 +118,7 @@ class GrepTool(BaseSearchTool):
             include: Glob pattern to filter files (e.g., "*.py")
 
         Returns:
-            List of ContentBlocks with matching lines grouped by file
+            List of TextContent with matching lines grouped by file
         """
         regex = self.compile_pattern(pattern)
         search_path = self.resolve_path(path or ".")
@@ -129,7 +129,7 @@ class GrepTool(BaseSearchTool):
         matches = self.search_files(search_path, regex, include)
         output = self.format_output(matches, pattern)
 
-        return ContentResult(output=output).to_content_blocks()
+        return ContentResult(output=output).to_text_blocks()
 
 
 __all__ = ["GrepTool"]

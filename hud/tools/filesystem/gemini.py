@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, ClassVar
 if TYPE_CHECKING:
     from pathlib import Path
 
+from mcp.types import ImageContent, TextContent  # noqa: TC002
+
 from hud.tools.filesystem.base import (
     BaseGlobTool,
     BaseListTool,
@@ -28,9 +30,6 @@ from hud.tools.filesystem.base import (
 from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult, ToolError
 from hud.types import AgentType
-
-if TYPE_CHECKING:
-    from mcp.types import ContentBlock
 
 
 class GeminiReadTool(BaseReadTool):
@@ -110,7 +109,7 @@ class GeminiReadTool(BaseReadTool):
         file_path: str,
         offset: int | None = None,
         limit: int | None = None,
-    ) -> list[ContentBlock]:
+    ) -> list[TextContent | ImageContent]:
         """Read file contents with optional pagination.
 
         Args:
@@ -119,7 +118,7 @@ class GeminiReadTool(BaseReadTool):
             limit: Maximum number of lines to read
 
         Returns:
-            List of ContentBlocks with file contents
+            List of TextContent (or ImageContent for images) with file contents
         """
         if not file_path or file_path.strip() == "":
             raise ToolError("The 'file_path' parameter must be non-empty.")
@@ -139,12 +138,12 @@ class GeminiReadTool(BaseReadTool):
         # Handle images
         if self.is_image(path):
             result = self.read_image(path)
-            return result.to_content_blocks()
+            return result.to_content_blocks()  # type: ignore[return-value]
 
         result = self.read_with_pagination(path, offset=offset or 0, limit=limit)
         output = self.format_output(result, file_path)
 
-        return ContentResult(output=output).to_content_blocks()
+        return list(ContentResult(output=output).to_text_blocks())
 
 
 class GeminiSearchTool(BaseSearchTool):
@@ -215,9 +214,7 @@ class GeminiSearchTool(BaseSearchTool):
 
         for file_path, file_group in file_matches.items():
             lines.append(f"{file_path}:")
-            lines.extend(
-                f"  Line {match.line_num}: {match.line_text}" for match in file_group
-            )
+            lines.extend(f"  Line {match.line_num}: {match.line_text}" for match in file_group)
             lines.append("")
 
         if truncated:
@@ -230,7 +227,7 @@ class GeminiSearchTool(BaseSearchTool):
         pattern: str,
         dir_path: str | None = None,
         include: str | None = None,
-    ) -> list[ContentBlock]:
+    ) -> list[TextContent]:
         """Search file contents for a pattern.
 
         Args:
@@ -239,7 +236,7 @@ class GeminiSearchTool(BaseSearchTool):
             include: Glob pattern to filter files (e.g., "*.py")
 
         Returns:
-            List of ContentBlocks with matching lines grouped by file
+            List of TextContent with matching lines grouped by file
         """
         regex = self.compile_pattern(pattern)
         search_path = self.resolve_path(dir_path or ".")
@@ -250,7 +247,7 @@ class GeminiSearchTool(BaseSearchTool):
         matches = self.search_files(search_path, regex, include)
         output = self.format_output(matches, pattern)
 
-        return ContentResult(output=output).to_content_blocks()
+        return ContentResult(output=output).to_text_blocks()
 
 
 class GeminiGlobTool(BaseGlobTool):
@@ -325,7 +322,7 @@ class GeminiGlobTool(BaseGlobTool):
         dir_path: str | None = None,
         case_sensitive: bool = True,
         respect_git_ignore: bool = True,
-    ) -> list[ContentBlock]:
+    ) -> list[TextContent]:
         """Find files matching a glob pattern.
 
         Args:
@@ -335,7 +332,7 @@ class GeminiGlobTool(BaseGlobTool):
             respect_git_ignore: Whether to respect .gitignore
 
         Returns:
-            List of ContentBlocks with matching file paths
+            List of TextContent with matching file paths
         """
         base = self.resolve_path(dir_path or ".")
 
@@ -347,7 +344,7 @@ class GeminiGlobTool(BaseGlobTool):
         matches = self.find_files(base, pattern, include_ignored=not respect_git_ignore)
         output = self.format_output(matches, pattern)
 
-        return ContentResult(output=output).to_content_blocks()
+        return ContentResult(output=output).to_text_blocks()
 
 
 class GeminiListTool(BaseListTool):
@@ -429,7 +426,7 @@ class GeminiListTool(BaseListTool):
         self,
         dir_path: str,
         ignore: list[str] | None = None,
-    ) -> list[ContentBlock]:
+    ) -> list[TextContent]:
         """List directory contents.
 
         Args:
@@ -437,7 +434,7 @@ class GeminiListTool(BaseListTool):
             ignore: List of glob patterns to ignore
 
         Returns:
-            List of ContentBlocks with directory listing
+            List of TextContent with directory listing
         """
         if not dir_path:
             raise ToolError("The 'dir_path' parameter must be non-empty.")
@@ -452,7 +449,7 @@ class GeminiListTool(BaseListTool):
         entries = self.list_directory(path, ignore=ignore, recursive=False)
         output = self.format_output(entries, path, dir_path)
 
-        return ContentResult(output=output).to_content_blocks()
+        return ContentResult(output=output).to_text_blocks()
 
 
 __all__ = [

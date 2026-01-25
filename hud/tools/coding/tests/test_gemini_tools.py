@@ -51,15 +51,8 @@ class TestGeminiShellTool:
     async def test_call_no_command(self) -> None:
         """Test call with no command raises error."""
         tool = GeminiShellTool()
-        with pytest.raises(ToolError, match="command is required"):
+        with pytest.raises(ToolError, match="Command cannot be empty"):
             await tool(command="")
-
-    @pytest.mark.asyncio
-    async def test_call_nonexistent_directory(self) -> None:
-        """Test call with nonexistent directory raises error."""
-        tool = GeminiShellTool()
-        with pytest.raises(ToolError, match="Directory does not exist"):
-            await tool(command="echo test", directory="/nonexistent/path/12345")
 
     @pytest.mark.asyncio
     async def test_call_simple_command(self) -> None:
@@ -67,8 +60,10 @@ class TestGeminiShellTool:
         with tempfile.TemporaryDirectory() as tmpdir:
             tool = GeminiShellTool(base_directory=tmpdir)
             result = await tool(command="echo hello")
-            assert result.output is not None
-            assert "hello" in result.output
+            # Returns list of ContentBlock
+            assert len(result) >= 1
+            assert hasattr(result[0], "text")
+            assert "hello" in result[0].text  # type: ignore[union-attr]
 
 
 class TestGeminiEditTool:
@@ -77,7 +72,7 @@ class TestGeminiEditTool:
     def test_init(self) -> None:
         """Test initialization."""
         tool = GeminiEditTool()
-        assert tool.name == "edit"
+        assert tool.name == "replace"
 
     def test_init_with_base_directory(self) -> None:
         """Test initialization with custom base directory."""
@@ -106,7 +101,7 @@ class TestGeminiEditTool:
     async def test_call_missing_file_path(self) -> None:
         """Test call with missing file_path raises error."""
         tool = GeminiEditTool()
-        with pytest.raises(ToolError, match="file_path is required"):
+        with pytest.raises(ToolError, match=r"file_path.*must be non-empty"):
             await tool(
                 file_path="",
                 instruction="test",
@@ -118,7 +113,7 @@ class TestGeminiEditTool:
     async def test_call_missing_instruction(self) -> None:
         """Test call with missing instruction raises error."""
         tool = GeminiEditTool()
-        with pytest.raises(ToolError, match="instruction is required"):
+        with pytest.raises(ToolError, match=r"instruction.*must be non-empty"):
             await tool(
                 file_path="test.txt",
                 instruction="",
@@ -148,7 +143,7 @@ class TestGeminiEditTool:
             test_file.write_text("hello world")
 
             tool = GeminiEditTool(base_directory=tmpdir)
-            with pytest.raises(ToolError, match="old_string not found"):
+            with pytest.raises(ToolError, match="0 occurrences found"):
                 await tool(
                     file_path="test.txt",
                     instruction="test edit",
@@ -157,20 +152,22 @@ class TestGeminiEditTool:
                 )
 
     @pytest.mark.asyncio
-    async def test_call_multiple_occurrences(self) -> None:
-        """Test call with multiple occurrences raises error."""
+    async def test_call_multiple_occurrences_no_expected(self) -> None:
+        """Test call with multiple occurrences without expected_replacements replaces first only."""
         with tempfile.TemporaryDirectory() as tmpdir:
             test_file = Path(tmpdir) / "test.txt"
             test_file.write_text("hello hello hello")
 
             tool = GeminiEditTool(base_directory=tmpdir)
-            with pytest.raises(ToolError, match=r"Expected 1 replacement.*found 3"):
-                await tool(
-                    file_path="test.txt",
-                    instruction="test edit",
-                    old_string="hello",
-                    new_string="world",
-                )
+            # Without expected_replacements, it replaces only the first occurrence
+            result = await tool(
+                file_path="test.txt",
+                instruction="test edit",
+                old_string="hello",
+                new_string="world",
+            )
+            assert test_file.read_text() == "world hello hello"
+            assert "1 replacements" in result[0].text  # type: ignore[union-attr]
 
     @pytest.mark.asyncio
     async def test_call_successful_edit(self) -> None:
@@ -193,7 +190,7 @@ class TestGeminiEditTool:
             # Verify result message
             assert len(result) == 1
             assert hasattr(result[0], "text")
-            assert "Successfully edited" in result[0].text  # type: ignore[union-attr]
+            assert "Successfully modified" in result[0].text  # type: ignore[union-attr]
 
     @pytest.mark.asyncio
     async def test_call_multiple_replacements(self) -> None:

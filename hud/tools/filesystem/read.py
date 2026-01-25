@@ -16,12 +16,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
+from mcp.types import ImageContent, TextContent  # noqa: TC002
+
 from hud.tools.filesystem.base import BaseReadTool, ReadResult
 from hud.tools.types import ContentResult, ToolError
 
 if TYPE_CHECKING:
-    from mcp.types import ContentBlock
-
     from hud.tools.native_types import NativeToolSpecs
 
 
@@ -103,7 +103,7 @@ class ReadTool(BaseReadTool):
         filePath: str,
         offset: int | None = None,
         limit: int | None = None,
-    ) -> list[ContentBlock]:
+    ) -> list[TextContent | ImageContent]:
         """Read file contents.
 
         Args:
@@ -112,7 +112,7 @@ class ReadTool(BaseReadTool):
             limit: Number of lines to read (default: 2000)
 
         Returns:
-            List of ContentBlocks with file contents
+            List of TextContent (or ImageContent for images) with file contents
         """
         if not filePath:
             raise ToolError("filePath is required")
@@ -127,7 +127,7 @@ class ReadTool(BaseReadTool):
         # Handle images
         if self.is_image(path):
             result = self.read_image(path)
-            return result.to_content_blocks()
+            return result.to_content_blocks()  # type: ignore[return-value]
 
         # Read with pagination
         result = self.read_with_pagination(
@@ -137,7 +137,7 @@ class ReadTool(BaseReadTool):
         )
 
         output = self.format_output(result, filePath)
-        return ContentResult(output=output).to_content_blocks()
+        return list(ContentResult(output=output).to_text_blocks())
 
 
 __all__ = ["ReadTool"]

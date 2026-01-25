@@ -17,12 +17,12 @@ from typing import TYPE_CHECKING, ClassVar
 if TYPE_CHECKING:
     from pathlib import Path
 
+from mcp.types import TextContent  # noqa: TC002
+
 from hud.tools.filesystem.base import BaseGlobTool
 from hud.tools.types import ContentResult, ToolError
 
 if TYPE_CHECKING:
-    from mcp.types import ContentBlock
-
     from hud.tools.native_types import NativeToolSpecs
 
 
@@ -102,7 +102,7 @@ class GlobTool(BaseGlobTool):
         self,
         pattern: str,
         path: str | None = None,
-    ) -> list[ContentBlock]:
+    ) -> list[TextContent]:
         """Find files matching a glob pattern.
 
         Args:
@@ -110,7 +110,7 @@ class GlobTool(BaseGlobTool):
             path: Base directory to search from (defaults to workspace)
 
         Returns:
-            List of ContentBlocks with matching file paths
+            List of TextContent with matching file paths
         """
         base = self.resolve_path(path or ".")
 
@@ -122,7 +122,7 @@ class GlobTool(BaseGlobTool):
         matches = self.find_files(base, pattern)
         output = self.format_output(matches, pattern)
 
-        return ContentResult(output=output).to_content_blocks()
+        return ContentResult(output=output).to_text_blocks()
 
 
 __all__ = ["GlobTool"]

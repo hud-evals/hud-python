@@ -17,12 +17,12 @@ from typing import TYPE_CHECKING, ClassVar
 if TYPE_CHECKING:
     from pathlib import Path
 
+from mcp.types import TextContent  # noqa: TC002
+
 from hud.tools.filesystem.base import BaseListTool
 from hud.tools.types import ContentResult, ToolError
 
 if TYPE_CHECKING:
-    from mcp.types import ContentBlock
-
     from hud.tools.native_types import NativeToolSpecs
 
 # OpenCode's default ignore patterns
@@ -141,7 +141,7 @@ class ListTool(BaseListTool):
         self,
         path: str | None = None,
         ignore: list[str] | None = None,
-    ) -> list[ContentBlock]:
+    ) -> list[TextContent]:
         """List directory contents.
 
         Args:
@@ -149,7 +149,7 @@ class ListTool(BaseListTool):
             ignore: Array of glob patterns to ignore
 
         Returns:
-            List of ContentBlocks with directory tree
+            List of TextContent with directory tree
         """
         search_path = self.resolve_path(path or ".")
 
@@ -164,7 +164,7 @@ class ListTool(BaseListTool):
         entries = self.list_directory(search_path, ignore=ignore_patterns)
         output = self.format_output(entries, search_path, path or ".")
 
-        return ContentResult(output=output).to_content_blocks()
+        return ContentResult(output=output).to_text_blocks()
 
 
 __all__ = ["ListTool"]

@@ -195,6 +195,8 @@ class TestNativeToolSpecAgentIntegration:
                     return results
 
             agent = TestClaudeAgent.create()
+            # Set model to match BashTool's supported_models pattern
+            agent.model = "claude-3-5-sonnet-20241022"
             agent._available_tools = list(tools)
 
             categorized = agent.categorize_tools()

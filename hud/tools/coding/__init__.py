@@ -36,10 +36,6 @@ from hud.tools.coding.utils import (
     write_file_sync,
 )
 
-# Memory tools (re-exported from hud.tools.memory for backwards compatibility)
-from hud.tools.memory import ClaudeMemoryCommand as MemoryCommand
-from hud.tools.memory import ClaudeMemoryTool
-
 __all__ = [
     "SNIPPET_LINES",
     "ApplyPatchResult",
@@ -47,14 +43,12 @@ __all__ = [
     "BashSession",
     "BashTool",
     "ClaudeBashSession",
-    "ClaudeMemoryTool",
     "Command",
     "DiffError",
     "EditTool",
     "GeminiEditTool",
     "GeminiShellOutput",
     "GeminiShellTool",
-    "MemoryCommand",
     "ShellCallOutcome",
     "ShellCommandOutput",
     "ShellResult",

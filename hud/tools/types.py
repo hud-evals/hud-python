@@ -60,30 +60,37 @@ class ContentResult(BaseModel):
             url=combine_fields(self.url, other.url, False),
         )
 
-    def to_content_blocks(self) -> list[ContentBlock]:
-        """Helper method to convert ContentResult to content blocks.
+    def to_text_blocks(self) -> list[TextContent]:
+        """Convert text-only content to TextContent blocks.
 
-        Subclasses can use this when they work with ContentResult internally.
-
-        Args:
-            result: ContentResult to convert
+        Use this for tools that only return text output.
 
         Returns:
-            List of ContentBlock with URL embedded as metadata if available
+            List of TextContent blocks
         """
-        blocks: list[ContentBlock] = []
+        blocks: list[TextContent] = []
 
         if self.output:
             blocks.append(TextContent(text=self.output, type="text"))
         if self.error:
             blocks.append(TextContent(text=self.error, type="text"))
-        if self.base64_image:
-            blocks.append(ImageContent(data=self.base64_image, mimeType="image/png", type="image"))
-
-        # Add URL as a special metadata text block (for Gemini Computer Use)
-        # Always include URL if set, even if it's a placeholder like "about:blank"
         if self.url:
             blocks.append(TextContent(text=f"__URL__:{self.url}", type="text"))
+
+        return blocks
+
+    def to_content_blocks(self) -> list[ContentBlock]:
+        """Convert to content blocks including images.
+
+        Use to_text_blocks() for text-only tools for better type safety.
+
+        Returns:
+            List of ContentBlock with URL embedded as metadata if available
+        """
+        blocks: list[ContentBlock] = list(self.to_text_blocks())
+
+        if self.base64_image:
+            blocks.append(ImageContent(data=self.base64_image, mimeType="image/png", type="image"))
 
         return blocks
 
