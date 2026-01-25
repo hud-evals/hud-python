@@ -3,6 +3,9 @@
 For coding tools (shell, bash, edit, apply_patch), import from:
     from hud.tools.coding import BashTool, ShellTool, EditTool, ApplyPatchTool
 
+For filesystem tools (read, grep, glob, list), import from:
+    from hud.tools.filesystem import ReadTool, GrepTool, GlobTool, ListTool
+
 For computer tools, import from:
     from hud.tools.computer import AnthropicComputerTool, OpenAIComputerTool
 """
@@ -44,6 +47,12 @@ if TYPE_CHECKING:
         GeminiShellTool,
         ShellTool,
     )
+    from .filesystem import (
+        GlobTool,
+        GrepTool,
+        ListTool,
+        ReadTool,
+    )
 
 __all__ = [
     # Base classes
@@ -67,6 +76,11 @@ __all__ = [
     "ApplyPatchTool",
     "GeminiShellTool",
     "GeminiEditTool",
+    # Filesystem tools (lazy import)
+    "ReadTool",
+    "GrepTool",
+    "GlobTool",
+    "ListTool",
     # Hosted tools
     "CodeExecutionTool",
     "GoogleSearchTool",
@@ -105,5 +119,15 @@ def __getattr__(name: str) -> Any:
     ):
         from . import coding
         return getattr(coding, name)
+
+    # Filesystem tools
+    if name in (
+        "ReadTool",
+        "GrepTool",
+        "GlobTool",
+        "ListTool",
+    ):
+        from . import filesystem
+        return getattr(filesystem, name)
 
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

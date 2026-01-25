@@ -1,5 +1,5 @@
 ---
-title: "Native Tools"
+title: "Introduction"
 description: "Pre-built capabilities for computer control, shell execution, and more"
 icon: "toolbox"
 ---
@@ -86,6 +86,53 @@ class RestrictedBashTool(BashTool):
 
 Your subclass inherits the native specs. Claude still gets `bash_20250124`, but with your restrictions.
 
+## Tool Hooks
+
+For simpler customization without subclassing, use `@tool.before` and `@tool.after`:
+
+```python
+from hud.tools import BashTool
+from hud.tools.types import ToolError
+
+bash = BashTool()
+
+@bash.before
+async def block_dangerous(command: str | None = None, **kwargs):
+    if command and "rm -rf" in command:
+        raise ToolError("Blocked dangerous command")
+
+@bash.after
+async def log_execution(command: str | None = None, result=None, **kwargs):
+    print(f"Executed: {command}")
+
+env.add_tool(bash)
+```
+
+**`@tool.before`** runs before execution:
+- Receives all tool arguments as kwargs
+- Return modified kwargs to change arguments
+- Return `None` to proceed unchanged
+- Raise an exception to block execution
+
+**`@tool.after`** runs after execution:
+- Receives tool arguments plus `result=`
+- Return modified result to change output
+- Return `None` to keep original result
+
+Stack multiple hooks—they run in registration order:
+
+```python
+@bash.before
+async def validate(command: str | None = None, **kwargs):
+    # First validation
+    ...
+
+@bash.before
+async def audit(command: str | None = None, **kwargs):
+    # Then audit logging
+    ...
+```
+
 ## Creating New Tools
 
 For entirely new capabilities:
@@ -133,6 +180,9 @@ class MyShellTool(BaseTool):
 ## Tool Categories
 
 <CardGroup cols={2}>
+  <Card title="Agent Tools" icon="users" href="/native-tools/agents">
+    Run sub-agents as tools
+  </Card>
   <Card title="Computer" icon="desktop" href="/native-tools/computer">
     Mouse, keyboard, screenshots
   </Card>

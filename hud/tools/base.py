@@ -141,12 +141,25 @@ class BaseTool(ABC):
 
         This allows clean registration:
             server.add_tool(my_tool.mcp)
+
+        The tool's __call__ is wrapped to trigger before and after callbacks,
+        enabling pre-execution validation and post-execution processing.
         """
         if not hasattr(self, "_mcp_tool"):
+            from functools import wraps
+
             from fastmcp.tools import FunctionTool
 
+            original_call = self.__call__
+
+            @wraps(original_call)
+            async def wrapped_call(**kwargs: Any) -> Any:
+                kwargs = await self._run_before(kwargs)
+                result = await original_call(**kwargs)
+                return await self._run_after(kwargs, result)
+
             self._mcp_tool = FunctionTool.from_function(
-                self,
+                wrapped_call,
                 name=self.name,
                 title=self.title,
                 description=self.description,
@@ -154,36 +167,70 @@ class BaseTool(ABC):
             )
         return self._mcp_tool
 
-    def add_callback(self, event_type: str, callback: Callable[..., Awaitable[Any]]) -> None:
-        """Register a callback function for specific event
+    def before(
+        self, fn: Callable[..., Awaitable[dict[str, Any] | None]]
+    ) -> Callable[..., Awaitable[dict[str, Any] | None]]:
+        """Decorator to run a function before tool execution.
 
-        Args:
-            event_type: (Required) Specific event name to trigger callback
-                        e.g. "after_click", "before_navigate"
-            callback: (Required) Async function to call. Must be defined by `async def f(...)`
+        The callback receives tool kwargs and can:
+        - Return modified kwargs (dict) to change arguments
+        - Return None to proceed with original kwargs
+        - Raise an exception to block execution
+
+        Example:
+            ```python
+            bash = BashTool()
+
+            @bash.before
+            async def validate(command: str | None = None, **kwargs):
+                if command and "rm -rf" in command:
+                    raise ToolError("Blocked dangerous command")
+                return None  # Proceed with original args
+            ```
         """
-        if event_type not in self._callbacks:
-            self._callbacks[event_type] = []
-        self._callbacks[event_type].append(callback)
+        self._callbacks.setdefault("before", []).append(fn)
+        return fn
 
-    def remove_callback(self, event_type: str, callback: Callable[..., Awaitable[Any]]) -> None:
-        """Remove a registered callback
-        Args:
-            event_type: (Required) Specific event name to trigger callback
-                        e.g. "after_click", "before_navigate"
-            callback: (Required) Function to remove from callback list.
+    def after(
+        self, fn: Callable[..., Awaitable[Any]]
+    ) -> Callable[..., Awaitable[Any]]:
+        """Decorator to run a function after tool execution.
+
+        The callback receives tool kwargs plus `result=` and can:
+        - Return modified result to change what's returned
+        - Return None to proceed with original result
+
+        Example:
+            ```python
+            bash = BashTool()
+
+            @bash.after
+            async def log_execution(command: str | None = None, result=None, **kwargs):
+                logger.info("Executed: %s", command)
+                return None  # Keep original result
+            ```
         """
-        if (event_type in self._callbacks) and (callback in self._callbacks[event_type]):
-            self._callbacks[event_type].remove(callback)
+        self._callbacks.setdefault("after", []).append(fn)
+        return fn
 
-    async def _trigger_callbacks(self, event_type: str, **kwargs: Any) -> None:
-        """Trigger all registered callback functions of an event type"""
-        callback_list = self._callbacks.get(event_type, [])
-        for callback in callback_list:
+    async def _run_before(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Run before callbacks. Can modify kwargs or raise to block."""
+        for callback in self._callbacks.get("before", []):
+            result = await callback(**kwargs)
+            if result is not None:
+                kwargs = result
+        return kwargs
+
+    async def _run_after(self, kwargs: dict[str, Any], result: Any) -> Any:
+        """Run after callbacks. Can modify result."""
+        for callback in self._callbacks.get("after", []):
             try:
-                await callback(**kwargs)
+                modified = await callback(result=result, **kwargs)
+                if modified is not None:
+                    result = modified
             except Exception as e:
-                logger.warning("Callback failed for %s: %s", event_type, e)
+                logger.warning("after callback failed: %s", e)
+        return result
 
 
 # Prefix for internal tool names

@@ -37,7 +37,20 @@ Got a FastAPI app? One line:
 env.connect_fastapi(app)
 ```
 
-All your routes become tools.
+All your routes become tools. HUD also provides ready-to-use tools—just `add_tool()` them:
+
+```python
+from hud.tools.computer import OpenAIComputerTool
+from hud.tools.coding import EditTool
+from hud.tools.hosted import WebSearchTool
+
+env = Environment("my-agent")
+env.add_tool(OpenAIComputerTool())  # Computer use for browser/desktop
+env.add_tool(EditTool())            # str_replace file editing
+env.add_tool(WebSearchTool())       # Web search via Anthropic/Google
+```
+
+See the [Tools](/tools) section for all available tools including [computer](/tools/computer), [coding](/tools/coding), and [web](/tools/web).
 
 ## Scenarios
 

@@ -107,34 +107,53 @@ coords = await grounder.predict_click(
 
 **Supported models**: Any vision-capable model via OpenAI-compatible API—GPT-4o, Qwen VL, LLaVA, etc.
 
-## Agent Loop
+## With HUD Agents
+
+`GroundedComputerTool` is typically used as a wrapper around environment computer tools. Register the underlying computer tool, then use grounded calls:
 
 ```python
+from hud import Environment
+from hud.tools import AnthropicComputerTool
 from hud.tools.grounding import GroundedComputerTool, Grounder, GrounderConfig
 
-async def run_agent(env, task):
-    config = GrounderConfig(api_base="https://api.openai.com/v1", model="gpt-4o")
-    grounder = Grounder(config=config)
+# Setup environment with computer tool
+env = Environment("grounded-env")
+env.add_tool(AnthropicComputerTool())
+
+# Create grounder
+config = GrounderConfig(
+    api_base="https://api.openai.com/v1",
+    model="gpt-4o",
+    api_key="your-api-key",
+)
+grounder = Grounder(config=config)
+
+async with env:
+    # Wrap environment for grounded calls
     grounded = GroundedComputerTool(grounder=grounder, ctx=env)
     
-    # Get initial screenshot
-    result = await env.call_tool(("computer", {"action": "screenshot"}))
-    screenshot = extract_screenshot(result)
+    # Take screenshot via environment
+    result = await env.call_tool("computer", action="screenshot")
     
-    done = False
-    while not done:
-        action = await get_agent_action(screenshot, task)
-        
-        if action["action"] == "click":
-            await grounded(
-                action="click",
-                element_description=action["element"],
-                screenshot_b64=screenshot,
-            )
-        
-        # New screenshot
-        result = await grounded(action="screenshot")
-        screenshot = extract_screenshot(result)
+    # Use grounded tool for element-based actions
+    await grounded(
+        action="click",
+        element_description="the login button",
+        screenshot_b64=result.content[0].data,  # base64 from screenshot
+    )
+```
+
+For full agent loops, use HUD's built-in agents which handle the loop automatically:
+
+```python
+from hud.agents import create_agent
+import hud
+
+task = env("my_task")
+agent = create_agent("gpt-4o")
+
+async with hud.eval(task) as ctx:
+    await agent.run(ctx)
 ```
 
 ## When to Use

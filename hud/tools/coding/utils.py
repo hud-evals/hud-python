@@ -159,14 +159,42 @@ def validate_path(path: Path, must_exist: bool = True, allow_dir: bool = False) 
         raise ToolError(f"Path {path} is a directory, expected a file.")
 
 
+def resolve_path_safely(file_path: str, base_path: Path) -> Path:
+    """Resolve a file path, ensuring it stays within base_path.
+
+    Used by filesystem tools (read, grep, glob, list) for security.
+
+    Args:
+        file_path: The path to resolve (relative or absolute)
+        base_path: The base directory that must contain the result
+
+    Returns:
+        Resolved absolute Path
+
+    Raises:
+        ToolError: If path escapes base directory
+    """
+    path = Path(file_path)
+    resolved = path.resolve() if path.is_absolute() else (base_path / path).resolve()
+
+    # Security: ensure path is within base_path
+    try:
+        resolved.relative_to(base_path)
+    except ValueError:
+        raise ToolError(f"Path escapes base directory: {file_path}") from None
+
+    return resolved
+
+
 __all__ = [
-    "SNIPPET_LINES",
     "MAX_RESPONSE_LENGTH",
-    "maybe_truncate",
+    "SNIPPET_LINES",
     "make_snippet",
+    "maybe_truncate",
     "read_file_async",
-    "write_file_async",
     "read_file_sync",
-    "write_file_sync",
+    "resolve_path_safely",
     "validate_path",
+    "write_file_async",
+    "write_file_sync",
 ]

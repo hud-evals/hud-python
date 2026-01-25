@@ -1,0 +1,182 @@
+---
+title: "Agent Tools"
+description: "Run agents as tools for hierarchical task delegation"
+icon: "users"
+---
+
+Agent tools let one agent delegate tasks to another. An orchestrator agent calls specialized sub-agents as tools—each with its own environment, model, and evaluation.
+
+## Why Sub-Agents?
+
+Complex tasks often break into specialized subtasks:
+
+- **Orchestrator** decides what to do
+- **Researcher** gathers information
+- **Coder** writes code
+- **Reviewer** checks work
+
+Instead of one massive agent trying to do everything, you compose focused specialists.
+
+```
+Orchestrator
+    ├── call research_tool("find security issues")
+    │       └── ResearchAgent runs with browsing tools
+    ├── call code_tool("fix the vulnerability")
+    │       └── CodingAgent runs with bash/edit tools
+    └── call review_tool("verify the fix")
+            └── ReviewAgent runs read-only
+```
+
+## AgentTool
+
+Wraps a Task template so it can be called as a tool.
+
+```python
+from hud import Environment
+from hud.tools import AgentTool
+
+# Define a specialist environment
+researcher_env = Environment("researcher")
+researcher_env.add_tool(PlaywrightTool())
+researcher_env.add_tool(WebSearchTool())
+
+@researcher_env.scenario()
+async def investigate(issue_id: str):
+    yield f"Research issue {issue_id} and summarize findings"
+    response = yield  # Agent's response
+    yield 1.0  # Evaluation
+
+# Create tool from task template
+research_tool = AgentTool(
+    researcher_env("investigate"),
+    model="gpt-4o",
+    name="research",
+    description="Research an issue and return findings",
+)
+```
+
+Now any agent can call `research(issue_id="SEC-123")` and a full sub-agent runs.
+
+## Parameters
+
+```python
+AgentTool(
+    task,                          # Task template to run
+    model="gpt-4o",                # Model for the sub-agent
+    # OR
+    agent=CustomAgent,             # Custom agent class
+    agent_params={"max_steps": 5}, # Passed to agent.create()
+    name="research",               # Tool name
+    description="...",             # Tool description
+    trace=True,                    # Enable tracing for debugging
+)
+```
+
+Use `model=` for standard agents or `agent=` for custom agent classes.
+
+## Eval-Only Parameters
+
+Parameters with `| None = None` are hidden from the tool schema but available for evaluation:
+
+```python
+@env.scenario()
+async def investigate(
+    issue_id: str,                      # Orchestrator sees this
+    expected_cause: str | None = None,  # Hidden - for eval only
+):
+    yield f"Research issue {issue_id}"
+    response = yield
+    
+    # Use expected_cause in evaluation
+    if expected_cause and expected_cause in response:
+        yield 1.0
+    else:
+        yield 0.5
+```
+
+The orchestrator calls `investigate(issue_id="SEC-123")`. The eval harness can pass `expected_cause` for automated scoring.
+
+## Orchestrator Setup
+
+```python
+from hud import Environment
+from hud.tools import AgentTool, BashTool, EditTool
+from hud.agents import create_agent
+import hud
+
+# Specialist environments
+researcher_env = Environment("researcher")
+# ... setup researcher tools and scenario
+
+coder_env = Environment("coder")
+coder_env.add_tool(BashTool())
+coder_env.add_tool(EditTool())
+
+@coder_env.scenario()
+async def fix_bug(description: str):
+    yield f"Fix the bug: {description}"
+    yield 1.0
+
+# Orchestrator with sub-agent tools
+orchestrator = Environment("orchestrator")
+orchestrator.add_tool(AgentTool(
+    researcher_env("investigate"),
+    model="gpt-4o",
+    name="research",
+))
+orchestrator.add_tool(AgentTool(
+    coder_env("fix_bug"),
+    model="claude-sonnet-4-5",
+    name="fix_code",
+))
+
+@orchestrator.scenario()
+async def handle_ticket(ticket_id: str):
+    yield f"Handle support ticket {ticket_id}"
+    yield 1.0
+
+# Run orchestrator
+task = orchestrator("handle_ticket", ticket_id="TICKET-456")
+agent = create_agent("gpt-4o")
+
+async with hud.eval(task) as ctx:
+    await agent.run(ctx)
+```
+
+## Tracing
+
+Enable `trace=True` to record sub-agent execution:
+
+```python
+research_tool = AgentTool(
+    researcher_env("investigate"),
+    model="gpt-4o",
+    trace=True,  # Records full sub-agent trajectory
+)
+```
+
+Sub-agent traces are linked to the parent trace for hierarchical debugging.
+
+## When to Use
+
+**Good for:**
+- Complex workflows with distinct phases
+- Mixing models (fast for orchestration, powerful for coding)
+- Isolating tool access (researcher can't edit files)
+- Reusable specialist agents
+
+**Avoid when:**
+- Simple linear tasks
+- Latency-sensitive applications (sub-agent overhead)
+- Single-model workflows
+
+## Tips
+
+Keep sub-agents focused. One clear task per specialist.
+
+Match models to complexity. Use cheaper models for simple delegation, expensive ones for hard problems.
+
+Test specialists independently. Run each sub-agent scenario directly before composing.
+
+→ [Computer Tools](/native-tools/computer) — GUI automation for sub-agents
+→ [Coding Tools](/native-tools/coding) — Shell and editing for coding agents

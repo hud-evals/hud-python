@@ -94,8 +94,8 @@ class TestNativeToolSpecE2E:
 
         # Create AnthropicComputerTool with custom dimensions
         computer_tool = AnthropicComputerTool(
-            display_width=1920,
-            display_height=1080,
+            width=1920,
+            height=1080,
         )
         mcp.add_tool(computer_tool)
 

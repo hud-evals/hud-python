@@ -137,14 +137,34 @@ computer = AnthropicComputerTool(display_width=1280, display_height=720)
 
 ## Customizing
 
+Log all actions with hooks:
+
+```python
+from hud.tools import AnthropicComputerTool
+
+computer = AnthropicComputerTool()
+
+@computer.after
+async def log_action(action: str = "", result=None, **kwargs):
+    print(f"Computer action: {action}")
+
+env.add_tool(computer)
+```
+
+Or subclass for deeper control:
+
 ```python
 from typing import Any
 from mcp.types import ContentBlock
 from hud.tools import AnthropicComputerTool
+from hud.tools.types import ToolError
 
 class SafeComputerTool(AnthropicComputerTool):
+    BLOCKED_ACTIONS = ["key"]  # Block keyboard shortcuts
+    
     async def __call__(self, action: str, **kwargs: Any) -> list[ContentBlock]:
-        print(f"Action: {action}")  # Log all actions
+        if action in self.BLOCKED_ACTIONS:
+            raise ToolError(f"Action '{action}' not allowed")
         return await super().__call__(action, **kwargs)
 ```
 

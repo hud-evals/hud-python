@@ -136,7 +136,21 @@ browser = PlaywrightTool(cdp_url="http://localhost:9222")
 
 ## Customizing
 
-Track all navigation:
+Log all browser actions with hooks:
+
+```python
+from hud.tools import PlaywrightTool
+
+browser = PlaywrightTool()
+
+@browser.after
+async def log_action(action: str = "", result=None, **kwargs):
+    print(f"Browser: {action}")
+
+env.add_tool(browser)
+```
+
+Or subclass for deeper control:
 
 ```python
 from typing import Any

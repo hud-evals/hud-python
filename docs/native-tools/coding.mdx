@@ -204,7 +204,41 @@ env.add_tool(ApplyPatchTool())
 
 ## Customizing
 
-Restrict commands:
+Use hooks for simple validation:
+
+```python
+from hud.tools import BashTool
+from hud.tools.types import ToolError
+
+bash = BashTool()
+
+@bash.before
+async def block_dangerous(command: str | None = None, **kwargs):
+    if command:
+        for blocked in ["rm -rf /", "sudo", "curl | sh"]:
+            if blocked in command:
+                raise ToolError(f"Blocked: {blocked}")
+
+env.add_tool(bash)
+```
+
+Read-only editor:
+
+```python
+from hud.tools import EditTool
+from hud.tools.types import ToolError
+
+editor = EditTool()
+
+@editor.before
+async def read_only(command: str = "", **kwargs):
+    if command != "view":
+        raise ToolError("Read-only environment")
+
+env.add_tool(editor)
+```
+
+Or subclass for more complex logic:
 
 ```python
 from typing import Any
@@ -212,32 +246,15 @@ from mcp.types import ContentBlock
 from hud.tools import BashTool
 from hud.tools.types import ToolError
 
-class RestrictedBashTool(BashTool):
-    BLOCKED = ["rm -rf /", "sudo", "curl"]
+class AuditedBashTool(BashTool):
+    def __init__(self):
+        super().__init__()
+        self.command_history: list[str] = []
     
     async def __call__(
         self, command: str | None = None, restart: bool = False
     ) -> list[ContentBlock]:
         if command:
-            for blocked in self.BLOCKED:
-                if blocked in command:
-                    raise ToolError(f"Blocked: {blocked}")
+            self.command_history.append(command)
         return await super().__call__(command, restart)
-```
-
-Read-only editor:
-
-```python
-from typing import Any
-from mcp.types import ContentBlock
-from hud.tools import EditTool
-from hud.tools.types import ToolError
-
-class ReadOnlyEditTool(EditTool):
-    async def __call__(
-        self, *, command: str, path: str, **kwargs: Any
-    ) -> list[ContentBlock]:
-        if command != "view":
-            raise ToolError("Read-only environment")
-        return await super().__call__(command=command, path=path, **kwargs)
 ```
