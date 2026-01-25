@@ -78,14 +78,18 @@ class BaseFileMemoryTool(BaseMemoryTool):
         self,
         base_path: str | Path = ".",
         memory_section_header: str = "## Memories",
+        **kwargs: Any,
     ) -> None:
         """Initialize file-based memory tool.
 
         Args:
             base_path: Base directory for memory files
             memory_section_header: Markdown header for memory section
+            **kwargs: Passed to parent classes (for cooperative inheritance)
         """
-        super().__init__(env=None, name="memory", title="Memory")
+        # Pass kwargs to parent for cooperative multiple inheritance
+        # This allows EditTool + BaseFileMemoryTool to work together
+        super().__init__(env=kwargs.get("env"), name="memory", title="Memory")
         self._base_path = Path(base_path).resolve()
         self._memory_section_header = memory_section_header
 

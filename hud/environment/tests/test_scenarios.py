@@ -1228,3 +1228,189 @@ class TestPromptYieldTypes:
 
         prompt = await env.run_scenario_setup("list-text-content", {})
         assert prompt == "First part\nSecond part"
+
+
+class TestEvaluationResultDefaults:
+    """Test EvaluationResult default behavior."""
+
+    @pytest.mark.asyncio
+    async def test_done_defaults_to_true(self) -> None:
+        """EvaluationResult.done should default to True."""
+        from hud.tools.types import EvaluationResult
+
+        result = EvaluationResult(reward=0.5)
+        assert result.done is True
+
+    @pytest.mark.asyncio
+    async def test_float_yield_implies_done(self) -> None:
+        """Yielding a float should produce done=True."""
+        env = Environment("test-env")
+
+        @env.scenario("float-done")
+        async def float_done_scenario():
+            yield "Do something"
+            yield 0.8  # Float yield
+
+        await env.run_scenario_setup("float-done", {})
+        env._active_session.answer = "done"
+        result = await env.run_scenario_evaluate("float-done")
+
+        assert result is not None
+        assert result.reward == 0.8
+        assert result.done is True  # Implied by float yield
+
+    @pytest.mark.asyncio
+    async def test_explicit_done_false(self) -> None:
+        """Scenarios can explicitly set done=False for partial progress."""
+        from hud.tools.types import EvaluationResult
+
+        env = Environment("test-env")
+
+        @env.scenario("partial-progress")
+        async def partial_scenario():
+            yield "Start task"
+            yield EvaluationResult(reward=0.25, done=False)
+
+        await env.run_scenario_setup("partial-progress", {})
+        env._active_session.answer = "partial"
+        result = await env.run_scenario_evaluate("partial-progress")
+
+        assert result is not None
+        assert result.done is False
+
+
+class TestSubscoreUsage:
+    """Test practical subscore usage patterns."""
+
+    @pytest.mark.asyncio
+    async def test_weighted_subscores(self) -> None:
+        """Test subscores with different weights."""
+        from hud.tools.types import EvaluationResult, SubScore
+
+        env = Environment("test-env")
+
+        @env.scenario("weighted")
+        async def weighted_scenario():
+            yield "Complete the task"
+            # Weighted average: 0.6*1.0 + 0.3*0.5 + 0.1*0.0 = 0.75
+            yield EvaluationResult(
+                reward=0.75,
+                done=True,
+                subscores=[
+                    SubScore(name="correctness", weight=0.6, value=1.0),
+                    SubScore(name="efficiency", weight=0.3, value=0.5),
+                    SubScore(name="style", weight=0.1, value=0.0),
+                ],
+            )
+
+        await env.run_scenario_setup("weighted", {})
+        env._active_session.answer = "result"
+        result = await env.run_scenario_evaluate("weighted")
+
+        assert result is not None
+        assert result.reward == 0.75
+        assert len(result.subscores) == 3
+        # Verify subscores preserved order and values
+        assert result.subscores[0].name == "correctness"
+        assert result.subscores[0].value == 1.0
+        assert result.subscores[2].name == "style"
+        assert result.subscores[2].value == 0.0
+
+    @pytest.mark.asyncio
+    async def test_subscores_with_content(self) -> None:
+        """Test subscores combined with explanation content."""
+        from hud.tools.types import EvaluationResult, SubScore
+
+        env = Environment("test-env")
+
+        @env.scenario("explained")
+        async def explained_scenario():
+            yield "Evaluate this"
+            yield EvaluationResult(
+                reward=0.6,
+                done=True,
+                content="Found 3 of 5 items correctly",
+                subscores=[
+                    SubScore(name="detection", value=0.6),
+                    SubScore(name="false_positives", value=1.0),  # Lower is better, inverted
+                ],
+            )
+
+        await env.run_scenario_setup("explained", {})
+        env._active_session.answer = "found 3 items"
+        result = await env.run_scenario_evaluate("explained")
+
+        assert result is not None
+        assert result.content == "Found 3 of 5 items correctly"
+        assert len(result.subscores) == 2
+
+
+class TestNormalizationEdgeCases:
+    """Test edge cases in yield normalization."""
+
+    @pytest.mark.asyncio
+    async def test_empty_string_prompt(self) -> None:
+        """Empty string prompt should work."""
+        env = Environment("test-env")
+
+        @env.scenario("empty-prompt")
+        async def empty_scenario():
+            yield ""
+            yield 1.0
+
+        prompt = await env.run_scenario_setup("empty-prompt", {})
+        assert prompt == ""
+
+    @pytest.mark.asyncio
+    async def test_zero_reward(self) -> None:
+        """Zero reward should work correctly."""
+        env = Environment("test-env")
+
+        @env.scenario("zero-reward")
+        async def zero_scenario():
+            yield "Try something"
+            yield 0.0
+
+        await env.run_scenario_setup("zero-reward", {})
+        env._active_session.answer = "failed"
+        result = await env.run_scenario_evaluate("zero-reward")
+
+        assert result is not None
+        assert result.reward == 0.0
+        assert result.done is True
+
+    @pytest.mark.asyncio
+    async def test_negative_reward(self) -> None:
+        """Negative reward (penalty) should work."""
+        from hud.tools.types import EvaluationResult
+
+        env = Environment("test-env")
+
+        @env.scenario("penalty")
+        async def penalty_scenario():
+            yield "Don't break anything"
+            yield EvaluationResult(reward=-0.5, done=True, content="Caused damage")
+
+        await env.run_scenario_setup("penalty", {})
+        env._active_session.answer = "broke it"
+        result = await env.run_scenario_evaluate("penalty")
+
+        assert result is not None
+        assert result.reward == -0.5
+
+    @pytest.mark.asyncio
+    async def test_reward_above_one(self) -> None:
+        """Reward above 1.0 (bonus) should work."""
+        env = Environment("test-env")
+
+        @env.scenario("bonus")
+        async def bonus_scenario():
+            yield "Do extra well"
+            yield 1.5  # Exceptional performance
+
+        await env.run_scenario_setup("bonus", {})
+        env._active_session.answer = "exceeded"
+        result = await env.run_scenario_evaluate("bonus")
+
+        assert result is not None
+        assert result.reward == 1.5
