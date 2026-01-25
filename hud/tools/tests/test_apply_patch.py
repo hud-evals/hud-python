@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from hud.tools.apply_patch import (
+from hud.tools.coding.apply_patch import (
     ActionType,
     ApplyPatchResult,
     ApplyPatchTool,

@@ -69,10 +69,8 @@ class GeminiComputerTool(HudComputerTool):
         platform_type: Literal["auto", "xdo", "pyautogui"] = "auto",
         display_num: int | None = None,
         # Overrides for what dimensions the agent thinks it operates in
-        display_width: int | None = None,
-        display_height: int | None = None,
-        width: int | None = None,  # Deprecated: use display_width
-        height: int | None = None,  # Deprecated: use display_height
+        width: int = computer_settings.GEMINI_COMPUTER_WIDTH,
+        height: int = computer_settings.GEMINI_COMPUTER_HEIGHT,
         rescale_images: bool = computer_settings.GEMINI_RESCALE_IMAGES,
         # What the agent sees as the tool's name, title, and description
         name: str | None = None,
@@ -84,15 +82,9 @@ class GeminiComputerTool(HudComputerTool):
         Initialize with Gemini's default dimensions.
 
         Args:
-            display_width: Width for agent coordinate system
-            display_height: Height for agent coordinate system
-            width: Deprecated, use display_width
-            height: Deprecated, use display_height
+            width: Width for agent coordinate system (default: 1440)
+            height: Height for agent coordinate system (default: 900)
         """
-        # Handle deprecated width/height params
-        actual_width = display_width or width or computer_settings.GEMINI_COMPUTER_WIDTH
-        actual_height = display_height or height or computer_settings.GEMINI_COMPUTER_HEIGHT
-
         # Create instance-level native_specs with display dimensions
         instance_native_specs = {
             AgentType.GEMINI: NativeToolSpec(
@@ -100,8 +92,8 @@ class GeminiComputerTool(HudComputerTool):
                 api_name="gemini_computer",
                 role="computer",
                 extra={
-                    "display_width": actual_width,
-                    "display_height": actual_height,
+                    "display_width": width,
+                    "display_height": height,
                 },
             ),
             AgentType.GEMINI_CUA: NativeToolSpec(
@@ -109,8 +101,8 @@ class GeminiComputerTool(HudComputerTool):
                 api_name="gemini_computer",
                 role="computer",
                 extra={
-                    "display_width": actual_width,
-                    "display_height": actual_height,
+                    "display_width": width,
+                    "display_height": height,
                 },
             ),
         }
@@ -119,8 +111,8 @@ class GeminiComputerTool(HudComputerTool):
             executor=executor,
             platform_type=platform_type,
             display_num=display_num,
-            width=actual_width,
-            height=actual_height,
+            width=width,
+            height=height,
             rescale_images=rescale_images,
             name=name or "gemini_computer",
             title=title or "Gemini Computer Tool",

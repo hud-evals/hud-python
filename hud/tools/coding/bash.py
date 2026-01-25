@@ -1,4 +1,11 @@
-"""Bash tool for executing shell commands."""
+"""Bash tool for Claude agents.
+
+This tool conforms to Anthropic's bash tool specification and is used
+when running with Claude models that support native bash.
+
+Note: This uses a simpler readuntil-based session compared to ShellTool's
+polling-based session, as Claude's bash API has different timeout handling.
+"""
 
 from __future__ import annotations
 
@@ -16,14 +23,18 @@ if TYPE_CHECKING:
     from mcp.types import ContentBlock
 
 
-class _BashSession:
-    """A session of a bash shell."""
+class ClaudeBashSession:
+    """A persistent bash shell session for Claude's bash tool.
+
+    Uses readuntil-based output capture, which is simpler than ShellTool's
+    polling approach but doesn't support dynamic timeouts.
+    """
 
     _started: bool
     _process: asyncio.subprocess.Process
+    _timed_out: bool
 
     command: str = "/bin/bash"
-    _output_delay: float = 0.2  # seconds
     _timeout: float = 120.0  # seconds
     _sentinel: str = "<<exit>>"
 
@@ -32,6 +43,7 @@ class _BashSession:
         self._timed_out = False
 
     async def start(self) -> None:
+        """Start the bash session."""
         if self._started:
             await asyncio.sleep(0)
             return
@@ -115,10 +127,19 @@ class _BashSession:
         return ContentResult(output=output, error=error)
 
 
+# Alias for backward compatibility
+_BashSession = ClaudeBashSession
+
+
 class BashTool(BaseTool):
-    """
-    A tool that allows the agent to run bash commands.
+    """A tool that allows the agent to run bash commands.
+
     The tool maintains a persistent bash session that can be restarted.
+    This is the Claude-native version that returns ContentResult format
+    and supports manual restart via the `restart` parameter.
+
+    Native specs: Claude (bash_20250124)
+    Role: "shell" (mutually exclusive with ShellTool)
     """
 
     native_specs: ClassVar[NativeToolSpecs] = {
@@ -130,7 +151,7 @@ class BashTool(BaseTool):
         ),
     }
 
-    def __init__(self, session: _BashSession | None = None) -> None:
+    def __init__(self, session: ClaudeBashSession | None = None) -> None:
         """Initialize BashTool with an optional session.
 
         Args:
@@ -145,32 +166,38 @@ class BashTool(BaseTool):
         )
 
     @property
-    def session(self) -> _BashSession | None:
-        """Get the current bash session (alias for context)."""
+    def session(self) -> ClaudeBashSession | None:
+        """Get the current bash session."""
         return self.env
 
     @session.setter
-    def session(self, value: _BashSession | None) -> None:
-        """Set the bash session (alias for context)."""
+    def session(self, value: ClaudeBashSession | None) -> None:
+        """Set the bash session."""
         self.env = value
 
     async def __call__(
         self, command: str | None = None, restart: bool = False
     ) -> list[ContentBlock]:
+        """Execute a bash command or restart the session.
+
+        Args:
+            command: Shell command to execute
+            restart: If True, restart the bash session
+
+        Returns:
+            List of MCP ContentBlocks with the result
+        """
         if restart:
-            # Preserve the session class type when restarting
-            session_cls = type(self.session) if self.session else _BashSession
+            session_cls = type(self.session) if self.session else ClaudeBashSession
             if self.session:
                 self.session.stop()
             self.session = session_cls()
             await self.session.start()
-
             return ContentResult(output="Bash session restarted.").to_content_blocks()
 
         if self.session is None:
-            self.session = _BashSession()
+            self.session = ClaudeBashSession()
 
-        # Ensure session is started (handles pre-configured sessions that weren't started)
         if not self.session._started:
             await self.session.start()
 
@@ -181,4 +208,4 @@ class BashTool(BaseTool):
         raise ToolError("No command provided.")
 
 
-__all__ = ["BashTool", "_BashSession"]
+__all__ = ["BashTool", "ClaudeBashSession", "_BashSession"]

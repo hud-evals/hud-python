@@ -6,13 +6,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from hud.tools.shell import (
+from hud.tools.coding import (
+    ShellTool,
+    ShellResult,
+)
+from hud.tools.coding.session import (
+    BashSession,
     ShellCallOutcome,
     ShellCommandOutput,
-    ShellResult,
-    ShellTool,
-    _BashSession,
 )
+
+# Alias for backward-compatible tests
+_BashSession = BashSession
 from hud.tools.types import ToolError
 
 
@@ -313,7 +318,7 @@ class TestShellTool:
         )
         mock_session.start = AsyncMock()
 
-        with patch("hud.tools.shell._BashSession") as mock_session_class:
+        with patch("hud.tools.coding.shell.BashSession") as mock_session_class:
             mock_session_class.return_value = mock_session
 
             result = await tool(commands=["echo test"])
@@ -340,7 +345,7 @@ class TestShellTool:
         )
         mock_session.start = AsyncMock()
 
-        with patch("hud.tools.shell._BashSession") as mock_session_class:
+        with patch("hud.tools.coding.shell.BashSession") as mock_session_class:
             mock_session_class.return_value = mock_session
 
             result = await tool(commands=["sleep 1"], timeout_ms=5000)
@@ -364,7 +369,7 @@ class TestShellTool:
         )
         mock_session.start = AsyncMock()
 
-        with patch("hud.tools.shell._BashSession") as mock_session_class:
+        with patch("hud.tools.coding.shell.BashSession") as mock_session_class:
             mock_session_class.return_value = mock_session
 
             result = await tool(commands=["echo test"], max_output_length=2048)
@@ -394,7 +399,7 @@ class TestShellTool:
         )
         mock_session.start = AsyncMock()
 
-        with patch("hud.tools.shell._BashSession") as mock_session_class:
+        with patch("hud.tools.coding.shell.BashSession") as mock_session_class:
             mock_session_class.return_value = mock_session
 
             result = await tool(commands=["echo first", "echo second"])
@@ -419,7 +424,7 @@ class TestShellTool:
         )
         mock_session.start = AsyncMock()
 
-        with patch("hud.tools.shell._BashSession") as mock_session_class:
+        with patch("hud.tools.coding.shell.BashSession") as mock_session_class:
             mock_session_class.return_value = mock_session
 
             # First call
@@ -457,7 +462,7 @@ class TestShellTool:
         )
         new_session.start = AsyncMock()
 
-        with patch("hud.tools.shell._BashSession") as mock_session_class:
+        with patch("hud.tools.coding.shell.BashSession") as mock_session_class:
             mock_session_class.return_value = new_session
 
             result = await tool(commands=["echo test"])
@@ -497,7 +502,7 @@ class TestShellTool:
         )
         new_session.start = AsyncMock()
 
-        with patch("hud.tools.shell._BashSession") as mock_session_class:
+        with patch("hud.tools.coding.shell.BashSession") as mock_session_class:
             mock_session_class.return_value = new_session
 
             result = await tool(commands=["echo test"])
@@ -515,7 +520,7 @@ class TestShellTool:
         mock_session.run = AsyncMock(side_effect=Exception("Test error"))
         mock_session.start = AsyncMock()
 
-        with patch("hud.tools.shell._BashSession") as mock_session_class:
+        with patch("hud.tools.coding.shell.BashSession") as mock_session_class:
             mock_session_class.return_value = mock_session
 
             result = await tool(commands=["failing command"])
@@ -551,7 +556,7 @@ class TestShellTool:
         )
         new_session.start = AsyncMock()
 
-        with patch("hud.tools.shell._BashSession") as mock_session_class:
+        with patch("hud.tools.coding.shell.BashSession") as mock_session_class:
             mock_session_class.return_value = new_session
 
             result = await tool(commands=["echo test"])
@@ -588,7 +593,7 @@ class TestShellTool:
         mock_session._process.returncode = None
         mock_session.stop = MagicMock()
 
-        with patch("hud.tools.shell._BashSession") as mock_session_class:
+        with patch("hud.tools.coding.shell.BashSession") as mock_session_class:
             mock_session_class.return_value = mock_session
 
             result = await tool(commands=["echo first", "echo second"])

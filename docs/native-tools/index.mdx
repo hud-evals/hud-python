@@ -1,0 +1,151 @@
+---
+title: "Native Tools"
+description: "Pre-built capabilities for computer control, shell execution, and more"
+icon: "toolbox"
+---
+
+Native tools are pre-built capabilities you add to environments—computer control, shell execution, file editing, web browsing. Each provider (Anthropic, OpenAI, Google) has its own tool specification. HUD handles the translation.
+
+## Why Native Tools?
+
+Claude uses `computer_20250124`. OpenAI uses `computer_use_preview`. Gemini uses function calling. You don't want to maintain three implementations.
+
+Add a tool to your environment, and HUD adapts it to whatever agent connects:
+
+```python
+from hud import Environment
+from hud.tools import AnthropicComputerTool, BashTool
+
+env = Environment("my-env")
+env.add_tool(AnthropicComputerTool())
+env.add_tool(BashTool())
+```
+
+Claude gets native `computer_20250124` and `bash_20250124`. OpenAI gets compatible function calls. Same environment, every agent.
+
+## How It Works
+
+Tools declare `native_specs` that tell agents how to register with their provider:
+
+```python
+class BashTool(BaseTool):
+    native_specs = {
+        AgentType.CLAUDE: NativeToolSpec(
+            api_type="bash_20250124",
+            api_name="bash",
+            beta="computer-use-2025-01-24",
+            role="shell",
+        ),
+    }
+```
+
+When an agent connects:
+1. SDK checks for native specs matching the agent type
+2. If found, registers using the provider's native format
+3. If not, falls back to standard function calling
+
+Tools with the same `role` are mutually exclusive—you can't have both `BashTool` (Claude) and `ShellTool` (OpenAI) active. When one is accepted natively, the other is excluded.
+
+## Choosing Tools
+
+Match tools to your agent:
+
+| Agent | Computer | Shell | Editor | Memory |
+|-------|----------|-------|--------|--------|
+| Claude | `AnthropicComputerTool` | `BashTool` | `EditTool` | `ClaudeMemoryTool` |
+| OpenAI | `OpenAIComputerTool` | `ShellTool` | `ApplyPatchTool` | — |
+| Gemini | `GeminiComputerTool` | `GeminiShellTool` | `GeminiEditTool` | — |
+
+```python
+from hud import Environment
+from hud.tools import AnthropicComputerTool, BashTool, EditTool
+
+env = Environment("claude-env")
+env.add_tool(AnthropicComputerTool())
+env.add_tool(BashTool())
+env.add_tool(EditTool())
+```
+
+## Customizing Tools
+
+Need different behavior? Subclass:
+
+```python
+from mcp.types import ContentBlock
+from hud.tools import BashTool
+from hud.tools.types import ToolError
+
+class RestrictedBashTool(BashTool):
+    async def __call__(
+        self, command: str | None = None, restart: bool = False
+    ) -> list[ContentBlock]:
+        if command and ("rm -rf" in command or "sudo" in command):
+            raise ToolError("Command not allowed")
+        return await super().__call__(command, restart)
+```
+
+Your subclass inherits the native specs. Claude still gets `bash_20250124`, but with your restrictions.
+
+## Creating New Tools
+
+For entirely new capabilities:
+
+```python
+from hud.tools import BaseTool
+from mcp.types import ContentBlock, TextContent
+
+class DatabaseTool(BaseTool):
+    def __init__(self, connection):
+        super().__init__(
+            env=connection,
+            name="database",
+            description="Execute SQL queries",
+        )
+    
+    async def __call__(self, query: str) -> list[ContentBlock]:
+        results = await self.env.execute(query)
+        return [TextContent(text=str(results), type="text")]
+```
+
+## For Model Training
+
+Training your own model? Three options:
+
+1. **Use existing tools** — Train your model on HUD's standard schemas
+2. **Subclass and adapt** — Modify behavior, keep compatible schemas
+3. **Define new specs** — Create schemas optimized for your model
+
+```python
+from hud.types import AgentType
+from hud.tools import BaseTool
+from hud.tools.native_types import NativeToolSpec
+
+class MyShellTool(BaseTool):
+    native_specs = {
+        AgentType.CUSTOM: NativeToolSpec(
+            api_type="my_shell_v1",
+            api_name="shell",
+            role="shell",
+        ),
+    }
+```
+
+## Tool Categories
+
+<CardGroup cols={2}>
+  <Card title="Computer" icon="desktop" href="/native-tools/computer">
+    Mouse, keyboard, screenshots
+  </Card>
+  <Card title="Coding" icon="code" href="/native-tools/coding">
+    Shell execution, file editing
+  </Card>
+  <Card title="Memory" icon="brain" href="/native-tools/memory">
+    Persistent storage
+  </Card>
+  <Card title="Web" icon="globe" href="/native-tools/web">
+    Browser automation, search
+  </Card>
+  <Card title="Grounding" icon="crosshairs" href="/native-tools/grounding">
+    Element description → coordinates
+  </Card>
+</CardGroup>

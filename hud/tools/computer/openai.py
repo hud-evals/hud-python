@@ -74,10 +74,8 @@ class OpenAIComputerTool(HudComputerTool):
         platform_type: Literal["auto", "xdo", "pyautogui"] = "auto",
         display_num: int | None = None,
         # Overrides for what dimensions the agent thinks it operates in
-        display_width: int | None = None,
-        display_height: int | None = None,
-        width: int | None = None,  # Deprecated: use display_width
-        height: int | None = None,  # Deprecated: use display_height
+        width: int = computer_settings.OPENAI_COMPUTER_WIDTH,
+        height: int = computer_settings.OPENAI_COMPUTER_HEIGHT,
         rescale_images: bool = computer_settings.OPENAI_RESCALE_IMAGES,
         name: str | None = None,
         title: str | None = None,
@@ -88,19 +86,13 @@ class OpenAIComputerTool(HudComputerTool):
         Initialize with OpenAI's default dimensions.
 
         Args:
-            display_width: Width for agent coordinate system
-            display_height: Height for agent coordinate system
-            width: Deprecated, use display_width
-            height: Deprecated, use display_height
+            width: Width for agent coordinate system (default: 1024)
+            height: Height for agent coordinate system (default: 768)
             rescale_images: If True, rescale screenshots. If False, only rescale action coordinates
             name: Tool name for MCP registration (auto-generated from class name if not provided)
             title: Human-readable display name for the tool (auto-generated from class name)
             description: Tool description (auto-generated from docstring if not provided)
         """
-        # Handle deprecated width/height params
-        actual_width = display_width or width or computer_settings.OPENAI_COMPUTER_WIDTH
-        actual_height = display_height or height or computer_settings.OPENAI_COMPUTER_HEIGHT
-
         # Create instance-level native_specs with display dimensions
         instance_native_specs = {
             AgentType.OPENAI: NativeToolSpec(
@@ -108,8 +100,8 @@ class OpenAIComputerTool(HudComputerTool):
                 api_name="computer",
                 role="computer",
                 extra={
-                    "display_width": actual_width,
-                    "display_height": actual_height,
+                    "display_width": width,
+                    "display_height": height,
                 },
             ),
             AgentType.OPERATOR: NativeToolSpec(
@@ -117,8 +109,8 @@ class OpenAIComputerTool(HudComputerTool):
                 api_name="computer",
                 role="computer",
                 extra={
-                    "display_width": actual_width,
-                    "display_height": actual_height,
+                    "display_width": width,
+                    "display_height": height,
                 },
             ),
         }
@@ -127,8 +119,8 @@ class OpenAIComputerTool(HudComputerTool):
             executor=executor,
             platform_type=platform_type,
             display_num=display_num,
-            width=actual_width,
-            height=actual_height,
+            width=width,
+            height=height,
             rescale_images=rescale_images,
             name=name or "openai_computer",
             title=title or "OpenAI Computer Tool",

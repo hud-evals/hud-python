@@ -74,6 +74,17 @@
                 ]
               },
               {
+                "group": "Tools",
+                "pages": [
+                  "native-tools/index",
+                  "native-tools/computer",
+                  "native-tools/coding",
+                  "native-tools/memory",
+                  "native-tools/web",
+                  "native-tools/grounding"
+                ]
+              },
+              {
                 "group": "SDK Reference",
                 "pages": [
                   "reference/evals",

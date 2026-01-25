@@ -19,7 +19,7 @@ from fastmcp import Client as MCPClient
 from hud.agents.base import CategorizedTools, MCPAgent
 from hud.server import MCPServer
 from hud.tools.base import BaseTool
-from hud.tools.bash import BashTool
+from hud.tools.coding import BashTool
 from hud.tools.computer.anthropic import AnthropicComputerTool
 from hud.tools.hosted import GoogleSearchTool
 from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
@@ -662,7 +662,7 @@ class TestToolNativeSpecs:
 
     def test_shell_tool_has_openai_native_spec(self) -> None:
         """Test ShellTool has native_specs for OpenAI."""
-        from hud.tools.shell import ShellTool
+        from hud.tools.coding import ShellTool
         from hud.types import AgentType
 
         assert hasattr(ShellTool, "native_specs")
@@ -673,7 +673,7 @@ class TestToolNativeSpecs:
 
     def test_apply_patch_tool_has_openai_native_spec(self) -> None:
         """Test ApplyPatchTool has native_specs for OpenAI."""
-        from hud.tools.apply_patch import ApplyPatchTool
+        from hud.tools.coding import ApplyPatchTool
         from hud.types import AgentType
 
         assert hasattr(ApplyPatchTool, "native_specs")
@@ -684,7 +684,7 @@ class TestToolNativeSpecs:
 
     def test_bash_tool_has_claude_native_spec(self) -> None:
         """Test BashTool has native_specs for Claude."""
-        from hud.tools.bash import BashTool
+        from hud.tools.coding import BashTool
         from hud.types import AgentType
 
         assert hasattr(BashTool, "native_specs")
@@ -695,7 +695,7 @@ class TestToolNativeSpecs:
 
     def test_edit_tool_has_claude_native_spec(self) -> None:
         """Test EditTool has native_specs for Claude."""
-        from hud.tools.edit import EditTool
+        from hud.tools.coding import EditTool
         from hud.types import AgentType
 
         assert hasattr(EditTool, "native_specs")
@@ -706,7 +706,7 @@ class TestToolNativeSpecs:
 
     def test_shell_tools_have_mutual_exclusion_role(self) -> None:
         """Test BashTool and ShellTool both have role='shell' for mutual exclusion."""
-        from hud.tools.bash import BashTool
+        from hud.tools.coding import BashTool
         from hud.tools.coding import ShellTool
         from hud.types import AgentType
 
@@ -719,7 +719,7 @@ class TestToolNativeSpecs:
     def test_editor_tools_have_mutual_exclusion_role(self) -> None:
         """Test EditTool and ApplyPatchTool both have role='editor' for mutual exclusion."""
         from hud.tools.coding import ApplyPatchTool
-        from hud.tools.edit import EditTool
+        from hud.tools.coding import EditTool
         from hud.types import AgentType
 
         edit_spec = EditTool.native_specs[AgentType.CLAUDE]
@@ -727,3 +727,21 @@ class TestToolNativeSpecs:
 
         assert edit_spec.role == "editor"
         assert apply_patch_spec.role == "editor"
+
+    def test_gemini_tools_have_role_but_not_native(self) -> None:
+        """Test GeminiShellTool and GeminiEditTool have roles for mutual exclusion but no native API."""
+        from hud.tools.coding import GeminiEditTool, GeminiShellTool
+        from hud.types import AgentType
+
+        shell_spec = GeminiShellTool.native_specs[AgentType.GEMINI]
+        edit_spec = GeminiEditTool.native_specs[AgentType.GEMINI]
+
+        # Should have roles for mutual exclusion
+        assert shell_spec.role == "shell"
+        assert edit_spec.role == "editor"
+
+        # But should NOT be native (no api_type means standard function calling)
+        assert shell_spec.api_type is None
+        assert edit_spec.api_type is None
+        assert shell_spec.is_native is False
+        assert edit_spec.is_native is False

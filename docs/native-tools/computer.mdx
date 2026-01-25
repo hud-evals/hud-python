@@ -1,0 +1,151 @@
+---
+title: "Computer Tools"
+description: "Mouse, keyboard, and screenshot control"
+icon: "desktop"
+---
+
+Computer tools let agents interact with GUIs—click, type, scroll, drag, screenshot. Each provider has its own computer use API. Pick the one that matches your agent.
+
+## Quick Reference
+
+| Tool | Agent | Default Resolution |
+|------|-------|-------------------|
+| `AnthropicComputerTool` | Claude | 1280×720 |
+| `OpenAIComputerTool` | OpenAI / Operator | 1920×1080 |
+| `GeminiComputerTool` | Gemini | 1280×720 |
+| `HudComputerTool` | Any (function calling) | 1280×720 |
+
+## AnthropicComputerTool
+
+For Claude. Uses `computer_20250124` native API.
+
+```python
+from hud.tools import AnthropicComputerTool
+
+computer = AnthropicComputerTool(
+    display_width=1280,
+    display_height=720,
+    rescale_images=True,
+)
+```
+
+**Actions**: `screenshot`, `click`, `double_click`, `mouse_move`, `left_click_drag`, `type`, `key`, `scroll`, `wait`
+
+```python
+# Screenshot
+await computer(action="screenshot")
+
+# Click
+await computer(action="click", coordinate=[640, 360])
+
+# Type text
+await computer(action="type", text="Hello, World!")
+
+# Keyboard shortcut
+await computer(action="key", text="ctrl+c")
+
+# Scroll
+await computer(action="scroll", coordinate=[640, 360], scroll_direction="down", scroll_amount=3)
+```
+
+## OpenAIComputerTool
+
+For OpenAI and Operator. Uses `computer_use_preview` native API.
+
+```python
+from hud.tools import OpenAIComputerTool
+
+computer = OpenAIComputerTool(
+    display_width=1920,
+    display_height=1080,
+    rescale_images=False,
+)
+```
+
+**Actions**: `screenshot`, `click`, `double_click`, `scroll`, `type`, `wait`, `move`, `keypress`, `drag`
+
+```python
+# Click
+await computer(type="click", x=500, y=300, button="left")
+
+# Type
+await computer(type="type", text="Hello!")
+
+# Key press
+await computer(type="keypress", keys=["ctrl", "v"])
+
+# Scroll
+await computer(type="scroll", x=500, y=300, scroll_x=0, scroll_y=-100)
+
+# Drag
+await computer(type="drag", path=[{"x": 100, "y": 100}, {"x": 300, "y": 300}])
+```
+
+## HudComputerTool
+
+Generic computer tool for any agent via function calling. Use when you need provider-agnostic control.
+
+```python
+from hud.tools import HudComputerTool
+
+computer = HudComputerTool(
+    platform_type="auto",  # "auto", "xdo", or "pyautogui"
+    width=1280,
+    height=720,
+)
+```
+
+**Actions**: `screenshot`, `click`, `write`, `press`, `scroll`, `drag`, `move`, `wait`
+
+```python
+await computer(action="screenshot")
+await computer(action="click", x=100, y=200)
+await computer(action="write", text="Hello", enter_after=True)
+await computer(action="press", keys=["ctrl", "c"])
+```
+
+## Executors
+
+Computer tools use executors for the actual system interaction:
+
+| Executor | Platform | Notes |
+|----------|----------|-------|
+| `PyAutoGUIExecutor` | Cross-platform | Default on Windows/macOS |
+| `XDOExecutor` | Linux/X11 | Faster, uses xdotool |
+
+```python
+from hud.tools import HudComputerTool
+from hud.tools.executors import XDOExecutor
+
+executor = XDOExecutor(display_num=1)
+computer = HudComputerTool(executor=executor)
+```
+
+## Coordinate Scaling
+
+Agent coordinates don't have to match actual display resolution. The tool handles scaling:
+
+```python
+# Agent works in 1280×720
+computer = AnthropicComputerTool(display_width=1280, display_height=720)
+
+# Actual display is 2560×1440
+# Agent sends (640, 360) → Executor receives (1280, 720)
+```
+
+`rescale_images=True` resizes screenshots to agent dimensions. `rescale_images=False` keeps full resolution (coordinates still scale).
+
+## Customizing
+
+```python
+from typing import Any
+from mcp.types import ContentBlock
+from hud.tools import AnthropicComputerTool
+
+class SafeComputerTool(AnthropicComputerTool):
+    async def __call__(self, action: str, **kwargs: Any) -> list[ContentBlock]:
+        print(f"Action: {action}")  # Log all actions
+        return await super().__call__(action, **kwargs)
+```
+
+→ [Grounding Tools](/native-tools/grounding) — Resolve element descriptions to coordinates

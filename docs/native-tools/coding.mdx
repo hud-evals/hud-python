@@ -1,0 +1,243 @@
+---
+title: "Coding Tools"
+description: "Shell execution and file editing"
+icon: "code"
+---
+
+Coding tools give agents shell access and file editing. Like computer tools, each provider has its own spec.
+
+## Quick Reference
+
+**Shell tools** execute commands in a persistent bash session:
+
+| Tool | Agent | Features |
+|------|-------|----------|
+| `BashTool` | Claude | Persistent, manual restart |
+| `ShellTool` | OpenAI | Auto-restart, dynamic timeout |
+| `GeminiShellTool` | Gemini | Simple execution |
+
+**Editor tools** modify files:
+
+| Tool | Agent | Style |
+|------|-------|-------|
+| `EditTool` | Claude | `str_replace` based |
+| `ApplyPatchTool` | OpenAI | Unified diff |
+| `GeminiEditTool` | Gemini | Instruction-based |
+
+## BashTool (Claude)
+
+Persistent bash shell. Session survives across calls. Agent must manually restart on timeout.
+
+```python
+from hud.tools import BashTool
+
+bash = BashTool()
+```
+
+```python
+# Execute command
+result = await bash(command="ls -la")
+
+# Chain commands (session persists)
+await bash(command="cd /app")
+await bash(command="npm install")
+
+# Restart if session dies
+await bash(restart=True)
+```
+
+Uses native `bash_20250124` API.
+
+## ShellTool (OpenAI)
+
+Auto-restarts on error. Supports multiple commands with per-command timeout.
+
+```python
+from hud.tools.coding import ShellTool
+
+shell = ShellTool()
+```
+
+```python
+result = await shell(
+    commands=["cd /app", "npm install", "npm run build"],
+    timeout_ms=60000,
+)
+
+for output in result.output:
+    print(f"stdout: {output.stdout}")
+    print(f"exit: {output.outcome.exit_code}")
+```
+
+Uses native `shell` API.
+
+## GeminiShellTool
+
+Simple command execution for Gemini and generic agents.
+
+```python
+from hud.tools.coding import GeminiShellTool
+
+shell = GeminiShellTool()
+result = await shell(command="python script.py", timeout=120)
+```
+
+## EditTool (Claude)
+
+File editor using `str_replace`. Maintains undo history.
+
+```python
+from hud.tools import EditTool
+
+editor = EditTool()
+```
+
+**Commands**: `view`, `create`, `str_replace`, `insert`, `undo_edit`
+
+```python
+# View file
+await editor(command="view", path="/app/main.py", view_range=[1, 50])
+
+# View directory
+await editor(command="view", path="/app")
+
+# Create file
+await editor(
+    command="create",
+    path="/app/new.py",
+    file_text="def hello():\n    print('Hello!')",
+)
+
+# Replace text (old_str must be unique in file)
+await editor(
+    command="str_replace",
+    path="/app/main.py",
+    old_str="print('old')",
+    new_str="print('new')",
+)
+
+# Insert at line
+await editor(
+    command="insert",
+    path="/app/main.py",
+    insert_line=10,
+    new_str="# New comment\n",
+)
+
+# Undo last edit
+await editor(command="undo_edit", path="/app/main.py")
+```
+
+Uses native `text_editor_20250728` API. Paths must be absolute.
+
+## ApplyPatchTool (OpenAI)
+
+Unified diff format for file modifications.
+
+```python
+from hud.tools.coding import ApplyPatchTool
+
+patcher = ApplyPatchTool()
+
+patch = """--- a/main.py
++++ b/main.py
+@@ -10,7 +10,7 @@
+ def greet(name):
+-    print(f"Hello, {name}!")
++    print(f"Welcome, {name}!")
+     return True
+"""
+
+result = await patcher(patch=patch)
+```
+
+## GeminiEditTool
+
+Instruction-based editing for Gemini.
+
+```python
+from hud.tools.coding import GeminiEditTool
+
+editor = GeminiEditTool()
+
+# Natural language instruction
+await editor(
+    file_path="/app/main.py",
+    instruction="Add a docstring to the greet function",
+)
+
+# Direct replacement
+await editor(
+    file_path="/app/main.py",
+    old_content="def greet():",
+    new_content="def greet(name: str):",
+)
+```
+
+## Role Exclusion
+
+Shell tools share `role="shell"`. Editor tools share `role="editor"`. Only one per role can be active natively—prevents conflicts.
+
+## Typical Setup
+
+For Claude:
+
+```python
+from hud import Environment
+from hud.tools import BashTool, EditTool
+
+env = Environment("coding-env")
+env.add_tool(BashTool())
+env.add_tool(EditTool())
+```
+
+For OpenAI:
+
+```python
+from hud import Environment
+from hud.tools.coding import ShellTool, ApplyPatchTool
+
+env = Environment("coding-env")
+env.add_tool(ShellTool())
+env.add_tool(ApplyPatchTool())
+```
+
+## Customizing
+
+Restrict commands:
+
+```python
+from typing import Any
+from mcp.types import ContentBlock
+from hud.tools import BashTool
+from hud.tools.types import ToolError
+
+class RestrictedBashTool(BashTool):
+    BLOCKED = ["rm -rf /", "sudo", "curl"]
+    
+    async def __call__(
+        self, command: str | None = None, restart: bool = False
+    ) -> list[ContentBlock]:
+        if command:
+            for blocked in self.BLOCKED:
+                if blocked in command:
+                    raise ToolError(f"Blocked: {blocked}")
+        return await super().__call__(command, restart)
+```
+
+Read-only editor:
+
+```python
+from typing import Any
+from mcp.types import ContentBlock
+from hud.tools import EditTool
+from hud.tools.types import ToolError
+
+class ReadOnlyEditTool(EditTool):
+    async def __call__(
+        self, *, command: str, path: str, **kwargs: Any
+    ) -> list[ContentBlock]:
+        if command != "view":
+            raise ToolError("Read-only environment")
+        return await super().__call__(command=command, path=path, **kwargs)
+```

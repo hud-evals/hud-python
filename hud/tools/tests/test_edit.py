@@ -11,7 +11,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from mcp.types import TextContent
 
-from hud.tools.edit import EditTool, ToolError
+from hud.tools.coding import EditTool
+from hud.tools.types import ToolError
 
 
 class TestEditTool:
@@ -21,8 +22,6 @@ class TestEditTool:
         """Test EditTool initialization."""
         tool = EditTool()
         assert tool is not None
-        # File history tracking was removed
-        # assert tool._file_history == {}
 
     @pytest.mark.asyncio
     async def test_validate_path_not_absolute(self):
@@ -75,23 +74,19 @@ class TestEditTool:
             file_path = Path(tmpdir) / "test.txt"
             content = "Hello, World!"
 
-            # Mock write_file to avoid actual file I/O
-            with patch.object(tool, "write_file", new_callable=AsyncMock) as mock_write:
+            # Patch the module-level write_file_async function
+            with patch(
+                "hud.tools.coding.edit.write_file_async", new_callable=AsyncMock
+            ) as mock_write:
                 result = await tool(command="create", path=str(file_path), file_text=content)
 
                 assert isinstance(result, list)
                 assert len(result) > 0
-                # Check that we have a content block with the success message
-                assert any("created successfully" in str(block) for block in result)
                 # For TextContent, we need to check the text attribute
                 text_blocks = [block for block in result if isinstance(block, TextContent)]
                 assert len(text_blocks) > 0
                 assert "created successfully" in text_blocks[0].text
                 mock_write.assert_called_once_with(file_path, content)
-                # Check history
-                # File history tracking was removed
-                # assert file_path in tool._file_history
-                # assert tool._file_history[file_path] == [content]
 
     @pytest.mark.asyncio
     async def test_create_file_no_text(self):
@@ -113,9 +108,11 @@ class TestEditTool:
 
         file_content = "Line 1\nLine 2\nLine 3"
 
-        # Mock read_file and validate_path
+        # Patch module-level functions
         with (
-            patch.object(tool, "read_file", new_callable=AsyncMock) as mock_read,
+            patch(
+                "hud.tools.coding.edit.read_file_async", new_callable=AsyncMock
+            ) as mock_read,
             patch.object(tool, "validate_path"),
         ):
             mock_read.return_value = file_content
@@ -124,7 +121,6 @@ class TestEditTool:
 
             assert isinstance(result, list)
             assert len(result) > 0
-            # Check that we have text content blocks with the file contents
             text_blocks = [block for block in result if isinstance(block, TextContent)]
             assert len(text_blocks) > 0
             combined_text = "".join(block.text for block in text_blocks)
@@ -139,9 +135,10 @@ class TestEditTool:
 
         file_content = "\n".join([f"Line {i}" for i in range(1, 11)])
 
-        # Mock read_file and validate_path
         with (
-            patch.object(tool, "read_file", new_callable=AsyncMock) as mock_read,
+            patch(
+                "hud.tools.coding.edit.read_file_async", new_callable=AsyncMock
+            ) as mock_read,
             patch.object(tool, "validate_path"),
         ):
             mock_read.return_value = file_content
@@ -150,7 +147,6 @@ class TestEditTool:
 
             assert isinstance(result, list)
             assert len(result) > 0
-            # Check that we have text content blocks with the specified range
             text_blocks = [block for block in result if isinstance(block, TextContent)]
             assert len(text_blocks) > 0
             combined_text = "".join(block.text for block in text_blocks)
@@ -170,10 +166,13 @@ class TestEditTool:
         file_content = "Hello, World!\nThis is a test."
         expected_content = "Hello, Universe!\nThis is a test."
 
-        # Mock read_file, write_file and validate_path
         with (
-            patch.object(tool, "read_file", new_callable=AsyncMock) as mock_read,
-            patch.object(tool, "write_file", new_callable=AsyncMock) as mock_write,
+            patch(
+                "hud.tools.coding.edit.read_file_async", new_callable=AsyncMock
+            ) as mock_read,
+            patch(
+                "hud.tools.coding.edit.write_file_async", new_callable=AsyncMock
+            ) as mock_write,
             patch.object(tool, "validate_path"),
         ):
             mock_read.return_value = file_content
@@ -184,7 +183,6 @@ class TestEditTool:
 
             assert isinstance(result, list)
             assert len(result) > 0
-            # Check for success message
             text_blocks = [block for block in result if isinstance(block, TextContent)]
             assert len(text_blocks) > 0
             combined_text = "".join(block.text for block in text_blocks)
@@ -198,9 +196,10 @@ class TestEditTool:
 
         file_content = "Hello, World!"
 
-        # Mock read_file and validate_path
         with (
-            patch.object(tool, "read_file", new_callable=AsyncMock) as mock_read,
+            patch(
+                "hud.tools.coding.edit.read_file_async", new_callable=AsyncMock
+            ) as mock_read,
             patch.object(tool, "validate_path"),
         ):
             mock_read.return_value = file_content
@@ -222,9 +221,10 @@ class TestEditTool:
 
         file_content = "Test test\nAnother test line"
 
-        # Mock read_file and validate_path
         with (
-            patch.object(tool, "read_file", new_callable=AsyncMock) as mock_read,
+            patch(
+                "hud.tools.coding.edit.read_file_async", new_callable=AsyncMock
+            ) as mock_read,
             patch.object(tool, "validate_path"),
         ):
             mock_read.return_value = file_content
@@ -241,8 +241,6 @@ class TestEditTool:
         """Test invalid command raises error."""
         tool = EditTool()
 
-        # Since EditTool has a bug where it references self.name without defining it,
-        # we'll test by passing a Command that isn't in the literal
         with tempfile.TemporaryDirectory() as tmpdir:
             file_path = Path(tmpdir) / "test.txt"
             # Create the file so validate_path doesn't fail
@@ -254,6 +252,5 @@ class TestEditTool:
                     path=str(file_path),
                 )
 
-            # Accept either the expected error or AttributeError from the bug
             error_msg = str(exc_info.value)
             assert "Unrecognized command" in error_msg or "name" in error_msg

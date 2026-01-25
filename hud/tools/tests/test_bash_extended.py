@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from hud.tools.bash import ToolError, _BashSession
+from hud.tools.coding import _BashSession
+from hud.tools.types import ToolError
 
 
 class TestBashSessionExtended:

@@ -125,7 +125,7 @@ class TestBaseToolNativeSpecs:
 
     def test_tool_with_class_native_specs(self) -> None:
         """Test that class-level native_specs are embedded in meta."""
-        from hud.tools.bash import BashTool
+        from hud.tools.coding import BashTool
 
         tool = BashTool()
         assert tool.meta is not None
@@ -161,7 +161,7 @@ class TestBaseToolNativeSpecs:
 
     def test_get_native_spec(self) -> None:
         """Test get_native_spec method on BaseTool."""
-        from hud.tools.bash import BashTool
+        from hud.tools.coding import BashTool
 
         tool = BashTool()
         spec = tool.get_native_spec(AgentType.CLAUDE)

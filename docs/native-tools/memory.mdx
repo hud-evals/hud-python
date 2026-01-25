@@ -1,0 +1,148 @@
+---
+title: "Memory Tools"
+description: "Persistent storage across conversations"
+icon: "brain"
+---
+
+Memory tools let agents store and retrieve information that persists beyond a single request. Two options: file-based (Claude's native memory) or semantic search (any agent).
+
+## Quick Reference
+
+| Tool | Agent | Storage | Persistence |
+|------|-------|---------|-------------|
+| `ClaudeMemoryTool` | Claude | Files in `/memories` | Across conversations |
+| `MemoryTool` | Any | In-memory or Qdrant | Session or persistent |
+
+## ClaudeMemoryTool
+
+File-based memory for Claude. Uses native `memory_20250818` API. Stores files in a `/memories` directory.
+
+```python
+from hud.tools.coding import ClaudeMemoryTool
+
+memory = ClaudeMemoryTool(memories_dir="/memories")
+```
+
+**Commands**: `view`, `create`, `str_replace`, `insert`, `delete`, `rename`
+
+```python
+# View memories directory
+await memory(command="view", path="/memories")
+
+# Create a memory file
+await memory(
+    command="create",
+    path="/memories/user_prefs.md",
+    file_text="# Preferences\n\n- Theme: dark\n- Language: Python",
+)
+
+# Update memory
+await memory(
+    command="str_replace",
+    path="/memories/user_prefs.md",
+    old_str="- Theme: dark",
+    new_str="- Theme: light",
+)
+
+# View file contents
+await memory(command="view", path="/memories/user_prefs.md")
+
+# Delete
+await memory(command="delete", path="/memories/old_notes.md")
+
+# Rename/move
+await memory(
+    command="rename",
+    old_path="/memories/temp.md",
+    new_path="/memories/archive/temp.md",
+)
+```
+
+Paths must start with `/memories`. Directory traversal is blocked.
+
+## MemoryTool
+
+Session-based memory with semantic search. Works with any agent. Uses simple token overlap for retrieval, or Qdrant for vector search.
+
+```python
+from hud.tools import MemoryTool
+
+# In-memory (session only)
+memory = MemoryTool()
+
+# With Qdrant (persistent)
+memory = MemoryTool(
+    collection="my_memories",
+    qdrant_url="http://localhost:6333",
+)
+```
+
+**Actions**: `add`, `search`
+
+```python
+# Store memory
+await memory(
+    action="add",
+    text="User prefers TypeScript over JavaScript",
+    metadata={"category": "preferences"},
+)
+
+# Search
+result = await memory(
+    action="search",
+    text="What language does the user prefer?",
+    top_k=3,
+)
+```
+
+In-memory uses token overlap (Jaccard similarity). Qdrant uses sentence-transformer embeddings for semantic search.
+
+## When to Use Which
+
+| Use Case | Tool |
+|----------|------|
+| Claude with native API | `ClaudeMemoryTool` |
+| Structured file storage | `ClaudeMemoryTool` |
+| Any agent, simple storage | `MemoryTool` |
+| Semantic search | `MemoryTool` + Qdrant |
+
+## Typical Setup
+
+```python
+from hud import Environment
+from hud.tools import BashTool, EditTool
+from hud.tools.coding import ClaudeMemoryTool
+
+env = Environment("persistent-env")
+env.add_tool(BashTool())
+env.add_tool(EditTool())
+env.add_tool(ClaudeMemoryTool())
+```
+
+## Custom Memory
+
+Key-value storage:
+
+```python
+from hud.tools import BaseTool
+from mcp.types import ContentBlock, TextContent
+
+class ContextTool(BaseTool):
+    def __init__(self):
+        super().__init__(name="context", description="Store and retrieve context")
+        self._store: dict[str, str] = {}
+    
+    async def __call__(
+        self, action: str, key: str, value: str | None = None
+    ) -> list[ContentBlock]:
+        if action == "set" and value:
+            self._store[key] = value
+            return [TextContent(text=f"Stored: {key}", type="text")]
+        elif action == "get":
+            val = self._store.get(key, "Not found")
+            return [TextContent(text=val, type="text")]
+        elif action == "list":
+            keys = ", ".join(self._store.keys()) or "Empty"
+            return [TextContent(text=keys, type="text")]
+        return [TextContent(text="Unknown action", type="text")]
+```

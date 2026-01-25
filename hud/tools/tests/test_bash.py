@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from hud.tools.bash import BashTool, ContentResult, ToolError, _BashSession
+from hud.tools.coding import BashTool, _BashSession
+from hud.tools.types import ContentResult, ToolError
 from hud.tools.types import TextContent
 
 

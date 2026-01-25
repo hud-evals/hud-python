@@ -1,15 +1,27 @@
-"""HUD tools for computer control, file editing, and bash commands."""
+"""HUD tools for computer control, file editing, and bash commands.
+
+For coding tools (shell, bash, edit, apply_patch), import from:
+    from hud.tools.coding import BashTool, ShellTool, EditTool, ApplyPatchTool
+
+For computer tools, import from:
+    from hud.tools.computer import AnthropicComputerTool, OpenAIComputerTool
+"""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+# Base classes and types
 from .agent import AgentTool
 from .base import BaseHub, BaseTool
-from .bash import BashTool  # Claude-native bash
-from .coding import ApplyPatchTool, ShellTool  # OpenAI-native shell/patch
-from .edit import EditTool  # Claude-native edit
-from .hosted import CodeExecutionTool, GoogleSearchTool, HostedTool, UrlContextTool
+from .hosted import (
+    CodeExecutionTool,
+    GoogleSearchTool,
+    HostedTool,
+    UrlContextTool,
+    WebFetchTool,
+    WebSearchTool,
+)
 from .memory import MemoryTool
 from .native_types import NativeToolSpec, NativeToolSpecs
 from .playwright import PlaywrightTool
@@ -24,6 +36,14 @@ if TYPE_CHECKING:
         OpenAIComputerTool,
         QwenComputerTool,
     )
+    from .coding import (
+        ApplyPatchTool,
+        BashTool,
+        EditTool,
+        GeminiEditTool,
+        GeminiShellTool,
+        ShellTool,
+    )
 
 __all__ = [
     # Base classes
@@ -34,22 +54,25 @@ __all__ = [
     # Native tool types
     "NativeToolSpec",
     "NativeToolSpecs",
-    # Computer tools
+    # Computer tools (lazy import)
     "AnthropicComputerTool",
     "GeminiComputerTool",
     "HudComputerTool",
     "OpenAIComputerTool",
     "QwenComputerTool",
-    # Shell/editor tools (Claude style)
+    # Coding tools (lazy import)
     "BashTool",
     "EditTool",
-    # Shell/editor tools (OpenAI style)
     "ShellTool",
     "ApplyPatchTool",
+    "GeminiShellTool",
+    "GeminiEditTool",
     # Hosted tools
     "CodeExecutionTool",
     "GoogleSearchTool",
     "UrlContextTool",
+    "WebFetchTool",
+    "WebSearchTool",
     # Other tools
     "MemoryTool",
     "PlaywrightTool",
@@ -59,7 +82,8 @@ __all__ = [
 
 
 def __getattr__(name: str) -> Any:
-    """Lazy import computer tools to avoid importing pyautogui unless needed."""
+    """Lazy import tools to avoid heavy imports unless needed."""
+    # Computer tools
     if name in (
         "AnthropicComputerTool",
         "HudComputerTool",
@@ -68,6 +92,18 @@ def __getattr__(name: str) -> Any:
         "QwenComputerTool",
     ):
         from . import computer
-
         return getattr(computer, name)
+
+    # Coding tools
+    if name in (
+        "BashTool",
+        "EditTool",
+        "ShellTool",
+        "ApplyPatchTool",
+        "GeminiShellTool",
+        "GeminiEditTool",
+    ):
+        from . import coding
+        return getattr(coding, name)
+
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

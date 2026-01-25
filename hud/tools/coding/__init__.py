@@ -1,33 +1,79 @@
-"""Coding tools for OpenAI-native shell execution and file patching.
+"""Coding tools for shell execution and file editing.
 
-This module provides OpenAI-native tools:
+All coding-related tools (shell, bash, edit, apply_patch) are centralized here.
 
-Shell Tools (command execution):
-- ShellTool: OpenAI-native shell tool with auto-restart
+Usage:
+    from hud.tools.coding import BashTool, ShellTool, EditTool, ApplyPatchTool
 
-File Patching Tools:
-- ApplyPatchTool: OpenAI-native V4A diff patch tool
+Claude-native tools:
+    - BashTool: Persistent bash shell with manual restart (bash_20250124)
+    - EditTool: str_replace-based file editor (text_editor_20250728)
 
-For Claude-native tools, use:
-- hud.tools.BashTool (Claude bash)
-- hud.tools.EditTool (Claude str_replace editor)
+OpenAI-native tools:
+    - ShellTool: Shell with auto-restart and dynamic timeout (shell)
+    - ApplyPatchTool: V4A diff-based file patching (apply_patch)
+
+Gemini/Generic tools (function calling only):
+    - GeminiShellTool: Simple run_shell_command style
+    - GeminiEditTool: Simple edit style with instruction
 """
 
+# Claude-native tools
+from hud.tools.coding.bash import BashTool, ClaudeBashSession, _BashSession
+from hud.tools.coding.edit import Command, EditTool
+from hud.tools.coding.memory import ClaudeMemoryTool, MemoryCommand
+
+# OpenAI-native tools
 from hud.tools.coding.apply_patch import ApplyPatchResult, ApplyPatchTool, DiffError
 from hud.tools.coding.session import BashSession, ShellCallOutcome, ShellCommandOutput
 from hud.tools.coding.shell import ShellResult, ShellTool
 
+# Gemini/Generic tools
+from hud.tools.coding.gemini_edit import GeminiEditTool
+from hud.tools.coding.gemini_shell import GeminiShellTool, ShellOutput
+
+# Shared utilities
+from hud.tools.coding.utils import (
+    SNIPPET_LINES,
+    make_snippet,
+    maybe_truncate,
+    read_file_async,
+    read_file_sync,
+    validate_path,
+    write_file_async,
+    write_file_sync,
+)
+
 __all__ = [
-    # OpenAI-native tools
+    # Claude tools
+    "BashTool",
+    "ClaudeBashSession",
+    "_BashSession",
+    "EditTool",
+    "Command",
+    "ClaudeMemoryTool",
+    "MemoryCommand",
+    # OpenAI tools
     "ShellTool",
+    "ShellResult",
     "ApplyPatchTool",
-    # Session management
+    "ApplyPatchResult",
+    "DiffError",
+    # Session types
     "BashSession",
     "ShellCallOutcome",
     "ShellCommandOutput",
-    # Result types
-    "ShellResult",
-    "ApplyPatchResult",
-    # Errors
-    "DiffError",
+    # Gemini tools
+    "GeminiShellTool",
+    "GeminiEditTool",
+    "ShellOutput",
+    # Utils
+    "SNIPPET_LINES",
+    "make_snippet",
+    "maybe_truncate",
+    "read_file_async",
+    "read_file_sync",
+    "write_file_async",
+    "write_file_sync",
+    "validate_path",
 ]
