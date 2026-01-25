@@ -49,9 +49,9 @@ class TestReadTool:
         tool = ReadTool(base_path=str(workspace))
         result = await tool(filePath=str(workspace / "test.txt"), offset=2)
 
-        text = result[0].text
-        assert "line 3" in text
-        assert "00003|" in text
+        assert isinstance(result[0], TextContent)
+        assert "line 3" in result[0].text
+        assert "00003|" in result[0].text
 
     @pytest.mark.asyncio
     async def test_read_with_limit(self, workspace: Path) -> None:
@@ -59,6 +59,7 @@ class TestReadTool:
         tool = ReadTool(base_path=str(workspace))
         result = await tool(filePath=str(workspace / "long.txt"), limit=5)
 
+        assert isinstance(result[0], TextContent)
         text = result[0].text
         assert "line 1" in text
         assert "line 5" in text
@@ -107,6 +108,7 @@ class TestGeminiReadTool:
             limit=5,
         )
 
+        assert isinstance(result[0], TextContent)
         text = result[0].text
         assert "IMPORTANT" in text  # Truncation warning
         assert "line 11" in text

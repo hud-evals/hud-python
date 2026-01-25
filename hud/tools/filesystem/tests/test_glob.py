@@ -95,6 +95,6 @@ class TestGeminiGlobTool:
         result = await tool(pattern="**/*.py")
 
         text = result[0].text
-        lines = [l for l in text.strip().split("\n") if l and not l.startswith("(")]
+        lines = [line for line in text.strip().split("\n") if line and not line.startswith("(")]
         # Should be sorted alphabetically
         assert lines == sorted(lines)
