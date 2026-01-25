@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from .agent import AgentTool
 from .base import BaseHub, BaseTool
 from .bash import BashTool
 from .edit import EditTool
+from .memory import MemoryTool
 from .playwright import PlaywrightTool
 from .response import ResponseTool
 from .submit import SubmitTool
@@ -17,9 +19,11 @@ if TYPE_CHECKING:
         GeminiComputerTool,
         HudComputerTool,
         OpenAIComputerTool,
+        QwenComputerTool,
     )
 
 __all__ = [
+    "AgentTool",
     "AnthropicComputerTool",
     "BaseHub",
     "BaseTool",
@@ -27,8 +31,10 @@ __all__ = [
     "EditTool",
     "GeminiComputerTool",
     "HudComputerTool",
+    "MemoryTool",
     "OpenAIComputerTool",
     "PlaywrightTool",
+    "QwenComputerTool",
     "ResponseTool",
     "SubmitTool",
 ]
@@ -41,6 +47,7 @@ def __getattr__(name: str) -> Any:
         "HudComputerTool",
         "OpenAIComputerTool",
         "GeminiComputerTool",
+        "QwenComputerTool",
     ):
         from . import computer
 

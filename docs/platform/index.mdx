@@ -1,0 +1,72 @@
+---
+title: "Overview"
+description: "Navigate the HUD platform to manage models, environments, and tasksets."
+icon: "building"
+---
+
+The HUD platform at [hud.ai](https://hud.ai) is your central dashboard for managing AI agent infrastructure. Browse and train models, deploy environments, organize tasks into evaluation sets, and analyze results.
+
+## Getting Started
+
+Sign in at [hud.ai](https://hud.ai) with your account. The main navigation gives you access to:
+
+- **Home** — View recent jobs and traces
+- **Models** — Browse models, view checkpoints, train custom models
+- **Environments** — Deploy and monitor your agent environments
+- **Tasksets** — Organize tasks for evaluations and benchmarks
+- **🔍 MCP** — Connect your AI agent to query platform data
+
+## Quick Links
+
+<CardGroup cols={2}>
+<Card title="MCP Integration" icon="magnifying-glass" href="/platform/mcp">
+  Let your AI agent query traces, debug environments, and explore tasks
+</Card>
+
+<Card title="Models" icon="robot" href="/platform/models">
+  Browse, fork, and train models
+</Card>
+
+<Card title="Environments" icon="cube" href="/platform/environments">
+  Deploy and manage environments
+</Card>
+
+<Card title="Tasksets" icon="list-check" href="/platform/tasksets">
+  Organize evaluation tasks
+</Card>
+</CardGroup>
+
+## Home Dashboard
+
+Your home page at [hud.ai/home](https://hud.ai/home) shows:
+
+- **Recent Jobs** — Evaluation jobs currently running or recently completed
+- **Latest Traces** — Your latest task runs with outcomes, filterable by user and searchable
+
+## API Keys
+
+Get your API key at [hud.ai/settings/api-keys](https://hud.ai/settings/api-keys). You'll need this for:
+
+- Gateway requests via `inference.hud.ai`
+- CLI authentication (`hud set HUD_API_KEY=...`)
+- SDK initialization
+
+## Team Settings
+
+Manage your team at [hud.ai/settings](https://hud.ai/settings):
+
+- **API Keys** — Create and rotate keys
+- **Team Members** — Invite collaborators
+- **Billing** — View usage and manage subscription
+
+## Next Steps
+
+<CardGroup cols={2}>
+<Card title="Gateway" icon="server" href="/quick-links/gateway">
+  Route to any model with one endpoint
+</Card>
+
+<Card title="Deploy Environments" icon="rocket" href="/quick-links/deploy">
+  Push your environment to production
+</Card>
+</CardGroup>

@@ -1,742 +1,416 @@
-"""Tests for BaseMCPAgent using simulated actions."""
+"""Tests for MCPAgent base class with v5 EvalContext pattern."""
 
 from __future__ import annotations
 
 from typing import Any, ClassVar
-from unittest.mock import MagicMock
-
-# Import AsyncMock from unittest.mock if available (Python 3.8+)
-try:
-    from unittest.mock import AsyncMock
-except ImportError:
-    # Fallback for older Python versions
-    from unittest.mock import MagicMock as AsyncMock
 
 import pytest
 from mcp import types
 
 from hud.agents import MCPAgent
-from hud.datasets import Task
-from hud.tools.executors.base import BaseExecutor
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Trace
+from hud.agents.base import BaseCreateParams
+from hud.environment.router import ToolRouter
+from hud.eval.context import EvalContext
+from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
+
+
+class MockConfig(BaseAgentConfig):
+    model_name: str = "MockAgent"
+    model: str = "mock-model"
+
+
+class MockCreateParams(BaseCreateParams, MockConfig):
+    pass
+
+
+class MockEvalContext(EvalContext):
+    """Mock EvalContext for testing."""
+
+    def __init__(
+        self,
+        prompt: str = "Test prompt",
+        tools: list[types.Tool] | None = None,
+    ) -> None:
+        # Core attributes
+        self.prompt = prompt
+        self._tools = tools or [
+            types.Tool(name="test_tool", description="A test tool", inputSchema={}),
+            types.Tool(name="another_tool", description="Another tool", inputSchema={}),
+        ]
+        self._submitted: str | None = None
+        self.reward: float | None = None
+        self._tool_calls: list[tuple[str, dict[str, Any]]] = []
+
+        # Environment attributes
+        self._router = ToolRouter()
+        self._agent_include: list[str] | None = None
+        self._agent_exclude: list[str] | None = None
+
+        # EvalContext attributes
+        self._task = None
+        self.trace_id = "test-trace-id"
+        self.eval_name = "test-eval"
+        self.job_id: str | None = None
+        self.group_id: str | None = None
+        self.index = 0
+        self.variants: dict[str, Any] = {}
+        self.answer: str | None = None
+        self.system_prompt: str | None = None
+        self.error: BaseException | None = None
+        self.metadata: dict[str, Any] = {}
+        self.results: list[Any] = []
+        self._is_summary = False
+
+    def as_tools(self) -> list[types.Tool]:
+        return self._tools
+
+    @property
+    def has_scenario(self) -> bool:
+        return True
+
+    async def list_tools(self) -> list[types.Tool]:
+        return self._tools
+
+    async def call_tool(self, call: Any, /, **kwargs: Any) -> MCPToolResult:
+        # Parse the call
+        if isinstance(call, tuple):
+            name, args = call[0], call[1] if len(call) > 1 else {}
+        elif hasattr(call, "name"):
+            name, args = call.name, getattr(call, "arguments", {}) or {}
+        else:
+            name, args = str(call), kwargs
+        self._tool_calls.append((name, args))
+        return MCPToolResult(
+            content=[types.TextContent(type="text", text=f"Result from {name}")],
+            isError=False,
+        )
+
+    async def submit(self, answer: str) -> None:
+        self._submitted = answer
 
 
 class MockMCPAgent(MCPAgent):
-    """Concrete implementation of BaseMCPAgent for testing."""
+    """Concrete implementation of MCPAgent for testing."""
 
-    metadata: ClassVar[dict[str, Any]] = {}  # Optional metadata for MCP config
+    metadata: ClassVar[dict[str, Any] | None] = {}
+    config_cls: ClassVar[type[BaseAgentConfig]] = MockConfig
 
-    def __init__(self, mcp_client: Any = None, **kwargs: Any) -> None:
-        if mcp_client is None:
-            # Create a mock client if none provided
-            mcp_client = MagicMock()
-            mcp_client.get_available_tools = MagicMock(return_value=[])
-            mcp_client.initialize = AsyncMock()
-            mcp_client.list_tools = AsyncMock(return_value=[])
-            mcp_client.mcp_config = {"test_server": {"url": "http://localhost"}}
-        super().__init__(mcp_client=mcp_client, **kwargs)
-        self.executor = BaseExecutor()  # Use simulated executor
-        self._messages = []
+    def __init__(self, **kwargs: Any) -> None:
+        params = MockCreateParams(**kwargs)
+        super().__init__(params)
+        self._response = AgentResponse(content="Mock response", tool_calls=[], done=True)
 
-    async def run(self, task: Task) -> list[dict[str, Any]]:
-        """Mock run method."""
-        return self._messages
-
-    async def create_initial_messages(
-        self, prompt: str, initial_screenshot: bool = False
-    ) -> list[dict[str, Any]]:
-        """Mock create initial messages."""
-        messages = [{"role": "user", "content": prompt}]
-        if initial_screenshot:
-            messages.append({"role": "assistant", "content": "Screenshot: mock_screenshot"})
-        return messages
+    def set_response(self, response: AgentResponse) -> None:
+        self._response = response
 
     async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
-        """Mock get response."""
-        return AgentResponse(content="Mock response", tool_calls=[], done=True)
+        return self._response
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
     ) -> list[dict[str, Any]]:
-        """Mock format tool results."""
         formatted = []
-        for tool_call, result in zip(tool_calls, tool_results):
+        for tool_call, result in zip(tool_calls, tool_results, strict=True):
             formatted.append({"role": "tool", "name": tool_call.name, "content": str(result)})
         return formatted
 
-    async def create_user_message(self, text: str) -> Any:
-        """Mock create user message."""
-        return {"role": "user", "content": text}
-
     async def get_system_messages(self) -> list[Any]:
-        """Mock get system messages."""
         return []
 
     async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
-        """Mock format blocks."""
-        formatted = []
-        for block in blocks:
-            if isinstance(block, types.TextContent):
-                formatted.append({"type": "text", "text": block.text})
-            elif isinstance(block, types.ImageContent):
-                formatted.append({"type": "image", "data": block.data})
-            elif hasattr(block, "type"):
-                formatted.append({"type": getattr(block, "type", "unknown")})
-        return formatted
+        return [{"type": "text", "text": getattr(b, "text", "")} for b in blocks]
 
 
-class TestBaseMCPAgent:
-    """Tests for BaseMCPAgent with simulated actions."""
+class TestMCPAgentInit:
+    """Tests for MCPAgent initialization."""
 
-    def test_init_defaults(self):
-        """Test initialization with default values."""
+    def test_init_defaults(self) -> None:
+        """Test agent initializes with default config."""
         agent = MockMCPAgent()
+        assert agent.ctx is None
+        assert agent._initialized is False
+        assert agent.system_prompt is None
 
-        assert agent.mcp_client is not None
-        assert agent.allowed_tools is None
-        assert agent.disallowed_tools is None
-        assert agent.initial_screenshot is True
-        assert agent.system_prompt is not None  # Default system prompt is set
-
-    def test_init_with_params(self):
-        """Test initialization with custom parameters."""
-        client = MagicMock()
-        agent = MockMCPAgent(
-            mcp_client=client,
-            allowed_tools=["tool1", "tool2"],
-            disallowed_tools=["bad_tool"],
-            initial_screenshot=True,
-            system_prompt="Custom prompt",
-        )
-
-        assert agent.mcp_client == client
-        assert agent.allowed_tools == ["tool1", "tool2"]
-        assert agent.disallowed_tools == ["bad_tool"]
-        assert agent.initial_screenshot is True
+    def test_init_with_system_prompt(self) -> None:
+        """Test agent with custom system prompt."""
+        agent = MockMCPAgent(system_prompt="Custom prompt")
         assert agent.system_prompt == "Custom prompt"
 
-    @pytest.mark.asyncio
-    async def test_init_no_client_no_task(self):
-        """Test initialize fails without client and without task."""
 
-        # Create a minimal concrete implementation to test the ValueError
-        class TestAgent(MCPAgent):
-            async def create_initial_messages(
-                self, prompt: str, initial_screenshot: bool = False
-            ) -> list[dict[str, Any]]:
-                return []
-
-            async def format_tool_results(
-                self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
-            ) -> list[dict[str, Any]]:
-                return []
-
-            async def get_response(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
-                return {"content": "test"}
-
-            async def get_system_messages(self) -> list[Any]:
-                return []
-
-            async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
-                return []
-
-        # Agent can be created with None client
-        agent = TestAgent(mcp_client=None)
-
-        # But initialize should fail without client or task
-        with pytest.raises(ValueError, match="No MCPClient"):
-            await agent.initialize()
+class TestMCPAgentRun:
+    """Tests for MCPAgent.run() with EvalContext."""
 
     @pytest.mark.asyncio
-    async def test_initialize_with_sessions(self):
-        """Test initialize with existing sessions."""
+    async def test_run_basic(self) -> None:
+        """Test basic run flow with EvalContext."""
+        ctx = MockEvalContext(prompt="Do something")
         agent = MockMCPAgent()
 
-        # Create proper async mock for session
-        mock_session = MagicMock()
+        result = await agent.run(ctx)
 
-        # Set up the connector and client_session structure
-        mock_session.connector = MagicMock()
-        mock_session.connector.client_session = MagicMock()
-
-        # Mock list_tools on the client_session
-        async def mock_list_tools():
-            return types.ListToolsResult(
-                tools=[
-                    types.Tool(name="tool1", description="Tool 1", inputSchema={"type": "object"}),
-                    types.Tool(name="tool2", description="Tool 2", inputSchema={"type": "object"}),
-                    types.Tool(
-                        name="setup", description="Setup tool", inputSchema={"type": "object"}
-                    ),
-                ]
-            )
-
-        mock_session.connector.client_session.list_tools = mock_list_tools
-
-        assert agent.mcp_client is not None
-
-        # Mock the list_tools method on mcp_client to return the tools
-        agent.mcp_client.list_tools = AsyncMock(
-            return_value=[
-                types.Tool(name="tool1", description="Tool 1", inputSchema={"type": "object"}),
-                types.Tool(name="tool2", description="Tool 2", inputSchema={"type": "object"}),
-                types.Tool(name="setup", description="Setup tool", inputSchema={"type": "object"}),
-            ]
-        )
-
-        await agent.initialize()
-
-        # Check available tools were populated (excludes lifecycle tools)
-        tools = agent.get_available_tools()
-        assert len(tools) == 3  # All tools (setup is not in default lifecycle tools)
-
-        # Ensure names exist in available tools
-        names = {t.name for t in tools}
-        assert {"tool1", "tool2", "setup"} <= names
+        assert result.done is True
+        assert result.content == "Mock response"
+        assert ctx._submitted == "Mock response"
 
     @pytest.mark.asyncio
-    async def test_initialize_with_filtering(self):
-        """Test initialize with tool filtering."""
-        agent = MockMCPAgent(allowed_tools=["tool1"], disallowed_tools=["tool3"])
-
-        # Create proper async mock for session
-        mock_session = MagicMock()
-
-        # Set up the connector and client_session structure
-        mock_session.connector = MagicMock()
-        mock_session.connector.client_session = MagicMock()
-
-        async def mock_list_tools():
-            return types.ListToolsResult(
-                tools=[
-                    types.Tool(name="tool1", description="Tool 1", inputSchema={"type": "object"}),
-                    types.Tool(name="tool2", description="Tool 2", inputSchema={"type": "object"}),
-                    types.Tool(name="tool3", description="Tool 3", inputSchema={"type": "object"}),
-                    types.Tool(name="setup", description="Setup", inputSchema={"type": "object"}),
-                ]
-            )
-
-        mock_session.connector.client_session.list_tools = mock_list_tools
-
-        assert agent.mcp_client is not None
-
-        # Mock the list_tools method on mcp_client to return the tools
-        agent.mcp_client.list_tools = AsyncMock(
-            return_value=[
-                types.Tool(name="tool1", description="Tool 1", inputSchema={"type": "object"}),
-                types.Tool(name="tool2", description="Tool 2", inputSchema={"type": "object"}),
-                types.Tool(name="tool3", description="Tool 3", inputSchema={"type": "object"}),
-                types.Tool(name="setup", description="Setup", inputSchema={"type": "object"}),
-            ]
-        )
-
-        await agent.initialize()
-
-        # Check filtering worked - get_available_tools excludes lifecycle tools
-        tools = agent.get_available_tools()
-        tool_names = [t.name for t in tools]
-        assert len(tools) == 1  # Only tool1 (tool2 and tool3 are filtered out)
-        assert "tool1" in tool_names
-        assert "setup" not in tool_names  # Lifecycle tool excluded from available tools
-        assert "tool2" not in tool_names  # Not in allowed list
-        assert "tool3" not in tool_names  # In disallowed list
-
-        # Make sure tool schemas are correct
-        schemas = agent.get_tool_schemas()
-        assert len(schemas) == 1
-        assert schemas[0]["name"] == "tool1"
-        assert schemas[0]["description"] == "Tool 1"
-        assert schemas[0]["parameters"] == {"type": "object"}
-
-    @pytest.mark.asyncio
-    async def test_call_tool_success(self):
-        """Test successful tool call."""
+    async def test_run_initializes_agent(self) -> None:
+        """Test run() initializes the agent with context."""
+        ctx = MockEvalContext(prompt="Do something")
         agent = MockMCPAgent()
 
-        # Initialize with a tool
-        mock_session = MagicMock()
-        mock_session.connector = MagicMock()
-        mock_session.connector.client_session = MagicMock()
+        assert not agent._initialized
+        await agent.run(ctx)
+        assert agent._initialized
 
-        async def mock_list_tools():
-            return types.ListToolsResult(
-                tools=[
-                    types.Tool(name="test_tool", description="Test", inputSchema={"type": "object"})
-                ]
-            )
+    @pytest.mark.asyncio
+    async def test_run_discovers_tools(self) -> None:
+        """Test run() discovers tools from context."""
+        tools = [
+            types.Tool(name="tool1", description="Tool 1", inputSchema={}),
+            types.Tool(name="tool2", description="Tool 2", inputSchema={}),
+        ]
+        ctx = MockEvalContext(prompt="Do something", tools=tools)
+        agent = MockMCPAgent()
 
-        mock_session.connector.client_session.list_tools = mock_list_tools
+        # We need to check tools before cleanup
+        # Store a reference to check
+        discovered_tools = []
 
-        # Mock the call_tool method on the client session
-        mock_result = types.CallToolResult(
-            content=[types.TextContent(type="text", text="Tool result")], isError=False
-        )
+        original_run = agent._run_context
 
-        async def mock_call_tool(name, args):
-            return mock_result
+        async def capture_tools(*args: Any, **kwargs: Any) -> Any:
+            discovered_tools.extend(agent.get_available_tools())
+            return await original_run(*args, **kwargs)
 
-        mock_session.connector.client_session.call_tool = mock_call_tool
+        agent._run_context = capture_tools  # type: ignore
+        await agent.run(ctx)
 
-        assert agent.mcp_client is not None
+        assert len(discovered_tools) == 2
+        assert discovered_tools[0].name == "tool1"
+        assert discovered_tools[1].name == "tool2"
 
-        # Mock the client's call_tool method directly
-        agent.mcp_client.call_tool = AsyncMock(return_value=mock_result)
+    @pytest.mark.asyncio
+    async def test_run_requires_eval_context(self) -> None:
+        """Test run() raises TypeError for non-EvalContext."""
+        agent = MockMCPAgent()
 
-        # Mock the list_tools method to return the test tool
-        agent.mcp_client.list_tools = AsyncMock(
-            return_value=[
-                types.Tool(name="test_tool", description="Test", inputSchema={"type": "object"})
-            ]
-        )
+        with pytest.raises(TypeError, match="must be EvalContext"):
+            await agent.run("not a context")  # type: ignore
 
-        await agent.initialize()
+    @pytest.mark.asyncio
+    async def test_run_requires_prompt(self) -> None:
+        """Test run() raises ValueError when prompt is empty."""
+        ctx = MockEvalContext(prompt="")
+        agent = MockMCPAgent()
 
-        # Call the tool
-        tool_call = MCPToolCall(name="test_tool", arguments={"param": "value"})
-        results = await agent.call_tools(tool_call)
+        with pytest.raises(ValueError, match="prompt is not set"):
+            await agent.run(ctx)
+
+    @pytest.mark.asyncio
+    async def test_run_clears_context_after(self) -> None:
+        """Test run() clears ctx after completion."""
+        ctx = MockEvalContext(prompt="Do something")
+        agent = MockMCPAgent()
+
+        await agent.run(ctx)
+        assert agent.ctx is None
+
+    @pytest.mark.asyncio
+    async def test_run_no_submit_on_empty_content(self) -> None:
+        """Test run() doesn't submit when content is empty."""
+        ctx = MockEvalContext(prompt="Do something")
+        agent = MockMCPAgent()
+        agent.set_response(AgentResponse(content="", tool_calls=[], done=True))
+
+        await agent.run(ctx)
+        assert ctx._submitted is None
+
+
+class TestMCPAgentToolCalling:
+    """Tests for tool calling through context."""
+
+    @pytest.mark.asyncio
+    async def test_call_tools_uses_context(self) -> None:
+        """Test call_tools routes through ctx.call_tool."""
+        ctx = MockEvalContext(prompt="Do something")
+        agent = MockMCPAgent()
+
+        # Bind context manually
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        # Call a tool
+        results = await agent.call_tools(MCPToolCall(name="test_tool", arguments={"arg": "value"}))
 
         assert len(results) == 1
-        assert results[0] == mock_result
         assert not results[0].isError
+        assert ("test_tool", {"arg": "value"}) in ctx._tool_calls
 
     @pytest.mark.asyncio
-    async def test_call_tool_not_found(self):
-        """Test calling non-existent tool."""
+    async def test_call_tools_without_context_raises(self) -> None:
+        """Test call_tools raises when no context bound."""
         agent = MockMCPAgent()
 
-        # Initialize without tools
-        mock_session = MagicMock()
+        with pytest.raises(ValueError, match="not bound to context"):
+            await agent.call_tools(MCPToolCall(name="test_tool", arguments={}))
 
-        async def mock_list_tools():
-            return types.ListToolsResult(tools=[])
 
-        mock_session.list_tools = mock_list_tools
-        assert agent.mcp_client is not None
-
-        await agent.initialize()
-
-        # Try to call unknown tool - call_tools doesn't raise for unknown tools
-        tool_call = MCPToolCall(name="unknown_tool", arguments={})
-        await agent.call_tools(tool_call)
+class TestMCPAgentRequiredTools:
+    """Tests for required_tools validation."""
 
     @pytest.mark.asyncio
-    async def test_call_tool_no_name(self):
-        """Test calling tool without name."""
-        # MCPToolCall accepts empty names
-        agent = MockMCPAgent()
-        tool_call = MCPToolCall(name="", arguments={})
+    async def test_missing_required_tools_raises(self) -> None:
+        """Test run() raises when required tools are missing."""
 
-        # call_tools doesn't validate empty names, it will return error
-        await agent.call_tools(tool_call)
+        class AgentWithRequiredTools(MockMCPAgent):
+            required_tools: ClassVar[list[str]] = ["must_have_tool"]
 
-    def test_get_tool_schemas(self):
-        """Test getting tool schemas."""
-        agent = MockMCPAgent()
+        ctx = MockEvalContext(prompt="Do something", tools=[])
+        agent = AgentWithRequiredTools()
 
-        agent._available_tools = [
-            types.Tool(name="tool1", description="Tool 1", inputSchema={"type": "object"}),
-            types.Tool(name="setup", description="Setup", inputSchema={"type": "object"}),
+        with pytest.raises(ValueError, match="Required tools are missing"):
+            await agent.run(ctx)
+
+    @pytest.mark.asyncio
+    async def test_required_tools_present_succeeds(self) -> None:
+        """Test run() succeeds when required tools are present."""
+
+        class AgentWithRequiredTools(MockMCPAgent):
+            required_tools: ClassVar[list[str]] = ["required_tool"]
+
+        tools = [types.Tool(name="required_tool", description="Required", inputSchema={})]
+        ctx = MockEvalContext(prompt="Do something", tools=tools)
+        agent = AgentWithRequiredTools()
+
+        result = await agent.run(ctx)
+        assert result.done
+
+
+class TestMCPAgentOnToolsReady:
+    """Tests for _on_tools_ready hook."""
+
+    @pytest.mark.asyncio
+    async def test_on_tools_ready_called(self) -> None:
+        """Test _on_tools_ready is called during initialization."""
+        hook_called = [False]
+
+        class AgentWithHook(MockMCPAgent):
+            def _on_tools_ready(self) -> None:
+                hook_called[0] = True
+
+        ctx = MockEvalContext(prompt="Do something")
+        agent = AgentWithHook()
+
+        await agent.run(ctx)
+        assert hook_called[0]
+
+    @pytest.mark.asyncio
+    async def test_on_tools_ready_has_access_to_tools(self) -> None:
+        """Test _on_tools_ready can access discovered tools."""
+        captured_tools: list[types.Tool] = []
+
+        class AgentWithHook(MockMCPAgent):
+            def _on_tools_ready(self) -> None:
+                captured_tools.extend(self.get_available_tools())
+
+        tools = [
+            types.Tool(name="tool1", description="Tool 1", inputSchema={}),
+            types.Tool(name="tool2", description="Tool 2", inputSchema={}),
         ]
+        ctx = MockEvalContext(prompt="Do something", tools=tools)
+        agent = AgentWithHook()
+
+        await agent.run(ctx)
+
+        assert len(captured_tools) == 2
+        assert captured_tools[0].name == "tool1"
+
+
+class TestMCPAgentToolSchemas:
+    """Tests for tool schema generation."""
+
+    @pytest.mark.asyncio
+    async def test_get_tool_schemas(self) -> None:
+        """Test get_tool_schemas returns correct format."""
+        tools = [
+            types.Tool(
+                name="my_tool",
+                description="My tool description",
+                inputSchema={"type": "object", "properties": {"x": {"type": "string"}}},
+            )
+        ]
+        ctx = MockEvalContext(prompt="Do something", tools=tools)
+        agent = MockMCPAgent()
+
+        # Initialize agent
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
 
         schemas = agent.get_tool_schemas()
+        assert len(schemas) == 1
+        assert schemas[0]["name"] == "my_tool"
+        assert schemas[0]["description"] == "My tool description"
 
-        # Should include non-lifecycle tools
-        assert len(schemas) == 2
-        assert schemas[0]["name"] == "tool1"
 
-    def test_get_tools_by_server(self):
-        """Test getting tools grouped by server."""
-        agent = MockMCPAgent()
-
-        # Set up tools from different servers
-        tool1 = types.Tool(name="tool1", description="Tool 1", inputSchema={"type": "object"})
-        tool2 = types.Tool(name="tool2", description="Tool 2", inputSchema={"type": "object"})
-
-        agent._available_tools = [tool1, tool2]
-        tools = agent.get_available_tools()
-        assert {t.name for t in tools} == {"tool1", "tool2"}
+class TestMCPAgentErrorPropagation:
+    """Tests for error propagation to EvalContext."""
 
     @pytest.mark.asyncio
-    async def test_executor_integration(self):
-        """Test integration with BaseExecutor for simulated actions."""
-        agent = MockMCPAgent()
+    async def test_exception_propagates_to_ctx_error(self) -> None:
+        """Test that exceptions during run() set ctx.error for platform visibility."""
 
-        # Test various executor actions
-        click_result = await agent.executor.click(100, 200, take_screenshot=False)
-        assert click_result.output is not None
-        assert "[SIMULATED] Click at (100, 200)" in click_result.output
+        class FailingAgent(MockMCPAgent):
+            async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
+                raise RuntimeError("Agent crashed")
 
-        type_result = await agent.executor.write("Test input", take_screenshot=False)
-        assert type_result.output is not None
-        assert "[SIMULATED] Type 'Test input'" in type_result.output
+        ctx = MockEvalContext(prompt="Do something")
+        agent = FailingAgent()
 
-        scroll_result = await agent.executor.scroll(x=50, y=50, scroll_y=5, take_screenshot=False)
-        assert scroll_result.output is not None
-        assert "[SIMULATED] Scroll" in scroll_result.output
+        result = await agent.run(ctx)
 
-        # Test screenshot
-        screenshot = await agent.executor.screenshot()
-        assert isinstance(screenshot, str)
-        assert screenshot.startswith("iVBORw0KGgo")  # PNG header
-
-
-class MockAgentExtended(MCPAgent):
-    """Mock agent for testing with predefined responses."""
-
-    metadata: ClassVar[dict[str, Any]] = {}  # Optional metadata for MCP config
-
-    def __init__(self, responses=None, **kwargs):
-        super().__init__(**kwargs)
-        self.responses = responses or []
-        self.call_count = 0
-
-    async def create_initial_messages(
-        self, prompt: str, initial_screenshot: bool = False
-    ) -> list[dict[str, Any]]:
-        """Create initial messages."""
-        messages = [{"role": "user", "content": prompt}]
-        if initial_screenshot:
-            # capture_screenshot doesn't exist, just mock it
-            screenshot = "mock_screenshot_data"
-            messages.append({"role": "assistant", "content": f"Screenshot: {screenshot}"})
-        return messages
-
-    async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
-        """Return predefined responses - must be async."""
-        if self.call_count < len(self.responses):
-            response_dict = self.responses[self.call_count]
-            self.call_count += 1
-            # Convert dict to AgentResponse
-            return AgentResponse(
-                content=response_dict.get("content", ""),
-                tool_calls=response_dict.get("tool_calls", []),
-                done=response_dict.get("done", not bool(response_dict.get("tool_calls"))),
-            )
-        return AgentResponse(content="Done", tool_calls=[], done=True)
-
-    async def format_tool_results(
-        self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
-    ) -> list[dict[str, Any]]:
-        """Format tool results."""
-        formatted = []
-        for tool_call, result in zip(tool_calls, tool_results):
-            formatted.append({"role": "tool", "name": tool_call.name, "content": str(result)})
-        return formatted
-
-    async def create_user_message(self, text: str) -> Any:
-        """Create user message."""
-        return {"role": "user", "content": text}
-
-    async def get_system_messages(self) -> list[Any]:
-        """Mock get system messages."""
-        return []
-
-    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
-        """Mock format blocks."""
-        formatted = []
-        for block in blocks:
-            if isinstance(block, types.TextContent):
-                formatted.append({"type": "text", "text": block.text})
-            elif isinstance(block, types.ImageContent):
-                formatted.append({"type": "image", "data": block.data})
-            elif hasattr(block, "type"):
-                formatted.append({"type": getattr(block, "type", "unknown")})
-        return formatted
-
-
-class TestMCPAgentExtended:
-    """Extended tests for MCPAgent."""
-
-    @pytest.fixture
-    def mock_client(self):
-        """Create a mock MCP client."""
-        client = MagicMock()
-        client.get_all_active_sessions = MagicMock(return_value={})
-        client.initialize = AsyncMock()
-        client.list_tools = AsyncMock(return_value=[])
-        client.call_tool = AsyncMock(
-            return_value=types.CallToolResult(
-                content=[types.TextContent(type="text", text="Success")],
-                isError=False,
-            )
-        )
-        return client
-
-    @pytest.fixture
-    def agent_with_tools(self, mock_client):
-        """Create agent with mock tools."""
-        mock_client.list_tools = AsyncMock(
-            return_value=[
-                types.Tool(name="screenshot", description="Take screenshot", inputSchema={}),
-                types.Tool(name="click", description="Click at coordinates", inputSchema={}),
-                types.Tool(name="type", description="Type text", inputSchema={}),
-                types.Tool(name="bad_tool", description="A tool that fails", inputSchema={}),
-            ]
-        )
-        return MockAgentExtended(mcp_client=mock_client)
-
-    @pytest.mark.asyncio
-    async def test_run_with_task_object(self, agent_with_tools):
-        """Test running agent with Task object."""
-        from hud.types import MCPToolResult
-
-        task = Task(
-            id="test_task",
-            prompt="Click the button",
-            mcp_config={"test_server": {"url": "http://localhost:8080"}},
-            setup_tool={"name": "navigate", "arguments": {"url": "https://example.com"}},  # type: ignore[arg-type]
-            evaluate_tool={"name": "check_result", "arguments": {}},  # type: ignore[arg-type]
-        )
-
-        # Set up responses
-        agent_with_tools.responses = [
-            {
-                "role": "assistant",
-                "content": "I'll click the button",
-                "tool_calls": [MCPToolCall(name="click", arguments={"x": 100, "y": 200})],
-            }
-        ]
-
-        # Mock the evaluation to return a reward
-        agent_with_tools.mcp_client.call_tool = AsyncMock(
-            side_effect=[
-                # Setup tool
-                MCPToolResult(
-                    content=[types.TextContent(type="text", text="Navigated")],
-                    isError=False,
-                ),
-                # Click tool
-                MCPToolResult(
-                    content=[types.TextContent(type="text", text="Clicked")],
-                    isError=False,
-                ),
-                # Evaluate tool with reward
-                MCPToolResult(
-                    content=[types.TextContent(type="text", text="Success")],
-                    isError=False,
-                    structuredContent={"reward": 1.0},
-                ),
-            ]
-        )
-
-        result = await agent_with_tools.run(task)
-
-        assert isinstance(result, Trace)
-        assert result.reward == 1.0
-        assert not result.isError
-        assert result.done
-
-    @pytest.mark.asyncio
-    async def test_run_with_setup_error(self, agent_with_tools):
-        """Test task execution with setup phase error."""
-        from hud.types import MCPToolResult
-
-        task = Task(
-            id="test_task",
-            prompt="Do something",
-            mcp_config={"test_server": {"url": "http://localhost:8080"}},
-            setup_tool={"name": "bad_setup", "arguments": {}},  # type: ignore[arg-type]
-        )
-
-        # Mock setup tool to fail
-        agent_with_tools.mcp_client.call_tool = AsyncMock(
-            return_value=MCPToolResult(
-                content=[types.TextContent(type="text", text="Setup failed")],
-                isError=True,
-            )
-        )
-
-        result = await agent_with_tools.run(task)
-
-        assert isinstance(result, Trace)
-        assert result.isError
-        # Error content is the string representation of the MCPToolResult list
+        # Should return error trace
+        assert result.isError is True
         assert result.content is not None
-        assert "Setup failed" in result.content
-        assert "MCPToolResult" in result.content
+        assert "Agent crashed" in result.content
+
+        assert ctx.error is not None
+        assert isinstance(ctx.error, BaseException)
+        assert "Agent crashed" in str(ctx.error)
 
     @pytest.mark.asyncio
-    async def test_run_with_multiple_setup_tools(self, agent_with_tools):
-        """Test task with multiple setup tools."""
+    async def test_step_error_propagates_to_ctx_error(self) -> None:
+        """Test that step-level errors (caught internally) set ctx.error."""
+        step_count = [0]
 
-        task = Task(
-            id="test_task",
-            prompt="Test multiple setup",
-            mcp_config={"test_server": {"url": "http://localhost:8080"}},
-            setup_tool=[
-                MCPToolCall(name="setup1", arguments={}),
-                MCPToolCall(name="setup2", arguments={}),
-            ],
-        )
+        class FailOnSecondStepAgent(MockMCPAgent):
+            async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
+                step_count[0] += 1
+                if step_count[0] == 1:
+                    return AgentResponse(
+                        content="",
+                        tool_calls=[MCPToolCall(name="test_tool", arguments={})],
+                        done=False,
+                    )
+                else:
+                    raise ValueError("Step 2 failed")
 
-        agent_with_tools.responses = [{"role": "assistant", "content": "Done", "tool_calls": []}]
+        ctx = MockEvalContext(prompt="Do something")
+        agent = FailOnSecondStepAgent()
 
-        setup_calls = []
-        agent_with_tools.mcp_client.call_tool = AsyncMock(
-            side_effect=lambda tool_call: setup_calls.append(tool_call)
-            or MCPToolResult(
-                content=[types.TextContent(type="text", text=f"{tool_call.name} done")],
-                isError=False,
-            )
-        )
+        result = await agent.run(ctx)
 
-        result = await agent_with_tools.run(task)
-
-        # Check that the tool names match
-        setup_names = [call.name for call in setup_calls]
-        assert "setup1" in setup_names
-        assert "setup2" in setup_names
-        assert not result.isError
+        # Should return error trace
+        assert result.isError is True
+        assert ctx.error is not None
+        assert "Step 2 failed" in str(ctx.error)
 
     @pytest.mark.asyncio
-    async def test_allowed_tools_filtering(self, mock_client):
-        """Test that allowed_tools filters available tools."""
-        mock_client.list_tools = AsyncMock(
-            return_value=[
-                types.Tool(name="tool1", description="Tool 1", inputSchema={}),
-                types.Tool(name="tool2", description="Tool 2", inputSchema={}),
-                types.Tool(name="tool3", description="Tool 3", inputSchema={}),
-            ]
-        )
+    async def test_no_error_when_successful(self) -> None:
+        """Test that ctx.error remains None on successful run."""
+        ctx = MockEvalContext(prompt="Do something")
+        agent = MockMCPAgent()
 
-        agent = MockAgentExtended(mcp_client=mock_client, allowed_tools=["tool1", "tool3"])
-        await agent.initialize("test")
+        result = await agent.run(ctx)
 
-        available_names = [tool.name for tool in agent.get_available_tools()]
-        assert "tool1" in available_names
-        assert "tool3" in available_names
-        assert "tool2" not in available_names
-
-    @pytest.mark.asyncio
-    async def test_disallowed_tools_filtering(self, mock_client):
-        """Test that disallowed_tools filters available tools."""
-        mock_client.list_tools = AsyncMock(
-            return_value=[
-                types.Tool(name="tool1", description="Tool 1", inputSchema={}),
-                types.Tool(name="tool2", description="Tool 2", inputSchema={}),
-                types.Tool(name="tool3", description="Tool 3", inputSchema={}),
-            ]
-        )
-
-        agent = MockAgentExtended(mcp_client=mock_client, disallowed_tools=["tool2"])
-        await agent.initialize("test")
-
-        available_names = [tool.name for tool in agent.get_available_tools()]
-        assert "tool1" in available_names
-        assert "tool3" in available_names
-        assert "tool2" not in available_names
-
-    @pytest.mark.asyncio
-    async def test_lifecycle_tools(self, mock_client):
-        """Test lifecycle tools are called in run_prompt."""
-        # Lifecycle tools are specified by name, not as objects
-        agent = MockAgentExtended(
-            mcp_client=mock_client,
-            responses=[{"role": "assistant", "content": "Done", "tool_calls": []}],
-        )
-
-        # Add screenshot tool to available tools
-        mock_client.list_tools = AsyncMock(
-            return_value=[
-                types.Tool(name="screenshot", description="Take screenshot", inputSchema={})
-            ]
-        )
-
-        # Initialize to make tools available
-        await agent.initialize()
-
-        result = await agent.run("Test lifecycle", max_steps=1)
-        assert not result.isError
-
-    # This test is commented out as screenshot history management may have changed
-    # @pytest.mark.asyncio
-    # async def test_screenshot_history_management(self, agent_with_tools):
-    #     """Test screenshot history is maintained."""
-    #     agent_with_tools.initial_screenshot = True
-
-    #     # Set up responses with tool calls
-    #     agent_with_tools.responses = [
-    #         {
-    #             "role": "assistant",
-    #             "content": "Action 1",
-    #             "tool_calls": [MCPToolCall(name="click", arguments={"x": 1, "y": 1})],
-    #         },
-    #         {
-    #             "role": "assistant",
-    #             "content": "Action 2",
-    #             "tool_calls": [MCPToolCall(name="click", arguments={"x": 2, "y": 2})],
-    #         },
-    #         {
-    #             "role": "assistant",
-    #             "content": "Action 3",
-    #             "tool_calls": [MCPToolCall(name="click", arguments={"x": 3, "y": 3})],
-    #         },
-    #     ]
-
-    #     await agent_with_tools.run("Test screenshots", max_steps=3)
-
-    #     # Should have screenshots in history
-    #     assert len(agent_with_tools.screenshot_history) > 0
-
-    @pytest.mark.asyncio
-    async def test_run_with_invalid_prompt_type(self, agent_with_tools):
-        """Test run with invalid prompt type raises TypeError."""
-        with pytest.raises(TypeError, match="prompt_or_task must be str or Task"):
-            await agent_with_tools.run(123)  # Invalid type
-
-    @pytest.mark.asyncio
-    async def test_evaluate_phase_with_multiple_tools(self, agent_with_tools):
-        """Test evaluation phase with multiple evaluation tools."""
-        from hud.types import MCPToolResult
-
-        task = Task(
-            id="test_task",
-            prompt="Test evaluation",
-            mcp_config={"test_server": {"url": "http://localhost:8080"}},
-            evaluate_tool=[
-                MCPToolCall(name="eval1", arguments={}),
-                MCPToolCall(name="eval2", arguments={"reward": True}),
-            ],
-        )
-
-        agent_with_tools.responses = [{"role": "assistant", "content": "Done", "tool_calls": []}]
-
-        eval_calls = []
-        agent_with_tools.mcp_client.call_tool = AsyncMock(
-            side_effect=lambda tool_call: eval_calls.append(tool_call)
-            or MCPToolResult(
-                content=[types.TextContent(type="text", text=f"{tool_call.name} result")],
-                isError=False,
-                structuredContent={"reward": 0.5} if tool_call.name == "eval1" else {"reward": 1.0},
-            )
-        )
-
-        result = await agent_with_tools.run(task)
-
-        # Check that the tool names match
-        eval_names = [call.name for call in eval_calls]
-        assert "eval1" in eval_names
-        assert "eval2" in eval_names
-        assert result.reward == 0.5  # From eval1 (first evaluation tool)
-
-    @pytest.mark.asyncio
-    async def test_trace_population_on_error(self, agent_with_tools):
-        """Test that trace is populated on task execution error."""
-
-        task = Task(
-            id="test_task",
-            prompt="Test error",
-            mcp_config={"test_server": {"url": "http://localhost:8080"}},
-            setup_tool={"name": "failing_setup", "arguments": {}},  # type: ignore[arg-type]
-        )
-
-        # Make setup fail with exception
-        agent_with_tools.mcp_client.call_tool = AsyncMock(side_effect=Exception("Setup explosion"))
-
-        result = await agent_with_tools.run(task)
-
-        assert result.isError
-        # Error content is the string representation of the MCPToolResult list
-        assert "Setup explosion" in result.content
-        assert "MCPToolResult" in result.content
-        assert result.done
+        assert result.isError is False
+        assert ctx.error is None

@@ -27,7 +27,9 @@ def parse_env_file(contents: str) -> dict[str, str]:
     """Parse simple KEY=VALUE lines into a dict.
 
     - Ignores blank lines and lines starting with '#'.
-    - Does not perform variable substitution or quoting.
+    - Strips inline comments (# and everything after) from unquoted values.
+    - Respects single and double quoted values (comments inside quotes are preserved).
+    - Does not perform variable substitution.
     """
     data: dict[str, str] = {}
     for raw_line in contents.splitlines():
@@ -39,6 +41,21 @@ def parse_env_file(contents: str) -> dict[str, str]:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip()
+
+        # Handle quoted values - preserve everything inside quotes
+        if value and value[0] in ('"', "'"):
+            quote_char = value[0]
+            # Find the closing quote
+            end_quote = value.find(quote_char, 1)
+            # Extract value without quotes (or strip opening quote if no closing quote)
+            value = value[1:end_quote] if end_quote != -1 else value[1:]
+        else:
+            # Unquoted value - strip inline comments
+            # Find # that's not escaped and treat as comment start
+            comment_idx = value.find("#")
+            if comment_idx != -1:
+                value = value[:comment_idx].rstrip()
+
         if key:
             data[key] = value
     return data

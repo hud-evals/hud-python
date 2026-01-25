@@ -63,7 +63,7 @@ def fetch_lock_from_registry(reference: str) -> dict | None:
 
         # URL-encode the path segments to handle special characters in tags
         url_safe_path = "/".join(quote(part, safe="") for part in reference.split("/"))
-        registry_url = f"{settings.hud_telemetry_url.rstrip('/')}/registry/envs/{url_safe_path}"
+        registry_url = f"{settings.hud_api_url.rstrip('/')}/registry/envs/{url_safe_path}"
 
         headers = {}
         if settings.api_key:

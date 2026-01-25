@@ -4,7 +4,15 @@ description: "Run agents on tasks or datasets"
 icon: "robot"
 ---
 
-The `hud eval` command runs an agent on a tasks file or a HuggingFace dataset.
+The `hud eval` command runs an agent on a tasks file or HuggingFace dataset.
+
+<Note>
+**Local Execution Dependencies**: Running Claude or Gemini agents locally requires additional packages:
+```bash
+uv add "hud-python[agents]"
+```
+This is not needed for `--remote` execution, which runs on HUD infrastructure.
+</Note>
 
 ## Usage
 
@@ -15,90 +23,217 @@ hud eval [SOURCE] [AGENT] [OPTIONS]
 ## Arguments
 
 <ParamField path="source" type="string">
-  HuggingFace dataset (e.g., `hud-evals/SheetBench-50`) or task JSON/JSONL file. If omitted, looks for a tasks file in the current directory.
+  HuggingFace dataset (e.g., `hud-evals/SheetBench-50`) or task JSON/JSONL file.
 </ParamField>
 
 <ParamField path="agent" type="string">
-  Agent backend to use: `claude`, `openai`, or `vllm`. If omitted, an interactive selector appears (including HUD hosted models).
+  Agent to use: `claude`, `openai`, `operator`, `gemini`, `openai_compatible`. If omitted, an interactive preset selector appears.
 </ParamField>
 
 ## Options
 
+### Execution Mode
+
 <ParamField path="--full" type="boolean" default="false">
-  Run the entire dataset (omit for single-task debug mode)
+  Run the entire dataset. Without this flag, only the first task runs (debug mode).
 </ParamField>
 
-<ParamField path="--model" type="string">
-  Model name for the chosen agent (required for some agents)
+<ParamField path="--remote" type="boolean" default="false">
+  Submit tasks to HUD platform for remote execution. Fire-and-forget - monitor at hud.ai.
 </ParamField>
 
-<ParamField path="--allowed-tools" type="string">
-  Comma-separated list of allowed tools
-</ParamField>
-
-<ParamField path="--max-concurrent" type="integer" default="30">
-  Maximum concurrent tasks (1-200 recommended). Adjust based on your API rate limits and system resources.
-</ParamField>
-
-<ParamField path="--max-steps" type="integer" default="50">
-  Maximum steps per task (default: 10 for single task, 50 for full dataset)
-</ParamField>
-
-<ParamField path="--verbose" type="boolean" default="false">
-  Enable verbose agent output
-</ParamField>
-
-<ParamField path="--very-verbose" type="boolean" default="false">
-  Enable debug-level logs for maximum visibility
-</ParamField>
-
-<ParamField path="--vllm-base-url" type="string">
-  Base URL for vLLM server (when using `--agent vllm` or HUD hosted models)
+<ParamField path="--task-ids" type="string">
+  Comma-separated task IDs to run (e.g., `task_1,task_5`). Overrides `--full`.
 </ParamField>
 
 <ParamField path="--group-size" type="integer" default="1">
-  Number of times to run each task (mini-batch style)
+  Number of times to run each task (for variance estimation).
 </ParamField>
+
+### Agent Configuration
+
+<ParamField path="--model, -m" type="string">
+  Model/checkpoint name (e.g., `claude-sonnet-4-5`, `gpt-5`).
+</ParamField>
+
+<ParamField path="--config, -c" type="string" repeatable>
+  Agent config overrides as `key=value`. Supports namespaced keys like `claude.max_tokens=32768`.
+</ParamField>
+
+<ParamField path="--allowed-tools" type="string">
+  Comma-separated tools to expose to the agent.
+</ParamField>
+
+<ParamField path="--disallowed-tools" type="string">
+  Comma-separated tools to hide from the agent.
+</ParamField>
+
+### Execution Limits
+
+<ParamField path="--max-concurrent" type="integer" default="30">
+  Maximum concurrent tasks (local execution only).
+</ParamField>
+
+<ParamField path="--max-steps" type="integer">
+  Maximum steps per task. Default: 10 (single task) or 100 (`--full`).
+</ParamField>
+
+<ParamField path="--auto-respond" type="boolean">
+  Use ResponseAgent to decide when to stop/continue. Default: True for `--full`.
+</ParamField>
+
+### Output & Confirmation
+
+<ParamField path="--verbose, -v" type="boolean" default="false">
+  Enable verbose agent output.
+</ParamField>
+
+<ParamField path="--very-verbose, -vv" type="boolean" default="false">
+  Enable debug-level logs.
+</ParamField>
+
+<ParamField path="--yes, -y" type="boolean" default="false">
+  Skip confirmation prompt.
+</ParamField>
+
+## Configuration File
+
+`hud eval` supports a `.hud_eval.toml` config file. Settings are merged with CLI args taking precedence:
+
+**CLI arguments > .hud_eval.toml > defaults**
+
+On first run, a template is created:
+
+```toml
+# .hud_eval.toml
+[eval]
+# source = "hud-evals/SheetBench-50"
+# agent = "claude"
+# full = false
+# max_concurrent = 30
+# max_steps = 10
+# group_size = 1
+# task_ids = ["task_1", "task_2"]
+# auto_respond = true
+
+[agent]
+# allowed_tools = ["computer", "playwright"]
+# disallowed_tools = []
+
+[claude]
+# model = "claude-sonnet-4-5"
+# max_tokens = 16384
+
+[openai]
+# model = "gpt-4o"
+# temperature = 0.7
+# max_output_tokens = 4096
+
+[gemini]
+# model = "gemini-2.5-pro"
+# temperature = 1.0
+
+[openai_compatible]
+# model = "my-model"
+# base_url = "http://localhost:8000/v1"
+```
 
 ## Examples
 
 ```bash
 # Single task (debug mode)
-hud eval hud-evals/SheetBench-50
-
-# Entire huggingface dataset with Claude
-hud eval hud-evals/SheetBench-50 claude --full
-
-# High concurrency for faster evaluation
-hud eval hud-evals/SheetBench-50 claude --full --max-concurrent 100
-
-# Limit concurrency to prevent rate limits
-hud eval hud-evals/SheetBench-50 openai --full --max-concurrent 20
-
-# Local task config
 hud eval tasks.json claude
 
-# Local task config with verbose output for debugging
-hud eval tasks.json claude --verbose
+# Full dataset evaluation
+hud eval hud-evals/SheetBench-50 claude --full
 
-# vLLM with explicit base URL
-hud eval tasks.json vllm --model llama3.1 --vllm-base-url http://localhost:8000
+# Run specific tasks by ID
+hud eval tasks.json claude --task-ids task_1,task_5
 
-# Limit tools and concurrency
-hud eval tasks.json claude --allowed-tools click,type --max-concurrent 10
+# With model override
+hud eval tasks.json openai --model gpt-4o
+
+# Agent config overrides
+hud eval tasks.json claude --config max_tokens=32768
+hud eval tasks.json openai --config temperature=0.7
+
+# High concurrency
+hud eval hud-evals/SheetBench-50 claude --full --max-concurrent 100
+
+# Variance estimation (run each task 3 times)
+hud eval tasks.json claude --full --group-size 3
+
+# Remote execution on HUD platform
+hud eval hud-evals/SheetBench-50 claude --full --remote
+
+# OpenAI-compatible endpoint (vLLM, Ollama, etc.)
+hud eval tasks.json openai_compatible \
+    --config base_url=http://localhost:8000/v1 \
+    --model llama3.1
+
+# Skip confirmation
+hud eval tasks.json claude --full -y
+
+# Verbose debugging
+hud eval tasks.json claude -vv
 ```
 
-## Notes
+## Interactive Mode
 
-- If you select a HUD hosted model, `hud eval` will route through vLLM with the appropriate base model.
-- When `SOURCE` is omitted, an interactive file picker helps locate a tasks file.
+When agent is omitted, an interactive selector shows presets:
+
+```
+? Select an agent:
+❯ Claude Sonnet 4.5
+  GPT-5
+  Operator (OpenAI Computer Use)
+  Gemini 2.5 Computer Use
+  Grok 4.1 Fast
+```
+
+## Remote Execution
+
+With `--remote`, both the **agent** and **environment** run on HUD infrastructure:
+
+```bash
+hud eval hud-evals/SheetBench-50 claude --full --remote
+```
+
+- **Remote agent**: Runs on HUD workers (no local compute needed)
+- **Remote environment**: Tasks must use URL-based `mcp_config` (not local Docker)
+- Uses [HUD Gateway](/gateway/index) - no model-specific API keys needed
+- Monitor progress at `https://hud.ai/jobs/{job_id}`
+- Cancel with `hud cancel`
+
+<Note>
+Tasks with local Docker configs (`command`-based `mcp_config`) cannot be run remotely. Convert them first:
+```bash
+hud convert tasks.json
+```
+</Note>
+
+<Note>
+Remote execution requires `HUD_API_KEY`. Gemini and Operator agents are not supported remotely.
+</Note>
+
+## Cancellation
+
+Cancel remote jobs:
+
+```bash
+# Cancel a specific job
+hud cancel --job <job_id>
+
+# Cancel a specific task
+hud cancel --task <job_id> <task_id>
+
+# Cancel ALL your active jobs
+hud cancel --all
+```
 
 ## See Also
 
-- [`hud rl`](/reference/cli/rl)
-- [`hud run`](/reference/cli/run)
-- [`hud analyze`](/reference/cli/analyze)
-
-## Pricing & Billing
-
-See hosted vLLM and training GPU rates in the [Training Quickstart → Pricing](/train-agents/quickstart#pricing). Manage usage and billing at `https://hud.so/project/billing`.
+- [Tasks Reference](/reference/tasks) - Task configuration
+- [Agents Reference](/reference/agents) - Agent options
+- [`hud rft`](/reference/cli/rft) - Reinforcement fine-tuning
+- [`hud cancel`](/reference/cli/misc) - Cancel remote jobs

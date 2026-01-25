@@ -1,0 +1,53 @@
+---
+title: "Contributing"
+description: "Help us improve HUD"
+icon: "hand-holding-heart"
+---
+
+We welcome contributions to the HUD SDK!
+
+<Card title="GitHub Repository" icon="github" href="https://github.com/hud-evals/hud-python">
+  Fork the repo and submit a PR
+</Card>
+
+## Quick Start
+
+1. **Fork the repository** on GitHub.
+2. **Clone your fork**:
+   ```bash
+   git clone https://github.com/YOUR-USERNAME/hud-python
+   cd hud-python
+   ```
+3. **Install in development mode**:
+   ```bash
+   uv pip install -e ".[dev]"
+   uv tool install --force --from "." hud-python --refresh
+   ```
+
+## Development Workflows
+
+<Steps>
+<Step title="Run Tests">
+  ```bash
+  uv pytest
+  ```
+</Step>
+<Step title="Lint & Format">
+  ```bash
+  ruff check . --fix
+  ruff format .
+  ```
+</Step>
+</Steps>
+
+## Need Help?
+
+<CardGroup cols={2}>
+<Card title="Open an Issue" icon="circle-exclamation" href="https://github.com/hud-evals/hud-python/issues">
+  Report bugs or request features
+</Card>
+<Card title="Join Discord" icon="discord" href="https://discord.gg/wkjtmHYYjm">
+  Chat with the team
+</Card>
+</CardGroup>
+

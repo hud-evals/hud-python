@@ -1,9 +1,0 @@
-[project]
-name = "game-2048-backend"
-version = "1.0.0"
-dependencies = [
-    "fastapi",
-    "uvicorn",
-    "numpy",
-    "pydantic"
-]

@@ -8,7 +8,6 @@ import pytest
 import typer
 
 from hud.cli.flows.tasks import convert_tasks_to_remote
-from hud.types import Task
 
 
 class TestConvertCommand:
@@ -41,7 +40,7 @@ class TestConvertCommand:
         # Create lock file
         lock_data = {
             "images": {
-                "remote": "registry.hud.so/test-org/test-env:v1.0.0",
+                "remote": "registry.hud.ai/test-org/test-env:v1.0.0",
                 "local": "test-env:latest",
             }
         }
@@ -70,25 +69,20 @@ class TestConvertCommand:
         """Test basic task conversion from local to remote."""
         # Setup mocks
         mock_settings.api_key = "test-api-key"
+        mock_settings.hud_mcp_url = "https://mcp.hud.ai/v3/mcp"
         mock_find_env.return_value = mock_env_dir
 
         # Mock the push check to return updated lock data
         mock_ensure_pushed.return_value = {
             "images": {
-                "remote": "registry.hud.so/test-org/test-env:v1.0.0",
+                "remote": "registry.hud.ai/test-org/test-env:v1.0.0",
                 "local": "test-env:v1.0.0",
             }
         }
 
         # Mock derive remote image
-        mock_derive_remote.return_value = "registry.hud.so/test-org/test-env:v1.0.0"
+        mock_derive_remote.return_value = "registry.hud.ai/test-org/test-env:v1.0.0"
 
-        task = Task(
-            prompt="Test task",
-            mcp_config={
-                "local": {"command": "docker", "args": ["run", "--rm", "-i", "test-image:latest"]}
-            },
-        )
         raw_task = {
             "prompt": "Test task",
             "mcp_config": {
@@ -96,7 +90,7 @@ class TestConvertCommand:
             },
         }
 
-        mock_load_tasks.side_effect = [[task], [raw_task]]
+        mock_load_tasks.return_value = [raw_task]
 
         # Run conversion
         result_path = convert_tasks_to_remote(str(temp_tasks_file))
@@ -111,7 +105,7 @@ class TestConvertCommand:
 
         assert len(converted_tasks) == 1
         assert "hud" in converted_tasks[0]["mcp_config"]
-        assert converted_tasks[0]["mcp_config"]["hud"]["url"] == "https://mcp.hud.so/v3/mcp"
+        assert converted_tasks[0]["mcp_config"]["hud"]["url"] == "https://mcp.hud.ai/v3/mcp"
 
     @patch("hud.settings.settings")
     def test_convert_missing_api_key(self, mock_settings, temp_tasks_file):
@@ -131,18 +125,18 @@ class TestConvertCommand:
         mock_settings.api_key = "test-api-key"
         mock_find_env.return_value = None  # No env dir needed for remote tasks
 
-        # Create task that's already remote
-        task = Task(
-            prompt="Test task",
-            mcp_config={
+        # Create task that's already remote (as raw dict)
+        raw_task = {
+            "prompt": "Test task",
+            "mcp_config": {
                 "remote": {
-                    "url": "https://mcp.hud.so",
-                    "headers": {"Mcp-Image": "registry.hud.so/test/image:v1"},
+                    "url": "https://mcp.hud.ai",
+                    "headers": {"Mcp-Image": "registry.hud.ai/test/image:v1"},
                 }
             },
-        )
+        }
 
-        mock_load_tasks.return_value = [task]
+        mock_load_tasks.return_value = [raw_task]
 
         # Should return original path without modification
         result_path = convert_tasks_to_remote(str(temp_tasks_file))
@@ -158,14 +152,14 @@ class TestConvertCommand:
         mock_settings.api_key = "test-api-key"
         mock_find_env.return_value = None
 
-        task = Task(
-            prompt="Test task",
-            mcp_config={
+        raw_task = {
+            "prompt": "Test task",
+            "mcp_config": {
                 "local": {"command": "docker", "args": ["run", "--rm", "-i", "test-image:latest"]}
             },
-        )
+        }
 
-        mock_load_tasks.return_value = [task]
+        mock_load_tasks.return_value = [raw_task]
 
         with pytest.raises(typer.Exit):
             convert_tasks_to_remote(str(temp_tasks_file))
@@ -189,36 +183,36 @@ class TestConvertCommand:
     ):
         """Test conversion includes environment variables as headers."""
         mock_settings.api_key = "test-api-key"
+        mock_settings.hud_mcp_url = "https://mcp.hud.ai/v3/mcp"
         mock_find_env.return_value = mock_env_dir
         mock_confirm.return_value = True  # Always confirm in tests
 
         # Mock the push check to return updated lock data
         mock_ensure_pushed.return_value = {
             "images": {
-                "remote": "registry.hud.so/test-org/test-env:v1.0.0",
+                "remote": "registry.hud.ai/test-org/test-env:v1.0.0",
                 "local": "test-env:v1.0.0",
             }
         }
 
         # Mock derive remote image
-        mock_derive_remote.return_value = "registry.hud.so/test-org/test-env:v1.0.0"
+        mock_derive_remote.return_value = "registry.hud.ai/test-org/test-env:v1.0.0"
 
         # Add .env file with API keys
         env_file = mock_env_dir / ".env"
         env_file.write_text("OPENAI_API_KEY=sk-test123\nANTHROPIC_API_KEY=sk-ant456")
 
-        task = Task(
-            prompt="Test task",
-            mcp_config={
+        raw_task = {
+            "prompt": "Test task",
+            "mcp_config": {
                 "local": {
                     "command": "docker",
                     "args": ["run", "--rm", "-i", "-e", "OPENAI_API_KEY", "test-image:latest"],
                 }
             },
-        )
-        raw_task = task.model_dump()
+        }
 
-        mock_load_tasks.side_effect = [[task], [raw_task]]
+        mock_load_tasks.return_value = [raw_task]
 
         # Run conversion
         result_path = convert_tasks_to_remote(str(temp_tasks_file))
@@ -262,7 +256,7 @@ SOME_TOKEN=abc123
 CLIENT_SECRET=secret789
 USER_PASSWORD=pass123
 REGULAR_VAR=not_included
-HUD_API_URL=https://api.hud.so
+HUD_API_URL=https://api.hud.ai
 """)
 
             result = _extract_dotenv_api_key_vars(env_dir)
@@ -281,9 +275,9 @@ HUD_API_URL=https://api.hud.so
         from hud.cli.flows.tasks import _is_remote_url
 
         # This function matches URLs with domain names (not localhost or IPs)
-        assert _is_remote_url("https://mcp.hud.so")
-        assert _is_remote_url("http://mcp.hud.so")
-        assert _is_remote_url("https://mcp.hud.so/some/path")
+        assert _is_remote_url("https://mcp.hud.ai")
+        assert _is_remote_url("http://mcp.hud.ai")
+        assert _is_remote_url("https://mcp.hud.ai/some/path")
         assert _is_remote_url("https://example.com")  # Also matches
         assert not _is_remote_url("http://localhost:8000")  # localhost doesn't match
         assert not _is_remote_url("file:///path/to/file")  # file:// doesn't match
@@ -356,7 +350,7 @@ HUD_API_URL=https://api.hud.so
                     }
                 },
             },
-            {"prompt": "Task 3", "mcp_config": {"remote": {"url": "https://mcp.hud.so"}}},
+            {"prompt": "Task 3", "mcp_config": {"remote": {"url": "https://mcp.hud.ai"}}},
         ]
 
         result = _extract_vars_from_task_configs(raw_tasks)

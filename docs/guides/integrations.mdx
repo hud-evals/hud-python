@@ -1,0 +1,430 @@
+---
+title: "Integrations"
+description: "Use any agent framework with HUD environments"
+icon: "robot"
+---
+
+HUD environments work with any agent framework. The `Environment` class provides format converters for all major providers, and `hud.eval()` handles setup, evaluation, and tracing automatically.
+
+Every example on this page uses the `eval` defined below and the [Gateway](/quick-links/gateway) for inference.
+
+## The Example Environment
+
+```python
+import hud
+
+CEOS = {"hud": "Jay Ram", "openai": "Sam Altman", "anthropic": "Dario Amodei"}
+
+env = hud.Environment("trivia")
+
+@env.tool()
+def lookup_ceo(company: str) -> str:
+    """Look up the CEO of a company."""
+    return CEOS.get(company.lower(), "Unknown")
+
+@env.scenario("initials")
+async def find_initials(company: str):
+    answer = yield f"What are the initials of the CEO of {company}?"
+    ceo = CEOS.get(company.lower())
+    correct = "".join(word[0] for word in ceo.split()) if ceo else None
+    yield 1.0 if answer and correct and correct in answer.upper() else 0.0
+
+task = env("initials", company="HUD")
+```
+
+---
+
+## OpenAI
+
+The OpenAI SDK supports three APIs: Chat Completions, Responses, and the Agents SDK.
+
+### Chat Completions
+
+```python
+import os
+from openai import AsyncOpenAI
+import hud
+
+client = AsyncOpenAI(
+    base_url="https://inference.hud.ai",
+    api_key=os.environ["HUD_API_KEY"]
+)
+
+async with hud.eval(eval) as ctx:
+    messages = [{"role": "user", "content": ctx.prompt}]
+    
+    while True:
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            tools=ctx.as_openai_chat_tools()
+        )
+        
+        msg = response.choices[0].message
+        messages.append(msg)
+        
+        if not msg.tool_calls:
+            break
+            
+        for tool_call in msg.tool_calls:
+            result = await ctx.call_tool(tool_call)
+            messages.append(result)
+    
+    await ctx.submit(msg.content or "")
+```
+
+### Responses API
+
+```python
+async with hud.eval(eval) as ctx:
+    response = await client.responses.create(
+        model="gpt-4o",
+        input=ctx.prompt,
+        tools=ctx.as_openai_responses_tools()
+    )
+    
+    for item in response.output:
+        if item.type == "function_call":
+            await ctx.call_tool(item)
+    
+    await ctx.submit(response.output_text)
+```
+
+### Agents SDK
+
+```python
+from agents import Agent, Runner
+import hud
+
+async with hud.eval(eval) as ctx:
+    agent = Agent(
+        name="trivia-agent",
+        instructions="Answer trivia questions. Use tools to look up information.",
+        tools=ctx.as_openai_agent_tools()
+    )
+    
+    result = await Runner.run(agent, ctx.prompt)
+    await ctx.submit(result.final_output)
+```
+
+Requires: `pip install openai-agents`
+
+---
+
+## Anthropic
+
+Claude's Messages API with tool use.
+
+```python
+import os
+from anthropic import AsyncAnthropic
+import hud
+
+client = AsyncAnthropic(
+    base_url="https://inference.hud.ai",
+    api_key=os.environ["HUD_API_KEY"]
+)
+
+async with hud.eval(eval) as ctx:
+    messages = [{"role": "user", "content": ctx.prompt}]
+    
+    while True:
+        response = await client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            messages=messages,
+            tools=ctx.as_claude_tools()
+        )
+        
+        tool_uses = [b for b in response.content if b.type == "tool_use"]
+        if not tool_uses:
+            break
+        
+        tool_results = [await ctx.call_tool(block) for block in tool_uses]
+        
+        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "user", "content": tool_results})
+    
+    text = next((b.text for b in response.content if b.type == "text"), "")
+    await ctx.submit(text)
+```
+
+Requires: `pip install anthropic`
+
+---
+
+## Gemini
+
+Google's Gemini API with function calling.
+
+```python
+import os
+import google.generativeai as genai
+import hud
+
+genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+model = genai.GenerativeModel("gemini-2.0-flash")
+
+async with hud.eval(eval) as ctx:
+    chat = model.start_chat()
+    
+    response = chat.send_message(
+        ctx.prompt,
+        tools=ctx.as_gemini_tools(),
+        tool_config=ctx.as_gemini_tool_config()
+    )
+    
+    while True:
+        part = response.candidates[0].content.parts[0]
+        if not hasattr(part, "function_call") or not part.function_call:
+            break
+        
+        result = await ctx.call_tool(part)
+        response = chat.send_message(result)
+    
+    await ctx.submit(response.text)
+```
+
+Requires: `pip install google-generativeai`
+
+---
+
+## browser-use
+
+Browser automation for web agents.
+
+```python
+import os
+from browser_use import Agent
+from langchain_openai import ChatOpenAI
+import hud
+
+llm = ChatOpenAI(
+    model="gpt-4o",
+    base_url="https://inference.hud.ai",
+    api_key=os.environ["HUD_API_KEY"]
+)
+
+async with hud.eval(eval) as ctx:
+    agent = Agent(task=ctx.prompt, llm=llm)
+    result = await agent.run()
+    await ctx.submit(str(result))
+```
+
+Requires: `pip install browser-use playwright && playwright install`
+
+---
+
+## LangChain
+
+LangChain's agent framework with tool calling.
+
+```python
+import os
+from langchain_openai import ChatOpenAI
+from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain_core.prompts import ChatPromptTemplate
+import hud
+
+llm = ChatOpenAI(
+    model="gpt-4o",
+    base_url="https://inference.hud.ai",
+    api_key=os.environ["HUD_API_KEY"]
+)
+
+async with hud.eval(eval) as ctx:
+    tools = ctx.as_langchain_tools()
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are a helpful assistant."),
+        ("human", "{input}"),
+        ("placeholder", "{agent_scratchpad}"),
+    ])
+    
+    agent = create_tool_calling_agent(llm, tools, prompt)
+    executor = AgentExecutor(agent=agent, tools=tools)
+    
+    result = await executor.ainvoke({"input": ctx.prompt})
+    await ctx.submit(result["output"])
+```
+
+Requires: `pip install langchain langchain-openai langchain-core`
+
+---
+
+## LlamaIndex
+
+LlamaIndex's ReAct agent with tool integration.
+
+```python
+import os
+from llama_index.llms.openai import OpenAI
+from llama_index.core.agent import ReActAgent
+import hud
+
+llm = OpenAI(
+    model="gpt-4o",
+    api_base="https://inference.hud.ai",
+    api_key=os.environ["HUD_API_KEY"]
+)
+
+async with hud.eval(eval) as ctx:
+    tools = ctx.as_llamaindex_tools()
+    
+    agent = ReActAgent.from_tools(tools, llm=llm, verbose=True)
+    response = await agent.achat(ctx.prompt)
+    
+    await ctx.submit(str(response))
+```
+
+Requires: `pip install llama-index-core llama-index-llms-openai`
+
+---
+
+## Google ADK
+
+Google's Agent Development Kit for Gemini-powered agents.
+
+```python
+import os
+from google.adk.agents import Agent
+from google.adk.runners import Runner
+import hud
+
+async with hud.eval(eval) as ctx:
+    agent = Agent(
+        name="trivia-agent",
+        model="gemini-2.0-flash",
+        instruction="Answer trivia questions. Use tools to look up information.",
+        tools=ctx.as_adk_tools()
+    )
+    
+    runner = Runner(agent=agent)
+    result = await runner.run(ctx.prompt)
+    
+    await ctx.submit(result.output)
+```
+
+Requires: `pip install google-adk`
+
+---
+
+## CrewAI
+
+Multi-agent orchestration with roles and tasks.
+
+```python
+import os
+from crewai import Agent, Task, Crew
+from langchain_openai import ChatOpenAI
+import hud
+
+llm = ChatOpenAI(
+    model="gpt-4o",
+    base_url="https://inference.hud.ai",
+    api_key=os.environ["HUD_API_KEY"]
+)
+
+async with hud.eval(eval) as ctx:
+    tools = ctx.as_langchain_tools()
+    
+    researcher = Agent(
+        role="Researcher",
+        goal="Find accurate information",
+        backstory="Expert at finding information",
+        tools=tools,
+        llm=llm
+    )
+    
+    task = Task(
+        description=ctx.prompt,
+        expected_output="The initials of the CEO",
+        agent=researcher
+    )
+    
+    crew = Crew(agents=[researcher], tasks=[task])
+    result = crew.kickoff()
+    await ctx.submit(str(result))
+```
+
+Requires: `pip install crewai langchain-openai`
+
+---
+
+## AutoGen
+
+Microsoft's multi-agent conversation framework.
+
+```python
+import os
+from autogen import AssistantAgent, UserProxyAgent
+import hud
+
+async with hud.eval(eval) as ctx:
+    config_list = [{
+        "model": "gpt-4o",
+        "base_url": "https://inference.hud.ai",
+        "api_key": os.environ["HUD_API_KEY"]
+    }]
+    
+    assistant = AssistantAgent(
+        name="assistant",
+        llm_config={"config_list": config_list}
+    )
+    
+    for tool in ctx.as_tools():
+        @assistant.register_for_execution()
+        async def tool_fn(name=tool.name, **kwargs):
+            return await ctx.call_tool(name, **kwargs)
+    
+    user = UserProxyAgent(
+        name="user",
+        human_input_mode="NEVER",
+        code_execution_config=False
+    )
+    
+    result = await user.a_initiate_chat(assistant, message=ctx.prompt)
+    await ctx.submit(result.summary)
+```
+
+Requires: `pip install pyautogen`
+
+---
+
+## Format Reference
+
+| Method | Returns | Use With |
+|--------|---------|----------|
+| `as_openai_chat_tools()` | OpenAI Chat format | OpenAI Chat Completions |
+| `as_openai_responses_tools()` | OpenAI Responses format | OpenAI Responses API |
+| `as_openai_agent_tools()` | FunctionTool objects | OpenAI Agents SDK |
+| `as_claude_tools()` | Anthropic format | Claude API |
+| `as_gemini_tools()` | Gemini format | Google AI |
+| `as_adk_tools()` | ADK FunctionTool objects | Google ADK |
+| `as_langchain_tools()` | StructuredTool objects | LangChain, CrewAI |
+| `as_llamaindex_tools()` | FunctionTool objects | LlamaIndex |
+| `as_tools()` | MCP Tool objects | Raw MCP, AutoGen |
+
+All `call_tool()` calls auto-detect the input format and return matching output format.
+
+---
+
+## Bring Your Own
+
+Don't see your framework? The pattern is simple:
+
+1. Get tools in your framework's format (or use `as_tools()` for raw MCP)
+2. Run your agent loop
+3. Call `ctx.call_tool()` for each tool invocation
+4. Call `ctx.submit()` with the final answer
+
+```python
+async with hud.eval(eval) as ctx:
+    tools = ctx.as_tools()  # Raw MCP format
+    
+    result = await my_custom_agent(ctx.prompt, tools, ctx.call_tool)
+    
+    await ctx.submit(result)
+```
+
+The environment handles setup, evaluation, and tracing. You handle the agent logic.

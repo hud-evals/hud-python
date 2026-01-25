@@ -4,33 +4,39 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar, cast
-
-from anthropic import Anthropic, AsyncAnthropic, BadRequestError
-from anthropic.types.beta import BetaContentBlockParam, BetaImageBlockParam, BetaTextBlockParam
-
-import hud
-
-if TYPE_CHECKING:
-    from anthropic.types.beta import (
-        BetaCacheControlEphemeralParam,
-        BetaContentBlockParam,
-        BetaImageBlockParam,
-        BetaMessageParam,
-        BetaTextBlockParam,
-        BetaToolResultBlockParam,
-    )
-
-    from hud.datasets import Task
+from inspect import cleandoc
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import mcp.types as types
+from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, Omit
+from anthropic.types import CacheControlEphemeralParam
+from anthropic.types.beta import (
+    BetaBase64ImageSourceParam,
+    BetaBase64PDFSourceParam,
+    BetaContentBlockParam,
+    BetaImageBlockParam,
+    BetaMessageParam,
+    BetaRequestDocumentBlockParam,
+    BetaTextBlockParam,
+    BetaToolBash20250124Param,
+    BetaToolComputerUse20250124Param,
+    BetaToolParam,
+    BetaToolResultBlockParam,
+    BetaToolTextEditor20250728Param,
+    BetaToolUnionParam,
+)
 
 from hud.settings import settings
 from hud.tools.computer.settings import computer_settings
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
+from hud.utils.types import with_signature
 
 from .base import MCPAgent
+from .types import ClaudeConfig, ClaudeCreateParams
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -43,90 +49,55 @@ class ClaudeAgent(MCPAgent):
     tools through MCP servers instead of direct implementation.
     """
 
-    metadata: ClassVar[dict[str, Any]] = {
+    metadata: ClassVar[dict[str, Any] | None] = {
         "display_width": computer_settings.ANTHROPIC_COMPUTER_WIDTH,
         "display_height": computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
     }
+    config_cls: ClassVar[type[BaseAgentConfig]] = ClaudeConfig
 
-    def __init__(
-        self,
-        model_client: AsyncAnthropic | None = None,
-        model: str = "claude-sonnet-4-20250514",
-        max_tokens: int = 4096,
-        use_computer_beta: bool = True,
-        validate_api_key: bool = True,
-        **kwargs: Any,
-    ) -> None:
-        """
-        Initialize Claude MCP agent.
+    @with_signature(ClaudeCreateParams)
+    @classmethod
+    def create(cls, **kwargs: Any) -> ClaudeAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
 
-        Args:
-            model_client: AsyncAnthropic client (created if not provided)
-            model: Claude model to use
-            max_tokens: Maximum tokens for response
-            use_computer_beta: Whether to use computer-use beta features
-            **kwargs: Additional arguments passed to BaseMCPAgent (including mcp_client)
-        """
-        super().__init__(**kwargs)
+    def __init__(self, params: ClaudeCreateParams | None = None, **kwargs: Any) -> None:
+        super().__init__(params, **kwargs)
+        self.config: ClaudeConfig
 
-        # Initialize client if not provided
+        model_client = self.config.model_client
         if model_client is None:
-            api_key = settings.anthropic_api_key
-            if not api_key:
-                raise ValueError("Anthropic API key not found. Set ANTHROPIC_API_KEY.")
-            model_client = AsyncAnthropic(api_key=api_key)
+            # Default to HUD gateway when HUD_API_KEY is available
+            if settings.api_key:
+                from hud.agents.gateway import build_gateway_client
 
-        # validate api key if requested
-        if validate_api_key:
-            try:
-                Anthropic(api_key=model_client.api_key).models.list()
-            except Exception as e:
-                raise ValueError(f"Anthropic API key is invalid: {e}") from e
+                model_client = build_gateway_client("anthropic")
+            elif settings.anthropic_api_key:
+                model_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+            else:
+                raise ValueError(
+                    "No API key found. Set HUD_API_KEY for HUD gateway, "
+                    "or ANTHROPIC_API_KEY for direct Anthropic access."
+                )
 
-        self.anthropic_client = model_client
-        self.model = model
-        self.max_tokens = max_tokens
-        self.use_computer_beta = use_computer_beta
+        self.anthropic_client: AsyncAnthropic | AsyncAnthropicBedrock = model_client
+        self.max_tokens = self.config.max_tokens
+        self.use_computer_beta = self.config.use_computer_beta
         self.hud_console = HUDConsole(logger=logger)
 
-        self.model_name = "Claude"
-        self.checkpoint_name = self.model
+        # these will be initialized in _convert_tools_for_claude
+        self.has_computer_tool = False
+        self.tool_mapping: dict[str, str] = {}
+        self.claude_tools: list[BetaToolUnionParam] = []
 
-        # Track mapping from Claude tool names to MCP tool names
-        self._claude_to_mcp_tool_map: dict[str, str] = {}
-        self.claude_tools: list[dict] = []
-
-        # Append Claude-specific instructions to the base system prompt
-        claude_instructions = """
-        You are Claude, an AI assistant created by Anthropic. You are helpful, harmless, and honest.
-
-        When working on tasks:
-        1. Be thorough and systematic in your approach
-        2. Complete tasks autonomously without asking for confirmation
-        3. Use available tools efficiently to accomplish your goals
-        4. Verify your actions and ensure task completion
-        5. Be precise and accurate in all operations
-
-        Remember: You are expected to complete tasks autonomously. The user trusts you to accomplish what they asked.
-        """.strip()  # noqa: E501
-
-        # Append Claude instructions to any base system prompt
-        if self.system_prompt:
-            self.system_prompt = f"{self.system_prompt}\n\n{claude_instructions}"
-        else:
-            self.system_prompt = claude_instructions
-
-    async def initialize(self, task: str | Task | None = None) -> None:
-        """Initialize the agent and build tool mappings."""
-        await super().initialize(task)
-        # Build tool mappings after tools are discovered
+    def _on_tools_ready(self) -> None:
+        """Build Claude-specific tool mappings after tools are discovered."""
         self._convert_tools_for_claude()
 
-    async def get_system_messages(self) -> list[Any]:
+    async def get_system_messages(self) -> list[BetaMessageParam]:
         """No system messages for Claude because applied in get_response"""
         return []
 
-    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[Any]:
+    async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[BetaMessageParam]:
         """Format messages for Claude."""
         # Convert MCP content types to Anthropic content types
         anthropic_blocks: list[BetaContentBlockParam] = []
@@ -135,101 +106,74 @@ class ClaudeAgent(MCPAgent):
             if isinstance(block, types.TextContent):
                 # Only include fields that Anthropic expects
                 anthropic_blocks.append(
-                    cast(
-                        "BetaTextBlockParam",
-                        {
-                            "type": "text",
-                            "text": block.text,
-                        },
+                    BetaTextBlockParam(
+                        type="text",
+                        text=block.text,
                     )
                 )
             elif isinstance(block, types.ImageContent):
                 # Convert MCP ImageContent to Anthropic format
                 anthropic_blocks.append(
-                    cast(
-                        "BetaImageBlockParam",
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": block.mimeType,
-                                "data": block.data,
-                            },
-                        },
+                    BetaImageBlockParam(
+                        type="image",
+                        source=BetaBase64ImageSourceParam(
+                            type="base64",
+                            media_type=cast(
+                                "Literal['image/jpeg', 'image/png', 'image/gif', 'image/webp']",
+                                block.mimeType,
+                            ),
+                            data=block.data,
+                        ),
                     )
                 )
             else:
-                # For other types, try to cast but log a warning
-                self.hud_console.log(f"Unknown content block type: {type(block)}", level="warning")
-                anthropic_blocks.append(cast("BetaContentBlockParam", block))
+                raise ValueError(f"Unknown content block type: {type(block)}")
 
-        return [
-            cast(
-                "BetaMessageParam",
-                {
-                    "role": "user",
-                    "content": anthropic_blocks,
-                },
-            )
-        ]
+        return [BetaMessageParam(role="user", content=anthropic_blocks)]
 
-    @hud.instrument(
-        span_type="agent",
-        record_args=False,  # Messages can be large
-        record_result=True,
-    )
     async def get_response(self, messages: list[BetaMessageParam]) -> AgentResponse:
         """Get response from Claude including any tool calls."""
+        messages_cached = self._add_prompt_caching(messages)
 
-        # Make API call with retry for prompt length
-        current_messages = messages.copy()
+        # betas to use
+        betas = ["fine-grained-tool-streaming-2025-05-14"]
+        if self.has_computer_tool:
+            betas.append("computer-use-2025-01-24")
 
-        while True:
-            messages_cached = self._add_prompt_caching(current_messages)
-
-            # Build create kwargs
-            create_kwargs = {
-                "model": self.model,
-                "max_tokens": self.max_tokens,
-                "system": self.system_prompt,
-                "messages": messages_cached,
-                "tools": self.claude_tools,
-                "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
-            }
-
-            # Add beta features if using computer tools
-            if self.use_computer_beta and any(
-                tool.get("type") == "computer_20250124" for tool in self.claude_tools
-            ):
-                create_kwargs["betas"] = ["computer-use-2025-01-24"]
-
+        # Bedrock doesn't support .stream() - use create(stream=True) instead
+        if isinstance(self.anthropic_client, AsyncAnthropicBedrock):
             try:
-                response = await self.anthropic_client.beta.messages.create(**create_kwargs)
-                break
-            except BadRequestError as e:
-                if (
-                    "prompt is too long" in str(e)
-                    or "request_too_large" in str(e)
-                    or e.status_code == 413
-                ):
-                    self.hud_console.warning("Prompt too long, truncating message history")
-                    # Keep first message and last 20 messages
-                    if len(current_messages) > 21:
-                        current_messages = [current_messages[0], *current_messages[-20:]]
-                    else:
-                        raise
-                else:
-                    raise
-
-        messages.append(
-            cast(
-                "BetaMessageParam",
-                {
-                    "role": "assistant",
-                    "content": response.content,
-                },
-            )
-        )
+                response = await self.anthropic_client.beta.messages.create(
+                    model=self.config.model,
+                    system=self.system_prompt if self.system_prompt is not None else Omit(),
+                    max_tokens=self.max_tokens,
+                    messages=messages_cached,
+                    tools=self.claude_tools,
+                    tool_choice={"type": "auto", "disable_parallel_tool_use": True},
+                    betas=betas,
+                )
+                messages.append(BetaMessageParam(role="assistant", content=response.content))
+            except ModuleNotFoundError:
+                raise ValueError(
+                    "boto3 is required for AWS Bedrock. Use `pip install hud[bedrock]`"
+                ) from None
+        else:
+            # Regular Anthropic client supports .stream()
+            async with self.anthropic_client.beta.messages.stream(
+                model=self.config.model,
+                system=self.system_prompt if self.system_prompt is not None else Omit(),
+                max_tokens=self.max_tokens,
+                messages=messages_cached,
+                tools=self.claude_tools,
+                tool_choice={"type": "auto", "disable_parallel_tool_use": True},
+                betas=betas,
+            ) as stream:
+                # allow backend to accumulate message content
+                async for _ in stream:
+                    pass
+                # get final message
+                response = await stream.get_final_message()
+                messages.append(BetaMessageParam(role="assistant", content=response.content))
 
         # Process response
         result = AgentResponse(content="", tool_calls=[], done=True)
@@ -240,36 +184,36 @@ class ClaudeAgent(MCPAgent):
 
         for block in response.content:
             if block.type == "tool_use":
-                # Map Claude tool name back to MCP tool name
-                mcp_tool_name = self._claude_to_mcp_tool_map.get(block.name, block.name)
-
-                # Create MCPToolCall object with Claude metadata as extra fields
-                # Pyright will complain but the tool class accepts extra fields
                 tool_call = MCPToolCall(
-                    id=block.id,  # canonical identifier for telemetry
-                    name=mcp_tool_name,
-                    arguments=block.input,
-                    claude_name=block.name,  # type: ignore
+                    id=block.id,
+                    # look up name in tool_mapping if available, otherwise use block name
+                    name=self.tool_mapping.get(block.name, block.name),
+                    arguments=block.input
+                    if isinstance(block.input, dict)
+                    else block.input.__dict__,
                 )
                 result.tool_calls.append(tool_call)
                 result.done = False
             elif block.type == "text":
                 text_content += block.text
             elif hasattr(block, "type") and block.type == "thinking":
-                thinking_content += f"Thinking: {block.thinking}\n"
+                if thinking_content:
+                    thinking_content += "\n"
+                thinking_content += block.thinking
 
-        # Combine text and thinking for final content
+        result.content = text_content
         if thinking_content:
-            result.content = thinking_content + text_content
-        else:
-            result.content = text_content
+            result.reasoning = thinking_content
 
         return result
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
     ) -> list[BetaMessageParam]:
-        """Format tool results into Claude messages."""
+        """Format tool results into Claude messages.
+
+        Handles EmbeddedResource (PDFs), images, and text content.
+        """
         # Process each tool result
         user_content = []
 
@@ -281,7 +225,9 @@ class ClaudeAgent(MCPAgent):
                 continue
 
             # Convert MCP tool results to Claude format
-            claude_blocks = []
+            claude_blocks: list[
+                BetaTextBlockParam | BetaImageBlockParam | BetaRequestDocumentBlockParam
+            ] = []
 
             if result.isError:
                 # Extract error message from content
@@ -298,86 +244,111 @@ class ClaudeAgent(MCPAgent):
                         claude_blocks.append(text_to_content_block(content.text))
                     elif isinstance(content, types.ImageContent):
                         claude_blocks.append(base64_to_content_block(content.data))
+                    elif isinstance(content, types.EmbeddedResource):
+                        # Handle embedded resources (PDFs)
+                        resource = content.resource
+                        if (
+                            isinstance(resource, types.BlobResourceContents)
+                            and resource.mimeType == "application/pdf"
+                        ):
+                            claude_blocks.append(
+                                document_to_content_block(base64_data=resource.blob)
+                            )
 
             # Add tool result
             user_content.append(tool_use_content_block(tool_use_id, claude_blocks))
 
         # Return as a user message containing all tool results
         return [
-            cast(
-                "BetaMessageParam",
-                {
-                    "role": "user",
-                    "content": user_content,
-                },
+            BetaMessageParam(
+                role="user",
+                content=user_content,
             )
         ]
 
     async def create_user_message(self, text: str) -> BetaMessageParam:
         """Create a user message in Claude's format."""
-        return cast("BetaMessageParam", {"role": "user", "content": text})
+        return BetaMessageParam(role="user", content=text)
 
-    def _convert_tools_for_claude(self) -> list[dict]:
-        """Convert MCP tools to Claude tool format."""
-        claude_tools = []
-        self._claude_to_mcp_tool_map = {}  # Reset mapping
+    def _convert_tools_for_claude(self) -> None:
+        """Convert MCP tools to Claude API tools."""
 
-        # Find computer tool by priority
-        computer_tool_priority = ["anthropic_computer", "computer_anthropic", "computer"]
+        # First pass: identify all computer tools and find the longest match
+        available_tools = self.get_available_tools()
+
+        # find potential computer tools by priority
         selected_computer_tool = None
-
-        for priority_name in computer_tool_priority:
-            for tool in self.get_available_tools():
+        computer_tool_names_by_priority = ["anthropic_computer", "computer_anthropic", "computer"]
+        for computer_tool_name in computer_tool_names_by_priority:
+            for tool in available_tools:
                 # Check both exact match and suffix match (for prefixed tools)
-                if tool.name == priority_name or tool.name.endswith(f"_{priority_name}"):
+                if tool.name == computer_tool_name or tool.name.endswith(f"_{computer_tool_name}"):
                     selected_computer_tool = tool
                     break
             if selected_computer_tool:
                 break
 
-        # Add the selected computer tool if found
-        if selected_computer_tool:
-            claude_tool = {
-                "type": "computer_20250124",
-                "name": "computer",
-                "display_width_px": self.metadata["display_width"],
-                "display_height_px": self.metadata["display_height"],
-            }
-            # Map Claude's "computer" back to the actual MCP tool name
-            self._claude_to_mcp_tool_map["computer"] = selected_computer_tool.name
-            claude_tools.append(claude_tool)
-            self.hud_console.debug(
-                f"Using {selected_computer_tool.name} as computer tool for Claude"
+        def to_api_tool(tool: types.Tool) -> BetaToolUnionParam | None:
+            if tool.name == "str_replace_based_edit_tool":
+                return BetaToolTextEditor20250728Param(
+                    type="text_editor_20250728",
+                    name="str_replace_based_edit_tool",
+                )
+            if tool.name == "bash":
+                return BetaToolBash20250124Param(
+                    type="bash_20250124",
+                    name="bash",
+                )
+            if selected_computer_tool is not None:
+                if tool.name == selected_computer_tool.name:
+                    return BetaToolComputerUse20250124Param(
+                        type="computer_20250124",
+                        name="computer",
+                        display_number=1,
+                        display_width_px=computer_settings.ANTHROPIC_COMPUTER_WIDTH,
+                        display_height_px=computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
+                    )
+                elif tool.name == "computer" or tool.name.endswith("_computer"):
+                    logger.warning(
+                        "Renamed tool %s to 'computer', dropping original 'computer' tool",
+                        selected_computer_tool.name,
+                    )
+                    return None
+
+            if tool.description is None or tool.inputSchema is None:
+                raise ValueError(
+                    cleandoc(f"""MCP tool {tool.name} requires both a description and inputSchema.
+                    Add these by:
+                    1. Adding a docstring to your @mcp.tool decorated function for the description
+                    2. Using pydantic Field() annotations on function parameters for the schema
+                    """)
+                )
+
+            return BetaToolParam(
+                name=tool.name,
+                description=tool.description,
+                input_schema=tool.inputSchema,
             )
 
-        # Add other non-computer tools
-        for tool in self.get_available_tools():
-            # Skip computer tools (already handled)
-            if any(
-                tool.name == priority_name or tool.name.endswith(f"_{priority_name}")
-                for priority_name in computer_tool_priority
-            ):
+        self.has_computer_tool = False
+        self.tool_mapping = {}
+        self.claude_tools = []
+        for tool in available_tools:
+            claude_tool = to_api_tool(tool)
+            if claude_tool is None:
                 continue
-
-            claude_tool = {
-                "name": tool.name,
-                "description": tool.description or f"Execute {tool.name}",
-                "input_schema": tool.inputSchema
-                or {
-                    "type": "object",
-                    "properties": {},
-                },
-            }
-            # Direct mapping for non-computer tools
-            self._claude_to_mcp_tool_map[tool.name] = tool.name
-            claude_tools.append(claude_tool)
-
-        self.claude_tools = claude_tools
-        return claude_tools
+            tool_name = claude_tool.get("name")
+            if tool_name is None:
+                continue
+            if tool_name == "computer":
+                self.has_computer_tool = True
+            self.tool_mapping[tool_name] = tool.name
+            self.claude_tools.append(claude_tool)
 
     def _add_prompt_caching(self, messages: list[BetaMessageParam]) -> list[BetaMessageParam]:
         """Add prompt caching to messages."""
         messages_cached = copy.deepcopy(messages)
+        cache_control = CacheControlEphemeralParam(type="ephemeral")
 
         # Mark last user message with cache control
         if (
@@ -391,20 +362,25 @@ class ClaudeAgent(MCPAgent):
                 for block in last_content:
                     # Only add cache control to dict-like block types that support it
                     if isinstance(block, dict):
-                        block_type = block.get("type")
-                        if block_type in ["text", "image", "tool_use", "tool_result"]:
-                            cache_control: BetaCacheControlEphemeralParam = {"type": "ephemeral"}
-                            block["cache_control"] = cache_control  # type: ignore[reportGeneralTypeIssues]
+                        match block["type"]:
+                            case "redacted_thinking" | "thinking":
+                                pass
+                            case _:
+                                block["cache_control"] = cache_control
 
         return messages_cached
 
 
 def base64_to_content_block(base64: str) -> BetaImageBlockParam:
     """Convert base64 image to Claude content block."""
-    return {
-        "type": "image",
-        "source": {"type": "base64", "media_type": "image/png", "data": base64},
-    }
+    return BetaImageBlockParam(
+        type="image",
+        source=BetaBase64ImageSourceParam(
+            type="base64",
+            media_type="image/png",
+            data=base64,
+        ),
+    )
 
 
 def text_to_content_block(text: str) -> BetaTextBlockParam:
@@ -412,8 +388,21 @@ def text_to_content_block(text: str) -> BetaTextBlockParam:
     return {"type": "text", "text": text}
 
 
+def document_to_content_block(base64_data: str) -> BetaRequestDocumentBlockParam:
+    """Convert base64 PDF to Claude document content block."""
+    return BetaRequestDocumentBlockParam(
+        type="document",
+        source=BetaBase64PDFSourceParam(
+            type="base64",
+            media_type="application/pdf",
+            data=base64_data,
+        ),
+    )
+
+
 def tool_use_content_block(
-    tool_use_id: str, content: list[BetaTextBlockParam | BetaImageBlockParam]
+    tool_use_id: str,
+    content: Sequence[BetaTextBlockParam | BetaImageBlockParam | BetaRequestDocumentBlockParam],
 ) -> BetaToolResultBlockParam:
     """Create tool result content block."""
-    return {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
+    return {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}  # pyright: ignore[reportReturnType]

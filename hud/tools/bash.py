@@ -143,15 +143,20 @@ class BashTool(BaseTool):
         self, command: str | None = None, restart: bool = False
     ) -> list[ContentBlock]:
         if restart:
+            # Preserve the session class type when restarting
+            session_cls = type(self.session) if self.session else _BashSession
             if self.session:
                 self.session.stop()
-            self.session = _BashSession()
+            self.session = session_cls()
             await self.session.start()
 
             return ContentResult(output="Bash session restarted.").to_content_blocks()
 
         if self.session is None:
             self.session = _BashSession()
+
+        # Ensure session is started (handles pre-configured sessions that weren't started)
+        if not self.session._started:
             await self.session.start()
 
         if command is not None:

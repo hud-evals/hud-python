@@ -1,100 +1,125 @@
 ---
 title: "Introduction"
-description: "OSS RL environment + evals toolkit."
+description: "Build, evaluate, and train AI agents."
 icon: "book"
 ---
 
-<Note>
-**Version 0.4.59** - Latest stable release
-</Note>
+HUD gives you three things: a unified API for every model, a way to turn your code into agent-callable tools, and infrastructure to run evaluations at scale.
 
-<CardGroup cols={3}>
-<Card title="I want to evaluate agents" icon="robot" href="/evaluate-agents/create-agents">
-  Test Claude, Operator, or custom agents on benchmarks like SheetBench and OSWorld
-</Card>
+## Install
 
-<Card title="I want to build environments" icon="cube" href="/build-environments">
-  Wrap any software in dockerized MCP for scalable and generalizable agent evaluation
-</Card>
+```bash
+# Install CLI
+uv tool install hud-python --python 3.12
 
-<Card title="I want to train agents" icon="brain" href="/train-agents/quickstart">
-  Use reinforcement learning and GRPO on evaluations to improve agent performance
-</Card>
-</CardGroup>
-
-## What is HUD?
-
-HUD connects AI agents to software environments using the Model Context Protocol (MCP). Whether you're evaluating existing agents, building new environments, or training models with RL, HUD provides the infrastructure.
-
-```mermaid
-graph LR
-    Agent["🤖 Any Agent<br/>(Claude, Operator, etc.)"]
-    MCP["🔌 MCP Protocol<br/>(Tool Calls)"]
-    Env["📦 Any Environment<br/>(Browser, OS, etc.)"]
-    
-    Agent -->|"call_tool()"| MCP
-    MCP -->|"click(x, y)"| Env
-    Env -->|"screenshot"| MCP
-    MCP -->|"get_response()"| Agent
-    
-    style Agent fill:#3b82f6,stroke:#1e40af,stroke-width:2px,color:#ffffff
-    style MCP fill:#f59e0b,stroke:#d97706,stroke-width:2px,color:#ffffff
-    style Env fill:#10b981,stroke:#047857,stroke-width:2px,color:#ffffff
+# Set your API key
+hud set HUD_API_KEY=your-key-here
 ```
 
-## Why HUD?
+Get your API key at [hud.ai/project/api-keys](https://hud.ai/project/api-keys).
 
-- **🔌 MCP-native**: Any agent can connect to any environment
-- **📡 Live telemetry**: Debug every tool call at [hud.ai](https://hud.ai)
-- **🚀 Production-ready**: From local Docker to cloud scale
-- **🎯 Built-in benchmarks**: OSWorld-Verified, SheetBench-50, and more
- - **🔧 CLI tools**: Create, develop, run, and train with `hud init`, `hud dev`, `hud run`, `hud eval`, `hud rl`
+## 1. Gateway: Any Model, One API
 
-<CardGroup cols={2}>
-<Card title="3-minute quickstart" icon="bolt" href="/quickstart">
-  Run your first agent evaluation with zero setup
-</Card>
-
-<Card title="Clone starter project" icon="code-branch">
-  ```bash
-  uvx hud-python quickstart
-  ```
-</Card>
-</CardGroup>
-
-
-
-## Quick Example
+Stop juggling API keys. Point any OpenAI-compatible client at `inference.hud.ai` and use Claude, GPT, Gemini, or Grok:
 
 ```python
-import asyncio, os, hud
-from hud.datasets import Task
-from hud.agents import ClaudeAgent
+from openai import AsyncOpenAI
+import os
 
-async def main():
-    # Define evaluation task with remote MCP
-    task = Task(
-        prompt="Win a game of 2048 by reaching the 128 tile",
-        mcp_config={
-            "hud": {
-                "url": "https://mcp.hud.so/v3/mcp",
-                "headers": {
-                    "Authorization": f"Bearer {os.getenv('HUD_API_KEY')}",
-                    "Mcp-Image": "hudevals/hud-text-2048:0.1.3"
-                }
-            }
-        },
-        setup_tool={"name": "setup", "arguments": {"name": "board", "arguments": { "board_size": 4}}},
-        evaluate_tool={"name": "evaluate", "arguments": {"name": "max_number", "arguments": {"target": 64}}}
-    )
-    
-    # Run agent (auto-creates MCP client)
-    agent = ClaudeAgent()
-    result = await agent.run(task)
-    print(f"Score: {result.reward}")
+client = AsyncOpenAI(
+    base_url="https://inference.hud.ai",
+    api_key=os.environ["HUD_API_KEY"]
+)
 
-asyncio.run(main())
+response = await client.chat.completions.create(
+    model="claude-sonnet-4-5",  # or gpt-4o, gemini-2.5-pro, grok-4-1-fast...
+    messages=[{"role": "user", "content": "Hello!"}]
+)
 ```
+
+Every call is traced. View them at [hud.ai/home](https://hud.ai/home).
+
+→ [More on Gateway](/quick-links/gateway)
+
+## 2. Environments: Your Code, Agent-Ready
+
+A production API is one live instance with shared state—you can't run 1,000 parallel tests without them stepping on each other. Environments spin up fresh for every evaluation: isolated, deterministic, reproducible. Each generates training data.
+
+Turn your code into tools agents can call. Define scenarios that evaluate what agents do:
+
+```python
+from hud import Environment
+
+env = Environment("my-env")
+
+@env.tool()
+def search(query: str) -> str:
+    """Search the knowledge base."""
+    return db.search(query)
+
+@env.scenario("find-answer")
+async def find_answer(question: str):
+    answer = yield f"Find the answer to: {question}"
+    yield 1.0 if "correct" in answer.lower() else 0.0
+```
+
+**Scenarios are the atomic skills your agent must get right.** Each one defines a prompt (first yield) and scoring logic (second yield). If your agent can't reliably pass a scenario, that's a gap to close—through prompting, fine-tuning, or tool design.
+
+→ [More on Environments](/quick-links/environments)
+
+## 3. Evals: Test and Improve
+
+Run your scenario with different models. Compare results:
+
+```python
+import hud
+
+task = env("find-answer", question="What is 2+2?")
+
+async with hud.eval(task, variants={"model": ["gpt-4o", "claude-sonnet-4-5"]}, group=5) as ctx:
+    response = await client.chat.completions.create(
+        model=ctx.variants["model"],
+        messages=[{"role": "user", "content": ctx.prompt}]
+    )
+    await ctx.submit(response.choices[0].message.content)
+```
+
+**Variants** test different configurations. **Groups** repeat each to see the distribution. Results show up on [hud.ai](https://hud.ai/home) with scores, traces, and side-by-side comparisons.
+
+→ [More on A/B Evals](/quick-links/ab-testing)
+
+## 4. Deploy and Scale
+
+Push your environment to GitHub, connect it on [hud.ai](https://hud.ai), and run thousands of evals in parallel. Every run generates training data.
+
+```bash
+hud init                    # Scaffold environment
+git push                    # Push to GitHub
+# Connect on hud.ai → New → Environment
+hud eval my-eval --model gpt-4o --group-size 100
+```
+
+→ [More on Deploy](/quick-links/deploy)
+
+## Next Steps
+
+<CardGroup cols={2}>
+<Card title="Gateway" icon="server" href="/quick-links/gateway">
+  One endpoint for every model. Full observability.
+</Card>
+
+<Card title="Environments" icon="cube" href="/quick-links/environments">
+  Tools, Scenarios, and local testing.
+</Card>
+
+<Card title="A/B Evals" icon="flask-vial" href="/quick-links/ab-testing">
+  Variants, groups, and finding what works.
+</Card>
+
+<Card title="Deploy" icon="rocket" href="/quick-links/deploy">
+  Run at scale. Generate training data.
+</Card>
+</CardGroup>
 
 ## Community
 
@@ -104,11 +129,12 @@ asyncio.run(main())
 </Card>
 
 <Card title="Discord" icon="discord" href="https://discord.gg/wkjtmHYYjm">
-  Join our community
+  Join the community
 </Card>
 </CardGroup>
 
-### Are you a startup building agents?
+## Enterprise
 
-[📅 Hop on a call](https://cal.com/jay-ram-z6st6w/demo) or [📧 founders@hud.so](mailto:founders@hud.so)
+Building agents at scale? We work with teams on custom environments, benchmarks, and training pipelines.
 
+[📅 Book a call](https://cal.com/jay-hud) · [📧 founders@hud.ai](mailto:founders@hud.ai)

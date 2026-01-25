@@ -6,8 +6,8 @@ from contextlib import suppress
 from typing import Any, cast
 
 import pytest
+from fastmcp import Client as MCPClient
 
-from hud.clients import MCPClient
 from hud.server import MCPServer
 from hud.server import server as server_mod  # for toggling _sigterm_received
 from hud.server.low_level import LowLevelServerWithInit
@@ -84,17 +84,17 @@ async def test_initialize_runs_once_and_tools_work() -> None:
 
     async def connect_and_check() -> None:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        client = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
-        await client.initialize()
+        client = MCPClient({"mcpServers": cfg})
+        await client.__aenter__()
         tools = await client.list_tools()
         names = sorted(t.name for t in tools)
         assert {"echo", "initialized"} <= set(names)
         res = await client.call_tool(name="initialized", arguments={})
-        # boolean return is exposed via structuredContent["result"]
-        assert getattr(res, "structuredContent", {}).get("result") is True
+        # boolean return is exposed via structured_content["result"]
+        assert getattr(res, "structured_content", {}).get("result") is True
         res2 = await client.call_tool(name="echo", arguments={"text": "ping"})
         assert _first_text(res2) == "echo:ping"
-        await client.shutdown()
+        await client.__aexit__(None, None, None)
 
     try:
         await connect_and_check()
@@ -123,9 +123,9 @@ async def test_shutdown_handler_only_on_sigterm_flag() -> None:
     try:
         # sanity connect so lifespan actually ran
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
-        await c.initialize()
-        await c.shutdown()
+        c = MCPClient({"mcpServers": cfg})
+        await c.__aenter__()
+        await c.__aexit__(None, None, None)
     finally:
         with suppress(asyncio.CancelledError):
             server_task.cancel()
@@ -140,9 +140,9 @@ async def test_shutdown_handler_only_on_sigterm_flag() -> None:
     server_task2 = await _start_http_server(mcp, port=port2)
     try:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port2}/mcp"}}
-        c = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
-        await c.initialize()
-        await c.shutdown()
+        c = MCPClient({"mcpServers": cfg})
+        await c.__aenter__()
+        await c.__aexit__(None, None, None)
 
         # flip the module-level flag the lifespan checks
         server_mod._sigterm_received = True  # type: ignore[attr-defined]
@@ -170,18 +170,18 @@ async def test_initializer_exception_propagates_to_client() -> None:
     server_task = await _start_http_server(mcp, port)
 
     cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-    client = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
+    client = MCPClient({"mcpServers": cfg})
 
     try:
         with pytest.raises(Exception):
-            await client.initialize()
+            await client.__aenter__()
     finally:
         with suppress(asyncio.CancelledError):
             server_task.cancel()
             await server_task
         # defensive: client may or may not be fully created
         with suppress(Exception):
-            await client.shutdown()
+            await client.__aexit__(None, None, None)
 
 
 # --- additional tests for MCPServer coverage ---
@@ -211,14 +211,14 @@ async def test_init_after_tools_preserves_handlers_and_runs_once() -> None:
 
     async def connect_and_check() -> None:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
-        await c.initialize()
+        c = MCPClient({"mcpServers": cfg})
+        await c.__aenter__()
         tools = await c.list_tools()
         names = sorted(t.name for t in tools)
         assert "foo" in names, "tool registered before @initialize must survive replacement"
         res = await c.call_tool(name="foo", arguments={})
         assert _first_text(res) == "bar"
-        await c.shutdown()
+        await c.__aexit__(None, None, None)
 
     try:
         await connect_and_check()
@@ -244,12 +244,12 @@ async def test_tool_default_argument_used_when_omitted() -> None:
     server_task = await _start_http_server(mcp, port)
     try:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
-        await c.initialize()
+        c = MCPClient({"mcpServers": cfg})
+        await c.__aenter__()
         # Call with no args → default should kick in
         res = await c.call_tool(name="echo", arguments={})
         assert _first_text(res) == "echo:ok"
-        await c.shutdown()
+        await c.__aexit__(None, None, None)
     finally:
         with suppress(asyncio.CancelledError):
             server_task.cancel()
@@ -273,9 +273,9 @@ async def test_shutdown_handler_runs_once_when_both_paths_fire() -> None:
     try:
         # Ensure lifespan started
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
-        await c.initialize()
-        await c.shutdown()
+        c = MCPClient({"mcpServers": cfg})
+        await c.__aenter__()
+        await c.__aexit__(None, None, None)
 
         # Arm SIGTERM flag so both code paths believe they should run
         server_mod._sigterm_received = True  # type: ignore[attr-defined]
@@ -315,9 +315,9 @@ async def test_initialize_ctx_exposes_client_info() -> None:
     server_task = await _start_http_server(mcp, port)
     try:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
-        await c.initialize()
-        await c.shutdown()
+        c = MCPClient({"mcpServers": cfg})
+        await c.__aenter__()
+        await c.__aexit__(None, None, None)
     finally:
         with suppress(asyncio.CancelledError):
             server_task.cancel()
@@ -344,9 +344,9 @@ async def test_initialize_redirects_stdout_to_stderr(capsys) -> None:
 
     try:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
-        await c.initialize()
-        await c.shutdown()
+        c = MCPClient({"mcpServers": cfg})
+        await c.__aenter__()
+        await c.__aexit__(None, None, None)
     finally:
         with suppress(asyncio.CancelledError):
             server_task.cancel()
@@ -373,13 +373,13 @@ async def test_initialize_callable_form_runs_once() -> None:
     server_task = await _start_http_server(mcp, port)
     try:
         cfg = {"srv": {"url": f"http://127.0.0.1:{port}/mcp"}}
-        c1 = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
-        await c1.initialize()
-        await c1.shutdown()
+        c1 = MCPClient({"mcpServers": cfg})
+        await c1.__aenter__()
+        await c1.__aexit__(None, None, None)
 
-        c2 = MCPClient(mcp_config=cfg, auto_trace=False, verbose=False)
-        await c2.initialize()
-        await c2.shutdown()
+        c2 = MCPClient({"mcpServers": cfg})
+        await c2.__aenter__()
+        await c2.__aexit__(None, None, None)
     finally:
         with suppress(asyncio.CancelledError):
             server_task.cancel()

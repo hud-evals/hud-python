@@ -160,7 +160,7 @@ class TestPushEnvironment:
         mock_hud_console = mock.Mock()
         mock_hud_console_class.return_value = mock_hud_console
         mock_settings.api_key = "test-key"
-        mock_settings.hud_telemetry_url = "https://api.hud.test"
+        mock_settings.hud_api_url = "https://api.hud.test"
         mock_get_username.return_value = "testuser"
 
         # Create lock file

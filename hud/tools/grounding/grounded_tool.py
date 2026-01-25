@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mcp import ErrorData, McpError
 from mcp.types import INVALID_PARAMS, ContentBlock
 
-from hud.clients.base import AgentMCPClient  # noqa: TC001
 from hud.tools.grounding.grounder import Grounder  # noqa: TC001
-from hud.types import MCPToolCall
+
+if TYPE_CHECKING:
+    from hud.environment import Environment
 
 logger = logging.getLogger(__name__)
 
@@ -33,18 +34,18 @@ class GroundedComputerTool:
         self,
         *,
         grounder: Grounder,
-        mcp_client: AgentMCPClient,
+        ctx: Environment,
         computer_tool_name: str = "computer",
     ) -> None:
         """Initialize the grounded computer tool.
 
         Args:
             grounder: Grounder instance for visual grounding
-            mcp_client: MCP client to call the environment's computer tool
+            ctx: Environment or EvalContext to call tools through
             computer_tool_name: Name of the computer tool in the environment
         """
         self._grounder = grounder
-        self._mcp_client = mcp_client
+        self._ctx = ctx
         self._computer_tool_name = computer_tool_name
 
     def get_openai_tool_schema(self) -> dict:
@@ -172,10 +173,8 @@ class GroundedComputerTool:
                 if keys is not None:
                     computer_args["keys"] = keys
 
-                result = await self._mcp_client.call_tool(
-                    MCPToolCall(
-                        name=self._computer_tool_name, arguments={**computer_args, **kwargs}
-                    )
+                result = await self._ctx.call_tool(
+                    (self._computer_tool_name, {**computer_args, **kwargs})
                 )
                 return result.content
 
@@ -224,10 +223,8 @@ class GroundedComputerTool:
                 if scroll_y is not None:
                     computer_args["scroll_y"] = scroll_y
 
-                result = await self._mcp_client.call_tool(
-                    MCPToolCall(
-                        name=self._computer_tool_name, arguments={**computer_args, **kwargs}
-                    )
+                result = await self._ctx.call_tool(
+                    (self._computer_tool_name, {**computer_args, **kwargs})
                 )
                 return result.content
 
@@ -292,10 +289,8 @@ class GroundedComputerTool:
                 if button:
                     computer_args["button"] = button
 
-                result = await self._mcp_client.call_tool(
-                    MCPToolCall(
-                        name=self._computer_tool_name, arguments={**computer_args, **kwargs}
-                    )
+                result = await self._ctx.call_tool(
+                    (self._computer_tool_name, {**computer_args, **kwargs})
                 )
                 return result.content
 

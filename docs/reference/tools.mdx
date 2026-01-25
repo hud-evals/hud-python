@@ -69,6 +69,93 @@ async def url_match(url: str) -> EvaluationResult:
 # Agents call: evaluators(name="url_match", arguments={"url": "..."})
 ```
 
+## Agent Tools
+
+### AgentTool
+
+```python
+from hud.tools import AgentTool
+```
+
+Wraps a scenario as a tool that can be called by another agent. Essential for building **hierarchical agent systems** where an orchestrator delegates to specialized subagents.
+
+**Constructor Parameters:**
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `task` | `Task` | Task template from `env("scenario_name")` | Required |
+| `model` | `str` | Model for subagent (via gateway) | `None` |
+| `agent` | `type[MCPAgent]` | Custom agent class | `None` |
+| `agent_params` | `dict` | Additional agent parameters | `{}` |
+| `name` | `str` | Tool name for orchestrator | From scenario |
+| `description` | `str` | Tool description | Auto-generated |
+| `trace` | `bool` | Enable tracing for standalone runs | `False` |
+
+<Note>Must provide either `model` or `agent`, not both.</Note>
+
+**Eval-Only Parameters:**
+
+Parameters with `| None = None` are hidden from the orchestrator but available for evaluation:
+
+```python
+@env.scenario("investigate")
+async def investigate(
+    query: str,                          # Visible - orchestrator passes this
+    expected_finding: str | None = None, # Hidden - only used in eval scoring
+):
+    response = yield f"Investigate: {query}"
+    
+    # Scoring uses expected_finding but orchestrator never sees it
+    if expected_finding and response:
+        yield 1.0 if expected_finding in response else 0.5
+    else:
+        yield 1.0 if response else 0.0
+```
+
+**Usage:**
+```python
+from hud import Environment
+from hud.tools import AgentTool
+
+# Subagent environment with scenario
+sentry_env = Environment(name="sentry-agent")
+
+@sentry_env.scenario("investigate")
+async def investigate_sentry(query: str):
+    yield f"Investigate Sentry: {query}"
+
+# Create orchestrator
+orchestrator = Environment(name="orchestrator")
+
+# Wrap subagent scenario as tool
+tool = AgentTool(
+    sentry_env("investigate"),  # Task template
+    model="gpt-4o-mini",
+    name="investigate_sentry",
+    description="Investigate errors in Sentry",
+)
+orchestrator.add_tool(tool.mcp)
+
+# Now orchestrator agent can call investigate_sentry(query="...")
+```
+
+**Trace Continuity:**
+
+When called from within an eval context, AgentTool automatically:
+1. Inherits the parent's trace_id
+2. Skips duplicate trace registration
+3. Routes all inference/tool calls to the parent trace
+
+```python
+async with hud.eval(task) as ctx:
+    agent = create_agent("gpt-4o")
+    result = await agent.run(ctx)
+    # All subagent activity appears in this single trace
+```
+
+**See Also:** [Ops Diagnostics Cookbook](/cookbook/ops-diagnostics) for a complete hierarchical agent example.
+
+---
+
 ## Core Tools
 
 ### BashTool
@@ -175,6 +262,7 @@ await tool(action="click", selector="button.submit")
 await tool(action="type", selector="input#search", text="query")
 ```
 
+
 ### MemoryTool
 
 ```python
@@ -187,9 +275,26 @@ Store and search short-term memory with a simple add/search interface.
 - In-memory (default)
 - Qdrant (set `QDRANT_URL`; optional `QDRANT_API_KEY`)
 
+### JupyterTool
+
+```python
+from hud.tools import JupyterTool
+```
+
+Execute Python code in a Jupyter kernel.
+
+**Constructor Parameters:**
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `url_suffix` | `str` | (Optional) Kernel gateway host:port | "localhost:8888" |
+| `kernel_name` | `str` | (Optional) Kernel name | "python3" |
+| `kernel_id` | `str` | (Optional) If set, connect to the existed kernel with `kernel_id` | ""(empty string) |
+
+
 **Tool Parameters:**
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
+
 | `action` | `"add" \| "search"` | Store or query memory | Required |
 | `text` | `str` | Content to store or query | Required |
 | `metadata` | `dict` | Optional metadata | `{}` |
@@ -200,6 +305,26 @@ Store and search short-term memory with a simple add/search interface.
 memory = MemoryTool()
 await memory(action="add", text="User prefers CSV output", metadata={"user_id": "123"})
 result = await memory(action="search", text="csv output")
+
+| `code` | `str` | Python code to execute | Required |
+| `execution_timeout` | `int` | Execution timeout in seconds | 15 |
+
+**Example: Tool Calling**
+```python
+jupyter_tool = JupyterTool()
+result = await jupyter_tool(code="print(\"hello world!\")")
+# Returns: [TextContent(text="hello world\n", type="text")]
+```
+**Example: Reuse the same kernel**
+
+```python
+# When initializing, register the kernel
+jupyter_tool = JupyterTool()
+JupyterTool.register_shared_kernel("my-jupyter", jupyter_tool.get_kernel_id())
+
+# Reuse the same kernel in other places:
+jupyter_tool_reuse = JupyterTool.from_shared_kernel("my-jupyter")
+
 ```
 
 ## Computer Control Tools
