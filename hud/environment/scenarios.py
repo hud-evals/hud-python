@@ -7,7 +7,10 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any, get_type_hints
 
+from mcp.types import TextContent
 from pydantic import BaseModel, ConfigDict
+
+from hud.tools.types import EvaluationResult
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
@@ -19,6 +22,80 @@ if TYPE_CHECKING:
 __all__ = ["ScenarioMixin", "ScenarioSession"]
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_prompt_yield(value: Any) -> list[str]:
+    """Convert various first-yield types to list of strings for FastMCP.
+
+    Accepts:
+    - str: Single string prompt
+    - TextContent: MCP text content block
+    - list[str]: Multiple string prompts
+    - list[ContentBlock]: Multiple content blocks (text extracted)
+
+    Returns:
+        List of strings that FastMCP will wrap as PromptMessages
+    """
+    # Simple string - most common case
+    if isinstance(value, str):
+        return [value]
+
+    # TextContent from mcp.types
+    if isinstance(value, TextContent):
+        return [value.text]
+
+    # List of items
+    if isinstance(value, list):
+        results: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                results.append(item)
+            elif isinstance(item, TextContent):
+                results.append(item.text)
+            elif hasattr(item, "text"):
+                # Other content blocks with text attribute
+                results.append(str(item.text))
+            else:
+                # Fall back to string conversion
+                results.append(str(item))
+        return results
+
+    # ContentBlock with text attribute
+    if hasattr(value, "text"):
+        return [str(value.text)]
+
+    # Fallback - convert to string
+    return [str(value)]
+
+
+def _normalize_eval_yield(value: Any) -> EvaluationResult:
+    """Convert various second-yield types to EvaluationResult.
+
+    Accepts:
+    - float/int: Simple reward value (done=True implied)
+    - EvaluationResult: Full evaluation result
+
+    Returns:
+        EvaluationResult with all fields populated
+    """
+    # Already an EvaluationResult
+    if isinstance(value, EvaluationResult):
+        return value
+
+    # Numeric reward - convert to EvaluationResult with done=True
+    if isinstance(value, (int, float)):
+        return EvaluationResult.from_float(float(value))
+
+    # Dict-like - try to construct EvaluationResult
+    if isinstance(value, dict):
+        return EvaluationResult(**value)
+
+    # Fallback - try to convert to float
+    try:
+        return EvaluationResult.from_float(float(value))
+    except (TypeError, ValueError):
+        logger.warning("Could not convert yield value %s to EvaluationResult", type(value))
+        return EvaluationResult(reward=0.0, done=True, isError=True)
 
 
 class ScenarioSession(BaseModel):
@@ -42,12 +119,27 @@ class ScenarioMixin:
     """Mixin providing @env.scenario decorator for setup/evaluate phases.
 
     Scenarios are async generators that yield twice:
-    - First yield: prompt string (setup phase)
-    - Second yield: reward float (evaluate phase)
+    - First yield: prompt (setup phase) - str, TextContent, or list
+    - Second yield: evaluation (evaluate phase) - float or EvaluationResult
 
     The scenario can receive the agent's answer via yield:
         answer = yield "Do the task"
         yield 1.0 if "success" in answer else 0.0
+
+    For more detailed evaluation results, yield an EvaluationResult:
+        from hud.tools.types import EvaluationResult, SubScore
+
+        answer = yield "Find all items on the page"
+        count = await check_items()
+        yield EvaluationResult(
+            reward=count / 10,
+            done=count >= 5,
+            content=f"Found {count} items",
+            subscores=[
+                SubScore(name="detection", weight=0.7, value=count / 10),
+                SubScore(name="speed", weight=0.3, value=1.0),
+            ],
+        )
 
     The answer is passed via the hud_submit tool or ctx.submit().
 
@@ -208,7 +300,12 @@ class ScenarioMixin:
             gen = scenario_fn(**args)
 
             # Run setup phase (code before first yield)
-            prompt = await gen.__anext__()
+            raw_prompt = await gen.__anext__()
+
+            # Normalize the prompt yield to a list of strings
+            # Accepts: str, TextContent, list[str], list[ContentBlock]
+            prompt_parts = _normalize_prompt_yield(raw_prompt)
+            prompt_text = prompt_parts[0] if len(prompt_parts) == 1 else "\n".join(prompt_parts)
 
             # Create session for local scenario
             self._active_session = ScenarioSession(
@@ -225,7 +322,7 @@ class ScenarioMixin:
                 local_name,
                 self._active_session,
             )
-            return str(prompt)
+            return prompt_text
         else:
             # Remote scenario - call via MCP prompt
             # If scenario_name already contains ":", it's already namespaced - use directly
@@ -321,8 +418,8 @@ class ScenarioMixin:
             )
             return prompt_text
 
-    async def run_scenario_evaluate(self, scenario_name: str) -> float | None:
-        """Run a scenario's evaluate phase and return the reward.
+    async def run_scenario_evaluate(self, scenario_name: str) -> EvaluationResult | None:
+        """Run a scenario's evaluate phase and return the evaluation result.
 
         Uses _active_session created by run_scenario_setup():
         - Local: use stored generator with submitted answer
@@ -332,7 +429,8 @@ class ScenarioMixin:
             scenario_name: Name of the scenario to evaluate
 
         Returns:
-            The reward from the scenario's evaluate phase, or None if failed
+            EvaluationResult with reward, done, content, subscores, etc.
+            Returns None if evaluation failed.
         """
         if not self._active_session:
             logger.warning("No active session for scenario '%s'", scenario_name)
@@ -349,16 +447,19 @@ class ScenarioMixin:
 
             answer = session.answer
             try:
-                reward = await session.generator.asend(answer)
+                raw_result = await session.generator.asend(answer)
+                # Normalize to EvaluationResult (handles float, EvaluationResult, dict)
+                result = _normalize_eval_yield(raw_result)
                 logger.debug(
-                    "Local scenario %s evaluate: answer=%s, reward=%s",
+                    "Local scenario %s evaluate: answer=%s, result=%s",
                     session.local_name,
                     answer[:50] if answer and len(answer) > 50 else answer,
-                    reward,
+                    result,
                 )
-                return float(reward)
+                return result
             except StopAsyncIteration:
-                return 1.0
+                # No second yield - default to success
+                return EvaluationResult(reward=1.0, done=True)
         else:
             # Remote scenario - read resource via router
             try:
@@ -367,15 +468,17 @@ class ScenarioMixin:
                     first = contents[0]
                     if hasattr(first, "text") and isinstance(first.text, str):  # type: ignore[union-attr]
                         data = json.loads(first.text)  # type: ignore[union-attr]
-                        if "reward" in data:
-                            logger.debug(
-                                "Remote scenario %s evaluate: reward=%s",
-                                session.local_name,
-                                data["reward"],
-                            )
-                            return float(data["reward"])
+                        # Parse as EvaluationResult (handles both old {"reward": x} and new format)
+                        # Default for done is True, so old environments work correctly
+                        result = EvaluationResult(**data)
+                        logger.debug(
+                            "Remote scenario %s evaluate: result=%s",
+                            session.local_name,
+                            result,
+                        )
+                        return result
             except Exception as e:
-                logger.warning("Failed to get scenario reward from %s: %s", session.resource_uri, e)
+                logger.warning("Failed to get scenario result from %s: %s", session.resource_uri, e)
             return None
 
     def scenario(
@@ -586,15 +689,17 @@ class ScenarioMixin:
             )
             self._prompt_manager.add_prompt(prompt)
 
-            # Register RESOURCE - runs evaluate, returns reward
+            # Register RESOURCE - runs evaluate, returns EvaluationResult
             async def resource_handler() -> str:
                 # Delegate to run_scenario_evaluate (consolidates client/server logic)
-                reward = await scenario_self.run_scenario_evaluate(scenario_name_ref)
+                result = await scenario_self.run_scenario_evaluate(scenario_name_ref)
 
-                if reward is None:
+                if result is None:
                     raise ValueError(f"Scenario '{scenario_name_ref}' evaluation failed")
 
-                return json.dumps({"reward": float(reward)})
+                # Serialize full EvaluationResult (includes reward, done, content, subscores)
+                # Use model_dump to get all fields, excluding None values for cleaner output
+                return json.dumps(result.model_dump(exclude_none=True))
 
             # Register as resource with same scenario: URI
             from fastmcp.resources.resource import FunctionResource

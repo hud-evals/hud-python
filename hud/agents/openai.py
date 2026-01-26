@@ -31,7 +31,8 @@ from openai.types.responses.response_input_param import FunctionCallOutput, Mess
 from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 
 from hud.settings import settings
-from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
+from hud.tools.native_types import NativeToolSpec
+from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
 from hud.utils.strict_schema import ensure_strict_json_schema
 from hud.utils.types import with_signature
 
@@ -46,6 +47,45 @@ class OpenAIAgent(MCPAgent):
 
     metadata: ClassVar[dict[str, Any] | None] = None
     config_cls: ClassVar[type[BaseAgentConfig]] = OpenAIConfig
+
+    @classmethod
+    def agent_type(cls) -> AgentType:
+        """Return the AgentType for OpenAI."""
+        return AgentType.OPENAI
+
+    # Legacy tool name patterns for backwards compatibility
+    _LEGACY_SHELL_NAMES = ("shell",)
+    _LEGACY_APPLY_PATCH_NAMES = ("apply_patch",)
+
+    def _legacy_native_spec_fallback(self, tool: types.Tool) -> NativeToolSpec | None:
+        """Detect OpenAI native tools by name for backwards compatibility.
+
+        Supports old environments that expose tools like 'shell' or 'apply_patch'
+        without native_tools metadata.
+        """
+        name = tool.name
+
+        # Check for shell tool patterns
+        for pattern in self._LEGACY_SHELL_NAMES:
+            if name == pattern or name.endswith(f"_{pattern}"):
+                logger.debug("Legacy fallback: detected %s as shell tool", name)
+                return NativeToolSpec(
+                    api_type="shell",
+                    api_name="shell",
+                    role="shell",
+                )
+
+        # Check for apply_patch tool patterns
+        for pattern in self._LEGACY_APPLY_PATCH_NAMES:
+            if name == pattern or name.endswith(f"_{pattern}"):
+                logger.debug("Legacy fallback: detected %s as apply_patch tool", name)
+                return NativeToolSpec(
+                    api_type="apply_patch",
+                    api_name="apply_patch",
+                    role="editor",
+                )
+
+        return None
 
     @with_signature(OpenAICreateParams)
     @classmethod
@@ -65,17 +105,16 @@ class OpenAIAgent(MCPAgent):
                 model_client = build_gateway_client("openai")
             elif settings.openai_api_key:
                 model_client = AsyncOpenAI(api_key=settings.openai_api_key)
+                if self.config.validate_api_key:
+                    try:
+                        OpenAI(api_key=settings.openai_api_key).models.list()
+                    except Exception as exc:  # pragma: no cover - network validation
+                        raise ValueError(f"OpenAI API key is invalid: {exc}") from exc
             else:
                 raise ValueError(
                     "No API key found. Set HUD_API_KEY for HUD gateway, "
                     "or OPENAI_API_KEY for direct OpenAI access."
                 )
-
-        if self.config.validate_api_key:
-            try:
-                OpenAI(api_key=model_client.api_key).models.list()
-            except Exception as exc:  # pragma: no cover - network validation
-                raise ValueError(f"OpenAI API key is invalid: {exc}") from exc
 
         self.openai_client: AsyncOpenAI = model_client
         self._model = self.config.model
@@ -96,21 +135,77 @@ class OpenAIAgent(MCPAgent):
         """Build OpenAI-specific tool mappings after tools are discovered."""
         self._convert_tools_for_openai()
 
-    def _to_openai_tool(
-        self,
-        tool: types.Tool,
-    ) -> (
-        FunctionShellToolParam | ApplyPatchToolParam | FunctionToolParam | ComputerToolParam | None
-    ):
-        # Special case: shell tool -> OpenAI native shell
-        if tool.name == "shell":
-            return FunctionShellToolParam(type="shell")
+    def _build_native_tool(self, tool: types.Tool, spec: NativeToolSpec) -> ToolParam | None:
+        """Build an OpenAI native tool from a NativeToolSpec.
 
-        # Special case: apply_patch tool -> OpenAI native apply_patch
-        if tool.name == "apply_patch":
-            return ApplyPatchToolParam(type="apply_patch")
+        Args:
+            tool: The MCP tool
+            spec: The native spec for OpenAI
 
-        # Regular function tool
+        Returns:
+            OpenAI-specific tool parameter
+        """
+        match spec.api_type:
+            case "shell":
+                return FunctionShellToolParam(type="shell")
+            case "apply_patch":
+                return ApplyPatchToolParam(type="apply_patch")
+            case "computer_use_preview":
+                # Computer use requires display dimensions
+                display_width = spec.extra.get("display_width", 1024)
+                display_height = spec.extra.get("display_height", 768)
+                environment = spec.extra.get("environment", "browser")
+                return ComputerToolParam(
+                    type="computer_use_preview",
+                    display_width=display_width,
+                    display_height=display_height,
+                    environment=environment,
+                )
+            case _:
+                logger.warning(
+                    "Unknown native tool type %s for tool %s, using function format",
+                    spec.api_type,
+                    tool.name,
+                )
+                return self._to_function_tool(tool)
+
+    def _build_hosted_tool(self, tool: types.Tool, spec: NativeToolSpec) -> ToolParam | None:
+        """Build an OpenAI hosted tool from a NativeToolSpec.
+
+        Args:
+            tool: The MCP tool
+            spec: The native spec with hosted=True
+
+        Returns:
+            OpenAI hosted tool parameter, or None if not supported
+        """
+        from openai.types.responses import WebSearchToolParam
+
+        match spec.api_type:
+            case "web_search":
+                # Web search is a simple hosted tool
+                return WebSearchToolParam(type="web_search")
+            case "code_interpreter":
+                # Code interpreter requires container config - skip for now
+                # as it requires additional setup
+                logger.debug(
+                    "Skipping code_interpreter tool %s - requires container configuration",
+                    tool.name,
+                )
+                return None
+            case _:
+                logger.warning("Unknown hosted tool type: %s", spec.api_type)
+                return None
+
+    def _to_function_tool(self, tool: types.Tool) -> FunctionToolParam | None:
+        """Convert an MCP tool to OpenAI function tool format.
+
+        Args:
+            tool: MCP tool to convert
+
+        Returns:
+            OpenAI function tool parameter
+        """
         if tool.description is None or tool.inputSchema is None:
             raise ValueError(
                 cleandoc(f"""MCP tool {tool.name} requires both a description and inputSchema.
@@ -119,8 +214,6 @@ class OpenAIAgent(MCPAgent):
                 2. Using pydantic Field() annotations on function parameters for the schema
                 """)
             )
-
-        # schema must be strict
 
         try:
             strict_schema = ensure_strict_json_schema(copy.deepcopy(tool.inputSchema))
@@ -137,20 +230,47 @@ class OpenAIAgent(MCPAgent):
         )
 
     def _convert_tools_for_openai(self) -> None:
-        """Convert MCP tools into OpenAI Responses tool definitions."""
-        available_tools = self.get_available_tools()
+        """Convert MCP tools into OpenAI Responses tool definitions.
 
+        Uses shared categorize_tools() for role-based exclusion.
+        """
         self._openai_tools = []
         self._tool_name_map = {}
 
-        for tool in available_tools:
-            openai_tool = self._to_openai_tool(tool)
-            if openai_tool is None:
-                continue
+        categorized = self.categorize_tools()
 
-            if "name" in openai_tool:
-                self._tool_name_map[openai_tool["name"]] = tool.name
-            self._openai_tools.append(openai_tool)
+        # Log skipped tools at debug level
+        for tool, reason in categorized.skipped:
+            logger.debug("Skipping tool %s: %s", tool.name, reason)
+
+        # Process hosted tools
+        for tool, spec in categorized.hosted:
+            openai_tool = self._build_hosted_tool(tool, spec)
+            if openai_tool:
+                self._openai_tools.append(openai_tool)
+                logger.debug("Added hosted tool %s (%s) for OpenAI", tool.name, spec.api_type)
+
+        # Process native tools
+        for tool, spec in categorized.native:
+            openai_tool = self._build_native_tool(tool, spec)
+            if openai_tool:
+                # Map the API name to MCP tool name for routing responses
+                api_name = spec.api_name or tool.name
+                self._tool_name_map[api_name] = tool.name
+                self._openai_tools.append(openai_tool)
+
+        # Process generic tools (function tools)
+        for tool in categorized.generic:
+            openai_tool = self._to_function_tool(tool)
+            if openai_tool:
+                self._tool_name_map[tool.name] = tool.name
+                self._openai_tools.append(openai_tool)
+
+        # Log actual tools being used
+        tool_names = sorted(self._tool_name_map.keys())
+        self.console.info(
+            f"Agent initialized with {len(tool_names)} tools: {', '.join(tool_names)}"
+        )
 
     def _extract_tool_call(self, item: Any) -> MCPToolCall | None:
         """Extract an MCPToolCall from a response output item.
@@ -164,10 +284,14 @@ class OpenAIAgent(MCPAgent):
             arguments = json.loads(item.arguments)
             return MCPToolCall(name=target_name, arguments=arguments, id=item.call_id)
         elif item.type == "shell_call":
-            return MCPToolCall(name="shell", arguments=item.action.to_dict(), id=item.call_id)
+            # Use mapping to get actual MCP tool name (handles legacy suffix patterns)
+            target_name = self._tool_name_map.get("shell", "shell")
+            return MCPToolCall(name=target_name, arguments=item.action.to_dict(), id=item.call_id)
         elif item.type == "apply_patch_call":
+            # Use mapping to get actual MCP tool name (handles legacy suffix patterns)
+            target_name = self._tool_name_map.get("apply_patch", "apply_patch")
             return MCPToolCall(
-                name="apply_patch", arguments=item.operation.to_dict(), id=item.call_id
+                name=target_name, arguments=item.operation.to_dict(), id=item.call_id
             )
         return None
 

@@ -11,7 +11,7 @@ from hud.agents import MCPAgent
 from hud.agents.base import BaseCreateParams
 from hud.environment.router import ToolRouter
 from hud.eval.context import EvalContext
-from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
 
 
 class MockConfig(BaseAgentConfig):
@@ -28,6 +28,11 @@ class MockMCPAgent(MCPAgent):
 
     metadata: ClassVar[dict[str, Any] | None] = {}
     config_cls: ClassVar[type[BaseAgentConfig]] = MockConfig
+
+    @classmethod
+    def agent_type(cls) -> AgentType:
+        """Return the AgentType for the mock agent."""
+        return AgentType.INTEGRATION_TEST
 
     def __init__(self, **kwargs: Any) -> None:
         params = MockCreateParams(**kwargs)

@@ -104,27 +104,22 @@ async def run_example(mode: Literal["text", "browser"], target: int) -> None:
     task = _create_task(mode, target)
     system_prompt = _system_prompt(mode)
 
-    checkpoint = "gpt-4o-mini"  # Replace with your model checkpoint
-
-    # Allowed tools differ by mode
-    allowed_tools = ["computer"] if mode == "browser" else ["move"]
+    model = "gpt-4o-mini"  # Replace with your model
 
     # Create OpenAI-compatible agent
     agent = OpenAIChatAgent.create(
         openai_client=openai_client,
-        checkpoint_name=checkpoint,
-        allowed_tools=allowed_tools,
-        append_setup_output=False,
+        model=model,
         system_prompt=system_prompt,
     )
 
     print("🎮 Starting 2048 game with OpenAI-compatible agent...")
-    print(f"🤖 Model: {agent.config.model}")
+    print(f"🤖 Model: {model}")
     print(f"🧩 Mode: {mode}")
     print("=" * 50)
 
     # Use hud.eval() for the task
-    async with hud.eval(task, variants={"model": checkpoint, "mode": mode}) as ctx:
+    async with hud.eval(task, variants={"model": model, "mode": mode}) as ctx:
         result = await agent.run(ctx, max_steps=100)
 
     print("=" * 50)

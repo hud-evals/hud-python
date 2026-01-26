@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from mcp import ErrorData, McpError
 from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ContentBlock
 from pydantic import Field
 
+from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult
+from hud.types import AgentType
 
 from .hud import HudComputerTool
 from .settings import computer_settings
@@ -60,12 +62,23 @@ ANTHROPIC_TO_CLA_KEYS = {
 
 
 class AnthropicComputerTool(HudComputerTool):
-    """
-    Anthropic Computer Use tool for interacting with the computer.
+    """Anthropic Computer Use tool for interacting with the computer.
+
+    This is the standard version for Claude Sonnet 4.5, Haiku 4.5, Opus 4.1,
+    Sonnet 4, and Opus 4. Uses tool version computer_20250124.
     """
 
     name: str = "computer"
     api_type: str = "computer_20250124"
+
+    native_specs: ClassVar[NativeToolSpecs] = {
+        AgentType.CLAUDE: NativeToolSpec(
+            api_type="computer_20250124",
+            api_name="computer",
+            beta="computer-use-2025-01-24",
+            role="computer",  # Mutually exclusive with other computer tools when native
+        ),
+    }
 
     def __init__(
         self,
@@ -87,13 +100,27 @@ class AnthropicComputerTool(HudComputerTool):
         Initialize with Anthropic's default dimensions.
 
         Args:
-            width: Target width for rescaling (None = use environment width)
-            height: Target height for rescaling (None = use environment height)
+            width: Width for agent coordinate system (default: 1400)
+            height: Height for agent coordinate system (default: 850)
             rescale_images: If True, rescale screenshots. If False, only rescale action coordinates
             name: Tool name for MCP registration (auto-generated from class name if not provided)
             title: Human-readable display name for the tool (auto-generated from class name)
             description: Tool description (auto-generated from docstring if not provided)
         """
+        # Create instance-level native_specs with display dimensions
+        instance_native_specs = {
+            AgentType.CLAUDE: NativeToolSpec(
+                api_type="computer_20250124",
+                api_name="computer",
+                beta="computer-use-2025-01-24",
+                role="computer",
+                extra={
+                    "display_width": width,
+                    "display_height": height,
+                },
+            ),
+        }
+
         super().__init__(
             executor=executor,
             platform_type=platform_type,
@@ -104,6 +131,7 @@ class AnthropicComputerTool(HudComputerTool):
             name=name or "anthropic_computer",
             title=title or "Anthropic Computer Tool",
             description=description or "Control computer with mouse, keyboard, and screenshot",
+            native_specs=instance_native_specs,
             **kwargs,
         )
 

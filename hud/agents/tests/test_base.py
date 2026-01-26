@@ -11,7 +11,7 @@ from hud.agents import MCPAgent
 from hud.agents.base import BaseCreateParams
 from hud.environment.router import ToolRouter
 from hud.eval.context import EvalContext
-from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
 
 
 class MockConfig(BaseAgentConfig):
@@ -94,6 +94,11 @@ class MockMCPAgent(MCPAgent):
 
     metadata: ClassVar[dict[str, Any] | None] = {}
     config_cls: ClassVar[type[BaseAgentConfig]] = MockConfig
+
+    @classmethod
+    def agent_type(cls) -> AgentType:
+        """Return the AgentType for the mock agent."""
+        return AgentType.INTEGRATION_TEST
 
     def __init__(self, **kwargs: Any) -> None:
         params = MockCreateParams(**kwargs)
@@ -414,3 +419,134 @@ class TestMCPAgentErrorPropagation:
 
         assert result.isError is False
         assert ctx.error is None
+
+
+class TestMCPAgentCategorizeTools:
+    """Tests for the categorize_tools method."""
+
+    @pytest.mark.asyncio
+    async def test_categorize_generic_tools(self) -> None:
+        """Test that tools without native specs are categorized as generic."""
+        tools = [
+            types.Tool(name="tool1", description="Tool 1", inputSchema={}),
+            types.Tool(name="tool2", description="Tool 2", inputSchema={}),
+        ]
+        ctx = MockEvalContext(prompt="Test", tools=tools)
+        agent = MockMCPAgent()
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        categorized = agent.categorize_tools()
+
+        assert len(categorized.generic) == 2
+        assert len(categorized.native) == 0
+        assert len(categorized.hosted) == 0
+        assert len(categorized.skipped) == 0
+
+    @pytest.mark.asyncio
+    async def test_categorize_native_tools(self) -> None:
+        """Test that tools with native specs are categorized correctly."""
+        native_tool = types.Tool(
+            name="native_tool",
+            description="Native tool",
+            inputSchema={},
+            _meta={
+                "native_tools": {
+                    "integration_test": {
+                        "api_type": "test_type",
+                        "role": "test_role",
+                    }
+                }
+            },
+        )
+        generic_tool = types.Tool(name="generic", description="Generic", inputSchema={})
+        tools = [native_tool, generic_tool]
+
+        ctx = MockEvalContext(prompt="Test", tools=tools)
+        agent = MockMCPAgent()
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        categorized = agent.categorize_tools()
+
+        assert len(categorized.native) == 1
+        assert categorized.native[0][0].name == "native_tool"
+        assert len(categorized.generic) == 1
+        assert categorized.generic[0].name == "generic"
+        assert "test_role" in categorized.claimed_roles
+
+    @pytest.mark.asyncio
+    async def test_categorize_role_exclusion(self) -> None:
+        """Test that tools with claimed roles are skipped."""
+        # Native tool claims the "computer" role
+        native_tool = types.Tool(
+            name="claude_computer",
+            description="Claude computer",
+            inputSchema={},
+            _meta={
+                "native_tools": {
+                    "integration_test": {
+                        "api_type": "computer_test",
+                        "role": "computer",
+                    }
+                }
+            },
+        )
+        # Another computer tool that should be skipped
+        other_computer = types.Tool(
+            name="gemini_computer",
+            description="Gemini computer",
+            inputSchema={},
+            _meta={
+                "native_tools": {
+                    "gemini": {
+                        "api_type": "computer_use",
+                        "role": "computer",
+                    }
+                }
+            },
+        )
+        tools = [native_tool, other_computer]
+
+        ctx = MockEvalContext(prompt="Test", tools=tools)
+        agent = MockMCPAgent()
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        categorized = agent.categorize_tools()
+
+        assert len(categorized.native) == 1
+        assert categorized.native[0][0].name == "claude_computer"
+        assert len(categorized.skipped) == 1
+        assert categorized.skipped[0][0].name == "gemini_computer"
+        assert "computer" in categorized.claimed_roles
+
+    @pytest.mark.asyncio
+    async def test_categorize_hosted_tools(self) -> None:
+        """Test that hosted tools are categorized separately."""
+        hosted_tool = types.Tool(
+            name="google_search",
+            description="Google Search",
+            inputSchema={},
+            _meta={
+                "native_tools": {
+                    "integration_test": {
+                        "api_type": "google_search",
+                        "hosted": True,
+                    }
+                }
+            },
+        )
+        tools = [hosted_tool]
+
+        ctx = MockEvalContext(prompt="Test", tools=tools)
+        agent = MockMCPAgent()
+        agent.ctx = ctx
+        await agent._initialize_from_ctx(ctx)
+
+        categorized = agent.categorize_tools()
+
+        assert len(categorized.hosted) == 1
+        assert categorized.hosted[0][0].name == "google_search"
+        assert categorized.hosted[0][1].hosted is True
+        assert len(categorized.native) == 0

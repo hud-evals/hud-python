@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import platform
-from typing import Literal
+from typing import Any, Literal
 
 from mcp import ErrorData, McpError
 from mcp.types import INVALID_PARAMS, ContentBlock, TextContent
@@ -40,6 +40,7 @@ class HudComputerTool(BaseTool):
         name: str | None = None,
         title: str | None = None,
         description: str | None = None,
+        **kwargs: Any,
     ) -> None:
         """
         Initialize the HUD computer tool.
@@ -79,6 +80,7 @@ class HudComputerTool(BaseTool):
             title=title or "Computer Control",
             description=description or "Control computer with mouse, keyboard, and screenshots",
             meta=meta,
+            **kwargs,
         )
 
         # This is the static width and height of the environment screen

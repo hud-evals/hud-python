@@ -1,0 +1,138 @@
+---
+title: "hud link"
+description: "Link a local directory to an existing HUD environment"
+icon: "link"
+---
+
+The `hud link` command connects a local directory to an existing HUD platform environment, similar to `vercel link` for Vercel projects.
+
+## Usage
+
+```bash
+hud link [DIRECTORY] [OPTIONS]
+```
+
+## Arguments
+
+<ParamField path="directory" type="string" default=".">
+  Directory to link
+</ParamField>
+
+## Options
+
+<ParamField path="--id" type="string">
+  Environment ID to link to. If not provided, shows an interactive list. Short: `-i`
+</ParamField>
+
+<ParamField path="--yes" type="boolean" default="false">
+  Skip confirmation prompts. Short: `-y`
+</ParamField>
+
+## Prerequisites
+
+<Warning>
+Requires `HUD_API_KEY`:
+```bash
+hud set HUD_API_KEY=your-api-key
+```
+</Warning>
+
+## What It Does
+
+<Steps>
+<Step title="Check Existing Link">
+Checks if `.hud/deploy.json` already exists and prompts to overwrite if so
+</Step>
+
+<Step title="Select Environment">
+If `--id` not provided, fetches your environments and shows an interactive selection
+</Step>
+
+<Step title="Verify Access">
+Confirms you have access to the specified environment
+</Step>
+
+<Step title="Create Link">
+Creates `.hud/deploy.json` with the registry ID
+</Step>
+</Steps>
+
+## Examples
+
+### Interactive Selection
+
+```bash
+hud link
+
+# Output:
+# Your environments:
+#   1. browser-env v0.1.3 (abc123...)
+#   2. terminal-env v0.2.0 (def456...)
+#   3. api-server v1.0.0 (ghi789...)
+# 
+# Select environment number (or paste full ID): 1
+```
+
+### Direct Link
+
+```bash
+# Link to specific environment by ID
+hud link --id abc123-def456-...
+```
+
+### Link Subdirectory
+
+```bash
+# Link a specific subdirectory
+hud link environments/browser --id abc123...
+```
+
+## Use Cases
+
+### Reconnecting After Deleting Link
+
+If you accidentally deleted `.hud/deploy.json`:
+
+```bash
+# Find your environment on hud.ai, copy the ID
+hud link --id your-environment-id
+```
+
+### Working on Multiple Machines
+
+```bash
+# On new machine, link to existing environment
+git clone your-repo && cd your-repo
+hud link
+# Select your environment from the list
+```
+
+### Switching Environments
+
+```bash
+# Unlink current
+rm .hud/deploy.json
+
+# Link to different environment
+hud link --id different-environment-id
+```
+
+## Link File
+
+After linking, `.hud/deploy.json` contains:
+
+```json
+{
+  "registryId": "abc123-def456-...",
+  "version": "0.1.3"
+}
+```
+
+<Note>
+The `.hud/` directory should typically be added to `.gitignore` as it contains machine-specific linking info.
+</Note>
+
+## See Also
+
+- [`hud deploy`](/reference/cli/deploy) - Deploy environment to platform
+- [Platform Environments](/platform/environments) - Managing environments on hud.ai

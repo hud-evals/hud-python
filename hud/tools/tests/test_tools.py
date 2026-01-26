@@ -5,9 +5,8 @@ import sys
 import pytest
 from mcp.types import ImageContent, TextContent
 
-from hud.tools.bash import BashTool
+from hud.tools.coding import BashTool, EditTool
 from hud.tools.computer.hud import HudComputerTool
-from hud.tools.edit import EditTool
 
 
 @pytest.mark.asyncio
@@ -64,7 +63,7 @@ async def test_bash_tool_restart_and_no_command():
         # minimal fake process attributes used later
         self._process = SimpleNamespace(returncode=None)
 
-    import hud.tools.bash as bash_mod
+    import hud.tools.coding.bash as bash_mod
 
     bash_mod._BashSession.start = _dummy_start  # type: ignore[assignment]
 
