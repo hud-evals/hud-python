@@ -65,7 +65,7 @@ def _load_raw_tasks(source: str) -> tuple[list[dict[str, Any]], list[str]]:
     path = Path(source)
     if path.exists() and path.suffix.lower() in {".json", ".jsonl"}:
         return _load_raw_from_file(path)
-    return cast(list[dict[str, Any]], load_tasks(source, raw=True)), []
+    return cast("list[dict[str, Any]]", load_tasks(source, raw=True)), []
 
 
 def _load_raw_from_file(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
@@ -78,7 +78,11 @@ def _load_raw_from_file(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
                 line = line.strip()
                 if not line:
                     continue
-                value = json.loads(line)
+                try:
+                    value = json.loads(line)
+                except json.JSONDecodeError as e:
+                    errors.append(f"line {line_no}: invalid JSON ({e.msg})")
+                    continue
                 if isinstance(value, dict):
                     items.append(value)
                     continue
@@ -87,8 +91,9 @@ def _load_raw_from_file(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
                         if isinstance(entry, dict):
                             items.append(entry)
                         else:
+                            entry_type = type(entry).__name__
                             errors.append(
-                                f"line {line_no} item {idx}: expected object, got {type(entry).__name__}"
+                                f"line {line_no} item {idx}: expected object, got {entry_type}"
                             )
                     continue
                 errors.append(

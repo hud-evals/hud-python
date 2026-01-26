@@ -46,7 +46,11 @@ def test_validate_command_invalid(tmp_path: Path) -> None:
 def test_validate_command_flags_non_dict_entries(tmp_path: Path) -> None:
     validate_command = _load_validate_command()
     tasks = [
-        {"prompt": "ok", "mcp_config": {"local": {"command": "echo", "args": ["hi"]}}},
+        {
+            "prompt": "ok",
+            "mcp_config": {"local": {"command": "echo", "args": ["hi"]}},
+            "evaluate_tool": {"name": "done", "arguments": {}},
+        },
         "not a task",
     ]
     path = _write_tasks(tmp_path / "tasks.json", tasks)

@@ -26,15 +26,12 @@ from .link import link_command
 from .pull import pull_command
 from .push import push_command
 from .remove import remove_command
-
-from .validate import validate_command
-
 from .rft import rft_command
 from .rft_status import rft_status_command
-
 from .utils.config import set_env_values
 from .utils.cursor import get_cursor_config_path, list_cursor_servers, parse_cursor_config
 from .utils.logging import CaptureLogger
+from .validate import validate_command
 
 # Create the main Typer app
 app = typer.Typer(
@@ -984,7 +981,7 @@ def quickstart() -> None:
 
 @app.command()
 def validate(
-    source: str = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
+    source: str = typer.Argument(  # type: ignore[arg-type]
         ...,
         help="Tasks file path or dataset slug (e.g. ./tasks.json or hud-evals/SheetBench-50)",
     ),
