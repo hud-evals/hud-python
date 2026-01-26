@@ -284,6 +284,85 @@ class TestNativeToolSpecAgentIntegration:
         assert len(categorized.skipped) == 1
         assert "gemini_computer" in categorized.skipped[0][0].name
 
+    @pytest.mark.asyncio
+    async def test_duplicate_same_agent_computer_tools(self) -> None:
+        """Test what happens when you add two computer tools for the same agent type.
+
+        If you add two AnthropicComputerTools (or any tools with the same role for
+        the same agent), the first one should be used natively and the second one
+        should be skipped due to role-based exclusion.
+        """
+        from mcp import types as mcp_types
+
+        # Create two Claude computer tools (simulating adding two AnthropicComputerTools)
+        computer_tool_1 = mcp_types.Tool(
+            name="computer_1",
+            description="First computer tool (1920x1080)",
+            inputSchema={},
+            _meta={
+                "native_tools": {
+                    "claude": {
+                        "api_type": "computer_20250124",
+                        "api_name": "computer",
+                        "role": "computer",
+                        "display_width": 1920,
+                        "display_height": 1080,
+                    }
+                }
+            },
+        )
+
+        computer_tool_2 = mcp_types.Tool(
+            name="computer_2",
+            description="Second computer tool (1280x720)",
+            inputSchema={},
+            _meta={
+                "native_tools": {
+                    "claude": {
+                        "api_type": "computer_20250124",
+                        "api_name": "computer",
+                        "role": "computer",
+                        "display_width": 1280,
+                        "display_height": 720,
+                    }
+                }
+            },
+        )
+
+        tools = [computer_tool_1, computer_tool_2]
+
+        class TestClaudeAgent(MCPAgent):
+            @classmethod
+            def agent_type(cls) -> AgentType:
+                return AgentType.CLAUDE
+
+            def get_system_messages(self) -> list[Any]:
+                return []
+
+            async def get_response(self, messages: list[Any]) -> AgentResponse:
+                return AgentResponse(content="test", done=True)
+
+            def format_blocks(self, blocks: list[Any]) -> list[Any]:
+                return blocks
+
+            def format_tool_results(self, results: list[Any]) -> list[Any]:
+                return results
+
+        claude_agent = TestClaudeAgent.create()
+        claude_agent._available_tools = tools
+        categorized = claude_agent.categorize_tools()
+
+        # First computer tool should be used natively
+        assert len(categorized.native) == 1
+        assert categorized.native[0][0].name == "computer_1"
+
+        # Second computer tool should be skipped (role already claimed by first)
+        assert len(categorized.skipped) == 1
+        assert categorized.skipped[0][0].name == "computer_2"
+
+        # No generic tools (both have native specs)
+        assert len(categorized.generic) == 0
+
 
 class TestToolWithoutNativeSpecs:
     """Test backwards compatibility with tools that don't have native specs."""
