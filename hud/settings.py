@@ -53,27 +53,33 @@ class Settings(BaseSettings):
         )
 
     hud_telemetry_url: str = Field(
-        default="https://telemetry.hud.so/v3/api",
+        default="https://telemetry.hud.ai/v3/api",
         description="Base URL for the HUD API",
         validation_alias="HUD_TELEMETRY_URL",
     )
 
     hud_mcp_url: str = Field(
-        default="https://mcp.hud.so/v3/mcp",
+        default="https://mcp.hud.ai/v3/mcp",
         description="Base URL for the MCP Server",
         validation_alias="HUD_MCP_URL",
     )
 
     hud_rl_url: str = Field(
-        default="https://rl.hud.so/v1",
+        default="https://rl.hud.ai/v1",
         description="Base URL for the HUD RL API server",
         validation_alias="HUD_RL_URL",
     )
 
     hud_api_url: str = Field(
-        default="https://api.hud.so",
+        default="https://api.hud.ai",
         description="Base URL for the HUD API server",
         validation_alias="HUD_API_URL",
+    )
+
+    hud_gateway_url: str = Field(
+        default="https://inference.hud.ai",
+        description="Base URL for the HUD inference gateway",
+        validation_alias="HUD_GATEWAY_URL",
     )
 
     api_key: str | None = Field(
@@ -86,6 +92,24 @@ class Settings(BaseSettings):
         default=None,
         description="API key for Anthropic models",
         validation_alias="ANTHROPIC_API_KEY",
+    )
+
+    aws_access_key_id: str | None = Field(
+        default=None,
+        description="AWS access key ID for Bedrock",
+        validation_alias="AWS_ACCESS_KEY_ID",
+    )
+
+    aws_secret_access_key: str | None = Field(
+        default=None,
+        description="AWS secret access key for Bedrock",
+        validation_alias="AWS_SECRET_ACCESS_KEY",
+    )
+
+    aws_region: str | None = Field(
+        default=None,
+        description="AWS region for Bedrock (e.g., us-east-1)",
+        validation_alias="AWS_REGION",
     )
 
     openai_api_key: str | None = Field(
@@ -134,6 +158,12 @@ class Settings(BaseSettings):
         default="stdout",
         description="Stream to use for logging output: 'stdout' or 'stderr'",
         validation_alias="HUD_LOG_STREAM",
+    )
+
+    client_timeout: int = Field(
+        default=900,
+        description="Timeout in seconds for MCP client operations (default: 900 = 15 minutes)",
+        validation_alias="HUD_CLIENT_TIMEOUT",
     )
 
 

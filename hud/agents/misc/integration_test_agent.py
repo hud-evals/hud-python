@@ -1,43 +1,77 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from hud.agents.base import MCPAgent, find_reward
-from hud.types import AgentResponse, Task, Trace
+from hud.agents.base import MCPAgent
+from hud.types import AgentResponse, AgentType, BaseAgentConfig, Trace
+
+if TYPE_CHECKING:
+    from hud.eval.context import EvalContext
 
 
 class IntegrationTestRunner(MCPAgent):
+    """Special agent that runs integration tests by executing tools directly.
+
+    Unlike regular agents, this doesn't run an LLM loop - it executes
+    integration_test_tool and evaluate_tool in sequence to verify tool behavior.
+    """
+
+    metadata: ClassVar[dict[str, Any] | None] = {}
+    config_cls: ClassVar[type[BaseAgentConfig]] = BaseAgentConfig
+
+    @classmethod
+    def agent_type(cls) -> AgentType:
+        """Return the AgentType for integration test runner."""
+        return AgentType.INTEGRATION_TEST
+
     def __init__(self, **kwargs: Any) -> None:
         kwargs["auto_trace"] = False
         super().__init__(**kwargs)
-        self.metadata = {}
 
-    async def run(self, task: Task, max_steps: int = 10) -> Trace:
+    async def run(
+        self,
+        ctx: EvalContext,
+        *,
+        max_steps: int = 10,
+    ) -> Trace:
+        """Run integration test by executing tools directly.
+
+        The EvalContext should have integration_test_tool and evaluate_tool
+        configured in its metadata or environment setup.
+        """
+        from hud.eval.context import EvalContext
+
+        if not isinstance(ctx, EvalContext):
+            raise TypeError(f"ctx must be EvalContext, got {type(ctx).__name__}")
+
+        self.ctx = ctx
+
         try:
-            # Initialize using base to set up client and telemetry correctly
-            await self.initialize(task)
+            # Initialize tools from context
+            if not self._initialized:
+                await self._initialize_from_ctx(ctx)
 
             self.console.info(f"Full system prompt: {self.system_prompt}")
 
-            # Validate task shape
-            if not getattr(task, "integration_test_tool", None):
+            # For integration tests, we expect the context's environment to have
+            # _setup_calls, _integration_test_calls, and _evaluate_calls configured
+            env = ctx
+
+            # Run integration test tool (stored in environment metadata or separate list)
+            integration_test_calls = getattr(env, "_integration_test_calls", [])
+            if not integration_test_calls:
                 raise ValueError(
-                    "--integration-test requires task.integration_test_tool (single call)"
+                    "--integration-test requires integration_test_tool to be configured"
                 )
-            elif not getattr(task, "evaluate_tool", None):
-                raise ValueError("--integration-test requires task.evaluate_tool (single call)")
 
-            if task.setup_tool:
-                _ = await self.call_tools(task.setup_tool)
+            for name, args in integration_test_calls:
+                await ctx.call_tool((name, args))
 
-            _ = await self.call_tools(task.integration_test_tool)
-            evaluate_result = await self.call_tools(task.evaluate_tool)
+            # The evaluate phase runs automatically when ctx exits,
+            # but we can also get the reward from ctx.reward after
+            return Trace(done=True, reward=ctx.reward or 0.0, info={})
 
-            reward = float(find_reward(evaluate_result[0])) if evaluate_result else 0.0
-
-            return Trace(done=True, reward=reward, info={})
         finally:
-            # Ensure resources are cleaned up so the CLI can exit cleanly
             await self._cleanup()
 
     # Stub implementations to satisfy abstract base class; not used in --integration-test path

@@ -7,17 +7,17 @@ from typing import Any
 from pydantic import Field
 
 from hud.settings import settings
-from hud.types import MCPToolCall, Task
+from hud.types import LegacyTask, MCPToolCall
 
 
-class BrowserTask(Task):
-    """Task subclass with browser defaults for BrowserTask(prompt=...)."""
+class BrowserTask(LegacyTask):
+    """LegacyTask subclass with browser defaults for BrowserTask(prompt=...)."""
 
     prompt: str = "Open Google and be ready to search."
     mcp_config: dict[str, Any] = Field(
         default_factory=lambda: {
             "browser": {
-                "url": "https://mcp.hud.so/v3/mcp",
+                "url": settings.hud_mcp_url,
                 "headers": {
                     "Authorization": f"Bearer {settings.api_key}",
                     "Mcp-Image": "hudevals/hud-remote-browser:0.1.1",

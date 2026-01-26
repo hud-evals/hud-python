@@ -1,0 +1,101 @@
+---
+title: "MCP Integration"
+description: "Let your AI agent query the platform. Analyze traces, debug environments, explore tasks."
+icon: "magnifying-glass"
+---
+
+Connect your AI agent to the HUD platform via MCP. Your agent can query traces from the Home dashboard, check environment build status, explore your tasksets—all through natural conversation. When you're reviewing jobs and spot failure patterns, ask your agent to analyze them and suggest new tasks.
+
+## Setup
+
+Click the 🔍 button in the platform header to get the config, or add manually:
+
+```json
+{
+  "hud": {
+    "url": "https://api.hud.ai/v3/mcp/",
+    "headers": {
+      "Authorization": "Bearer YOUR_HUD_API_KEY"
+    }
+  }
+}
+```
+
+Get your API key from [Settings → API Keys](https://hud.ai/project/api-keys).
+
+## Analyze Traces
+
+From the Home dashboard, you see your recent jobs and traces. With MCP, your agent can dig deeper:
+
+```
+"Get the traces from my last failed job and explain what the agent did wrong."
+```
+
+```
+"Show me traces where the reward was 0. What patterns do you see in how the agent failed?"
+```
+
+Your agent retrieves the trace data—every action, tool call, and response—and helps you understand what happened.
+
+## Debug Environments
+
+When an environment build fails or behaves unexpectedly, ask your agent to investigate:
+
+```
+"Check the status of my remote-browser environment."
+```
+
+```
+"List my environments and tell me which ones are ready vs still building."
+```
+
+This surfaces the same info you see on the Environments page, but lets you query it conversationally while you're working.
+
+## Explore Tasksets
+
+Browse your tasksets and see what's in each one:
+
+```
+"What tasksets do I have? How many tasks are in SheetBench-50?"
+```
+
+```
+"Show me the tasks in my latest evalset and describe what they test."
+```
+
+## Write New Tasks from Failures
+
+The real power: after analyzing failed traces, have your agent suggest new tasks that target those weaknesses.
+
+```
+"Based on the failures you found, write 3 new tasks that would test 
+those specific edge cases."
+```
+
+This closes the loop—run evals → analyze failures → create targeted tasks → run again.
+
+## Available Tools
+
+| Tool | What it queries |
+|------|-----------------|
+| `list_jobs` | Your jobs from Home (status, metrics) |
+| `get_job` | Job details and summary |
+| `get_job_traces` | Traces in a job |
+| `get_trace` | Full trace with trajectory and logs |
+| `list_environments` | Your environments from Environments page |
+| `get_environment` | Environment details and build status |
+| `list_evalsets` | Your tasksets from Tasksets page |
+| `get_evalset_tasks` | Tasks in a specific evalset |
+| `list_scenarios` | Scenarios for an environment |
+
+All read-only—your agent can query but not modify platform data.
+
+<CardGroup cols={2}>
+<Card title="Environments" icon="cube" href="/platform/environments">
+  Deploy and manage agent environments
+</Card>
+
+<Card title="Tasksets" icon="list-check" href="/platform/tasksets">
+  Organize tasks for evaluation
+</Card>
+</CardGroup>

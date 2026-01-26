@@ -4,7 +4,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import typer
 import yaml
@@ -13,12 +13,8 @@ from hud.cli.push import push_environment
 from hud.cli.utils.docker import require_docker_running
 from hud.cli.utils.env_check import find_environment_dir
 from hud.cli.utils.registry import extract_name_and_tag
+from hud.datasets import load_tasks
 from hud.utils.hud_console import hud_console
-from hud.utils.tasks import load_tasks
-
-if TYPE_CHECKING:
-    from hud.types import Task
-
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +25,11 @@ def _is_remote_url(url: str) -> bool:
     return bool(re.match(r"^(https?:\/\/)?(www\.)?[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}(\/\S*)?$", url))
 
 
-def _validate_tasks(tasks: list[Task]) -> bool:
+def _validate_tasks(tasks: list[dict[str, Any]]) -> bool:
     """Validate the tasks file: return True if tasks already reference a remote MCP URL.
 
     A task is considered remote if any "url" field anywhere inside mcp_config
-    is a valid remote URL (e.g., https://mcp.hud.so/v3/mcp).
+    is a valid remote URL (e.g., https://mcp.hud.ai/v3/mcp).
     """
 
     def _has_remote_url(obj: Any) -> bool:
@@ -50,7 +46,7 @@ def _validate_tasks(tasks: list[Task]) -> bool:
         return False
 
     for task in tasks:
-        cfg = task.mcp_config or {}
+        cfg = task.get("mcp_config") or {}
         if not _has_remote_url(cfg):
             return False
     return True
@@ -115,7 +111,7 @@ def _derive_remote_image(lock_data: dict[str, Any]) -> str:
     raise typer.Exit(1)
 
 
-def _extract_existing_images(tasks: list[Task]) -> set[str]:
+def _extract_existing_images(tasks: list[dict[str, Any]]) -> set[str]:
     """Extract all Mcp-Image references from tasks."""
     images = set()
 
@@ -134,8 +130,9 @@ def _extract_existing_images(tasks: list[Task]) -> set[str]:
                 _extract_from_obj(item)
 
     for task in tasks:
-        if task.mcp_config:
-            _extract_from_obj(task.mcp_config)
+        mcp_config = task.get("mcp_config")
+        if mcp_config:
+            _extract_from_obj(mcp_config)
 
     return images
 
@@ -262,16 +259,17 @@ def convert_tasks_to_remote(tasks_file: str) -> str:
     1) Find env dir; ensure built (hud.lock.yaml), otherwise build
     2) Ensure pushed to registry, otherwise push
     3) Check for outdated images in existing task configurations
-    4) Create remote_[tasks].json with mcp_config pointing to mcp.hud.so and Mcp-Image
+    4) Create remote_[tasks].json with mcp_config pointing to mcp.hud.ai and Mcp-Image
     5) Return the new tasks file path
     """
     tasks_path = Path(tasks_file).resolve()
 
-    # Load validated tasks for decision-making (may resolve env vars)
-    tasks: list[Task] = load_tasks(str(tasks_path))  # type: ignore[assignment]
-
-    # Load raw tasks to preserve placeholders when writing back to disk
+    # Load raw tasks - we work with dicts directly to preserve placeholders
+    # when writing back to disk (e.g., ${HUD_API_KEY})
     raw_tasks: list[dict[str, Any]] = load_tasks(str(tasks_path), raw=True)  # type: ignore[assignment]
+
+    # Use the same raw tasks for validation (they have mcp_config structure)
+    tasks = raw_tasks
 
     # Ensure HUD_API_KEY is available: prefer process env, else load from env_dir/.env
     from hud.settings import settings
@@ -446,10 +444,10 @@ def convert_tasks_to_remote(tasks_file: str) -> str:
     tasks_payload: list[dict[str, Any]] = []
     for t in tasks:
         item: dict[str, Any] = {
-            "prompt": t.prompt,
+            "prompt": t.get("prompt"),
             "mcp_config": {
                 "hud": {
-                    "url": "https://mcp.hud.so/v3/mcp",
+                    "url": settings.hud_mcp_url,
                     "headers": {
                         "Authorization": "Bearer ${HUD_API_KEY}",
                         "Mcp-Image": remote_image,
@@ -462,16 +460,16 @@ def convert_tasks_to_remote(tasks_file: str) -> str:
         item["mcp_config"]["hud"]["headers"].update(extra_api_key_headers)
 
         # Optional fields, omit Nones
-        if t.setup_tool is not None:
-            item["setup_tool"] = _simplify_tool_call(t.setup_tool)
-        if t.evaluate_tool is not None:
-            item["evaluate_tool"] = _simplify_tool_call(t.evaluate_tool)
-        if t.agent_config is not None:
-            item["agent_config"] = t.agent_config
-        if t.metadata:
-            item["metadata"] = t.metadata
-        if t.id is not None:
-            item["id"] = t.id
+        if t.get("setup_tool") is not None:
+            item["setup_tool"] = _simplify_tool_call(t["setup_tool"])
+        if t.get("evaluate_tool") is not None:
+            item["evaluate_tool"] = _simplify_tool_call(t["evaluate_tool"])
+        if t.get("agent_config") is not None:
+            item["agent_config"] = t["agent_config"]
+        if t.get("metadata"):
+            item["metadata"] = t["metadata"]
+        if t.get("id") is not None:
+            item["id"] = t["id"]
 
         tasks_payload.append(item)
 

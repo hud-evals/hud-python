@@ -11,7 +11,6 @@ import time
 
 from rich.console import Console
 
-from hud.clients import MCPClient
 from hud.utils.hud_console import HUDConsole
 
 from .utils.logging import CaptureLogger, Colors, analyze_error_for_hints
@@ -246,8 +245,10 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
         logger.command(command)
         logger.info("Creating MCP client via hud...")
 
-        client = MCPClient(mcp_config=mcp_config, verbose=False, auto_trace=False)
-        await client.initialize()
+        from fastmcp import Client as FastMCPClient
+
+        client = FastMCPClient(transport=mcp_config)
+        await client.__aenter__()
 
         # Wait for initialization
         logger.info("Waiting for server initialization...")
@@ -350,6 +351,8 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
         try:
             logger.info("Creating 3 concurrent MCP clients...")
 
+            from fastmcp import Client as FastMCPClient
+
             for i in range(3):
                 client_config = {
                     f"test_concurrent_{i}": {
@@ -358,10 +361,8 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
                     }
                 }
 
-                concurrent_client = MCPClient(
-                    mcp_config=client_config, verbose=False, auto_trace=False
-                )
-                await concurrent_client.initialize()
+                concurrent_client = FastMCPClient(transport=client_config)
+                await concurrent_client.__aenter__()
                 concurrent_clients.append(concurrent_client)
                 logger.info(f"Client {i + 1} connected")
 
@@ -369,7 +370,8 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
 
             # Clean shutdown
             for i, c in enumerate(concurrent_clients):
-                await c.shutdown()
+                if c.is_connected():
+                    await c.close()
                 logger.info(f"Client {i + 1} disconnected")
 
             phases_completed = 5
@@ -379,7 +381,8 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
         finally:
             for c in concurrent_clients:
                 try:
-                    await c.shutdown()
+                    if c.is_connected():
+                        await c.close()
                 except Exception as e:
                     logger.error(f"Failed to close client: {e}")
 
@@ -391,7 +394,8 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
         # Ensure client is closed even on exceptions
         if client:
             try:
-                await client.shutdown()
+                if client.is_connected():
+                    await client.close()
             except Exception:
                 logger.error("Failed to close client")
 

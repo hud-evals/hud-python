@@ -140,8 +140,12 @@ class HiddenRouter(MCPRouter):
         self._resource_manager.add_resource(catalogue_resource)
 
     # Override _list_tools to hide internal tools when mounted
-    async def _list_tools(self) -> list[Tool]:
-        """Override _list_tools to hide internal tools when mounted."""
+    async def _list_tools(self, context: Any = None) -> list[Tool]:
+        """Override _list_tools to hide internal tools when mounted.
+
+        Args:
+            context: MiddlewareContext passed by FastMCP (optional for backwards compat)
+        """
         return [
             tool
             for key, tool in self._tool_manager._tools.items()

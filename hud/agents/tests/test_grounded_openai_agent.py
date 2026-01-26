@@ -1,58 +1,14 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import mcp.types as types
 import pytest
+from openai import AsyncOpenAI
 
 from hud.agents.grounded_openai import GroundedOpenAIChatAgent
 from hud.tools.grounding import GrounderConfig
 from hud.types import MCPToolCall, MCPToolResult
-
-
-class DummyOpenAI:
-    class chat:  # type: ignore[no-redef]
-        class completions:
-            @staticmethod
-            async def create(**kwargs: Any) -> Any:
-                # Return a minimal object mimicking OpenAI response
-                class Msg:
-                    def __init__(self) -> None:
-                        self.content = "Thinking..."
-                        self.tool_calls = [
-                            type(
-                                "ToolCall",
-                                (),
-                                {
-                                    "id": "call_1",
-                                    "function": type(
-                                        "Fn",
-                                        (),
-                                        {
-                                            "name": "computer",
-                                            "arguments": json.dumps(
-                                                {
-                                                    "action": "click",
-                                                    "element_description": "blue button",
-                                                }
-                                            ),
-                                        },
-                                    ),
-                                },
-                            )()
-                        ]
-
-                class Choice:
-                    def __init__(self) -> None:
-                        self.message = Msg()
-                        self.finish_reason = "tool_calls"
-
-                class Resp:
-                    def __init__(self) -> None:
-                        self.choices = [Choice()]
-
-                return Resp()
 
 
 class FakeMCPClient:
@@ -62,6 +18,7 @@ class FakeMCPClient:
             types.Tool(name="setup", description="internal functions", inputSchema={}),
         ]
         self.called: list[MCPToolCall] = []
+        self._initialized = True
 
     async def initialize(self, mcp_config: dict[str, dict[str, Any]] | None = None) -> None:
         return None
@@ -76,6 +33,10 @@ class FakeMCPClient:
     @property
     def mcp_config(self) -> dict[str, dict[str, Any]]:
         return {"local": {"command": "echo", "args": ["ok"]}}
+
+    @property
+    def is_connected(self) -> bool:
+        return self._initialized
 
     async def shutdown(self) -> None:
         return None
@@ -109,19 +70,20 @@ class DummyGroundedTool:
 
 @pytest.mark.asyncio
 async def test_call_tools_injects_screenshot_and_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Agent with fake OpenAI client and fake MCP client
+    # Agent with fake OpenAI client
     grounder_cfg = GrounderConfig(api_base="http://example", model="qwen")
-    agent = GroundedOpenAIChatAgent(
+    fake_openai = AsyncOpenAI(api_key="test")
+    agent = GroundedOpenAIChatAgent.create(
         grounder_config=grounder_cfg,
-        openai_client=DummyOpenAI(),
-        model_name="gpt-4o-mini",
-        mcp_client=FakeMCPClient(),
+        openai_client=fake_openai,
+        model="gpt-4o-mini",
         initial_screenshot=False,
     )
 
     # Inject a dummy grounded tool to observe args without full initialization
     dummy_tool = DummyGroundedTool()
     agent.grounded_tool = dummy_tool  # type: ignore
+    agent._initialized = True  # Mark as initialized to skip context initialization
 
     # Seed conversation history with a user image
     png_b64 = (
@@ -153,3 +115,56 @@ async def test_call_tools_injects_screenshot_and_delegates(monkeypatch: pytest.M
     assert dummy_tool.last_args["element_description"] == "blue button"
     assert "screenshot_b64" in dummy_tool.last_args
     assert isinstance(dummy_tool.last_args["screenshot_b64"], str)
+
+
+@pytest.mark.asyncio
+async def test_get_response_with_reasoning() -> None:
+    """Test that reasoning content is extracted from the response."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    grounder_cfg = GrounderConfig(api_base="http://example", model="qwen")
+    fake_openai = AsyncOpenAI(api_key="test")
+
+    with patch("hud.settings.settings.telemetry_enabled", False):
+        agent = GroundedOpenAIChatAgent.create(
+            grounder_config=grounder_cfg,
+            openai_client=fake_openai,
+            model="gpt-4o-mini",
+            initial_screenshot=False,
+        )
+
+        mock_response = MagicMock()
+        mock_choice = MagicMock()
+        mock_message = MagicMock()
+
+        mock_message.content = "Here is my answer"
+        mock_message.reasoning_content = "Let me think step by step..."
+        mock_message.tool_calls = None
+
+        mock_choice.message = mock_message
+        mock_choice.finish_reason = "stop"
+
+        mock_response.choices = [mock_choice]
+
+        agent.oai.chat.completions.create = AsyncMock(return_value=mock_response)
+        agent._initialized = True  # Mark as initialized to skip context initialization
+
+        # Include an image so get_response doesn't try to take a screenshot via ctx
+        png_b64 = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQAB"
+            "J2n0mQAAAABJRU5ErkJggg=="
+        )
+        agent.conversation_history = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{png_b64}"}},
+                    {"type": "text", "text": "Hard question"},
+                ],
+            }
+        ]
+
+        response = await agent.get_response(agent.conversation_history)
+
+        assert response.content == "Here is my answer"
+        assert response.reasoning == "Let me think step by step..."

@@ -1,0 +1,74 @@
+---
+title: "Models"
+description: "One endpoint for every model. Native tool integration."
+icon: "robot"
+---
+
+Models are the AI weights your agents use—Claude, GPT, Gemini, Grok, and more. HUD routes all of them through a single OpenAI-compatible endpoint at `inference.hud.ai`. One API key, any model, full observability. Browse all available models at [hud.ai/models](https://hud.ai/models).
+
+## Quick Start
+
+Point any OpenAI-compatible client at the gateway:
+
+```python
+from openai import AsyncOpenAI
+import os
+
+client = AsyncOpenAI(
+    base_url="https://inference.hud.ai",
+    api_key=os.environ["HUD_API_KEY"]
+)
+
+response = await client.chat.completions.create(
+    model="claude-sonnet-4-5",  # or gpt-4o, gemini-2.5-pro, grok-4-1-fast...
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
+
+Swap `model="gpt-4o"` for `model="claude-sonnet-4-5"` and you're comparing providers. Every call is traced—view them at [hud.ai/home](https://hud.ai/home).
+
+## create_agent and Native Tools
+
+`create_agent()` connects a model to an environment with the best tools for that model. Each provider has specialized native tools—Claude has `computer_use`, `bash`, and `text_editor`; OpenAI has `computer_use_preview`; Gemini has `ComputerUse`. These aren't generic function calls—they're provider-specific APIs the model was trained on.
+
+HUD environments declare `native_specs` that tell agents how to use each tool natively:
+
+```python
+from hud.agents import create_agent
+
+# create_agent detects native tools and routes them correctly
+agent = create_agent("claude-sonnet-4-5")
+# → Claude gets bash_20250124, computer_20250124, text_editor_20250728
+
+agent = create_agent("gpt-4o")
+# → OpenAI gets computer_use_preview
+
+agent = create_agent("gemini-2.5-pro")
+# → Gemini gets ComputerUse
+```
+
+The same environment works with Claude Code, Codex, Operator, Gemini CUA—each gets its native interface. You optimize your model through the platform to be best at your environment, while supporting all providers and their specialized tools.
+
+## Trained Models
+
+Fork a base model on [hud.ai/models](https://hud.ai/models) to get your model ID. Then train it on your tasks (see [Tasks & Training](/quick-links/evals)), and evaluate at any time:
+
+```python
+from hud.agents import create_agent
+
+# Your forked model - evaluate before, during, or after training
+agent = create_agent("your-model-id")
+
+async with hud.eval(task) as ctx:
+    result = await agent.run(ctx)
+```
+
+Same interface, improving performance as you train.
+
+## Every Agent Framework Is Building an Environment
+
+An agent is just a for-loop of tool calls. When you connect a model to an environment, that combination *becomes* an agent. All agent frameworks—LangChain, CrewAI, AutoGen—are different ways to expose tools to a model.
+
+This is [The Bitter Lesson of Agent Frameworks](https://browser-use.com/posts/bitter-lesson-agent-frameworks): every framework is ultimately building an environment. HUD makes the environment explicit—define your tools, define your scenarios, train the model, and get better at your specific tasks.
+
+→ [Build your environment](/quick-links/environments)

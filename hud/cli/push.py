@@ -420,13 +420,20 @@ def push_environment(
 
         # URL-encode the path segments to handle special characters in tags
         url_safe_path = "/".join(quote(part, safe="") for part in name_with_tag.split("/"))
-        registry_url = f"{settings.hud_telemetry_url.rstrip('/')}/registry/envs/{url_safe_path}"
+        registry_url = f"{settings.hud_api_url.rstrip('/')}/registry/envs/{url_safe_path}"
+
+        # Detect git remote URL for matching existing GitHub-connected registries
+        from hud.cli.utils.git import get_git_remote_url
+
+        github_url = get_git_remote_url(Path(directory))
 
         # Prepare the payload
-        payload = {
+        payload: dict[str, str | None] = {
             "lock": yaml.dump(lock_data, default_flow_style=False, sort_keys=False),
             "digest": pushed_digest.split("@")[-1] if "@" in pushed_digest else None,
         }
+        if github_url:
+            payload["github_url"] = github_url
 
         headers = {"Authorization": f"Bearer {settings.api_key}"}
 
@@ -489,4 +496,13 @@ def push_command(
     verbose: bool = False,
 ) -> None:
     """Push HUD environment to registry."""
+    hud_console = HUDConsole()
+
+    # Deprecation warning
+    hud_console.warning(
+        "hud push is deprecated for platform builds. Use 'hud deploy' instead for remote builds."
+    )
+    hud_console.info("'hud push' pushes to Docker Hub. For platform builds, use 'hud deploy'.")
+    hud_console.info("")
+
     push_environment(directory, image, tag, sign, yes, verbose)

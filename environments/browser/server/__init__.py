@@ -1,1 +1,0 @@
-"""Browser MCP server package."""

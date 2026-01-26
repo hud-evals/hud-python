@@ -1,0 +1,192 @@
+---
+title: "Build Your Own OpenCode"
+description: "Recreate the OpenCode AI coding agent from scratch using HUD"
+icon: "terminal"
+---
+
+This guide shows you how to **build your own OpenCode** - a recreation of [anomalyco/opencode](https://github.com/anomalyco/opencode), the popular open-source coding agent. HUD provides tools that match OpenCode's architecture exactly.
+
+<Card
+  title="Example Code"
+  icon="github"
+  href="https://github.com/hud-evals/hud-python/blob/main/examples/07_opencode_agent.py"
+>
+  The complete working example - your own OpenCode in Python.
+</Card>
+
+## Why Build Your Own OpenCode?
+
+[OpenCode](https://github.com/anomalyco/opencode) is an open-source AI coding agent with 86k+ GitHub stars. It uses:
+
+- **str_replace editing** - Precise text replacement (not diff patches)
+- **Filesystem exploration** - read, grep, glob, list tools
+- **Dual agents** - "build" (full access) and "plan" (read-only)
+
+With HUD, you can recreate this functionality with full observability and evaluation support.
+
+## How OpenCode Tools Map to HUD
+
+| OpenCode Tool | HUD Implementation | Description |
+| ------------- | ------------------ | ----------- |
+| `bash` | `hud.tools.coding.ShellTool` | Execute shell commands |
+| `edit` | `hud.tools.coding.EditTool` | str_replace file editing |
+| `write` | `EditTool.create` | Create new files |
+| `read` | `hud.tools.filesystem.ReadTool` | Read file contents |
+| `grep` | `hud.tools.filesystem.GrepTool` | Search file contents |
+| `glob` | `hud.tools.filesystem.GlobTool` | Find files by pattern |
+| `list` | `hud.tools.filesystem.ListTool` | List directory contents |
+
+All tools are available as `BaseTool` subclasses - just `env.add_tool()` them.
+
+## Build Your OpenCode
+
+### Complete Local Agent
+
+```python
+import hud
+from hud.agents import create_agent
+from hud.tools.coding import EditTool, ShellTool
+from hud.tools.filesystem import ReadTool, GrepTool, GlobTool, ListTool
+
+# Create environment with all OpenCode tools
+env = hud.Environment("my-opencode")
+base = "./workspace"
+
+# Coding tools
+env.add_tool(ShellTool())
+env.add_tool(EditTool())
+
+# Filesystem exploration tools
+env.add_tool(ReadTool(base_path=base))
+env.add_tool(GrepTool(base_path=base))
+env.add_tool(GlobTool(base_path=base))
+env.add_tool(ListTool(base_path=base))
+
+# Define scenario for evaluation
+@env.scenario("coding_task")
+async def coding_task(task: str):
+    yield f"""You are a skilled software developer. Complete the following task:
+
+{task}
+
+Available tools:
+- `shell` - Run bash commands
+- `str_replace_based_edit_tool` - Edit files using str_replace
+- `read` - Read file contents with line numbers
+- `grep` - Search file contents with regex
+- `glob` - Find files by pattern
+- `list` - List directory contents
+
+Explore the codebase first using read/grep/glob/list, then make changes."""
+    yield 1.0
+
+# Run with any model
+agent = create_agent("gpt-4o")
+
+async with hud.eval(env("coding_task", task="Fix the bug in main.py"), name="opencode-local") as ctx:
+    await agent.run(ctx, max_steps=30)
+```
+
+### Plan Mode (Read-Only Agent)
+
+OpenCode's "plan" agent is read-only for safe codebase exploration. Just omit the coding tools:
+
+```python
+import hud
+from hud.agents import create_agent
+from hud.tools.filesystem import ReadTool, GrepTool, GlobTool, ListTool
+
+env = hud.Environment("opencode-plan")
+base = "./workspace"
+
+# Only read-only tools - no edit or shell
+env.add_tool(ReadTool(base_path=base))
+env.add_tool(GrepTool(base_path=base))
+env.add_tool(GlobTool(base_path=base))
+env.add_tool(ListTool(base_path=base))
+
+@env.scenario("analyze")
+async def analyze_task(question: str):
+    yield f"""You are analyzing a codebase. Answer this question:
+
+{question}
+
+Use the available read-only tools to explore. Do NOT suggest code changes."""
+    yield 1.0
+
+agent = create_agent("claude-sonnet-4-5")
+
+async with hud.eval(env("analyze", question="How does auth work?"), name="opencode-plan") as ctx:
+    await agent.run(ctx, max_steps=20)
+```
+
+## Tool Specifications
+
+### Edit Tool (str_replace)
+
+The `EditTool` matches OpenCode's edit tool with these commands:
+
+| Command | Description |
+| ------- | ----------- |
+| `view` | View file contents with line numbers |
+| `create` | Create a new file |
+| `str_replace` | Replace exact text with new text |
+| `insert` | Insert text at a specific line |
+| `undo_edit` | Undo the last edit |
+
+**Example str_replace call:**
+
+```python
+{
+    "command": "str_replace",
+    "path": "src/main.py",
+    "old_str": "def hello():\n    print('Hello')",
+    "new_str": "def hello():\n    print('Hello, World!')"
+}
+```
+
+### Shell Tool
+
+Persistent bash session with:
+- Auto-restart on errors
+- Dynamic timeout support
+- Output capture (stdout/stderr)
+
+## CLI Usage
+
+```bash
+# Build mode - make changes to code
+uv run python examples/07_opencode_agent.py --task "Add error handling to api.py"
+
+# Plan mode (read-only exploration)
+uv run python examples/07_opencode_agent.py --plan --task "How does the auth system work?"
+
+# Use different models
+uv run python examples/07_opencode_agent.py --model gpt-4o --task "Fix the bug"
+uv run python examples/07_opencode_agent.py --model claude-sonnet-4-5 --task "Add tests"
+
+# Verbose output
+uv run python examples/07_opencode_agent.py --verbose --task "Refactor utils"
+```
+
+## Comparison with OpenCode
+
+| Feature | OpenCode | Your HUD OpenCode |
+| ------- | -------- | ----------------- |
+| str_replace editing | `edit` tool | `EditTool` (same spec) |
+| Shell execution | `bash` tool | `ShellTool`/`BashTool` |
+| File reading | `read` tool | `ReadTool` |
+| Regex search | `grep` tool | `GrepTool` |
+| File finding | `glob` tool | `GlobTool` |
+| Directory listing | `list` tool | `ListTool` |
+| Build/Plan agents | Built-in | Create separate environments |
+| LSP integration | Experimental | Not yet (use shell + lsp commands) |
+| Observability | Internal logs | Full traces on hud.ai |
+| Evaluation | Manual | Built-in with `hud.eval` |
+
+## See Also
+
+- [OpenCode](https://github.com/anomalyco/opencode) - The original open-source coding agent
+- [Build Your Own Codex](/cookbooks/codex-coding) - OpenAI Codex-style agent with V4A diffs
+- [Tools Reference](/reference/tools) - Complete tool documentation
+- [Agents Reference](/reference/agents) - Agent configuration options

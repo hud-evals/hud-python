@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import base64
 import io
-import json
+import logging
 import re
 
 from openai import AsyncOpenAI
-from opentelemetry import trace
 
-from hud import instrument
 from hud.tools.grounding.config import GrounderConfig  # noqa: TC001
+
+logger = logging.getLogger(__name__)
 
 
 class Grounder:
@@ -181,12 +181,6 @@ class Grounder:
 
         return (final_x, final_y)
 
-    @instrument(
-        name="Grounding.predict_click",
-        span_type="agent",
-        record_args=True,
-        record_result=True,
-    )
     async def predict_click(
         self, *, image_b64: str, instruction: str, max_retries: int = 3
     ) -> tuple[int, int] | None:
@@ -247,12 +241,7 @@ class Grounder:
 
                 # Extract response text
                 response_text = response.choices[0].message.content
-
-                # Manually record the raw response in the span
-                span = trace.get_current_span()
-                if span and span.is_recording():
-                    span.set_attribute("grounder.raw_response", json.dumps(response.model_dump()))
-                    span.set_attribute("grounder.attempt", attempt + 1)
+                logger.debug("Grounder attempt %d response: %s", attempt + 1, response_text)
 
                 # Parse coordinates from response
                 if response_text is None:
@@ -277,26 +266,16 @@ class Grounder:
                     y = max(0, min(y, original_size[1] - 1))
                     pixel_coords = (x, y)
 
-                # Record successful grounding in span
-                span = trace.get_current_span()
-                if span and span.is_recording():
-                    span.set_attribute("grounder.success", True)
-                    span.set_attribute(
-                        "grounder.final_coords", f"{pixel_coords[0]},{pixel_coords[1]}"
-                    )
-                    span.set_attribute("grounder.total_attempts", attempt + 1)
-
+                logger.debug(
+                    "Grounder success: coords=%s after %d attempts",
+                    pixel_coords,
+                    attempt + 1,
+                )
                 return pixel_coords
 
             except Exception:
                 if attempt < max_retries - 1:
                     continue
 
-        # Record failure in span
-        span = trace.get_current_span()
-        if span and span.is_recording():
-            span.set_attribute("grounder.success", False)
-            span.set_attribute("grounder.total_attempts", max_retries)
-            span.set_attribute("grounder.failure_reason", "All attempts exhausted")
-
+        logger.debug("Grounder failed after %d attempts", max_retries)
         return None

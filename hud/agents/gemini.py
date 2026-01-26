@@ -5,152 +5,114 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
+import mcp.types as types
 from google import genai
 from google.genai import types as genai_types
 
-import hud
-
-if TYPE_CHECKING:
-    from hud.datasets import Task
-
-import mcp.types as types
-
 from hud.settings import settings
-from hud.tools.computer.settings import computer_settings
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
+from hud.utils.types import with_signature
 
 from .base import MCPAgent
+from .types import GeminiConfig, GeminiCreateParams
+
+if TYPE_CHECKING:
+    from hud.tools.native_types import NativeToolSpec
 
 logger = logging.getLogger(__name__)
-
-# Predefined Gemini computer use functions
-PREDEFINED_COMPUTER_USE_FUNCTIONS = [
-    "open_web_browser",
-    "click_at",
-    "hover_at",
-    "type_text_at",
-    "scroll_document",
-    "scroll_at",
-    "wait_5_seconds",
-    "go_back",
-    "go_forward",
-    "search",
-    "navigate",
-    "key_combination",
-    "drag_and_drop",
-]
 
 
 class GeminiAgent(MCPAgent):
     """
     Gemini agent that uses MCP servers for tool execution.
 
-    This agent uses Gemini's native computer use capabilities but executes
+    This agent uses Gemini's native tool calling capabilities but executes
     tools through MCP servers instead of direct implementation.
     """
 
-    metadata: ClassVar[dict[str, Any]] = {
-        "display_width": computer_settings.GEMINI_COMPUTER_WIDTH,
-        "display_height": computer_settings.GEMINI_COMPUTER_HEIGHT,
-    }
+    metadata: ClassVar[dict[str, Any] | None] = None
+    config_cls: ClassVar[type[BaseAgentConfig]] = GeminiConfig
 
-    def __init__(
-        self,
-        model_client: genai.Client | None = None,
-        model: str = "gemini-2.5-computer-use-preview-10-2025",
-        temperature: float = 1.0,
-        top_p: float = 0.95,
-        top_k: int = 40,
-        max_output_tokens: int = 8192,
-        validate_api_key: bool = True,
-        excluded_predefined_functions: list[str] | None = None,
-        **kwargs: Any,
-    ) -> None:
+    @classmethod
+    def agent_type(cls) -> AgentType:
+        """Return the AgentType for Gemini."""
+        return AgentType.GEMINI
+
+    # Legacy tool name patterns for backwards compatibility
+    _LEGACY_COMPUTER_NAMES = ("gemini_computer", "computer_gemini", "computer")
+
+    def _legacy_native_spec_fallback(self, tool: types.Tool) -> NativeToolSpec | None:
+        """Detect Gemini native tools by name for backwards compatibility.
+
+        Supports old environments that expose tools like 'gemini_computer'
+        without native_tools metadata.
         """
-        Initialize Gemini MCP agent.
+        from hud.tools.native_types import NativeToolSpec
 
-        Args:
-            model_client: Gemini client (created if not provided)
-            model: Gemini model to use
-            temperature: Temperature for response generation
-            top_p: Top-p sampling parameter
-            top_k: Top-k sampling parameter
-            max_output_tokens: Maximum tokens for response
-            validate_api_key: Whether to validate API key on initialization
-            excluded_predefined_functions: List of predefined functions to exclude
-            **kwargs: Additional arguments passed to BaseMCPAgent (including mcp_client)
-        """
-        super().__init__(**kwargs)
+        name = tool.name
 
-        # Initialize client if not provided
+        # Check for computer tool patterns
+        for pattern in self._LEGACY_COMPUTER_NAMES:
+            if name == pattern or name.endswith(f"_{pattern}"):
+                logger.debug("Legacy fallback: detected %s as computer tool", name)
+                return NativeToolSpec(
+                    api_type="computer_use",
+                    api_name="gemini_computer",
+                    role="computer",
+                )
+
+        return None
+
+    @with_signature(GeminiCreateParams)
+    @classmethod
+    def create(cls, **kwargs: Any) -> GeminiAgent:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return MCPAgent.create.__func__(cls, **kwargs)  # type: ignore[return-value]
+
+    def __init__(self, params: GeminiCreateParams | None = None, **kwargs: Any) -> None:
+        super().__init__(params, **kwargs)
+        self.config: GeminiConfig
+
+        model_client = self.config.model_client
         if model_client is None:
-            api_key = settings.gemini_api_key
-            if not api_key:
-                raise ValueError("Gemini API key not found. Set GEMINI_API_KEY.")
-            model_client = genai.Client(api_key=api_key)
+            # Default to HUD gateway when HUD_API_KEY is available
+            if settings.api_key:
+                from hud.agents.gateway import build_gateway_client
 
-        # Validate API key if requested
-        if validate_api_key:
-            try:
-                # Simple validation - try to list models
-                list(model_client.models.list(config=genai_types.ListModelsConfig(page_size=1)))
-            except Exception as e:
-                raise ValueError(f"Gemini API key is invalid: {e}") from e
+                model_client = build_gateway_client("gemini")
+            elif settings.gemini_api_key:
+                model_client = genai.Client(api_key=settings.gemini_api_key)
+                if self.config.validate_api_key:
+                    try:
+                        list(
+                            model_client.models.list(
+                                config=genai_types.ListModelsConfig(page_size=1)
+                            )
+                        )
+                    except Exception as e:
+                        raise ValueError(f"Gemini API key is invalid: {e}") from e
+            else:
+                raise ValueError(
+                    "No API key found. Set HUD_API_KEY for HUD gateway, "
+                    "or GEMINI_API_KEY for direct Gemini access."
+                )
 
-        self.gemini_client = model_client
-        self.model = model
-        self.temperature = temperature
-        self.top_p = top_p
-        self.top_k = top_k
-        self.max_output_tokens = max_output_tokens
-        self.excluded_predefined_functions = excluded_predefined_functions or []
+        self.gemini_client: genai.Client = model_client
+        self.temperature = self.config.temperature
+        self.top_p = self.config.top_p
+        self.top_k = self.config.top_k
+        self.max_output_tokens = self.config.max_output_tokens
         self.hud_console = HUDConsole(logger=logger)
-
-        # Context management: Maximum number of recent turns to keep screenshots for
-        # Configurable via GEMINI_MAX_RECENT_TURN_WITH_SCREENSHOTS environment variable
-        self.max_recent_turn_with_screenshots = (
-            computer_settings.GEMINI_MAX_RECENT_TURN_WITH_SCREENSHOTS
-        )
-
-        self.model_name = self.model
 
         # Track mapping from Gemini tool names to MCP tool names
         self._gemini_to_mcp_tool_map: dict[str, str] = {}
-        self.gemini_tools: list[genai_types.Tool] = []
+        self.gemini_tools: genai_types.ToolListUnion = []
 
-        # Append Gemini-specific instructions to the base system prompt
-        gemini_instructions = "\n".join(
-            [
-                "You are Gemini, a helpful AI assistant created by Google.",
-                "You can interact with computer interfaces.",
-                "",
-                "When working on tasks:",
-                "1. Be thorough and systematic in your approach",
-                "2. Complete tasks autonomously without asking for confirmation",
-                "3. Use available tools efficiently to accomplish your goals",
-                "4. Verify your actions and ensure task completion",
-                "5. Be precise and accurate in all operations",
-                "6. Adapt to the environment and the task at hand",
-                "",
-                "Remember: You are expected to complete tasks autonomously.",
-                "The user trusts you to accomplish what they asked.",
-            ]
-        )
-
-        # Append Gemini instructions to any base system prompt
-        if self.system_prompt:
-            self.system_prompt = f"{self.system_prompt}\n\n{gemini_instructions}"
-        else:
-            self.system_prompt = gemini_instructions
-
-    async def initialize(self, task: str | Task | None = None) -> None:
-        """Initialize the agent and build tool mappings."""
-        await super().initialize(task)
-        # Build tool mappings after tools are discovered
+    def _on_tools_ready(self) -> None:
+        """Build Gemini-specific tool mappings after tools are discovered."""
         self._convert_tools_for_gemini()
 
-    async def get_system_messages(self) -> list[Any]:
+    async def get_system_messages(self) -> list[genai_types.Content]:
         """No system messages for Gemini because applied in get_response"""
         return []
 
@@ -177,30 +139,21 @@ class GeminiAgent(MCPAgent):
 
         return [genai_types.Content(role="user", parts=gemini_parts)]
 
-    @hud.instrument(
-        span_type="agent",
-        record_args=False,  # Messages can be large
-        record_result=True,
-    )
     async def get_response(self, messages: list[genai_types.Content]) -> AgentResponse:
         """Get response from Gemini including any tool calls."""
-
         # Build generate content config
         generate_config = genai_types.GenerateContentConfig(
             temperature=self.temperature,
             top_p=self.top_p,
             top_k=self.top_k,
             max_output_tokens=self.max_output_tokens,
-            tools=cast("Any", self.gemini_tools),
+            tools=self.gemini_tools,
             system_instruction=self.system_prompt,
         )
 
-        # Trim screenshots from older turns to manage context growth
-        self._remove_old_screenshots(messages)
-
-        # Make API call - using a simpler call pattern
-        response = self.gemini_client.models.generate_content(
-            model=self.model,
+        # Use async API to avoid blocking the event loop
+        response = await self.gemini_client.aio.models.generate_content(
+            model=self.config.model,
             contents=cast("Any", messages),
             config=generate_config,
         )
@@ -208,7 +161,7 @@ class GeminiAgent(MCPAgent):
         # Append assistant response (including any function_call) so that
         # subsequent FunctionResponse messages correspond to a prior FunctionCall
         if response.candidates and len(response.candidates) > 0 and response.candidates[0].content:
-            cast("list[genai_types.Content]", messages).append(response.candidates[0].content)
+            messages.append(response.candidates[0].content)
 
         # Process response
         result = AgentResponse(content="", tool_calls=[], done=True)
@@ -227,89 +180,44 @@ class GeminiAgent(MCPAgent):
         if candidate.content and candidate.content.parts:
             for part in candidate.content.parts:
                 if part.function_call:
-                    # Map Gemini tool name back to MCP tool name
-                    func_name = part.function_call.name or ""
-                    mcp_tool_name = self._gemini_to_mcp_tool_map.get(func_name, func_name)
-
-                    # Create MCPToolCall object with Gemini metadata
-                    raw_args = dict(part.function_call.args) if part.function_call.args else {}
-
-                    # Normalize Gemini Computer Use calls to MCP tool schema
-                    if part.function_call.name in PREDEFINED_COMPUTER_USE_FUNCTIONS:
-                        # Ensure 'action' is present and equals the Gemini function name
-                        normalized_args: dict[str, Any] = {"action": part.function_call.name}
-
-                        # Map common argument shapes used by Gemini Computer Use
-                        # 1) Coordinate arrays → x/y
-                        coord = raw_args.get("coordinate") or raw_args.get("coordinates")
-                        if isinstance(coord, (list, tuple)) and len(coord) >= 2:
-                            try:
-                                normalized_args["x"] = int(coord[0])
-                                normalized_args["y"] = int(coord[1])
-                            except (TypeError, ValueError):
-                                # Fall back to raw if casting fails
-                                pass
-
-                        # Destination coordinate arrays → destination_x/destination_y
-                        dest = (
-                            raw_args.get("destination")
-                            or raw_args.get("destination_coordinate")
-                            or raw_args.get("destinationCoordinate")
-                        )
-                        if isinstance(dest, (list, tuple)) and len(dest) >= 2:
-                            try:
-                                normalized_args["destination_x"] = int(dest[0])
-                                normalized_args["destination_y"] = int(dest[1])
-                            except (TypeError, ValueError):
-                                pass
-
-                        # Pass through supported fields if present (including direct coords)
-                        for key in (
-                            "text",
-                            "press_enter",
-                            "clear_before_typing",
-                            "safety_decision",
-                            "direction",
-                            "magnitude",
-                            "url",
-                            "keys",
-                            "x",
-                            "y",
-                            "destination_x",
-                            "destination_y",
-                        ):
-                            if key in raw_args:
-                                normalized_args[key] = raw_args[key]
-
-                        # Use normalized args for computer tool calls
-                        final_args = normalized_args
-                    else:
-                        # Non-computer tools: pass args as-is
-                        final_args = raw_args
-
-                    tool_call = MCPToolCall(
-                        name=mcp_tool_name,
-                        arguments=final_args,
-                        gemini_name=func_name,  # type: ignore[arg-type]
-                    )
-                    collected_tool_calls.append(tool_call)
+                    tool_call = self._extract_tool_call(part)
+                    if tool_call is not None:
+                        collected_tool_calls.append(tool_call)
+                elif part.thought is True and part.text:
+                    if thinking_content:
+                        thinking_content += "\n"
+                    thinking_content += part.text
                 elif part.text:
                     text_content += part.text
-                elif hasattr(part, "thought") and part.thought:
-                    thinking_content += f"Thinking: {part.thought}\n"
 
         # Assign collected tool calls and mark done status
         if collected_tool_calls:
             result.tool_calls = collected_tool_calls
             result.done = False
 
-        # Combine text and thinking for final content
+        result.content = text_content
         if thinking_content:
-            result.content = thinking_content + text_content
-        else:
-            result.content = text_content
+            result.reasoning = thinking_content
 
         return result
+
+    def _extract_tool_call(self, part: genai_types.Part) -> MCPToolCall | None:
+        """Extract an MCPToolCall from a function call part.
+
+        Subclasses can override to customize tool call extraction (e.g., normalizing
+        computer use calls to a different schema).
+        """
+        if not part.function_call:
+            return None
+
+        func_name = part.function_call.name or ""
+        mcp_tool_name = self._gemini_to_mcp_tool_map.get(func_name, func_name)
+        raw_args = dict(part.function_call.args) if part.function_call.args else {}
+
+        return MCPToolCall(
+            name=mcp_tool_name,
+            arguments=raw_args,
+        )
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
@@ -324,61 +232,28 @@ class GeminiAgent(MCPAgent):
 
             # Convert MCP tool results to Gemini format
             response_dict: dict[str, Any] = {}
-            url = None
 
             if result.isError:
                 # Extract error message from content
                 error_msg = "Tool execution failed"
                 for content in result.content:
                     if isinstance(content, types.TextContent):
-                        # Check if this is a URL metadata block
-                        if content.text.startswith("__URL__:"):
-                            url = content.text.replace("__URL__:", "")
-                        else:
-                            error_msg = content.text
-                            break
+                        error_msg = content.text
+                        break
                 response_dict["error"] = error_msg
             else:
                 # Process success content
                 response_dict["success"] = True
-
-            # Extract URL and screenshot from content
-            screenshot_parts = []
-            for content in result.content:
-                if isinstance(content, types.TextContent):
-                    # Check if this is a URL metadata block
-                    if content.text.startswith("__URL__:"):
-                        url = content.text.replace("__URL__:", "")
-                elif isinstance(content, types.ImageContent):
-                    # Decode base64 string to bytes for FunctionResponseBlob
-                    import base64
-
-                    image_bytes = base64.b64decode(content.data)
-                    screenshot_parts.append(
-                        genai_types.FunctionResponsePart(
-                            inline_data=genai_types.FunctionResponseBlob(
-                                mime_type=content.mimeType or "image/png",
-                                data=image_bytes,
-                            )
-                        )
-                    )
-
-            # Add URL to response dict (required by Gemini Computer Use model)
-            # URL must ALWAYS be present per Gemini API requirements
-            response_dict["url"] = url if url else "about:blank"
-
-            # For Gemini Computer Use actions, always acknowledge safety decisions
-            requires_ack = False
-            if tool_call.arguments:
-                requires_ack = bool(tool_call.arguments.get("safety_decision"))
-            if gemini_name in PREDEFINED_COMPUTER_USE_FUNCTIONS and requires_ack:
-                response_dict["safety_acknowledgement"] = True
+                # Add text content to response
+                for content in result.content:
+                    if isinstance(content, types.TextContent):
+                        response_dict["output"] = content.text
+                        break
 
             # Create function response
             function_response = genai_types.FunctionResponse(
                 name=gemini_name,
                 response=response_dict,
-                parts=screenshot_parts if screenshot_parts else None,
             )
             function_responses.append(function_response)
 
@@ -394,99 +269,107 @@ class GeminiAgent(MCPAgent):
         """Create a user message in Gemini's format."""
         return genai_types.Content(role="user", parts=[genai_types.Part(text=text)])
 
-    def _convert_tools_for_gemini(self) -> list[genai_types.Tool]:
-        """Convert MCP tools to Gemini tool format."""
-        gemini_tools = []
-        self._gemini_to_mcp_tool_map = {}  # Reset mapping
+    def _convert_tools_for_gemini(self) -> None:
+        """Convert MCP tools to Gemini tool format using native specs.
 
-        # Find computer tool by priority
-        computer_tool_priority = ["gemini_computer", "computer_gemini", "computer"]
-        selected_computer_tool = None
+        Uses shared categorize_tools() for role-based exclusion.
+        """
+        self._gemini_to_mcp_tool_map = {}
+        self.gemini_tools = []
 
-        for priority_name in computer_tool_priority:
-            for tool in self.get_available_tools():
-                # Check both exact match and suffix match (for prefixed tools)
-                if tool.name == priority_name or tool.name.endswith(f"_{priority_name}"):
-                    selected_computer_tool = tool
-                    break
-            if selected_computer_tool:
-                break
+        categorized = self.categorize_tools()
 
-        # Add the selected computer tool if found
-        if selected_computer_tool:
-            gemini_tool = genai_types.Tool(
-                computer_use=genai_types.ComputerUse(
-                    environment=genai_types.Environment.ENVIRONMENT_BROWSER,
-                    excluded_predefined_functions=self.excluded_predefined_functions,
-                )
-            )
-            # Map Gemini's computer use functions back to the actual MCP tool name
-            for func_name in PREDEFINED_COMPUTER_USE_FUNCTIONS:
-                if func_name not in self.excluded_predefined_functions:
-                    self._gemini_to_mcp_tool_map[func_name] = selected_computer_tool.name
+        # Log skipped tools at debug level
+        for tool, reason in categorized.skipped:
+            logger.debug("Skipping tool %s: %s", tool.name, reason)
 
-            gemini_tools.append(gemini_tool)
-            self.hud_console.debug(
-                f"Using {selected_computer_tool.name} as computer tool for Gemini"
-            )
+        # Process hosted tools
+        for tool, spec in categorized.hosted:
+            gemini_tool = self._build_hosted_tool(spec)
+            if gemini_tool:
+                self.gemini_tools.append(gemini_tool)
+                logger.debug("Added hosted tool %s (%s) for Gemini", tool.name, spec.api_type)
 
-        # Add other non-computer tools as custom functions
-        for tool in self.get_available_tools():
-            # Skip computer tools (already handled)
-            if any(
-                tool.name == priority_name or tool.name.endswith(f"_{priority_name}")
-                for priority_name in computer_tool_priority
-            ):
-                continue
-
-            # Convert MCP tool schema to Gemini function declaration
-            try:
-                # Ensure parameters have proper Schema format
-                params = tool.inputSchema or {"type": "object", "properties": {}}
-                function_decl = genai_types.FunctionDeclaration(
-                    name=tool.name,
-                    description=tool.description or f"Execute {tool.name}",
-                    parameters=genai_types.Schema(**params) if isinstance(params, dict) else params,  # type: ignore
-                )
-                custom_tool = genai_types.Tool(function_declarations=[function_decl])
-                gemini_tools.append(custom_tool)
-                # Direct mapping for non-computer tools
+        # Process native client-executed tools
+        for tool, spec in categorized.native:
+            gemini_tool = self._build_native_tool(tool, spec)
+            if gemini_tool:
                 self._gemini_to_mcp_tool_map[tool.name] = tool.name
-            except Exception:
-                self.hud_console.warning(f"Failed to convert tool {tool.name} to Gemini format")
+                self.gemini_tools.append(gemini_tool)
 
-        self.gemini_tools = gemini_tools
-        return gemini_tools
+        # Process generic function tools
+        for tool in categorized.generic:
+            gemini_tool = self._to_gemini_tool(tool)
+            if gemini_tool:
+                self._gemini_to_mcp_tool_map[tool.name] = tool.name
+                self.gemini_tools.append(gemini_tool)
 
-    def _remove_old_screenshots(self, messages: list[genai_types.Content]) -> None:
+        # Log actual tools being used
+        tool_names = sorted(self._gemini_to_mcp_tool_map.keys())
+        self.console.info(
+            f"Agent initialized with {len(tool_names)} tools: {', '.join(tool_names)}"
+        )
+
+    def _build_hosted_tool(self, spec: NativeToolSpec) -> genai_types.Tool | None:
+        """Build a Gemini hosted tool from a NativeToolSpec.
+
+        Args:
+            spec: The native spec with hosted=True
+
+        Returns:
+            Gemini Tool with the appropriate hosted configuration
         """
-        Remove screenshots from old turns to manage context length.
-        Keeps only the last N turns with screenshots (configured via self.max_recent_turn_with_screenshots).
+        match spec.api_type:
+            case "google_search":
+                return genai_types.Tool(google_search=genai_types.GoogleSearch(**spec.extra))
+            case "code_execution":
+                return genai_types.Tool(code_execution=genai_types.ToolCodeExecution())
+            case "url_context":
+                return genai_types.Tool(url_context=genai_types.UrlContext())
+            case _:
+                logger.warning("Unknown hosted tool type: %s", spec.api_type)
+                return None
+
+    def _build_native_tool(self, tool: types.Tool, spec: NativeToolSpec) -> genai_types.Tool | None:
+        """Build a Gemini native tool from a NativeToolSpec.
+
+        Args:
+            tool: The MCP tool
+            spec: The native spec for Gemini
+
+        Returns:
+            Gemini-specific tool or None if not supported
         """
-        turn_with_screenshots_found = 0
+        # Currently Gemini native tools are similar to function tools
+        # This method exists for future expansion (e.g., computer_use native support)
+        match spec.api_type:
+            case "computer_use":
+                # Gemini computer use is still a function tool
+                return self._to_gemini_tool(tool)
+            case _:
+                # Unknown native type - try as function tool
+                logger.debug(
+                    "Native tool type %s for %s, using function declaration",
+                    spec.api_type,
+                    tool.name,
+                )
+                return self._to_gemini_tool(tool)
 
-        for content in reversed(messages):
-            if content.role == "user" and content.parts:
-                # Check if content has screenshots (function responses with images)
-                has_screenshot = False
-                for part in content.parts:
-                    if (
-                        part.function_response
-                        and part.function_response.parts
-                        and part.function_response.name in PREDEFINED_COMPUTER_USE_FUNCTIONS
-                    ):
-                        has_screenshot = True
-                        break
+    def _to_gemini_tool(self, tool: types.Tool) -> genai_types.Tool | None:
+        """Convert a single MCP tool to Gemini function tool format.
 
-                if has_screenshot:
-                    turn_with_screenshots_found += 1
-                    # Remove the screenshot image if the number of screenshots exceeds the limit
-                    if turn_with_screenshots_found > self.max_recent_turn_with_screenshots:
-                        for part in content.parts:
-                            if (
-                                part.function_response
-                                and part.function_response.parts
-                                and part.function_response.name in PREDEFINED_COMPUTER_USE_FUNCTIONS
-                            ):
-                                # Clear the parts (screenshots)
-                                part.function_response.parts = None
+        Args:
+            tool: MCP tool to convert
+
+        Returns:
+            Gemini Tool with function declaration
+        """
+        if tool.description is None or tool.inputSchema is None:
+            raise ValueError(f"MCP tool {tool.name} requires both a description and inputSchema.")
+
+        function_decl = genai_types.FunctionDeclaration(
+            name=tool.name,
+            description=tool.description,
+            parameters_json_schema=tool.inputSchema,
+        )
+        return genai_types.Tool(function_declarations=[function_decl])

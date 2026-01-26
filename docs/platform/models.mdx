@@ -1,0 +1,116 @@
+---
+title: "Models"
+description: "Browse, fork, and train AI models on the HUD platform."
+icon: "robot"
+---
+
+The Models page at [hud.ai/models](https://hud.ai/models) lets you browse available models, track your trained model checkpoints, and view inference logs. Models are the AI providers you use through the HUD Gateway—Claude, GPT, Gemini, and more—plus any custom models you've trained.
+
+## Overview
+
+Navigate to **Models** to see two tabs:
+
+- **Explore** — Browse public base models from providers (Anthropic, OpenAI, Google, xAI)
+- **My Models** — Your forked or trained models
+
+<Frame>
+  <img src="/src/images/platform-models.png" alt="Models page showing available models" />
+</Frame>
+
+## Model Details
+
+Click on any model to see its detail page:
+
+### Checkpoints Tab
+
+Shows the checkpoint tree for your model. Each checkpoint represents a saved state during training:
+
+- **HEAD** — The active checkpoint used for inference
+- **Tree View** — Visual history of training branches
+- **Click a checkpoint** — View details, set as HEAD, or start new training
+
+<Frame>
+  <img src="/src/images/platform-model-checkpoints.png" alt="Checkpoint tree view" />
+</Frame>
+
+### Traces Tab
+
+View all traces where this model was used:
+
+- Filter by checkpoint
+- Click to view full trace details
+- See prompts, tool calls, and responses
+
+### Logs Tab
+
+Inference logs for API calls through the Gateway:
+
+- Request/response details
+- Token usage
+- Latency metrics
+- Filter by checkpoint
+
+### Settings Tab
+
+Model configuration:
+
+- **Display Name** — How the model appears in the UI
+- **Advanced** — Model ID, API name, provider, routes, and other metadata
+
+## Training Models
+
+To train a model, you need a base model to start from:
+
+1. Go to **Explore** and find a trainable model
+2. Click **Fork** to create your own copy
+3. Click **Train Model** to start a training job
+
+Training creates new checkpoints that appear in your checkpoint tree. You can set any checkpoint as HEAD to use it for inference.
+
+<Note>
+Not all models are trainable. Look for the "Train Model" button to be enabled.
+</Note>
+
+## Forking Models
+
+Fork a model to create your own copy that you can train:
+
+1. Navigate to the model you want to fork
+2. Click **Fork** in the header
+3. Enter a name for your forked model
+4. Your forked model appears in **My Models**
+
+Forking copies the current HEAD checkpoint as your starting point.
+
+## Using Models via Gateway
+
+All models on the platform are available through the HUD Gateway at `inference.hud.ai`:
+
+```python
+from openai import AsyncOpenAI
+import os
+
+client = AsyncOpenAI(
+    base_url="https://inference.hud.ai",
+    api_key=os.environ["HUD_API_KEY"]
+)
+
+response = await client.chat.completions.create(
+    model="claude-sonnet-4-5",  # Base model
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
+
+For trained models, use the model's API name from the Settings tab.
+
+## Next Steps
+
+<CardGroup cols={2}>
+<Card title="Models" icon="robot" href="/quick-links/models">
+  Models and agents essentials
+</Card>
+
+<Card title="Testing" icon="flask-vial" href="/advanced/testing-environments">
+  Variants, groups, and local testing
+</Card>
+</CardGroup>

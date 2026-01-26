@@ -1,0 +1,169 @@
+---
+title: "Web Tools"
+description: "Browser automation and web search"
+icon: "globe"
+---
+
+Web tools let agents browse the internet and search for information. Two types: client-executed (your environment runs the browser) and hosted (provider runs the search).
+
+## Quick Reference
+
+| Tool | Execution | Purpose |
+|------|-----------|---------|
+| `PlaywrightTool` | Client | Full browser automation |
+| `WebSearchTool` | Hosted (Claude) | Real-time web search |
+| `GoogleSearchTool` | Hosted (Gemini) | Google search |
+| `WebFetchTool` | Client | Fetch page content |
+
+## PlaywrightTool
+
+Full browser automation via Playwright. Navigate, click, type, screenshot.
+
+```python
+from hud.tools import PlaywrightTool
+
+browser = PlaywrightTool()
+
+# Or connect to existing browser
+browser = PlaywrightTool(cdp_url="http://localhost:9222")
+```
+
+**Actions**: `navigate`, `screenshot`, `click`, `type`, `get_page_info`, `wait_for_element`
+
+```python
+# Navigate
+await browser(action="navigate", url="https://example.com", wait_for_load_state="networkidle")
+
+# Screenshot
+result = await browser(action="screenshot")
+# Returns ContentResult with base64_image
+
+# Click element
+await browser(action="click", selector="button.submit")
+
+# Type in input
+await browser(action="type", selector="input#search", text="HUD AI")
+
+# Wait for element
+await browser(action="wait_for_element", selector=".results")
+
+# Get page info
+info = await browser(action="get_page_info")
+# Returns: {"url": "...", "title": "..."}
+```
+
+**Load states**: `commit`, `domcontentloaded`, `load`, `networkidle`
+
+When done:
+
+```python
+await browser.close()
+```
+
+## WebSearchTool (Claude)
+
+Claude's native web search. Executed server-side by Anthropic. Results appear in the response with citations.
+
+```python
+from hud.tools.hosted import WebSearchTool
+
+search = WebSearchTool(
+    max_uses=10,                        # Max searches per request
+    allowed_domains=["docs.python.org"],# Only these domains
+    blocked_domains=["spam.com"],       # Never these domains
+)
+```
+
+Uses `web_search_20250305` API. $10 per 1,000 searches.
+
+<Note>
+Hosted tools are declared in your environment but executed by the provider. You don't call them directly—Claude invokes them and results appear in the response.
+</Note>
+
+## GoogleSearchTool (Gemini)
+
+Google Search for Gemini. Also hosted—executed by Google.
+
+```python
+from hud.tools.hosted import GoogleSearchTool
+
+search = GoogleSearchTool()
+```
+
+## WebFetchTool
+
+Fetch and extract content from URLs.
+
+```python
+from hud.tools.hosted import WebFetchTool
+
+fetch = WebFetchTool()
+result = await fetch(url="https://example.com/article")
+```
+
+## Hosted vs Client
+
+**Hosted tools** (WebSearchTool, GoogleSearchTool):
+- You declare them, provider executes them
+- Results in response metadata
+- No local browser needed
+
+**Client tools** (PlaywrightTool, WebFetchTool):
+- Your environment runs the browser
+- Full control over interaction
+- Screenshots, clicks, form filling
+
+## Typical Setup
+
+```python
+from hud import Environment
+from hud.tools import PlaywrightTool
+from hud.tools.hosted import WebSearchTool
+
+env = Environment("web-env")
+env.add_tool(PlaywrightTool())
+env.add_tool(WebSearchTool())
+```
+
+## CDP for Containers
+
+In Docker, run Chrome with remote debugging and connect via CDP:
+
+```python
+# Chrome running with: --remote-debugging-port=9222
+browser = PlaywrightTool(cdp_url="http://localhost:9222")
+```
+
+## Customizing
+
+Log all browser actions with hooks:
+
+```python
+from hud.tools import PlaywrightTool
+
+browser = PlaywrightTool()
+
+@browser.after
+async def log_action(action: str = "", result=None, **kwargs):
+    print(f"Browser: {action}")
+
+env.add_tool(browser)
+```
+
+Or subclass for deeper control:
+
+```python
+from typing import Any
+from hud.tools import PlaywrightTool
+
+class TrackedBrowserTool(PlaywrightTool):
+    def __init__(self, **kwargs: Any):
+        super().__init__(**kwargs)
+        self.history: list[str] = []
+    
+    async def navigate(self, url: str, **kwargs: Any) -> dict[str, Any]:
+        self.history.append(url)
+        return await super().navigate(url, **kwargs)
+```
+
+→ [Computer Tools](/tools/computer) — For desktop GUI automation

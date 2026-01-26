@@ -1,46 +1,123 @@
+"""Runtime tests for MCPAgent base class."""
+
 from __future__ import annotations
 
-from unittest import mock
+from typing import Any
 
 import mcp.types as types
 import pytest
 
-from hud.agents.base import MCPAgent, find_content, find_reward, text_to_blocks
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.agents.base import BaseCreateParams, MCPAgent, find_content, find_reward, text_to_blocks
+from hud.environment.router import ToolRouter
+from hud.eval.context import EvalContext
+from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
+
+
+class DummyConfig(BaseAgentConfig):
+    model_name: str = "DummyAgent"
+    model: str = "dummy-model"
+
+
+class DummyCreateParams(BaseCreateParams, DummyConfig):
+    pass
+
+
+class MockEvalContext(EvalContext):
+    """Mock EvalContext for testing."""
+
+    def __init__(
+        self,
+        prompt: str = "Test prompt",
+        tools: list[types.Tool] | None = None,
+    ) -> None:
+        # Core attributes
+        self.prompt = prompt
+        self._tools = tools or []
+        self._submitted: str | None = None
+        self.reward: float | None = None
+        self._call_tool_handler: Any = None
+
+        # Environment attributes
+        self._router = ToolRouter()
+        self._agent_include: list[str] | None = None
+        self._agent_exclude: list[str] | None = None
+
+        # EvalContext attributes
+        self._task = None
+        self.trace_id = "test-trace-id"
+        self.eval_name = "test-eval"
+        self.job_id: str | None = None
+        self.group_id: str | None = None
+        self.index = 0
+        self.variants: dict[str, Any] = {}
+        self.answer: str | None = None
+        self.system_prompt: str | None = None
+        self.error: BaseException | None = None
+        self.metadata: dict[str, Any] = {}
+        self.results: list[Any] = []
+        self._is_summary = False
+
+    def as_tools(self) -> list[types.Tool]:
+        return self._tools
+
+    @property
+    def has_scenario(self) -> bool:
+        return False
+
+    def set_call_tool_handler(self, handler: Any) -> None:
+        self._call_tool_handler = handler
+
+    async def list_tools(self) -> list[types.Tool]:
+        return self._tools
+
+    async def call_tool(self, call: Any, /, **kwargs: Any) -> MCPToolResult:
+        if self._call_tool_handler:
+            # Parse the call
+            if isinstance(call, tuple):
+                tc = MCPToolCall(name=call[0], arguments=call[1] if len(call) > 1 else {})
+            elif hasattr(call, "name"):
+                tc = call
+            else:
+                tc = MCPToolCall(name=str(call), arguments=kwargs)
+            return self._call_tool_handler(tc)
+        return MCPToolResult(
+            content=[types.TextContent(type="text", text="ok")],
+            isError=False,
+        )
+
+    async def submit(self, answer: str) -> None:
+        self._submitted = answer
 
 
 class DummyAgent(MCPAgent):
-    async def get_system_messages(self):
-        return [types.TextContent(text="sys", type="text")]
+    config_cls = DummyConfig
 
-    async def get_response(self, messages):
-        # Single step: no tool calls -> done
+    @classmethod
+    def agent_type(cls) -> AgentType:
+        """Return the AgentType for the dummy agent."""
+        return AgentType.INTEGRATION_TEST
+
+    def __init__(self, **kwargs: Any) -> None:
+        params = DummyCreateParams(**kwargs)
+        super().__init__(params)
+
+    async def get_system_messages(self) -> list[types.ContentBlock]:
+        return [types.TextContent(type="text", text="sys")]
+
+    async def get_response(self, messages: list[Any]) -> AgentResponse:
         return AgentResponse(content="ok", tool_calls=[], done=True)
 
-    async def format_blocks(self, blocks):
-        # Return as-is
+    async def format_blocks(self, blocks: list[Any]) -> list[Any]:
         return blocks
 
-    async def format_tool_results(self, tool_calls, tool_results):
+    async def format_tool_results(
+        self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
+    ) -> list[Any]:
         return [types.TextContent(text="tools", type="text")]
 
 
-@pytest.mark.asyncio
-async def test_run_with_string_prompt_auto_client(monkeypatch):
-    # Fake MCPClient with required methods
-    fake_client = mock.AsyncMock()
-    fake_client.initialize.return_value = None
-    fake_client.list_tools.return_value = []
-    fake_client.shutdown.return_value = None
-
-    # Patch MCPClient construction inside initialize()
-    with mock.patch("hud.clients.MCPClient", return_value=fake_client):
-        agent = DummyAgent(mcp_client=fake_client, auto_trace=False)
-        result = await agent.run("hello", max_steps=1)
-    assert result.done is True and result.isError is False
-
-
-def test_find_reward_and_content_extractors():
+def test_find_reward_and_content_extractors() -> None:
+    """Test reward and content extraction from tool results."""
     # Structured content
     r = MCPToolResult(
         content=text_to_blocks("{}"), isError=False, structuredContent={"reward": 0.7}
@@ -53,13 +130,74 @@ def test_find_reward_and_content_extractors():
     assert find_content(r2) == "hi"
 
 
+def test_get_available_tools_before_run_raises() -> None:
+    """Test that get_available_tools raises before initialization."""
+    agent = DummyAgent()
+    with pytest.raises(RuntimeError):
+        agent.get_available_tools()
+
+
 @pytest.mark.asyncio
-async def test_call_tools_error_paths():
-    fake_client = mock.AsyncMock()
-    # First call succeeds
+async def test_format_message_invalid_type_raises() -> None:
+    """Test that format_message raises for invalid types."""
+    agent = DummyAgent()
+    with pytest.raises(ValueError):
+        await agent.format_message({"oops": 1})  # type: ignore
+
+
+def test_text_to_blocks_shapes() -> None:
+    """Test text_to_blocks returns correct structure."""
+    blocks = text_to_blocks("x")
+    assert isinstance(blocks, list) and blocks and isinstance(blocks[0], types.TextContent)
+
+
+@pytest.mark.asyncio
+async def test_run_with_eval_context() -> None:
+    """Test basic run() with EvalContext."""
+    ctx = MockEvalContext(prompt="hello")
+    agent = DummyAgent()
+    result = await agent.run(ctx, max_steps=1)
+    assert result.done is True
+    assert result.isError is False
+
+
+@pytest.mark.asyncio
+async def test_run_requires_eval_context() -> None:
+    """Test run() raises TypeError for non-EvalContext."""
+    agent = DummyAgent()
+    with pytest.raises(TypeError, match="must be EvalContext"):
+        await agent.run("hello")  # type: ignore
+
+
+@pytest.mark.asyncio
+async def test_run_requires_prompt() -> None:
+    """Test run() raises ValueError when prompt is empty."""
+    ctx = MockEvalContext(prompt="")
+    agent = DummyAgent()
+    with pytest.raises(ValueError, match="prompt is not set"):
+        await agent.run(ctx)
+
+
+@pytest.mark.asyncio
+async def test_call_tools_error_paths() -> None:
+    """Test call_tools handles errors correctly."""
+    call_count = [0]
     ok_result = MCPToolResult(content=text_to_blocks("ok"), isError=False)
-    fake_client.call_tool.side_effect = [ok_result, RuntimeError("boom")]
-    agent = DummyAgent(mcp_client=fake_client, auto_trace=False)
+
+    def handler(tool_call: MCPToolCall) -> MCPToolResult:
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return ok_result
+        raise RuntimeError("boom")
+
+    ctx = MockEvalContext(prompt="test")
+    ctx.set_call_tool_handler(handler)
+    agent = DummyAgent()
+
+    # Initialize the agent with context
+    agent.ctx = ctx
+    await agent._initialize_from_ctx(ctx)
+
     results = await agent.call_tools(
         [MCPToolCall(name="a", arguments={}), MCPToolCall(name="b", arguments={})]
     )
@@ -68,97 +206,33 @@ async def test_call_tools_error_paths():
 
 
 @pytest.mark.asyncio
-async def test_initialize_without_client_raises_valueerror():
-    agent = DummyAgent(mcp_client=None, auto_trace=False)
-    with pytest.raises(ValueError):
-        await agent.initialize(None)
+async def test_call_tools_timeout_raises() -> None:
+    """Test call_tools raises TimeoutError."""
 
+    def handler(tool_call: MCPToolCall) -> MCPToolResult:
+        raise TimeoutError("timeout")
 
-def test_get_available_tools_before_initialize_raises():
-    agent = DummyAgent(mcp_client=mock.AsyncMock(), auto_trace=False)
-    with pytest.raises(RuntimeError):
-        agent.get_available_tools()
+    ctx = MockEvalContext(prompt="test")
+    ctx.set_call_tool_handler(handler)
+    agent = DummyAgent()
 
+    agent.ctx = ctx
+    await agent._initialize_from_ctx(ctx)
 
-@pytest.mark.asyncio
-async def test_format_message_invalid_type_raises():
-    agent = DummyAgent(mcp_client=mock.AsyncMock(), auto_trace=False)
-    with pytest.raises(ValueError):
-        await agent.format_message({"oops": 1})  # type: ignore
-
-
-@pytest.mark.asyncio
-async def test_call_tools_timeout_error_shutdown_called():
-    fake_client = mock.AsyncMock()
-    fake_client.call_tool.side_effect = TimeoutError("timeout")
-    fake_client.shutdown.return_value = None
-    agent = DummyAgent(mcp_client=fake_client, auto_trace=False)
     with pytest.raises(TimeoutError):
         await agent.call_tools(MCPToolCall(name="x", arguments={}))
-    fake_client.shutdown.assert_awaited_once()
-
-
-def test_text_to_blocks_shapes():
-    blocks = text_to_blocks("x")
-    assert isinstance(blocks, list) and blocks and isinstance(blocks[0], types.TextContent)
 
 
 @pytest.mark.asyncio
-async def test_run_returns_connection_error_trace(monkeypatch):
-    fake_client = mock.AsyncMock()
-    fake_client.mcp_config = {}
-    fake_client.initialize.side_effect = RuntimeError("Connection refused http://localhost:1234")
-    fake_client.list_tools.return_value = []
-    fake_client.shutdown.return_value = None
+async def test_get_available_tools_after_run() -> None:
+    """Test get_available_tools works after initialization."""
+    tools = [types.Tool(name="test_tool", description="Test", inputSchema={})]
+    ctx = MockEvalContext(prompt="hello", tools=tools)
+    agent = DummyAgent()
 
-    class DummyCM:
-        def __exit__(self, *args, **kwargs):
-            return False
+    # Run initializes the agent
+    await agent.run(ctx, max_steps=1)
 
-    monkeypatch.setattr("hud.utils.mcp.setup_hud_telemetry", lambda *args, **kwargs: DummyCM())
-
-    agent = DummyAgent(mcp_client=fake_client, auto_trace=False)
-    result = await agent.run("p", max_steps=1)
-    assert result.isError is True
-    assert "Could not connect" in (result.content or "")
-
-
-@pytest.mark.asyncio
-async def test_run_calls_response_tool_when_configured(monkeypatch):
-    fake_client = mock.AsyncMock()
-    fake_client.mcp_config = {}
-    fake_client.initialize.return_value = None
-    fake_client.list_tools.return_value = []
-    fake_client.shutdown.return_value = None
-    ok = MCPToolResult(content=text_to_blocks("ok"), isError=False)
-    fake_client.call_tool.return_value = ok
-
-    class DummyCM:
-        def __exit__(self, *args, **kwargs):
-            return False
-
-    monkeypatch.setattr("hud.utils.mcp.setup_hud_telemetry", lambda *args, **kwargs: DummyCM())
-
-    agent = DummyAgent(mcp_client=fake_client, auto_trace=False, response_tool_name="submit")
-    result = await agent.run("hello", max_steps=1)
-    assert result.isError is False
-    fake_client.call_tool.assert_awaited()
-
-
-@pytest.mark.asyncio
-async def test_get_available_tools_after_initialize(monkeypatch):
-    fake_client = mock.AsyncMock()
-    fake_client.mcp_config = {}
-    fake_client.initialize.return_value = None
-    fake_client.list_tools.return_value = []
-    fake_client.shutdown.return_value = None
-
-    class DummyCM:
-        def __exit__(self, *args, **kwargs):
-            return False
-
-    monkeypatch.setattr("hud.utils.mcp.setup_hud_telemetry", lambda *args, **kwargs: DummyCM())
-
-    agent = DummyAgent(mcp_client=fake_client, auto_trace=False)
-    await agent.initialize(None)
-    assert agent.get_available_tools() == []
+    # After cleanup, we can't access tools (ctx is cleared)
+    # But during run, tools were available
+    assert agent._initialized is True

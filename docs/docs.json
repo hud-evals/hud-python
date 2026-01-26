@@ -27,67 +27,135 @@
     "url": "https://hud.ai"
   },
   "navigation": {
-    "versions": [
+    "tabs": [
       {
-        "version": "0.4.59",
+        "tab": "SDK",
+        "icon": "code",
+        "versions": [
+          {
+            "version": "0.5.16",
+            "groups": [
+              {
+                "group": "Get Started",
+                "pages": [
+                  "index",
+                  "llm-quickstart"
+                ]
+              },
+              {
+                "group": "Essentials",
+                "pages": [
+                  "quick-links/models",
+                  "quick-links/environments",
+                  "quick-links/deploy",
+                  "quick-links/evals"
+                ]
+              },
+              {
+                "group": "Guides",
+                "pages": [
+                  "guides/integrations",
+                  "guides/sandboxing",
+                  "guides/best-practices",
+                  "migration"
+                ]
+              },
+              {
+                "group": "Cookbooks",
+                "pages": [
+                  "cookbooks/codex-coding",
+                  "cookbooks/ops-diagnostics",
+                  "cookbooks/opencode-agent"
+                ]
+              },
+              {
+                "group": "Advanced",
+                "pages": [
+                  "advanced/testing-environments"
+                ]
+              },
+              {
+                "group": "Tools",
+                "pages": [
+                  "tools/index",
+                  "tools/agents",
+                  "tools/computer",
+                  "tools/coding",
+                  "tools/filesystem",
+                  "tools/memory",
+                  "tools/web",
+                  "tools/grounding"
+                ]
+              },
+              {
+                "group": "SDK Reference",
+                "pages": [
+                  "reference/evals",
+                  "reference/environments",
+                  "reference/tools",
+                  "reference/mcpserver",
+                  "reference/agents",
+                  "reference/types"
+                ]
+              },
+              {
+                "group": "CLI Reference",
+                "pages": [
+                  "reference/cli/overview",
+                  "reference/cli/init",
+                  "reference/cli/dev",
+                  "reference/cli/build",
+                  "reference/cli/deploy",
+                  "reference/cli/link",
+                  "reference/cli/push",
+                  "reference/cli/analyze",
+                  "reference/cli/debug",
+                  "reference/cli/run",
+                  "reference/cli/eval",
+                  "reference/cli/rft",
+                  "reference/cli/misc"
+                ]
+              },
+              {
+                "group": "Community",
+                "pages": [
+                  "contributing"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Platform",
+        "icon": "building",
         "groups": [
           {
             "group": "Get Started",
-            "pages": ["index", "quickstart", "llm-quickstart"]
-          },
-          {
-            "group": "Ideas",
             "pages": [
-              "core-concepts/mcp-protocol",
-              "core-concepts/architecture", 
-              "core-concepts/task-system",
-              "core-concepts/tricks"
+              "platform/index",
+              "platform/mcp"
             ]
           },
           {
-            "group": "Environments",
+            "group": "Concepts",
             "pages": [
-              "build-environments/index",
-              "build-environments/spec"
+              "platform/models",
+              "platform/environments",
+              "platform/tasksets"
             ]
           },
           {
-            "group": "RL",
+            "group": "Guides",
             "pages": [
-              "train-agents/quickstart",
-              "train-agents/tasks"
+              "platform/publishing-leaderboards",
+              "platform/subagent"
             ]
           },
           {
-            "group": "Agents",
+            "group": "Integrations",
             "pages": [
-              "evaluate-agents/create-agents",
-              "evaluate-agents/benchmarks"
-            ]
-          },
-          {
-            "group": "CLI Reference",
-            "pages": [
-              "reference/cli/overview",
-              "reference/cli/init",
-              "reference/cli/dev",
-              "reference/cli/build",
-              "reference/cli/push",
-              "reference/cli/analyze",
-              "reference/cli/debug",
-              "reference/cli/run",
-              "reference/cli/eval",
-              "reference/cli/rl",
-              "reference/cli/misc"
-            ]
-          },
-          {
-            "group": "SDK Reference",
-            "pages": [
-              "reference/tools",
-              "reference/agents",
-              "reference/environments",
-              "reference/tasks"
+              "platform/slack"
             ]
           }
         ]

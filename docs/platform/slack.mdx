@@ -1,0 +1,140 @@
+---
+title: "Slack Integration"
+description: "Run HUD scenarios directly from Slack by @mentioning the HUD bot."
+icon: "slack"
+---
+
+Connect Slack to run agent scenarios without leaving your workspace. Mention `@hud` with a command and get results posted back to the channel.
+
+## Setup
+
+1. Go to [hud.ai/project/settings](https://hud.ai/project/settings)
+2. Find the **Integrations** section
+3. Click **Add to Slack**
+4. Authorize HUD for your workspace
+
+Once connected, you'll see the workspace name and a "Connected" badge.
+
+<Note>
+  You need admin or owner permissions on your HUD team to set up integrations.
+</Note>
+
+## Commands
+
+### Run a Scenario
+
+```
+@hud run <environment> <scenario> [arg=value ...]
+```
+
+Runs an agent on a specific scenario. Arguments with spaces must be quoted.
+
+**Examples:**
+
+```
+@hud run browser-env search-task query="best restaurants in SF"
+```
+
+```
+@hud run code-sandbox debug-task file=main.py line=42
+```
+
+```
+@hud run ops-diagnostics investigate issue_url="https://sentry.io/issues/12345"
+```
+
+The bot reacts with ⏳ while processing, then ✅ on success with a trace link to follow the run.
+
+## Example: Ops Debugging Bot
+
+We use this internally at HUD—when a Sentry alert fires, someone pastes the issue URL into our `#ops` channel:
+
+```
+@hud run ops-diagnostics investigate issue_url="https://sentry.io/issues/12345"
+```
+
+The agent:
+1. Connects to Sentry via MCP
+2. Pulls error details, stack traces, and context
+3. Analyzes the root cause
+4. Posts a summary with suggested fixes
+
+The whole team sees the diagnosis without anyone needing to context-switch into Sentry. We've found it cuts our initial triage time significantly.
+
+<Tip>
+  See the [Ops Diagnostics Cookbook](/cookbooks/ops-diagnostics) to set up a similar environment for your team.
+</Tip>
+
+### List Available Scenarios
+
+```
+@hud list
+```
+
+Shows all environments and scenarios you have access to.
+
+### Get Help
+
+```
+@hud help
+```
+
+Shows available commands and usage examples.
+
+## Options
+
+You can customize runs with additional parameters:
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `model` | Model to use (after scenario name) | `claude-sonnet-4-5` |
+| `max_steps` | Maximum agent actions | `100` |
+
+**Example with options:**
+
+```
+@hud run my-env my-scenario claude-opus-4-5 50 query="hello world"
+```
+
+This runs `my-scenario` with `claude-opus-4-5`, max 50 steps, and `query="hello world"`.
+
+## Viewing Results
+
+When you run a scenario, HUD immediately responds with:
+
+- ✅ **Started** confirmation (or ❌ if there's an error)
+- **Trace link** — Click to follow the agent's progress live
+
+The trace page shows detailed tool calls, observations, and updates in real-time as the agent runs. Once complete, you'll see the final evaluation result and reward.
+
+## Finding Commands from the Platform
+
+Every scenario card on the platform has a code snippet panel. Click the `</>` icon, then select the **Slack** tab to see the exact command for that scenario with proper argument formatting.
+
+<Frame caption="Slack command in scenario card">
+  Copy the command directly from the platform for any scenario.
+</Frame>
+
+## Troubleshooting
+
+### "I don't see @hud in my workspace"
+
+Make sure you've completed the OAuth flow in [Settings](https://hud.ai/project/settings). You may need to refresh Slack after authorization.
+
+### "Permission denied" errors
+
+The person running the command needs access to the environment in HUD. Check your team permissions on the platform.
+
+### "Scenario not found"
+
+Double-check the environment and scenario names. Use `@hud list` to see available options.
+
+<CardGroup cols={2}>
+  <Card title="Environments" icon="cube" href="/platform/environments">
+    Create environments with scenarios
+  </Card>
+
+  <Card title="Models" icon="microchip" href="/platform/models">
+    Available models for agent runs
+  </Card>
+</CardGroup>

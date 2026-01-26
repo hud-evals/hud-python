@@ -1,0 +1,359 @@
+---
+title: "Build Your Own Codex"
+description: "Recreate OpenAI's Codex CLI from scratch using HUD"
+icon: "code"
+---
+
+This guide shows you how to **build your own Codex** - a 1:1 recreation of [OpenAI's Codex CLI](https://github.com/openai/codex) using the HUD SDK. The implementation matches Codex's behavior exactly because HUD's tools conform to the same OpenAI Responses API specifications.
+
+<Card
+  title="Example Code"
+  icon="github"
+  href="https://github.com/hud-evals/hud-python/blob/main/examples/06_codex_coding_agent.py"
+>
+  The complete working example - your own Codex in ~100 lines of Python.
+</Card>
+
+## Why Build Your Own Codex?
+
+OpenAI's Codex CLI is a coding agent that uses two native tools: `shell` and `apply_patch`. With HUD, you can:
+
+- **Customize behavior** - Add logging, approval flows, or custom security policies
+- **Full observability** - Get detailed traces of every tool call and model response
+- **Run anywhere** - Local machine, Docker, or HUD Cloud
+- **Evaluate systematically** - Run your Codex against benchmarks and track improvements
+
+## How It Works
+
+HUD's tool implementations match OpenAI's specifications exactly:
+
+| OpenAI Codex Tool | HUD Implementation | Spec Conformance |
+| ----------------- | ------------------ | ---------------- |
+| `shell` | `hud.tools.coding.ShellTool` | `ShellAction` → `ShellResult` with `stdout`, `stderr`, `outcome` |
+| `apply_patch` | `hud.tools.coding.ApplyPatchTool` | V4A diff format, `create_file`/`update_file`/`delete_file` |
+
+When you register tools named `shell` or `apply_patch`, the `OpenAIAgent` automatically converts them to OpenAI's native tool types - the model sees the exact same interface as the official Codex CLI.
+
+## Two Execution Modes
+
+Just like OpenAI's Codex CLI can run locally or connect to cloud services, your HUD Codex supports both:
+
+| Mode                  | Like Codex CLI... | API Keys Required |
+| --------------------- | ----------------- | ----------------- |
+| **Local** (`--local`) | Running `codex` on your machine | `OPENAI_API_KEY`  |
+| **Hub** (default)     | Running in a sandboxed cloud environment | `HUD_API_KEY`     |
+
+Both modes support full traces on hud.ai when `HUD_API_KEY` is set.
+
+## Build Your Codex
+
+### Local Mode
+
+```python
+import hud
+from hud.agents import create_agent
+from hud.tools.coding import ShellTool, ApplyPatchTool
+
+# Create environment with Codex tools
+env = hud.Environment("my-codex")
+env.add_tool(ShellTool())
+env.add_tool(ApplyPatchTool(base_path="./workspace"))
+
+# Define a scenario for evaluation
+@env.scenario("coding_task")
+async def coding_task(task: str):
+    yield f"Complete this task: {task}"
+    yield 1.0  # Reward on completion
+
+# Run with any OpenAI model
+agent = create_agent("gpt-4o")
+
+async with hud.eval(env("coding_task", task="Create hello.py"), name="codex-local") as ctx:
+    await agent.run(ctx, max_steps=20)
+```
+
+That's it. The agent automatically converts these to native `shell` and `apply_patch` tools for OpenAI models.
+
+### Hub Mode (Cloud Execution)
+
+<Note>
+  **Prerequisites**: You must create the `codex_environment_sandbox` environment
+  in [hud.ai](https://hud.ai) first before using hub mode. Go to
+  [hud.ai](https://hud.ai) → **New** → **Environment** → Import from
+  [hud-evals/codex_environment_sandbox](https://github.com/hud-evals/codex_environment_sandbox).
+  Once deployed, your environment will be accessible via `connect_hub()`.
+</Note>
+
+Connect to HUD Hub for full cloud execution and telemetry:
+
+```python
+import hud
+from hud.agents.openai import OpenAIAgent
+from hud.settings import settings
+from openai import AsyncOpenAI
+
+# Connect to HUD Hub environment
+env = hud.Environment()
+env.connect_hub("codex_environment_sandbox")
+
+# Define a scenario for evaluation
+@env.scenario("coding_task")
+async def coding_task(task: str):
+    yield f"Complete this task: {task}"
+    yield 1.0  # Reward on completion
+
+# Use HUD Gateway for inference (full telemetry)
+model_client = AsyncOpenAI(
+    base_url=settings.hud_gateway_url,
+    api_key=settings.api_key,
+)
+agent = OpenAIAgent.create(
+    model="gpt-5.1",
+    model_client=model_client,
+    validate_api_key=False,
+)
+
+async with hud.eval(env("coding_task", task="Create hello.py"), name="codex-hub") as ctx:
+    await agent.run(ctx, max_steps=20)
+```
+
+<Note>
+  The first request may take a few seconds while the environment spins up in the
+  cloud. Subsequent requests will be faster.
+</Note>
+
+## Tool Specifications
+
+### Shell Tool
+
+The `ShellTool` provides a persistent bash session for executing commands.
+
+**Features:**
+
+- Auto-restart on error (session automatically restarts if needed)
+- Dynamic timeout via `timeout_ms` parameter
+- Persistent environment (exported variables, working directory)
+- Concurrent command execution support
+
+**Input Schema:**
+
+```python
+{
+    "commands": ["ls -la", "cat file.py"],  # List of commands
+    "timeout_ms": 30000,                     # Optional timeout per command
+    "max_output_length": 10000               # Optional output limit
+}
+```
+
+**Output Format:**
+
+```python
+{
+    "output": [
+        {
+            "stdout": "file1.py\nfile2.py",
+            "stderr": "",
+            "outcome": {"type": "exit", "exit_code": 0}
+        }
+    ]
+}
+```
+
+### Apply Patch Tool
+
+The `ApplyPatchTool` creates, updates, and deletes files using OpenAI's V4A diff format.
+
+**Operations:**
+
+| Operation     | Description          | Diff Required |
+| ------------- | -------------------- | ------------- |
+| `create_file` | Create a new file    | Yes           |
+| `update_file` | Modify existing file | Yes           |
+| `delete_file` | Remove a file        | No            |
+
+**Input Schema:**
+
+```python
+{
+    "type": "update_file",
+    "path": "src/main.py",
+    "diff": "..."  # V4A diff content
+}
+```
+
+**V4A Diff Format Example:**
+
+```diff
+@@ def hello():
+-    print("Hello")
++    print("Hello, World!")
+```
+
+**Output Format:**
+
+```python
+{
+    "status": "completed",  # or "failed"
+    "output": "Updated src/main.py"
+}
+```
+
+## The Magic: Automatic Native Tool Conversion
+
+Here's what makes your HUD Codex identical to the official Codex CLI. The `OpenAIAgent` automatically detects `shell` and `apply_patch` tools and converts them to OpenAI's native types:
+
+```python
+# What you register:
+@env.tool()
+async def shell(commands: list[str], ...): ...
+
+# What the model sees (same as official Codex):
+{"type": "shell"}  # Native tool, not a function!
+```
+
+The conversion happens automatically:
+
+```python
+# In hud/agents/openai.py
+def _to_openai_tool(self, tool):
+    if tool.name == "shell":
+        return FunctionShellToolParam(type="shell")
+    if tool.name == "apply_patch":
+        return ApplyPatchToolParam(type="apply_patch")
+    # ... regular function tools
+```
+
+This means:
+
+1. **Same model behavior** - GPT-5.1 sees native `shell` and `apply_patch` tools, exactly like Codex CLI
+2. **Same response format** - Responses include `shell_call` and `apply_patch_call` output types
+3. **Same tool execution** - Your tools receive the exact same parameters Codex would
+
+The result? Your agent behaves identically to OpenAI's Codex CLI.
+
+## Complete Example
+
+Here's a full runnable script:
+
+```python
+import asyncio
+import os
+import hud
+from hud.agents import create_agent
+from hud.tools.coding import ShellTool, ApplyPatchTool
+
+async def main():
+    # Set up working directory
+    work_dir = "./codex_output"
+    os.makedirs(work_dir, exist_ok=True)
+
+    # Create environment with Codex tools
+    env = hud.Environment("my-codex")
+    env.add_tool(ShellTool())
+    env.add_tool(ApplyPatchTool(base_path=work_dir))
+
+    # Define scenario for evaluation
+    @env.scenario("coding_task")
+    async def coding_task(task: str):
+        yield f"""You are a skilled software developer. Complete:
+
+{task}
+
+Use `shell` to run commands and `apply_patch` to create/modify files."""
+        yield 1.0
+
+    # Create agent and run
+    agent = create_agent("gpt-4o", verbose=True)
+    task = "Create a Python script called main.py that prints Hello World"
+
+    async with hud.eval(env("coding_task", task=task), name="codex-local") as ctx:
+        await agent.run(ctx, max_steps=20)
+
+    print(f"Reward: {ctx.reward}")
+    print(f"Files: {os.listdir(work_dir)}")
+
+asyncio.run(main())
+```
+
+## CLI Usage
+
+### Setting Up API Keys
+
+Create a `.env` file in your project root:
+
+```bash
+# For local mode (calls OpenAI directly)
+OPENAI_API_KEY=sk-...
+
+# For hub mode OR traces (recommended)
+HUD_API_KEY=sk-hud-...
+```
+
+Get your keys:
+
+- **HUD_API_KEY**: [hud.ai/project/api-keys](https://hud.ai/project/api-keys)
+- **OPENAI_API_KEY**: [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+
+<Tip>
+  If you have both keys set, you get local execution with cloud traces - the
+  best of both worlds!
+</Tip>
+
+### Running the Example
+
+```bash
+# Local mode - tools run on your machine
+uv run python examples/06_codex_coding_agent.py --local
+
+# Local mode with persistent output directory
+uv run python examples/06_codex_coding_agent.py --local --work-dir ./codex_output
+
+# Hub mode - full cloud execution (default)
+uv run python examples/06_codex_coding_agent.py
+
+# Custom task
+uv run python examples/06_codex_coding_agent.py --local \
+  --task "Create a Python script that prints the Fibonacci sequence up to 10 numbers"
+
+# Verbose output
+uv run python examples/06_codex_coding_agent.py --local --verbose
+```
+
+### CLI Options
+
+| Flag          | Default            | Description                                        |
+| ------------- | ------------------ | -------------------------------------------------- |
+| `--local`     | Off                | Run locally (tools on your machine, OpenAI direct) |
+| `--task`      | Hello World script | The coding task to complete                        |
+| `--model`     | `gpt-5.1`          | Codex-capable model (`gpt-5.1`, `gpt-5.1-codex`)   |
+| `--work-dir`  | Temp directory     | Working directory (local mode only)                |
+| `--max-steps` | `20`               | Maximum agent steps                                |
+| `--verbose`   | Off                | Enable verbose output                              |
+
+## Security Considerations
+
+<Warning>
+  The shell and apply_patch tools can execute arbitrary commands and modify
+  files. Use them in sandboxed environments for untrusted tasks.
+</Warning>
+
+## Comparison with Official Codex CLI
+
+| Feature | OpenAI Codex CLI | Your HUD Codex |
+| ------- | ---------------- | -------------- |
+| Shell execution | `shell` native tool | `ShellTool` (same spec) |
+| File editing | `apply_patch` with V4A diff | `ApplyPatchTool` (same spec) |
+| Persistent bash session | Yes | Yes |
+| Auto-restart on error | Yes | Yes |
+| Custom approval flows | Limited | Full control |
+| Observability | Basic logs | Full traces on hud.ai |
+| Cloud execution | No | Yes (Hub mode) |
+| Benchmarking | No | Built-in with `hud.eval` |
+
+## See Also
+
+- [OpenAI Codex CLI](https://github.com/openai/codex) - The official Codex CLI that this recreates
+- [Codex-capable models](https://platform.openai.com/docs/guides/tools-shell#supported-models) - OpenAI models that support native shell and apply_patch tools
+- [Tools Reference](/reference/tools) - Complete tool documentation
+- [OpenAI Agent](/reference/agents#openaiagent) - Agent configuration options
+- [Sandboxing](/guides/sandboxing) - Running agents safely

@@ -1,0 +1,355 @@
+---
+title: "Filesystem Tools"
+description: "File reading, searching, and directory listing"
+icon: "folder-open"
+---
+
+Filesystem tools give agents the ability to read files, search content, find files by pattern, and list directories. Two styles are available: OpenCode-style (matches OpenCode specification) and Gemini CLI-style (matches Gemini CLI).
+
+## Quick Reference
+
+| Operation | OpenCode Style | Gemini CLI Style |
+|-----------|----------------|------------------|
+| Read file | `ReadTool` | `GeminiReadTool` |
+| Search content | `GrepTool` | `GeminiSearchTool` |
+| Find files | `GlobTool` | `GeminiGlobTool` |
+| List directory | `ListTool` | `GeminiListTool` |
+
+Both styles share the same underlying logic but differ in parameter naming and output formatting. Choose based on your agent's training data.
+
+## ReadTool (OpenCode)
+
+Reads files with line numbers and pagination support.
+
+```python
+from hud.tools.filesystem import ReadTool
+
+reader = ReadTool(base_path="./workspace")
+
+# Read entire file
+result = await reader(filePath="/path/to/file.py")
+
+# Read with offset (0-based line number)
+result = await reader(filePath="/path/to/file.py", offset=100)
+
+# Read with limit
+result = await reader(filePath="/path/to/file.py", offset=0, limit=50)
+```
+
+**Output format**: Lines wrapped in `<file>...</file>` tags with 5-digit zero-padded line numbers:
+
+```
+<file>
+00001| def hello():
+00002|     print("Hello")
+00003|
+
+(End of file - total 3 lines)
+</file>
+```
+
+**Image support**: Automatically returns base64-encoded image content for image files (png, jpg, gif, webp).
+
+## GeminiReadTool
+
+Gemini CLI-style file reading with truncation warnings.
+
+```python
+from hud.tools.filesystem import GeminiReadTool
+
+reader = GeminiReadTool(base_path="./workspace")
+
+# Read file
+result = await reader(file_path="/path/to/file.py")
+
+# With pagination
+result = await reader(file_path="/path/to/file.py", offset=10, limit=50)
+```
+
+**Output format**: Truncated files include a warning header:
+
+```
+IMPORTANT: The file content has been truncated.
+Status: Showing lines 11-60 of 200 total lines.
+Action: To read more, use 'offset' and 'limit' parameters. Example: offset: 60.
+
+--- FILE CONTENT (truncated) ---
+def process():
+    ...
+```
+
+## GrepTool (OpenCode)
+
+Search file contents using regex patterns.
+
+```python
+from hud.tools.filesystem import GrepTool
+
+grep = GrepTool(base_path="./workspace")
+
+# Simple search
+result = await grep(pattern="def main")
+
+# With file filter
+result = await grep(pattern="TODO|FIXME", include="*.py")
+
+# In specific directory
+result = await grep(pattern="import", path="src/")
+```
+
+**Output format**: Matches grouped by file, sorted by modification time:
+
+```
+Found 5 matches
+
+src/main.py:
+  Line 10: def main():
+  Line 25: if __name__ == "__main__":
+
+src/utils.py:
+  Line 5: def helper():
+```
+
+## GeminiSearchTool
+
+Gemini CLI-style content search.
+
+```python
+from hud.tools.filesystem import GeminiSearchTool
+
+search = GeminiSearchTool(base_path="./workspace")
+
+# Search
+result = await search(pattern="function.*async")
+
+# With directory filter
+result = await search(pattern="TODO", dir_path="src/", include="*.ts")
+```
+
+**Output format**:
+
+```
+Found 3 matches in 2 files
+
+src/api.ts:
+  Line 15: async function fetchData() {
+  Line 42: async function postData() {
+
+src/utils.ts:
+  Line 8: async function delay() {
+```
+
+## GlobTool (OpenCode)
+
+Find files matching glob patterns.
+
+```python
+from hud.tools.filesystem import GlobTool
+
+glob = GlobTool(base_path="./workspace")
+
+# Find all Python files
+result = await glob(pattern="**/*.py")
+
+# In subdirectory
+result = await glob(pattern="*.ts", path="src/")
+```
+
+**Output format**: Relative paths sorted by modification time (most recent first):
+
+```
+src/main.py
+src/utils.py
+tests/test_main.py
+
+(Results are truncated. Consider using a more specific path or pattern.)
+```
+
+## GeminiGlobTool
+
+Gemini CLI-style file finding with additional options.
+
+```python
+from hud.tools.filesystem import GeminiGlobTool
+
+glob = GeminiGlobTool(base_path="./workspace")
+
+# Find files
+result = await glob(pattern="**/*.py")
+
+# With options
+result = await glob(
+    pattern="**/*.py",
+    dir_path="src/",
+    case_sensitive=True,
+    respect_git_ignore=True,
+)
+```
+
+**Output format**: Absolute paths sorted alphabetically:
+
+```
+/workspace/src/main.py
+/workspace/src/utils.py
+/workspace/tests/test_main.py
+```
+
+## ListTool (OpenCode)
+
+List directory contents in a tree structure.
+
+```python
+from hud.tools.filesystem import ListTool
+
+ls = ListTool(base_path="./workspace")
+
+# List current directory
+result = await ls()
+
+# List specific directory
+result = await ls(path="/path/to/dir")
+
+# With ignore patterns
+result = await ls(path="/path/to/dir", ignore=["*.log", "node_modules/"])
+```
+
+**Output format**: Tree structure with indentation:
+
+```
+/workspace/
+  src/
+    main.py
+    utils.py
+  tests/
+    test_main.py
+  README.md
+```
+
+**Default ignores**: `node_modules/`, `__pycache__/`, `.git/`, `dist/`, `build/`, etc.
+
+## GeminiListTool
+
+Gemini CLI-style directory listing.
+
+```python
+from hud.tools.filesystem import GeminiListTool
+
+ls = GeminiListTool(base_path="./workspace")
+
+# List directory
+result = await ls(dir_path="/path/to/dir")
+
+# With ignore patterns
+result = await ls(dir_path="/path/to/dir", ignore=["*.pyc"])
+```
+
+**Output format**: DIR prefix for directories:
+
+```
+DIR  src
+DIR  tests
+     README.md
+     setup.py
+```
+
+## Typical Setup
+
+For a coding environment:
+
+```python
+from hud import Environment
+from hud.tools import BashTool, EditTool
+from hud.tools.filesystem import ReadTool, GrepTool, GlobTool, ListTool
+
+env = Environment("coding-env")
+env.add_tool(BashTool())
+env.add_tool(EditTool())
+env.add_tool(ReadTool())
+env.add_tool(GrepTool())
+env.add_tool(GlobTool())
+env.add_tool(ListTool())
+```
+
+For Gemini agents:
+
+```python
+from hud import Environment
+from hud.tools.coding import GeminiShellTool, GeminiEditTool
+from hud.tools.filesystem import (
+    GeminiReadTool,
+    GeminiSearchTool,
+    GeminiGlobTool,
+    GeminiListTool,
+)
+
+env = Environment("gemini-env")
+env.add_tool(GeminiShellTool())
+env.add_tool(GeminiEditTool())
+env.add_tool(GeminiReadTool())
+env.add_tool(GeminiSearchTool())
+env.add_tool(GeminiGlobTool())
+env.add_tool(GeminiListTool())
+```
+
+## Customizing
+
+Use hooks for validation:
+
+```python
+from hud.tools.filesystem import ReadTool
+from hud.tools.types import ToolError
+
+reader = ReadTool()
+
+@reader.before
+async def block_sensitive(filePath: str = "", **kwargs):
+    if ".env" in filePath or "secrets" in filePath.lower():
+        raise ToolError("Access to sensitive files is blocked")
+
+env.add_tool(reader)
+```
+
+Or subclass for custom behavior:
+
+```python
+from hud.tools.filesystem import GrepTool
+from mcp.types import TextContent
+
+class LimitedGrepTool(GrepTool):
+    def __init__(self):
+        super().__init__(max_results=20)  # Limit to 20 matches
+```
+
+## Parameters Summary
+
+### ReadTool / GeminiReadTool
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `filePath` / `file_path` | `str` | Path to file (required) |
+| `offset` | `int` | 0-based line to start from |
+| `limit` | `int` | Maximum lines to read |
+
+### GrepTool / GeminiSearchTool
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `pattern` | `str` | Regex pattern (required) |
+| `path` / `dir_path` | `str` | Directory to search |
+| `include` | `str` | Glob filter (e.g., `"*.py"`) |
+
+### GlobTool / GeminiGlobTool
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `pattern` | `str` | Glob pattern (required) |
+| `path` / `dir_path` | `str` | Base directory |
+| `case_sensitive` | `bool` | Case sensitivity (Gemini only) |
+| `respect_git_ignore` | `bool` | Honor .gitignore (Gemini only) |
+
+### ListTool / GeminiListTool
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` / `dir_path` | `str` | Directory to list |
+| `ignore` | `list[str]` | Glob patterns to ignore |
