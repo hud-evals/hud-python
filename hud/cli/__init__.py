@@ -21,7 +21,6 @@ from .clone import clone_repository, get_clone_message, print_error, print_tutor
 from .debug import debug_mcp_stdio
 from .deploy import deploy_command
 from .dev import run_mcp_dev_server
-from .eval import eval_command
 from .link import link_command
 from .pull import pull_command
 from .push import push_command
@@ -1103,6 +1102,7 @@ def eval(
 
     # If no agent specified, fetch available models and prompt for selection
     base_model = None
+    hud_model_base_map: dict[str, str] = {}
     if agent is None:
         # Get available HUD models first
         hud_models = get_available_models()
@@ -1113,7 +1113,7 @@ def eval(
         # Add HUD models as agent choices
         for hud_model in hud_models:
             model_name = hud_model["name"]
-            base_model = hud_model["base_model"]
+            hud_model_base_map[model_name] = hud_model["base_model"]
             vllm_status = " ⚡" if hud_model.get("vllm_url") else ""
             choices.append({"name": f"{model_name}{vllm_status}", "value": f"{model_name}"})
 
@@ -1139,11 +1139,11 @@ def eval(
 
         # Set model to base model for the vllm endpoint
         if not base_model:
-            hud_models = get_available_models()
-            for hud_model in hud_models:
-                if hud_model["name"] == model:
-                    base_model = hud_model["base_model"]
-                    break
+            if not hud_model_base_map:
+                hud_models = get_available_models()
+                for hud_model in hud_models:
+                    hud_model_base_map[hud_model["name"]] = hud_model["base_model"]
+            base_model = hud_model_base_map.get(model)
         if not base_model:
             hud_console.error(f"Model {model} not found")
             raise typer.Exit(1)
@@ -1175,8 +1175,6 @@ def eval(
         group_size=group_size,
         integration_test=integration_test,
     )
-
-app.command(name="eval")(eval_command)
 
 
 

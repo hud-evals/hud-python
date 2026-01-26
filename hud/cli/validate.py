@@ -9,8 +9,9 @@ from typing import Any
 import typer
 from pydantic import ValidationError
 
+from hud.datasets import load_tasks
+from hud.eval.utils import validate_v4_task
 from hud.types import Task
-from hud.utils.tasks import load_tasks
 from hud.utils.hud_console import hud_console
 
 
@@ -27,6 +28,8 @@ def validate_command(source: str) -> None:
     for idx, task in enumerate(raw_tasks):
         label = task.get("id") or f"index {idx}"
         try:
+            if _looks_like_v4(task):
+                validate_v4_task(task)
             Task(**_as_dict(task))
         except ValidationError as e:
             errors.append(f"{label}: {e}")
@@ -49,6 +52,13 @@ def _as_dict(task: Any) -> dict[str, Any]:
         return dict(task)
     except Exception:
         return {}
+
+
+def _looks_like_v4(task: dict[str, Any]) -> bool:
+    return any(
+        key in task
+        for key in ("prompt", "mcp_config", "evaluate_tool", "setup_tool", "integration_test_tool")
+    )
 
 
 def _load_raw_tasks(source: str) -> tuple[list[dict[str, Any]], list[str]]:
