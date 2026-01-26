@@ -30,6 +30,7 @@ from .init import create_environment
 from .pull import pull_command
 from .push import push_command
 from .remove import remove_command
+from .validate import validate_command
 from .utils.config import set_env_values
 from .utils.cursor import get_cursor_config_path, list_cursor_servers, parse_cursor_config
 from .utils.logging import CaptureLogger
@@ -788,6 +789,17 @@ def quickstart() -> None:
     """
     # Just call the clone command with the quickstart URL
     clone("https://github.com/hud-evals/quickstart.git")
+
+
+@app.command()
+def validate(
+    source: str = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
+        ...,
+        help="Tasks file path or dataset slug (e.g. ./tasks.json or hud-evals/SheetBench-50)",
+    ),
+) -> None:
+    """Validate task files or datasets without running them."""
+    validate_command(source)
 
 
 @app.command()
