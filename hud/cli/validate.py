@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import typer
 from pydantic import ValidationError
@@ -65,7 +65,7 @@ def _load_raw_tasks(source: str) -> tuple[list[dict[str, Any]], list[str]]:
     path = Path(source)
     if path.exists() and path.suffix.lower() in {".json", ".jsonl"}:
         return _load_raw_from_file(path)
-    return load_tasks(source, raw=True), []
+    return cast(list[dict[str, Any]], load_tasks(source, raw=True)), []
 
 
 def _load_raw_from_file(path: Path) -> tuple[list[dict[str, Any]], list[str]]:

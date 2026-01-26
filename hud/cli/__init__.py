@@ -21,6 +21,7 @@ from .clone import clone_repository, get_clone_message, print_error, print_tutor
 from .debug import debug_mcp_stdio
 from .deploy import deploy_command
 from .dev import run_mcp_dev_server
+from .eval import eval_command
 from .link import link_command
 from .pull import pull_command
 from .push import push_command
@@ -981,7 +982,6 @@ def quickstart() -> None:
     clone("https://github.com/hud-evals/quickstart.git")
 
 
-
 @app.command()
 def validate(
     source: str = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
@@ -993,189 +993,7 @@ def validate(
     validate_command(source)
 
 
-@app.command()
-def eval(
-    source: str | None = typer.Argument(
-        None,
-        help=(
-            "HuggingFace dataset (e.g. 'hud-evals/SheetBench-50') or task JSON file. "
-            "If not provided, looks for task.json in current directory."
-        ),
-    ),
-    agent: str | None = typer.Argument(
-        None,
-        help=(
-            "Agent backend to use (claude, openai, vllm, or litellm). If not provided, will prompt interactively."  # noqa: E501
-        ),
-    ),
-    full: bool = typer.Option(
-        False,
-        "--full",
-        help="Run the entire dataset (omit for single-task debug mode)",
-    ),
-    model: str | None = typer.Option(
-        None,
-        "--model",
-        help="Model name for the chosen agent",
-    ),
-    allowed_tools: str | None = typer.Option(
-        None,
-        "--allowed-tools",
-        help="Comma-separated list of allowed tools",
-    ),
-    max_concurrent: int = typer.Option(
-        30,
-        "--max-concurrent",
-        help="Maximum concurrent tasks (1-200 recommended, prevents rate limits)",
-    ),
-    max_steps: int | None = typer.Option(
-        None,
-        "--max-steps",
-        help="Maximum steps per task (default: 10 for single, 50 for full)",
-    ),
-    verbose: bool = typer.Option(
-        False,
-        "--verbose",
-        "-v",
-        help="Enable verbose output from the agent",
-    ),
-    very_verbose: bool = typer.Option(
-        False,
-        "--very-verbose",
-        "-vv",
-        help="Enable debug-level logs for maximum visibility",
-    ),
-    vllm_base_url: str | None = typer.Option(
-        None,
-        "--vllm-base-url",
-        help="Base URL for vLLM server (when using --agent vllm)",
-    ),
-    group_size: int = typer.Option(
-        1,
-        "--group-size",
-        help="Number of times to run each task (similar to RL training)",
-    ),
-    integration_test: bool = typer.Option(
-        False,
-        "--integration-test",
-        help=(
-            "Run integration_test_tool, where problem is setup, "
-            "actions are applied, and evaluation is performed, without "
-            "spinning up an agent"
-        ),
-    ),
-) -> None:
-    """🚀 Run evaluation on datasets or individual tasks with agents."""
-    from hud.settings import settings
-    from hud.utils.hud_console import HUDConsole
-
-    hud_console = HUDConsole()
-
-    if integration_test:
-        agent = AgentType.INTEGRATION_TEST
-
-    # If no source provided, reuse RL helper to find a tasks file interactively
-    if source is None:
-        try:
-            from hud.cli.utils.tasks import find_tasks_file
-
-            source = find_tasks_file(None, msg="Select a tasks file to run")
-            hud_console.success(f"Selected: {source}")
-        except (FileNotFoundError, Exception):
-            hud_console.error(
-                "No source provided and no task/eval JSON files found in current directory"
-            )
-            hud_console.info(
-                "Usage: hud eval <source> or create a task JSON file (e.g., task.json, tasks.jsonl)"
-            )
-            raise typer.Exit(1) from None
-
-    # Import eval_command lazily to avoid importing agent dependencies
-    try:
-        from .eval import eval_command, get_available_models
-    except ImportError as e:
-        hud_console.error(
-            "Evaluation dependencies are not installed. "
-            "Please install with: pip install 'hud-python[agent]'"
-        )
-        raise typer.Exit(1) from e
-
-    # If no agent specified, fetch available models and prompt for selection
-    base_model = None
-    hud_model_base_map: dict[str, str] = {}
-    if agent is None:
-        # Get available HUD models first
-        hud_models = get_available_models()
-
-        # Build choices starting with HUD models
-        choices = []
-
-        # Add HUD models as agent choices
-        for hud_model in hud_models:
-            model_name = hud_model["name"]
-            hud_model_base_map[model_name] = hud_model["base_model"]
-            vllm_status = " ⚡" if hud_model.get("vllm_url") else ""
-            choices.append({"name": f"{model_name}{vllm_status}", "value": f"{model_name}"})
-
-        # Add standard agent choices
-        choices.extend(
-            [
-                {"name": "Claude 4 Sonnet", "value": AgentType.CLAUDE},
-                {"name": "OpenAI Computer Use", "value": AgentType.OPENAI},
-                {"name": "Gemini Computer Use", "value": AgentType.GEMINI},
-                {"name": "vLLM (Local Server)", "value": AgentType.VLLM},
-                {"name": "LiteLLM (Multi-provider)", "value": AgentType.LITELLM},
-            ]
-        )
-
-        agent = hud_console.select("Select an agent to use:", choices=choices, default=0)
-
-    # Handle HUD model selection
-    if agent and agent not in [e.value for e in AgentType]:
-        # Find remote model name
-        model = agent
-        if not vllm_base_url:
-            vllm_base_url = f"{settings.hud_rl_url}/models/{model}/vllm"
-
-        # Set model to base model for the vllm endpoint
-        if not base_model:
-            if not hud_model_base_map:
-                hud_models = get_available_models()
-                for hud_model in hud_models:
-                    hud_model_base_map[hud_model["name"]] = hud_model["base_model"]
-            base_model = hud_model_base_map.get(model)
-        if not base_model:
-            hud_console.error(f"Model {model} not found")
-            raise typer.Exit(1)
-        model = base_model
-        agent = AgentType.VLLM  # Use vLLM backend for HUD models
-        hud_console.info(f"Using HUD model: {model} (trained on {base_model})")
-
-    # Validate agent choice
-    valid_agents = [e.value for e in AgentType]
-    if agent not in valid_agents:
-        hud_console.error(f"Invalid agent: {agent}. Must be one of: {', '.join(valid_agents)}")
-        raise typer.Exit(1)
-
-    # Type narrowing: agent is now guaranteed to be an AgentType value after validation
-    agent = AgentType(agent)
-
-    # Run the command
-    eval_command(
-        source=source,
-        full=full,
-        agent=agent,
-        model=model,
-        allowed_tools=allowed_tools,
-        max_concurrent=max_concurrent,
-        max_steps=max_steps,
-        verbose=verbose,
-        very_verbose=very_verbose,
-        vllm_base_url=vllm_base_url,
-        group_size=group_size,
-        integration_test=integration_test,
-    )
-
+app.command(name="eval")(eval_command)
 
 
 @app.command()
