@@ -62,7 +62,7 @@ class ClaudeAgent(MCPAgent):
         return AgentType.CLAUDE
 
     # Legacy tool name patterns for backwards compatibility
-    _LEGACY_COMPUTER_NAMES = ("anthropic_computer", "computer_anthropic", "computer")
+    _LEGACY_COMPUTER_NAMES = ("anthropic_computer", "computer_anthropic")
     _LEGACY_BASH_NAMES = ("bash",)
     _LEGACY_EDITOR_NAMES = ("str_replace_based_edit_tool", "text_editor", "edit")
 
