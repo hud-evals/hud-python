@@ -19,6 +19,7 @@ import yaml
 
 from hud.cli.utils.environment import find_dockerfile
 from hud.cli.utils.source_hash import compute_source_hash, list_source_files
+from hud.shared.hints import render_hints, secrets_in_build_args
 from hud.utils.hud_console import HUDConsole
 from hud.version import __version__ as hud_version
 
@@ -316,6 +317,52 @@ def parse_base_image(dockerfile_path: Path) -> str | None:
     except Exception:
         return None
     return None
+
+
+def check_dockerfile_for_secrets(directory: Path, dockerfile: Path) -> list[str]:
+    """Run docker buildx build --check to detect secrets in ARG/ENV.
+
+    Returns a list of variable names that were flagged as potential secrets.
+    This is a fast, non-building lint check.
+    """
+    hud_console = HUDConsole()
+
+    cmd = ["docker", "buildx", "build", "--check"]
+    if dockerfile.name != "Dockerfile":
+        cmd.extend(["-f", str(dockerfile)])
+    cmd.append(str(directory))
+
+    try:
+        result = subprocess.run(  # noqa: S603
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        output = result.stdout + result.stderr
+
+        pattern = r'Do not use ARG or ENV instructions for sensitive data \((ARG|ENV) "([^"]+)"\)'
+        matches = re.findall(pattern, output)
+
+        if matches:
+            secret_vars = [f"{var_type} {var_name}" for var_type, var_name in matches]
+            return secret_vars
+
+    except subprocess.TimeoutExpired:
+        hud_console.warning("Dockerfile check timed out")
+    except Exception as e:
+        hud_console.debug(f"Dockerfile secrets check failed: {e}")
+
+    return []
+
+
+def display_secrets_warning(secret_vars: list[str]) -> None:
+    """Display a warning about secrets found in Dockerfile ARG/ENV."""
+
+    hud_console = HUDConsole()
+    hud_console.print("")
+    render_hints([secrets_in_build_args(secret_vars)])
+    hud_console.print("")
 
 
 def collect_runtime_metadata(image: str, *, verbose: bool = False) -> dict[str, str | None]:
@@ -787,6 +834,11 @@ def build_environment(
             f"Environment variables not provided via -e flags: {', '.join(sorted(all_missing))}"
         )
         hud_console.info("These will be added to the required list in the lock file")
+
+    # Check for secrets in ARG/ENV instructions
+    secret_vars = check_dockerfile_for_secrets(env_dir, dockerfile_path)
+    if secret_vars:
+        display_secrets_warning(secret_vars)
 
     # Check for existing version and increment
     lock_path = env_dir / "hud.lock.yaml"
