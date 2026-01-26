@@ -133,7 +133,8 @@ class TestClaudeMemoryCreate:
         # Verify file was created
         created_file = tmp_path / "new_file.txt"
         assert created_file.exists()
-        assert created_file.read_text() == "Hello, World!"
+        # write_file_async uses heredoc which adds trailing newline
+        assert created_file.read_text().rstrip("\n") == "Hello, World!"
 
     @pytest.mark.asyncio
     async def test_create_existing_file_error(self, tmp_path: Path) -> None:
@@ -184,8 +185,8 @@ class TestClaudeMemoryStrReplace:
             new_str="Memory",
         )
 
-        # Verify replacement
-        assert file_path.read_text() == "Hello, Memory!"
+        # Verify replacement (write_file_async uses heredoc which adds trailing newline)
+        assert file_path.read_text().rstrip("\n") == "Hello, Memory!"
 
     @pytest.mark.asyncio
     async def test_str_replace_missing_path(self, tmp_path: Path) -> None:
