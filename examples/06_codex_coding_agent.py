@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
 """
-Codex Coding Agent Example
+Build Your Own Codex - A 1:1 Recreation of OpenAI's Codex CLI
 
-This example demonstrates how to use OpenAI's **Codex-capable** models with
-native `shell` and `apply_patch` tools via the HUD SDK.
+This example shows how to build your own Codex (https://github.com/openai/codex)
+from scratch using the HUD SDK. The implementation matches Codex's behavior
+exactly because HUD's tools conform to the same OpenAI Responses API specs:
 
-What this shows:
-- **Local mode**: Run locally without Docker - tools execute on your machine
-- **Hub mode**: Connect to HUD Hub for full telemetry and cloud execution
-- OpenAIAgent automatically converts tools to OpenAI's native tool types
+- `ShellTool` implements `ShellAction` → `ShellResult` (stdout, stderr, outcome)
+- `ApplyPatchTool` implements V4A diff format (create_file, update_file, delete_file)
+
+The `OpenAIAgent` automatically converts these to OpenAI's native tool types,
+so the model sees the exact same interface as the official Codex CLI.
+
+What you get:
+- **Your own Codex** - Same behavior as `codex` CLI, but fully customizable
+- **Full observability** - Every tool call and response traced on hud.ai
+- **Two modes** - Local (like `codex`) or Hub (cloud sandboxed execution)
 
 Usage:
-  # Local mode (no Docker required, no HUD_API_KEY required for OPENAI_API_KEY users)
+  # Local mode - just like running `codex` on your machine
   uv run python examples/06_codex_coding_agent.py --local
 
-  # Hub mode (requires HUD_API_KEY)
+  # Hub mode - sandboxed cloud execution with full telemetry
   export HUD_API_KEY="sk-hud-..."
   uv run python examples/06_codex_coding_agent.py
 
@@ -24,15 +31,12 @@ Usage:
 
 Requirements:
   - Install deps: `uv sync`
-  - For local mode: OPENAI_API_KEY environment variable
-  - For hub mode: HUD_API_KEY environment variable
-  - For traces (hud.eval): HUD_API_KEY environment variable
+  - HUD_API_KEY environment variable (for both local and hub modes)
 """
 
 import argparse
 import asyncio
 import os
-import shlex
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
@@ -43,8 +47,7 @@ load_dotenv()
 import hud
 from hud.agents.openai import OpenAIAgent
 from hud.settings import settings
-from hud.tools.apply_patch import ApplyPatchTool
-from hud.tools.shell import ShellTool
+from hud.tools.coding import ApplyPatchTool, ShellTool
 
 # =============================================================================
 # Configuration
@@ -92,72 +95,43 @@ async def run_coding_task_local(
             "Use a model that supports native shell/apply_patch tools."
         )
 
-    # Create working directory
+    # Set base path - use current directory by default
     if work_dir:
-        os.makedirs(work_dir, exist_ok=True)
         base_path = os.path.abspath(work_dir)
     else:
-        # Default to ./codex_output
-        work_dir = "./codex_output"
-        os.makedirs(work_dir, exist_ok=True)
-        base_path = os.path.abspath(work_dir)
+        base_path = os.getcwd()
+
+    if not os.path.exists(base_path):
+        raise ValueError(f"Directory not found: {base_path}")
 
     print(f"📁 Working directory: {base_path}")
 
-    # Initialize tools
-    shell_tool = ShellTool()
-    apply_patch_tool = ApplyPatchTool(base_path=base_path)
-
-    # Create environment with local tools
-    env = hud.Environment("local-codex")
-
-    @env.tool()
-    async def shell(
-        commands: list[str],
-        timeout_ms: int | None = None,
-        max_output_length: int | None = None,
-    ) -> dict:
-        """Execute shell commands in a bash session.
-
-        Args:
-            commands: List of shell commands to execute
-            timeout_ms: Optional timeout in milliseconds for each command
-            max_output_length: Optional max output length hint
-        """
-        # Change to working directory before executing
-        # Use shlex.quote to safely handle paths with spaces or special characters
-        safe_path = shlex.quote(base_path)
-        prefixed_commands = [f"cd {safe_path} && {cmd}" for cmd in commands]
-        result = await shell_tool(
-            commands=prefixed_commands,
-            timeout_ms=timeout_ms,
-            max_output_length=max_output_length,
+    # Require HUD_API_KEY for gateway access
+    if not settings.api_key:
+        raise ValueError(
+            "HUD_API_KEY is required.\n"
+            "Get yours at: https://hud.ai/project/api-keys\n"
+            "Then: export HUD_API_KEY='sk-hud-...'"
         )
-        return result.to_dict()
 
-    @env.tool()
-    async def apply_patch(
-        type: str,
-        path: str,
-        diff: str | None = None,
-    ) -> dict:
-        """Apply file operations using V4A diff format.
+    # Create environment with Codex tools - 1:1 match with OpenAI's Codex CLI
+    # Both tools use the same working directory for consistency
+    env = hud.Environment("local-codex")
+    env.add_tool(ShellTool(cwd=base_path))
+    env.add_tool(ApplyPatchTool(base_path=base_path))
 
-        Args:
-            type: Operation type - "create_file", "update_file", or "delete_file"
-            path: The file path to operate on
-            diff: The diff content (required for create_file and update_file)
-        """
-        result = await apply_patch_tool(type=type, path=path, diff=diff)
-        return result.to_dict()
-
-    # Create OpenAI client
-    model_client = AsyncOpenAI()
+    # Create agent using HUD Gateway (uses HUD_API_KEY)
+    model_client = AsyncOpenAI(
+        base_url=settings.hud_gateway_url,
+        api_key=settings.api_key,
+    )
     agent = OpenAIAgent.create(
         model=model,
         model_client=model_client,
+        validate_api_key=False,  # HUD key won't validate against OpenAI
         verbose=verbose,
     )
+    print("🌐 Using HUD Gateway for inference")
 
     print(f"🤖 Model: {model}")
     print(f"📋 Task: {task}")
@@ -188,13 +162,6 @@ Work in the current directory. When done, verify your work runs correctly."""
     print("=" * 60)
     print("✅ Task completed!")
     print(f"📊 Reward: {ctx.reward}")
-    print(f"📁 Files created in: {base_path}")
-
-    # List created files
-    if os.path.exists(base_path):
-        files = os.listdir(base_path)
-        if files:
-            print(f"📄 Files: {', '.join(files)}")
 
 
 # =============================================================================
@@ -225,13 +192,12 @@ async def run_coding_task_hub(
         hub_name: Hub environment name (default: codex_environment_sandbox)
         verbose: Enable verbose output
     """
-    # Require HUD_API_KEY for hub mode
+    # Require HUD_API_KEY for gateway access
     if not settings.api_key:
         raise ValueError(
-            "HUD_API_KEY is required for hub mode.\n"
+            "HUD_API_KEY is required.\n"
             "Get yours at: https://hud.ai/project/api-keys\n"
-            "Then: export HUD_API_KEY='sk-hud-...'\n\n"
-            "Or use --local flag to run without HUD infrastructure."
+            "Then: export HUD_API_KEY='sk-hud-...'"
         )
 
     print(f"🌐 Connecting to hub: {hub_name}")
@@ -349,7 +315,7 @@ Examples:
         "--work-dir",
         type=str,
         default=None,
-        help="Working directory for file operations (local mode only, default: ./codex_output)",
+        help="Working directory for file operations (default: current directory)",
     )
     parser.add_argument(
         "--verbose",

@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from hud.eval.task import Task
+    from hud.tools.types import EvaluationResult
     from hud.types import MCPToolResult
 
 
@@ -168,6 +169,7 @@ class EvalContext(Environment):
         # User-settable (per-run values, override Environment defaults)
         self.prompt: str | None = None  # From scenario setup or task
         self.reward: float | None = None
+        self.evaluation_result: EvaluationResult | None = None  # Full result with subscores
         self.answer: str | None = None  # Agent's submitted answer
         self.system_prompt: str | None = None  # From task.agent_config, passed to agent
 
@@ -394,9 +396,10 @@ class EvalContext(Environment):
         if self._task is None or self._task.scenario is None:
             return
 
-        reward = await self.run_scenario_evaluate(self._task.scenario)
-        if reward is not None:
-            self.reward = reward
+        result = await self.run_scenario_evaluate(self._task.scenario)
+        if result is not None:
+            self.evaluation_result = result
+            self.reward = result.reward
 
     # =========================================================================
     # Summary Context - Attribute Access Control

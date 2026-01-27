@@ -1,66 +1,115 @@
 ---
-title: "Deploy"
-description: "Deploy environments. Create evals. Run and train at scale."
+title: "Hosted Running"
+description: "Deploy environments to the platform. Run evals at scale."
 icon: "rocket"
 ---
 
 You've built an environment with tools and scenarios. Deploy it to the platform and you can run evals at scale—hundreds of parallel runs across models, all traced, all generating training data.
 
-## Deploying Environments
+## hud deploy
 
-Start with `hud init` ([see Environments](/quick-links/environments)) to scaffold locally. When ready:
+The simplest path. One command builds and deploys your environment directly to HUD:
+
+```bash
+hud deploy
+```
+
+This:
+1. Packages your build context (respects `.dockerignore`)
+2. Uploads to HUD's build service
+3. Builds remotely via AWS CodeBuild
+4. Streams logs in real-time
+5. Links this directory to the deployed environment
+
+Once complete, your environment appears on the platform:
+
+<Frame>
+  <img src="/src/images/platform-environments.png" alt="Deployed environment on the platform" />
+</Frame>
+
+See your environment's tools, scenarios, and builds at [hud.ai/environments](https://hud.ai/environments). For full details on managing environments through the platform UI, see [Platform Environments](/platform/environments).
+
+### Rebuilding
+
+Run `hud deploy` again in the same directory. HUD reads `.hud/deploy.json` to find your existing environment and builds a new version:
+
+```bash
+hud deploy  # v0.1.0
+# make changes...
+hud deploy  # v0.1.1
+```
+
+### Configuration
+
+<Accordion title="Environment Variables">
+Variables from your `.env` file are automatically passed during deployment. Override or use a different file:
+
+```bash
+hud deploy -e API_KEY=secret -e DEBUG=true    # Inline overrides
+hud deploy --env-file .env.production         # Different env file
+```
+
+Variables are encrypted at rest and injected at runtime.
+</Accordion>
+
+<Accordion title="Naming">
+Environment name is determined by (in order): `--name` flag, `[tool.hud].name` in pyproject.toml, or the directory name.
+
+```toml
+# pyproject.toml
+[tool.hud]
+name = "My Browser Environment"
+```
+</Accordion>
+
+## GitHub Auto-Deploy
+
+For teams and CI/CD, connect a GitHub repository. HUD rebuilds automatically when you push:
 
 1. Go to [hud.ai](https://hud.ai) → **New** → **Environment**
-2. Connect your GitHub repo and name your environment
-3. Push changes and it rebuilds automatically, like Vercel
+2. Click **Connect GitHub** and install the HUD GitHub App
+3. Select your repository and branch
+4. Push changes—rebuilds happen automatically
 
-Your environment—tools, scenarios, everything—is now live. Connect from anywhere:
+<Frame>
+  <img src="/src/images/remote-builds/select-repo.png" alt="Connecting a GitHub repository" />
+</Frame>
 
-```python
-env.connect_hub("my-env")
+This is better for long-term projects because:
+- **CI/CD integration**: Rebuilds on every push to your branch
+- **Team collaboration**: Anyone with repo access can trigger deploys
+- **Version history**: See which commit each build came from
+- **Rollback**: Deploy previous commits if needed
+
+### Switching Between Methods
+
+Started with `hud deploy` but want GitHub integration later? Just connect the same repo on the platform. HUD links them by environment ID.
+
+Going the other way? Use `hud link` to connect a local directory to an existing platform environment:
+
+```bash
+hud link --id existing-environment-id
 ```
 
-## Running at Scale
+## Comparison
 
-Once deployed, create evals on [hud.ai](https://hud.ai) from your scenarios. Each eval is a frozen configuration—same prompt, same scoring, every time.
+| Feature | `hud deploy` | GitHub Integration |
+|---------|--------------|-------------------|
+| Setup | One command | Connect repo on platform |
+| Rebuilds | Manual (`hud deploy`) | Automatic on push |
+| Best for | Solo dev, quick iteration | Teams, CI/CD |
+| Env vars | `.env` file (automatic) | Platform settings |
 
-Your scenario might take arguments:
+Both methods result in the same deployed environment. Choose based on your workflow.
 
-```python
-@env.scenario("checkout")
-async def checkout_flow(product_name: str, apply_coupon: bool = False):
-    yield f"Complete checkout for {product_name}" + (" with coupon" if apply_coupon else "")
-    yield 1.0 if order_confirmed() else 0.0
-```
-
-On the platform, click **New Eval** → select your scenario → fill in the arguments. Create multiple evals from the same scenario:
-
-| Eval Name | Arguments |
-|-----------|-----------|
-| `checkout-laptop` | `product_name="Laptop"`, `apply_coupon=False` |
-| `checkout-phone-coupon` | `product_name="Phone"`, `apply_coupon=True` |
-| `checkout-headphones` | `product_name="Headphones"`, `apply_coupon=False` |
-
-Then run them—select an eval, choose variants and groups, launch hundreds of runs in parallel. Every run is traced. Results show scores, distributions, and side-by-side model comparisons. These become your training data.
-
-For A/B testing with variants and groups, see [A/B Evals](/quick-links/ab-testing).
-
-## What's Next?
-
-With your environment deployed:
-
-- **Scale**: Launch thousands of rollouts. Every run generates traces—prompts, tool calls, rewards.
-- **Analyze**: See which evals agents struggle with. Compare models across your entire benchmark.
-- **Train**: Use runs as training data. Fine-tune on successful completions. Run reinforcement learning to optimize for your specific environment.
-
-The loop: deploy → eval at scale → analyze → train → redeploy. Agents get better at *your* environment.
+## What's Next
 
 <CardGroup cols={2}>
-<Card title="Integrations" icon="robot" href="/guides/integrations">
-  Connect OpenAI, Anthropic, LangChain, and more.
+<Card title="Tasks & Training" icon="flask-vial" href="/quick-links/evals">
+  Create tasks and train models
 </Card>
 
-<Card title="Sandboxing" icon="shield" href="/guides/sandboxing">
-  Turn production services into safe test environments.
+<Card title="Platform Environments" icon="cube" href="/platform/environments">
+  Full platform environment guide
 </Card>
 </CardGroup>

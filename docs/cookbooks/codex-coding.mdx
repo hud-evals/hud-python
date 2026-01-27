@@ -1,76 +1,78 @@
 ---
-title: "Codex Agent"
-description: "Build coding agents with OpenAI's native shell and apply_patch tools"
+title: "Build Your Own Codex"
+description: "Recreate OpenAI's Codex CLI from scratch using HUD"
 icon: "code"
 ---
 
-HUD provides native support for OpenAI's coding tools (`shell` and `apply_patch`), enabling you to build powerful coding agents that can create, modify, and execute code.
+This guide shows you how to **build your own Codex** - a 1:1 recreation of [OpenAI's Codex CLI](https://github.com/openai/codex) using the HUD SDK. The implementation matches Codex's behavior exactly because HUD's tools conform to the same OpenAI Responses API specifications.
 
 <Card
   title="Example Code"
   icon="github"
   href="https://github.com/hud-evals/hud-python/blob/main/examples/06_codex_coding_agent.py"
 >
-  Follow along with the full working example on GitHub.
+  The complete working example - your own Codex in ~100 lines of Python.
 </Card>
 
-## Overview
+## Why Build Your Own Codex?
 
-OpenAI's Responses API includes specialized tools for coding tasks:
+OpenAI's Codex CLI is a coding agent that uses two native tools: `shell` and `apply_patch`. With HUD, you can:
 
-| Tool          | Purpose                                                | HUD Implementation                     |
-| ------------- | ------------------------------------------------------ | -------------------------------------- |
-| `shell`       | Execute shell commands in a persistent bash session    | `hud.tools.shell.ShellTool`            |
-| `apply_patch` | Create, update, and delete files using V4A diff format | `hud.tools.apply_patch.ApplyPatchTool` |
+- **Customize behavior** - Add logging, approval flows, or custom security policies
+- **Full observability** - Get detailed traces of every tool call and model response
+- **Run anywhere** - Local machine, Docker, or HUD Cloud
+- **Evaluate systematically** - Run your Codex against benchmarks and track improvements
 
-When you register tools named `shell` or `apply_patch` in your environment, the `OpenAIAgent` automatically converts them to OpenAI's native tool types for optimal performance.
+## How It Works
 
-## Two Modes
+HUD's tool implementations match OpenAI's specifications exactly:
 
-HUD supports two execution modes for coding agents:
+| OpenAI Codex Tool | HUD Implementation | Spec Conformance |
+| ----------------- | ------------------ | ---------------- |
+| `shell` | `hud.tools.coding.ShellTool` | `ShellAction` → `ShellResult` with `stdout`, `stderr`, `outcome` |
+| `apply_patch` | `hud.tools.coding.ApplyPatchTool` | V4A diff format, `create_file`/`update_file`/`delete_file` |
 
-| Mode                  | Tools Run On | Inference Via   | API Keys Required |
-| --------------------- | ------------ | --------------- | ----------------- |
-| **Local** (`--local`) | Your machine | OpenAI directly | `OPENAI_API_KEY`  |
-| **Hub** (default)     | HUD Cloud    | HUD Gateway     | `HUD_API_KEY`     |
+When you register tools named `shell` or `apply_patch`, the `OpenAIAgent` automatically converts them to OpenAI's native tool types - the model sees the exact same interface as the official Codex CLI.
 
-Both modes support traces on hud.ai if `HUD_API_KEY` is set.
+## Two Execution Modes
 
-## Quick Start
+Just like OpenAI's Codex CLI can run locally or connect to cloud services, your HUD Codex supports both:
 
-### Local Mode (No Docker)
+| Mode                  | Like Codex CLI... | API Keys Required |
+| --------------------- | ----------------- | ----------------- |
+| **Local** (`--local`) | Running `codex` on your machine | `OPENAI_API_KEY`  |
+| **Hub** (default)     | Running in a sandboxed cloud environment | `HUD_API_KEY`     |
 
-Run coding agents directly on your machine without any infrastructure:
+Both modes support full traces on hud.ai when `HUD_API_KEY` is set.
+
+## Build Your Codex
+
+### Local Mode
 
 ```python
 import hud
-from hud.agents.openai import OpenAIAgent
-from hud.tools.shell import ShellTool
-from hud.tools.apply_patch import ApplyPatchTool
+from hud.agents import create_agent
+from hud.tools.coding import ShellTool, ApplyPatchTool
 
-# Create environment with coding tools
-env = hud.Environment("coding")
-shell_tool = ShellTool()
-apply_patch_tool = ApplyPatchTool(base_path="/path/to/workspace")
+# Create environment with Codex tools
+env = hud.Environment("my-codex")
+env.add_tool(ShellTool())
+env.add_tool(ApplyPatchTool(base_path="./workspace"))
 
-@env.tool()
-async def shell(commands: list[str], timeout_ms: int | None = None):
-    """Execute shell commands."""
-    result = await shell_tool(commands=commands, timeout_ms=timeout_ms)
-    return result.to_dict()
+# Define a scenario for evaluation
+@env.scenario("coding_task")
+async def coding_task(task: str):
+    yield f"Complete this task: {task}"
+    yield 1.0  # Reward on completion
 
-@env.tool()
-async def apply_patch(type: str, path: str, diff: str | None = None):
-    """Apply file patches."""
-    result = await apply_patch_tool(type=type, path=path, diff=diff)
-    return result.to_dict()
+# Run with any OpenAI model
+agent = create_agent("gpt-4o")
 
-# Run with OpenAI agent (calls OpenAI directly)
-agent = OpenAIAgent.create(model="gpt-5.1")
-
-async with hud.eval(env(), name="coding-task") as ctx:
-    result = await agent.run(ctx, max_steps=20)
+async with hud.eval(env("coding_task", task="Create hello.py"), name="codex-local") as ctx:
+    await agent.run(ctx, max_steps=20)
 ```
+
+That's it. The agent automatically converts these to native `shell` and `apply_patch` tools for OpenAI models.
 
 ### Hub Mode (Cloud Execution)
 
@@ -94,6 +96,12 @@ from openai import AsyncOpenAI
 env = hud.Environment()
 env.connect_hub("codex_environment_sandbox")
 
+# Define a scenario for evaluation
+@env.scenario("coding_task")
+async def coding_task(task: str):
+    yield f"Complete this task: {task}"
+    yield 1.0  # Reward on completion
+
 # Use HUD Gateway for inference (full telemetry)
 model_client = AsyncOpenAI(
     base_url=settings.hud_gateway_url,
@@ -105,8 +113,8 @@ agent = OpenAIAgent.create(
     validate_api_key=False,
 )
 
-async with hud.eval(env(), name="coding-task") as ctx:
-    result = await agent.run(ctx, max_steps=20)
+async with hud.eval(env("coding_task", task="Create hello.py"), name="codex-hub") as ctx:
+    await agent.run(ctx, max_steps=20)
 ```
 
 <Note>
@@ -190,9 +198,20 @@ The `ApplyPatchTool` creates, updates, and deletes files using OpenAI's V4A diff
 }
 ```
 
-## Agent Integration
+## The Magic: Automatic Native Tool Conversion
 
-The `OpenAIAgent` automatically detects `shell` and `apply_patch` tools and converts them to OpenAI's native types:
+Here's what makes your HUD Codex identical to the official Codex CLI. The `OpenAIAgent` automatically detects `shell` and `apply_patch` tools and converts them to OpenAI's native types:
+
+```python
+# What you register:
+@env.tool()
+async def shell(commands: list[str], ...): ...
+
+# What the model sees (same as official Codex):
+{"type": "shell"}  # Native tool, not a function!
+```
+
+The conversion happens automatically:
 
 ```python
 # In hud/agents/openai.py
@@ -206,103 +225,52 @@ def _to_openai_tool(self, tool):
 
 This means:
 
-1. The model sees native `shell` and `apply_patch` tools
-2. Responses include `shell_call` and `apply_patch_call` output types
-3. The agent routes these back to your registered tools
+1. **Same model behavior** - GPT-5.1 sees native `shell` and `apply_patch` tools, exactly like Codex CLI
+2. **Same response format** - Responses include `shell_call` and `apply_patch_call` output types
+3. **Same tool execution** - Your tools receive the exact same parameters Codex would
+
+The result? Your agent behaves identically to OpenAI's Codex CLI.
 
 ## Complete Example
 
-Here's the full local mode example with a working directory:
+Here's a full runnable script:
 
 ```python
 import asyncio
 import os
-import tempfile
-
-from dotenv import load_dotenv
-from openai import AsyncOpenAI
-
-load_dotenv()  # Load .env file
-
 import hud
-from hud.agents.openai import OpenAIAgent
-from hud.tools.shell import ShellTool
-from hud.tools.apply_patch import ApplyPatchTool
-
+from hud.agents import create_agent
+from hud.tools.coding import ShellTool, ApplyPatchTool
 
 async def main():
     # Set up working directory
     work_dir = "./codex_output"
     os.makedirs(work_dir, exist_ok=True)
-    base_path = os.path.abspath(work_dir)
 
-    # Initialize tools
-    shell_tool = ShellTool()
-    apply_patch_tool = ApplyPatchTool(base_path=base_path)
+    # Create environment with Codex tools
+    env = hud.Environment("my-codex")
+    env.add_tool(ShellTool())
+    env.add_tool(ApplyPatchTool(base_path=work_dir))
 
-    # Create environment with local tools
-    env = hud.Environment("local-codex")
-
-    @env.tool()
-    async def shell(
-        commands: list[str],
-        timeout_ms: int | None = None,
-        max_output_length: int | None = None,
-    ) -> dict:
-        """Execute shell commands in a bash session."""
-        import shlex
-        # Change to working directory before executing
-        safe_path = shlex.quote(base_path)
-        prefixed_commands = [f"cd {safe_path} && {cmd}" for cmd in commands]
-        result = await shell_tool(
-            commands=prefixed_commands,
-            timeout_ms=timeout_ms,
-            max_output_length=max_output_length,
-        )
-        return result.to_dict()
-
-    @env.tool()
-    async def apply_patch(
-        type: str,
-        path: str,
-        diff: str | None = None,
-    ) -> dict:
-        """Apply file operations using V4A diff format."""
-        result = await apply_patch_tool(type=type, path=path, diff=diff)
-        return result.to_dict()
-
-    # Define scenario
+    # Define scenario for evaluation
     @env.scenario("coding_task")
-    async def coding_task_scenario(task_description: str):
-        yield f"""You are a skilled software developer. Complete the following task:
+    async def coding_task(task: str):
+        yield f"""You are a skilled software developer. Complete:
 
-{task_description}
+{task}
 
-Use the available tools:
-- `shell` to run commands (ls, cat, python, etc.)
-- `apply_patch` to create or modify files
-
-Work in the current directory. When done, verify your work runs correctly."""
-
+Use `shell` to run commands and `apply_patch` to create/modify files."""
         yield 1.0
 
-    # Create agent
-    agent = OpenAIAgent.create(model="gpt-5.1", verbose=True)
-
-    # Run the task
+    # Create agent and run
+    agent = create_agent("gpt-4o", verbose=True)
     task = "Create a Python script called main.py that prints Hello World"
-    eval_task = env("coding_task", task_description=task)
 
-    async with hud.eval(eval_task, name="codex-coding-local") as ctx:
+    async with hud.eval(env("coding_task", task=task), name="codex-local") as ctx:
         await agent.run(ctx, max_steps=20)
 
     print(f"Reward: {ctx.reward}")
-    print(f"Files created in: {base_path}")
-
-    # Show created files
-    for f in os.listdir(base_path):
-        print(f"  - {f}")
-
+    print(f"Files: {os.listdir(work_dir)}")
 
 asyncio.run(main())
 ```
@@ -369,10 +337,23 @@ uv run python examples/06_codex_coding_agent.py --local --verbose
   files. Use them in sandboxed environments for untrusted tasks.
 </Warning>
 
+## Comparison with Official Codex CLI
+
+| Feature | OpenAI Codex CLI | Your HUD Codex |
+| ------- | ---------------- | -------------- |
+| Shell execution | `shell` native tool | `ShellTool` (same spec) |
+| File editing | `apply_patch` with V4A diff | `ApplyPatchTool` (same spec) |
+| Persistent bash session | Yes | Yes |
+| Auto-restart on error | Yes | Yes |
+| Custom approval flows | Limited | Full control |
+| Observability | Basic logs | Full traces on hud.ai |
+| Cloud execution | No | Yes (Hub mode) |
+| Benchmarking | No | Built-in with `hud.eval` |
+
 ## See Also
 
+- [OpenAI Codex CLI](https://github.com/openai/codex) - The official Codex CLI that this recreates
 - [Codex-capable models](https://platform.openai.com/docs/guides/tools-shell#supported-models) - OpenAI models that support native shell and apply_patch tools
 - [Tools Reference](/reference/tools) - Complete tool documentation
 - [OpenAI Agent](/reference/agents#openaiagent) - Agent configuration options
-- [Integrations](/guides/integrations) - Using HUD with other frameworks
 - [Sandboxing](/guides/sandboxing) - Running agents safely

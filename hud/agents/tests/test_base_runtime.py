@@ -10,7 +10,7 @@ import pytest
 from hud.agents.base import BaseCreateParams, MCPAgent, find_content, find_reward, text_to_blocks
 from hud.environment.router import ToolRouter
 from hud.eval.context import EvalContext
-from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
 
 
 class DummyConfig(BaseAgentConfig):
@@ -91,6 +91,11 @@ class MockEvalContext(EvalContext):
 
 class DummyAgent(MCPAgent):
     config_cls = DummyConfig
+
+    @classmethod
+    def agent_type(cls) -> AgentType:
+        """Return the AgentType for the dummy agent."""
+        return AgentType.INTEGRATION_TEST
 
     def __init__(self, **kwargs: Any) -> None:
         params = DummyCreateParams(**kwargs)

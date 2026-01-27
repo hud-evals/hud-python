@@ -33,7 +33,7 @@
         "icon": "code",
         "versions": [
           {
-            "version": "0.5.15",
+            "version": "0.5.16",
             "groups": [
               {
                 "group": "Get Started",
@@ -45,10 +45,10 @@
               {
                 "group": "Essentials",
                 "pages": [
-                  "quick-links/gateway",
-                  "quick-links/ab-testing",
+                  "quick-links/models",
                   "quick-links/environments",
-                  "quick-links/deploy"
+                  "quick-links/deploy",
+                  "quick-links/evals"
                 ]
               },
               {
@@ -64,13 +64,27 @@
                 "group": "Cookbooks",
                 "pages": [
                   "cookbooks/codex-coding",
-                  "cookbooks/ops-diagnostics"
+                  "cookbooks/ops-diagnostics",
+                  "cookbooks/opencode-agent"
                 ]
               },
               {
                 "group": "Advanced",
                 "pages": [
                   "advanced/testing-environments"
+                ]
+              },
+              {
+                "group": "Tools",
+                "pages": [
+                  "tools/index",
+                  "tools/agents",
+                  "tools/computer",
+                  "tools/coding",
+                  "tools/filesystem",
+                  "tools/memory",
+                  "tools/web",
+                  "tools/grounding"
                 ]
               },
               {
@@ -91,6 +105,8 @@
                   "reference/cli/init",
                   "reference/cli/dev",
                   "reference/cli/build",
+                  "reference/cli/deploy",
+                  "reference/cli/link",
                   "reference/cli/push",
                   "reference/cli/analyze",
                   "reference/cli/debug",

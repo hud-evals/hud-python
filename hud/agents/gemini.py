@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import mcp.types as types
 from google import genai
 from google.genai import types as genai_types
 
 from hud.settings import settings
-from hud.types import AgentResponse, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
 
 from .base import MCPAgent
 from .types import GeminiConfig, GeminiCreateParams
+
+if TYPE_CHECKING:
+    from hud.tools.native_types import NativeToolSpec
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +33,36 @@ class GeminiAgent(MCPAgent):
 
     metadata: ClassVar[dict[str, Any] | None] = None
     config_cls: ClassVar[type[BaseAgentConfig]] = GeminiConfig
+
+    @classmethod
+    def agent_type(cls) -> AgentType:
+        """Return the AgentType for Gemini."""
+        return AgentType.GEMINI
+
+    # Legacy tool name patterns for backwards compatibility
+    _LEGACY_COMPUTER_NAMES = ("gemini_computer", "computer_gemini", "computer")
+
+    def _legacy_native_spec_fallback(self, tool: types.Tool) -> NativeToolSpec | None:
+        """Detect Gemini native tools by name for backwards compatibility.
+
+        Supports old environments that expose tools like 'gemini_computer'
+        without native_tools metadata.
+        """
+        from hud.tools.native_types import NativeToolSpec
+
+        name = tool.name
+
+        # Check for computer tool patterns
+        for pattern in self._LEGACY_COMPUTER_NAMES:
+            if name == pattern or name.endswith(f"_{pattern}"):
+                logger.debug("Legacy fallback: detected %s as computer tool", name)
+                return NativeToolSpec(
+                    api_type="computer_use",
+                    api_name="gemini_computer",
+                    role="computer",
+                )
+
+        return None
 
     @with_signature(GeminiCreateParams)
     @classmethod
@@ -235,29 +268,104 @@ class GeminiAgent(MCPAgent):
         """Create a user message in Gemini's format."""
         return genai_types.Content(role="user", parts=[genai_types.Part(text=text)])
 
-    def _convert_tools_for_gemini(self) -> genai_types.ToolListUnion:
-        """Convert MCP tools to Gemini tool format."""
-        self._gemini_to_mcp_tool_map = {}  # Reset mapping
+    def _convert_tools_for_gemini(self) -> None:
+        """Convert MCP tools to Gemini tool format using native specs.
+
+        Uses shared categorize_tools() for role-based exclusion.
+        """
+        self._gemini_to_mcp_tool_map = {}
         self.gemini_tools = []
 
-        for tool in self.get_available_tools():
+        categorized = self.categorize_tools()
+
+        # Log skipped tools at debug level
+        for tool, reason in categorized.skipped:
+            logger.debug("Skipping tool %s: %s", tool.name, reason)
+
+        # Process hosted tools
+        for tool, spec in categorized.hosted:
+            gemini_tool = self._build_hosted_tool(spec)
+            if gemini_tool:
+                self.gemini_tools.append(gemini_tool)
+                logger.debug("Added hosted tool %s (%s) for Gemini", tool.name, spec.api_type)
+
+        # Process native client-executed tools
+        for tool, spec in categorized.native:
+            gemini_tool = self._build_native_tool(tool, spec)
+            if gemini_tool:
+                self._gemini_to_mcp_tool_map[tool.name] = tool.name
+                self.gemini_tools.append(gemini_tool)
+
+        # Process generic function tools
+        for tool in categorized.generic:
             gemini_tool = self._to_gemini_tool(tool)
-            if gemini_tool is None:
-                continue
+            if gemini_tool:
+                self._gemini_to_mcp_tool_map[tool.name] = tool.name
+                self.gemini_tools.append(gemini_tool)
 
-            self._gemini_to_mcp_tool_map[tool.name] = tool.name
-            self.gemini_tools.append(gemini_tool)
+        # Log actual tools being used
+        tool_names = sorted(self._gemini_to_mcp_tool_map.keys())
+        self.console.info(
+            f"Agent initialized with {len(tool_names)} tools: {', '.join(tool_names)}"
+        )
 
-        return self.gemini_tools
+    def _build_hosted_tool(self, spec: NativeToolSpec) -> genai_types.Tool | None:
+        """Build a Gemini hosted tool from a NativeToolSpec.
+
+        Args:
+            spec: The native spec with hosted=True
+
+        Returns:
+            Gemini Tool with the appropriate hosted configuration
+        """
+        match spec.api_type:
+            case "google_search":
+                return genai_types.Tool(google_search=genai_types.GoogleSearch(**spec.extra))
+            case "code_execution":
+                return genai_types.Tool(code_execution=genai_types.ToolCodeExecution())
+            case "url_context":
+                return genai_types.Tool(url_context=genai_types.UrlContext())
+            case _:
+                logger.warning("Unknown hosted tool type: %s", spec.api_type)
+                return None
+
+    def _build_native_tool(self, tool: types.Tool, spec: NativeToolSpec) -> genai_types.Tool | None:
+        """Build a Gemini native tool from a NativeToolSpec.
+
+        Args:
+            tool: The MCP tool
+            spec: The native spec for Gemini
+
+        Returns:
+            Gemini-specific tool or None if not supported
+        """
+        # Currently Gemini native tools are similar to function tools
+        # This method exists for future expansion (e.g., computer_use native support)
+        match spec.api_type:
+            case "computer_use":
+                # Gemini computer use is still a function tool
+                return self._to_gemini_tool(tool)
+            case _:
+                # Unknown native type - try as function tool
+                logger.debug(
+                    "Native tool type %s for %s, using function declaration",
+                    spec.api_type,
+                    tool.name,
+                )
+                return self._to_gemini_tool(tool)
 
     def _to_gemini_tool(self, tool: types.Tool) -> genai_types.Tool | None:
-        """Convert a single MCP tool to Gemini tool format.
+        """Convert a single MCP tool to Gemini function tool format.
 
-        Subclasses can override to customize tool conversion (e.g., for computer use).
+        Args:
+            tool: MCP tool to convert
+
+        Returns:
+            Gemini Tool with function declaration
         """
-        # Ensure parameters have proper Schema format
         if tool.description is None or tool.inputSchema is None:
             raise ValueError(f"MCP tool {tool.name} requires both a description and inputSchema.")
+
         function_decl = genai_types.FunctionDeclaration(
             name=tool.name,
             description=tool.description,

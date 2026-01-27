@@ -4,15 +4,15 @@ description: "Turn your code into agent-callable tools. Define how agents are ev
 icon: "cube"
 ---
 
-An environment is everything an agent can interact with—your APIs, services, databases, wrapped as tools. But it's more than that: the environment also defines how agents are *evaluated* through **Scenarios**. When you deploy an environment, you're creating a sandbox that agents can learn from at scale.
+An environment is everything an agent can interact with—your APIs, services, databases, wrapped as tools. It also defines how agents are *evaluated* through **scenarios**. When you deploy an environment, you're creating a sandbox that agents can learn from at scale.
 
-## Why Environments, Not API Servers?
+## Why Environments?
 
-Your production API is a single live instance with shared state—you can't run 500 tests against it in parallel without causing chaos. Environments spin up fresh for every evaluation: isolated, deterministic, reproducible. Run thousands in parallel, each starting from the exact state you define, each generating training data. An API server is a live system you observe. An environment is a sandbox you control.
+Your production API is a single live instance with shared state—you can't run 500 tests against it in parallel without causing chaos. Environments spin up fresh for every evaluation: isolated, deterministic, reproducible. Run thousands in parallel, each starting from the exact state you define, each generating training data.
 
 ## Tools
 
-Start with `hud init` to scaffold an environment—works with existing codebases or from scratch:
+Start with `hud init` to scaffold an environment. Works on existing codebases too:
 
 ```bash
 hud init
@@ -31,19 +31,17 @@ async def search(query: str) -> str:
     return db.search(query)
 ```
 
+<Tip>
+Before building custom tools, check if [HUD's pre-built tools](/tools) already provide what you need—computer control, shell execution, file editing, web browsing, and more.
+</Tip>
+
 Got a FastAPI app? One line:
 
 ```python
 env.connect_fastapi(app)
 ```
 
-All your routes become tools. Run it:
-
-```python
-async with env() as ctx:
-    tools = await ctx.list_tools()
-    result = await ctx.call_tool("search", query="test")
-```
+All your routes become tools.
 
 ## Scenarios
 
@@ -60,49 +58,119 @@ async def checkout_flow(product_name: str):
     yield 1.0 if order_exists else 0.0
 ```
 
-The agent runs between the yields. First yield sends the prompt and returns the agent's answer. Second yield checks environment state—database rows, files, API calls—and returns a reward. Scenarios live with the environment because only the environment knows how to verify what happened.
+The agent runs between the yields. First yield sends the prompt and returns the agent's answer. Second yield checks environment state and returns a reward.
 
-## Evals
+### Scenarios as Subagents
 
-Call the environment with a scenario name and arguments to create a task:
+The first yield is more than just a prompt—it's context management mixed with dynamic input from the scenario's parameters. The parameters become a tool spec that other agents can call.
+
+We've found that agents train *much* better within a scenario structure than on standalone random tasks. Scenarios define boundaries: what the agent should focus on, what success looks like, and how to measure it. This structure also makes agents easier to compose—wrap a scenario with `AgentTool` and an orchestrator can call it as a specialized subagent.
+
+See the [Ops Diagnostics Cookbook](/cookbooks/ops-diagnostics) for a complete example of hierarchical agents calling subagent scenarios.
+
+## Iterating on Your Environment
+
+Three ways to develop and test your environment:
+
+### 1. Agent Loop with create_agent
+
+Run a full agent loop locally. This mirrors exactly what happens in remote rollouts:
 
 ```python
-task = env("checkout", product_name="Laptop")
+import hud
+from hud import Environment
+from hud.agents import create_agent
 
-async with hud.eval(task, group=4) as ctx:
-    # Connect your agent here. Handle tool calls, run agent loop...
+env = Environment("my-env")
+
+@env.tool()
+def count_letter(text: str, letter: str) -> int:
+    """Count occurrences of a letter in text."""
+    return text.lower().count(letter.lower())
+
+@env.scenario("count")
+async def count_scenario(sentence: str, letter: str):
+    answer = yield f"How many '{letter}' in '{sentence}'?"
+    correct = str(sentence.lower().count(letter.lower()))
+    yield 1.0 if correct in answer else 0.0
+
+# Create task and run agent
+task = env("count", sentence="Strawberry", letter="r")
+agent = create_agent("claude-sonnet-4-5")
+
+async with hud.eval(task) as ctx:
+    result = await agent.run(ctx, max_steps=10)
+
+print(f"Reward: {result.reward}")
+```
+
+### 2. MCP Server with hud dev
+
+Spawn your environment as an MCP server that Cursor, Claude Code, or any MCP client can connect to:
+
+```bash
+# Python-only (no Docker, hot-reloads current directory)
+hud dev env:env
+
+# Docker mode (if Dockerfile exists)
+hud dev -w env.py -w tools/    # -w enables hot-reload for those paths
+```
+
+Then in Cursor's MCP settings:
+
+```json
+{
+  "my-dev-env": { "url": "http://localhost:8765/mcp" }
+}
+```
+
+Now your coding agent can call your tools directly. Edit your environment, save, and changes apply immediately.
+
+The `env:env` syntax is like uvicorn—`module:attribute`. It tells `hud dev` to import `env.py` and run the `env` object as an MCP server.
+
+### 3. Custom Agent Loop
+
+Build your own agent loop using the format converters. See [Integrations](/guides/integrations) for OpenAI, Anthropic, LangChain, and more:
+
+```python
+async with hud.eval(task) as ctx:
     response = await client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": ctx.prompt}],
         tools=ctx.as_openai_chat_tools()
     )
-
+    
+    # Handle tool calls...
     await ctx.submit(response.choices[0].message.content)
-
-print(ctx.reward)
 ```
 
-This creates a trace on [hud.ai](https://hud.ai/home). Add [variants](/quick-links/ab-testing) to A/B test across models. To run evals at scale, [deploy your environment](/quick-links/deploy).
+## Connecting Your Stack
 
-## Mock Mode
-
-Testing your agent loop without hitting real services? Mock mode returns fake responses based on tool schemas:
+HUD wraps your existing infrastructure:
 
 ```python
-env.mock()
-env.mock_tool("search", "Mock search results") # Manual override of mock
-
-async with hud.eval(env(), group=4) as ctx:
-    tools = env.as_openai_chat_tools()
-    
-    response = await client.chat.completions.create(
-        model="claude-sonnet-4-5",
-        messages=[{"role": "user", "content": "Search for X"}],
-        tools=tools
-    )
-    
-    # Returns mock value instead of hitting real service
-    result = await env.call_tool(response.choices[0].message.tool_calls[0])
+env.connect_fastapi(app)                                    # FastAPI → tools
+env.connect_openapi("https://api.example.com/openapi.json") # OpenAPI spec → tools
+env.connect_hub("hud-evals/browser")                        # HUD Hub environments
+env.connect_image("my-service:v1")                          # Docker images
 ```
-Your agent code stays the same—just toggle `env.mock()` for local testing.
 
+## What's Next
+
+<CardGroup cols={2}>
+<Card title="Hosted Running" icon="rocket" href="/quick-links/deploy">
+  Deploy your environment to the platform
+</Card>
+
+<Card title="Sandboxing" icon="shield" href="/guides/sandboxing">
+  Make databases and external services safe for agents
+</Card>
+
+<Card title="Best Practices" icon="check" href="/guides/best-practices">
+  Patterns for reliable environments
+</Card>
+
+<Card title="Integrations" icon="robot" href="/guides/integrations">
+  Connect any agent framework
+</Card>
+</CardGroup>

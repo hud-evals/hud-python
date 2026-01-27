@@ -41,9 +41,7 @@ async def main() -> None:
     # Phase 2: Create agent
     print("🤖 Creating Claude agent...")
     agent = ClaudeAgent.create(
-        checkpoint_name="claude-sonnet-4-20250514",
-        allowed_tools=["anthropic_computer"],
-        initial_screenshot=True,
+        model="claude-sonnet-4-20250514",
     )
 
     # Phase 3: Enter eval context and run agent

@@ -45,7 +45,7 @@ async def main() -> None:
     agent = GroundedOpenAIChatAgent.create(
         grounder_config=grounder_config,
         openai_client=openai_client,
-        checkpoint_name="gpt-4o-mini",  # Planning model
+        model="gpt-4o-mini",  # Planning model
     )
 
     form_url = "https://hb.cran.dev/forms/post"

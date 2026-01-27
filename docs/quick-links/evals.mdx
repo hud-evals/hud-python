@@ -1,0 +1,141 @@
+---
+title: "Tasks & Training"
+description: "Run evaluations at scale. Train models on your tasks."
+icon: "flask-vial"
+---
+
+Once your environment is deployed, the platform handles everything: spinning up instances, running agents, collecting traces, and training models. Create tasks from your scenarios, run them across models, and use successful runs as training data.
+
+<Warning>
+Before running evaluations and training, your environment must be deployed via `hud deploy`. See [Hosted Running](/quick-links/deploy).
+</Warning>
+
+## Tasks and Tasksets
+
+Tasks are instances of scenarios with specific arguments. Tasksets group related tasks for batch evaluation.
+
+1. Go to your environment on [hud.ai/environments](https://hud.ai/environments)
+2. Click the **Scenarios** tab and select a scenario
+3. Fill in the arguments and add to a taskset
+
+<Frame>
+  <img src="/src/images/platform-env-scenarios.png" alt="Creating tasks from scenarios" />
+</Frame>
+
+Your scenario might take arguments:
+
+```python
+@env.scenario("checkout")
+async def checkout_flow(product_name: str, apply_coupon: bool = False):
+    yield f"Complete checkout for {product_name}" + (" with coupon" if apply_coupon else "")
+    yield 1.0 if order_confirmed() else 0.0
+```
+
+Create multiple tasks from it—`checkout-laptop`, `checkout-phone-coupon`, `checkout-headphones`. Group them in a taskset and run them all at once. Tasksets become your benchmarks—run them against new model versions to track progress.
+
+See [Platform Tasksets](/platform/tasksets) for the full guide.
+
+## Running Evaluations
+
+Open your taskset on [hud.ai/evalsets](https://hud.ai/evalsets), click **Run Taskset**, and configure your run:
+
+<Frame>
+  <img src="/src/images/platform-leaderboards-run.png" alt="Run taskset configuration modal" />
+</Frame>
+
+- **Models** — Select one or more models to evaluate. Multi-select runs the same tasks across all selected models.
+- **Group Size** — How many times to run each task per model (more runs = higher confidence)
+- **Max Steps** — Limit agent actions per task
+
+Jobs queue and run in parallel across HUD infrastructure. Each run generates a trace with the full conversation, tool calls, and reward. Results show up in real-time on the taskset's **Leaderboard** tab—rankings, success rates, and model comparisons.
+
+<Frame>
+  <img src="/src/images/platform-tasksets.png" alt="Tasksets and leaderboards" />
+</Frame>
+
+## Training Models
+
+Training turns your evaluation traces into better models:
+
+1. Go to [hud.ai/models](https://hud.ai/models) and find a trainable base model in **Explore**
+2. Click **Fork** to create your copy—this gives you your model ID
+3. Click **Train Model** and select a taskset as training data
+4. Training creates a new checkpoint in your model's tree
+
+<Frame>
+  <img src="/src/images/platform-model-checkpoints.png" alt="Model checkpoints after training" />
+</Frame>
+
+Set any checkpoint as HEAD to use it for inference. Your model ID works through the same gateway:
+
+```python
+from hud.agents import create_agent
+
+# Your forked model - evaluate at any time
+agent = create_agent("your-model-id")
+
+async with hud.eval(task) as ctx:
+    result = await agent.run(ctx)
+```
+
+See [Platform Models](/platform/models) for training details.
+
+## CLI Alternative
+
+Prefer the command line? Use `hud eval` for running evaluations locally or remotely:
+
+```bash
+# Run a taskset with a model
+hud eval my-taskset claude --full
+
+# Run with multiple repeats for variance
+hud eval my-taskset claude --full --group-size 5
+
+# Run remotely on HUD infrastructure
+hud eval my-taskset claude --full --remote
+```
+
+See [`hud eval` CLI reference](/reference/cli/eval) for all options.
+
+## The Loop
+
+Deploy your environment, create tasks, run evaluations, train on successful traces, use the trained model. Repeat.
+
+```mermaid
+graph LR
+    A[Deploy Environment] --> B[Create Tasks]
+    B --> C[Run Evaluations]
+    C --> D[Analyze Results]
+    D --> E[Train Model]
+    E --> F[Use Trained Model]
+    F --> C
+    
+    style A fill:#e0e7ff,stroke:#6366f1
+    style B fill:#e0e7ff,stroke:#6366f1
+    style C fill:#d1fae5,stroke:#10b981
+    style D fill:#d1fae5,stroke:#10b981
+    style E fill:#fef3c7,stroke:#f59e0b
+    style F fill:#fef3c7,stroke:#f59e0b
+```
+
+Every evaluation generates traces. Every training run creates a better model. Agents get better at *your* environment, *your* tasks, *your* success criteria.
+
+## What's Next
+
+<CardGroup cols={2}>
+<Card title="Platform Tasksets" icon="list-check" href="/platform/tasksets">
+  Full taskset management guide
+</Card>
+
+<Card title="Platform Models" icon="robot" href="/platform/models">
+  Model training and checkpoints
+</Card>
+
+<Card title="Testing Environments" icon="flask" href="/advanced/testing-environments">
+  Local testing, variants, and mock mode
+</Card>
+
+<Card title="Publishing Leaderboards" icon="trophy" href="/platform/publishing-leaderboards">
+  Make your benchmarks public
+</Card>
+</CardGroup>
