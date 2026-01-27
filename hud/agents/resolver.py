@@ -11,12 +11,9 @@ __all__ = ["resolve_cls"]
 
 _models_cache: list[dict[str, Any]] | None = None
 
-# Provider name → AgentType value (only anthropic differs)
-_PROVIDER_TO_AGENT = {"anthropic": "claude"}
-
 
 def _fetch_gateway_models() -> list[dict[str, Any]]:
-    """Fetch available models from HUD gateway (cached)."""
+    """Fetch available models from HUD API (cached)."""
     global _models_cache
     if _models_cache is not None:
         return _models_cache
@@ -30,14 +27,15 @@ def _fetch_gateway_models() -> list[dict[str, Any]]:
 
     try:
         resp = httpx.get(
-            f"{settings.hud_gateway_url}/models",
+            f"{settings.hud_api_url}/models/",
             headers={"Authorization": f"Bearer {settings.api_key}"},
             timeout=10.0,
         )
         resp.raise_for_status()
         data = resp.json()
-        _models_cache = data.get("data", data) if isinstance(data, dict) else data
-        return _models_cache or []
+        models = data.get("models") or []
+        _models_cache = models
+        return models
     except Exception:
         return []
 
@@ -59,12 +57,8 @@ def resolve_cls(model: str) -> tuple[type[MCPAgent], dict[str, Any] | None]:
 
     # Gateway lookup
     for m in _fetch_gateway_models():
-        if model in (m.get("id"), m.get("name"), m.get("model")):
-            provider = (m.get("provider") or "openai_compatible").lower()
-            agent_str = _PROVIDER_TO_AGENT.get(provider, provider)
-            try:
-                return AgentType(agent_str).cls, m
-            except ValueError:
-                return AgentType.OPENAI_COMPATIBLE.cls, m
+        if model in (m.get("id"), m.get("name"), m.get("model_name")):
+            agent_str = m.get("sdk_agent_type") or m["provider"]["default_sdk_agent_type"]
+            return AgentType(agent_str).cls, m
 
     raise ValueError(f"Model '{model}' not found")

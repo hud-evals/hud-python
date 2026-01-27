@@ -75,7 +75,6 @@ class GeminiAgent(MCPAgent):
 
         model_client = self.config.model_client
         if model_client is None:
-            # Default to HUD gateway when HUD_API_KEY is available
             if settings.api_key:
                 from hud.agents.gateway import build_gateway_client
 
