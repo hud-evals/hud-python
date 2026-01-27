@@ -141,10 +141,11 @@ def _display_lock_details(
         rich_console.print(scenarios_table)
 
     # Display environment variables
-    env_config = lock_data.get("environment", {})
+    env_config = lock_data.get("environment") or {}
     if env_config:
-        required_vars = env_config.get("variables", {}).get("required", [])
-        optional_vars = env_config.get("variables", {}).get("optional", [])
+        variables = env_config.get("variables") or {}
+        required_vars = variables.get("required", [])
+        optional_vars = variables.get("optional", [])
 
         if required_vars or optional_vars:
             rich_console.print()
