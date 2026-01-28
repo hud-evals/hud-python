@@ -84,6 +84,8 @@ def patch_streamable_http_error_handling() -> None:
                     else:
                         await ctx.read_stream_writer.send(exc)
 
+                backoff = 0.5
+                max_backoff = 60.0
                 while True:
                     try:
                         if is_resumption:
@@ -100,7 +102,8 @@ def patch_streamable_http_error_handling() -> None:
                                 await send_error_response(e)
                                 return
                             logger.warning("Retrying MCP request after error: %s", e)
-                            await asyncio.sleep(2.0)
+                            await asyncio.sleep(backoff)
+                            backoff = min(backoff * 2, max_backoff)
                         else:
                             logger.exception("Request handler error: %s", e)
                             await send_error_response(e)
