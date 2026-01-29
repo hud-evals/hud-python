@@ -569,7 +569,7 @@ def deploy_command(
         hud deploy . --name my-env     # Custom name
         hud deploy . -e API_KEY=xxx    # With env vars
         hud deploy . --build-arg NODE_ENV=production  # With build args
-        hud deploy . --secret id=MY_KEY,env=MY_KEY  # With build secrets
+        hud deploy . --secret id=MY_KEY,env=MY_KEY  # With build secrets (will be encrypted at rest)
         hud deploy . --secret id=MY_KEY,src=./my_key.txt  # Secret from file
         hud deploy . --no-cache        # Force rebuild[/not dim]
     """
