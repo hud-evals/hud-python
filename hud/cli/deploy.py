@@ -74,7 +74,7 @@ def deploy_environment(
     verbose: bool = False,
     registry_id: str | None = None,
     build_args: list[str] | None = None,
-    secrets: list[str] | None = None,
+    build_secrets: list[str] | None = None,
 ) -> None:
     """Deploy a HUD environment to the platform.
 
@@ -94,7 +94,7 @@ def deploy_environment(
         verbose: Show detailed output
         registry_id: Existing registry ID for rebuilds
         build_args: List of KEY=VALUE Docker build arguments
-        secrets: List of Docker build secrets (e.g. id=GITHUB_TOKEN,env=GITHUB_TOKEN)
+        build_secrets: List of Docker build secrets (e.g. id=GITHUB_TOKEN,env=GITHUB_TOKEN)
     """
     hud_console = HUDConsole()
     hud_console.header("HUD Environment Deploy")
@@ -193,9 +193,9 @@ def deploy_environment(
     if build_args_dict and verbose:
         hud_console.info(f"Build arguments: {', '.join(build_args_dict.keys())}")
 
-    secrets_dict: dict[str, str] = {}
-    if secrets:
-        for secret_spec in secrets:
+    build_secrets_dict: dict[str, str] = {}
+    if build_secrets:
+        for secret_spec in build_secrets:
             # Parse Docker secret spec: comma-separated key=value pairs
             # e.g. "id=GITHUB_TOKEN,env=GITHUB_TOKEN" or "id=mykey,src=./mykey.txt"
             parts = {}
@@ -217,7 +217,7 @@ def deploy_environment(
                         f"Secret '{secret_id}': environment variable '{env_name}' is not set"
                     )
                     raise typer.Exit(1)
-                secrets_dict[secret_id] = value
+                build_secrets_dict[secret_id] = value
             elif "src" in parts:
                 src_path = Path(parts["src"])
                 if not src_path.is_absolute():
@@ -226,7 +226,7 @@ def deploy_environment(
                     hud_console.error(f"Secret '{secret_id}': file not found: {src_path}")
                     raise typer.Exit(1)
                 try:
-                    secrets_dict[secret_id] = src_path.read_text(encoding="utf-8")
+                    build_secrets_dict[secret_id] = src_path.read_text(encoding="utf-8")
                 except Exception as e:
                     hud_console.error(f"Secret '{secret_id}': failed to read {src_path}: {e}")
                     raise typer.Exit(1) from e
@@ -257,7 +257,7 @@ def deploy_environment(
                 name=name,
                 env_vars=env_vars,
                 build_args=build_args_dict,
-                secrets=secrets_dict,
+                build_secrets=build_secrets_dict,
                 no_cache=no_cache,
                 registry_id=registry_id,
                 api_key=settings.api_key,
@@ -284,7 +284,7 @@ async def _deploy_async(
     name: str,
     env_vars: dict[str, str],
     build_args: dict[str, str],
-    secrets: dict[str, str],
+    build_secrets: dict[str, str],
     no_cache: bool,
     registry_id: str | None,
     api_key: str,
@@ -299,7 +299,7 @@ async def _deploy_async(
         name: Environment name
         env_vars: Environment variables
         build_args: Docker build arguments
-        secrets: Resolved Docker build secrets (id -> value)
+        build_secrets: Resolved Docker build secrets (id -> value)
         no_cache: Whether to disable cache
         registry_id: Optional existing registry ID
         api_key: HUD API key
@@ -377,8 +377,8 @@ async def _deploy_async(
                 trigger_payload["environment_variables"] = env_vars
             if build_args:
                 trigger_payload["build_args"] = build_args
-            if secrets:
-                trigger_payload["secrets"] = secrets
+            if build_secrets:
+                trigger_payload["build_secrets"] = build_secrets
 
             trigger_response = await client.post(
                 f"{api_url.rstrip('/')}/builds/trigger-direct",
@@ -582,5 +582,5 @@ def deploy_command(
         verbose=verbose,
         registry_id=registry_id,
         build_args=build_args,
-        secrets=secrets,
+        build_secrets=secrets,
     )
