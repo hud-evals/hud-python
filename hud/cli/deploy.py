@@ -197,7 +197,7 @@ def deploy_environment(
     if secrets:
         for secret_spec in secrets:
             # Parse Docker secret spec: comma-separated key=value pairs
-            # e.g. "id=GITHUB_TOKEN,env=GITHUB_TOKEN"
+            # e.g. "id=GITHUB_TOKEN,env=GITHUB_TOKEN" or "id=mykey,src=./mykey.txt"
             parts = {}
             for part in secret_spec.split(","):
                 if "=" in part:
@@ -218,12 +218,21 @@ def deploy_environment(
                     )
                     raise typer.Exit(1)
                 secrets_dict[secret_id] = value
+            elif "src" in parts:
+                src_path = Path(parts["src"])
+                if not src_path.is_absolute():
+                    src_path = env_dir / src_path
+                if not src_path.exists():
+                    hud_console.error(f"Secret '{secret_id}': file not found: {src_path}")
+                    raise typer.Exit(1)
+                try:
+                    secrets_dict[secret_id] = src_path.read_text(encoding="utf-8")
+                except Exception as e:
+                    hud_console.error(f"Secret '{secret_id}': failed to read {src_path}: {e}")
+                    raise typer.Exit(1) from e
             else:
-                hud_console.error(f"Invalid --secret format: {secret_spec} (env= is required)")
+                hud_console.error(f"Invalid --secret format: {secret_spec} (need env= or src=)")
                 raise typer.Exit(1)
-    if secrets_dict and verbose:
-        hud_console.info(f"Build secrets: {', '.join(secrets_dict.keys())}")
-
     # Create build context tarball
     hud_console.progress_message("Creating build context tarball...")
 
@@ -561,6 +570,7 @@ def deploy_command(
         hud deploy . -e API_KEY=xxx    # With env vars
         hud deploy . --build-arg NODE_ENV=production  # With build args
         hud deploy . --secret id=MY_KEY,env=MY_KEY  # With build secrets
+        hud deploy . --secret id=MY_KEY,src=./my_key.txt  # Secret from file
         hud deploy . --no-cache        # Force rebuild[/not dim]
     """
     deploy_environment(
