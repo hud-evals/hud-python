@@ -403,6 +403,14 @@ def models(
             console.print("[yellow]No models found[/yellow]")
             return
 
+        # Sort models alphabetically by name
+        models_list = sorted(
+            models_list,
+            key=lambda x: (x.get("name") or str(x)).lower()
+            if isinstance(x, dict)
+            else str(x).lower(),
+        )
+
         console.print(Panel.fit("📋 [bold cyan]Available Models[/bold cyan]", border_style="cyan"))
 
         table = Table()
@@ -766,7 +774,9 @@ def build(
         hud build . --tag my-env:v1.0 -e VAR1=value1 -e VAR2=value2
         hud build . --no-cache       # Force rebuild
         hud build . --remote-cache my-cache-repo   # Use ECR remote cache (requires AWS_ACCOUNT_ID and AWS_DEFAULT_REGION)
-        hud build . --build-arg NODE_ENV=production  # Pass Docker build args[/not dim]
+        hud build . --build-arg NODE_ENV=production  # Pass Docker build args
+        hud build . --secret id=MY_KEY,env=MY_KEY  # Pass build secrets, reading $MY_KEY env var. These will be encrypted at rest.
+        hud build . --secret id=MY_KEY,src=./my_key.txt  # Pass build secret from file.[/not dim]
     """  # noqa: E501
     # Parse directory and extra arguments
     if params:
