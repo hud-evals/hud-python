@@ -773,7 +773,8 @@ def build(
         hud build . --no-cache       # Force rebuild
         hud build . --remote-cache my-cache-repo   # Use ECR remote cache (requires AWS_ACCOUNT_ID and AWS_DEFAULT_REGION)
         hud build . --build-arg NODE_ENV=production  # Pass Docker build args
-        hud build . --secret id=MY_KEY,env=MY_KEY  # Pass build secrets, reading $MY_KEY env var. These will be encrypted at rest.[/not dim]
+        hud build . --secret id=MY_KEY,env=MY_KEY  # Pass build secrets, reading $MY_KEY env var. These will be encrypted at rest.
+        hud build . --secret id=MY_KEY,src=./my_key.txt  # Pass build secret from file.[/not dim]
     """  # noqa: E501
     # Parse directory and extra arguments
     if params:
