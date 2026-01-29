@@ -41,15 +41,28 @@ hud deploy  # v0.1.1
 
 ### Configuration
 
-<Accordion title="Environment Variables">
-Variables from your `.env` file are automatically passed during deployment. Override or use a different file:
+<Accordion title="Environment Variables, Build Args & Secrets">
+
+Three flags for different purposes:
+
+| Flag | When | Use For |
+|------|------|---------|
+| `--env` / `-e` | Runtime | API keys, config |
+| `--build-arg` | Build time | Repo URLs, build modes |
+| `--secret` | Build time (not stored in image) | Private repo tokens |
 
 ```bash
-hud deploy -e API_KEY=secret -e DEBUG=true    # Inline overrides
-hud deploy --env-file .env.production         # Different env file
+# Runtime env vars (encrypted, injected when container runs)
+hud deploy -e API_KEY=secret
+
+# Build args (for Dockerfile ARG directives)
+hud deploy --build-arg REPO_URL=https://github.com/org/repo
+
+# Build secrets (for private repos, not baked into image)
+hud deploy --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN
 ```
 
-Variables are encrypted at rest and injected at runtime.
+See [hud deploy reference](/reference/cli/deploy) for full details.
 </Accordion>
 
 <Accordion title="Naming">
@@ -98,7 +111,7 @@ hud link --id existing-environment-id
 | Setup | One command | Connect repo on platform |
 | Rebuilds | Manual (`hud deploy`) | Automatic on push |
 | Best for | Solo dev, quick iteration | Teams, CI/CD |
-| Env vars | `.env` file (automatic) | Platform settings |
+| Env vars / Build args / Secrets | CLI flags | Platform settings |
 
 Both methods result in the same deployed environment. Choose based on your workflow.
 
