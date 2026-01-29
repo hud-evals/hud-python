@@ -208,7 +208,8 @@ async def submit_rollouts(
                 for item in result.get("results", []):
                     if isinstance(item, dict):
                         if item.get("status") == "rejected":
-                            hud_console.warning(f"Task rejected: {item.get('error', 'Unknown reason')}")
+                            error = item.get("error", "Unknown reason")
+                            hud_console.warning(f"Task rejected: {error}")
                         elif item.get("trace_id"):
                             trace_ids.append(item["trace_id"])
 

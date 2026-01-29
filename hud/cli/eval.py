@@ -910,7 +910,7 @@ def eval_command(
     # Run
     start_time = time.time()
     try:
-        results, tasks = asyncio.run(_run_evaluation(cfg))
+        results, _tasks = asyncio.run(_run_evaluation(cfg))
     except ValueError as e:
         hud_console.error(str(e))
         raise typer.Exit(1) from None
