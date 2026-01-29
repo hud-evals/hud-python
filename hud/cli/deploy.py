@@ -219,7 +219,7 @@ def deploy_environment(
                     raise typer.Exit(1)
                 build_secrets_dict[secret_id] = value
             elif "src" in parts:
-                src_path = Path(parts["src"])
+                src_path = Path(parts["src"]).expanduser()
                 if not src_path.is_absolute():
                     src_path = env_dir / src_path
                 if not src_path.exists():
