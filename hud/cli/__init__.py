@@ -406,7 +406,7 @@ def models(
         # Sort models alphabetically by name
         models_list = sorted(
             models_list,
-            key=lambda x: x.get("name", str(x)).lower() if isinstance(x, dict) else str(x).lower()
+            key=lambda x: x.get("name", str(x)).lower() if isinstance(x, dict) else str(x).lower(),
         )
 
         console.print(Panel.fit("📋 [bold cyan]Available Models[/bold cyan]", border_style="cyan"))
