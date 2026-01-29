@@ -919,6 +919,6 @@ def eval_command(
     if cfg.remote:
         return
 
-    from hud.datasets import display_results
-
-    display_results(results, tasks=tasks, elapsed=elapsed, show_details=len(results) <= 50)
+    if results:
+        rate = len(results) / elapsed if elapsed > 0 else 0
+        hud_console.info(f"Completed {len(results)} evals in {elapsed:.1f}s ({rate:.1f}/s)")
