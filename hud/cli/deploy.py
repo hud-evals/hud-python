@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from pathlib import Path
 
@@ -73,6 +74,7 @@ def deploy_environment(
     verbose: bool = False,
     registry_id: str | None = None,
     build_args: list[str] | None = None,
+    secrets: list[str] | None = None,
 ) -> None:
     """Deploy a HUD environment to the platform.
 
@@ -92,6 +94,7 @@ def deploy_environment(
         verbose: Show detailed output
         registry_id: Existing registry ID for rebuilds
         build_args: List of KEY=VALUE Docker build arguments
+        secrets: List of Docker build secrets (e.g. id=GITHUB_TOKEN,env=GITHUB_TOKEN)
     """
     hud_console = HUDConsole()
     hud_console.header("HUD Environment Deploy")
@@ -190,6 +193,37 @@ def deploy_environment(
     if build_args_dict and verbose:
         hud_console.info(f"Build arguments: {', '.join(build_args_dict.keys())}")
 
+    secrets_dict: dict[str, str] = {}
+    if secrets:
+        for secret_spec in secrets:
+            # Parse Docker secret spec: comma-separated key=value pairs
+            # e.g. "id=GITHUB_TOKEN,env=GITHUB_TOKEN"
+            parts = {}
+            for part in secret_spec.split(","):
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    parts[k.strip()] = v.strip()
+
+            secret_id = parts.get("id")
+            if not secret_id:
+                hud_console.error(f"Invalid --secret format: {secret_spec} (missing id=)")
+                raise typer.Exit(1)
+
+            if "env" in parts:
+                env_name = parts["env"]
+                value = os.environ.get(env_name)
+                if value is None:
+                    hud_console.error(
+                        f"Secret '{secret_id}': environment variable '{env_name}' is not set"
+                    )
+                    raise typer.Exit(1)
+                secrets_dict[secret_id] = value
+            else:
+                hud_console.error(f"Invalid --secret format: {secret_spec} (env= is required)")
+                raise typer.Exit(1)
+    if secrets_dict and verbose:
+        hud_console.info(f"Build secrets: {', '.join(secrets_dict.keys())}")
+
     # Create build context tarball
     hud_console.progress_message("Creating build context tarball...")
 
@@ -214,6 +248,7 @@ def deploy_environment(
                 name=name,
                 env_vars=env_vars,
                 build_args=build_args_dict,
+                secrets=secrets_dict,
                 no_cache=no_cache,
                 registry_id=registry_id,
                 api_key=settings.api_key,
@@ -240,6 +275,7 @@ async def _deploy_async(
     name: str,
     env_vars: dict[str, str],
     build_args: dict[str, str],
+    secrets: dict[str, str],
     no_cache: bool,
     registry_id: str | None,
     api_key: str,
@@ -254,6 +290,7 @@ async def _deploy_async(
         name: Environment name
         env_vars: Environment variables
         build_args: Docker build arguments
+        secrets: Resolved Docker build secrets (id -> value)
         no_cache: Whether to disable cache
         registry_id: Optional existing registry ID
         api_key: HUD API key
@@ -331,6 +368,8 @@ async def _deploy_async(
                 trigger_payload["environment_variables"] = env_vars
             if build_args:
                 trigger_payload["build_args"] = build_args
+            if secrets:
+                trigger_payload["secrets"] = secrets
 
             trigger_response = await client.post(
                 f"{api_url.rstrip('/')}/builds/trigger-direct",
@@ -481,6 +520,11 @@ def deploy_command(
         "--build-arg",
         help="Docker build argument (KEY=VALUE, repeatable)",
     ),
+    secrets: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--secret",
+        help="Docker build secret, e.g. --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN",
+    ),
     no_cache: bool = typer.Option(
         False,
         "--no-cache",
@@ -516,6 +560,7 @@ def deploy_command(
         hud deploy . --name my-env     # Custom name
         hud deploy . -e API_KEY=xxx    # With env vars
         hud deploy . --build-arg NODE_ENV=production  # With build args
+        hud deploy . --secret id=MY_KEY,env=MY_KEY  # With build secrets
         hud deploy . --no-cache        # Force rebuild[/not dim]
     """
     deploy_environment(
@@ -527,4 +572,5 @@ def deploy_command(
         verbose=verbose,
         registry_id=registry_id,
         build_args=build_args,
+        secrets=secrets,
     )
