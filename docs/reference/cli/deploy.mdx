@@ -36,6 +36,10 @@ hud deploy [DIRECTORY] [OPTIONS]
   Path to .env file (default: .env in directory if exists)
 </ParamField>
 
+<ParamField path="--build-arg" type="string" repeatable>
+  Docker build argument in KEY=VALUE format. Can be repeated. Used for Dockerfile `ARG` directives.
+</ParamField>
+
 <ParamField path="--no-cache" type="boolean" default="false">
   Disable Docker build cache for a clean rebuild
 </ParamField>
@@ -84,6 +88,64 @@ Creates `.hud/deploy.json` to link this directory to the deployed environment fo
 </Step>
 </Steps>
 
+## Environment Variables vs Build Arguments
+
+Understanding when to use `--env` vs `--build-arg` is important:
+
+<Tabs>
+<Tab title="Build Arguments (--build-arg)">
+
+**Use for:** Values needed during Docker image build time
+
+Build arguments are passed to `docker build` as `--build-arg` flags and are used by `ARG` directives in your Dockerfile.
+
+```dockerfile
+# Dockerfile
+ARG REPO_URL
+ARG NODE_ENV=development
+
+RUN git clone ${REPO_URL} /app
+RUN npm install --production=$([[ "$NODE_ENV" == "production" ]] && echo "true" || echo "false")
+```
+
+```bash
+hud deploy . --build-arg REPO_URL=https://github.com/org/repo --build-arg NODE_ENV=production
+```
+
+**Key points:**
+- Resolved at **build time** (when the Docker image is built)
+- Values are baked into the image layers
+- Use for: repository URLs, build modes, version numbers, base image selection
+
+</Tab>
+<Tab title="Environment Variables (--env)">
+
+**Use for:** Values needed when running the container
+
+Environment variables are stored on the HUD platform and injected when the container runs.
+
+```dockerfile
+# Dockerfile
+ENV API_KEY=""
+ENV DEBUG="false"
+```
+
+```bash
+hud deploy . -e API_KEY=secret -e DEBUG=true
+```
+
+**Key points:**
+- Resolved at **runtime** (when the container starts)
+- Can be changed without rebuilding
+- Use for: API keys, secrets, feature flags, runtime configuration
+
+</Tab>
+</Tabs>
+
+<Warning>
+A common mistake is using `--env` for Dockerfile `ARG` values. If your Dockerfile has `ARG REPO_URL` and you pass `-e REPO_URL=...`, the value will be empty during build because `-e` sets runtime variables, not build-time arguments.
+</Warning>
+
 ## Environment Name Resolution
 
 The environment name is determined in this order:
@@ -114,11 +176,28 @@ hud deploy environments/browser
 ### With Environment Variables
 
 ```bash
-# Pass env vars
+# Pass runtime env vars
 hud deploy . -e API_KEY=secret -e DEBUG=true
 
 # Use env file
 hud deploy . --env-file .env.production
+```
+
+### With Build Arguments
+
+```bash
+# Pass Docker build arguments
+hud deploy . --build-arg NODE_ENV=production
+
+# Multiple build args
+hud deploy . --build-arg REPO_URL=https://github.com/org/repo --build-arg FOLDER_NAME=project
+```
+
+### Combined Usage
+
+```bash
+# Build args for Dockerfile ARG + env vars for runtime
+hud deploy . --build-arg BASE_IMAGE=node:20 -e API_KEY=secret
 ```
 
 ### Custom Name
@@ -192,6 +271,7 @@ Even without `.dockerignore`, HUD automatically excludes common sensitive files 
 | Registry | HUD ECR | Docker Hub/GHCR |
 | GitHub required | No | No |
 | Env var storage | HUD platform | Not stored |
+| Build args | Yes (`--build-arg`) | Yes (`--build-arg`) |
 | Recommended for | Platform deployments | Docker Hub sharing |
 
 ## See Also
