@@ -173,13 +173,7 @@ class OpenAIComputerTool(HudComputerTool):
         # Key press parameter
         keys: list[str] | str | int | None = Field(None, description="Keys to press"),
         # Drag parameter
-        path: (
-            list[Coordinate]
-            | list[list[float | int]]
-            | list[dict[str, float | int]]
-            | int
-            | None
-        ) = Field(
+        path: list[Coordinate] | list[list[float | int]] | int | None = Field(
             None,
             description="Path for drag actions as list of {x, y} dicts or [[x, y], ...]",
         ),
