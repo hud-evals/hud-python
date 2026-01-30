@@ -127,12 +127,65 @@ class OperatorAgent(OpenAIAgent):
         """Route computer_call to the OpenAI-specific computer tool."""
         if item.type == "computer_call":
             self.pending_safety_checks = item.pending_safety_checks
+            arguments = item.action.to_dict()
+            # Normalize action args to match MCP tool schema (ints + x/y fields)
+            arguments = self._normalize_computer_action_args(arguments)
             return MCPToolCall(
                 name=self._operator_computer_tool_name,
-                arguments=item.action.to_dict(),
+                arguments=arguments,
                 id=item.call_id,
             )
         return super()._extract_tool_call(item)
+
+    @staticmethod
+    def _normalize_computer_action_args(args: dict[str, Any]) -> dict[str, Any]:
+        """Normalize OpenAI computer_use args to match MCP schema."""
+        if not isinstance(args, dict):
+            return args
+
+        def to_int(value: Any) -> int | None:
+            if value is None:
+                return None
+            if isinstance(value, int):
+                return value
+            try:
+                return round(float(value))
+            except (TypeError, ValueError):
+                return None
+
+        # Support coordinate: [x, y]
+        coordinate = args.get("coordinate")
+        if isinstance(coordinate, (list, tuple)) and len(coordinate) >= 2:
+            args["x"] = coordinate[0]
+            args["y"] = coordinate[1]
+            args.pop("coordinate", None)
+
+        # Coerce numeric fields to ints
+        for key in ("x", "y", "scroll_x", "scroll_y", "ms"):
+            if key in args:
+                args[key] = to_int(args.get(key))
+
+        # Normalize path: [[x, y], ...] -> [{x, y}, ...]
+        path = args.get("path")
+        if isinstance(path, list) and path and isinstance(path[0], (list, tuple)):
+            normalized_path = []
+            for point in path:
+                if len(point) < 2:
+                    continue
+                px = to_int(point[0])
+                py = to_int(point[1])
+                if px is None or py is None:
+                    continue
+                normalized_path.append({"x": px, "y": py})
+            args["path"] = normalized_path
+        elif isinstance(path, list) and path and isinstance(path[0], dict):
+            for point in path:
+                if "x" in point:
+                    point["x"] = to_int(point.get("x"))
+                if "y" in point:
+                    point["y"] = to_int(point.get("y"))
+
+        return args
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]

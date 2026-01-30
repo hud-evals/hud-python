@@ -150,8 +150,15 @@ class OpenAIComputerTool(HudComputerTool):
             "custom",
         ] = Field(..., description="The action type to perform"),
         # Coordinate parameters
-        x: int | None = Field(None, description="X coordinate for click/move/scroll actions"),
-        y: int | None = Field(None, description="Y coordinate for click/move/scroll actions"),
+        x: float | int | None = Field(
+            None, description="X coordinate for click/move/scroll actions"
+        ),
+        y: float | int | None = Field(
+            None, description="Y coordinate for click/move/scroll actions"
+        ),
+        coordinate: list[float | int] | int | None = Field(
+            None, description="Coordinate as [x, y] for click/move/scroll actions"
+        ),
         # Button parameter
         button: Literal["left", "right", "middle", "back", "forward"] | None = Field(
             None, description="Mouse button for click actions (left, right, middle, wheel)"
@@ -164,10 +171,17 @@ class OpenAIComputerTool(HudComputerTool):
         # Wait parameter
         ms: int | None = Field(None, description="Time to wait in milliseconds"),
         # Key press parameter
-        keys: list[str] | None = Field(None, description="Keys to press"),
+        keys: list[str] | str | int | None = Field(None, description="Keys to press"),
         # Drag parameter
-        path: list[Coordinate] | None = Field(
-            None, description="Path for drag actions as list of {x, y} dicts"
+        path: (
+            list[Coordinate]
+            | list[list[float | int]]
+            | list[dict[str, float | int]]
+            | int
+            | None
+        ) = Field(
+            None,
+            description="Path for drag actions as list of {x, y} dicts or [[x, y], ...]",
         ),
         # Custom action parameter
         action: str | None = Field(None, description="Custom action name"),
@@ -182,6 +196,32 @@ class OpenAIComputerTool(HudComputerTool):
         """
         logger.info("OpenAIComputerTool received type: %s", type)
 
+        # Normalize coordinate inputs (some models emit [x, y] instead of x/y fields)
+        if (
+            isinstance(coordinate, (list, tuple))
+            and (x is None and y is None)
+            and len(coordinate) >= 2
+        ):
+            x, y = coordinate[0], coordinate[1]
+
+        # Helper to coerce numeric inputs to ints for executors
+        def _to_int(value: float | int | None) -> int | None:
+            if value is None:
+                return None
+            try:
+                return int(round(float(value)))
+            except (TypeError, ValueError):
+                return None
+
+        x_int = _to_int(x)
+        y_int = _to_int(y)
+
+        # Normalize keys to list[str]
+        if isinstance(keys, str):
+            keys = [keys]
+        elif isinstance(keys, int):
+            keys = [str(keys)]
+
         # Process based on action type
         if type == "screenshot":
             screenshot_base64 = await self.executor.screenshot()
@@ -192,13 +232,22 @@ class OpenAIComputerTool(HudComputerTool):
                 result = ContentResult(error="Failed to take screenshot")
 
         elif type == "click":
-            if x is not None and y is not None:
+            if x_int is not None and y_int is not None:
                 # Cast button to proper literal type
                 button_literal = cast(
                     "Literal['left', 'right', 'middle', 'back', 'forward']", button or "left"
                 )
-                scaled_x, scaled_y = self._scale_coordinates(x, y)
-                logger.info("Scaled coordinates: %s, %s", scaled_x, scaled_y)
+                logger.info(
+                    "🎯 Click: Agent coords (%d, %d) in %dx%d space, scale factors: %.3f, %.3f",
+                    x_int,
+                    y_int,
+                    self.width,
+                    self.height,
+                    self.scale_x,
+                    self.scale_y,
+                )
+                scaled_x, scaled_y = self._scale_coordinates(x_int, y_int)
+                logger.info("   → Screen coords (%d, %d) in %dx%d display", scaled_x, scaled_y, self.environment_width, self.environment_height)
                 result = await self.executor.click(x=scaled_x, y=scaled_y, button=button_literal)
             else:
                 raise McpError(
@@ -206,9 +255,9 @@ class OpenAIComputerTool(HudComputerTool):
                 )
 
         elif type == "double_click":
-            if x is not None and y is not None:
+            if x_int is not None and y_int is not None:
                 # Use pattern for double-click
-                scaled_x, scaled_y = self._scale_coordinates(x, y)
+                scaled_x, scaled_y = self._scale_coordinates(x_int, y_int)
                 result = await self.executor.click(
                     x=scaled_x, y=scaled_y, button="left", pattern=[100]
                 )
@@ -220,7 +269,7 @@ class OpenAIComputerTool(HudComputerTool):
                 )
 
         elif type == "scroll":
-            if x is None or y is None:
+            if x_int is None or y_int is None:
                 raise McpError(
                     ErrorData(
                         code=INVALID_PARAMS, message="x and y coordinates required for scroll"
@@ -228,7 +277,7 @@ class OpenAIComputerTool(HudComputerTool):
                 )
 
             # scroll_x and scroll_y default to 0 if not provided
-            scaled_x, scaled_y = self._scale_coordinates(x, y)
+            scaled_x, scaled_y = self._scale_coordinates(x_int, y_int)
             result = await self.executor.scroll(
                 x=scaled_x, y=scaled_y, scroll_x=scroll_x or 0, scroll_y=scroll_y or 0
             )
@@ -243,8 +292,8 @@ class OpenAIComputerTool(HudComputerTool):
             result = await self.executor.wait(time=wait_time)
 
         elif type == "move":
-            if x is not None and y is not None:
-                scaled_x, scaled_y = self._scale_coordinates(x, y)
+            if x_int is not None and y_int is not None:
+                scaled_x, scaled_y = self._scale_coordinates(x_int, y_int)
                 result = await self.executor.move(x=scaled_x, y=scaled_y)
             else:
                 raise McpError(
@@ -273,8 +322,26 @@ class OpenAIComputerTool(HudComputerTool):
                     )
                 )
 
-            # Convert path from list of Coordinate objects to list of tuples
-            drag_path = [(point.x, point.y) for point in path]
+            # Convert path from list of Coordinate objects or [[x, y], ...] to tuples
+            drag_path: list[tuple[int, int]] = []
+            if path and isinstance(path, list) and isinstance(path[0], Coordinate):
+                drag_path = [(point.x, point.y) for point in cast("list[Coordinate]", path)]
+            elif path and isinstance(path, list) and isinstance(path[0], dict):
+                for point in cast("list[dict[str, float | int]]", path):
+                    px = _to_int(point.get("x"))
+                    py = _to_int(point.get("y"))
+                    if px is None or py is None:
+                        continue
+                    drag_path.append((px, py))
+            elif path and isinstance(path, list):
+                for point in cast("list[list[float | int]]", path):
+                    if len(point) < 2:
+                        continue
+                    px = _to_int(point[0])
+                    py = _to_int(point[1])
+                    if px is None or py is None:
+                        continue
+                    drag_path.append((px, py))
 
             scaled_path = self._scale_path(drag_path)
             result = await self.executor.drag(path=scaled_path)
@@ -296,12 +363,14 @@ class OpenAIComputerTool(HudComputerTool):
         else:
             raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Invalid action type: {type}"))
 
-        # Rescale screenshot in result if present
+        # Rescale screenshot in result if the action itself returned one
+        # This happens for actions like "screenshot" that produce an image
         if isinstance(result, ContentResult) and result.base64_image and self.rescale_images:
             rescaled_image = await self._rescale_screenshot(result.base64_image)
             result.base64_image = rescaled_image
 
-        # Handle screenshot for actions that need it
+        # Auto-capture screenshot for actions that need visual confirmation
+        # but didn't return one themselves (e.g., click, type)
         screenshot_actions = {
             "screenshot",
             "click",
@@ -314,15 +383,18 @@ class OpenAIComputerTool(HudComputerTool):
             "wait",
         }
 
+        # IMPORTANT: The 'not result.base64_image' condition ensures we don't
+        # double-rescale. If the action returned a screenshot (rescaled above),
+        # we skip this auto-screenshot section.
         if (
             type in screenshot_actions
             and type != "screenshot"
             and isinstance(result, ContentResult)
-            and not result.base64_image
+            and not result.base64_image  # Only if no screenshot from action itself
         ):
             screenshot_base64 = await self.executor.screenshot()
             if screenshot_base64:
-                # Rescale screenshot if requested
+                # Rescale the new screenshot if requested
                 screenshot_base64 = await self._rescale_screenshot(screenshot_base64)
                 result = ContentResult(
                     output=result.output, error=result.error, base64_image=screenshot_base64
