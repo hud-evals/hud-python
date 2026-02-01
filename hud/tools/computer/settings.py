@@ -114,6 +114,20 @@ class ComputerSettings(BaseSettings):
         description="Maximum number of recent turns to keep screenshots for in Gemini agent",
         validation_alias="GEMINI_MAX_RECENT_TURN_WITH_SCREENSHOTS",
     )
-
+    GLM_COMPUTER_WIDTH: int = Field(
+        default=1024,
+        description="Width of the display to use for the z-ai/glm4.5v computer tools",
+        validation_alias="GLM_COMPUTER_WIDTH",
+    )
+    GLM_COMPUTER_HEIGHT: int = Field(
+        default=768,
+        description="Height of the display to use for the GLM computer tools",
+        validation_alias="GLM_COMPUTER_HEIGHT",
+    )
+    GLM_RESCALE_IMAGES: bool = Field(
+        default=True,
+        description="Whether to rescale images to the agent width and height",
+        validation_alias="GLM_RESCALE_IMAGES",
+    )
 
 computer_settings = ComputerSettings()
