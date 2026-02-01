@@ -17,7 +17,7 @@ __all__ = [
 ]
 
 
-def create_agent(model: str, **kwargs: Any) -> MCPAgent:
+def create_agent(model: str, *, byok: bool = False, **kwargs: Any) -> MCPAgent:
     """Create an agent for a gateway model.
 
     This routes ALL requests through the HUD gateway. For direct API access
@@ -25,6 +25,8 @@ def create_agent(model: str, **kwargs: Any) -> MCPAgent:
 
     Args:
         model: Model name (e.g., "gpt-4o", "claude-sonnet-4-5").
+        byok: If True, use your own provider API keys.
+              Requires HUD_API_KEY for auth and provider API keys (e.g., ANTHROPIC_API_KEY).
         **kwargs: Additional params passed to agent.create().
 
     Returns:
@@ -35,6 +37,9 @@ def create_agent(model: str, **kwargs: Any) -> MCPAgent:
         # Gateway routing (recommended)
         agent = create_agent("gpt-4o")
         agent = create_agent("claude-sonnet-4-5", temperature=0.7)
+
+        # BYOK
+        agent = create_agent("claude-sonnet-4-5", byok=True)
 
         # Direct API access (use agent classes)
         from hud.agents.claude import ClaudeAgent
@@ -53,7 +58,6 @@ def create_agent(model: str, **kwargs: Any) -> MCPAgent:
     if gateway_info:
         model_id = gateway_info.get("model_name") or model
 
-    # Determine provider: from gateway info, or infer from agent class
     if gateway_info:
         provider = gateway_info["provider"]["name"]
     else:
@@ -63,7 +67,7 @@ def create_agent(model: str, **kwargs: Any) -> MCPAgent:
         elif agent_cls.__name__ in ("GeminiAgent", "GeminiCUAAgent"):
             provider = "gemini"
 
-    client = build_gateway_client(provider)
+    client = build_gateway_client(provider, byok=byok)
 
     # Set up kwargs
     kwargs.setdefault("model", model_id)

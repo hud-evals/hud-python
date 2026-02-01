@@ -95,7 +95,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # max_concurrent = 30
 # max_steps = 10
 # group_size = 1
-# byok = false  # Remote only; use encrypted env vars on the platform.
+# byok = false
 # task_ids = ["task_1", "task_2"]
 # verbose = true
 # very_verbose = true
@@ -213,11 +213,6 @@ class EvalConfig(BaseModel):
 
     def validate_api_keys(self) -> None:
         """Validate required API keys for the selected agent. Raises typer.Exit on failure."""
-        # BYOK requires remote execution (check before agent_type guard)
-        if self.byok and not self.remote:
-            hud_console.error("--byok requires --remote (BYOK only works with remote execution)")
-            raise typer.Exit(1)
-
         if self.agent_type is None:
             return
 
@@ -228,10 +223,10 @@ class EvalConfig(BaseModel):
                 raise typer.Exit(1)
             return
 
-        # Gateway mode only requires HUD_API_KEY
-        if self.gateway:
+        # Gateway or BYOK mode requires HUD_API_KEY
+        if self.gateway or self.byok:
             if not settings.api_key:
-                hud_console.error("HUD_API_KEY is required for gateway mode")
+                hud_console.error("HUD_API_KEY is required for gateway/BYOK mode")
                 hud_console.info("Set it: hud set HUD_API_KEY=your-key-here")
                 raise typer.Exit(1)
             return
@@ -339,7 +334,7 @@ class EvalConfig(BaseModel):
             kwargs["validate_api_key"] = False
 
         # Configure gateway mode - route LLM API calls through HUD gateway
-        if self.gateway:
+        if self.gateway or self.byok:
             if not settings.api_key:
                 raise typer.Exit(1)  # Already validated in validate_api_keys()
 
@@ -355,12 +350,14 @@ class EvalConfig(BaseModel):
                 AgentType.OPENAI_COMPATIBLE: "openai",
             }
             provider = agent_to_provider.get(self.agent_type, "openai")
-            client = build_gateway_client(provider)
+            client = build_gateway_client(provider, byok=self.byok)
 
             # OpenAI-compatible uses openai_client key
             is_oai_compat = self.agent_type == AgentType.OPENAI_COMPATIBLE
             kwargs["openai_client" if is_oai_compat else "model_client"] = client
-            hud_console.info(f"🌐 Using HUD Gateway for {provider} API")
+
+            mode_str = "BYOK via " if self.byok else ""
+            hud_console.info(f"🌐 Using {mode_str}HUD Gateway for {provider} API")
 
         return kwargs
 
