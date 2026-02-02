@@ -3,12 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 from .base import CategorizedTools, MCPAgent
+from .glm_cua import GLMCUA
 from .openai import OpenAIAgent
 from .openai_chat import OpenAIChatAgent
 from .operator import OperatorAgent
 
 __all__ = [
     "CategorizedTools",
+    "GLMCUA",
     "MCPAgent",
     "OpenAIAgent",
     "OpenAIChatAgent",

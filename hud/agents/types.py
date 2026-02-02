@@ -130,6 +130,26 @@ class OpenAIChatCreateParams(BaseCreateParams, OpenAIChatConfig):
 
 
 # -----------------------------------------------------------------------------
+# GLM CUA
+# -----------------------------------------------------------------------------
+
+
+class GLMCUAConfig(OpenAIChatConfig):
+    """Configuration for GLMCUAAgent (GLM-4.5V GUI Agent)."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    model_name: str = "GLM CUA"
+    model: str = Field(default="glm-4.5v", validation_alias=_model_alias)
+    max_history_screenshots: int = 4  # Number of past screenshots to include
+    history_image_scale: float = 0.5  # Scale for history screenshots (50%)
+
+
+class GLMCUACreateParams(BaseCreateParams, GLMCUAConfig):
+    pass
+
+
+# -----------------------------------------------------------------------------
 # Operator
 # -----------------------------------------------------------------------------
 

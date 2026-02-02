@@ -33,12 +33,16 @@ class GLMComputerTool(HudComputerTool):
     name: str = "glm_computer"
     api_type: str = "glm4_5v_computer"
     native_specs: ClassVar[NativeToolSpecs] = {
-        AgentType.GLM: NativeToolSpec(
-            api_type="glm4_5v_computer",
-            api_name="computer",
+        AgentType.OPENAI_COMPATIBLE: NativeToolSpec(
+            api_type="function",
+            api_name="glm_computer",
             role="computer",
-            supported_models=("z-ai/glm4.5v-*",),
-        )
+        ),
+        AgentType.GLM_CUA: NativeToolSpec(
+            api_type="glm_computer",
+            api_name="glm_computer",
+            role="computer",
+        ),
     }
 
     def __init__(
@@ -54,14 +58,6 @@ class GLMComputerTool(HudComputerTool):
         description: str | None = "Control computer with mouse, keyboard, and screenshots",
         **kwargs: Any,
     ) -> None:
-        instance_native_specs = {
-            AgentType.GLM: NativeToolSpec(
-                api_type="glm4_5v_computer",
-                api_name="computer",
-                role="computer",
-                supported_models=("z-ai/glm4.5v-*",),
-            )
-        }
         super().__init__(
             executor=executor,
             platform_type=platform_type,
@@ -72,7 +68,6 @@ class GLMComputerTool(HudComputerTool):
             name=name,
             title=title,
             description=description,
-            native_specs=instance_native_specs,
             **kwargs,
         )
 
