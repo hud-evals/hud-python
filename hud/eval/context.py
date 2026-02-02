@@ -645,6 +645,8 @@ class EvalContext(Environment):
         if exc_type is not None:
             self.error = exc_val
             error_msg = str(exc_val) if exc_val else "Unknown error"
+        elif self.error is not None:
+            error_msg = str(self.error)
 
         # Flush any pending telemetry spans for this trace
         flush(self.trace_id)
