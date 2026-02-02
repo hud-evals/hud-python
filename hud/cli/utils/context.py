@@ -39,12 +39,68 @@ def parse_ignore_file(ignore_path: Path) -> list[str]:
     return patterns
 
 
+def _matches_pattern(
+    rel_path_str: str,
+    path: Path,
+    pattern: str,
+) -> bool:
+    """Check if a path matches a single ignore pattern.
+
+    Args:
+        rel_path_str: Relative path string (forward slashes)
+        path: Original Path object (for is_dir checks)
+        pattern: Single ignore pattern (without ! prefix)
+
+    Returns:
+        True if the path matches the pattern
+    """
+    # Handle directory-only patterns (ending with /)
+    if pattern.endswith("/"):
+        pattern = pattern[:-1]
+        if path.is_dir() and fnmatch.fnmatch(rel_path_str, pattern):
+            return True
+        return fnmatch.fnmatch(rel_path_str, f"{pattern}/*")
+
+    # Handle ** patterns (match any directory depth)
+    if "**" in pattern:
+        # Convert ** to regex-like pattern
+        regex_pattern = pattern.replace("**", "*")
+        if fnmatch.fnmatch(rel_path_str, regex_pattern):
+            return True
+        # Also check if any parent directory matches
+        parts = rel_path_str.split("/")
+        for i in range(len(parts)):
+            partial = "/".join(parts[: i + 1])
+            if fnmatch.fnmatch(partial, regex_pattern):
+                return True
+        return False
+
+    # Standard pattern matching
+    if fnmatch.fnmatch(rel_path_str, pattern):
+        return True
+    # Also match against just the filename
+    if fnmatch.fnmatch(path.name, pattern):
+        return True
+    # Check if pattern matches a parent directory
+    parts = rel_path_str.split("/")
+    for i in range(len(parts)):
+        partial = "/".join(parts[: i + 1])
+        if fnmatch.fnmatch(partial, pattern):
+            return True
+
+    return False
+
+
 def should_ignore(
     path: Path,
     base_path: Path,
     ignore_patterns: list[str],
 ) -> bool:
     """Check if a path should be ignored based on patterns.
+
+    Supports negation patterns (lines starting with !) following
+    .dockerignore semantics: patterns are evaluated in order, and
+    a later negation can re-include a previously excluded path.
 
     Args:
         path: Path to check
@@ -60,48 +116,19 @@ def should_ignore(
     except ValueError:
         return False
 
+    ignored = False
+
     for pattern in ignore_patterns:
-        # Handle negation patterns (we don't support these yet, just skip)
+        # Handle negation patterns
         if pattern.startswith("!"):
-            continue
+            # A negation pattern re-includes a previously excluded file
+            neg_pattern = pattern[1:]
+            if ignored and _matches_pattern(rel_path_str, path, neg_pattern):
+                ignored = False
+        elif _matches_pattern(rel_path_str, path, pattern):
+            ignored = True
 
-        # Handle directory-only patterns (ending with /)
-        if pattern.endswith("/"):
-            pattern = pattern[:-1]
-            if path.is_dir() and fnmatch.fnmatch(rel_path_str, pattern):
-                return True
-            if fnmatch.fnmatch(rel_path_str, f"{pattern}/*"):
-                return True
-            continue
-
-        # Handle ** patterns (match any directory depth)
-        if "**" in pattern:
-            # Convert ** to regex-like pattern
-            regex_pattern = pattern.replace("**", "*")
-            if fnmatch.fnmatch(rel_path_str, regex_pattern):
-                return True
-            # Also check if any parent directory matches
-            parts = rel_path_str.split("/")
-            for i in range(len(parts)):
-                partial = "/".join(parts[: i + 1])
-                if fnmatch.fnmatch(partial, regex_pattern):
-                    return True
-            continue
-
-        # Standard pattern matching
-        if fnmatch.fnmatch(rel_path_str, pattern):
-            return True
-        # Also match against just the filename
-        if fnmatch.fnmatch(path.name, pattern):
-            return True
-        # Check if pattern matches a parent directory
-        parts = rel_path_str.split("/")
-        for i in range(len(parts)):
-            partial = "/".join(parts[: i + 1])
-            if fnmatch.fnmatch(partial, pattern):
-                return True
-
-    return False
+    return ignored
 
 
 # Default patterns that are always excluded for security and efficiency

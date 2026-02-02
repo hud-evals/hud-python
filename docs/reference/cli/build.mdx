@@ -36,8 +36,12 @@ hud build [DIRECTORY] [OPTIONS]
   Target platform for Docker build. Defaults to `linux/amd64` if unspecified.
 </ParamField>
 
-<ParamField path="--build-arg" type="string">
-  Docker build argument passed to `docker build --build-arg`. Can be specified multiple times for multiple arguments.
+<ParamField path="--build-arg" type="string" repeatable>
+  Docker build argument passed to `docker build --build-arg`. Can be repeated.
+</ParamField>
+
+<ParamField path="--secret" type="string" repeatable>
+  Docker build secret. Format: `id=SECRET_ID,env=ENV_VAR`. Passed to `docker build --secret`. Can be repeated.
 </ParamField>
 
 ## What It Does
@@ -79,6 +83,12 @@ hud build . --no-cache --verbose
 
 # Force cross‑platform (useful on Apple Silicon)
 hud build . --platform linux/amd64
+
+# With build arguments (for Dockerfile ARG directives)
+hud build . --build-arg REPO_URL=https://github.com/org/repo
+
+# With build secrets (for private repos, not stored in image)
+hud build . --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN
 ```
 
 ## Image Naming

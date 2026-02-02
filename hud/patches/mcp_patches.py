@@ -51,12 +51,20 @@ def patch_streamable_http_error_handling() -> None:
                 # Use configured timeout, minimum 30s to prevent instant failures
                 timeout = max(settings.client_timeout, 15.0)
                 deadline = time.monotonic() + timeout
-                retryable = (
+                retryable_exceptions = (
                     httpx.ConnectError,
                     httpx.ReadError,
                     httpx.TimeoutException,
                     ssl.SSLError,
                 )
+                retryable_status_codes = (502, 503, 504)
+
+                def is_retryable(exc: Exception) -> bool:
+                    if isinstance(exc, retryable_exceptions):
+                        return True
+                    if isinstance(exc, httpx.HTTPStatusError):
+                        return exc.response.status_code in retryable_status_codes
+                    return False
 
                 async def send_error_response(exc: Exception) -> None:
                     """Send an error response to the client."""
@@ -76,6 +84,8 @@ def patch_streamable_http_error_handling() -> None:
                     else:
                         await ctx.read_stream_writer.send(exc)
 
+                backoff = 0.5
+                max_backoff = 60.0
                 while True:
                     try:
                         if is_resumption:
@@ -83,19 +93,21 @@ def patch_streamable_http_error_handling() -> None:
                         else:
                             await self._handle_post_request(ctx)
                         return
-                    except retryable as e:
-                        if time.monotonic() >= deadline:
-                            logger.error("MCP request failed after timeout: %s", e)
-                            await send_error_response(e)
-                            return
-                        logger.warning("Retrying MCP request after error: %s", e)
-                        await asyncio.sleep(2.0)
                     except asyncio.CancelledError:
                         raise
                     except Exception as e:
-                        logger.exception("Request handler error: %s", e)
-                        await send_error_response(e)
-                        return
+                        if is_retryable(e):
+                            if time.monotonic() >= deadline:
+                                logger.error("MCP request failed after timeout: %s", e)
+                                await send_error_response(e)
+                                return
+                            logger.warning("Retrying MCP request after error: %s", e)
+                            await asyncio.sleep(backoff)
+                            backoff = min(backoff * 2, max_backoff)
+                        else:
+                            logger.exception("Request handler error: %s", e)
+                            await send_error_response(e)
+                            return
 
             try:
                 async with write_stream_reader:

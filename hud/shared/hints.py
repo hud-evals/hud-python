@@ -159,6 +159,21 @@ MCP_SERVER_ERROR = Hint(
 )
 
 
+def secrets_in_build_args(secret_vars: list[str]) -> Hint:
+    return Hint(
+        title="Possible secrets detected in Dockerfile",
+        message=", ".join(secret_vars),
+        tips=[
+            "These will be visible in image layers and build logs",
+            "Mount secrets at build time: RUN --mount=type=secret,id=mytoken",
+            "Pass the --secret flag when you build:",
+        ],
+        command_examples=["hud build . --secret id=mytoken,src=./token.txt"],
+        code="SECRETS_IN_BUILD_ARGS",
+        context=["docker", "security"],
+    )
+
+
 def render_hints(hints: Iterable[Hint] | None, *, design: Any | None = None) -> None:
     """Render a collection of hints using the HUD design system if available.
 

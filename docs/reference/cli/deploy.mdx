@@ -36,6 +36,14 @@ hud deploy [DIRECTORY] [OPTIONS]
   Path to .env file (default: .env in directory if exists)
 </ParamField>
 
+<ParamField path="--build-arg" type="string" repeatable>
+  Docker build argument in KEY=VALUE format. Can be repeated. Used for Dockerfile `ARG` directives.
+</ParamField>
+
+<ParamField path="--secret" type="string" repeatable>
+  Docker build secret. Format: `id=SECRET_ID,env=ENV_VAR` or `id=SECRET_ID,src=./path`. Encrypted at rest.
+</ParamField>
+
 <ParamField path="--no-cache" type="boolean" default="false">
   Disable Docker build cache for a clean rebuild
 </ParamField>
@@ -84,6 +92,67 @@ Creates `.hud/deploy.json` to link this directory to the deployed environment fo
 </Step>
 </Steps>
 
+## Environment Variables, Build Arguments & Secrets
+
+Three flags for different purposes:
+
+| Flag | When Used | Stored In | Use For |
+|------|-----------|-----------|---------|
+| `--env` | Runtime | Platform (encrypted) | API keys, feature flags, runtime config |
+| `--build-arg` | Build time | Image layers | Repo URLs, build modes, versions |
+| `--secret` | Build time | Not stored in image | Private repo tokens, credentials during build |
+
+<Tabs>
+<Tab title="--env">
+
+**Runtime environment variables** — injected when the container runs.
+
+```bash
+hud deploy . -e API_KEY=secret -e DEBUG=true
+```
+
+Values are encrypted on the platform and can be changed without rebuilding.
+
+</Tab>
+<Tab title="--build-arg">
+
+**Build-time arguments** — passed to `docker build` for Dockerfile `ARG` directives.
+
+```dockerfile
+ARG REPO_URL
+RUN git clone ${REPO_URL} /app
+```
+
+```bash
+hud deploy . --build-arg REPO_URL=https://github.com/org/repo
+```
+
+Values are baked into image layers (visible in image history).
+
+</Tab>
+<Tab title="--secret">
+
+**Build-time secrets** — available during build but not stored in the image.
+
+```dockerfile
+RUN --mount=type=secret,id=GITHUB_TOKEN \
+    GITHUB_TOKEN=$(cat /run/secrets/GITHUB_TOKEN) && \
+    git clone https://${GITHUB_TOKEN}@github.com/org/private-repo /app
+```
+
+```bash
+hud deploy . --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN
+```
+
+Use `env=VAR` to read from environment, or `src=./file` to read from a file.
+
+</Tab>
+</Tabs>
+
+<Warning>
+**Common mistake:** Using `--env` for Dockerfile `ARG` values. If your Dockerfile has `ARG REPO_URL`, use `--build-arg REPO_URL=...`, not `-e REPO_URL=...`.
+</Warning>
+
 ## Environment Name Resolution
 
 The environment name is determined in this order:
@@ -114,11 +183,40 @@ hud deploy environments/browser
 ### With Environment Variables
 
 ```bash
-# Pass env vars
+# Pass runtime env vars
 hud deploy . -e API_KEY=secret -e DEBUG=true
 
 # Use env file
 hud deploy . --env-file .env.production
+```
+
+### With Build Arguments
+
+```bash
+# Pass Docker build arguments
+hud deploy . --build-arg NODE_ENV=production
+
+# Multiple build args
+hud deploy . --build-arg REPO_URL=https://github.com/org/repo --build-arg FOLDER_NAME=project
+```
+
+### With Build Secrets
+
+```bash
+# Secret from environment variable
+hud deploy . --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN
+
+# Secret from file
+hud deploy . --secret id=SSH_KEY,src=~/.ssh/deploy_key
+```
+
+### Combined Usage
+
+```bash
+# All three: build args + secrets for build, env vars for runtime
+hud deploy . --build-arg REPO_URL=https://github.com/org/repo \
+             --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN \
+             -e API_KEY=secret
 ```
 
 ### Custom Name
@@ -184,15 +282,20 @@ node_modules
 Even without `.dockerignore`, HUD automatically excludes common sensitive files like `.env`, `.git`, and virtual environments.
 </Note>
 
-## Comparison with hud push
+## Comparison with hud build + hud push
 
-| Feature | `hud deploy` | `hud push` |
-|---------|--------------|------------|
+| Feature | `hud deploy` | `hud build` + `hud push` |
+|---------|--------------|--------------------------|
 | Build location | Remote (HUD CodeBuild) | Local (Docker) |
 | Registry | HUD ECR | Docker Hub/GHCR |
-| GitHub required | No | No |
+| Build args | Yes (`--build-arg`) | Yes (via `hud build`) |
+| Build secrets | Yes (`--secret`) | Yes (via `hud build`) |
 | Env var storage | HUD platform | Not stored |
 | Recommended for | Platform deployments | Docker Hub sharing |
+
+<Note>
+`hud push` only pushes an already-built image. Use `hud build --build-arg` and `hud build --secret` for local builds with build arguments and secrets, then `hud push` to share.
+</Note>
 
 ## See Also
 

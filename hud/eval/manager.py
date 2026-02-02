@@ -30,30 +30,39 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _get_eval_name(tasks: list[Task] | None = None) -> str:
+def _get_eval_name(tasks: list[Task] | None = None, group: int = 1) -> str:
     """Extract a nice name for job display.
 
     Args:
         tasks: List of Task objects
+        group: Group size (runs per task)
 
     Returns:
-        Name like "scenario with val1, val2" or "eval" if no tasks
+        Name like "scenario (group=5)" for single task or "eval (50 tasks)" for batch
     """
-    from hud.eval.task import build_eval_name
+    if not tasks:
+        return "eval"
 
-    # If we have Task objects, derive name from first one
-    if tasks:
+    # Single task: use scenario/env name
+    if len(tasks) == 1:
+        name = None
         if tasks[0].scenario:
-            return build_eval_name(tasks[0].scenario, tasks[0].args)
-        # Fall back to env name or prompt
-        if tasks[0].env and hasattr(tasks[0].env, "name"):
-            return tasks[0].env.name
-        if tasks[0].env and hasattr(tasks[0].env, "prompt") and tasks[0].env.prompt:
-            return tasks[0].env.prompt[:30].strip()
-        if tasks[0].id:
-            return tasks[0].id
+            name = tasks[0].scenario
+        elif tasks[0].env and hasattr(tasks[0].env, "name"):
+            name = tasks[0].env.name
 
-    return "eval"
+        if name:
+            if group > 1:
+                return f"{name} (group={group})"
+            return name
+        return "eval"
+
+    # Batch: use generic name with count
+    parts = [f"{len(tasks)} tasks"]
+    if group > 1:
+        parts.append(f"group={group}")
+
+    return f"eval ({', '.join(parts)})"
 
 
 async def _send_job_enter(
@@ -256,7 +265,7 @@ async def run_eval(
             # and task are linked to the taskset (via job_id + task_version_id).
             job_id_for_run = job_id
             if taskset:
-                eval_name = _get_eval_name(tasks=tasks)
+                eval_name = _get_eval_name(tasks=tasks, group=group)
                 if job_id_for_run is None:
                     job_id_for_run = str(uuid.uuid4())
 
@@ -309,7 +318,7 @@ async def run_eval(
 
     else:
         # Parallel execution: create implicit job to group traces
-        eval_name = _get_eval_name(tasks=tasks)
+        eval_name = _get_eval_name(tasks=tasks, group=group)
         implicit_job_id = job_id or str(uuid.uuid4())
         job_url = f"https://hud.ai/jobs/{implicit_job_id}"
 
