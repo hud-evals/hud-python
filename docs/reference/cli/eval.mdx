@@ -222,10 +222,10 @@ Cancel remote jobs:
 
 ```bash
 # Cancel a specific job
-hud cancel --job <job_id>
+hud cancel <job_id>
 
-# Cancel a specific task
-hud cancel --task <job_id> <task_id>
+# Cancel a specific trace within a job
+hud cancel <job_id> --trace-id <trace_id>
 
 # Cancel ALL your active jobs
 hud cancel --all

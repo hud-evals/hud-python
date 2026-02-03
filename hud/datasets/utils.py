@@ -263,23 +263,15 @@ async def cancel_job(job_id: str) -> dict[str, Any]:
         return response.json()
 
 
-async def cancel_task(job_id: str, task_id: str) -> dict[str, Any]:
-    """Cancel a specific task within a job.
-
-    Args:
-        job_id: The job ID
-        task_id: The specific task ID to cancel
-
-    Returns:
-        Response with cancellation result
-    """
+async def cancel_task(job_id: str, trace_id: str) -> dict[str, Any]:
+    """Cancel a specific task run within a job."""
     api_url = f"{settings.hud_api_url.rstrip('/')}/v1/rollouts/cancel"
     headers = {"Authorization": f"Bearer {settings.api_key}"}
 
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(
             api_url,
-            json={"job_id": job_id, "task_id": task_id},
+            json={"job_id": job_id, "trace_id": trace_id},
             headers=headers,
         )
         response.raise_for_status()

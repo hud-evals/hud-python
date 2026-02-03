@@ -141,14 +141,15 @@ class TestCancellationFunctions:
                 mock_settings.hud_api_url = "https://api.hud.ai"
                 mock_settings.api_key = "test-key"
 
-                result = await cancel_task("job-123", "task-1")
+                result = await cancel_task("job-123", "trace-1")
 
             assert result["cancelled"] is True
             mock_client.post.assert_called_once()
             call_args = mock_client.post.call_args
             assert "cancel" in call_args[0][0]
             assert call_args[1]["json"]["job_id"] == "job-123"
-            assert call_args[1]["json"]["task_id"] == "task-1"
+            assert "task_id" not in call_args[1]["json"]
+            assert call_args[1]["json"]["trace_id"] == "trace-1"
 
     @pytest.mark.asyncio
     async def test_cancel_job(self):
