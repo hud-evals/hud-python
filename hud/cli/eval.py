@@ -910,7 +910,7 @@ def eval_command(
     # Run
     start_time = time.time()
     try:
-        results, tasks = asyncio.run(_run_evaluation(cfg))
+        results, _tasks = asyncio.run(_run_evaluation(cfg))
     except ValueError as e:
         hud_console.error(str(e))
         raise typer.Exit(1) from None
@@ -919,6 +919,6 @@ def eval_command(
     if cfg.remote:
         return
 
-    from hud.datasets import display_results
-
-    display_results(results, tasks=tasks, elapsed=elapsed, show_details=len(results) <= 50)
+    if results:
+        rate = len(results) / elapsed if elapsed > 0 else 0
+        hud_console.info(f"Completed {len(results)} evals in {elapsed:.1f}s ({rate:.1f}/s)")

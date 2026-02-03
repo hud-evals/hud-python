@@ -115,8 +115,10 @@ async def submit_rollouts(
     batch_size: int = 50,
     metadata: dict[str, Any] | None = None,
     use_byok: bool = False,
-) -> None:
-    """Submit rollouts to the HUD platform API for remote execution (fire-and-forget).
+) -> list[str]:
+    """Submit rollouts to the HUD platform API for remote execution.
+
+    Returns the list of trace_ids for tracking.
 
     Args:
         tasks: List of tasks (v5 Task, v4 LegacyTask, or dicts)
@@ -184,6 +186,7 @@ async def submit_rollouts(
 
     total_accepted = 0
     total_rejected = 0
+    trace_ids: list[str] = []
 
     async with httpx.AsyncClient(timeout=120) as client:
         for i in range(0, len(requests), batch_size):
@@ -203,8 +206,12 @@ async def submit_rollouts(
                 total_rejected += result.get("rejected", 0)
 
                 for item in result.get("results", []):
-                    if isinstance(item, dict) and item.get("status") == "rejected":
-                        hud_console.warning(f"Task rejected: {item.get('error', 'Unknown reason')}")
+                    if isinstance(item, dict):
+                        if item.get("status") == "rejected":
+                            error = item.get("error", "Unknown reason")
+                            hud_console.warning(f"Task rejected: {error}")
+                        elif item.get("trace_id"):
+                            trace_ids.append(item["trace_id"])
 
                 batch_num = (i // batch_size) + 1
                 total_batches = (len(requests) + batch_size - 1) // batch_size
@@ -230,6 +237,8 @@ async def submit_rollouts(
         )
     else:
         hud_console.info(f"Submitted {total_accepted}/{len(requests)} requests")
+
+    return trace_ids
 
 
 async def cancel_job(job_id: str) -> dict[str, Any]:
