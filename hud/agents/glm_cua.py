@@ -329,7 +329,7 @@ class GLMCUA(OpenAIChatAgent):
             value = kv_match.group(2).strip()
             args[key] = value
 
-        # Pattern 2: Malformed - key</arg_key> <arg_value>val</arg_value> (missing opening tag)
+        # Pattern 2: Missing <arg_key> -- key</arg_key> <arg_value>val</arg_value> 
         malformed_pattern = r"\b(\w+)</arg_key>\s*<arg_value>([^<]*)</arg_value>"
         for kv_match in re.finditer(malformed_pattern, response):
             key = kv_match.group(1)
@@ -348,7 +348,6 @@ class GLMCUA(OpenAIChatAgent):
                 args[key] = value
 
         # Pattern 4: Missing <arg_key> - "keys</arg_key> <arg_value>up </tool_call>"
-        # The model sometimes omits the opening <arg_key> tag
         missing_open_truncated = r"\b(\w+)</arg_key>\s*<arg_value>([^<]+?)(?:</tool_call>|</arg_v|$)"
         for kv_match in re.finditer(missing_open_truncated, response):
             key = kv_match.group(1)

@@ -110,6 +110,38 @@ class GLMComputerTool(HudComputerTool):
             return []
         return [k.strip().lower() for k in keys.split("+")]
 
+    def _parse_function_style_action(
+        self, action: str
+    ) -> tuple[str, dict[str, Any]]:
+        """Parse function-style action like 'left_click(start_box='[513,438]')'.
+        
+        Returns (action_name, extracted_args).
+        """
+        import re
+        
+        # Check if action contains function call syntax
+        func_match = re.match(r"(\w+)\((.*)\)", action)
+        if not func_match:
+            return action, {}
+        
+        action_name = func_match.group(1)
+        args_str = func_match.group(2)
+        
+        extracted: dict[str, Any] = {}
+        
+        # Extract quoted arguments: key='value' or key="value"
+        quoted_pattern = r"(\w+)=['\"]([^'\"]*)['\"]"
+        for match in re.finditer(quoted_pattern, args_str):
+            extracted[match.group(1)] = match.group(2)
+        
+        # Extract unquoted numeric arguments: key=123
+        unquoted_pattern = r"(\w+)=(\d+)(?!['\"])"
+        for match in re.finditer(unquoted_pattern, args_str):
+            if match.group(1) not in extracted:
+                extracted[match.group(1)] = int(match.group(2))
+        
+        return action_name, extracted
+
     async def __call__(
         self,
         action: str = Field(..., description="The action to perform"),
@@ -122,6 +154,24 @@ class GLMComputerTool(HudComputerTool):
         step: int = Field(5, description="Scroll steps"),
     ) -> list[ContentBlock]:
         """Execute a GLM desktop computer action."""
+        # Handle GLM 4.6V function-style action: "left_click(start_box='[513,438]')"
+        if "(" in action:
+            parsed_action, extracted_args = self._parse_function_style_action(action)
+            action = parsed_action
+            # Override None arguments with extracted values
+            if start_box is None and "start_box" in extracted_args:
+                start_box = extracted_args["start_box"]
+            if end_box is None and "end_box" in extracted_args:
+                end_box = extracted_args["end_box"]
+            if keys is None and "keys" in extracted_args:
+                keys = extracted_args["keys"]
+            if content is None and "content" in extracted_args:
+                content = extracted_args["content"]
+            if direction is None and "direction" in extracted_args:
+                direction = extracted_args["direction"]
+            if "step" in extracted_args:
+                step = extracted_args["step"]
+        
         logger.info("GLMComputerTool action: %s", action)
 
         result: ContentResult | None = None
