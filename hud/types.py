@@ -53,9 +53,9 @@ class AgentType(str, Enum):
 
             return GeminiCUAAgent
         elif self == AgentType.GLM_CUA:
-            from hud.agents.glm_cua import GLMCUAAgent
+            from hud.agents.glm_cua import GLMCUA
 
-            return GLMCUAAgent
+            return GLMCUA
         elif self == AgentType.OPENAI_COMPATIBLE:
             from hud.agents.openai_chat import OpenAIChatAgent
 
