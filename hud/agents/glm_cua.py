@@ -347,6 +347,15 @@ class GLMCUA(OpenAIChatAgent):
                 value = kv_match.group(2).strip()
                 args[key] = value
 
+        # Pattern 4: Missing <arg_key> - "keys</arg_key> <arg_value>up </tool_call>"
+        # The model sometimes omits the opening <arg_key> tag
+        missing_open_truncated = r"\b(\w+)</arg_key>\s*<arg_value>([^<]+?)(?:</tool_call>|</arg_v|$)"
+        for kv_match in re.finditer(missing_open_truncated, response):
+            key = kv_match.group(1)
+            if key not in args:
+                value = kv_match.group(2).strip()
+                args[key] = value
+
         return args
 
     def _extract_memory(self, response: str) -> str:
