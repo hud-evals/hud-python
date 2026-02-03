@@ -246,7 +246,17 @@ def get_docker_image_id(image: str) -> str | None:
 
 
 def extract_env_vars_from_dockerfile(dockerfile_path: Path) -> tuple[list[str], list[str]]:
-    """Extract required and optional environment variables from Dockerfile."""
+    """Extract required and optional RUNTIME environment variables from Dockerfile.
+
+    Only ENV directives are considered for runtime env vars.
+    ARG directives are build-time only and are NOT added to required env vars
+    (those should be passed via --build-arg during build).
+
+    ARG variables are tracked only to detect patterns like:
+        ARG MY_VAR
+        ENV MY_VAR=$MY_VAR
+    where the ARG value is exposed as a runtime ENV.
+    """
     required = []
     optional = []
 
@@ -255,20 +265,20 @@ def extract_env_vars_from_dockerfile(dockerfile_path: Path) -> tuple[list[str], 
 
     # Parse both ENV and ARG directives
     content = dockerfile_path.read_text()
-    arg_vars = set()  # Track ARG variables
+    arg_vars = set()  # Track ARG variables (for detecting ENV $ARG patterns)
 
     for line in content.splitlines():
         line = line.strip()
 
         # Look for ARG directives (build-time variables)
+        # These are NOT runtime env vars - only track them to detect ENV $ARG patterns
         if line.startswith("ARG "):
             parts = line[4:].strip().split("=", 1)
             var_name = parts[0].strip()
             if len(parts) == 1 or not parts[1].strip():
-                # No default value = required
+                # No default value - track it but DON'T add to required
+                # ARG is build-time only, not runtime
                 arg_vars.add(var_name)
-                if var_name not in required:
-                    required.append(var_name)
 
         # Look for ENV directives (runtime variables)
         elif line.startswith("ENV "):
@@ -276,6 +286,7 @@ def extract_env_vars_from_dockerfile(dockerfile_path: Path) -> tuple[list[str], 
             var_name = parts[0].strip()
 
             # Check if it references an ARG variable (e.g., ENV MY_VAR=$MY_VAR)
+            # This pattern exposes the build-time ARG as a runtime ENV
             if len(parts) == 2 and parts[1].strip().startswith("$"):
                 ref_var = parts[1].strip()[1:]
                 if ref_var in arg_vars and var_name not in required:
