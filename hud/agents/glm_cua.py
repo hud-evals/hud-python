@@ -338,6 +338,15 @@ class GLMCUA(OpenAIChatAgent):
                 value = kv_match.group(2).strip()
                 args[key] = value
 
+        # Pattern 3: Truncated - <arg_value>val</tool_call> or <arg_value>val (no closing tag)
+        # This handles cases where model output is cut off
+        truncated_pattern = r"<arg_key>(\w+)</arg_key>\s*<arg_value>([^<]+?)(?:</tool_call>|</arg_v|$)"
+        for kv_match in re.finditer(truncated_pattern, response):
+            key = kv_match.group(1)
+            if key not in args:
+                value = kv_match.group(2).strip()
+                args[key] = value
+
         return args
 
     def _extract_memory(self, response: str) -> str:
