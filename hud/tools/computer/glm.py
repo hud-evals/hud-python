@@ -1,13 +1,27 @@
-# flake8: noqa: B008
-"""GLM computer tool for interacting with the computer."""
+"""GLM computer tool for interacting with the computer.
+
+GLM 4.6V uses PC action space with (0-999, 0-999) coordinate space.
+Coordinates are automatically rescaled to actual screen dimensions.
+
+Native PC actions:
+- left_click, right_click, middle_click(start_box='[x,y]')
+- hover(start_box='[x,y]')
+- left_double_click(start_box='[x,y]')
+- left_drag(start_box='[x,y]', end_box='[x,y]')
+- key(keys='')
+- type(content='')
+- scroll(start_box='[x,y]', direction='', step=5)
+- WAIT(), DONE(), FAIL()
+"""
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
+import re
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from mcp import ErrorData, McpError
-from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ContentBlock, TextContent
+from mcp.types import INVALID_PARAMS, ContentBlock
 from pydantic import Field
 
 from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
@@ -22,24 +36,44 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# GLM uses normalized 0-999 coordinate space
+GLM_COORDINATE_SPACE = 999
+
+# Field definitions matching GLM's PC action space
+ACTION_FIELD = Field(
+    ...,
+    description="GLM PC action: left_click, right_click, middle_click, hover, "
+    "left_double_click, left_drag, key, type, scroll, WAIT, DONE, FAIL",
+)
+START_BOX_FIELD = Field(
+    None,
+    description="Position as '[x,y]' string or [x,y] array, coordinates 0-999 normalized",
+)
+END_BOX_FIELD = Field(
+    None,
+    description="End position for drag as '[x,y]' string or [x,y] array, coordinates 0-999",
+)
+CONTENT_FIELD = Field(None, description="Text content to type (for 'type' action)")
+KEYS_FIELD = Field(None, description="Key(s) to press, e.g. 'enter', 'ctrl+c', 'alt+tab'")
+DIRECTION_FIELD = Field(None, description="Scroll direction: 'up' or 'down'")
+STEP_FIELD = Field(5, description="Scroll steps (default 5)")
+ELEMENT_INFO_FIELD = Field(None, description="Optional description of the UI element")
+
 
 class GLMComputerTool(HudComputerTool):
     """
-    GLM computer tool for z-ai/glm4.5v.
+    GLM Computer Tool for GLM-4.6V models.
 
-    Uses normalized coordinates (0-999) and start_box='[x,y]' format for desktop actions.
+    Uses GLM's native PC action space with normalized coordinates (0-999)
+    that are automatically rescaled to actual screen dimensions.
+    
+    Supports actions: left_click, right_click, middle_click, hover,
+    left_double_click, left_drag, key, type, scroll, WAIT, DONE, FAIL
     """
 
-    name: str = "glm_computer"
-    api_type: str = "glm4_5v_computer"
     native_specs: ClassVar[NativeToolSpecs] = {
-        AgentType.OPENAI_COMPATIBLE: NativeToolSpec(
-            api_type="function",
-            api_name="glm_computer",
-            role="computer",
-        ),
         AgentType.GLM_CUA: NativeToolSpec(
-            api_type="glm_computer",
+            api_type="function",
             api_name="glm_computer",
             role="computer",
         ),
@@ -53,11 +87,25 @@ class GLMComputerTool(HudComputerTool):
         width: int = computer_settings.GLM_COMPUTER_WIDTH,
         height: int = computer_settings.GLM_COMPUTER_HEIGHT,
         rescale_images: bool = computer_settings.GLM_RESCALE_IMAGES,
-        name: str | None = "glm_computer",
-        title: str | None = "GLM Computer Tool",
-        description: str | None = "Control computer with mouse, keyboard, and screenshots",
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
         **kwargs: Any,
     ) -> None:
+        """Initialize GLM Computer Tool with coordinate scaling."""
+        instance_native_specs = {
+            AgentType.GLM_CUA: NativeToolSpec(
+                api_type="function",
+                api_name="glm_computer",
+                role="computer",
+                extra={
+                    "display_width": width,
+                    "display_height": height,
+                    "coordinate_space": GLM_COORDINATE_SPACE,
+                },
+            ),
+        }
+
         super().__init__(
             executor=executor,
             platform_type=platform_type,
@@ -65,219 +113,260 @@ class GLMComputerTool(HudComputerTool):
             width=width,
             height=height,
             rescale_images=rescale_images,
-            name=name,
-            title=title,
-            description=description,
+            name=name or "glm_computer",
+            title=title or "GLM Computer Tool",
+            description=description
+            or "Control computer with GLM PC action space. Coordinates use 0-999 scale.",
+            native_specs=instance_native_specs,
             **kwargs,
         )
 
-    def to_params(self) -> dict:
-        """Convert to GLM tool parameters."""
-        return {
-            "type": self.api_type,
-            "name": self.name,
-            "display_width_px": self.width,
-            "display_height_px": self.height,
-        }
-
-    def _parse_box(self, box: str | list[int] | None) -> tuple[int | None, int | None]:
-        """Parse start_box/end_box from '[x,y]' or [x,y] to screen pixels."""
+    def _parse_box(self, box: Any) -> tuple[int, int] | None:
+        """Parse start_box/end_box to (x, y) tuple.
+        
+        Handles:
+        - '[x,y]' string format
+        - [x, y] list format
+        - [[x, y]] nested list (bounding box format)
+        """
         if box is None:
-            return None, None
-
+            return None
+        
+        # Handle string format: '[513,438]'
         if isinstance(box, str):
-            cleaned = box.strip("[]")
-            parts = cleaned.split(",")
-            if len(parts) < 2:
-                return None, None
-            try:
-                norm_x, norm_y = int(parts[0].strip()), int(parts[1].strip())
-            except ValueError:
-                return None, None
-        elif isinstance(box, list) and len(box) >= 2:
-            norm_x, norm_y = int(box[0]), int(box[1])
+            box = box.strip()
+            match = re.match(r"\[?\s*(\d+)\s*,\s*(\d+)\s*\]?", box)
+            if match:
+                return (int(match.group(1)), int(match.group(2)))
+            return None
+        
+        # Handle list format: [513, 438] or [[513, 438]]
+        if isinstance(box, list):
+            # Unwrap nested list: [[x, y]] → [x, y]
+            if len(box) == 1 and isinstance(box[0], list):
+                box = box[0]
+            if len(box) >= 2:
+                try:
+                    return (int(box[0]), int(box[1]))
+                except (TypeError, ValueError):
+                    return None
+        
+        return None
+
+    def _scale_coord(self, coord: int, is_x: bool = True) -> int:
+        """Scale coordinate from GLM's 0-999 space to actual screen pixels."""
+        if is_x:
+            return int(coord * self.environment_width / GLM_COORDINATE_SPACE)
         else:
-            return None, None
+            return int(coord * self.environment_height / GLM_COORDINATE_SPACE)
 
-        # Convert normalized (0-999) to screen coordinates
-        screen_x = int(norm_x * self.environment_width / 999)
-        screen_y = int(norm_y * self.environment_height / 999)
-        return screen_x, screen_y
-
-    def _parse_keys(self, keys: str) -> list[str]:
-        """Parse 'ctrl+c' format to ['ctrl', 'c']."""
+    def _parse_keys(self, keys: str | list[str] | None) -> list[str]:
+        """Parse key input to list of keys."""
         if not keys:
             return []
+        if isinstance(keys, list):
+            return [k.strip().lower() for k in keys]
+        # Handle 'ctrl+c' format
         return [k.strip().lower() for k in keys.split("+")]
-
-    def _parse_function_style_action(
-        self, action: str
-    ) -> tuple[str, dict[str, Any]]:
-        """Parse function-style action like 'left_click(start_box='[513,438]')'.
-        
-        Returns (action_name, extracted_args).
-        """
-        import re
-        
-        # Check if action contains function call syntax
-        func_match = re.match(r"(\w+)\((.*)\)", action)
-        if not func_match:
-            return action, {}
-        
-        action_name = func_match.group(1)
-        args_str = func_match.group(2)
-        
-        extracted: dict[str, Any] = {}
-        
-        # Extract quoted arguments: key='value' or key="value"
-        quoted_pattern = r"(\w+)=['\"]([^'\"]*)['\"]"
-        for match in re.finditer(quoted_pattern, args_str):
-            extracted[match.group(1)] = match.group(2)
-        
-        # Extract unquoted numeric arguments: key=123
-        unquoted_pattern = r"(\w+)=(\d+)(?!['\"])"
-        for match in re.finditer(unquoted_pattern, args_str):
-            if match.group(1) not in extracted:
-                extracted[match.group(1)] = int(match.group(2))
-        
-        return action_name, extracted
 
     async def __call__(
         self,
-        action: str = Field(..., description="The action to perform"),
-        start_box: str | list[int] | None = Field(None, description="Coordinates [x,y] (0-999)"),
-        end_box: str | list[int] | None = Field(None, description="End coordinates for drag"),
-        element_info: str | None = Field(None, description="UI element description"),
-        keys: str | None = Field(None, description="Key combination (e.g., 'ctrl+c')"),
-        content: str | None = Field(None, description="Text to type"),
-        direction: Literal["up", "down"] | None = Field(None, description="Scroll direction"),
-        step: int = Field(5, description="Scroll steps"),
+        action: str = ACTION_FIELD,
+        start_box: str | list | None = START_BOX_FIELD,
+        end_box: str | list | None = END_BOX_FIELD,
+        content: str | None = CONTENT_FIELD,
+        keys: str | list[str] | None = KEYS_FIELD,
+        direction: Literal["up", "down"] | None = DIRECTION_FIELD,
+        step: int = STEP_FIELD,
+        element_info: str | None = ELEMENT_INFO_FIELD,
     ) -> list[ContentBlock]:
-        """Execute a GLM desktop computer action."""
-        # Handle GLM 4.6V function-style action: "left_click(start_box='[513,438]')"
-        if "(" in action:
-            parsed_action, extracted_args = self._parse_function_style_action(action)
-            action = parsed_action
-            # Override None arguments with extracted values
-            if start_box is None and "start_box" in extracted_args:
-                start_box = extracted_args["start_box"]
-            if end_box is None and "end_box" in extracted_args:
-                end_box = extracted_args["end_box"]
-            if keys is None and "keys" in extracted_args:
-                keys = extracted_args["keys"]
-            if content is None and "content" in extracted_args:
-                content = extracted_args["content"]
-            if direction is None and "direction" in extracted_args:
-                direction = extracted_args["direction"]
-            if "step" in extracted_args:
-                step = extracted_args["step"]
+        """Execute a GLM PC action.
+
+        GLM PC Action Space:
+        - left_click(start_box='[x,y]', element_info=''): Left mouse click
+        - right_click(start_box='[x,y]', element_info=''): Right mouse click
+        - middle_click(start_box='[x,y]', element_info=''): Middle mouse click
+        - hover(start_box='[x,y]', element_info=''): Move mouse without clicking
+        - left_double_click(start_box='[x,y]', element_info=''): Double left click
+        - left_drag(start_box='[x,y]', end_box='[x,y]', element_info=''): Drag
+        - key(keys=''): Press key(s), e.g. 'ctrl+c', 'alt+tab'
+        - type(content=''): Type text content
+        - scroll(start_box='[x,y]', direction='', step=5, element_info=''): Scroll
+        - WAIT(): Wait 5 seconds
+        - DONE(): Task completed successfully
+        - FAIL(): Task cannot be completed
         
-        logger.info("GLMComputerTool action: %s", action)
+        Coordinates are 0-999 normalized, automatically scaled to screen pixels.
+        """
+        logger.info("GLMComputerTool action: %s (start_box=%s)", action, start_box)
+        
+        # Parse boxes to coordinates
+        start_coords = self._parse_box(start_box)
+        end_coords = self._parse_box(end_box)
+        
+        # Scale coordinates
+        screen_x: int | None = None
+        screen_y: int | None = None
+        screen_end_x: int | None = None
+        screen_end_y: int | None = None
+        
+        if start_coords:
+            screen_x = self._scale_coord(start_coords[0], is_x=True)
+            screen_y = self._scale_coord(start_coords[1], is_x=False)
+            logger.debug("Scaled start: [%s,%s] -> (%s,%s)", 
+                        start_coords[0], start_coords[1], screen_x, screen_y)
+        
+        if end_coords:
+            screen_end_x = self._scale_coord(end_coords[0], is_x=True)
+            screen_end_y = self._scale_coord(end_coords[1], is_x=False)
 
         result: ContentResult | None = None
 
         # Click actions
-        if action in ("left_click", "right_click", "middle_click"):
-            x, y = self._parse_box(start_box)
-            if x is None or y is None:
-                raise McpError(
-                    ErrorData(code=INVALID_PARAMS, message=f"start_box required for {action}")
-                )
-            button = cast("Literal['left', 'right', 'middle']", action.replace("_click", ""))
-            result = await self.executor.click(x=x, y=y, button=button)
+        if action in ("left_click", "click"):
+            if screen_x is None or screen_y is None:
+                raise McpError(ErrorData(
+                    code=INVALID_PARAMS, 
+                    message="start_box required for left_click"
+                ))
+            result = await self.executor.click(x=screen_x, y=screen_y, button="left")
 
-        elif action == "left_double_click":
-            x, y = self._parse_box(start_box)
-            if x is None or y is None:
-                raise McpError(
-                    ErrorData(code=INVALID_PARAMS, message="start_box required for double_click")
-                )
-            result = await self.executor.click(x=x, y=y, button="left", pattern=[100])
+        elif action == "right_click":
+            if screen_x is None or screen_y is None:
+                raise McpError(ErrorData(
+                    code=INVALID_PARAMS, 
+                    message="start_box required for right_click"
+                ))
+            result = await self.executor.click(x=screen_x, y=screen_y, button="right")
+
+        elif action == "middle_click":
+            if screen_x is None or screen_y is None:
+                raise McpError(ErrorData(
+                    code=INVALID_PARAMS, 
+                    message="start_box required for middle_click"
+                ))
+            result = await self.executor.click(x=screen_x, y=screen_y, button="middle")
 
         elif action == "hover":
-            x, y = self._parse_box(start_box)
-            if x is None or y is None:
-                raise McpError(
-                    ErrorData(code=INVALID_PARAMS, message="start_box required for hover")
-                )
-            result = await self.executor.move(x=x, y=y)
+            if screen_x is None or screen_y is None:
+                raise McpError(ErrorData(code=INVALID_PARAMS, message="x, y required for hover"))
+            result = await self.executor.move(x=screen_x, y=screen_y)
+
+        elif action == "left_double_click":
+            if screen_x is None or screen_y is None:
+                raise McpError(ErrorData(
+                    code=INVALID_PARAMS, 
+                    message="start_box required for left_double_click"
+                ))
+            result = await self.executor.click(x=screen_x, y=screen_y, button="left", pattern=[100])
 
         elif action == "left_drag":
-            start_x, start_y = self._parse_box(start_box)
-            end_x, end_y = self._parse_box(end_box)
-            if start_x is None or start_y is None:
-                raise McpError(
-                    ErrorData(code=INVALID_PARAMS, message="start_box required for left_drag")
-                )
-            if end_x is None or end_y is None:
-                raise McpError(
-                    ErrorData(code=INVALID_PARAMS, message="end_box required for left_drag")
-                )
-            result = await self.executor.drag(path=[(start_x, start_y), (end_x, end_y)])
+            if screen_x is None or screen_y is None:
+                raise McpError(ErrorData(
+                    code=INVALID_PARAMS, 
+                    message="start_box required for left_drag"
+                ))
+            if screen_end_x is None or screen_end_y is None:
+                raise McpError(ErrorData(
+                    code=INVALID_PARAMS, 
+                    message="end_box required for left_drag"
+                ))
+            result = await self.executor.drag(
+                path=[(screen_x, screen_y), (screen_end_x, screen_end_y)]
+            )
 
         # Keyboard actions
         elif action == "key":
-            if not keys:
-                raise McpError(
-                    ErrorData(code=INVALID_PARAMS, message="keys required for key action")
-                )
-            result = await self.executor.press(keys=self._parse_keys(keys))
+            key_list = self._parse_keys(keys)
+            if not key_list:
+                raise McpError(ErrorData(
+                    code=INVALID_PARAMS, 
+                    message="keys required for key action"
+                ))
+            result = await self.executor.press(keys=key_list)
 
         elif action == "type":
-            if content is None:
-                raise McpError(
-                    ErrorData(code=INVALID_PARAMS, message="content required for type action")
-                )
+            if not content:
+                raise McpError(ErrorData(
+                    code=INVALID_PARAMS, 
+                    message="content required for type"
+                ))
             result = await self.executor.write(text=content, enter_after=False)
 
         # Scroll action
         elif action == "scroll":
-            x, y = self._parse_box(start_box)
-            if x is None or y is None:
-                raise McpError(
-                    ErrorData(code=INVALID_PARAMS, message="start_box required for scroll")
-                )
             if not direction:
-                raise McpError(
-                    ErrorData(code=INVALID_PARAMS, message="direction required for scroll")
-                )
+                raise McpError(ErrorData(
+                    code=INVALID_PARAMS, 
+                    message="direction required for scroll"
+                ))
+            # If no start_box, scroll at center of screen
+            if screen_x is None:
+                screen_x = self.environment_width // 2
+            if screen_y is None:
+                screen_y = self.environment_height // 2
+            # Convert step count to pixels (each step ~100 pixels)
             scroll_y = step * 100 if direction == "down" else -step * 100
-            result = await self.executor.scroll(x=x, y=y, scroll_y=scroll_y)
+            result = await self.executor.scroll(x=screen_x, y=screen_y, scroll_y=scroll_y)
+
+        # Screenshot action
+        elif action == "screenshot":
+            screenshot = await self.executor.screenshot()
+            if screenshot:
+                if self.rescale_images:
+                    screenshot = await self._rescale_screenshot(screenshot)
+                result = ContentResult(base64_image=screenshot)
+            else:
+                result = ContentResult(error="Failed to take screenshot")
+            return result.to_content_blocks()
 
         # Control actions
         elif action == "WAIT":
             result = await self.executor.wait(time=5000)
 
         elif action == "DONE":
-            return [TextContent(text="Task completed successfully.", type="text")]
+            screenshot = await self.executor.screenshot()
+            if screenshot and self.rescale_images:
+                screenshot = await self._rescale_screenshot(screenshot)
+            return ContentResult(
+                output="Task completed successfully", 
+                base64_image=screenshot
+            ).to_content_blocks()
 
         elif action == "FAIL":
-            return [TextContent(text="Task cannot be completed.", type="text")]
-
-        elif action == "screenshot":
             screenshot = await self.executor.screenshot()
-            if screenshot:
-                result = ContentResult(base64_image=screenshot)
-            else:
-                result = ContentResult(error="Failed to take screenshot")
+            if screenshot and self.rescale_images:
+                screenshot = await self._rescale_screenshot(screenshot)
+            return ContentResult(
+                error="Task failed or is infeasible", 
+                base64_image=screenshot
+            ).to_content_blocks()
 
         else:
-            raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Unknown action: {action}"))
-
-        # Rescale screenshot if present
-        if isinstance(result, ContentResult) and result.base64_image and self.rescale_images:
-            result.base64_image = await self._rescale_screenshot(result.base64_image)
+            raise McpError(ErrorData(
+                code=INVALID_PARAMS, 
+                message=f"Unknown action: {action}"
+            ))
 
         # Auto-screenshot for interactive actions
-        interactive = {
-            "left_click", "right_click", "middle_click", "left_double_click",
-            "hover", "left_drag", "key", "type", "scroll",
+        interactive_actions = {
+            "left_click", "click", "right_click", "middle_click", "hover",
+            "left_double_click", "left_drag", "key", "type", "scroll",
         }
-        if action in interactive and isinstance(result, ContentResult) and not result.base64_image:
-            screenshot = await self.executor.screenshot()
-            if screenshot:
-                screenshot = await self._rescale_screenshot(screenshot)
-                result = ContentResult(output="", error=result.error, base64_image=screenshot)
+        if action in interactive_actions:
+            if result is None or (isinstance(result, ContentResult) and not result.base64_image):
+                screenshot = await self.executor.screenshot()
+                if screenshot:
+                    if self.rescale_images:
+                        screenshot = await self._rescale_screenshot(screenshot)
+                    if result is None:
+                        result = ContentResult(base64_image=screenshot)
+                    else:
+                        result = ContentResult(
+                            output=result.output, 
+                            error=result.error, 
+                            base64_image=screenshot
+                        )
 
         if result is None:
             result = ContentResult(output="Action completed")
