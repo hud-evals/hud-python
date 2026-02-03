@@ -12,6 +12,7 @@ Native PC actions:
 - type(content='')
 - scroll(start_box='[x,y]', direction='', step=5)
 - WAIT(), DONE(), FAIL()
+- screenshot()
 """
 
 from __future__ import annotations
@@ -39,33 +40,49 @@ logger = logging.getLogger(__name__)
 # GLM uses normalized 0-999 coordinate space
 GLM_COORDINATE_SPACE = 999
 
-# All supported GLM PC actions
+# All supported GLM PC actions with their call signatures:
+# - left_click(start_box='[x,y]', element_info='')
+# - right_click(start_box='[x,y]', element_info='')
+# - middle_click(start_box='[x,y]', element_info='')
+# - hover(start_box='[x,y]', element_info='')
+# - left_double_click(start_box='[x,y]', element_info='')
+# - left_drag(start_box='[x,y]', end_box='[x,y]', element_info='')
+# - key(keys='ctrl+c')
+# - type(content='text')
+# - scroll(start_box='[x,y]', direction='up|down', step=5)
+# - screenshot()
+# - WAIT()
+# - DONE()
+# - FAIL()
 GLMAction = Literal[
-    # Mouse actions
-    "left_click",
-    "click",  # alias for left_click
-    "right_click",
-    "middle_click",
-    "hover",
-    "left_double_click",
-    "left_drag",
-    # Keyboard actions
-    "key",
-    "type",
-    # Scroll
-    "scroll",
-    # Screenshot
-    "screenshot",
-    # Control actions
-    "WAIT",
-    "DONE",
-    "FAIL",
+    "left_click",   # start_box='[x,y]'
+    "click",        # alias for left_click
+    "right_click",  # start_box='[x,y]'
+    "middle_click", # start_box='[x,y]'
+    "hover",        # start_box='[x,y]'
+    "left_double_click",  # start_box='[x,y]'
+    "left_drag",    # start_box='[x,y]', end_box='[x,y]'
+    "key",          # keys='ctrl+c'
+    "type",         # content='text'
+    "scroll",       # start_box='[x,y]', direction='up|down', step=5
+    "screenshot",   # no params
+    "WAIT",         # no params
+    "DONE",         # no params - task completed
+    "FAIL",         # no params - task failed
 ]
 
 # Field definitions matching GLM's PC action space
 ACTION_FIELD = Field(
     ...,
-    description="GLM PC action to perform",
+    description=(
+        "Action to perform: "
+        "left_click/right_click/middle_click/hover/left_double_click(start_box='[x,y]'), "
+        "left_drag(start_box, end_box), "
+        "key(keys='ctrl+c'), "
+        "type(content='text'), "
+        "scroll(start_box, direction, step), "
+        "screenshot(), WAIT(), DONE(), FAIL()"
+    ),
 )
 START_BOX_FIELD = Field(
     None,

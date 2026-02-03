@@ -115,6 +115,7 @@ class GLMCUAAgent(OpenAIChatAgent):
         """Get response from GLM model.
         
         Intercepts predefined GLM functions and routes them to glm_computer.
+        Handles DONE/FAIL actions to terminate the task.
         """
         response = await super().get_response(messages)
         
@@ -126,12 +127,34 @@ class GLMCUAAgent(OpenAIChatAgent):
             processed_calls = []
             for tc in response.tool_calls:
                 logger.info("GLM raw tool call: %s(%s)", tc.name, tc.arguments)
+                
+                # Check for terminal actions
+                action = self._get_action(tc)
+                if action == "DONE" or action == "FAIL":
+                    logger.info("Task completed")
+                    response.done = True
+                    response.tool_calls = []  # Clear tool calls
+                    if not response.content:
+                        response.content = "Task completed."
+                    return response
                 processed = self._process_tool_call(tc)
                 logger.info("GLM processed tool call: %s(%s)", processed.name, processed.arguments)
                 processed_calls.append(processed)
             response.tool_calls = processed_calls
 
         return response
+    
+    def _get_action(self, tool_call: MCPToolCall) -> str | None:
+        """Extract action from tool call (handles both direct and routed calls)."""
+        # Direct function call (e.g., DONE, FAIL)
+        if tool_call.name in ("DONE", "FAIL"):
+            return tool_call.name
+        
+        # glm_computer call with action argument
+        if tool_call.name == self._computer_tool_name and tool_call.arguments:
+            return tool_call.arguments.get("action")
+        
+        return None
     
     def _process_tool_call(self, tool_call: MCPToolCall) -> MCPToolCall:
         """Process a tool call, routing predefined GLM functions to glm_computer.
