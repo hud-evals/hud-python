@@ -39,11 +39,33 @@ logger = logging.getLogger(__name__)
 # GLM uses normalized 0-999 coordinate space
 GLM_COORDINATE_SPACE = 999
 
+# All supported GLM PC actions
+GLMAction = Literal[
+    # Mouse actions
+    "left_click",
+    "click",  # alias for left_click
+    "right_click",
+    "middle_click",
+    "hover",
+    "left_double_click",
+    "left_drag",
+    # Keyboard actions
+    "key",
+    "type",
+    # Scroll
+    "scroll",
+    # Screenshot
+    "screenshot",
+    # Control actions
+    "WAIT",
+    "DONE",
+    "FAIL",
+]
+
 # Field definitions matching GLM's PC action space
 ACTION_FIELD = Field(
     ...,
-    description="GLM PC action: left_click, right_click, middle_click, hover, "
-    "left_double_click, left_drag, key, type, scroll, WAIT, DONE, FAIL",
+    description="GLM PC action to perform",
 )
 START_BOX_FIELD = Field(
     None,
@@ -171,7 +193,7 @@ class GLMComputerTool(HudComputerTool):
 
     async def __call__(
         self,
-        action: str = ACTION_FIELD,
+        action: GLMAction = ACTION_FIELD,
         start_box: str | list | None = START_BOX_FIELD,
         end_box: str | list | None = END_BOX_FIELD,
         content: str | None = CONTENT_FIELD,
