@@ -16,16 +16,6 @@ from hud.types import BaseAgentConfig
 _model_alias = AliasChoices("model", "checkpoint_name")
 
 
-def _get_glm_setting(name: str, default: Any) -> Any:
-    """Get GLM setting from computer_settings, with lazy import to avoid circular deps."""
-    try:
-        from hud.tools.computer.settings import computer_settings
-
-        return getattr(computer_settings, name, default)
-    except ImportError:
-        return default
-
-
 class BaseCreateParams(BaseModel):
     """Runtime parameters for agent creation."""
 
@@ -151,12 +141,8 @@ class GLMCUAConfig(OpenAIChatConfig):
 
     model_name: str = "GLM CUA"
     model: str = Field(default="glm-4.5v", validation_alias=_model_alias)
-    max_history_screenshots: int = Field(
-        default_factory=lambda: _get_glm_setting("GLM_MAX_HISTORY_SCREENSHOTS", 2)
-    )
-    history_image_scale: float = Field(
-        default_factory=lambda: _get_glm_setting("GLM_HISTORY_IMAGE_SCALE", 0.25)
-    )
+    max_history_screenshots: int = 2  # Env: GLM_MAX_HISTORY_SCREENSHOTS
+    history_image_scale: float = 0.25  # Env: GLM_HISTORY_IMAGE_SCALE (25%)
 
 
 class GLMCUACreateParams(BaseCreateParams, GLMCUAConfig):
