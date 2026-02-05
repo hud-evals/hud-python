@@ -7,12 +7,13 @@ BashTool (Claude) and ShellTool (OpenAI) with different output formats.
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from dataclasses import dataclass
 from typing import Literal
 
 from hud.tools.types import ContentResult, ToolError
+
+from .utils import get_demote_preexec_fn
 
 
 @dataclass
@@ -90,39 +91,14 @@ class BashSession:
             await asyncio.sleep(0)
             return
 
-        # Platform-specific process creation
-        preexec_fn = None
-        if sys.platform != "win32":
-            # On Unix, use setsid for process group isolation
-            # If running as root (e.g., Docker), also demote to uid 1000
-            if os.getuid() == 0:
-
-                def demote() -> None:
-                    os.setsid()  # type: ignore[attr-defined]
-                    os.setgid(1000)  # type: ignore[attr-defined]
-                    os.setuid(1000)  # type: ignore[attr-defined]
-
-                preexec_fn = demote
-            else:
-                preexec_fn = os.setsid  # type: ignore[attr-defined]
-
-        if sys.platform != "win32":
-            self._process = await asyncio.create_subprocess_shell(
-                self.command,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                preexec_fn=preexec_fn,
-                cwd=self._cwd,
-            )
-        else:
-            self._process = await asyncio.create_subprocess_shell(
-                self.command,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=self._cwd,
-            )
+        self._process = await asyncio.create_subprocess_shell(
+            self.command,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=self._cwd,
+            preexec_fn=get_demote_preexec_fn(),
+        )
 
         self._started = True
         self._timed_out = False
