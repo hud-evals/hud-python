@@ -201,3 +201,13 @@ class OperatorAgent(OpenAIAgent):
             if isinstance(content, types.TextContent) and result.isError:
                 self.console.error_log(f"Computer tool error: {content.text}")
         return None
+
+    def _legacy_native_spec_fallback(self, tool: types.Tool) -> NativeToolSpec | None:
+        """Detect Operator native tools by name for backwards compatibility."""
+        if tool.name == "openai_computer" or tool.name.endswith("_openai_computer"):
+            return NativeToolSpec(
+                api_type="computer_use_preview",
+                api_name="computer",
+                role="computer",
+            )
+        return super()._legacy_native_spec_fallback(tool)
