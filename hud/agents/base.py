@@ -104,6 +104,7 @@ class MCPAgent(ABC):
             generic function calling.
         """
         spec: NativeToolSpec | None = None
+        spec_data = None
 
         # First try metadata-based resolution
         if tool.meta:
@@ -113,6 +114,8 @@ class MCPAgent(ABC):
             if isinstance(spec_data, list):
                 # List of specs -- pick first model-matching spec
                 for item in spec_data:
+                    if not isinstance(item, dict):
+                        continue
                     candidate = _parse_spec_dict(item)
                     if candidate and candidate.supports_model(self.model):
                         spec = candidate
@@ -121,7 +124,8 @@ class MCPAgent(ABC):
                 spec = _parse_spec_dict(spec_data)
 
         # Fall back to legacy name-based detection for old environments
-        if spec is None:
+        # Only if metadata didn't contain specs for this agent type at all
+        if spec is None and not spec_data:
             spec = self._legacy_native_spec_fallback(tool)
 
         # Check if current model supports this native spec

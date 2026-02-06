@@ -145,7 +145,6 @@ class BashTool(BaseTool):
                 "claude-opus-4-*",
                 "claude-4-5-sonnet-*",
                 "claude-4-5-opus-*",
-                "claude-opus-4-6*",
             ),
         ),
     }
