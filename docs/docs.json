@@ -165,6 +165,12 @@
             "pages": [
               "platform/slack"
             ]
+          },
+          {
+            "group": "How We Use HUD on HUD",
+            "pages": [
+              "platform/internal/trace-analysis"
+            ]
           }
         ]
       }

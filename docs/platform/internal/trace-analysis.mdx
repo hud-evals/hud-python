@@ -1,0 +1,155 @@
+---
+title: "Trace Analysis Environment"
+description: "How we built an environment to let agents analyze their own traces"
+icon: "magnifying-glass-chart"
+---
+
+When an evaluation trace fails, understanding *why* is half the battle. We built a trace analysis environment that lets agents investigate evaluation traces using familiar coding tools—the same way a developer would debug a log file.
+
+This page explains the design decisions behind it—why we chose coding tools, how it integrates with the platform, and where you'll see it in action.
+
+<Card title="View the source code" icon="github" href="https://github.com/hud-evals/hud-trace-explorer">
+  The trace analysis environment is open source. See the full implementation on GitHub.
+</Card>
+
+## The Problem
+
+After running evaluations, we often want to ask:
+- "Why did this trace fail?"
+- "What error caused the agent to get stuck?"
+- "Is there evidence of reward hacking?"
+- "Which tool calls took the longest?"
+
+Manual analysis works, but it doesn't scale. We wanted agents to investigate traces systematically—and that meant giving them access to trace data in a form they could actually work with.
+
+## Why Coding Tools?
+
+We considered several approaches for trace analysis:
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **Custom MCP tools** | Specialized for trace data | Yet another tool spec to maintain |
+| **Natural language summary** | Easy for models to parse | Loses detail, can't drill down |
+| **Coding tools + files** | Models already know how to explore files | Requires preprocessing trace data |
+
+We went with **coding tools**. Recent research indicates that file-based tools provide the best way to interface with large datasets—rather than stuffing everything into the LLM's context window, you give the model tools to explore data on demand.
+
+### 1. Models Already Know How to Explore Files
+
+Every modern coding agent knows how to read files, grep for patterns, and navigate directories. By writing trace data to files, we tap into capabilities the model already has—no new tool schemas to learn.
+
+### 2. Flexible Investigation Patterns
+
+With files + bash, agents can:
+- `grep` for specific error messages
+- Read the full trajectory or just a summary
+- Cross-reference logs with tool calls
+- Build their own analysis pipelines
+
+This flexibility is more valuable than a fixed set of "get_trace_errors" or "get_tool_calls" endpoints.
+
+### 3. Screenshots Work Too
+
+CUA traces include screenshots at each step. The HUD SDK's `ReadTool` already supports reading images—it base64-encodes them and the model can view them visually. No special image tool needed.
+
+## How It Works
+
+The environment:
+
+1. **Fetches trace data** from the HUD API (telemetry, environment logs, rollout logs)
+2. **Downloads screenshots** from Supabase storage (for CUA traces)
+3. **Writes preprocessed files** to a workspace directory
+4. **Provides coding tools** (bash, grep, read, edit, glob, list)
+5. **Evaluates responses** against include/exclude patterns
+
+### Preprocessing Matters
+
+Raw trace data is deeply nested JSON with telemetry spans, exception stacks, and container logs. We transform it into files that are easier to navigate:
+
+| File | What's in it |
+|------|-------------|
+| `trajectory_summary.txt` | Human-readable list of tool calls, errors, agent turns |
+| `trajectory.json` | Full span data for deep inspection |
+| `metadata.json` | Job ID, task ID, status, reward, scenario info |
+| `prompt.txt` | The original task prompt |
+| `screenshots/step_XXXX.png` | CUA observations (viewable with read tool) |
+| `screenshots_index.txt` | Maps step numbers to screenshot files |
+| `environment_logs.txt` | Container stdout/stderr |
+| `worker_logs.txt` | Orchestrator/rollout logs |
+
+Without preprocessing, agents spend too many steps just figuring out the data structure. The summary files let them get to the actual analysis faster.
+
+### Key Metadata in Context
+
+Early testing showed agents wasting 5-7 steps just reading metadata files. We fixed this by including key information directly in the initial prompt:
+
+- Trace ID, Job ID, Task ID, External ID
+- Status and reward
+- Scenario name and trajectory length
+- Task prompt (truncated if long)
+- Error information (if any)
+
+Now agents can immediately start analyzing without a "read the metadata" warmup phase.
+
+## Where You'll See It
+
+### Agent Columns
+
+Evalsets can have **Agent columns**—custom columns that automatically run analysis on every completed trace.
+
+When you add an Agent column:
+1. Configure a query (e.g., "Did the agent complete the task successfully?")
+2. Select data sources (trajectory, environment logs, worker logs)
+3. Every trace that completes spawns an analysis run
+
+The analysis result appears in the column for each trace, making it easy to spot patterns across your evalset.
+
+Sample queries for Agent columns:
+- **Task Success**: "Did the agent successfully complete the task? Explain why or why not."
+- **Errors**: "What errors or failures occurred during this trace?"
+- **Reward Hacking**: "Is there evidence of reward hacking or gaming the evaluation?"
+- **Efficiency**: "Could the agent have completed the task with fewer steps?"
+- **Tool Usage**: "Did the agent use the available tools effectively?"
+
+### One-Time Analysis
+
+On any trace page, the **Analysis** tab lets you run one-time queries:
+
+1. Enter your question or pick a suggested query
+2. Click Analyze
+3. The analysis runs (you can see its trace!)
+4. Results appear in the Analysis pane
+
+This is useful for ad-hoc investigation of specific traces without setting up an Agent column.
+
+### Analysis Trace Links
+
+Every analysis creates its own trace. You can click through to see exactly how the analysis agent investigated the original trace—what files it read, what patterns it searched for, what conclusions it drew.
+
+This is meta-evaluation: using HUD to understand HUD evaluation results.
+
+## Design Decisions
+
+### Read-Only by Default
+
+The environment only provides read tools (plus bash for things like `grep` and `wc`). There's no ability to modify traces or platform data. This makes it safe to run against production traces.
+
+### Scenario Parameters for Evaluation
+
+The scenario accepts `includes` and `excludes` patterns. This lets us build evalsets for trace analysis quality:
+
+```python
+env("analyze",
+    trace_id="...",
+    query="Why did this trace fail?",
+    includes=["timeout", "error"],  # Must mention these
+    excludes=["success"],           # Must not claim success
+)
+```
+
+## See Also
+
+- [Source Code on GitHub](https://github.com/hud-evals/hud-trace-explorer) - The full environment implementation
+- [Environments](/platform/environments) - How environments work on the platform
+- [Coding Tools](/tools/coding) - Shell, apply_patch, and related tools
+- [Filesystem Tools](/tools/filesystem) - Read, grep, and file navigation tools
