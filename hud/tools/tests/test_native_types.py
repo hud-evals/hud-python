@@ -209,8 +209,12 @@ class TestNativeToolSpecs:
         assert len(specs) == 2
         assert AgentType.CLAUDE in specs
         assert AgentType.GEMINI in specs
-        assert specs[AgentType.CLAUDE].api_type == "computer_20250124"
-        assert specs[AgentType.GEMINI].api_type == "computer_use"
+        claude_spec = specs[AgentType.CLAUDE]
+        gemini_spec = specs[AgentType.GEMINI]
+        assert isinstance(claude_spec, NativeToolSpec)
+        assert isinstance(gemini_spec, NativeToolSpec)
+        assert claude_spec.api_type == "computer_20250124"
+        assert gemini_spec.api_type == "computer_use"
 
     def test_specs_serialization_for_meta(self) -> None:
         """Test serializing specs for embedding in tool meta."""
@@ -221,10 +225,11 @@ class TestNativeToolSpecs:
                 beta="computer-use-2025-01-24",
             ),
         }
-        # Simulate what BaseTool does
+        # Simulate what BaseTool does (single-spec case)
+        claude_spec = specs[AgentType.CLAUDE]
+        assert isinstance(claude_spec, NativeToolSpec)
         meta_native_tools = {
-            agent_type.value: spec.model_dump(exclude_none=True)
-            for agent_type, spec in specs.items()
+            AgentType.CLAUDE.value: claude_spec.model_dump(exclude_none=True),
         }
         assert "claude" in meta_native_tools
         assert meta_native_tools["claude"]["api_type"] == "bash_20250124"
@@ -402,7 +407,7 @@ class TestBaseToolNativeSpecs:
                 return []
 
         # Instance with override
-        instance_specs = {
+        instance_specs: NativeToolSpecs = {
             AgentType.GEMINI: NativeToolSpec(api_type="test_instance"),
         }
         tool = TestTool(native_specs=instance_specs)

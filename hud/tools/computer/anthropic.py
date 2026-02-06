@@ -191,6 +191,15 @@ class AnthropicComputerTool(HudComputerTool):
             },
         )
 
+    def _parse_hold_keys(self, text: str | None) -> list[str] | None:
+        """Parse modifier keys from text, splitting combos like 'ctrl+shift' into separate keys."""
+        if not text:
+            return None
+        mapped = self._map_anthropic_key_to_cla(text)
+        if "+" in mapped:
+            return [k.strip() for k in mapped.split("+")]
+        return [mapped]
+
     def _map_anthropic_key_to_cla(self, key: str) -> str:
         """Map Anthropic key name to CLA standard key."""
         # Handle key combinations like "ctrl+a"
@@ -266,7 +275,7 @@ class AnthropicComputerTool(HudComputerTool):
                 result = ContentResult(error="Failed to take screenshot")
 
         elif action == "left_click" or action == "click":
-            hold_keys = [self._map_anthropic_key_to_cla(text)] if text else None
+            hold_keys = self._parse_hold_keys(text)
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 logger.info("Scaled coordinates: %s, %s", scaled_x, scaled_y)
@@ -275,7 +284,7 @@ class AnthropicComputerTool(HudComputerTool):
                 result = await self.executor.click(hold_keys=hold_keys)
 
         elif action == "double_click":
-            hold_keys = [self._map_anthropic_key_to_cla(text)] if text else None
+            hold_keys = self._parse_hold_keys(text)
             if coord_tuple and len(coord_tuple) >= 2:
                 # Use pattern for double-click
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
@@ -286,7 +295,7 @@ class AnthropicComputerTool(HudComputerTool):
                 result = await self.executor.click(pattern=[100], hold_keys=hold_keys)
 
         elif action == "triple_click":
-            hold_keys = [self._map_anthropic_key_to_cla(text)] if text else None
+            hold_keys = self._parse_hold_keys(text)
             if coord_tuple and len(coord_tuple) >= 2:
                 # Use pattern for triple-click
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
@@ -297,7 +306,7 @@ class AnthropicComputerTool(HudComputerTool):
                 result = await self.executor.click(pattern=[100, 100], hold_keys=hold_keys)
 
         elif action == "right_click":
-            hold_keys = [self._map_anthropic_key_to_cla(text)] if text else None
+            hold_keys = self._parse_hold_keys(text)
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 result = await self.executor.click(
@@ -307,7 +316,7 @@ class AnthropicComputerTool(HudComputerTool):
                 result = await self.executor.click(button="right", hold_keys=hold_keys)
 
         elif action == "middle_click":
-            hold_keys = [self._map_anthropic_key_to_cla(text)] if text else None
+            hold_keys = self._parse_hold_keys(text)
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 result = await self.executor.click(
@@ -374,7 +383,7 @@ class AnthropicComputerTool(HudComputerTool):
                 )
 
             # Map modifier key to CLA format (e.g., "Control" -> "ctrl")
-            hold_keys = [self._map_anthropic_key_to_cla(text)] if text else None
+            hold_keys = self._parse_hold_keys(text)
             # Convert scroll amount from "clicks" to pixels
             # Anthropic's scroll_amount represents wheel clicks, not pixels
             # Standard conversion: 1 wheel click ≈ 100 pixels (3 lines of text)

@@ -21,6 +21,7 @@ from hud.server import MCPServer
 from hud.tools.coding import BashTool
 from hud.tools.computer.anthropic import AnthropicComputerTool
 from hud.tools.hosted import GoogleSearchTool
+from hud.tools.native_types import NativeToolSpec
 from hud.types import AgentResponse, AgentType
 
 
@@ -793,6 +794,7 @@ class TestToolNativeSpecs:
         assert hasattr(ShellTool, "native_specs")
         assert AgentType.OPENAI in ShellTool.native_specs
         spec = ShellTool.native_specs[AgentType.OPENAI]
+        assert isinstance(spec, NativeToolSpec)
         assert spec.api_type == "shell"
         assert spec.api_name == "shell"
 
@@ -804,6 +806,7 @@ class TestToolNativeSpecs:
         assert hasattr(ApplyPatchTool, "native_specs")
         assert AgentType.OPENAI in ApplyPatchTool.native_specs
         spec = ApplyPatchTool.native_specs[AgentType.OPENAI]
+        assert isinstance(spec, NativeToolSpec)
         assert spec.api_type == "apply_patch"
         assert spec.api_name == "apply_patch"
 
@@ -815,6 +818,7 @@ class TestToolNativeSpecs:
         assert hasattr(BashTool, "native_specs")
         assert AgentType.CLAUDE in BashTool.native_specs
         spec = BashTool.native_specs[AgentType.CLAUDE]
+        assert isinstance(spec, NativeToolSpec)
         assert spec.api_type == "bash_20250124"
         assert spec.api_name == "bash"
 
@@ -826,6 +830,7 @@ class TestToolNativeSpecs:
         assert hasattr(EditTool, "native_specs")
         assert AgentType.CLAUDE in EditTool.native_specs
         spec = EditTool.native_specs[AgentType.CLAUDE]
+        assert isinstance(spec, NativeToolSpec)
         assert spec.api_type == "text_editor_20250728"
         assert spec.api_name == "str_replace_based_edit_tool"
 
@@ -836,6 +841,8 @@ class TestToolNativeSpecs:
 
         bash_spec = BashTool.native_specs[AgentType.CLAUDE]
         shell_spec = ShellTool.native_specs[AgentType.OPENAI]
+        assert isinstance(bash_spec, NativeToolSpec)
+        assert isinstance(shell_spec, NativeToolSpec)
 
         assert bash_spec.role == "shell"
         assert shell_spec.role == "shell"
@@ -847,6 +854,8 @@ class TestToolNativeSpecs:
 
         edit_spec = EditTool.native_specs[AgentType.CLAUDE]
         apply_patch_spec = ApplyPatchTool.native_specs[AgentType.OPENAI]
+        assert isinstance(edit_spec, NativeToolSpec)
+        assert isinstance(apply_patch_spec, NativeToolSpec)
 
         assert edit_spec.role == "editor"
         assert apply_patch_spec.role == "editor"
@@ -858,6 +867,8 @@ class TestToolNativeSpecs:
 
         shell_spec = GeminiShellTool.native_specs[AgentType.GEMINI]
         edit_spec = GeminiEditTool.native_specs[AgentType.GEMINI]
+        assert isinstance(shell_spec, NativeToolSpec)
+        assert isinstance(edit_spec, NativeToolSpec)
 
         # Should have roles for mutual exclusion
         assert shell_spec.role == "shell"
