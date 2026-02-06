@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
-from typing import Literal, TypeAlias
+from io import BytesIO
+from typing import TYPE_CHECKING, Literal, TypeAlias
 
 from hud.tools.types import ContentResult
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -332,6 +337,52 @@ class BaseExecutor:
 
         screenshot = await self.screenshot()
         return ContentResult(output=msg, base64_image=screenshot)
+
+    @staticmethod
+    def _crop_and_resize_image(
+        image: Image.Image,
+        x0: int,
+        y0: int,
+        x1: int,
+        y1: int,
+        target_width: int | None = None,
+        target_height: int | None = None,
+    ) -> str:
+        """
+        Crop and resize an image, returning base64-encoded PNG.
+
+        This is a shared helper for zoom implementations to avoid code duplication.
+
+        Args:
+            image: PIL Image to process
+            x0, y0: Top-left corner of crop region
+            x1, y1: Bottom-right corner of crop region
+            target_width: Target width to resize to (None = no resize)
+            target_height: Target height to resize to (None = no resize)
+
+        Returns:
+            Base64-encoded PNG string
+        """
+        from PIL import Image as PILImage
+
+        # Crop to region
+        cropped = image.crop((x0, y0, x1, y1))
+        width = x1 - x0
+        height = y1 - y0
+
+        # Resize if target dimensions provided
+        if target_width and target_height:
+            upscale_factor = min(target_width / width, target_height / height)
+            tgt_w = round(width * upscale_factor)
+            tgt_h = round(height * upscale_factor)
+            resized = cropped.resize((tgt_w, tgt_h), PILImage.Resampling.LANCZOS)
+        else:
+            resized = cropped
+
+        # Convert to base64
+        buffer = BytesIO()
+        resized.save(buffer, format="PNG")
+        return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
     async def position(self) -> ContentResult:
         """

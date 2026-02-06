@@ -541,27 +541,13 @@ class XDOExecutor(BaseExecutor):
             if not screenshot_base64:
                 return ContentResult(error="Failed to take screenshot for zoom")
 
-            # Decode and crop
+            # Decode screenshot to PIL Image
             image_data = base64.b64decode(screenshot_base64)
             image = Image.open(BytesIO(image_data))
-            cropped = image.crop((x0, y0, x1, y1))
-            width = x1 - x0
-            height = y1 - y0
 
-            # Resize if target dimensions provided
-            if target_width and target_height:
-                upscale_factor = min(target_width / width, target_height / height)
-                tgt_w = round(width * upscale_factor)
-                tgt_h = round(height * upscale_factor)
-                resized = cropped.resize((tgt_w, tgt_h), Image.Resampling.LANCZOS)
-            else:
-                resized = cropped
-
-            # Convert to base64
-            buffer = BytesIO()
-            resized.save(buffer, format="PNG")
-            zoomed_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
-
+            zoomed_base64 = self._crop_and_resize_image(
+                image, x0, y0, x1, y1, target_width, target_height
+            )
             return ContentResult(base64_image=zoomed_base64)
         except Exception as e:
             logger.error("Failed to capture zoom region: %s", e)
