@@ -306,8 +306,9 @@ class AnthropicComputerTool(HudComputerTool):
                 else:
                     keys_list = [mapped_key]
 
-                for _ in range(repeat):
-                    result = await self.executor.press(keys=keys_list)
+                for i in range(repeat):
+                    is_last = i == repeat - 1
+                    result = await self.executor.press(keys=keys_list, take_screenshot=is_last)
             else:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="text is required for key"))
 
