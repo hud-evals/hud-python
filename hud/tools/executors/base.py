@@ -303,6 +303,36 @@ class BaseExecutor:
         logger.info("[SIMULATION] Taking screenshot")
         return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="  # noqa: E501
 
+    async def zoom(
+        self,
+        x0: int,
+        y0: int,
+        x1: int,
+        y1: int,
+        target_width: int | None = None,
+        target_height: int | None = None,
+    ) -> ContentResult:
+        """
+        Capture a region of the screen and optionally resize it.
+
+        Args:
+            x0, y0: Top-left corner of the region
+            x1, y1: Bottom-right corner of the region
+            target_width: Target width to resize to (None = use screen width)
+            target_height: Target height to resize to (None = use screen height)
+
+        Returns:
+            ContentResult with the zoomed screenshot
+        """
+        width = x1 - x0
+        height = y1 - y0
+        msg = f"[SIMULATED] Zoom region ({x0}, {y0}) to ({x1}, {y1}) - {width}x{height}"
+        if target_width and target_height:
+            msg += f" resized to {target_width}x{target_height}"
+
+        screenshot = await self.screenshot()
+        return ContentResult(output=msg, base64_image=screenshot)
+
     async def position(self) -> ContentResult:
         """
         Get current cursor position.
