@@ -384,6 +384,7 @@ class ClaudeAgent(MCPAgent):
                 name=tool.name,
                 description=tool.description,
                 input_schema=tool.inputSchema,
+                eager_input_streaming=True,
             )
             self.tool_mapping[tool.name] = tool.name
             self.claude_tools.append(claude_tool)
