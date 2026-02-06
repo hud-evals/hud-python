@@ -4,7 +4,7 @@ description: "How we built an environment to let agents analyze their own traces
 icon: "magnifying-glass-chart"
 ---
 
-We use HUD to debug HUD. When an evaluation trace fails, we don't want to manually dig through logs—so we built an environment that lets an agent do it for us, using the same coding tools it would use for any debugging task.
+We use HUD to debug HUD. When an evaluation trace fails, we don't want to manually dig through logs—so we built an environment that lets an agent do it for us, using the same coding tools it would use for any debugging task. We even used the analysis environment to debug itself—running it on its own traces to find issues with the environment's preprocessing and prompt design.
 
 This page walks through how we built it, what we learned, and how you can apply the same pattern to build your own data analysis environments.
 
