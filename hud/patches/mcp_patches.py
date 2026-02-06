@@ -227,7 +227,7 @@ def patch_server_output_validation() -> None:
                             # None means success with no content
                             unstructured_content = []
                             maybe_structured_content = None
-                        elif isinstance(results, (str, bytes, bytearray, memoryview)):
+                        elif isinstance(results, str | bytes | bytearray | memoryview):
                             # Handle string/bytes explicitly before iterable check
                             # (these are iterable but should not be split into chars/ints)
                             if isinstance(results, str):
@@ -238,7 +238,7 @@ def patch_server_output_validation() -> None:
                                 text = bytes(results).decode("utf-8", errors="replace")
                             unstructured_content = [types.TextContent(type="text", text=text)]
                             maybe_structured_content = None
-                        elif isinstance(results, (int, float, bool)):
+                        elif isinstance(results, int | float | bool):
                             # Primitives -> string representation
                             unstructured_content = [
                                 types.TextContent(type="text", text=str(results))

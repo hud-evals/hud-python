@@ -17,7 +17,7 @@ from openai.types.responses.response_input_param import (
 from openai.types.shared_params.reasoning import Reasoning
 
 from hud.tools.computer.settings import computer_settings
-from hud.tools.native_types import NativeToolSpec  # noqa: TC001
+from hud.tools.native_types import NativeToolSpec
 from hud.types import AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.types import with_signature
 
@@ -201,3 +201,13 @@ class OperatorAgent(OpenAIAgent):
             if isinstance(content, types.TextContent) and result.isError:
                 self.console.error_log(f"Computer tool error: {content.text}")
         return None
+
+    def _legacy_native_spec_fallback(self, tool: types.Tool) -> NativeToolSpec | None:
+        """Detect Operator native tools by name for backwards compatibility."""
+        if tool.name == "openai_computer" or tool.name.endswith("_openai_computer"):
+            return NativeToolSpec(
+                api_type="computer_use_preview",
+                api_name="computer",
+                role="computer",
+            )
+        return super()._legacy_native_spec_fallback(tool)
