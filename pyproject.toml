@@ -1,6 +1,6 @@
 [project]
 name = "hud-python"
-version = "0.5.18"
+version = "0.5.16"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
@@ -139,7 +139,7 @@ dev = [
     "jupyter_core",
     "dotenv>=0.9.9",
     # Testing and linting
-    "ruff==0.15.0",
+    "ruff >=0.11.8, <0.15.0",
     "pytest >=8.1.1",
     "pytest-asyncio",
     "pytest-mock",
