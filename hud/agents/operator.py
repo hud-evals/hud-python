@@ -17,7 +17,7 @@ from openai.types.responses.response_input_param import (
 from openai.types.shared_params.reasoning import Reasoning
 
 from hud.tools.computer.settings import computer_settings
-from hud.tools.native_types import NativeToolSpec  # noqa: TC001
+from hud.tools.native_types import NativeToolSpec
 from hud.types import AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.types import with_signature
 
