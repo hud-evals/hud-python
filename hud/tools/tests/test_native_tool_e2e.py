@@ -111,18 +111,25 @@ class TestNativeToolSpecE2E:
             tool = computer_tools[0]
             assert tool.meta is not None
 
-            # Verify native_tools contains Claude spec with display dimensions
+            # Verify native_tools contains Claude spec list with display dimensions
             native_tools = tool.meta.get("native_tools", {})
             assert "claude" in native_tools
 
-            claude_spec = native_tools["claude"]
-            assert claude_spec["api_type"] == "computer_20250124"
-            assert claude_spec["role"] == "computer"
+            claude_specs = native_tools["claude"]
+            assert isinstance(claude_specs, list)
+            assert len(claude_specs) == 2
 
-            # Display dimensions should be in extra field
-            extra = claude_spec.get("extra", {})
-            assert extra.get("display_width") == 1920
-            assert extra.get("display_height") == 1080
+            # First spec: computer_20251124 (Opus 4.5/4.6)
+            assert claude_specs[0]["api_type"] == "computer_20251124"
+            assert claude_specs[0]["role"] == "computer"
+            assert claude_specs[0].get("extra", {}).get("display_width") == 1920
+            assert claude_specs[0].get("extra", {}).get("display_height") == 1080
+
+            # Second spec: computer_20250124 (catch-all)
+            assert claude_specs[1]["api_type"] == "computer_20250124"
+            assert claude_specs[1]["role"] == "computer"
+            assert claude_specs[1].get("extra", {}).get("display_width") == 1920
+            assert claude_specs[1].get("extra", {}).get("display_height") == 1080
 
             await client.__aexit__(None, None, None)
         finally:

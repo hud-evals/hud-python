@@ -97,26 +97,44 @@ class BaseTool(ABC):
 
         # Embed native specs in meta for MCP transport
         if self._native_specs:
-            self.meta["native_tools"] = {
-                agent_type.value: spec.model_dump(exclude_none=True)
-                for agent_type, spec in self._native_specs.items()
-            }
+            native_tools_meta: dict[str, Any] = {}
+            for agent_type, spec_or_list in self._native_specs.items():
+                if isinstance(spec_or_list, list):
+                    native_tools_meta[agent_type.value] = [
+                        s.model_dump(exclude_none=True) for s in spec_or_list
+                    ]
+                else:
+                    native_tools_meta[agent_type.value] = spec_or_list.model_dump(exclude_none=True)
+            self.meta["native_tools"] = native_tools_meta
 
         # Expose attributes FastMCP expects when registering an instance directly
         self.__name__ = self.name  # FastMCP uses fn.__name__ if name param omitted
         if self.description:
             self.__doc__ = self.description
 
-    def get_native_spec(self, agent_type: AgentType) -> NativeToolSpec | None:
+    def get_native_spec(
+        self, agent_type: AgentType, model: str | None = None
+    ) -> NativeToolSpec | None:
         """Get the native tool spec for a specific agent type.
+
+        When the spec is a list, returns the first spec that supports the given model.
 
         Args:
             agent_type: The agent type to get the spec for
+            model: Optional model name for list-of-specs resolution
 
         Returns:
             NativeToolSpec if one exists for the agent type, None otherwise
         """
-        return self._native_specs.get(agent_type)
+        spec_or_list = self._native_specs.get(agent_type)
+        if spec_or_list is None:
+            return None
+        if isinstance(spec_or_list, list):
+            for s in spec_or_list:
+                if s.supports_model(model):
+                    return s
+            return None
+        return spec_or_list
 
     @abstractmethod
     async def __call__(self, **kwargs: Any) -> ToolResult:

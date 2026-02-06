@@ -232,6 +232,145 @@ class TestNativeToolSpecs:
         assert meta_native_tools["claude"]["beta"] == "computer-use-2025-01-24"
 
 
+class TestListNativeToolSpecs:
+    """Tests for list-of-specs (model-specific variants) in NativeToolSpecs."""
+
+    def test_list_specs_creation(self) -> None:
+        """Test creating a NativeToolSpecs with a list of specs."""
+        specs: NativeToolSpecs = {
+            AgentType.CLAUDE: [
+                NativeToolSpec(
+                    api_type="computer_20251124",
+                    api_name="computer",
+                    supported_models=("claude-opus-4-5*", "claude-opus-4-6*"),
+                ),
+                NativeToolSpec(
+                    api_type="computer_20250124",
+                    api_name="computer",
+                ),
+            ],
+        }
+        spec_list = specs[AgentType.CLAUDE]
+        assert isinstance(spec_list, list)
+        assert len(spec_list) == 2
+        assert spec_list[0].api_type == "computer_20251124"
+        assert spec_list[1].api_type == "computer_20250124"
+
+    def test_list_specs_first_match_wins(self) -> None:
+        """Test that first matching spec is selected when iterating a list."""
+        specs = [
+            NativeToolSpec(
+                api_type="computer_20251124",
+                supported_models=("claude-opus-4-5*", "claude-opus-4-6*"),
+            ),
+            NativeToolSpec(
+                api_type="computer_20250124",
+            ),
+        ]
+        # Opus 4.6 should match the first spec
+        for s in specs:
+            if s.supports_model("claude-opus-4-6-20260101"):
+                matched = s
+                break
+        assert matched.api_type == "computer_20251124"
+
+    def test_list_specs_fallback_to_catchall(self) -> None:
+        """Test that a non-matching model falls back to the catch-all spec."""
+        specs = [
+            NativeToolSpec(
+                api_type="computer_20251124",
+                supported_models=("claude-opus-4-5*", "claude-opus-4-6*"),
+            ),
+            NativeToolSpec(
+                api_type="computer_20250124",
+            ),
+        ]
+        # Sonnet 4 should NOT match the first spec (restricted to Opus 4.5/4.6)
+        # so it falls through to the catch-all second spec
+        matched = None
+        for s in specs:
+            if s.supports_model("claude-sonnet-4-20250514"):
+                matched = s
+                break
+        assert matched is not None
+        assert matched.api_type == "computer_20250124"
+
+    def test_list_specs_restricted_first_unrestricted_second(self) -> None:
+        """Test that restricted first + unrestricted second works as expected."""
+        specs = [
+            NativeToolSpec(
+                api_type="new_type",
+                supported_models=("model-a*",),
+            ),
+            NativeToolSpec(
+                api_type="old_type",
+                # No supported_models = matches all
+            ),
+        ]
+        # model-a-123 should match first
+        for s in specs:
+            if s.supports_model("model-a-123"):
+                matched_a = s
+                break
+        assert matched_a.api_type == "new_type"
+
+        # model-b-456 should NOT match first (restricted to model-a*)
+        # but WILL match first because supports_model returns True for unrestricted...
+        # Wait -- first spec IS restricted. model-b doesn't match "model-a*" so first fails.
+        matched_b = None
+        for s in specs:
+            if s.supports_model("model-b-456"):
+                matched_b = s
+                break
+        assert matched_b is not None
+        assert matched_b.api_type == "old_type"
+
+    def test_list_specs_serialization(self) -> None:
+        """Test that list specs serialize correctly for meta embedding."""
+        specs: NativeToolSpecs = {
+            AgentType.CLAUDE: [
+                NativeToolSpec(api_type="computer_20251124", api_name="computer"),
+                NativeToolSpec(api_type="computer_20250124", api_name="computer"),
+            ],
+        }
+        # Simulate BaseTool serialization
+        native_tools_meta = {}
+        for agent_type, spec_or_list in specs.items():
+            if isinstance(spec_or_list, list):
+                native_tools_meta[agent_type.value] = [
+                    s.model_dump(exclude_none=True) for s in spec_or_list
+                ]
+            else:
+                native_tools_meta[agent_type.value] = spec_or_list.model_dump(exclude_none=True)
+
+        assert "claude" in native_tools_meta
+        assert isinstance(native_tools_meta["claude"], list)
+        assert len(native_tools_meta["claude"]) == 2
+        assert native_tools_meta["claude"][0]["api_type"] == "computer_20251124"
+        assert native_tools_meta["claude"][1]["api_type"] == "computer_20250124"
+
+    def test_anthropic_computer_tool_has_list_specs(self) -> None:
+        """Test that AnthropicComputerTool now uses list specs."""
+        from hud.tools.computer.anthropic import AnthropicComputerTool
+
+        spec_or_list = AnthropicComputerTool.native_specs[AgentType.CLAUDE]
+        assert isinstance(spec_or_list, list)
+        assert len(spec_or_list) == 2
+        assert spec_or_list[0].api_type == "computer_20251124"
+        assert spec_or_list[1].api_type == "computer_20250124"
+
+    def test_anthropic_computer_tool_meta_is_list(self) -> None:
+        """Test that AnthropicComputerTool meta serializes list specs."""
+        from hud.tools.computer.anthropic import AnthropicComputerTool
+
+        tool = AnthropicComputerTool(width=1920, height=1080)
+        native_tools = tool.meta.get("native_tools", {})
+        assert "claude" in native_tools
+        assert isinstance(native_tools["claude"], list)
+        assert len(native_tools["claude"]) == 2
+        assert native_tools["claude"][0]["api_type"] == "computer_20251124"
+
+
 class TestBaseToolNativeSpecs:
     """Tests for BaseTool native_specs integration."""
 

@@ -16,7 +16,10 @@ from .hud import HudComputerTool
 from .settings import computer_settings
 
 if TYPE_CHECKING:
-    from anthropic.types.beta import BetaToolComputerUse20250124Param
+    from anthropic.types.beta import (
+        BetaToolComputerUse20250124Param,
+        BetaToolComputerUse20251124Param,
+    )
 
     from hud.tools.executors.base import BaseExecutor
 
@@ -64,20 +67,29 @@ ANTHROPIC_TO_CLA_KEYS = {
 class AnthropicComputerTool(HudComputerTool):
     """Anthropic Computer Use tool for interacting with the computer.
 
-    This is the standard version for Claude Sonnet 4.5, Haiku 4.5, Opus 4.1,
-    Sonnet 4, and Opus 4. Uses tool version computer_20250124.
+    Supports computer_20251124 (Opus 4.5/4.6 with zoom) and
+    computer_20250124 (Sonnet 4.5, Haiku 4.5, Sonnet 4, Opus 4).
     """
 
     name: str = "computer"
     api_type: str = "computer_20250124"
 
     native_specs: ClassVar[NativeToolSpecs] = {
-        AgentType.CLAUDE: NativeToolSpec(
-            api_type="computer_20250124",
-            api_name="computer",
-            beta="computer-use-2025-01-24",
-            role="computer",  # Mutually exclusive with other computer tools when native
-        ),
+        AgentType.CLAUDE: [
+            NativeToolSpec(
+                api_type="computer_20251124",
+                api_name="computer",
+                beta="computer-use-2025-11-24",
+                role="computer",
+                supported_models=("claude-opus-4-5*", "claude-opus-4-6*"),
+            ),
+            NativeToolSpec(
+                api_type="computer_20250124",
+                api_name="computer",
+                beta="computer-use-2025-01-24",
+                role="computer",
+            ),
+        ],
     }
 
     def __init__(
@@ -108,17 +120,30 @@ class AnthropicComputerTool(HudComputerTool):
             description: Tool description (auto-generated from docstring if not provided)
         """
         # Create instance-level native_specs with display dimensions
-        instance_native_specs = {
-            AgentType.CLAUDE: NativeToolSpec(
-                api_type="computer_20250124",
-                api_name="computer",
-                beta="computer-use-2025-01-24",
-                role="computer",
-                extra={
-                    "display_width": width,
-                    "display_height": height,
-                },
-            ),
+        instance_native_specs: NativeToolSpecs = {
+            AgentType.CLAUDE: [
+                NativeToolSpec(
+                    api_type="computer_20251124",
+                    api_name="computer",
+                    beta="computer-use-2025-11-24",
+                    role="computer",
+                    supported_models=("claude-opus-4-5*", "claude-opus-4-6*"),
+                    extra={
+                        "display_width": width,
+                        "display_height": height,
+                    },
+                ),
+                NativeToolSpec(
+                    api_type="computer_20250124",
+                    api_name="computer",
+                    beta="computer-use-2025-01-24",
+                    role="computer",
+                    extra={
+                        "display_width": width,
+                        "display_height": height,
+                    },
+                ),
+            ],
         }
 
         super().__init__(
@@ -135,12 +160,31 @@ class AnthropicComputerTool(HudComputerTool):
             **kwargs,
         )
 
-    def to_params(self) -> BetaToolComputerUse20250124Param:
-        """Convert to Anthropic tool parameters."""
+    def to_params(
+        self, api_type: str | None = None
+    ) -> BetaToolComputerUse20250124Param | BetaToolComputerUse20251124Param:
+        """Convert to Anthropic tool parameters.
+
+        Args:
+            api_type: Override the api_type (e.g., "computer_20251124" for Opus 4.5/4.6).
+                      Defaults to self.api_type.
+        """
+        effective_type = api_type or self.api_type
+        if effective_type == "computer_20251124":
+            return cast(
+                "BetaToolComputerUse20251124Param",
+                {
+                    "type": "computer_20251124",
+                    "name": self.name,
+                    "display_width_px": self.width,
+                    "display_height_px": self.height,
+                    "enable_zoom": True,
+                },
+            )
         return cast(
             "BetaToolComputerUse20250124Param",
             {
-                "type": self.api_type,
+                "type": effective_type,
                 "name": self.name,
                 "display_width_px": self.width,
                 "display_height_px": self.height,
@@ -185,6 +229,9 @@ class AnthropicComputerTool(HudComputerTool):
         duration: float | None = Field(None, description="The duration of the action in seconds"),
         take_screenshot_on_click: bool = Field(
             True, description="Whether to take a screenshot after clicking"
+        ),
+        region: list[int] | None = Field(
+            None, description="Region [x1, y1, x2, y2] for zoom action"
         ),
     ) -> list[ContentBlock]:
         """
@@ -415,12 +462,47 @@ class AnthropicComputerTool(HudComputerTool):
         elif action == "cursor_position":
             result = await self.executor.position()
 
+        elif action == "zoom":
+            if region is None or len(region) != 4:
+                raise McpError(
+                    ErrorData(
+                        code=INVALID_PARAMS,
+                        message="region [x1, y1, x2, y2] is required for zoom",
+                    )
+                )
+            screenshot_base64 = await self.executor.screenshot()
+            if not screenshot_base64:
+                result = ContentResult(error="Failed to take screenshot for zoom")
+            else:
+                import base64 as b64
+                from io import BytesIO
+
+                from PIL import Image  # type: ignore[import-not-found]
+
+                image_data = b64.b64decode(screenshot_base64)
+                image = Image.open(BytesIO(image_data))
+
+                # Scale region coordinates from agent space to screen space
+                x1_s, y1_s = self._scale_coordinates(region[0], region[1])
+                x2_s, y2_s = self._scale_coordinates(region[2], region[3])
+
+                cropped = image.crop((x1_s or 0, y1_s or 0, x2_s or 0, y2_s or 0))
+
+                buffer = BytesIO()
+                cropped.save(buffer, format="PNG")
+                result = ContentResult(base64_image=b64.b64encode(buffer.getvalue()).decode())
+
         else:
             # Unknown action
             raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Invalid action: {action}"))
 
-        # Rescale screenshot in result if present
-        if isinstance(result, ContentResult) and result.base64_image and self.rescale_images:
+        # Zoom returns full-resolution crops -- skip rescaling for zoom
+        if (
+            isinstance(result, ContentResult)
+            and result.base64_image
+            and self.rescale_images
+            and action != "zoom"
+        ):
             rescaled_image = await self._rescale_screenshot(result.base64_image)
             result.base64_image = rescaled_image
 

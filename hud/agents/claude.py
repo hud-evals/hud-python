@@ -20,6 +20,7 @@ from anthropic.types.beta import (
     BetaTextBlockParam,
     BetaToolBash20250124Param,
     BetaToolComputerUse20250124Param,
+    BetaToolComputerUse20251124Param,
     BetaToolParam,
     BetaToolResultBlockParam,
     BetaToolTextEditor20250728Param,
@@ -72,12 +73,26 @@ class ClaudeAgent(MCPAgent):
         Supports old environments that expose tools like 'anthropic_computer',
         'bash', or 'str_replace_based_edit_tool' without native_tools metadata.
         """
+        import fnmatch
+
         name = tool.name
 
         # Check for computer tool patterns
         for pattern in self._LEGACY_COMPUTER_NAMES:
             if name == pattern or name.endswith(f"_{pattern}"):
                 logger.debug("Legacy fallback: detected %s as computer tool", name)
+                # Opus 4.5/4.6 use the new computer tool version
+                model_lower = (self.model or "").lower()
+                if any(
+                    fnmatch.fnmatch(model_lower, p)
+                    for p in ("claude-opus-4-5*", "claude-opus-4-6*")
+                ):
+                    return NativeToolSpec(
+                        api_type="computer_20251124",
+                        api_name="computer",
+                        beta="computer-use-2025-11-24",
+                        role="computer",
+                    )
                 return NativeToolSpec(
                     api_type="computer_20250124",
                     api_name="computer",
@@ -92,7 +107,6 @@ class ClaudeAgent(MCPAgent):
                 return NativeToolSpec(
                     api_type="bash_20250124",
                     api_name="bash",
-                    beta="computer-use-2025-01-24",
                     role="shell",
                 )
 
@@ -103,7 +117,6 @@ class ClaudeAgent(MCPAgent):
                 return NativeToolSpec(
                     api_type="text_editor_20250728",
                     api_name="str_replace_based_edit_tool",
-                    beta="computer-use-2025-01-24",
                     role="editor",
                 )
 
@@ -142,7 +155,7 @@ class ClaudeAgent(MCPAgent):
         self.has_computer_tool = False
         self.tool_mapping: dict[str, str] = {}
         self.claude_tools: list[BetaToolUnionParam] = []
-        self._required_betas: set[str] = {"fine-grained-tool-streaming-2025-05-14"}
+        self._required_betas: set[str] = set()
 
     def _on_tools_ready(self) -> None:
         """Build Claude-specific tool mappings after tools are discovered."""
@@ -331,7 +344,7 @@ class ClaudeAgent(MCPAgent):
         self.has_computer_tool = False
         self.tool_mapping: dict[str, str] = {}
         self.claude_tools: list[BetaToolUnionParam] = []
-        self._required_betas: set[str] = {"fine-grained-tool-streaming-2025-05-14"}
+        self._required_betas: set[str] = set()
 
         categorized = self.categorize_tools()
 
@@ -387,7 +400,7 @@ class ClaudeAgent(MCPAgent):
         Claude's native tools have fixed names that must be used exactly.
         """
         match spec.api_type:
-            case "computer_20250124":
+            case "computer_20250124" | "computer_20251124":
                 return "computer"
             case "bash_20250124":
                 return "bash"
@@ -407,8 +420,7 @@ class ClaudeAgent(MCPAgent):
             Claude-specific tool parameter
         """
         match spec.api_type:
-            case "computer_20250124":
-                # Get display dimensions from spec.extra, fallback to settings
+            case "computer_20251124":
                 display_width = spec.extra.get("display_width")
                 display_height = spec.extra.get("display_height")
 
@@ -425,7 +437,31 @@ class ClaudeAgent(MCPAgent):
                     display_width = display_width or computer_settings.ANTHROPIC_COMPUTER_WIDTH
                     display_height = display_height or computer_settings.ANTHROPIC_COMPUTER_HEIGHT
 
-                # Claude expects name to be literal "computer"
+                return BetaToolComputerUse20251124Param(
+                    type="computer_20251124",
+                    name="computer",
+                    display_number=1,
+                    display_width_px=display_width,
+                    display_height_px=display_height,
+                    enable_zoom=True,
+                )
+            case "computer_20250124":
+                display_width = spec.extra.get("display_width")
+                display_height = spec.extra.get("display_height")
+
+                if display_width is None or display_height is None:
+                    import warnings
+
+                    warnings.warn(
+                        "Computer tool missing display dimensions in native_specs.extra. "
+                        "Falling back to computer_settings. This fallback will be removed "
+                        "in v0.6.0. Update your tool to pass display_width/display_height.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                    display_width = display_width or computer_settings.ANTHROPIC_COMPUTER_WIDTH
+                    display_height = display_height or computer_settings.ANTHROPIC_COMPUTER_HEIGHT
+
                 return BetaToolComputerUse20250124Param(
                     type="computer_20250124",
                     name="computer",
