@@ -551,7 +551,7 @@ class TestClaudeAgentComputerTool20251124:
             inputSchema={},
         )
 
-        result = cast(dict[str, Any], agent._build_native_tool(tool, spec))
+        result = cast("dict[str, Any]", agent._build_native_tool(tool, spec))
         assert result["type"] == "computer_20251124"
         assert result["name"] == "computer"
         assert result["display_width_px"] == 1920
