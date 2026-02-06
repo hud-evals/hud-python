@@ -227,11 +227,12 @@ class AnthropicComputerTool(HudComputerTool):
         ),
         scroll_amount: int | None = Field(None, description="The amount to scroll"),
         duration: float | None = Field(None, description="The duration of the action in seconds"),
+        region: tuple[int, int, int, int] | list[int] | None = Field(
+            None, description="The region for zoom action [x0, y0, x1, y1]"
+        ),
+        repeat: int = Field(1, description="Number of times to repeat the key action (1-100)"),
         take_screenshot_on_click: bool = Field(
             True, description="Whether to take a screenshot after clicking"
-        ),
-        region: list[int] | None = Field(
-            None, description="Region [x1, y1, x2, y2] for zoom action"
         ),
     ) -> list[ContentBlock]:
         """
@@ -265,42 +266,55 @@ class AnthropicComputerTool(HudComputerTool):
                 result = ContentResult(error="Failed to take screenshot")
 
         elif action == "left_click" or action == "click":
+            hold_keys = [self._map_anthropic_key_to_cla(text)] if text else None
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 logger.info("Scaled coordinates: %s, %s", scaled_x, scaled_y)
-                result = await self.executor.click(x=scaled_x, y=scaled_y)
+                result = await self.executor.click(x=scaled_x, y=scaled_y, hold_keys=hold_keys)
             else:
-                result = await self.executor.click()
+                result = await self.executor.click(hold_keys=hold_keys)
 
         elif action == "double_click":
+            hold_keys = [self._map_anthropic_key_to_cla(text)] if text else None
             if coord_tuple and len(coord_tuple) >= 2:
                 # Use pattern for double-click
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
-                result = await self.executor.click(x=scaled_x, y=scaled_y, pattern=[100])
+                result = await self.executor.click(
+                    x=scaled_x, y=scaled_y, pattern=[100], hold_keys=hold_keys
+                )
             else:
-                result = await self.executor.click(pattern=[100])
+                result = await self.executor.click(pattern=[100], hold_keys=hold_keys)
 
         elif action == "triple_click":
+            hold_keys = [self._map_anthropic_key_to_cla(text)] if text else None
             if coord_tuple and len(coord_tuple) >= 2:
                 # Use pattern for triple-click
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
-                result = await self.executor.click(x=scaled_x, y=scaled_y, pattern=[100, 100])
+                result = await self.executor.click(
+                    x=scaled_x, y=scaled_y, pattern=[100, 100], hold_keys=hold_keys
+                )
             else:
-                result = await self.executor.click(pattern=[100, 100])
+                result = await self.executor.click(pattern=[100, 100], hold_keys=hold_keys)
 
         elif action == "right_click":
+            hold_keys = [self._map_anthropic_key_to_cla(text)] if text else None
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
-                result = await self.executor.click(x=scaled_x, y=scaled_y, button="right")
+                result = await self.executor.click(
+                    x=scaled_x, y=scaled_y, button="right", hold_keys=hold_keys
+                )
             else:
-                result = await self.executor.click(button="right")
+                result = await self.executor.click(button="right", hold_keys=hold_keys)
 
         elif action == "middle_click":
+            hold_keys = [self._map_anthropic_key_to_cla(text)] if text else None
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
-                result = await self.executor.click(x=scaled_x, y=scaled_y, button="middle")
+                result = await self.executor.click(
+                    x=scaled_x, y=scaled_y, button="middle", hold_keys=hold_keys
+                )
             else:
-                result = await self.executor.click(button="middle")
+                result = await self.executor.click(button="middle", hold_keys=hold_keys)
 
         elif action == "mouse_move" or action == "move":
             if coord_tuple and len(coord_tuple) >= 2:
@@ -319,6 +333,13 @@ class AnthropicComputerTool(HudComputerTool):
 
         elif action == "key":
             if text:
+                if not isinstance(repeat, int) or repeat < 1:
+                    repeat = 1
+                if repeat > 100:
+                    raise McpError(
+                        ErrorData(code=INVALID_PARAMS, message="repeat exceeds maximum of 100")
+                    )
+
                 # Anthropic sends single key or combo like "ctrl+a"
                 # Map to CLA standard key format
                 mapped_key = self._map_anthropic_key_to_cla(text)
@@ -329,7 +350,9 @@ class AnthropicComputerTool(HudComputerTool):
                 else:
                     keys_list = [mapped_key]
 
-                result = await self.executor.press(keys=keys_list)
+                for i in range(repeat):
+                    is_last = i == repeat - 1
+                    result = await self.executor.press(keys=keys_list, take_screenshot=is_last)
             else:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="text is required for key"))
 
@@ -350,6 +373,8 @@ class AnthropicComputerTool(HudComputerTool):
                     )
                 )
 
+            # Map modifier key to CLA format (e.g., "Control" -> "ctrl")
+            hold_keys = [self._map_anthropic_key_to_cla(text)] if text else None
             # Convert scroll amount from "clicks" to pixels
             # Anthropic's scroll_amount represents wheel clicks, not pixels
             # Standard conversion: 1 wheel click ≈ 100 pixels (3 lines of text)
@@ -371,10 +396,16 @@ class AnthropicComputerTool(HudComputerTool):
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 result = await self.executor.scroll(
-                    x=scaled_x, y=scaled_y, scroll_x=scroll_x, scroll_y=scroll_y
+                    x=scaled_x,
+                    y=scaled_y,
+                    scroll_x=scroll_x,
+                    scroll_y=scroll_y,
+                    hold_keys=hold_keys,
                 )
             else:
-                result = await self.executor.scroll(scroll_x=scroll_x, scroll_y=scroll_y)
+                result = await self.executor.scroll(
+                    scroll_x=scroll_x, scroll_y=scroll_y, hold_keys=hold_keys
+                )
 
         elif action == "left_click_drag" or action == "drag":
             # Anthropic sends drag with start and end coordinates
@@ -463,34 +494,56 @@ class AnthropicComputerTool(HudComputerTool):
             result = await self.executor.position()
 
         elif action == "zoom":
-            if region is None or len(region) != 4:
+            # Zoom action: capture a region of the screen and optionally resize
+            if region is None:
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="region is required for zoom action")
+                )
+            if not isinstance(region, list | tuple) or len(region) != 4:
                 raise McpError(
                     ErrorData(
                         code=INVALID_PARAMS,
-                        message="region [x1, y1, x2, y2] is required for zoom",
+                        message="region must be a tuple/list of 4 integers (x0, y0, x1, y1)",
                     )
                 )
-            screenshot_base64 = await self.executor.screenshot()
-            if not screenshot_base64:
-                result = ContentResult(error="Failed to take screenshot for zoom")
-            else:
-                import base64 as b64
-                from io import BytesIO
+            if not all(isinstance(coord, int) and coord >= 0 for coord in region):
+                raise McpError(
+                    ErrorData(
+                        code=INVALID_PARAMS,
+                        message="region coordinates must be non-negative integers",
+                    )
+                )
 
-                from PIL import Image  # type: ignore[import-not-found]
+            x0, y0, x1, y1 = region
+            # Scale coordinates from agent space to screen space
+            x0, y0 = self._scale_coordinates(x0, y0)
+            x1, y1 = self._scale_coordinates(x1, y1)
 
-                image_data = b64.b64decode(screenshot_base64)
-                image = Image.open(BytesIO(image_data))
+            # Ensure coordinates are valid after scaling
+            if x0 is None or y0 is None or x1 is None or y1 is None:
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="Failed to scale region coordinates")
+                )
 
-                # Scale region coordinates from agent space to screen space
-                x1_s, y1_s = self._scale_coordinates(region[0], region[1])
-                x2_s, y2_s = self._scale_coordinates(region[2], region[3])
+            width = x1 - x0
+            height = y1 - y0
 
-                cropped = image.crop((x1_s or 0, y1_s or 0, x2_s or 0, y2_s or 0))
+            if width <= 0 or height <= 0:
+                raise McpError(
+                    ErrorData(
+                        code=INVALID_PARAMS, message="region must have positive width and height"
+                    )
+                )
 
-                buffer = BytesIO()
-                cropped.save(buffer, format="PNG")
-                result = ContentResult(base64_image=b64.b64encode(buffer.getvalue()).decode())
+            # Use executor's zoom method to capture and resize the region
+            result = await self.executor.zoom(
+                x0=x0,
+                y0=y0,
+                x1=x1,
+                y1=y1,
+                target_width=self.environment_width,
+                target_height=self.environment_height,
+            )
 
         else:
             # Unknown action
