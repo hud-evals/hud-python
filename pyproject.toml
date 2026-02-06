@@ -139,7 +139,7 @@ dev = [
     "jupyter_core",
     "dotenv>=0.9.9",
     # Testing and linting
-    "ruff >=0.11.8",
+    "ruff==0.15.0",
     "pytest >=8.1.1",
     "pytest-asyncio",
     "pytest-mock",
