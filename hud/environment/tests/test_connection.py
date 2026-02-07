@@ -23,7 +23,7 @@ class TestConnectionConfig:
 
     def test_config_with_options(self) -> None:
         """Config with all options set."""
-        transform_fn = lambda t: t  # noqa: E731
+        transform_fn = lambda t: t
         config = ConnectionConfig(
             prefix="test",
             include=["tool1", "tool2"],
