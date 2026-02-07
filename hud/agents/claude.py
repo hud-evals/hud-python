@@ -142,7 +142,7 @@ class ClaudeAgent(MCPAgent):
         self.has_computer_tool = False
         self.tool_mapping: dict[str, str] = {}
         self.claude_tools: list[BetaToolUnionParam] = []
-        self._required_betas: set[str] = {"fine-grained-tool-streaming-2025-05-14"}
+        self._required_betas: set[str] = set()
 
     def _on_tools_ready(self) -> None:
         """Build Claude-specific tool mappings after tools are discovered."""
@@ -191,7 +191,9 @@ class ClaudeAgent(MCPAgent):
         messages_cached = self._add_prompt_caching(messages)
 
         # betas to use - collected during tool conversion based on native specs
-        betas = list(self._required_betas)
+        # Only pass betas when non-empty; an empty list can produce an empty
+        # anthropic-beta header which the API rejects.
+        betas: list[str] | Omit = list(self._required_betas) if self._required_betas else Omit()
 
         # Bedrock doesn't support .stream() - use create(stream=True) instead
         if isinstance(self.anthropic_client, AsyncAnthropicBedrock):
@@ -331,7 +333,7 @@ class ClaudeAgent(MCPAgent):
         self.has_computer_tool = False
         self.tool_mapping: dict[str, str] = {}
         self.claude_tools: list[BetaToolUnionParam] = []
-        self._required_betas: set[str] = {"fine-grained-tool-streaming-2025-05-14"}
+        self._required_betas: set[str] = set()
 
         categorized = self.categorize_tools()
 
