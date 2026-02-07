@@ -183,7 +183,7 @@ def validate_dockerfile(directory: Path) -> list[ValidationIssue]:
                         copied_files.add("__ALL__")
                     else:
                         # Normalize path: remove leading ./ and trailing / or *
-                        normalized = src.lstrip("./").rstrip("/").rstrip("*")
+                        normalized = src.removeprefix("./").rstrip("/").rstrip("*")
                         copied_files.add(normalized)
 
         # Check for uv sync or pip install before full COPY
@@ -222,7 +222,7 @@ def _check_pyproject_copy_order(
             license_file = license_info.get("file", "")
             if license_file:
                 # Normalize path for comparison
-                normalized_license = license_file.lstrip("./")
+                normalized_license = license_file.removeprefix("./")
                 if normalized_license not in copied_files:
                     hint = (
                         f"Add 'COPY {license_file} ./' before the RUN command "
@@ -241,7 +241,7 @@ def _check_pyproject_copy_order(
         readme = project.get("readme")
         if isinstance(readme, str):
             # Normalize path for comparison
-            normalized_readme = readme.lstrip("./")
+            normalized_readme = readme.removeprefix("./")
             if normalized_readme not in copied_files:
                 hint = f"Add 'COPY {readme} ./' before the RUN command, or builds may fail"
                 issues.append(

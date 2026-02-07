@@ -26,13 +26,13 @@ ENV WITH_DEFAULT=val
 """
     )
     required, optional = extract_env_vars_from_dockerfile(dockerfile)
-    # BUILD_TOKEN required (ARG without default)
-    assert "BUILD_TOKEN" in required
+    # BUILD_TOKEN is an ARG (build-time only) — NOT a runtime env var
+    assert "BUILD_TOKEN" not in required
     # RUNTIME_KEY required (ENV without value)
     assert "RUNTIME_KEY" in required
-    # FROM_ARG references BUILD_TOKEN -> required
+    # FROM_ARG references BUILD_TOKEN via ENV=$ARG pattern -> required at runtime
     assert "FROM_ARG" in required
-    # DEFAULTED and WITH_DEFAULT should not be marked required by default
+    # DEFAULTED is ARG with default (build-time only), WITH_DEFAULT is ENV with value
     assert "DEFAULTED" not in required
     assert "WITH_DEFAULT" not in required
     assert optional == []
