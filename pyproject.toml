@@ -1,6 +1,6 @@
 [project]
 name = "hud-python"
-version = "0.5.19"
+version = "0.5.20"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
@@ -113,7 +113,7 @@ agents = [
     "mcp-use==1.5.0",
     "langchain>=1.1.0",  # Required by mcp-use
     # AI providers
-    "anthropic>=0.75",
+    "anthropic>=0.78.0",
     "google-genai",
     "openai-agents",
     # Dataset loading (HuggingFace)
@@ -126,7 +126,7 @@ agents = [
 
 # AWS Bedrock support for ClaudeAgent
 bedrock = [
-    "anthropic[bedrock]>=0.75",
+    "anthropic[bedrock]>=0.78.0",
 ]
 
 # Development dependencies - includes testing, linting, and automation tools

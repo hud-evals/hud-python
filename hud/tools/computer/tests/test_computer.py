@@ -50,6 +50,45 @@ async def test_anthropic_computer_screenshot():
 
 
 @pytest.mark.asyncio
+async def test_anthropic_computer_zoom():
+    """Test zoom action on AnthropicComputerTool.
+
+    This test verifies that the zoom action correctly calls the executor
+    with properly scaled coordinates.
+    """
+    from hud.tools.types import ContentResult
+
+    comp = AnthropicComputerTool()
+
+    # Mock the executor's zoom method to verify it's called with correct params
+    mock_zoom = AsyncMock(return_value=ContentResult(base64_image="fake_base64"))
+    comp.executor.zoom = mock_zoom
+
+    # Zoom into a 400x400 region starting at (0, 0)
+    blocks = await comp(action="zoom", region=[0, 0, 400, 400])
+
+    # Verify zoom was called with scaled coordinates
+    mock_zoom.assert_called_once()
+    call_kwargs = mock_zoom.call_args.kwargs
+
+    # The input region [0, 0, 400, 400] should be scaled from agent space to screen space
+    # AnthropicComputerTool defaults to 1400x850, environment defaults to 1920x1080
+    # scale_x = 1400/1920, scale_y = 850/1080
+    # Scaled coords: x0=0, y0=0, x1=400/(1400/1920)=548, y1=400/(850/1080)=508
+    assert call_kwargs["x0"] == 0
+    assert call_kwargs["y0"] == 0
+    assert call_kwargs["x1"] == int(400 / (1400 / 1920))  # ~548
+    assert call_kwargs["y1"] == int(400 / (850 / 1080))  # ~508
+    assert call_kwargs["target_width"] == comp.environment_width
+    assert call_kwargs["target_height"] == comp.environment_height
+
+    assert blocks is not None
+    assert len(blocks) > 0
+    # Should return an image (the zoomed screenshot)
+    assert any(isinstance(b, ImageContent) for b in blocks)
+
+
+@pytest.mark.asyncio
 async def test_openai_computer_click():
     comp = OpenAIComputerTool()
     blocks = await comp(type="click", x=5, y=5)

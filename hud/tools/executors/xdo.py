@@ -509,3 +509,46 @@ class XDOExecutor(BaseExecutor):
     async def position(self) -> ContentResult:
         """Get current cursor position."""
         return await self.execute("getmouselocation", take_screenshot=False)
+
+    async def zoom(
+        self,
+        x0: int,
+        y0: int,
+        x1: int,
+        y1: int,
+        target_width: int | None = None,
+        target_height: int | None = None,
+    ) -> ContentResult:
+        """
+        Capture a region of the screen and optionally resize it.
+
+        Args:
+            x0, y0: Top-left corner of the region
+            x1, y1: Bottom-right corner of the region
+            target_width: Target width to resize to (None = scale to fill)
+            target_height: Target height to resize to (None = scale to fill)
+
+        Returns:
+            ContentResult with the zoomed screenshot
+        """
+        try:
+            from io import BytesIO
+
+            from PIL import Image
+
+            # Take full screenshot first
+            screenshot_base64 = await self.screenshot()
+            if not screenshot_base64:
+                return ContentResult(error="Failed to take screenshot for zoom")
+
+            # Decode screenshot to PIL Image
+            image_data = base64.b64decode(screenshot_base64)
+            image = Image.open(BytesIO(image_data))
+
+            zoomed_base64 = self._crop_and_resize_image(
+                image, x0, y0, x1, y1, target_width, target_height
+            )
+            return ContentResult(base64_image=zoomed_base64)
+        except Exception as e:
+            logger.error("Failed to capture zoom region: %s", e)
+            return ContentResult(error=f"Failed to capture zoom region: {e}")
