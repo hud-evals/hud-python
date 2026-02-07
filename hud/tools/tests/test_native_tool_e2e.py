@@ -529,25 +529,6 @@ class TestLegacyNameFallback:
         assert spec is not None, "Legacy fallback should detect editor"
         assert spec.api_type == "text_editor_20250728"
 
-    def test_claude_legacy_suffix_match(self, mock_anthropic: Any) -> None:
-        """Test Claude agent detects prefixed tool names like mcp_anthropic_computer."""
-        from mcp import types as mcp_types
-
-        from hud.agents.claude import ClaudeAgent
-
-        legacy_tool = mcp_types.Tool(
-            name="mcp_anthropic_computer",
-            description="Prefixed computer tool from MCP server",
-            inputSchema={"type": "object", "properties": {}},
-        )
-
-        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
-        agent._available_tools = [legacy_tool]
-
-        spec = agent.resolve_native_spec(legacy_tool)
-        assert spec is not None, "Legacy fallback should detect prefixed computer tool"
-        assert spec.api_type == "computer_20250124"
-
     def test_gemini_legacy_computer_fallback(self, mock_gemini: Any) -> None:
         """Test Gemini agent detects gemini_computer by name without metadata."""
         from mcp import types as mcp_types

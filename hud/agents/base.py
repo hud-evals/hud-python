@@ -159,27 +159,33 @@ class MCPAgent(ABC):
         The role is used for mutual exclusion - when an agent accepts a tool
         natively, other tools with the same role are excluded.
 
+        Checks metadata first, then falls back to legacy name-based detection
+        so old environments without native_tools metadata still get proper
+        role-based exclusion.
+
         Args:
             tool: MCP Tool object to check
 
         Returns:
             The role string if any native spec defines one, None otherwise
         """
-        if not tool.meta:
-            return None
+        # Check metadata-based specs first
+        if tool.meta:
+            native_tools = tool.meta.get("native_tools", {})
+            if native_tools:
+                # Check all specs for a role (they should all have the same role)
+                for spec_data in native_tools.values():
+                    if isinstance(spec_data, dict) and spec_data.get("role"):
+                        return spec_data["role"]
+                    if isinstance(spec_data, list):
+                        for item in spec_data:
+                            if isinstance(item, dict) and item.get("role"):
+                                return item["role"]
 
-        native_tools = tool.meta.get("native_tools", {})
-        if not native_tools:
-            return None
-
-        # Check all specs for a role (they should all have the same role)
-        for spec_data in native_tools.values():
-            if isinstance(spec_data, dict) and spec_data.get("role"):
-                return spec_data["role"]
-            if isinstance(spec_data, list):
-                for item in spec_data:
-                    if isinstance(item, dict) and item.get("role"):
-                        return item["role"]
+        # Fall back to legacy detection for old environments without metadata
+        legacy_spec = self._legacy_native_spec_fallback(tool)
+        if legacy_spec and legacy_spec.role:
+            return legacy_spec.role
 
         return None
 
@@ -222,6 +228,10 @@ class MCPAgent(ABC):
             else:
                 result.native.append((tool, spec))
 
+        # Collect api_names claimed by native tools to prevent name collisions
+        claimed_api_names = {s.api_name for _, s in result.native if s.api_name}
+        claimed_api_names |= {s.api_name for _, s in result.hosted if s.api_name}
+
         # Second pass: process tools without native specs (generic function tools)
         for tool in tools:
             spec = self.resolve_native_spec(tool)
@@ -233,6 +243,13 @@ class MCPAgent(ABC):
             tool_role = self.get_tool_role(tool)
             if tool_role and tool_role in result.claimed_roles:
                 result.skipped.append((tool, f"role '{tool_role}' already claimed by native tool"))
+                continue
+
+            # Check if this tool's name collides with a native tool's api_name
+            if tool.name in claimed_api_names:
+                result.skipped.append(
+                    (tool, f"name '{tool.name}' collides with native tool api_name")
+                )
                 continue
 
             result.generic.append(tool)

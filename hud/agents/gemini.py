@@ -47,20 +47,22 @@ class GeminiAgent(MCPAgent):
 
         Supports old environments that expose tools like 'gemini_computer'
         without native_tools metadata.
+
+        Each tuple is ordered by preference — first name that exists wins.
+        Only returns a spec if this tool IS that preferred match.
         """
         from hud.tools.native_types import NativeToolSpec
 
-        name = tool.name
+        available = {t.name for t in (self._available_tools or [])} | {tool.name}
+        preferred = lambda names: next((n for n in names if n in available), None) == tool.name
 
-        # Check for computer tool patterns
-        for pattern in self._LEGACY_COMPUTER_NAMES:
-            if name == pattern or name.endswith(f"_{pattern}"):
-                logger.debug("Legacy fallback: detected %s as computer tool", name)
-                return NativeToolSpec(
-                    api_type="computer_use",
-                    api_name="gemini_computer",
-                    role="computer",
-                )
+        if preferred(self._LEGACY_COMPUTER_NAMES):
+            logger.debug("Legacy fallback: detected %s as computer tool", tool.name)
+            return NativeToolSpec(
+                api_type="computer_use",
+                api_name="gemini_computer",
+                role="computer",
+            )
 
         return None
 
