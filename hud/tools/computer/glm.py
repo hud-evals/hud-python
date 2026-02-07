@@ -55,20 +55,20 @@ GLM_COORDINATE_SPACE = 999
 # - DONE()
 # - FAIL()
 GLMAction = Literal[
-    "left_click",   # start_box='[x,y]'
-    "click",        # alias for left_click
+    "left_click",  # start_box='[x,y]'
+    "click",  # alias for left_click
     "right_click",  # start_box='[x,y]'
-    "middle_click", # start_box='[x,y]'
-    "hover",        # start_box='[x,y]'
+    "middle_click",  # start_box='[x,y]'
+    "hover",  # start_box='[x,y]'
     "left_double_click",  # start_box='[x,y]'
-    "left_drag",    # start_box='[x,y]', end_box='[x,y]'
-    "key",          # keys='ctrl+c'
-    "type",         # content='text'
-    "scroll",       # start_box='[x,y]', direction='up|down', step=5
-    "screenshot",   # no params
-    "WAIT",         # no params
-    "DONE",         # no params - task completed
-    "FAIL",         # no params - task failed
+    "left_drag",  # start_box='[x,y]', end_box='[x,y]'
+    "key",  # keys='ctrl+c'
+    "type",  # content='text'
+    "scroll",  # start_box='[x,y]', direction='up|down', step=5
+    "screenshot",  # no params
+    "WAIT",  # no params
+    "DONE",  # no params - task completed
+    "FAIL",  # no params - task failed
 ]
 
 # Field definitions matching GLM's PC action space
@@ -105,7 +105,7 @@ class GLMComputerTool(HudComputerTool):
 
     Uses GLM's native PC action space with normalized coordinates (0-999)
     that are automatically rescaled to actual screen dimensions.
-    
+
     Supports actions: left_click, right_click, middle_click, hover,
     left_double_click, left_drag, key, type, scroll, WAIT, DONE, FAIL
     """
@@ -162,7 +162,7 @@ class GLMComputerTool(HudComputerTool):
 
     def _parse_box(self, box: Any) -> tuple[int, int] | None:
         """Parse start_box/end_box to (x, y) tuple.
-        
+
         Handles:
         - '[x,y]' string format
         - [x, y] list format
@@ -170,7 +170,7 @@ class GLMComputerTool(HudComputerTool):
         """
         if box is None:
             return None
-        
+
         # Handle string format: '[513,438]'
         if isinstance(box, str):
             box = box.strip()
@@ -178,7 +178,7 @@ class GLMComputerTool(HudComputerTool):
             if match:
                 return (int(match.group(1)), int(match.group(2)))
             return None
-        
+
         # Handle list format: [513, 438] or [[513, 438]]
         if isinstance(box, list):
             # Unwrap nested list: [[x, y]] → [x, y]
@@ -189,7 +189,7 @@ class GLMComputerTool(HudComputerTool):
                     return (int(box[0]), int(box[1]))
                 except (TypeError, ValueError):
                     return None
-        
+
         return None
 
     def _scale_coord(self, coord: int, is_x: bool = True) -> int:
@@ -234,27 +234,32 @@ class GLMComputerTool(HudComputerTool):
         - WAIT(): Wait 5 seconds
         - DONE(): Task completed successfully
         - FAIL(): Task cannot be completed
-        
+
         Coordinates are 0-999 normalized, automatically scaled to screen pixels.
         """
         logger.info("GLMComputerTool action: %s (start_box=%s)", action, start_box)
-        
+
         # Parse boxes to coordinates
         start_coords = self._parse_box(start_box)
         end_coords = self._parse_box(end_box)
-        
+
         # Scale coordinates
         screen_x: int | None = None
         screen_y: int | None = None
         screen_end_x: int | None = None
         screen_end_y: int | None = None
-        
+
         if start_coords:
             screen_x = self._scale_coord(start_coords[0], is_x=True)
             screen_y = self._scale_coord(start_coords[1], is_x=False)
-            logger.debug("Scaled start: [%s,%s] -> (%s,%s)", 
-                        start_coords[0], start_coords[1], screen_x, screen_y)
-        
+            logger.debug(
+                "Scaled start: [%s,%s] -> (%s,%s)",
+                start_coords[0],
+                start_coords[1],
+                screen_x,
+                screen_y,
+            )
+
         if end_coords:
             screen_end_x = self._scale_coord(end_coords[0], is_x=True)
             screen_end_y = self._scale_coord(end_coords[1], is_x=False)
@@ -264,26 +269,23 @@ class GLMComputerTool(HudComputerTool):
         # Click actions
         if action in ("left_click", "click"):
             if screen_x is None or screen_y is None:
-                raise McpError(ErrorData(
-                    code=INVALID_PARAMS, 
-                    message="start_box required for left_click"
-                ))
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="start_box required for left_click")
+                )
             result = await self.executor.click(x=screen_x, y=screen_y, button="left")
 
         elif action == "right_click":
             if screen_x is None or screen_y is None:
-                raise McpError(ErrorData(
-                    code=INVALID_PARAMS, 
-                    message="start_box required for right_click"
-                ))
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="start_box required for right_click")
+                )
             result = await self.executor.click(x=screen_x, y=screen_y, button="right")
 
         elif action == "middle_click":
             if screen_x is None or screen_y is None:
-                raise McpError(ErrorData(
-                    code=INVALID_PARAMS, 
-                    message="start_box required for middle_click"
-                ))
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="start_box required for middle_click")
+                )
             result = await self.executor.click(x=screen_x, y=screen_y, button="middle")
 
         elif action == "hover":
@@ -293,23 +295,22 @@ class GLMComputerTool(HudComputerTool):
 
         elif action == "left_double_click":
             if screen_x is None or screen_y is None:
-                raise McpError(ErrorData(
-                    code=INVALID_PARAMS, 
-                    message="start_box required for left_double_click"
-                ))
+                raise McpError(
+                    ErrorData(
+                        code=INVALID_PARAMS, message="start_box required for left_double_click"
+                    )
+                )
             result = await self.executor.click(x=screen_x, y=screen_y, button="left", pattern=[100])
 
         elif action == "left_drag":
             if screen_x is None or screen_y is None:
-                raise McpError(ErrorData(
-                    code=INVALID_PARAMS, 
-                    message="start_box required for left_drag"
-                ))
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="start_box required for left_drag")
+                )
             if screen_end_x is None or screen_end_y is None:
-                raise McpError(ErrorData(
-                    code=INVALID_PARAMS, 
-                    message="end_box required for left_drag"
-                ))
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="end_box required for left_drag")
+                )
             result = await self.executor.drag(
                 path=[(screen_x, screen_y), (screen_end_x, screen_end_y)]
             )
@@ -318,27 +319,22 @@ class GLMComputerTool(HudComputerTool):
         elif action == "key":
             key_list = self._parse_keys(keys)
             if not key_list:
-                raise McpError(ErrorData(
-                    code=INVALID_PARAMS, 
-                    message="keys required for key action"
-                ))
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="keys required for key action")
+                )
             result = await self.executor.press(keys=key_list)
 
         elif action == "type":
             if not content:
-                raise McpError(ErrorData(
-                    code=INVALID_PARAMS, 
-                    message="content required for type"
-                ))
+                raise McpError(ErrorData(code=INVALID_PARAMS, message="content required for type"))
             result = await self.executor.write(text=content, enter_after=False)
 
         # Scroll action
         elif action == "scroll":
             if not direction:
-                raise McpError(ErrorData(
-                    code=INVALID_PARAMS, 
-                    message="direction required for scroll"
-                ))
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="direction required for scroll")
+                )
             # If no start_box, scroll at center of screen
             if screen_x is None:
                 screen_x = self.environment_width // 2
@@ -368,8 +364,7 @@ class GLMComputerTool(HudComputerTool):
             if screenshot and self.rescale_images:
                 screenshot = await self._rescale_screenshot(screenshot)
             return ContentResult(
-                output="Task completed successfully", 
-                base64_image=screenshot
+                output="Task completed successfully", base64_image=screenshot
             ).to_content_blocks()
 
         elif action == "FAIL":
@@ -377,20 +372,24 @@ class GLMComputerTool(HudComputerTool):
             if screenshot and self.rescale_images:
                 screenshot = await self._rescale_screenshot(screenshot)
             return ContentResult(
-                error="Task failed or is infeasible", 
-                base64_image=screenshot
+                error="Task failed or is infeasible", base64_image=screenshot
             ).to_content_blocks()
 
         else:
-            raise McpError(ErrorData(
-                code=INVALID_PARAMS, 
-                message=f"Unknown action: {action}"
-            ))
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Unknown action: {action}"))
 
         # Auto-screenshot for interactive actions
         interactive_actions = {
-            "left_click", "click", "right_click", "middle_click", "hover",
-            "left_double_click", "left_drag", "key", "type", "scroll",
+            "left_click",
+            "click",
+            "right_click",
+            "middle_click",
+            "hover",
+            "left_double_click",
+            "left_drag",
+            "key",
+            "type",
+            "scroll",
         }
         if action in interactive_actions:
             if result is None or (isinstance(result, ContentResult) and not result.base64_image):
@@ -402,9 +401,7 @@ class GLMComputerTool(HudComputerTool):
                         result = ContentResult(base64_image=screenshot)
                     else:
                         result = ContentResult(
-                            output=result.output, 
-                            error=result.error, 
-                            base64_image=screenshot
+                            output=result.output, error=result.error, base64_image=screenshot
                         )
 
         if result is None:

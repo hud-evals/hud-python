@@ -61,7 +61,7 @@ Wrong: {"action": "left_click<arg_key>start_box</arg_key><arg_value>[500, 300]"}
 class GLMCUAAgent(OpenAIChatAgent):
     """
     GLM Computer Use Agent using native PC action space.
-    
+
     Routes GLM's predefined functions (left_click, type, scroll, etc.)
     to the glm_computer MCP tool with automatic coordinate rescaling.
     """
@@ -110,18 +110,18 @@ class GLMCUAAgent(OpenAIChatAgent):
 
         super().__init__(params, **kwargs)  # type: ignore[arg-type]
         self.config: GLMCUAConfig  # type: ignore[assignment]
-        
+
         self._computer_tool_name = "glm_computer"
         logger.info("GLMCUAAgent initialized with coordinate space 0-999")
 
     async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
         """Get response from GLM model.
-        
+
         Intercepts predefined GLM functions and routes them to glm_computer.
         Handles DONE/FAIL actions to terminate the task.
         """
         response = await super().get_response(messages)
-        
+
         if response.isError:
             return response
 
@@ -130,11 +130,11 @@ class GLMCUAAgent(OpenAIChatAgent):
             processed_calls = []
             for tc in response.tool_calls:
                 logger.info("GLM raw tool call: %s(%s)", tc.name, tc.arguments)
-                
+
                 # First fix any XML-style arguments
                 if tc.arguments:
                     tc.arguments = self._fix_xml_args(tc.arguments)
-                
+
                 # Check for terminal actions (after fixing XML)
                 action = self._get_action(tc)
                 if action in ("DONE", "FAIL"):
@@ -144,29 +144,29 @@ class GLMCUAAgent(OpenAIChatAgent):
                     if not response.content:
                         response.content = f"Task {action.lower()}."
                     return response
-                
+
                 processed = self._process_tool_call(tc)
                 logger.info("GLM processed tool call: %s(%s)", processed.name, processed.arguments)
                 processed_calls.append(processed)
             response.tool_calls = processed_calls
 
         return response
-    
+
     def _get_action(self, tool_call: MCPToolCall) -> str | None:
         """Extract action from tool call (handles both direct and routed calls)."""
         # Direct function call (e.g., DONE, FAIL)
         if tool_call.name in ("DONE", "FAIL"):
             return tool_call.name
-        
+
         # glm_computer call with action argument
         if tool_call.name == self._computer_tool_name and tool_call.arguments:
             return tool_call.arguments.get("action")
-        
+
         return None
-    
+
     def _process_tool_call(self, tool_call: MCPToolCall) -> MCPToolCall:
         """Process a tool call, routing predefined GLM functions to glm_computer.
-        
+
         Handles GLM's native PC action space:
         - left_click(start_box='[x,y]', element_info='')
         - type(content='')
@@ -175,11 +175,11 @@ class GLMCUAAgent(OpenAIChatAgent):
         """
         func_name = tool_call.name
         raw_args = dict(tool_call.arguments) if tool_call.arguments else {}
-        
+
         # Route predefined GLM functions to glm_computer
         if func_name in PREDEFINED_GLM_FUNCTIONS:
             normalized_args: dict[str, Any] = {"action": func_name}
-            
+
             # Pass through GLM's native parameters directly
             # Tool handles start_box/end_box parsing
             if "start_box" in raw_args:
@@ -196,13 +196,13 @@ class GLMCUAAgent(OpenAIChatAgent):
                 normalized_args["step"] = raw_args["step"]
             if "element_info" in raw_args:
                 normalized_args["element_info"] = raw_args["element_info"]
-            
+
             return MCPToolCall(
                 name=self._computer_tool_name,
                 arguments=normalized_args,
                 glm_name=func_name,  # type: ignore[arg-type]
             )
-        
+
         # For glm_computer direct calls, fix any XML-style args
         if func_name == self._computer_tool_name:
             fixed_args = self._fix_xml_args(raw_args)
@@ -210,60 +210,60 @@ class GLMCUAAgent(OpenAIChatAgent):
                 name=func_name,
                 arguments=fixed_args,
             )
-        
+
         # Other tools pass through unchanged
         return tool_call
-    
+
     def _fix_xml_args(self, args: dict[str, Any]) -> dict[str, Any]:
         """Fix XML-style arguments from GLM output.
-        
+
         Handles cases like:
         {"action": "left_click\n<arg_key>start_box</arg_key>\n<arg_value>[114, 167]"}
-        
+
         Converts to:
         {"action": "left_click", "start_box": "[114, 167]"}
         """
         fixed = {}
-        
+
         for key, value in args.items():
             if not isinstance(value, str):
                 fixed[key] = value
                 continue
-            
+
             # Case 1(Good JSON):Check if value contains XML tags
             if "<arg_key>" not in value:
                 fixed[key] = value
                 continue
-            
+
             # Case 2(Mixture of JSON and XML):
             # Extract the actual value before XML tags
             # Example: "left_click\n<arg_key>..." -> "left_click"
             main_value = value.split("<arg_key>")[0].strip()
             if main_value:
                 fixed[key] = main_value
-            
+
             # Case 3(Good XML):
             # Parse XML-style key-value pairs
             # Pattern: <arg_key>key</arg_key> followed by optional <arg_value>value</arg_value>
             # Example: <arg_key>start_box</arg_key> <arg_value>[114, 167]</arg_value>
             pattern = r"<arg_key>(\w+)</arg_key>\s*<arg_value>([^\"<]+)"
             matches = re.findall(pattern, value)
-            
+
             for arg_name, arg_val in matches:
                 arg_name = arg_name.strip()
                 arg_val = arg_val.strip()
                 if arg_name and arg_val:
                     fixed[arg_name] = arg_val
-            
+
             logger.warning("Fixed XML args: %s -> %s", args, fixed)
-        
+
         return fixed
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
     ) -> list[dict[str, Any]]:
         """Format tool results for the next turn.
-        
+
         Simply passes results back - screenshots are already in the results.
         """
         messages: list[dict[str, Any]] = []
@@ -271,10 +271,10 @@ class GLMCUAAgent(OpenAIChatAgent):
         for tool_call, result in zip(tool_calls, tool_results, strict=True):
             # Get the original GLM function name if available
             glm_name = getattr(tool_call, "glm_name", tool_call.name)
-            
+
             # Build content from result
             content_parts: list[dict[str, Any]] = []
-            
+
             # Add text content
             text_parts = []
             for content in result.content:
@@ -282,21 +282,25 @@ class GLMCUAAgent(OpenAIChatAgent):
                     text_parts.append(content.text)
                 elif isinstance(content, types.ImageContent):
                     # Add screenshot
-                    content_parts.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{content.mimeType};base64,{content.data}"}
-                    })
-            
+                    content_parts.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{content.mimeType};base64,{content.data}"},
+                        }
+                    )
+
             if text_parts:
                 content_parts.insert(0, {"type": "text", "text": "\n".join(text_parts)})
-            
+
             if not content_parts:
                 content_parts.append({"type": "text", "text": f"{glm_name} completed"})
 
-            messages.append({
-                "role": "user", 
-                "content": content_parts,
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": content_parts,
+                }
+            )
 
         return messages
 

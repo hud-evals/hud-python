@@ -140,4 +140,5 @@ class ComputerSettings(BaseSettings):
         validation_alias="GLM_HISTORY_IMAGE_SCALE",
     )
 
+
 computer_settings = ComputerSettings()
