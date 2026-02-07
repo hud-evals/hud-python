@@ -193,11 +193,15 @@ class GLMComputerTool(HudComputerTool):
         return None
 
     def _scale_coord(self, coord: int, is_x: bool = True) -> int:
-        """Scale coordinate from GLM's 0-999 space to actual screen pixels."""
+        """Scale coordinate from GLM's 0-999 space to actual screen pixels.
+
+        Maps [0, 999] → [0, dimension) so the max coordinate lands on the
+        last valid pixel index rather than going out of bounds.
+        """
         if is_x:
-            return int(coord * self.environment_width / GLM_COORDINATE_SPACE)
+            return int(coord * (self.environment_width - 1) / GLM_COORDINATE_SPACE)
         else:
-            return int(coord * self.environment_height / GLM_COORDINATE_SPACE)
+            return int(coord * (self.environment_height - 1) / GLM_COORDINATE_SPACE)
 
     def _parse_keys(self, keys: str | list[str] | None) -> list[str]:
         """Parse key input to list of keys."""
@@ -391,18 +395,19 @@ class GLMComputerTool(HudComputerTool):
             "type",
             "scroll",
         }
-        if action in interactive_actions:
-            if result is None or (isinstance(result, ContentResult) and not result.base64_image):
-                screenshot = await self.executor.screenshot()
-                if screenshot:
-                    if self.rescale_images:
-                        screenshot = await self._rescale_screenshot(screenshot)
-                    if result is None:
-                        result = ContentResult(base64_image=screenshot)
-                    else:
-                        result = ContentResult(
-                            output=result.output, error=result.error, base64_image=screenshot
-                        )
+        if action in interactive_actions and (
+            result is None or (isinstance(result, ContentResult) and not result.base64_image)
+        ):
+            screenshot = await self.executor.screenshot()
+            if screenshot:
+                if self.rescale_images:
+                    screenshot = await self._rescale_screenshot(screenshot)
+                if result is None:
+                    result = ContentResult(base64_image=screenshot)
+                else:
+                    result = ContentResult(
+                        output=result.output, error=result.error, base64_image=screenshot
+                    )
 
         if result is None:
             result = ContentResult(output="Action completed")

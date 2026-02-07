@@ -41,7 +41,14 @@ PREDEFINED_GLM_FUNCTIONS = [
 ]
 
 # GLM CUA system instructions (from agent.md)
-GLM_CUA_INSTRUCTIONS = """You are a GUI Agent, and your primary task is to respond accurately to user requests or questions. In addition to directly answering the user's queries, you can also use tools or perform GUI operations directly until you fulfill the user's request or provide a correct answer. You should carefully read and understand the images and questions provided by the user, and engage in thinking and reflection when appropriate. The coordinates involved are all represented in thousandths (0-999).
+GLM_CUA_INSTRUCTIONS = """\
+You are a GUI Agent, and your primary task is to respond accurately to user \
+requests or questions. In addition to directly answering the user's queries, \
+you can also use tools or perform GUI operations directly until you fulfill \
+the user's request or provide a correct answer. You should carefully read and \
+understand the images and questions provided by the user, and engage in \
+thinking and reflection when appropriate. The coordinates involved are all \
+represented in thousandths (0-999).
 
 # Task Platform
 Ubuntu
