@@ -85,8 +85,7 @@ class ClaudeAgent(MCPAgent):
             logger.debug("Legacy fallback: detected %s as computer tool", tool.name)
             model_lower = (self.model or "").lower()
             if any(
-                fnmatch.fnmatch(model_lower, p)
-                for p in ("claude-opus-4-5*", "claude-opus-4-6*")
+                fnmatch.fnmatch(model_lower, p) for p in ("claude-opus-4-5*", "claude-opus-4-6*")
             ):
                 return NativeToolSpec(
                     api_type="computer_20251124",

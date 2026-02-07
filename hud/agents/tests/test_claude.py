@@ -657,7 +657,7 @@ class TestClaudeAgentBetaHeader:
 
             _, kwargs = mock_anthropic.beta.messages.stream.call_args
             assert isinstance(kwargs["betas"], Omit), (
-                f"Expected Omit() when no betas required, got {type(kwargs['betas'])}: {kwargs['betas']}"
+                f"Expected Omit() when no betas required, got {type(kwargs['betas'])}"
             )
 
     @pytest.mark.asyncio
@@ -694,7 +694,7 @@ class TestClaudeAgentBetaHeader:
 
     @pytest.mark.asyncio
     async def test_generic_tools_only_no_beta_header(self, mock_anthropic: Any) -> None:
-        """Tools without native specs (generic function calling) should not produce a beta header."""
+        """Generic function tools should not produce a beta header."""
         with patch("hud.settings.settings.telemetry_enabled", False):
             tools = [
                 types.Tool(
