@@ -81,7 +81,8 @@
           {
             "group": "Advanced",
             "pages": [
-              "advanced/testing-environments"
+              "advanced/testing-environments",
+              "advanced/harbor-convert"
             ]
           },
           {
