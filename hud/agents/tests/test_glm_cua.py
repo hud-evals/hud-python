@@ -90,6 +90,7 @@ class TestProcessToolCall:
         result = glm_agent._process_tool_call(tc)
 
         assert result.name == "glm_computer"
+        assert result.arguments is not None
         assert result.arguments["action"] == "left_click"
         assert result.arguments["start_box"] == "[500, 300]"
 
@@ -98,6 +99,7 @@ class TestProcessToolCall:
         result = glm_agent._process_tool_call(tc)
 
         assert result.name == "glm_computer"
+        assert result.arguments is not None
         assert result.arguments["action"] == "type"
         assert result.arguments["content"] == "hello"
 
@@ -109,6 +111,7 @@ class TestProcessToolCall:
         result = glm_agent._process_tool_call(tc)
 
         assert result.name == "glm_computer"
+        assert result.arguments is not None
         assert result.arguments["action"] == "scroll"
         assert result.arguments["direction"] == "down"
         assert result.arguments["step"] == 3
@@ -118,6 +121,7 @@ class TestProcessToolCall:
         result = glm_agent._process_tool_call(tc)
 
         assert result.name == "glm_computer"
+        assert result.arguments is not None
         assert result.arguments["action"] == "key"
         assert result.arguments["keys"] == "ctrl+c"
 
@@ -129,6 +133,7 @@ class TestProcessToolCall:
         result = glm_agent._process_tool_call(tc)
 
         assert result.name == "glm_computer"
+        assert result.arguments is not None
         assert result.arguments["action"] == "left_drag"
         assert result.arguments["start_box"] == "[100, 100]"
         assert result.arguments["end_box"] == "[500, 500]"
@@ -138,6 +143,7 @@ class TestProcessToolCall:
         result = glm_agent._process_tool_call(tc)
 
         assert result.name == "glm_computer"
+        assert result.arguments is not None
         assert result.arguments["action"] == "hover"
 
     def test_all_predefined_functions_route(self, glm_agent: GLMCUAAgent) -> None:
@@ -146,6 +152,7 @@ class TestProcessToolCall:
             tc = MCPToolCall(name=func_name, arguments={})
             result = glm_agent._process_tool_call(tc)
             assert result.name == "glm_computer", f"{func_name} was not routed"
+            assert result.arguments is not None
             assert result.arguments["action"] == func_name
 
     def test_non_predefined_passthrough(self, glm_agent: GLMCUAAgent) -> None:
@@ -165,6 +172,7 @@ class TestProcessToolCall:
         result = glm_agent._process_tool_call(tc)
 
         assert result.name == "glm_computer"
+        assert result.arguments is not None
         assert result.arguments["action"] == "left_click"
 
 
@@ -274,6 +282,7 @@ class TestGetResponseTerminalActions:
             assert response.done is False
             assert len(response.tool_calls) == 1
             assert response.tool_calls[0].name == "glm_computer"
+            assert response.tool_calls[0].arguments is not None
             assert response.tool_calls[0].arguments["action"] == "left_click"
 
 

@@ -35,6 +35,7 @@ PREDEFINED_GLM_FUNCTIONS = [
     "key",
     "type",
     "scroll",
+    "screenshot",
     "WAIT",
     "DONE",
     "FAIL",
