@@ -616,3 +616,120 @@ class TestClaudeAgentComputerTool20251124:
             validate_api_key=False,
         )
         assert "fine-grained-tool-streaming-2025-05-14" not in agent._required_betas
+
+
+class TestClaudeAgentBetaHeader:
+    """Test that the Anthropic-Beta header is handled correctly."""
+
+    @pytest.fixture
+    def mock_anthropic(self) -> Any:
+        return MagicMock(spec=["messages", "beta"])
+
+    @pytest.mark.asyncio
+    async def test_empty_betas_sends_omit_not_empty_list(self, mock_anthropic: Any) -> None:
+        """When no tools require a beta, betas should be Omit() not []."""
+        from anthropic import Omit
+
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = ClaudeAgent.create(
+                model_client=mock_anthropic,
+                validate_api_key=False,
+            )
+            agent.claude_tools = []
+            agent.tool_mapping = {}
+            agent.has_computer_tool = False
+            agent._required_betas = set()  # No betas required
+            agent._initialized = True
+
+            mock_response = MagicMock()
+            mock_response.content = [MagicMock(type="text", text="Hello")]
+
+            mock_stream = MockStreamContextManager(mock_response)
+            mock_anthropic.beta.messages.stream = MagicMock(return_value=mock_stream)
+
+            messages = [
+                cast(
+                    "BetaMessageParam",
+                    {"role": "user", "content": [{"type": "text", "text": "Hi"}]},
+                )
+            ]
+            await agent.get_response(messages)
+
+            _, kwargs = mock_anthropic.beta.messages.stream.call_args
+            assert isinstance(kwargs["betas"], Omit), (
+                f"Expected Omit() when no betas required, got {type(kwargs['betas'])}: {kwargs['betas']}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_nonempty_betas_sends_list(self, mock_anthropic: Any) -> None:
+        """When tools require betas, betas should be a list of strings."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = ClaudeAgent.create(
+                model_client=mock_anthropic,
+                validate_api_key=False,
+            )
+            agent.claude_tools = []
+            agent.tool_mapping = {}
+            agent.has_computer_tool = True
+            agent._required_betas = {"computer-use-2025-01-24"}
+            agent._initialized = True
+
+            mock_response = MagicMock()
+            mock_response.content = [MagicMock(type="text", text="Hello")]
+
+            mock_stream = MockStreamContextManager(mock_response)
+            mock_anthropic.beta.messages.stream = MagicMock(return_value=mock_stream)
+
+            messages = [
+                cast(
+                    "BetaMessageParam",
+                    {"role": "user", "content": [{"type": "text", "text": "Hi"}]},
+                )
+            ]
+            await agent.get_response(messages)
+
+            _, kwargs = mock_anthropic.beta.messages.stream.call_args
+            assert isinstance(kwargs["betas"], list)
+            assert "computer-use-2025-01-24" in kwargs["betas"]
+
+    @pytest.mark.asyncio
+    async def test_generic_tools_only_no_beta_header(self, mock_anthropic: Any) -> None:
+        """Tools without native specs (generic function calling) should not produce a beta header."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            tools = [
+                types.Tool(
+                    name="my_tool",
+                    description="A test tool",
+                    inputSchema={"type": "object", "properties": {"x": {"type": "string"}}},
+                )
+            ]
+            ctx = MockEvalContext(tools=tools)
+            agent = ClaudeAgent.create(
+                model_client=mock_anthropic,
+                validate_api_key=False,
+            )
+
+            agent.ctx = ctx
+            await agent._initialize_from_ctx(ctx)
+
+            # Generic tools should not add any betas
+            assert len(agent._required_betas) == 0
+
+            mock_response = MagicMock()
+            mock_response.content = [MagicMock(type="text", text="Hello")]
+
+            mock_stream = MockStreamContextManager(mock_response)
+            mock_anthropic.beta.messages.stream = MagicMock(return_value=mock_stream)
+
+            from anthropic import Omit
+
+            messages = [
+                cast(
+                    "BetaMessageParam",
+                    {"role": "user", "content": [{"type": "text", "text": "Hi"}]},
+                )
+            ]
+            await agent.get_response(messages)
+
+            _, kwargs = mock_anthropic.beta.messages.stream.call_args
+            assert isinstance(kwargs["betas"], Omit)

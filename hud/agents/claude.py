@@ -204,7 +204,8 @@ class ClaudeAgent(MCPAgent):
         messages_cached = self._add_prompt_caching(messages)
 
         # betas to use - collected during tool conversion based on native specs
-        betas = list(self._required_betas)
+        # Pass NOT_GIVEN when empty to avoid sending an empty Anthropic-Beta header
+        betas = list(self._required_betas) if self._required_betas else Omit()
 
         # Bedrock doesn't support .stream() - use create(stream=True) instead
         if isinstance(self.anthropic_client, AsyncAnthropicBedrock):
