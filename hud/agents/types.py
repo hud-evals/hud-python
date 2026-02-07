@@ -141,8 +141,6 @@ class GLMCUAConfig(OpenAIChatConfig):
 
     model_name: str = "GLM CUA"
     model: str = Field(default="glm-4.5v", validation_alias=_model_alias)
-    max_history_screenshots: int = 0  # Env: GLM_MAX_HISTORY_SCREENSHOTS
-    history_image_scale: float = 0.25  # Env: GLM_HISTORY_IMAGE_SCALE (25%)
 
 
 class GLMCUACreateParams(BaseCreateParams, GLMCUAConfig):
