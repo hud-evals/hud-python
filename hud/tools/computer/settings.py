@@ -130,7 +130,7 @@ class ComputerSettings(BaseSettings):
         validation_alias="GLM_RESCALE_IMAGES",
     )
     GLM_MAX_HISTORY_SCREENSHOTS: int = Field(
-        default=2,
+        default=0,
         description="Maximum number of history screenshots to include in GLM agent context",
         validation_alias="GLM_MAX_HISTORY_SCREENSHOTS",
     )

@@ -230,21 +230,22 @@ class GLMCUAAgent(OpenAIChatAgent):
                 fixed[key] = value
                 continue
             
-            # Check if value contains XML tags
+            # Case 1(Good JSON):Check if value contains XML tags
             if "<arg_key>" not in value:
                 fixed[key] = value
                 continue
             
+            # Case 2(Mixture of JSON and XML):
             # Extract the actual value before XML tags
-            # e.g., "left_click\n<arg_key>..." -> "left_click"
+            # Example: "left_click\n<arg_key>..." -> "left_click"
             main_value = value.split("<arg_key>")[0].strip()
             if main_value:
                 fixed[key] = main_value
             
+            # Case 3(Good XML):
             # Parse XML-style key-value pairs
             # Pattern: <arg_key>key</arg_key> followed by optional <arg_value>value</arg_value>
-            # Value ends at: </arg_value>, next <arg_key>, or end of string
-            # Use greedy match and capture everything after <arg_value> until terminator
+            # Example: <arg_key>start_box</arg_key> <arg_value>[114, 167]</arg_value>
             pattern = r"<arg_key>(\w+)</arg_key>\s*<arg_value>([^\"<]+)"
             matches = re.findall(pattern, value)
             
