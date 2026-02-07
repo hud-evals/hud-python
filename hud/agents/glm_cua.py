@@ -211,15 +211,6 @@ class GLMCUAAgent(OpenAIChatAgent):
                 glm_name=func_name,  # type: ignore[arg-type]
             )
 
-        # For glm_computer direct calls, fix any XML-style args
-        if func_name == self._computer_tool_name:
-            fixed_args = self._fix_xml_args(raw_args)
-            return MCPToolCall(
-                name=func_name,
-                arguments=fixed_args,
-            )
-
-        # Other tools pass through unchanged
         return tool_call
 
     def _fix_xml_args(self, args: dict[str, Any]) -> dict[str, Any]:
