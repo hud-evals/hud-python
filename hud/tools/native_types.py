@@ -94,8 +94,9 @@ class NativeToolSpec(BaseModel):
         return False
 
 
-# Type alias for mapping AgentType to NativeToolSpec
-# Defined as a string annotation to avoid circular import issues
-NativeToolSpecs = dict["AgentType", NativeToolSpec]
+# Type alias for mapping AgentType to NativeToolSpec (or a list for model-specific variants).
+# When a list is provided, specs are tried in order -- first matching supports_model() wins.
+# Defined as a string annotation to avoid circular import issues.
+NativeToolSpecs = dict["AgentType", "NativeToolSpec | list[NativeToolSpec]"]
 
 __all__ = ["NativeToolSpec", "NativeToolSpecs"]

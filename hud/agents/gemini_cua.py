@@ -78,7 +78,7 @@ class GeminiCUAAgent(GeminiAgent):
         return AgentType.GEMINI_CUA
 
     # Legacy tool name patterns for backwards compatibility
-    _LEGACY_COMPUTER_NAMES = ("gemini_computer", "computer_gemini", "computer")
+    _LEGACY_COMPUTER_NAMES = ("gemini_computer", "computer_gemini")
 
     def _legacy_native_spec_fallback(self, tool: types.Tool) -> NativeToolSpec | None:
         """Detect Gemini CUA native tools by name for backwards compatibility.

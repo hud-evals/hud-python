@@ -86,8 +86,11 @@ def _replace_placeholders(target_dir: Path, env_name: str) -> list[str]:
     return modified_files
 
 
-def _prompt_for_preset() -> str:
-    """Ask the user to choose a preset when not provided."""
+def _prompt_for_preset() -> str | None:
+    """Ask the user to choose a preset when not provided.
+
+    Returns None if the user cancels the selection.
+    """
     try:
         choices = [
             {"name": "blank", "message": "blank"},
@@ -102,11 +105,13 @@ def _prompt_for_preset() -> str:
             "Choose a preset", choices=display_choices, default=display_choices[0]
         ).ask()
         if not selected:
-            return "blank"
+            return None  # User cancelled
         for c in choices:
             if c["message"] == selected:
                 return c["name"]
         return "blank"
+    except KeyboardInterrupt:
+        return None  # User pressed Ctrl+C
     except Exception:
         return "blank"
 
@@ -187,7 +192,14 @@ def create_environment(
     hud_console = HUDConsole()
 
     # Choose preset
-    preset_normalized = (preset or "").strip().lower() if preset else _prompt_for_preset()
+    if preset:
+        preset_normalized = preset.strip().lower()
+    else:
+        preset_result = _prompt_for_preset()
+        if preset_result is None:
+            # User cancelled the selection
+            raise typer.Exit(0)
+        preset_normalized = preset_result
 
     # If no name is provided, use the preset name as the environment name
     if name is None:

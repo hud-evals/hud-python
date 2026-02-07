@@ -486,7 +486,6 @@ class TestClaudeAgentBedrock:
             _, kwargs = bedrock_client.beta.messages.create.call_args  # type: ignore[union-attr]
             assert kwargs["model"] == "test-model-arn"
             assert kwargs["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}
-            assert "fine-grained-tool-streaming-2025-05-14" in kwargs["betas"]
             assert "computer-use-2025-01-24" in kwargs["betas"]
 
     @pytest.mark.asyncio
@@ -517,3 +516,103 @@ class TestClaudeAgentBedrock:
                 validate_api_key=False,
             )
             assert agent.anthropic_client == bedrock_client
+
+
+class TestClaudeAgentComputerTool20251124:
+    """Test ClaudeAgent with the new computer_20251124 tool type."""
+
+    @pytest.fixture
+    def mock_anthropic(self) -> Any:
+        from unittest.mock import MagicMock
+
+        return MagicMock(spec=["messages", "beta"])
+
+    def test_build_native_tool_computer_20251124(self, mock_anthropic: Any) -> None:
+        """Test that _build_native_tool handles computer_20251124."""
+        from hud.tools.native_types import NativeToolSpec
+
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            model="claude-opus-4-6-20260101",
+            validate_api_key=False,
+        )
+
+        spec = NativeToolSpec(
+            api_type="computer_20251124",
+            api_name="computer",
+            beta="computer-use-2025-11-24",
+            role="computer",
+            extra={"display_width": 1920, "display_height": 1080},
+        )
+
+        tool = types.Tool(
+            name="computer",
+            description="Computer tool",
+            inputSchema={},
+        )
+
+        result = cast("dict[str, Any]", agent._build_native_tool(tool, spec))
+        assert result["type"] == "computer_20251124"
+        assert result["name"] == "computer"
+        assert result["display_width_px"] == 1920
+        assert result["display_height_px"] == 1080
+        assert result["enable_zoom"] is True
+
+    def test_get_native_api_name_computer_20251124(self, mock_anthropic: Any) -> None:
+        """Test that _get_native_api_name handles computer_20251124."""
+        from hud.tools.native_types import NativeToolSpec
+
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            validate_api_key=False,
+        )
+        spec = NativeToolSpec(api_type="computer_20251124", api_name="computer")
+        assert agent._get_native_api_name(spec) == "computer"
+
+    def test_legacy_fallback_opus_46_uses_new_computer(self, mock_anthropic: Any) -> None:
+        """Test legacy fallback returns computer_20251124 for Opus 4.6 models."""
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            model="claude-opus-4-6-20260101",
+            validate_api_key=False,
+        )
+        agent._available_tools = []
+
+        legacy_tool = types.Tool(
+            name="anthropic_computer",
+            description="Old-style computer tool",
+            inputSchema={"type": "object", "properties": {}},
+        )
+
+        spec = agent._legacy_native_spec_fallback(legacy_tool)
+        assert spec is not None
+        assert spec.api_type == "computer_20251124"
+        assert spec.beta == "computer-use-2025-11-24"
+
+    def test_legacy_fallback_sonnet4_uses_old_computer(self, mock_anthropic: Any) -> None:
+        """Test legacy fallback returns computer_20250124 for non-Opus 4.5/4.6 models."""
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            model="claude-sonnet-4-20250514",
+            validate_api_key=False,
+        )
+        agent._available_tools = []
+
+        legacy_tool = types.Tool(
+            name="anthropic_computer",
+            description="Old-style computer tool",
+            inputSchema={"type": "object", "properties": {}},
+        )
+
+        spec = agent._legacy_native_spec_fallback(legacy_tool)
+        assert spec is not None
+        assert spec.api_type == "computer_20250124"
+        assert spec.beta == "computer-use-2025-01-24"
+
+    def test_no_fine_grained_streaming_beta(self, mock_anthropic: Any) -> None:
+        """Test that fine-grained-tool-streaming beta is no longer included."""
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            validate_api_key=False,
+        )
+        assert "fine-grained-tool-streaming-2025-05-14" not in agent._required_betas

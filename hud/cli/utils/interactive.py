@@ -290,14 +290,16 @@ class InteractiveMCPTester:
                     value_str = await questionary.text(
                         prompt,
                         default="",
-                        validate=lambda text, pt=prop_type, req=is_required: True
-                        if not text and not req
-                        else (
-                            text.replace("-", "").replace(".", "").isdigit()
-                            if pt == "number"
-                            else text.replace("-", "").isdigit()
-                        )
-                        or f"Please enter a valid {pt}",
+                        validate=lambda text, pt=prop_type, req=is_required: (
+                            True
+                            if not text and not req
+                            else (
+                                text.replace("-", "").replace(".", "").isdigit()
+                                if pt == "number"
+                                else text.replace("-", "").isdigit()
+                            )
+                            or f"Please enter a valid {pt}"
+                        ),
                     ).unsafe_ask_async()
                     if not value_str and not is_required:
                         continue

@@ -83,7 +83,7 @@ def _normalize_eval_yield(value: Any) -> EvaluationResult:
         return value
 
     # Numeric reward - convert to EvaluationResult with done=True
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return EvaluationResult.from_float(float(value))
 
     # Dict-like - try to construct EvaluationResult

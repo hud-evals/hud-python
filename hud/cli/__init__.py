@@ -406,9 +406,9 @@ def models(
         # Sort models alphabetically by name
         models_list = sorted(
             models_list,
-            key=lambda x: (x.get("name") or str(x)).lower()
-            if isinstance(x, dict)
-            else str(x).lower(),
+            key=lambda x: (
+                (x.get("name") or str(x)).lower() if isinstance(x, dict) else str(x).lower()
+            ),
         )
 
         console.print(Panel.fit("📋 [bold cyan]Available Models[/bold cyan]", border_style="cyan"))
@@ -1072,8 +1072,8 @@ def cancel(
     job_id: str | None = typer.Argument(
         None, help="Job ID to cancel. Omit to cancel all active jobs with --all."
     ),
-    task_id: str | None = typer.Option(
-        None, "--task", "-t", help="Specific task ID within the job to cancel."
+    trace_id: str | None = typer.Option(
+        None, "--trace-id", "-t", help="Specific trace ID within the job to cancel."
     ),
     all_jobs: bool = typer.Option(
         False, "--all", "-a", help="Cancel ALL active jobs for your account (panic button)."
@@ -1083,8 +1083,8 @@ def cancel(
     """Cancel remote rollouts.
 
     Examples:
-        hud cancel <job_id>              # Cancel all tasks in a job
-        hud cancel <job_id> --task <id>  # Cancel specific task
+        hud cancel <job_id>                 # Cancel all tasks in a job
+        hud cancel <job_id> --trace-id <id> # Cancel specific task run
         hud cancel --all                 # Cancel ALL active jobs (panic button)
     """
     import asyncio
@@ -1115,7 +1115,7 @@ def cancel(
 
     if (
         job_id
-        and not task_id
+        and not trace_id
         and not yes
         and not questionary.confirm(
             f"Cancel all tasks in job {job_id}?",
@@ -1144,9 +1144,9 @@ def cancel(
                 for job in result.get("job_details", []):
                     hud_console.info(f"  • {job['job_id']}: {job['cancelled']} tasks cancelled")
 
-        elif task_id:
-            hud_console.info(f"Cancelling task {task_id} in job {job_id}...")
-            result = await cancel_task(job_id, task_id)  # type: ignore[arg-type]
+        elif trace_id:
+            hud_console.info(f"Cancelling trace {trace_id} in job {job_id}...")
+            result = await cancel_task(job_id, trace_id)  # type: ignore[arg-type]
 
             status = result.get("status", "unknown")
             if status in ("revoked", "terminated"):
