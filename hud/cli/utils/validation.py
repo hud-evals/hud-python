@@ -182,7 +182,9 @@ def validate_dockerfile(directory: Path) -> list[ValidationIssue]:
                     if src == ".":
                         copied_files.add("__ALL__")
                     else:
-                        copied_files.add(src.rstrip("/").rstrip("*"))
+                        # Normalize path: remove leading ./ and trailing / or *
+                        normalized = src.removeprefix("./").rstrip("/").rstrip("*")
+                        copied_files.add(normalized)
 
         # Check for uv sync or pip install before full COPY
         line_lower = line.lower()
@@ -218,32 +220,38 @@ def _check_pyproject_copy_order(
         license_info = project.get("license")
         if isinstance(license_info, dict):
             license_file = license_info.get("file", "")
-            if license_file and license_file not in copied_files:
-                hint = (
-                    f"Add 'COPY {license_file} ./' before the RUN command "
-                    "that installs dependencies"
-                )
+            if license_file:
+                # Normalize path for comparison
+                normalized_license = license_file.removeprefix("./")
+                if normalized_license not in copied_files:
+                    hint = (
+                        f"Add 'COPY {license_file} ./' before the RUN command "
+                        "that installs dependencies"
+                    )
+                    issues.append(
+                        ValidationIssue(
+                            severity="error",
+                            message="LICENSE file not copied before uv sync/pip install",
+                            file=dockerfile_name,
+                            hint=hint,
+                        )
+                    )
+
+        # Check if README is referenced but not copied early
+        readme = project.get("readme")
+        if isinstance(readme, str):
+            # Normalize path for comparison
+            normalized_readme = readme.removeprefix("./")
+            if normalized_readme not in copied_files:
+                hint = f"Add 'COPY {readme} ./' before the RUN command, or builds may fail"
                 issues.append(
                     ValidationIssue(
-                        severity="error",
-                        message="LICENSE file not copied before uv sync/pip install",
+                        severity="warning",
+                        message="README not copied before uv sync/pip install",
                         file=dockerfile_name,
                         hint=hint,
                     )
                 )
-
-        # Check if README is referenced but not copied early
-        readme = project.get("readme")
-        if isinstance(readme, str) and readme not in copied_files:
-            hint = f"Add 'COPY {readme} ./' before the RUN command, or builds may fail"
-            issues.append(
-                ValidationIssue(
-                    severity="warning",
-                    message="README not copied before uv sync/pip install",
-                    file=dockerfile_name,
-                    hint=hint,
-                )
-            )
     except Exception:  # noqa: S110 - best effort validation, errors are expected
         pass  # Best effort - tomllib may not parse all files
 
