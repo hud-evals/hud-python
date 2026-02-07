@@ -9,8 +9,8 @@ from .openai_chat import OpenAIChatAgent
 from .operator import OperatorAgent
 
 __all__ = [
-    "CategorizedTools",
     "GLMCUA",
+    "CategorizedTools",
     "MCPAgent",
     "OpenAIAgent",
     "OpenAIChatAgent",
