@@ -8,9 +8,58 @@ Import this module early (e.g., in hud/__init__.py) to apply patches.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import httpx
+    from mcp.client.streamable_http import StreamWriter
 
 logger = logging.getLogger(__name__)
+
+
+def patch_json_response_error_propagation() -> None:
+    """
+    Patch _handle_json_response to re-raise exceptions instead of swallowing them.
+
+    The original implementation catches all exceptions (e.g. ReadError during
+    response.aread(), ValidationError during JSON parsing) and sends them as raw
+    Exception objects to the read stream — where BaseSession._handle_incoming
+    silently drops them. This causes the caller (call_tool / send_request) to
+    hang forever waiting for a response that will never arrive.
+
+    By re-raising, exceptions propagate to the retry loop in our patched
+    post_writer, which already distinguishes retryable errors (ReadError →
+    retry with backoff) from non-retryable ones (ValidationError → send
+    proper JSONRPCError to resolve the pending request).
+    """
+    try:
+        from mcp.client.streamable_http import StreamableHTTPTransport
+        from mcp.shared.message import SessionMessage
+        from mcp.types import JSONRPCMessage
+
+        async def patched_handle_json_response(
+            self: Any,
+            response: httpx.Response,
+            read_stream_writer: StreamWriter,
+            is_initialization: bool = False,
+        ) -> None:
+            try:
+                content = await response.aread()
+                message = JSONRPCMessage.model_validate_json(content)
+                if is_initialization:
+                    self._maybe_extract_protocol_version_from_message(message)
+                await read_stream_writer.send(SessionMessage(message))
+            except Exception:
+                logger.exception("Error in _handle_json_response")
+                raise
+
+        StreamableHTTPTransport._handle_json_response = patched_handle_json_response
+        logger.debug("Patched StreamableHTTPTransport._handle_json_response to re-raise errors")
+
+    except ImportError:
+        logger.debug("mcp.client.streamable_http not available, skipping patch")
+    except Exception as e:
+        logger.warning("Failed to patch _handle_json_response: %s", e)
 
 
 def patch_streamable_http_error_handling() -> None:
@@ -313,6 +362,7 @@ def suppress_fastmcp_logging(level: int = logging.WARNING) -> None:
 
 def apply_all_patches() -> None:
     """Apply all MCP patches."""
+    patch_json_response_error_propagation()
     patch_streamable_http_error_handling()
     patch_client_session_validation()
     patch_server_output_validation()
