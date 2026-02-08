@@ -15,7 +15,7 @@ git clone https://github.com/laude-institute/terminal-bench-2.git
 # 2. Convert to HUD format
 hud convert ./terminal-bench-2/ --output ./tb2-hud
 
-# 3. Deploy all environments
+# 3. Deploy all environments (~3 min per environment, leave it running)
 hud deploy ./tb2-hud --all
 
 # 4. Run evaluation
@@ -23,6 +23,11 @@ hud eval ./tb2-hud/taskset.json
 ```
 
 That's it. The converter handles Dockerfile adaptation, build context, test scripts, and reward parsing automatically.
+
+<Tip>
+Each environment takes roughly 3 minutes to build and deploy. For datasets with many environments,
+`hud deploy --all` runs them sequentially -- just leave it running and check back when it's done.
+</Tip>
 
 ## What Gets Converted
 
@@ -81,9 +86,29 @@ Harbor test scripts write results to `/logs/verifier/`. The converter supports b
 - `reward.txt` -- a single float (`1.0` for pass, `0.0` for fail)
 - `reward.json` -- `{"reward": 1.0}` or just a float
 
-## Running Programmatically
+## Running Tasks
 
-You can also run converted tasks from Python using the SDK:
+### Option 1: Upload as a Taskset (recommended)
+
+The generated `taskset.json` can be uploaded directly to the HUD platform for managed evaluation, leaderboards, and comparison across models:
+
+1. Go to [hud.ai/evalsets](https://hud.ai/evalsets) and create a new taskset
+2. Click **Upload Tasks** and paste the contents of `taskset.json`
+3. Run evaluations from the platform UI or via `hud eval`
+
+See the [Tasksets guide](/platform/tasksets) for full details on creating and managing tasksets.
+
+### Option 2: CLI eval
+
+Run the taskset directly from the command line:
+
+```bash
+hud eval ./tb2-hud/taskset.json
+```
+
+### Option 3: Python SDK
+
+Run tasks programmatically with any agent:
 
 ```python
 import asyncio
@@ -108,7 +133,7 @@ async def main():
 asyncio.run(main())
 ```
 
-Or load the full taskset:
+Or load the full taskset as Task objects:
 
 ```python
 import json

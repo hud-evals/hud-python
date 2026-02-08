@@ -1026,45 +1026,156 @@ def get(
 
 @app.command()
 def convert(
-    tasks_file: str = typer.Argument(
-        ..., help="Path to tasks file (JSON/JSONL) to convert to remote MCP configuration"
+    path: str = typer.Argument(
+        ..., help="Path to source tasks/dataset directory to convert to HUD format"
+    ),
+    from_format: str = typer.Option(
+        "auto",
+        "--from",
+        "-f",
+        help="Source format (auto, harbor). Use 'auto' to detect automatically.",
+    ),
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output directory (default: ./hud_converted)",
     ),
 ) -> None:
-    """Convert local MCP task configs to remote (mcp.hud.ai) format.
+    """Convert external benchmark formats to HUD environments + tasksets.
 
-    This mirrors the implicit conversion flow used by 'hud rl' and writes a new
-    remote_<name>.json next to the source file when needed.
+    [not dim]Converts tasks from frameworks like Harbor into HUD-compatible
+    environments (env.py + Dockerfile.hud) and v5 taskset files.
+
+    Supports pluggable formats. Currently: harbor.
+
+    Examples:
+        hud convert ./algotune/                  # Auto-detect, convert dataset
+        hud convert ./my-task/ --from harbor      # Explicit format
+        hud convert ./dataset/ --output ./out     # Custom output directory[/not dim]
     """
     from pathlib import Path
 
+    from .convert import detect_format, get_converter, list_formats, write_result
+
     hud_console = HUDConsole()
+    source_path = Path(path).resolve()
 
+    if not source_path.exists():
+        hud_console.error(f"Path does not exist: {path}")
+        raise typer.Exit(1)
+
+    # Resolve converter
+    if from_format == "auto":
+        converter = detect_format(source_path)
+        if converter is None:
+            # Auto-detect failed — prompt user to pick a format
+            available = list_formats()
+            if not available:
+                hud_console.error("No converters registered.")
+                raise typer.Exit(1)
+
+            if len(available) == 1:
+                # Only one format exists, just use it
+                converter = get_converter(available[0][0])
+                if converter:
+                    hud_console.info(f"Using format: {converter.name}")
+            else:
+                import questionary
+
+                choices = [
+                    questionary.Choice(title=f"{name} — {desc}", value=name)
+                    for name, desc in available
+                ]
+                picked = questionary.select(
+                    "Could not auto-detect format. Which format is this?",
+                    choices=choices,
+                ).ask()
+                if not picked:
+                    raise typer.Exit(1)
+                converter = get_converter(picked)
+
+            if converter is None:
+                hud_console.error("No converter selected.")
+                raise typer.Exit(1)
+        else:
+            hud_console.info(f"Detected format: {converter.name}")
+    else:
+        converter = get_converter(from_format)
+        if converter is None:
+            hud_console.error(f"Unknown format: {from_format}")
+            available = list_formats()
+            if available:
+                hud_console.info("Available formats:")
+                for name, desc in available:
+                    hud_console.info(f"  {name}: {desc}")
+            raise typer.Exit(1)
+
+    # Run conversion
     try:
-        from .flows.tasks import convert_tasks_to_remote
-
-        result_path = convert_tasks_to_remote(tasks_file)
-
-        # If nothing changed, inform the user
-        try:
-            if Path(result_path).resolve() == Path(tasks_file).resolve():
-                hud_console.success(
-                    "Tasks already reference remote MCP URLs. No conversion needed."
-                )
-                hud_console.hint("You can run them directly with: hud eval <tasks_file> --full")
-                return
-        except Exception as e:
-            # Best effort; continue with success message
-            hud_console.debug(f"Path comparison failed, continuing: {e}")
-
-        hud_console.success(f"Converted tasks written to: {result_path}")
-        hud_console.hint(
-            "You can now run remote flows: hud rl <converted_file> or hud eval <converted_file>"
-        )
-    except typer.Exit:
-        raise
-    except Exception as e:
-        hud_console.error(f"Failed to convert tasks: {e}")
+        result = converter.convert(source_path)
+    except ValueError as e:
+        hud_console.error(str(e))
         raise typer.Exit(1) from e
+    except Exception as e:
+        hud_console.error(f"Conversion failed: {e}")
+        raise typer.Exit(1) from e
+
+    # Write output
+    output_dir = Path(output) if output else Path("./hud_converted")
+    try:
+        taskset_path = write_result(result, output_dir.resolve())
+    except Exception as e:
+        hud_console.error(f"Failed to write output: {e}")
+        raise typer.Exit(1) from e
+
+    # Display results
+    hud_console.header("Convert Complete")
+    hud_console.info("")
+
+    total_tasks = len(result.taskset)
+    total_envs = len(result.environments)
+    hud_console.success(
+        f"Converted {total_tasks} task(s) into {total_envs} environment(s)."
+    )
+    hud_console.info("")
+
+    # Show each environment
+    hud_console.section_title("Environments")
+    for env_gen in result.environments:
+        task_count = len(env_gen.task_dirs)
+        hud_console.status_item(env_gen.name, f"{task_count} tasks")
+    hud_console.info("")
+
+    # Show output paths
+    hud_console.section_title("Output")
+    hud_console.status_item("Directory", str(output_dir.resolve()))
+    hud_console.status_item("Taskset", str(taskset_path))
+    hud_console.info("")
+
+    # Show next steps with numbered commands
+    hud_console.section_title("Next Steps")
+    hud_console.info("")
+
+    hud_console.info("1. Deploy environment(s):")
+    if total_envs > 1:
+        hud_console.command_example(
+            f"hud deploy {output_dir.resolve()} --all",
+            f"Deploy all {total_envs} environments",
+        )
+    else:
+        first_env = result.environments[0].name if result.environments else "<env>"
+        hud_console.command_example(
+            f"hud deploy {output_dir.resolve() / first_env}",
+            "Build & deploy to HUD platform",
+        )
+    hud_console.info("")
+
+    hud_console.info("2. Run evaluation:")
+    hud_console.command_example(
+        f"hud eval {taskset_path}", "Run agent against tasks"
+    )
+    hud_console.info("")
 
 
 @app.command()

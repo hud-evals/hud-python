@@ -625,10 +625,14 @@ class ScenarioMixin:
                         continue
 
                     # If we have a non-str type annotation, use TypeAdapter
+                    # Use validate_python (not validate_json) because MCP args
+                    # are always strings, not JSON documents. validate_json("0")
+                    # would parse as int 0, losing the string type. validate_python("0")
+                    # keeps it as str "0" and lets Pydantic coerce based on the annotation.
                     if annotation is not None:
                         try:
                             adapter = TypeAdapter(annotation)
-                            deserialized_args[arg_name] = adapter.validate_json(arg_value)
+                            deserialized_args[arg_name] = adapter.validate_python(arg_value)
                             continue
                         except Exception:  # noqa: S110
                             pass  # Fall through to generic JSON decode
