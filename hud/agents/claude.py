@@ -20,6 +20,7 @@ from anthropic.types.beta import (
     BetaTextBlockParam,
     BetaToolBash20250124Param,
     BetaToolComputerUse20250124Param,
+    BetaToolComputerUse20251124Param,
     BetaToolParam,
     BetaToolResultBlockParam,
     BetaToolTextEditor20250728Param,
@@ -71,41 +72,49 @@ class ClaudeAgent(MCPAgent):
 
         Supports old environments that expose tools like 'anthropic_computer',
         'bash', or 'str_replace_based_edit_tool' without native_tools metadata.
-        """
-        name = tool.name
 
-        # Check for computer tool patterns
-        for pattern in self._LEGACY_COMPUTER_NAMES:
-            if name == pattern or name.endswith(f"_{pattern}"):
-                logger.debug("Legacy fallback: detected %s as computer tool", name)
+        Each tuple is ordered by preference — first name that exists wins.
+        Only returns a spec if this tool IS that preferred match.
+        """
+        import fnmatch
+
+        available = {t.name for t in (self._available_tools or [])} | {tool.name}
+        preferred = lambda names: next((n for n in names if n in available), None) == tool.name
+
+        if preferred(self._LEGACY_COMPUTER_NAMES):
+            logger.debug("Legacy fallback: detected %s as computer tool", tool.name)
+            model_lower = (self.model or "").lower()
+            if any(
+                fnmatch.fnmatch(model_lower, p) for p in ("claude-opus-4-5*", "claude-opus-4-6*")
+            ):
                 return NativeToolSpec(
-                    api_type="computer_20250124",
+                    api_type="computer_20251124",
                     api_name="computer",
-                    beta="computer-use-2025-01-24",
+                    beta="computer-use-2025-11-24",
                     role="computer",
                 )
+            return NativeToolSpec(
+                api_type="computer_20250124",
+                api_name="computer",
+                beta="computer-use-2025-01-24",
+                role="computer",
+            )
 
-        # Check for bash tool patterns
-        for pattern in self._LEGACY_BASH_NAMES:
-            if name == pattern or name.endswith(f"_{pattern}"):
-                logger.debug("Legacy fallback: detected %s as bash tool", name)
-                return NativeToolSpec(
-                    api_type="bash_20250124",
-                    api_name="bash",
-                    beta="computer-use-2025-01-24",
-                    role="shell",
-                )
+        if preferred(self._LEGACY_BASH_NAMES):
+            logger.debug("Legacy fallback: detected %s as bash tool", tool.name)
+            return NativeToolSpec(
+                api_type="bash_20250124",
+                api_name="bash",
+                role="shell",
+            )
 
-        # Check for text editor tool patterns
-        for pattern in self._LEGACY_EDITOR_NAMES:
-            if name == pattern or name.endswith(f"_{pattern}"):
-                logger.debug("Legacy fallback: detected %s as text_editor tool", name)
-                return NativeToolSpec(
-                    api_type="text_editor_20250728",
-                    api_name="str_replace_based_edit_tool",
-                    beta="computer-use-2025-01-24",
-                    role="editor",
-                )
+        if preferred(self._LEGACY_EDITOR_NAMES):
+            logger.debug("Legacy fallback: detected %s as text_editor tool", tool.name)
+            return NativeToolSpec(
+                api_type="text_editor_20250728",
+                api_name="str_replace_based_edit_tool",
+                role="editor",
+            )
 
         return None
 
@@ -373,6 +382,7 @@ class ClaudeAgent(MCPAgent):
                 name=tool.name,
                 description=tool.description,
                 input_schema=tool.inputSchema,
+                eager_input_streaming=True,
             )
             self.tool_mapping[tool.name] = tool.name
             self.claude_tools.append(claude_tool)
@@ -389,7 +399,7 @@ class ClaudeAgent(MCPAgent):
         Claude's native tools have fixed names that must be used exactly.
         """
         match spec.api_type:
-            case "computer_20250124":
+            case "computer_20250124" | "computer_20251124":
                 return "computer"
             case "bash_20250124":
                 return "bash"
@@ -409,8 +419,7 @@ class ClaudeAgent(MCPAgent):
             Claude-specific tool parameter
         """
         match spec.api_type:
-            case "computer_20250124":
-                # Get display dimensions from spec.extra, fallback to settings
+            case "computer_20251124":
                 display_width = spec.extra.get("display_width")
                 display_height = spec.extra.get("display_height")
 
@@ -427,7 +436,31 @@ class ClaudeAgent(MCPAgent):
                     display_width = display_width or computer_settings.ANTHROPIC_COMPUTER_WIDTH
                     display_height = display_height or computer_settings.ANTHROPIC_COMPUTER_HEIGHT
 
-                # Claude expects name to be literal "computer"
+                return BetaToolComputerUse20251124Param(
+                    type="computer_20251124",
+                    name="computer",
+                    display_number=1,
+                    display_width_px=display_width,
+                    display_height_px=display_height,
+                    enable_zoom=True,
+                )
+            case "computer_20250124":
+                display_width = spec.extra.get("display_width")
+                display_height = spec.extra.get("display_height")
+
+                if display_width is None or display_height is None:
+                    import warnings
+
+                    warnings.warn(
+                        "Computer tool missing display dimensions in native_specs.extra. "
+                        "Falling back to computer_settings. This fallback will be removed "
+                        "in v0.6.0. Update your tool to pass display_width/display_height.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                    display_width = display_width or computer_settings.ANTHROPIC_COMPUTER_WIDTH
+                    display_height = display_height or computer_settings.ANTHROPIC_COMPUTER_HEIGHT
+
                 return BetaToolComputerUse20250124Param(
                     type="computer_20250124",
                     name="computer",

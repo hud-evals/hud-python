@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import mcp.types as types
@@ -17,13 +18,15 @@ from openai.types.responses.response_input_param import (
 from openai.types.shared_params.reasoning import Reasoning
 
 from hud.tools.computer.settings import computer_settings
-from hud.tools.native_types import NativeToolSpec  # noqa: TC001
+from hud.tools.native_types import NativeToolSpec
 from hud.types import AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
 from hud.utils.types import with_signature
 
 from .base import MCPAgent
 from .openai import OpenAIAgent
 from .types import OperatorConfig, OperatorCreateParams
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
@@ -201,3 +204,24 @@ class OperatorAgent(OpenAIAgent):
             if isinstance(content, types.TextContent) and result.isError:
                 self.console.error_log(f"Computer tool error: {content.text}")
         return None
+
+    _LEGACY_COMPUTER_NAMES = ("openai_computer",)
+
+    def _legacy_native_spec_fallback(self, tool: types.Tool) -> NativeToolSpec | None:
+        """Detect Operator native tools by name for backwards compatibility.
+
+        Each tuple is ordered by preference — first name that exists wins.
+        Only returns a spec if this tool IS that preferred match.
+        """
+        available = {t.name for t in (self._available_tools or [])} | {tool.name}
+        preferred = lambda names: next((n for n in names if n in available), None) == tool.name
+
+        if preferred(self._LEGACY_COMPUTER_NAMES):
+            logger.debug("Legacy fallback: detected %s as computer tool", tool.name)
+            return NativeToolSpec(
+                api_type="computer_use_preview",
+                api_name="computer",
+                role="computer",
+            )
+
+        return super()._legacy_native_spec_fallback(tool)

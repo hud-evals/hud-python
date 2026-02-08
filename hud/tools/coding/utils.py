@@ -7,10 +7,39 @@ shell, bash, edit, and apply_patch tools.
 from __future__ import annotations
 
 import asyncio
+import os
 import shlex
+import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hud.tools.types import ToolError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+def get_demote_preexec_fn() -> Callable[[], None] | None:
+    """Get a preexec_fn that demotes privileges for subprocess creation.
+
+    On Unix systems running as root, returns a function that demotes
+    to uid/gid 1000 for security isolation. On non-root Unix, returns
+    os.setsid for process group isolation. On Windows, returns None.
+    """
+    if sys.platform == "win32":
+        return None
+
+    if os.getuid() == 0:
+
+        def demote() -> None:
+            os.setsid()  # type: ignore[attr-defined]
+            os.setgid(1000)  # type: ignore[attr-defined]
+            os.setuid(1000)  # type: ignore[attr-defined]
+
+        return demote
+    else:
+        return os.setsid  # type: ignore[attr-defined]
+
 
 # Default number of lines to show around edits in snippets
 SNIPPET_LINES: int = 4
@@ -70,6 +99,7 @@ async def read_file_async(path: Path) -> str:
             f"cat {safe_path}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            preexec_fn=get_demote_preexec_fn(),
         )
         stdout, stderr = await process.communicate()
         if process.returncode != 0:
@@ -95,6 +125,7 @@ async def write_file_async(path: Path, content: str) -> None:
             f"cat > {safe_path} << 'EOF'\n{content}\nEOF",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            preexec_fn=get_demote_preexec_fn(),
         )
         _, stderr = await process.communicate()
         if process.returncode != 0:
@@ -187,6 +218,7 @@ def resolve_path_safely(file_path: str, base_path: Path) -> Path:
 __all__ = [
     "MAX_RESPONSE_LENGTH",
     "SNIPPET_LINES",
+    "get_demote_preexec_fn",
     "make_snippet",
     "maybe_truncate",
     "read_file_async",

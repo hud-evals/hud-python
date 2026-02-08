@@ -21,6 +21,7 @@ from hud.server import MCPServer
 from hud.tools.coding import BashTool
 from hud.tools.computer.anthropic import AnthropicComputerTool
 from hud.tools.hosted import GoogleSearchTool
+from hud.tools.native_types import NativeToolSpec
 from hud.types import AgentResponse, AgentType
 
 
@@ -111,18 +112,25 @@ class TestNativeToolSpecE2E:
             tool = computer_tools[0]
             assert tool.meta is not None
 
-            # Verify native_tools contains Claude spec with display dimensions
+            # Verify native_tools contains Claude spec list with display dimensions
             native_tools = tool.meta.get("native_tools", {})
             assert "claude" in native_tools
 
-            claude_spec = native_tools["claude"]
-            assert claude_spec["api_type"] == "computer_20250124"
-            assert claude_spec["role"] == "computer"
+            claude_specs = native_tools["claude"]
+            assert isinstance(claude_specs, list)
+            assert len(claude_specs) == 2
 
-            # Display dimensions should be in extra field
-            extra = claude_spec.get("extra", {})
-            assert extra.get("display_width") == 1920
-            assert extra.get("display_height") == 1080
+            # First spec: computer_20251124 (Opus 4.5/4.6)
+            assert claude_specs[0]["api_type"] == "computer_20251124"
+            assert claude_specs[0]["role"] == "computer"
+            assert claude_specs[0].get("extra", {}).get("display_width") == 1920
+            assert claude_specs[0].get("extra", {}).get("display_height") == 1080
+
+            # Second spec: computer_20250124 (catch-all)
+            assert claude_specs[1]["api_type"] == "computer_20250124"
+            assert claude_specs[1]["role"] == "computer"
+            assert claude_specs[1].get("extra", {}).get("display_width") == 1920
+            assert claude_specs[1].get("extra", {}).get("display_height") == 1080
 
             await client.__aexit__(None, None, None)
         finally:
@@ -521,25 +529,6 @@ class TestLegacyNameFallback:
         assert spec is not None, "Legacy fallback should detect editor"
         assert spec.api_type == "text_editor_20250728"
 
-    def test_claude_legacy_suffix_match(self, mock_anthropic: Any) -> None:
-        """Test Claude agent detects prefixed tool names like mcp_anthropic_computer."""
-        from mcp import types as mcp_types
-
-        from hud.agents.claude import ClaudeAgent
-
-        legacy_tool = mcp_types.Tool(
-            name="mcp_anthropic_computer",
-            description="Prefixed computer tool from MCP server",
-            inputSchema={"type": "object", "properties": {}},
-        )
-
-        agent = ClaudeAgent.create(model_client=mock_anthropic, validate_api_key=False)
-        agent._available_tools = [legacy_tool]
-
-        spec = agent.resolve_native_spec(legacy_tool)
-        assert spec is not None, "Legacy fallback should detect prefixed computer tool"
-        assert spec.api_type == "computer_20250124"
-
     def test_gemini_legacy_computer_fallback(self, mock_gemini: Any) -> None:
         """Test Gemini agent detects gemini_computer by name without metadata."""
         from mcp import types as mcp_types
@@ -786,6 +775,7 @@ class TestToolNativeSpecs:
         assert hasattr(ShellTool, "native_specs")
         assert AgentType.OPENAI in ShellTool.native_specs
         spec = ShellTool.native_specs[AgentType.OPENAI]
+        assert isinstance(spec, NativeToolSpec)
         assert spec.api_type == "shell"
         assert spec.api_name == "shell"
 
@@ -797,6 +787,7 @@ class TestToolNativeSpecs:
         assert hasattr(ApplyPatchTool, "native_specs")
         assert AgentType.OPENAI in ApplyPatchTool.native_specs
         spec = ApplyPatchTool.native_specs[AgentType.OPENAI]
+        assert isinstance(spec, NativeToolSpec)
         assert spec.api_type == "apply_patch"
         assert spec.api_name == "apply_patch"
 
@@ -808,6 +799,7 @@ class TestToolNativeSpecs:
         assert hasattr(BashTool, "native_specs")
         assert AgentType.CLAUDE in BashTool.native_specs
         spec = BashTool.native_specs[AgentType.CLAUDE]
+        assert isinstance(spec, NativeToolSpec)
         assert spec.api_type == "bash_20250124"
         assert spec.api_name == "bash"
 
@@ -819,6 +811,7 @@ class TestToolNativeSpecs:
         assert hasattr(EditTool, "native_specs")
         assert AgentType.CLAUDE in EditTool.native_specs
         spec = EditTool.native_specs[AgentType.CLAUDE]
+        assert isinstance(spec, NativeToolSpec)
         assert spec.api_type == "text_editor_20250728"
         assert spec.api_name == "str_replace_based_edit_tool"
 
@@ -829,6 +822,8 @@ class TestToolNativeSpecs:
 
         bash_spec = BashTool.native_specs[AgentType.CLAUDE]
         shell_spec = ShellTool.native_specs[AgentType.OPENAI]
+        assert isinstance(bash_spec, NativeToolSpec)
+        assert isinstance(shell_spec, NativeToolSpec)
 
         assert bash_spec.role == "shell"
         assert shell_spec.role == "shell"
@@ -840,6 +835,8 @@ class TestToolNativeSpecs:
 
         edit_spec = EditTool.native_specs[AgentType.CLAUDE]
         apply_patch_spec = ApplyPatchTool.native_specs[AgentType.OPENAI]
+        assert isinstance(edit_spec, NativeToolSpec)
+        assert isinstance(apply_patch_spec, NativeToolSpec)
 
         assert edit_spec.role == "editor"
         assert apply_patch_spec.role == "editor"
@@ -851,6 +848,8 @@ class TestToolNativeSpecs:
 
         shell_spec = GeminiShellTool.native_specs[AgentType.GEMINI]
         edit_spec = GeminiEditTool.native_specs[AgentType.GEMINI]
+        assert isinstance(shell_spec, NativeToolSpec)
+        assert isinstance(edit_spec, NativeToolSpec)
 
         # Should have roles for mutual exclusion
         assert shell_spec.role == "shell"

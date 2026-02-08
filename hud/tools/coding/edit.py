@@ -43,10 +43,7 @@ class EditTool(BaseTool):
         AgentType.CLAUDE: NativeToolSpec(
             api_type="text_editor_20250728",
             api_name="str_replace_based_edit_tool",
-            beta="computer-use-2025-01-24",
             role="editor",
-            # Claude models that support computer use / text editor tool
-            # https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/text-editor-tool
             supported_models=(
                 "claude-3-5-sonnet-*",
                 "claude-3-7-sonnet-*",
