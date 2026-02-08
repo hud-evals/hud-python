@@ -625,19 +625,30 @@ class ScenarioMixin:
                         continue
 
                     # If we have a non-str type annotation, use TypeAdapter
-                    # Use validate_python (not validate_json) because MCP args
-                    # are always strings, not JSON documents. validate_json("0")
-                    # would parse as int 0, losing the string type. validate_python("0")
-                    # keeps it as str "0" and lets Pydantic coerce based on the annotation.
                     if annotation is not None:
+                        adapter = TypeAdapter(annotation)
+
+                        # Try validate_json first (handles Pydantic models,
+                        # lists, enums, datetimes from JSON-encoded strings)
                         try:
-                            adapter = TypeAdapter(annotation)
+                            deserialized_args[arg_name] = adapter.validate_json(arg_value)
+                            continue
+                        except Exception:  # noqa: S110
+                            pass
+
+                        # Fall back to validate_python (handles Literal[str]
+                        # where validate_json("0") would parse as int 0,
+                        # losing the string type)
+                        try:
                             deserialized_args[arg_name] = adapter.validate_python(arg_value)
                             continue
                         except Exception:  # noqa: S110
-                            pass  # Fall through to generic JSON decode
+                            pass
 
-                    # Try JSON decode for strings that look like JSON
+                        # TypeAdapter couldn't handle it -- skip generic
+                        # heuristics that would lose type information
+
+                    # No annotation: try generic JSON decode heuristics
                     stripped = arg_value.strip()
                     if (stripped and stripped[0] in "[{") or stripped in ("true", "false", "null"):
                         try:
