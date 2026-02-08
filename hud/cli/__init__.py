@@ -1135,9 +1135,7 @@ def convert(
 
     total_tasks = len(result.taskset)
     total_envs = len(result.environments)
-    hud_console.success(
-        f"Converted {total_tasks} task(s) into {total_envs} environment(s)."
-    )
+    hud_console.success(f"Converted {total_tasks} task(s) into {total_envs} environment(s).")
     hud_console.info("")
 
     # Show each environment
@@ -1172,9 +1170,7 @@ def convert(
     hud_console.info("")
 
     hud_console.info("2. Run evaluation:")
-    hud_console.command_example(
-        f"hud eval {taskset_path}", "Run agent against tasks"
-    )
+    hud_console.command_example(f"hud eval {taskset_path}", "Run agent against tasks")
     hud_console.info("")
 
 

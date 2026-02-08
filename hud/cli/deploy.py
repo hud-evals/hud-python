@@ -520,13 +520,13 @@ def discover_environments(directory: Path) -> list[Path]:
 
     Returns sorted list of environment directory paths.
     """
-    envs: list[Path] = []
     if not directory.is_dir():
-        return envs
-    for child in sorted(directory.iterdir()):
-        if child.is_dir() and is_environment_directory(child):
-            envs.append(child)
-    return envs
+        return []
+    return [
+        child
+        for child in sorted(directory.iterdir())
+        if child.is_dir() and is_environment_directory(child)
+    ]
 
 
 def deploy_all(

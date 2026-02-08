@@ -8,12 +8,14 @@ defined in conftest.py.
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 from hud.cli.convert import detect_format, get_converter, list_formats, write_result
-from hud.cli.convert.base import ConvertResult, GeneratedEnvironment
 from hud.cli.convert.harbor import (
     HarborConverter,
     _adapt_harbor_dockerfile,
@@ -25,7 +27,6 @@ from hud.cli.convert.harbor import (
 )
 
 from .conftest import make_harbor_task
-
 
 # ============================================================================
 # Helper unit tests
@@ -333,9 +334,7 @@ class TestBuildContextSource:
         assert env.build_context_source is not None
         assert env.build_context_source.is_dir()
 
-    def test_build_context_source_none_when_no_env_dir(
-        self, dataset_no_dockerfile: Path
-    ) -> None:
+    def test_build_context_source_none_when_no_env_dir(self, dataset_no_dockerfile: Path) -> None:
         result = self.converter.convert(dataset_no_dockerfile)
         env = result.environments[0]
         assert env.build_context_source is None
@@ -362,9 +361,7 @@ class TestWriteBuildContext:
         assert (env_dir / "warriors" / "flashpaper.red").is_file()
         assert (env_dir / "warriors" / "rave.red").is_file()
 
-    def test_dockerfile_not_duplicated(
-        self, task_with_build_context: Path, tmp_path: Path
-    ) -> None:
+    def test_dockerfile_not_duplicated(self, task_with_build_context: Path, tmp_path: Path) -> None:
         result = self.converter.convert(task_with_build_context)
         out = tmp_path / "output"
         write_result(result, out)
@@ -384,9 +381,7 @@ class TestWriteBuildContext:
         write_result(result, out)
 
         env = result.environments[0]
-        content = (out / env.name / "warriors" / "flashpaper.red").read_text(
-            encoding="utf-8"
-        )
+        content = (out / env.name / "warriors" / "flashpaper.red").read_text(encoding="utf-8")
         assert "MOV 0, 1" in content
 
 
@@ -607,9 +602,7 @@ class TestScenarioSignature:
         for env in result.environments:
             assert "TaskId = Literal[" in env.env_py
 
-    def test_single_task_build_context_fixture(
-        self, task_with_build_context: Path
-    ) -> None:
+    def test_single_task_build_context_fixture(self, task_with_build_context: Path) -> None:
         result = self.converter.convert(task_with_build_context)
         env_py = result.environments[0].env_py
         assert 'task_id: str = "build-pmars"' in env_py
@@ -644,9 +637,7 @@ class TestWriteResult:
     def setup_method(self) -> None:
         self.converter = HarborConverter()
 
-    def test_creates_directory_structure(
-        self, single_task: Path, tmp_path: Path
-    ) -> None:
+    def test_creates_directory_structure(self, single_task: Path, tmp_path: Path) -> None:
         result = self.converter.convert(single_task)
         out = tmp_path / "output"
         write_result(result, out)
@@ -685,9 +676,7 @@ class TestWriteResult:
         assert (task_out / "task.toml").is_file()
         assert (task_out / "tests" / "test.sh").is_file()
 
-    def test_environment_dir_not_copied(
-        self, single_task: Path, tmp_path: Path
-    ) -> None:
+    def test_environment_dir_not_copied(self, single_task: Path, tmp_path: Path) -> None:
         result = self.converter.convert(single_task)
         out = tmp_path / "output"
         write_result(result, out)
@@ -698,9 +687,7 @@ class TestWriteResult:
         # environment/ should be excluded from the copy
         assert not (task_out / "environment").exists()
 
-    def test_solution_dir_not_copied(
-        self, dataset_with_solutions: Path, tmp_path: Path
-    ) -> None:
+    def test_solution_dir_not_copied(self, dataset_with_solutions: Path, tmp_path: Path) -> None:
         result = self.converter.convert(dataset_with_solutions)
         out = tmp_path / "output"
         write_result(result, out)

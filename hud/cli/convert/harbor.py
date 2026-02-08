@@ -35,7 +35,7 @@ import logging
 import re
 import tomllib
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path  # noqa: TC003 - used at runtime
 from typing import Any
 
 from .base import BaseConverter, ConvertResult, GeneratedEnvironment
@@ -52,11 +52,7 @@ LOGGER = logging.getLogger(__name__)
 
 def _is_harbor_task(path: Path) -> bool:
     """Check if a directory looks like a valid Harbor task."""
-    return (
-        path.is_dir()
-        and (path / "task.toml").exists()
-        and (path / "instruction.md").exists()
-    )
+    return path.is_dir() and (path / "task.toml").exists() and (path / "instruction.md").exists()
 
 
 def _hash_directory(path: Path) -> str:
@@ -195,19 +191,19 @@ env.add_tool(ListTool())
 '''
 
 # Single task: task_id is optional, defaults to the only task.
-_SCENARIO_SINGLE = '''\
+_SCENARIO_SINGLE = """\
 @env.scenario("run-task")
 async def run_task(task_id: str = "{default_task_id}"):
-'''
+"""
 
 # Multiple tasks: task_id is required, typed as a Literal.
-_SCENARIO_MULTI = '''\
+_SCENARIO_MULTI = """\
 TaskId = Literal[{task_id_literal}]
 
 
 @env.scenario("run-task")
 async def run_task(task_id: TaskId):
-'''
+"""
 
 _SCENARIO_BODY = '''\
     """Run a Harbor task by ID.
@@ -338,12 +334,15 @@ WORKDIR /hud
 
 # Install uv standalone (no pip/python required on the base image)
 RUN command -v curl >/dev/null 2>&1 || \\
-    (apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*) && \\
+    (apt-get update -qq && \\
+     apt-get install -y -qq --no-install-recommends curl ca-certificates && \\
+     rm -rf /var/lib/apt/lists/*) && \\
     curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
 COPY pyproject.toml uv.lock* ./
-RUN uv sync --frozen --no-dev --no-install-project 2>/dev/null || uv sync --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project 2>/dev/null || \\
+    uv sync --no-dev --no-install-project
 
 # Harbor task data (instructions + test scripts baked into image)
 COPY tasks/ /harbor/tasks/
@@ -357,20 +356,26 @@ COPY env.py ./
 CMD ["uv", "run", "--no-project", "python", "-m", "hud", "dev", "env:env", "--stdio"]
 """
 
-DOCKERFILE_WITH_BASE_TEMPLATE = """\
+DOCKERFILE_WITH_BASE_TEMPLATE = (
+    """\
 # ============================================================
 # Harbor environment base
 # Source: {source}
 # ============================================================
 {base_dockerfile}
-""" + _HUD_LAYER
+"""
+    + _HUD_LAYER
+)
 
-DOCKERFILE_FALLBACK_TEMPLATE = """\
+DOCKERFILE_FALLBACK_TEMPLATE = (
+    """\
 FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \\
     curl git build-essential && rm -rf /var/lib/apt/lists/*
-""" + _HUD_LAYER
+"""
+    + _HUD_LAYER
+)
 
 PYPROJECT_TEMPLATE = """\
 [project]
@@ -418,9 +423,7 @@ class HarborConverter(BaseConverter):
             task_dirs = [path]
             dataset_name = path.parent.name
         else:
-            task_dirs = sorted(
-                d for d in path.iterdir() if d.is_dir() and _is_harbor_task(d)
-            )
+            task_dirs = sorted(d for d in path.iterdir() if d.is_dir() and _is_harbor_task(d))
             dataset_name = path.name
 
         if not task_dirs:

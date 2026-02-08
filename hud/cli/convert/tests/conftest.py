@@ -16,10 +16,9 @@ matching the terminal-bench-2 layout:
 from __future__ import annotations
 
 import textwrap
-from pathlib import Path
+from pathlib import Path  # noqa: TC003 - used at runtime
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # task.toml templates (matching real terminal-bench style)

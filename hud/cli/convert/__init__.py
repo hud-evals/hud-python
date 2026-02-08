@@ -14,8 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-from pathlib import Path
-from typing import Any
+from pathlib import Path  # noqa: TC003 - used at runtime
 
 from .base import BaseConverter, ConvertResult, GeneratedEnvironment
 
@@ -49,6 +48,7 @@ def _normalize_line_endings(directory: Path) -> None:
                 path.write_bytes(raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n"))
                 LOGGER.debug("Normalized line endings: %s", path)
 
+
 # ---------------------------------------------------------------------------
 # Converter registry
 # ---------------------------------------------------------------------------
@@ -58,7 +58,7 @@ _converters: list[BaseConverter] | None = None
 
 
 def _load_converters() -> list[BaseConverter]:
-    global _converters  # noqa: PLW0603
+    global _converters
     if _converters is None:
         from .harbor import HarborConverter
 
