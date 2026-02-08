@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from pathlib import Path
@@ -14,9 +15,15 @@ from hud.cli.utils.build_display import display_build_summary
 from hud.cli.utils.build_logs import poll_build_status, stream_build_logs
 from hud.cli.utils.config import parse_env_file
 from hud.cli.utils.context import create_build_context_tarball, format_size
-from hud.cli.utils.environment import find_dockerfile, get_environment_name
+from hud.cli.utils.environment import (
+    find_dockerfile,
+    get_environment_name,
+    is_environment_directory,
+)
 from hud.cli.utils.validation import validate_environment
 from hud.utils.hud_console import HUDConsole
+
+LOGGER = logging.getLogger(__name__)
 
 
 def collect_environment_variables(
@@ -505,6 +512,96 @@ def _save_deploy_link(
         console.warning(f"Failed to save deploy link: {e}")
 
 
+def discover_environments(directory: Path) -> list[Path]:
+    """Find all HUD environment subdirectories within a parent directory.
+
+    Scans immediate children for directories containing a Dockerfile
+    (Dockerfile.hud or Dockerfile) and pyproject.toml.
+
+    Returns sorted list of environment directory paths.
+    """
+    if not directory.is_dir():
+        return []
+    return [
+        child
+        for child in sorted(directory.iterdir())
+        if child.is_dir() and is_environment_directory(child)
+    ]
+
+
+def deploy_all(
+    directory: str,
+    env: list[str] | None = None,
+    env_file: str | None = None,
+    no_cache: bool = False,
+    verbose: bool = False,
+    build_args: list[str] | None = None,
+    build_secrets: list[str] | None = None,
+) -> None:
+    """Deploy all HUD environments found in a directory.
+
+    Discovers subdirectories that are valid HUD environments and deploys
+    each one sequentially.
+    """
+    hud_console = HUDConsole()
+    parent = Path(directory).resolve()
+
+    if not parent.is_dir():
+        hud_console.error(f"Directory does not exist: {directory}")
+        raise typer.Exit(1)
+
+    envs = discover_environments(parent)
+    if not envs:
+        hud_console.error(f"No HUD environments found in {parent}")
+        hud_console.info("Expected subdirectories containing Dockerfile.hud + pyproject.toml")
+        raise typer.Exit(1)
+
+    hud_console.header("Deploy All Environments")
+    hud_console.info(f"Found {len(envs)} environment(s) in {parent}:")
+    for env_dir in envs:
+        hud_console.info(f"  {env_dir.name}/")
+    hud_console.info("")
+
+    succeeded: list[str] = []
+    failed: list[str] = []
+
+    for i, env_dir in enumerate(envs, start=1):
+        hud_console.section_title(f"[{i}/{len(envs)}] Deploying {env_dir.name}")
+
+        try:
+            deploy_environment(
+                directory=str(env_dir),
+                name=None,
+                env=env,
+                env_file=env_file,
+                no_cache=no_cache,
+                verbose=verbose,
+                registry_id=None,
+                build_args=build_args,
+                build_secrets=build_secrets,
+            )
+            succeeded.append(env_dir.name)
+        except (typer.Exit, SystemExit):
+            LOGGER.warning("Deploy failed for environment %s", env_dir.name)
+            failed.append(env_dir.name)
+        except Exception:
+            LOGGER.exception("Unexpected error deploying %s", env_dir.name)
+            failed.append(env_dir.name)
+
+    # Summary
+    hud_console.info("")
+    hud_console.header("Deploy All Summary")
+    if succeeded:
+        hud_console.success(f"{len(succeeded)} environment(s) deployed successfully:")
+        for name in succeeded:
+            hud_console.info(f"  {name}")
+    if failed:
+        hud_console.error(f"{len(failed)} environment(s) failed:")
+        for name in failed:
+            hud_console.info(f"  {name}")
+        raise typer.Exit(1)
+
+
 def deploy_command(
     directory: str = typer.Argument(".", help="Environment directory"),
     name: str | None = typer.Option(
@@ -512,6 +609,12 @@ def deploy_command(
         "--name",
         "-n",
         help="Environment display name (defaults to directory name)",
+    ),
+    all_envs: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Deploy all HUD environments found in directory",
     ),
     env: list[str] | None = typer.Option(  # noqa: B008
         None,
@@ -568,11 +671,24 @@ def deploy_command(
         hud deploy environments/browser
         hud deploy . --name my-env     # Custom name
         hud deploy . -e API_KEY=xxx    # With env vars
+        hud deploy ./converted --all   # Deploy all envs in directory
         hud deploy . --build-arg NODE_ENV=production  # With build args
         hud deploy . --secret id=MY_KEY,env=MY_KEY  # With build secrets (will be encrypted at rest)
         hud deploy . --secret id=MY_KEY,src=./my_key.txt  # Secret from file
         hud deploy . --no-cache        # Force rebuild[/not dim]
     """
+    if all_envs:
+        deploy_all(
+            directory=directory,
+            env=env,
+            env_file=env_file,
+            no_cache=no_cache,
+            verbose=verbose,
+            build_args=build_args,
+            build_secrets=secrets,
+        )
+        return
+
     deploy_environment(
         directory=directory,
         name=name,

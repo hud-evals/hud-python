@@ -628,12 +628,35 @@ class ScenarioMixin:
                     if annotation is not None:
                         try:
                             adapter = TypeAdapter(annotation)
-                            deserialized_args[arg_name] = adapter.validate_json(arg_value)
-                            continue
-                        except Exception:  # noqa: S110
-                            pass  # Fall through to generic JSON decode
+                        except Exception:
+                            # Unresolvable annotation (e.g. raw string from
+                            # PEP 563 fallback) -- treat as untyped
+                            adapter = None
 
-                    # Try JSON decode for strings that look like JSON
+                        if adapter is not None:
+                            # Try validate_json first (handles Pydantic models,
+                            # lists, enums, datetimes from JSON-encoded strings)
+                            try:
+                                deserialized_args[arg_name] = adapter.validate_json(arg_value)
+                                continue
+                            except Exception:  # noqa: S110
+                                pass
+
+                            # Fall back to validate_python (handles Literal[str]
+                            # where validate_json("0") would parse as int 0,
+                            # losing the string type)
+                            try:
+                                deserialized_args[arg_name] = adapter.validate_python(arg_value)
+                                continue
+                            except Exception:  # noqa: S110
+                                pass
+
+                            # TypeAdapter couldn't handle it -- skip generic
+                            # heuristics that would lose type information
+                            deserialized_args[arg_name] = arg_value
+                            continue
+
+                    # No annotation (or unresolvable): try generic JSON decode heuristics
                     stripped = arg_value.strip()
                     if (stripped and stripped[0] in "[{") or stripped in ("true", "false", "null"):
                         try:
