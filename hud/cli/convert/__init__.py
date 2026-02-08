@@ -31,6 +31,24 @@ __all__ = [
 
 LOGGER = logging.getLogger(__name__)
 
+# Shell script extensions that need CRLF -> LF normalization
+_SHELL_EXTENSIONS = frozenset({".sh", ".bash", ".zsh", ".ksh"})
+
+
+def _normalize_line_endings(directory: Path) -> None:
+    """Convert CRLF to LF in all shell scripts under a directory.
+
+    Git on Windows with autocrlf=true converts LF to CRLF on checkout.
+    Shell scripts with CRLF break on Linux (e.g., shebang errors,
+    'set: pipefail\\r: invalid option name').
+    """
+    for path in directory.rglob("*"):
+        if path.is_file() and path.suffix in _SHELL_EXTENSIONS:
+            raw = path.read_bytes()
+            if b"\r" in raw:
+                path.write_bytes(raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n"))
+                LOGGER.debug("Normalized line endings: %s", path)
+
 # ---------------------------------------------------------------------------
 # Converter registry
 # ---------------------------------------------------------------------------
@@ -139,6 +157,9 @@ def write_result(result: ConvertResult, output_dir: Path) -> Path:
                     shutil.copytree(item, dest / item.name)
                 else:
                     shutil.copy2(item, dest / item.name)
+
+        # Normalize CRLF -> LF in all shell scripts (fixes Windows git checkout)
+        _normalize_line_endings(env_dir)
 
         LOGGER.info(
             "Wrote environment '%s' with %d task(s)",

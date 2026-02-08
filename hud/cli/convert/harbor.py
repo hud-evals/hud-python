@@ -348,8 +348,9 @@ RUN uv sync --frozen --no-dev --no-install-project 2>/dev/null || uv sync --no-d
 # Harbor task data (instructions + test scripts baked into image)
 COPY tasks/ /harbor/tasks/
 
-# Ensure standard directories exist
-RUN mkdir -p /logs/verifier /workspace
+# Ensure standard directories exist and are writable at runtime
+# (MCP server may run as non-root; Harbor tasks expect /app writable)
+RUN mkdir -p /logs/verifier /workspace /app && chmod 777 /logs/verifier /workspace /app
 
 COPY env.py ./
 
