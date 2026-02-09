@@ -703,6 +703,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             taskset=cfg.taskset,
             tasks=tasks_data,
             hud_eval_config=eval_cfg_dict,
+            strict=True,
         )
 
         if cfg.taskset and ids:
@@ -714,7 +715,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             for task_obj, task_version_id in zip(tasks_to_create, ids, strict=False):
                 task_obj.id = task_version_id
 
-        await submit_rollouts(
+        trace_ids = await submit_rollouts(
             tasks=tasks,
             job_id=job_id,
             agent_type=cfg.agent_type,
@@ -723,6 +724,9 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             group_size=cfg.group_size,
             use_byok=cfg.byok,
         )
+
+        if not trace_ids:
+            raise ValueError("No tasks were accepted for execution. Check errors above.")
 
         hud_console.success(f"Tasks submitted. View at: https://hud.ai/jobs/{job_id}")
         return [], tasks

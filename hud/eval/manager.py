@@ -74,8 +74,14 @@ async def _send_job_enter(
     taskset: str | None = None,
     tasks: list[dict[str, Any]] | None = None,
     hud_eval_config: dict[str, Any] | None = None,
+    strict: bool = False,
 ) -> list[str] | None:
-    """Send job enter payload (async request before traces start)."""
+    """Send job enter payload (async request before traces start).
+
+    Args:
+        strict: If True, raise ValueError on failure instead of returning None.
+            Use for remote execution where job registration is required.
+    """
     import httpx
 
     from hud.eval.types import JobEnterPayload
@@ -110,7 +116,16 @@ async def _send_job_enter(
                 ids = data.get("task_version_ids")
                 if isinstance(ids, list) and all(isinstance(x, str) for x in ids):
                     return ids
+        else:
+            error_detail = resp.text[:500] if resp.text else f"HTTP {resp.status_code}"
+            if strict:
+                raise ValueError(f"Job registration failed: {error_detail}")
+            logger.warning("Job enter failed (%d): %s", resp.status_code, error_detail)
+    except ValueError:
+        raise
     except Exception as e:
+        if strict:
+            raise ValueError(f"Job registration failed: {e}") from e
         logger.warning("Failed to send job enter: %s", e)
     return None
 
