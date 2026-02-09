@@ -111,11 +111,15 @@ async def _send_job_enter(
             try:
                 data = resp.json()
             except Exception:
+                if strict:
+                    raise ValueError("Job registration failed: invalid response body")
                 return None
             if isinstance(data, dict):
                 ids = data.get("task_version_ids")
                 if isinstance(ids, list) and all(isinstance(x, str) for x in ids):
                     return ids
+            if strict:
+                raise ValueError("Job registration failed: missing task_version_ids in response")
         else:
             error_detail = resp.text[:500] if resp.text else f"HTTP {resp.status_code}"
             if strict:
