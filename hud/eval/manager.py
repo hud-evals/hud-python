@@ -88,7 +88,7 @@ async def _send_job_enter(
     from hud.settings import settings
 
     api_key = api_key or settings.api_key
-    if not settings.telemetry_enabled or not api_key:
+    if not strict and (not settings.telemetry_enabled or not api_key):
         return None
 
     payload = JobEnterPayload(
