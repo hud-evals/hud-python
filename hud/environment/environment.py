@@ -78,6 +78,10 @@ class Environment(
         as_claude_programmatic_tools() - Programmatic tool use
         as_anthropic_runner() - Tool runner (requires anthropic)
 
+    Claude Agent SDK integrations:
+        as_claude_agent_mcp_server() - In-process MCP server (requires claude-agent-sdk)
+        as_claude_agent_options() - Full ClaudeAgentOptions (requires claude-agent-sdk)
+
     Google/Gemini integrations:
         as_gemini_tools() - Gemini format
         as_gemini_tool_config() - Tool execution config
