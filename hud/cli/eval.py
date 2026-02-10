@@ -703,7 +703,6 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             taskset=cfg.taskset,
             tasks=tasks_data,
             hud_eval_config=eval_cfg_dict,
-            strict=True,
         )
 
         if cfg.taskset and ids:

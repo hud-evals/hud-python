@@ -74,13 +74,11 @@ async def _send_job_enter(
     taskset: str | None = None,
     tasks: list[dict[str, Any]] | None = None,
     hud_eval_config: dict[str, Any] | None = None,
-    strict: bool = False,
 ) -> list[str] | None:
     """Send job enter payload (async request before traces start).
 
-    Args:
-        strict: If True, raise ValueError on failure instead of returning None.
-            Use for remote execution where job registration is required.
+    Returns task_version_ids on success, None if telemetry is disabled.
+    Raises on any failure (network, bad response, etc).
     """
     import httpx
 
@@ -88,7 +86,7 @@ async def _send_job_enter(
     from hud.settings import settings
 
     api_key = api_key or settings.api_key
-    if not strict and (not settings.telemetry_enabled or not api_key):
+    if not settings.telemetry_enabled or not api_key:
         return None
 
     payload = JobEnterPayload(
@@ -100,38 +98,20 @@ async def _send_job_enter(
         hud_eval_config=hud_eval_config,
     )
 
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                f"{settings.hud_api_url}/trace/job/{job_id}/enter",
-                json=payload.model_dump(exclude_none=True),
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-        if resp.is_success:
-            try:
-                data = resp.json()
-            except Exception:
-                if strict:
-                    raise ValueError("Job registration failed: invalid response body") from None
-                return None
-            if isinstance(data, dict):
-                ids = data.get("task_version_ids")
-                if isinstance(ids, list) and all(isinstance(x, str) for x in ids):
-                    return ids
-            if strict:
-                raise ValueError("Job registration failed: missing task_version_ids in response")
-        else:
-            error_detail = resp.text[:500] if resp.text else f"HTTP {resp.status_code}"
-            if strict:
-                raise ValueError(f"Job registration failed: {error_detail}")
-            logger.warning("Job enter failed (%d): %s", resp.status_code, error_detail)
-    except ValueError:
-        raise
-    except Exception as e:
-        if strict:
-            raise ValueError(f"Job registration failed: {e}") from e
-        logger.warning("Failed to send job enter: %s", e)
-    return None
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            f"{settings.hud_api_url}/trace/job/{job_id}/enter",
+            json=payload.model_dump(exclude_none=True),
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+
+    resp.raise_for_status()
+    data = resp.json()
+    if isinstance(data, dict):
+        ids = data.get("task_version_ids")
+        if isinstance(ids, list) and all(isinstance(x, str) for x in ids):
+            return ids
+    raise ValueError(f"Job registration failed: unexpected response: {data}")
 
 
 @asynccontextmanager
