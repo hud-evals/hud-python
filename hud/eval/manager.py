@@ -75,7 +75,11 @@ async def _send_job_enter(
     tasks: list[dict[str, Any]] | None = None,
     hud_eval_config: dict[str, Any] | None = None,
 ) -> list[str] | None:
-    """Send job enter payload (async request before traces start)."""
+    """Send job enter payload (async request before traces start).
+
+    Returns task_version_ids on success, None if telemetry is disabled.
+    Raises on any failure (network, bad response, etc).
+    """
     import httpx
 
     from hud.eval.types import JobEnterPayload
@@ -94,25 +98,20 @@ async def _send_job_enter(
         hud_eval_config=hud_eval_config,
     )
 
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                f"{settings.hud_api_url}/trace/job/{job_id}/enter",
-                json=payload.model_dump(exclude_none=True),
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-        if resp.is_success:
-            try:
-                data = resp.json()
-            except Exception:
-                return None
-            if isinstance(data, dict):
-                ids = data.get("task_version_ids")
-                if isinstance(ids, list) and all(isinstance(x, str) for x in ids):
-                    return ids
-    except Exception as e:
-        logger.warning("Failed to send job enter: %s", e)
-    return None
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            f"{settings.hud_api_url}/trace/job/{job_id}/enter",
+            json=payload.model_dump(exclude_none=True),
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+
+    resp.raise_for_status()
+    data = resp.json()
+    if isinstance(data, dict):
+        ids = data.get("task_version_ids")
+        if isinstance(ids, list) and all(isinstance(x, str) for x in ids):
+            return ids
+    raise ValueError(f"Job registration failed: unexpected response: {data}")
 
 
 @asynccontextmanager
