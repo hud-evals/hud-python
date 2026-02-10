@@ -9,14 +9,17 @@ Just hand it your environment's tools and a prompt.
 │  (manages loop)   │              │  (hud.Env)    │
 └───────────────────┘              └───────────────┘
 
-The SDK spawns Claude as a subprocess that autonomously calls tools,
-manages context, and streams results back.
+API routing:
+  - If HUD_API_KEY is set, Claude API calls are automatically routed
+    through the HUD inference gateway (for billing/telemetry).
+  - Otherwise falls back to ANTHROPIC_API_KEY directly.
 
 Requires: pip install claude-agent-sdk
 
-Two patterns shown below:
+Three patterns shown below:
   1. Low-level: get MCP server, configure SDK yourself
-  2. Convenience: as_claude_agent_options() does it for you
+  2. Convenience: as_claude_agent_options() does it all (inc. gateway)
+  3. Local env: no remote hub needed
 """
 
 from __future__ import annotations
@@ -32,8 +35,10 @@ from hud.eval.task import Task
 
 
 async def low_level() -> None:
-    """Use as_claude_agent_mcp_server() for full control."""
-    from claude_agent_sdk import ClaudeAgentOptions, AssistantMessage, TextBlock, query
+    """Use as_claude_agent_mcp_server() for full control over SDK config."""
+    from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
+
+    from hud.settings import settings
 
     task = Task(
         env={"name": "browser"},
@@ -48,11 +53,20 @@ async def low_level() -> None:
         # Build tool allowlist (SDK naming: mcp__<server>__<tool>)
         tool_names = [f"mcp__env__{t.name}" for t in ctx.as_tools()]
 
+        # Route through HUD gateway if HUD_API_KEY is set
+        sdk_env = {}
+        if settings.api_key:
+            sdk_env = {
+                "ANTHROPIC_API_KEY": settings.api_key,
+                "ANTHROPIC_BASE_URL": settings.hud_gateway_url,
+            }
+
         options = ClaudeAgentOptions(
             mcp_servers={"env": server},
             allowed_tools=tool_names,
             permission_mode="bypassPermissions",
             max_turns=15,
+            env=sdk_env,
         )
 
         # Run the SDK — it handles the entire agent loop
@@ -71,12 +85,12 @@ async def low_level() -> None:
 
 
 # ------------------------------------------------------------------
-# Pattern 2: Convenience — one-liner options
+# Pattern 2: Convenience — one-liner (handles gateway automatically)
 # ------------------------------------------------------------------
 
 
 async def convenience() -> None:
-    """Use as_claude_agent_options() for minimal boilerplate."""
+    """Use as_claude_agent_options() — gateway routing is automatic."""
     from claude_agent_sdk import AssistantMessage, TextBlock, query
 
     task = Task(
@@ -86,7 +100,8 @@ async def convenience() -> None:
     )
 
     async with hud.eval(task, name="sdk-convenience") as ctx:
-        # One call builds MCP server + options with tool allowlist
+        # One call builds: MCP server + tool allowlist + gateway env
+        # If HUD_API_KEY is set, API calls route through HUD gateway
         options = ctx.as_claude_agent_options(
             model="sonnet",
             max_turns=15,
@@ -129,6 +144,7 @@ async def local_env() -> None:
     from claude_agent_sdk import AssistantMessage, TextBlock, query
 
     async with hud.eval(env(), trace=False) as ctx:
+        # Gateway routing still applies here if HUD_API_KEY is set
         options = ctx.as_claude_agent_options()
 
         async for message in query(

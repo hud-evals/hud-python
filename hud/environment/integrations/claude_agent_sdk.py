@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -100,6 +99,7 @@ class ClaudeAgentSDKMixin:
         allowed_tools: list[str] | None = None,
         disallowed_tools: list[str] | None = None,
         include_builtin_tools: bool = False,
+        use_gateway: bool | None = None,
         **extra_options: Any,
     ) -> Any:
         """Create ClaudeAgentOptions pre-configured with this environment's tools.
@@ -107,6 +107,11 @@ class ClaudeAgentSDKMixin:
         Convenience method that builds the full options object. By default,
         only environment tools are allowed (no built-in Read/Write/Bash etc.)
         unless ``include_builtin_tools=True``.
+
+        When ``HUD_API_KEY`` is set (or ``use_gateway=True``), the SDK's
+        Claude API calls are automatically routed through the HUD inference
+        gateway by setting ``ANTHROPIC_API_KEY`` and ``ANTHROPIC_BASE_URL``
+        in the subprocess environment.
 
         Requires: pip install claude-agent-sdk
 
@@ -122,6 +127,8 @@ class ClaudeAgentSDKMixin:
             disallowed_tools: Tool denylist.
             include_builtin_tools: If True, also allow SDK built-in tools
                 (Read, Write, Edit, Bash, etc.).
+            use_gateway: Route Claude API calls through HUD gateway. Defaults
+                to True when ``HUD_API_KEY`` is set, False otherwise.
             **extra_options: Additional kwargs passed to ClaudeAgentOptions.
 
         Returns:
@@ -132,6 +139,7 @@ class ClaudeAgentSDKMixin:
             from claude_agent_sdk import query
 
             async with env:
+                # Auto-detects HUD_API_KEY and routes through gateway
                 options = env.as_claude_agent_options(model="sonnet")
                 async for msg in query(prompt="Do the task", options=options):
                     print(msg)
@@ -150,11 +158,19 @@ class ClaudeAgentSDKMixin:
         if allowed_tools is None and not include_builtin_tools:
             allowed_tools = [f"mcp__{server_name}__{t.name}" for t in self.as_tools()]
 
+        # Build subprocess env for API routing
+        sdk_env = _build_sdk_env(use_gateway)
+
         options_kwargs: dict[str, Any] = {
             "mcp_servers": {server_name: mcp_server},
             "permission_mode": permission_mode,
             **extra_options,
         }
+
+        if sdk_env:
+            # Merge with any user-provided env, user values take precedence
+            existing_env = options_kwargs.pop("env", {})
+            options_kwargs["env"] = {**sdk_env, **existing_env}
 
         if allowed_tools is not None:
             options_kwargs["allowed_tools"] = allowed_tools
@@ -168,6 +184,42 @@ class ClaudeAgentSDKMixin:
             options_kwargs["max_turns"] = max_turns
 
         return ClaudeAgentOptions(**options_kwargs)
+
+
+def _build_sdk_env(use_gateway: bool | None) -> dict[str, str]:
+    """Build env vars to route the SDK subprocess through the HUD gateway.
+
+    The Claude Agent SDK spawns a CLI subprocess. Env vars passed via
+    ``ClaudeAgentOptions(env={...})`` are merged into the subprocess
+    environment, overriding system env vars.
+
+    Args:
+        use_gateway: Explicit toggle. None = auto-detect from HUD_API_KEY.
+
+    Returns:
+        Dict of env vars to set on the subprocess. Empty if not using gateway.
+    """
+    from hud.settings import settings
+
+    # Auto-detect: use gateway when HUD_API_KEY is available
+    if use_gateway is None:
+        use_gateway = bool(settings.api_key)
+
+    if not use_gateway:
+        return {}
+
+    if not settings.api_key:
+        logger.warning(
+            "use_gateway=True but HUD_API_KEY is not set. "
+            "Set HUD_API_KEY or pass use_gateway=False."
+        )
+        return {}
+
+    logger.debug("Routing Claude Agent SDK through HUD gateway: %s", settings.hud_gateway_url)
+    return {
+        "ANTHROPIC_API_KEY": settings.api_key,
+        "ANTHROPIC_BASE_URL": settings.hud_gateway_url,
+    }
 
 
 def _create_sdk_tool(env: ClaudeAgentSDKMixin, tool: mcp_types.Tool, tool_decorator: Any) -> Any:
