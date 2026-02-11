@@ -41,9 +41,7 @@ class TestBashSessionHeredoc:
         session._timeout = 5.0
         await session.start()
         try:
-            result = await session.run(
-                "cat << 'EOF'\nhello world\nEOF"
-            )
+            result = await session.run("cat << 'EOF'\nhello world\nEOF")
             assert result.output is not None
             assert "hello world" in result.output
         finally:
@@ -56,9 +54,7 @@ class TestBashSessionHeredoc:
         session._timeout = 5.0
         await session.start()
         try:
-            result = await session.run(
-                "cat << 'EOF'\nhello world\nEOF\n"
-            )
+            result = await session.run("cat << 'EOF'\nhello world\nEOF\n")
             assert result.output is not None
             assert "hello world" in result.output
         finally:
@@ -74,9 +70,7 @@ class TestBashSessionHeredoc:
         await session.start()
         try:
             result = await session.run(
-                f"cat > {tmp_path} << 'EOF'\n"
-                "line one\nline two\nEOF\n"
-                f"cat {tmp_path}"
+                f"cat > {tmp_path} << 'EOF'\nline one\nline two\nEOF\ncat {tmp_path}"
             )
             assert result.output is not None
             assert "line one" in result.output

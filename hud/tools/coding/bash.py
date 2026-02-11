@@ -91,9 +91,7 @@ class ClaudeBashSession:
         # Use a newline before the sentinel echo (not ";") so that:
         # 1. Heredoc delimiters aren't corrupted (e.g. EOF; echo '...' wouldn't match EOF)
         # 2. The echo is a standalone command, avoiding syntax errors from leading ";"
-        self._process.stdin.write(
-            command.encode() + f"\necho '{self._sentinel}'\n".encode()
-        )
+        self._process.stdin.write(command.encode() + f"\necho '{self._sentinel}'\n".encode())
         await self._process.stdin.drain()
 
         # Read output from the process, until the sentinel is found
