@@ -13,6 +13,16 @@ Native PC actions:
 - scroll(start_box='[x,y]', direction='', step=5)
 - WAIT(), DONE(), FAIL()
 - screenshot()
+
+Works directly with OpenAIChatAgent:
+
+    from hud.agents import OpenAIChatAgent
+    from hud.tools.computer.glm import GLM_CUA_INSTRUCTIONS
+
+    agent = OpenAIChatAgent.create(
+        model="glm-4.5v",
+        system_prompt=GLM_CUA_INSTRUCTIONS,
+    )
 """
 
 from __future__ import annotations
@@ -25,20 +35,43 @@ from mcp import ErrorData, McpError
 from mcp.types import INVALID_PARAMS, ContentBlock
 from pydantic import Field
 
-from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult
-from hud.types import AgentType
 
 from .hud import HudComputerTool
 from .settings import computer_settings
 
 if TYPE_CHECKING:
     from hud.tools.executors.base import BaseExecutor
+    from hud.tools.native_types import NativeToolSpecs
 
 logger = logging.getLogger(__name__)
 
 # GLM uses normalized 0-999 coordinate space
 GLM_COORDINATE_SPACE = 999
+
+# GLM CUA system instructions
+GLM_CUA_INSTRUCTIONS = """\
+You are a GUI Agent, and your primary task is to respond accurately to user \
+requests or questions. In addition to directly answering the user's queries, \
+you can also use tools or perform GUI operations directly until you fulfill \
+the user's request or provide a correct answer. You should carefully read and \
+understand the images and questions provided by the user, and engage in \
+thinking and reflection when appropriate. The coordinates involved are all \
+represented in thousandths (0-999).
+
+# Task Platform
+Ubuntu
+
+# Tool Call Format
+IMPORTANT: Always use valid JSON for function arguments. Do NOT use XML tags.
+Correct: {"action": "left_click", "start_box": "[500, 300]"}
+Wrong: {"action": "left_click<arg_key>start_box</arg_key><arg_value>[500, 300]"}
+
+# Some Additional Notes
+- Complete tasks autonomously without asking for confirmation.
+- If a task cannot be completed, use FAIL().
+- Coordinates use 0-999 scale (thousandths of screen dimensions).\
+""".strip()
 
 # All supported GLM PC actions with their call signatures:
 # - left_click(start_box='[x,y]', element_info='')
@@ -67,8 +100,8 @@ GLMAction = Literal[
     "scroll",  # start_box='[x,y]', direction='up|down', step=5
     "screenshot",  # no params
     "WAIT",  # no params
-    "DONE",  # no params - task completed
-    "FAIL",  # no params - task failed
+    "DONE",  # no params - task completed (no-op)
+    "FAIL",  # no params - task failed (no-op)
 ]
 
 # Field definitions matching GLM's PC action space
@@ -106,17 +139,20 @@ class GLMComputerTool(HudComputerTool):
     Uses GLM's native PC action space with normalized coordinates (0-999)
     that are automatically rescaled to actual screen dimensions.
 
-    Supports actions: left_click, right_click, middle_click, hover,
-    left_double_click, left_drag, key, type, scroll, WAIT, DONE, FAIL
+    Handles all model-specific quirks (XML arg fixing, DONE/FAIL no-ops)
+    so it works directly with OpenAIChatAgent -- no custom agent class needed.
+
+    Usage:
+        from hud.agents import OpenAIChatAgent
+        from hud.tools.computer.glm import GLM_CUA_INSTRUCTIONS
+
+        agent = OpenAIChatAgent.create(
+            model="glm-4.5v",
+            system_prompt=GLM_CUA_INSTRUCTIONS,
+        )
     """
 
-    native_specs: ClassVar[NativeToolSpecs] = {
-        AgentType.GLM_CUA: NativeToolSpec(
-            api_type="function",
-            api_name="glm_computer",
-            role="computer",
-        ),
-    }
+    native_specs: ClassVar[NativeToolSpecs] = {}
 
     def __init__(
         self,
@@ -132,19 +168,6 @@ class GLMComputerTool(HudComputerTool):
         **kwargs: Any,
     ) -> None:
         """Initialize GLM Computer Tool with coordinate scaling."""
-        instance_native_specs = {
-            AgentType.GLM_CUA: NativeToolSpec(
-                api_type="function",
-                api_name="glm_computer",
-                role="computer",
-                extra={
-                    "display_width": width,
-                    "display_height": height,
-                    "coordinate_space": GLM_COORDINATE_SPACE,
-                },
-            ),
-        }
-
         super().__init__(
             executor=executor,
             platform_type=platform_type,
@@ -156,7 +179,6 @@ class GLMComputerTool(HudComputerTool):
             title=title or "GLM Computer Tool",
             description=description
             or "Control computer with GLM PC action space. Coordinates use 0-999 scale.",
-            native_specs=instance_native_specs,
             **kwargs,
         )
 
@@ -181,7 +203,7 @@ class GLMComputerTool(HudComputerTool):
 
         # Handle list format: [513, 438] or [[513, 438]]
         if isinstance(box, list):
-            # Unwrap nested list: [[x, y]] → [x, y]
+            # Unwrap nested list: [[x, y]] -> [x, y]
             if len(box) == 1 and isinstance(box[0], list):
                 box = box[0]
             if len(box) >= 2:
@@ -195,7 +217,7 @@ class GLMComputerTool(HudComputerTool):
     def _scale_coord(self, coord: int, is_x: bool = True) -> int:
         """Scale coordinate from GLM's 0-999 space to actual screen pixels.
 
-        Maps [0, 999] → [0, dimension) so the max coordinate lands on the
+        Maps [0, 999] -> [0, dimension-1] so the max coordinate lands on the
         last valid pixel index rather than going out of bounds.
         """
         if is_x:
@@ -212,6 +234,52 @@ class GLMComputerTool(HudComputerTool):
         # Handle 'ctrl+c' format
         return [k.strip().lower() for k in keys.split("+")]
 
+    @staticmethod
+    def _fix_xml_args(args: dict[str, Any]) -> dict[str, Any]:
+        """Fix XML-style arguments that GLM models sometimes output.
+
+        Handles cases like:
+        {"action": "left_click\\n<arg_key>start_box</arg_key>\\n<arg_value>[114, 167]"}
+
+        Converts to:
+        {"action": "left_click", "start_box": "[114, 167]"}
+        """
+        fixed: dict[str, Any] = {}
+
+        for key, value in args.items():
+            if not isinstance(value, str):
+                fixed[key] = value
+                continue
+
+            # No XML tags -- pass through
+            if "<arg_key>" not in value:
+                fixed[key] = value
+                continue
+
+            # Extract the plain-text value before the first XML tag
+            # Example: "left_click\n<arg_key>..." -> "left_click"
+            main_value = value.split("<arg_key>")[0].strip()
+            if main_value:
+                fixed[key] = main_value
+
+            # Parse XML-style key-value pairs
+            pattern = r"<arg_key>(\w+)</arg_key>\s*<arg_value>([^\"<]+)"
+            matches = re.findall(pattern, value)
+
+            for arg_name, arg_val in matches:
+                arg_name = arg_name.strip()
+                arg_val = arg_val.strip()
+                if arg_name and arg_val:
+                    fixed[arg_name] = arg_val
+
+            # Preserve original key if no plain text prefix and no XML matches
+            if not main_value and not matches:
+                fixed[key] = value
+
+            logger.warning("Fixed XML args: %s -> %s", args, fixed)
+
+        return fixed
+
     async def __call__(
         self,
         action: GLMAction = ACTION_FIELD,
@@ -225,22 +293,60 @@ class GLMComputerTool(HudComputerTool):
     ) -> list[ContentBlock]:
         """Execute a GLM PC action.
 
+        Handles all GLM model quirks:
+        - Fixes XML-style arguments that GLM sometimes outputs
+        - Treats DONE/FAIL as no-ops (raises McpError)
+        - Parses start_box/end_box in multiple formats
+        - Scales 0-999 normalized coordinates to screen pixels
+
         GLM PC Action Space:
-        - left_click(start_box='[x,y]', element_info=''): Left mouse click
-        - right_click(start_box='[x,y]', element_info=''): Right mouse click
-        - middle_click(start_box='[x,y]', element_info=''): Middle mouse click
-        - hover(start_box='[x,y]', element_info=''): Move mouse without clicking
-        - left_double_click(start_box='[x,y]', element_info=''): Double left click
-        - left_drag(start_box='[x,y]', end_box='[x,y]', element_info=''): Drag
+        - left_click(start_box='[x,y]'): Left mouse click
+        - right_click(start_box='[x,y]'): Right mouse click
+        - middle_click(start_box='[x,y]'): Middle mouse click
+        - hover(start_box='[x,y]'): Move mouse without clicking
+        - left_double_click(start_box='[x,y]'): Double left click
+        - left_drag(start_box='[x,y]', end_box='[x,y]'): Drag
         - key(keys=''): Press key(s), e.g. 'ctrl+c', 'alt+tab'
         - type(content=''): Type text content
-        - scroll(start_box='[x,y]', direction='', step=5, element_info=''): Scroll
+        - scroll(start_box='[x,y]', direction='', step=5): Scroll
+        - screenshot(): Take screenshot
         - WAIT(): Wait 5 seconds
-        - DONE(): Task completed successfully
-        - FAIL(): Task cannot be completed
+        - DONE(): Task completed (no-op)
+        - FAIL(): Task failed (no-op)
 
         Coordinates are 0-999 normalized, automatically scaled to screen pixels.
         """
+        # --- Fix XML-mangled arguments ---
+        # GLM sometimes embeds XML in string args:
+        #   "left_click\n<arg_key>start_box</arg_key>\n<arg_value>[114, 167]"
+        # Only the action string can contain embedded XML key-value pairs.
+        if isinstance(action, str) and "<arg_key>" in action:
+            fixed = self._fix_xml_args({"action": action})
+            action = fixed.pop("action", action)  # type: ignore[assignment]
+            # Apply any extracted parameters (start_box, content, etc.)
+            start_box = fixed.pop("start_box", start_box)
+            end_box = fixed.pop("end_box", end_box)
+            content = fixed.pop("content", content)
+            keys = fixed.pop("keys", keys)
+            direction = fixed.pop("direction", direction)  # type: ignore[assignment]
+
+        # --- Handle DONE/FAIL as no-ops (like Qwen's terminate/answer) ---
+        if action == "DONE":
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message="DONE action is not supported for computer control. This is a no-op.",
+                )
+            )
+
+        if action == "FAIL":
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message="FAIL action is not supported for computer control. This is a no-op.",
+                )
+            )
+
         logger.info("GLMComputerTool action: %s (start_box=%s)", action, start_box)
 
         # Parse boxes to coordinates
@@ -362,22 +468,6 @@ class GLMComputerTool(HudComputerTool):
         # Control actions
         elif action == "WAIT":
             result = await self.executor.wait(time=5000)
-
-        elif action == "DONE":
-            screenshot = await self.executor.screenshot()
-            if screenshot and self.rescale_images:
-                screenshot = await self._rescale_screenshot(screenshot)
-            return ContentResult(
-                output="Task completed successfully", base64_image=screenshot
-            ).to_content_blocks()
-
-        elif action == "FAIL":
-            screenshot = await self.executor.screenshot()
-            if screenshot and self.rescale_images:
-                screenshot = await self._rescale_screenshot(screenshot)
-            return ContentResult(
-                error="Task failed or is infeasible", base64_image=screenshot
-            ).to_content_blocks()
 
         else:
             raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Unknown action: {action}"))

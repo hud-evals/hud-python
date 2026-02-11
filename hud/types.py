@@ -53,9 +53,10 @@ class AgentType(str, Enum):
 
             return GeminiCUAAgent
         elif self == AgentType.GLM_CUA:
-            from hud.agents.glm_cua import GLMCUA
+            # GLM now uses OpenAIChatAgent directly (backward compat)
+            from hud.agents.openai_chat import OpenAIChatAgent
 
-            return GLMCUA
+            return OpenAIChatAgent
         elif self == AgentType.OPENAI_COMPATIBLE:
             from hud.agents.openai_chat import OpenAIChatAgent
 
@@ -74,7 +75,6 @@ class AgentType(str, Enum):
             ClaudeConfig,
             GeminiConfig,
             GeminiCUAConfig,
-            GLMCUAConfig,
             OpenAIChatConfig,
             OpenAIConfig,
             OperatorConfig,
@@ -86,7 +86,7 @@ class AgentType(str, Enum):
             AgentType.OPERATOR: OperatorConfig,
             AgentType.GEMINI: GeminiConfig,
             AgentType.GEMINI_CUA: GeminiCUAConfig,
-            AgentType.GLM_CUA: GLMCUAConfig,
+            AgentType.GLM_CUA: OpenAIChatConfig,  # GLM uses OpenAIChatAgent
             AgentType.OPENAI_COMPATIBLE: OpenAIChatConfig,
             AgentType.INTEGRATION_TEST: BaseAgentConfig,
         }

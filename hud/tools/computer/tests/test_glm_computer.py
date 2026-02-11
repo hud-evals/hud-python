@@ -61,6 +61,11 @@ class TestGLMComputerToolInit:
         assert tool.title == "My GLM"
         assert tool.description == "Custom GLM"
 
+    def test_no_native_specs(self, base_executor: BaseExecutor) -> None:
+        """GLMComputerTool should have empty native_specs (works with any agent)."""
+        tool = GLMComputerTool(executor=base_executor)
+        assert tool.native_specs == {}
+
 
 # ---------------------------------------------------------------------------
 # _parse_box
@@ -154,6 +159,79 @@ class TestParseKeys:
 
     def test_empty_string(self, glm_tool: GLMComputerTool) -> None:
         assert glm_tool._parse_keys("") == []
+
+
+# ---------------------------------------------------------------------------
+# _fix_xml_args (moved from GLMCUAAgent)
+# ---------------------------------------------------------------------------
+
+
+class TestFixXMLArgs:
+    """Test _fix_xml_args static method for handling GLM's XML-style output."""
+
+    def test_clean_json_passthrough(self) -> None:
+        """Clean JSON args should pass through unchanged."""
+        args = {"action": "left_click", "start_box": "[500, 300]"}
+        assert GLMComputerTool._fix_xml_args(args) == args
+
+    def test_non_string_passthrough(self) -> None:
+        """Non-string values should pass through unchanged."""
+        args = {"action": "scroll", "step": 5}
+        assert GLMComputerTool._fix_xml_args(args) == args
+
+    def test_mixed_json_xml(self) -> None:
+        """Mixed JSON/XML format: action value contains XML tags."""
+        args = {
+            "action": "left_click\n<arg_key>start_box</arg_key>\n<arg_value>[114, 167]"
+        }
+        result = GLMComputerTool._fix_xml_args(args)
+        assert result["action"] == "left_click"
+        assert result["start_box"] == "[114, 167]"
+
+    def test_pure_xml_no_prefix(self) -> None:
+        """Value starts directly with XML tag (no plain text prefix)."""
+        args = {
+            "action": "<arg_key>action</arg_key><arg_value>left_click"
+        }
+        result = GLMComputerTool._fix_xml_args(args)
+        assert result["action"] == "left_click"
+
+    def test_preserves_key_when_no_xml_match(self) -> None:
+        """Original key preserved when no XML content found."""
+        args = {"action": "<arg_key>unknown</arg_key>"}
+        result = GLMComputerTool._fix_xml_args(args)
+        # Original key should be preserved
+        assert "action" in result
+
+    def test_multiple_xml_pairs(self) -> None:
+        """Multiple XML key-value pairs extracted correctly."""
+        args = {
+            "action": "left_click\n"
+            "<arg_key>start_box</arg_key>\n<arg_value>[100, 200]\n"
+            "<arg_key>element_info</arg_key>\n<arg_value>button"
+        }
+        result = GLMComputerTool._fix_xml_args(args)
+        assert result["action"] == "left_click"
+        assert result["start_box"] == "[100, 200]"
+        assert result["element_info"] == "button"
+
+
+# ---------------------------------------------------------------------------
+# __call__ - XML arg fixing in __call__
+# ---------------------------------------------------------------------------
+
+
+class TestGLMXMLArgFixingInCall:
+    """Test that __call__ fixes XML-mangled arguments inline."""
+
+    @pytest.mark.asyncio
+    async def test_xml_action_is_fixed(self, glm_tool: GLMComputerTool) -> None:
+        """XML-mangled action string should be fixed and executed."""
+        blocks = await glm_tool(
+            action="left_click\n<arg_key>start_box</arg_key>\n<arg_value>[500, 300]",  # type: ignore[arg-type]
+        )
+        assert blocks
+        assert all(isinstance(b, (ImageContent, TextContent)) for b in blocks)
 
 
 # ---------------------------------------------------------------------------
@@ -294,8 +372,6 @@ class TestGLMScrollAction:
     @pytest.mark.asyncio
     async def test_scroll_no_start_box_defaults_to_center(self, glm_tool: GLMComputerTool) -> None:
         """Scroll without start_box should use screen center."""
-        # Must pass step explicitly because Field(...) default doesn't resolve
-        # when __call__ is invoked directly (not through MCP).
         blocks = await glm_tool(action="scroll", direction="down", step=5)
         assert blocks
 
@@ -343,7 +419,7 @@ class TestGLMScreenshotAction:
 
 
 # ---------------------------------------------------------------------------
-# __call__ - control actions
+# __call__ - control actions (DONE/FAIL are now no-ops, WAIT still works)
 # ---------------------------------------------------------------------------
 
 
@@ -356,22 +432,18 @@ class TestGLMControlActions:
         assert blocks
 
     @pytest.mark.asyncio
-    async def test_done(self, base_executor: BaseExecutor) -> None:
+    async def test_done_raises_mcp_error(self, base_executor: BaseExecutor) -> None:
+        """DONE should raise McpError (no-op, like Qwen's terminate)."""
         tool = GLMComputerTool(executor=base_executor)
-        base_executor.screenshot = AsyncMock(return_value="fake_base64")
-
-        blocks = await tool(action="DONE")
-        assert blocks
-        assert any(isinstance(b, TextContent) and "completed" in b.text.lower() for b in blocks)
+        with pytest.raises(McpError, match="DONE action is not supported"):
+            await tool(action="DONE")
 
     @pytest.mark.asyncio
-    async def test_fail(self, base_executor: BaseExecutor) -> None:
+    async def test_fail_raises_mcp_error(self, base_executor: BaseExecutor) -> None:
+        """FAIL should raise McpError (no-op, like Qwen's terminate)."""
         tool = GLMComputerTool(executor=base_executor)
-        base_executor.screenshot = AsyncMock(return_value="fake_base64")
-
-        blocks = await tool(action="FAIL")
-        assert blocks
-        assert any(isinstance(b, TextContent) and "failed" in b.text.lower() for b in blocks)
+        with pytest.raises(McpError, match="FAIL action is not supported"):
+            await tool(action="FAIL")
 
 
 # ---------------------------------------------------------------------------
