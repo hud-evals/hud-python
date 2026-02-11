@@ -14,13 +14,13 @@ Native PC actions:
 - WAIT(), DONE(), FAIL()
 - screenshot()
 
-Works directly with OpenAIChatAgent:
+Works with OpenAIChatAgent:
 
     from hud.agents import OpenAIChatAgent
     from hud.tools.computer.glm import GLM_CUA_INSTRUCTIONS
 
     agent = OpenAIChatAgent.create(
-        model="glm-4.5v",
+        model="glm-4.6v",
         system_prompt=GLM_CUA_INSTRUCTIONS,
     )
 """
@@ -147,7 +147,7 @@ class GLMComputerTool(HudComputerTool):
         from hud.tools.computer.glm import GLM_CUA_INSTRUCTIONS
 
         agent = OpenAIChatAgent.create(
-            model="glm-4.5v",
+            model="glm-4.6v",
             system_prompt=GLM_CUA_INSTRUCTIONS,
         )
     """
@@ -252,13 +252,13 @@ class GLMComputerTool(HudComputerTool):
                 continue
 
             # No XML tags -- pass through
-            if "<arg_key>" not in value:
+            if not re.search(r"</?arg_", value):
                 fixed[key] = value
                 continue
 
             # Extract the plain-text value before the first XML tag
             # Example: "left_click\n<arg_key>..." -> "left_click"
-            main_value = value.split("<arg_key>")[0].strip()
+            main_value = re.split(r"</?arg_", value, maxsplit=1)[0].strip()
             if main_value:
                 fixed[key] = main_value
 
@@ -317,10 +317,7 @@ class GLMComputerTool(HudComputerTool):
         Coordinates are 0-999 normalized, automatically scaled to screen pixels.
         """
         # --- Fix XML-mangled arguments ---
-        # GLM sometimes embeds XML in string args:
-        #   "left_click\n<arg_key>start_box</arg_key>\n<arg_value>[114, 167]"
-        # Only the action string can contain embedded XML key-value pairs.
-        if isinstance(action, str) and "<arg_key>" in action:
+        if isinstance(action, str) and re.search(r"</?arg_", action):
             fixed = self._fix_xml_args({"action": action})
             action = fixed.pop("action", action)  # type: ignore[assignment]
             # Apply any extracted parameters (start_box, content, etc.)
