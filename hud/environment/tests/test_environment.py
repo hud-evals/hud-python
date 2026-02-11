@@ -332,6 +332,56 @@ class TestEnvironmentMCPProtocol:
         mock_conn.call_tool.assert_called_once_with("remote_tool", {"arg": "value"})
         assert len(result) == 1
 
+    @pytest.mark.asyncio
+    async def test_env_call_tool_propagates_trace_from_request_ctx_to_agent_tool(self) -> None:
+        """_env_call_tool reads trace_id from request_ctx for AgentTool calls."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from mcp.server.lowlevel.server import request_ctx
+        from mcp.shared.context import RequestContext
+        from mcp.types import RequestParams
+
+        from hud.environment import Environment
+        from hud.tools import AgentTool
+
+        env = Environment("test")
+
+        @env.scenario()
+        async def investigate(issue: str):
+            yield {"task": f"Investigate {issue}"}
+
+        agent_tool = AgentTool(env("investigate"), model="claude", trace=True)
+        env.add_tool(agent_tool.mcp)
+        await env._build_routing()
+
+        with (
+            patch("hud.eval.manager.run_eval") as mock_run_eval,
+            patch("hud.agents.create_agent") as mock_create_agent,
+        ):
+            mock_ctx = AsyncMock()
+            mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
+            mock_ctx.__aexit__ = AsyncMock(return_value=None)
+            mock_run_eval.return_value = mock_ctx
+
+            mock_agent = MagicMock()
+            mock_agent.run = AsyncMock(return_value=MagicMock(content="subagent output"))
+            mock_create_agent.return_value = mock_agent
+            req_meta = RequestParams.Meta.model_validate({"_hud_trace_id": "trace-from-meta"})
+            req_context = RequestContext(
+                request_id="test-req",
+                meta=req_meta,
+                session=MagicMock(),
+                lifespan_context=None,
+            )
+            token = request_ctx.set(req_context)  # type: ignore[arg-type]
+            try:
+                result = await env._env_call_tool("investigate", {"issue": "order decline"})
+            finally:
+                request_ctx.reset(token)
+
+        assert len(result) == 1
+        assert mock_run_eval.call_args.kwargs["trace_id"] == "trace-from-meta"
+
     def test_setup_handlers_registers_custom_handlers(self) -> None:
         """Verify _setup_handlers registers our _env_list_tools and _env_call_tool."""
         from hud.environment import Environment
