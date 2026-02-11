@@ -8,7 +8,9 @@ cannot be caught by mocking.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
+import tempfile
 
 import pytest
 
@@ -65,17 +67,20 @@ class TestBashSessionHeredoc:
     @pytest.mark.asyncio
     async def test_heredoc_write_and_read_file(self):
         """Heredoc that writes a file then cats it back."""
+        fd, tmp_path = tempfile.mkstemp(prefix="_bash_test_heredoc_", suffix=".txt")
+        os.close(fd)
         session = _BashSession()
         session._timeout = 5.0
         await session.start()
         try:
             result = await session.run(
-                "cat > /tmp/_bash_test_heredoc.txt << 'EOF'\n"
+                f"cat > {tmp_path} << 'EOF'\n"
                 "line one\nline two\nEOF\n"
-                "cat /tmp/_bash_test_heredoc.txt"
+                f"cat {tmp_path}"
             )
             assert result.output is not None
             assert "line one" in result.output
             assert "line two" in result.output
         finally:
             await _cleanup(session)
+            os.unlink(tmp_path)
