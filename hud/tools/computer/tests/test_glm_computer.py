@@ -181,18 +181,14 @@ class TestFixXMLArgs:
 
     def test_mixed_json_xml(self) -> None:
         """Mixed JSON/XML format: action value contains XML tags."""
-        args = {
-            "action": "left_click\n<arg_key>start_box</arg_key>\n<arg_value>[114, 167]"
-        }
+        args = {"action": "left_click\n<arg_key>start_box</arg_key>\n<arg_value>[114, 167]"}
         result = GLMComputerTool._fix_xml_args(args)
         assert result["action"] == "left_click"
         assert result["start_box"] == "[114, 167]"
 
     def test_pure_xml_no_prefix(self) -> None:
         """Value starts directly with XML tag (no plain text prefix)."""
-        args = {
-            "action": "<arg_key>action</arg_key><arg_value>left_click"
-        }
+        args = {"action": "<arg_key>action</arg_key><arg_value>left_click"}
         result = GLMComputerTool._fix_xml_args(args)
         assert result["action"] == "left_click"
 
