@@ -158,7 +158,6 @@ class Connector:
             if self.config.transform is not None:
                 from fastmcp.tools.tool import Tool as FastMCPTool
 
-                original_meta = tool.meta  # preserve meta across transform
                 fastmcp_tool = FastMCPTool.model_construct(
                     name=tool.name,
                     description=tool.description or "",
