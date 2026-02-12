@@ -137,7 +137,7 @@ def patch_streamable_http_error_handling() -> None:
                                 message=f"Transport error: {type(exc).__name__}",
                                 data={
                                     "error_type": type(exc).__name__,
-                                    "detail": _format_exception(exc),
+                                    "detail": str(exc),
                                 },
                             ),
                         )
