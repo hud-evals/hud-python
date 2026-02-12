@@ -278,11 +278,7 @@ class GeminiAgent(MCPAgent):
         self._gemini_to_mcp_tool_map = {}
         self.gemini_tools = []
 
-        categorized = self.categorize_tools()
-
-        # Log skipped tools at debug level
-        for tool, reason in categorized.skipped:
-            logger.debug("Skipping tool %s: %s", tool.name, reason)
+        categorized = self._categorized_tools
 
         # Process hosted tools
         for tool, spec in categorized.hosted:
