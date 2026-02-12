@@ -344,11 +344,7 @@ class ClaudeAgent(MCPAgent):
         self.claude_tools: list[BetaToolUnionParam] = []
         self._required_betas: set[str] = set()
 
-        categorized = self.categorize_tools()
-
-        # Log skipped tools at debug level
-        for tool, reason in categorized.skipped:
-            logger.debug("Skipping tool %s: %s", tool.name, reason)
+        categorized = self._categorized_tools
 
         # Log skipped hosted tools (Claude doesn't support hosted tools currently)
         for tool, _spec in categorized.hosted:

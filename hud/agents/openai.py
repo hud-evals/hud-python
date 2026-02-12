@@ -236,11 +236,7 @@ class OpenAIAgent(MCPAgent):
         self._openai_tools = []
         self._tool_name_map = {}
 
-        categorized = self.categorize_tools()
-
-        # Log skipped tools at debug level
-        for tool, reason in categorized.skipped:
-            logger.debug("Skipping tool %s: %s", tool.name, reason)
+        categorized = self._categorized_tools
 
         # Process hosted tools
         for tool, spec in categorized.hosted:

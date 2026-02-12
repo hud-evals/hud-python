@@ -294,6 +294,7 @@ class MCPAgent(ABC):
 
         self._available_tools: list[types.Tool] | None = None
         self._tool_map: dict[str, types.Tool] = {}
+        self._categorized_tools: CategorizedTools = CategorizedTools()
         self._initialized: bool = False
 
     @classmethod
@@ -337,6 +338,10 @@ class MCPAgent(ABC):
             f"Discovered {len(self._available_tools)} tools from environment: "
             f"{', '.join([t.name for t in self._available_tools])}"
         )
+
+        self._categorized_tools = self.categorize_tools()
+        for tool, reason in self._categorized_tools.skipped:
+            logger.debug("Skipping tool %s: %s", tool.name, reason)
 
         # Call hook for subclass-specific initialization (e.g., tool format conversion)
         self._on_tools_ready()
@@ -696,9 +701,23 @@ class MCPAgent(ABC):
         return self._available_tools
 
     def get_tool_schemas(self) -> list[dict]:
-        """Get tool schemas in a format suitable for the model."""
+        """Get tool schemas in a format suitable for the model.
+
+        Uses categorized tools so that skipped tools (role-blocked)
+        are excluded from schemas automatically. Falls back to
+        get_available_tools() if called before categorization.
+        """
+        if self._initialized:
+            tools = (
+                [t for t, _spec in self._categorized_tools.native]
+                + [t for t, _spec in self._categorized_tools.hosted]
+                + list(self._categorized_tools.generic)
+            )
+        else:
+            tools = self.get_available_tools()
+
         schemas = []
-        for tool in self.get_available_tools():
+        for tool in tools:
             schema = {
                 "name": tool.name,
                 "description": tool.description,
