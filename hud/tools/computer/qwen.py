@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from mcp import ErrorData, McpError
 from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ContentBlock
 from pydantic import Field
 
+from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult
+from hud.types import AgentType
 
 from .hud import HudComputerTool
 from .settings import computer_settings
@@ -24,6 +26,13 @@ class QwenComputerTool(HudComputerTool):
     """
     Qwen Computer Use tool for interacting with the computer.
     """
+
+    native_specs: ClassVar[NativeToolSpecs] = {
+        AgentType.OPENAI_COMPATIBLE: NativeToolSpec(
+            role="computer",
+            supported_models=("qwen*",),
+        ),
+    }
 
     name: str = "computer_use"
     api_type: str = "computer_use"

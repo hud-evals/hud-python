@@ -81,7 +81,8 @@
           {
             "group": "Advanced",
             "pages": [
-              "advanced/testing-environments"
+              "advanced/testing-environments",
+              "advanced/harbor-convert"
             ]
           },
           {
@@ -164,6 +165,12 @@
             "group": "Integrations",
             "pages": [
               "platform/slack"
+            ]
+          },
+          {
+            "group": "How We Use HUD on HUD",
+            "pages": [
+              "platform/internal/trace-analysis"
             ]
           }
         ]

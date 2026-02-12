@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from pydantic import BaseModel
@@ -790,6 +790,239 @@ class TestScenarioJsonSerialization:
         assert all(isinstance(item, _Item) for item in received_items)
         assert received_items[0].name == "Apple"
         assert received_items[1].name == "Banana"
+
+
+class TestLiteralDeserialization:
+    """Tests for Literal type deserialization edge cases.
+
+    The MCP protocol sends all arguments as strings. When the scenario
+    function uses Literal types, the deserializer must correctly match
+    string values -- especially numeric-looking strings like "0", "1".
+    """
+
+    @pytest.mark.asyncio
+    async def test_literal_string_kept_as_string(self) -> None:
+        """Literal["a", "b"] receives string values correctly."""
+        env = Environment("test-env")
+        received: str | None = None
+
+        @env.scenario("literal_str")
+        async def literal_str_scenario(choice: Literal["a", "b"]):
+            nonlocal received
+            received = choice
+            yield f"Got {choice}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:literal_str")
+        assert prompt is not None
+
+        await prompt.render({"choice": "a"})
+        assert received == "a"
+        assert isinstance(received, str)
+
+    @pytest.mark.asyncio
+    async def test_literal_numeric_string_not_coerced_to_int(self) -> None:
+        """Literal["0", "1", "2"] keeps "0" as string, not int 0.
+
+        This is the GPQA Diamond bug: task IDs are "0", "1", etc.
+        and must stay as strings for Path operations.
+        """
+        env = Environment("test-env")
+        received: Any = None
+
+        @env.scenario("literal_numeric")
+        async def literal_numeric_scenario(task_id: Literal["0", "1", "2"]):
+            nonlocal received
+            received = task_id
+            yield f"Task {task_id}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:literal_numeric")
+        assert prompt is not None
+
+        await prompt.render({"task_id": "0"})
+        assert received == "0"
+        assert isinstance(received, str)
+
+    @pytest.mark.asyncio
+    async def test_literal_numeric_string_various_values(self) -> None:
+        """All numeric-looking Literal string values stay as strings."""
+        env = Environment("test-env")
+        received: Any = None
+
+        @env.scenario("literal_nums")
+        async def literal_nums_scenario(idx: Literal["0", "42", "197"]):
+            nonlocal received
+            received = idx
+            yield f"Index {idx}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:literal_nums")
+        assert prompt is not None
+
+        for val in ("0", "42", "197"):
+            await prompt.render({"idx": val})
+            assert received == val, f"Expected {val!r}, got {received!r}"
+            assert isinstance(received, str), f"Expected str, got {type(received)}"
+
+    @pytest.mark.asyncio
+    async def test_literal_int_coerces_correctly(self) -> None:
+        """Literal[1, 2, 3] with int values coerces string "1" to int 1."""
+        env = Environment("test-env")
+        received: Any = None
+
+        @env.scenario("literal_int")
+        async def literal_int_scenario(level: Literal[1, 2, 3]):
+            nonlocal received
+            received = level
+            yield f"Level {level}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:literal_int")
+        assert prompt is not None
+
+        await prompt.render({"level": "2"})
+        assert received == 2
+        assert isinstance(received, int)
+
+    @pytest.mark.asyncio
+    async def test_literal_mixed_types(self) -> None:
+        """Literal["auto", 0, 1] handles mixed string/int literal values."""
+        env = Environment("test-env")
+        received: Any = None
+
+        @env.scenario("literal_mixed")
+        async def literal_mixed_scenario(mode: Literal["auto", 0, 1]):
+            nonlocal received
+            received = mode
+            yield f"Mode {mode}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:literal_mixed")
+        assert prompt is not None
+
+        await prompt.render({"mode": "auto"})
+        assert received == "auto"
+
+    @pytest.mark.asyncio
+    async def test_literal_with_default(self) -> None:
+        """Literal with default value works when arg is provided."""
+        env = Environment("test-env")
+        received: Any = None
+
+        @env.scenario("literal_default")
+        async def literal_default_scenario(
+            task_id: Literal["build-pmars"] = "build-pmars",
+        ):
+            nonlocal received
+            received = task_id
+            yield f"Task {task_id}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:literal_default")
+        assert prompt is not None
+
+        await prompt.render({"task_id": "build-pmars"})
+        assert received == "build-pmars"
+
+    @pytest.mark.asyncio
+    async def test_int_annotation_coerces_numeric_string(self) -> None:
+        """Plain int annotation coerces "42" to 42."""
+        env = Environment("test-env")
+        received: Any = None
+
+        @env.scenario("int_arg")
+        async def int_arg_scenario(count: int):
+            nonlocal received
+            received = count
+            yield f"Count {count}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:int_arg")
+        assert prompt is not None
+
+        await prompt.render({"count": "42"})
+        assert received == 42
+        assert isinstance(received, int)
+
+    @pytest.mark.asyncio
+    async def test_float_annotation_coerces_numeric_string(self) -> None:
+        """Plain float annotation coerces "3.14" to 3.14."""
+        env = Environment("test-env")
+        received: Any = None
+
+        @env.scenario("float_arg")
+        async def float_arg_scenario(rate: float):
+            nonlocal received
+            received = rate
+            yield f"Rate {rate}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:float_arg")
+        assert prompt is not None
+
+        await prompt.render({"rate": "3.14"})
+        assert received == pytest.approx(3.14)
+        assert isinstance(received, float)
+
+    @pytest.mark.asyncio
+    async def test_bool_annotation_coerces_string(self) -> None:
+        """Bool annotation coerces "true"/"false" correctly."""
+        env = Environment("test-env")
+        received: Any = None
+
+        @env.scenario("bool_arg")
+        async def bool_arg_scenario(verbose: bool):
+            nonlocal received
+            received = verbose
+            yield f"Verbose {verbose}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:bool_arg")
+        assert prompt is not None
+
+        await prompt.render({"verbose": "true"})
+        assert received is True
+
+    @pytest.mark.asyncio
+    async def test_str_annotation_preserves_numeric_string(self) -> None:
+        """Plain str annotation keeps "42" as string "42"."""
+        env = Environment("test-env")
+        received: Any = None
+
+        @env.scenario("str_numeric")
+        async def str_numeric_scenario(name: str):
+            nonlocal received
+            received = name
+            yield f"Name {name}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:str_numeric")
+        assert prompt is not None
+
+        await prompt.render({"name": "42"})
+        assert received == "42"
+        assert isinstance(received, str)
+
+    @pytest.mark.asyncio
+    async def test_no_annotation_numeric_becomes_int(self) -> None:
+        """Untyped arg with numeric-looking string falls through to json.loads."""
+        env = Environment("test-env")
+        received: Any = None
+
+        @env.scenario("untyped_num")
+        async def untyped_num_scenario(val):
+            nonlocal received
+            received = val
+            yield f"Val {val}"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:untyped_num")
+        assert prompt is not None
+
+        await prompt.render({"val": "42"})
+        # Without annotation, generic heuristic converts to int
+        assert received == 42
 
 
 class TestScenarioNameNormalization:

@@ -62,28 +62,28 @@ class OpenAIAgent(MCPAgent):
 
         Supports old environments that expose tools like 'shell' or 'apply_patch'
         without native_tools metadata.
+
+        Each tuple is ordered by preference — first name that exists wins.
+        Only returns a spec if this tool IS that preferred match.
         """
-        name = tool.name
+        available = {t.name for t in (self._available_tools or [])} | {tool.name}
+        preferred = lambda names: next((n for n in names if n in available), None) == tool.name
 
-        # Check for shell tool patterns
-        for pattern in self._LEGACY_SHELL_NAMES:
-            if name == pattern or name.endswith(f"_{pattern}"):
-                logger.debug("Legacy fallback: detected %s as shell tool", name)
-                return NativeToolSpec(
-                    api_type="shell",
-                    api_name="shell",
-                    role="shell",
-                )
+        if preferred(self._LEGACY_SHELL_NAMES):
+            logger.debug("Legacy fallback: detected %s as shell tool", tool.name)
+            return NativeToolSpec(
+                api_type="shell",
+                api_name="shell",
+                role="shell",
+            )
 
-        # Check for apply_patch tool patterns
-        for pattern in self._LEGACY_APPLY_PATCH_NAMES:
-            if name == pattern or name.endswith(f"_{pattern}"):
-                logger.debug("Legacy fallback: detected %s as apply_patch tool", name)
-                return NativeToolSpec(
-                    api_type="apply_patch",
-                    api_name="apply_patch",
-                    role="editor",
-                )
+        if preferred(self._LEGACY_APPLY_PATCH_NAMES):
+            logger.debug("Legacy fallback: detected %s as apply_patch tool", tool.name)
+            return NativeToolSpec(
+                api_type="apply_patch",
+                api_name="apply_patch",
+                role="editor",
+            )
 
         return None
 
@@ -236,11 +236,7 @@ class OpenAIAgent(MCPAgent):
         self._openai_tools = []
         self._tool_name_map = {}
 
-        categorized = self.categorize_tools()
-
-        # Log skipped tools at debug level
-        for tool, reason in categorized.skipped:
-            logger.debug("Skipping tool %s: %s", tool.name, reason)
+        categorized = self._categorized_tools
 
         # Process hosted tools
         for tool, spec in categorized.hosted:
@@ -350,12 +346,12 @@ class OpenAIAgent(MCPAgent):
             temperature=self.temperature,
             tool_choice=self.tool_choice if self.tool_choice is not None else Omit(),
             parallel_tool_calls=self.parallel_tool_calls,
-            reasoning=self.reasoning,
+            reasoning=self.reasoning if self.reasoning is not None else Omit(),
             tools=self._openai_tools if self._openai_tools else Omit(),
             previous_response_id=(
                 self.last_response_id if self.last_response_id is not None else Omit()
             ),
-            truncation=self.truncation,
+            truncation=self.truncation if self.truncation is not None else Omit(),
         )
 
         self.last_response_id = response.id

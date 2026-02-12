@@ -72,53 +72,49 @@ class ClaudeAgent(MCPAgent):
 
         Supports old environments that expose tools like 'anthropic_computer',
         'bash', or 'str_replace_based_edit_tool' without native_tools metadata.
+
+        Each tuple is ordered by preference — first name that exists wins.
+        Only returns a spec if this tool IS that preferred match.
         """
         import fnmatch
 
-        name = tool.name
+        available = {t.name for t in (self._available_tools or [])} | {tool.name}
+        preferred = lambda names: next((n for n in names if n in available), None) == tool.name
 
-        # Check for computer tool patterns
-        for pattern in self._LEGACY_COMPUTER_NAMES:
-            if name == pattern or name.endswith(f"_{pattern}"):
-                logger.debug("Legacy fallback: detected %s as computer tool", name)
-                # Opus 4.5/4.6 use the new computer tool version
-                model_lower = (self.model or "").lower()
-                if any(
-                    fnmatch.fnmatch(model_lower, p)
-                    for p in ("claude-opus-4-5*", "claude-opus-4-6*")
-                ):
-                    return NativeToolSpec(
-                        api_type="computer_20251124",
-                        api_name="computer",
-                        beta="computer-use-2025-11-24",
-                        role="computer",
-                    )
+        if preferred(self._LEGACY_COMPUTER_NAMES):
+            logger.debug("Legacy fallback: detected %s as computer tool", tool.name)
+            model_lower = (self.model or "").lower()
+            if any(
+                fnmatch.fnmatch(model_lower, p) for p in ("claude-opus-4-5*", "claude-opus-4-6*")
+            ):
                 return NativeToolSpec(
-                    api_type="computer_20250124",
+                    api_type="computer_20251124",
                     api_name="computer",
-                    beta="computer-use-2025-01-24",
+                    beta="computer-use-2025-11-24",
                     role="computer",
                 )
+            return NativeToolSpec(
+                api_type="computer_20250124",
+                api_name="computer",
+                beta="computer-use-2025-01-24",
+                role="computer",
+            )
 
-        # Check for bash tool patterns
-        for pattern in self._LEGACY_BASH_NAMES:
-            if name == pattern or name.endswith(f"_{pattern}"):
-                logger.debug("Legacy fallback: detected %s as bash tool", name)
-                return NativeToolSpec(
-                    api_type="bash_20250124",
-                    api_name="bash",
-                    role="shell",
-                )
+        if preferred(self._LEGACY_BASH_NAMES):
+            logger.debug("Legacy fallback: detected %s as bash tool", tool.name)
+            return NativeToolSpec(
+                api_type="bash_20250124",
+                api_name="bash",
+                role="shell",
+            )
 
-        # Check for text editor tool patterns
-        for pattern in self._LEGACY_EDITOR_NAMES:
-            if name == pattern or name.endswith(f"_{pattern}"):
-                logger.debug("Legacy fallback: detected %s as text_editor tool", name)
-                return NativeToolSpec(
-                    api_type="text_editor_20250728",
-                    api_name="str_replace_based_edit_tool",
-                    role="editor",
-                )
+        if preferred(self._LEGACY_EDITOR_NAMES):
+            logger.debug("Legacy fallback: detected %s as text_editor tool", tool.name)
+            return NativeToolSpec(
+                api_type="text_editor_20250728",
+                api_name="str_replace_based_edit_tool",
+                role="editor",
+            )
 
         return None
 
@@ -204,7 +200,9 @@ class ClaudeAgent(MCPAgent):
         messages_cached = self._add_prompt_caching(messages)
 
         # betas to use - collected during tool conversion based on native specs
-        betas = list(self._required_betas)
+        # Only pass betas when non-empty; an empty list can produce an empty
+        # anthropic-beta header which the API rejects.
+        betas: list[str] | Omit = list(self._required_betas) if self._required_betas else Omit()
 
         # Bedrock doesn't support .stream() - use create(stream=True) instead
         if isinstance(self.anthropic_client, AsyncAnthropicBedrock):
@@ -346,11 +344,7 @@ class ClaudeAgent(MCPAgent):
         self.claude_tools: list[BetaToolUnionParam] = []
         self._required_betas: set[str] = set()
 
-        categorized = self.categorize_tools()
-
-        # Log skipped tools at debug level
-        for tool, reason in categorized.skipped:
-            logger.debug("Skipping tool %s: %s", tool.name, reason)
+        categorized = self._categorized_tools
 
         # Log skipped hosted tools (Claude doesn't support hosted tools currently)
         for tool, _spec in categorized.hosted:
