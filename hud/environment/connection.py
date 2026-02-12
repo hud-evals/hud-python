@@ -166,21 +166,18 @@ class Connector:
                 transformed = self.config.transform(fastmcp_tool)
                 if transformed is None:
                     continue
-                tool = mcp_types.Tool(
-                    name=transformed.name,
-                    description=transformed.description,
-                    inputSchema=transformed.parameters,
+                tool = tool.model_copy(
+                    update={
+                        "name": transformed.name,
+                        "description": transformed.description,
+                        "inputSchema": transformed.parameters,
+                    }
                 )
 
             # Apply prefix
-            name = f"{self.config.prefix}_{tool.name}" if self.config.prefix else tool.name
-            result.append(
-                mcp_types.Tool(
-                    name=name,
-                    description=tool.description,
-                    inputSchema=tool.inputSchema,
-                )
-            )
+            if self.config.prefix:
+                tool = tool.model_copy(update={"name": f"{self.config.prefix}_{tool.name}"})
+            result.append(tool)
 
         self._tools_cache = result
         return result

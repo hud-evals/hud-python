@@ -13,6 +13,7 @@ Computer tools let agents interact with GUIs—click, type, scroll, drag, screen
 | `AnthropicComputerTool` | Claude | 1280×720 |
 | `OpenAIComputerTool` | OpenAI / Operator | 1920×1080 |
 | `GeminiComputerTool` | Gemini | 1280×720 |
+| `GLMComputerTool` | GLM-V | 1024×768 |
 | `HudComputerTool` | Any (function calling) | 1280×720 |
 
 ## AnthropicComputerTool
@@ -79,6 +80,39 @@ await computer(type="scroll", x=500, y=300, scroll_x=0, scroll_y=-100)
 
 # Drag
 await computer(type="drag", path=[{"x": 100, "y": 100}, {"x": 300, "y": 300}])
+```
+
+## GLMComputerTool
+
+For GLM-4.6V and later. Uses **normalized 0–999 coordinates** automatically rescaled to screen pixels.
+
+```python
+from hud.tools import GLMComputerTool
+
+computer = GLMComputerTool(width=1024, height=768, rescale_images=True)
+```
+
+**Actions**: `left_click`, `right_click`, `middle_click`, `hover`, `left_double_click`, `left_drag`, `key`, `type`, `scroll`, `screenshot`, `WAIT`, `DONE`, `FAIL`
+
+```python
+# Click (start_box accepts "[x,y]" string, [x,y] list, or [[x,y]])
+await computer(action="left_click", start_box="[500, 300]")
+
+# Type text
+await computer(action="type", content="Hello, World!")
+
+# Keyboard shortcut
+await computer(action="key", keys="ctrl+c")
+
+# Scroll down 5 steps
+await computer(action="scroll", start_box="[500, 300]", direction="down", step=5)
+
+# Drag
+await computer(action="left_drag", start_box="[100, 100]", end_box="[400, 400]")
+
+# Task completion / failure signals
+await computer(action="DONE")
+await computer(action="FAIL")
 ```
 
 ## HudComputerTool

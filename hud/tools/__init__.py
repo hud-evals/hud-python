@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from .computer import (
         AnthropicComputerTool,
         GeminiComputerTool,
+        GLMComputerTool,
         HudComputerTool,
         OpenAIComputerTool,
         QwenComputerTool,
@@ -69,6 +70,7 @@ __all__ = [
     "ClaudeMemoryTool",
     "CodeExecutionTool",
     "EditTool",
+    "GLMComputerTool",
     "GeminiComputerTool",
     "GeminiEditTool",
     "GeminiMemoryTool",
@@ -101,6 +103,7 @@ def __getattr__(name: str) -> Any:
     # Computer tools
     if name in (
         "AnthropicComputerTool",
+        "GLMComputerTool",
         "HudComputerTool",
         "OpenAIComputerTool",
         "GeminiComputerTool",
