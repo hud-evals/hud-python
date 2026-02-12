@@ -70,7 +70,7 @@ class TestGLMComputerToolInit:
         spec = tool.native_specs[AgentType.OPENAI_COMPATIBLE]
         assert isinstance(spec, NativeToolSpec)
         assert spec.role == "computer"
-        assert spec.api_type is None  # generic function calling, not a native API
+        assert spec.api_type == "gui_agent_glm45v"
         assert spec.supported_models == ("glm-*",)
         assert spec.supports_model("glm-4.6v")
         assert spec.supports_model("glm-4v-plus")

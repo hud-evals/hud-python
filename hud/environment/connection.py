@@ -158,6 +158,7 @@ class Connector:
             if self.config.transform is not None:
                 from fastmcp.tools.tool import Tool as FastMCPTool
 
+                original_meta = tool.meta  # preserve meta across transform
                 fastmcp_tool = FastMCPTool.model_construct(
                     name=tool.name,
                     description=tool.description or "",
@@ -170,6 +171,7 @@ class Connector:
                     name=transformed.name,
                     description=transformed.description,
                     inputSchema=transformed.parameters,
+                    _meta=original_meta,
                 )
 
             # Apply prefix
@@ -179,6 +181,7 @@ class Connector:
                     name=name,
                     description=tool.description,
                     inputSchema=tool.inputSchema,
+                    _meta=tool.meta,
                 )
             )
 

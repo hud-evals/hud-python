@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, get_args
 
 from mcp import ErrorData, McpError
 from mcp.types import INVALID_PARAMS, ContentBlock
@@ -78,17 +78,16 @@ GLMAction = Literal[
     "FAIL",  # no params - task failed (no-op)
 ]
 
+# Derive the set of valid actions from GLMAction at import time
+VALID_GLM_ACTIONS: set[str] = set(get_args(GLMAction))
+
 # Field definitions matching GLM's PC action space
 ACTION_FIELD = Field(
     None,
     description=(
         "REQUIRED. Action to perform: "
-        "left_click/right_click/middle_click/hover/left_double_click(start_box='[x,y]'), "
-        "left_drag(start_box, end_box), "
-        "key(keys='ctrl+c'), "
-        "type(content='text'), "
-        "scroll(start_box, direction, step), "
-        "screenshot(), WAIT(), DONE(), FAIL()"
+        "left_click, right_click, middle_click, hover, left_double_click, "
+        "left_drag, key, type, scroll, screenshot, WAIT, DONE, FAIL"
     ),
 )
 START_BOX_FIELD = Field(
@@ -124,6 +123,8 @@ class GLMComputerTool(HudComputerTool):
 
     native_specs: ClassVar[NativeToolSpecs] = {
         AgentType.OPENAI_COMPATIBLE: NativeToolSpec(
+            api_type="gui_agent_glm45v",
+            api_name="computer",
             role="computer",
             supported_models=("glm-*",),
             extra={
@@ -177,7 +178,7 @@ Use this tool to interact with the computer via GLM's PC action space.
   - key(keys='ctrl+c'), type(content='text')
   - scroll(start_box='[x,y]', direction='up|down', step=5)
   - screenshot(), WAIT(), DONE(), FAIL()
-* If a task cannot be completed, use FAIL().\
+* If a task cannot be completed, use FAIL.\
 """.strip()
         )
 
@@ -334,10 +335,7 @@ Use this tool to interact with the computer via GLM's PC action space.
                 ErrorData(
                     code=INVALID_PARAMS,
                     message=(
-                        "'action' is required. Use one of: "
-                        "left_click, right_click, middle_click, hover, "
-                        "left_double_click, left_drag, key, type, scroll, "
-                        "screenshot, WAIT, DONE, FAIL"
+                        "'action' is required. Use one of: " + ", ".join(sorted(VALID_GLM_ACTIONS))
                     ),
                 )
             )
@@ -493,21 +491,18 @@ Use this tool to interact with the computer via GLM's PC action space.
             result = await self.executor.wait(time=5000)
 
         else:
-            raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Unknown action: {action}"))
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=(
+                        f"Unknown action: {action}. Use one of: "
+                        + ", ".join(sorted(VALID_GLM_ACTIONS))
+                    ),
+                )
+            )
 
-        # Auto-screenshot for interactive actions
-        interactive_actions = {
-            "left_click",
-            "click",
-            "right_click",
-            "middle_click",
-            "hover",
-            "left_double_click",
-            "left_drag",
-            "key",
-            "type",
-            "scroll",
-        }
+        # Auto-screenshot for interactive actions (everything except control/screenshot)
+        interactive_actions = VALID_GLM_ACTIONS - {"screenshot", "WAIT", "DONE", "FAIL"}
         if action in interactive_actions and (
             result is None or (isinstance(result, ContentResult) and not result.base64_image)
         ):
