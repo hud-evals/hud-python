@@ -524,6 +524,19 @@ class Environment(
         if not trace_id and isinstance(meta, dict):
             trace_id = meta.get("_hud_trace_id") or meta.get("trace_id")
 
+        # FastMCP does not forward request meta as call_tool kwargs.
+        # Read request_ctx directly to extract _hud_trace_id from MCP metadata.
+        if not trace_id:
+            try:
+                from mcp.server.lowlevel.server import request_ctx
+
+                req_meta = getattr(request_ctx.get(), "meta", None)
+                if req_meta is not None:
+                    extra = getattr(req_meta, "model_extra", None) or {}
+                    trace_id = extra.get("_hud_trace_id") or extra.get("trace_id")
+            except (ImportError, LookupError):
+                pass
+
         if trace_id:
             from hud.eval.context import set_trace_context
 
