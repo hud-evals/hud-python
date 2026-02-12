@@ -501,6 +501,11 @@ Use this tool to interact with the computer via GLM's PC action space.
                 )
             )
 
+        # Rescale screenshot
+        if isinstance(result, ContentResult) and result.base64_image and self.rescale_images:
+            rescaled_image = await self._rescale_screenshot(result.base64_image)
+            result.base64_image = rescaled_image
+
         # Auto-screenshot for interactive actions (everything except control/screenshot)
         interactive_actions = VALID_GLM_ACTIONS - {"screenshot", "WAIT", "DONE", "FAIL"}
         if action in interactive_actions and (
