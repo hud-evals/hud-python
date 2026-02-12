@@ -78,10 +78,12 @@ class TestGLMComputerToolInit:
 
     def test_native_specs_has_instructions(self, base_executor: BaseExecutor) -> None:
         """GLMComputerTool native spec should carry agent instructions."""
+        from hud.tools.native_types import NativeToolSpec
         from hud.types import AgentType
 
         tool = GLMComputerTool(executor=base_executor)
         spec = tool.native_specs[AgentType.OPENAI_COMPATIBLE]
+        assert isinstance(spec, NativeToolSpec)
         instructions = spec.extra.get("instructions")
         assert instructions is not None
         assert "GUI Agent" in instructions
