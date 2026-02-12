@@ -704,13 +704,17 @@ class MCPAgent(ABC):
         """Get tool schemas in a format suitable for the model.
 
         Uses categorized tools so that skipped tools (role-blocked)
-        are excluded from schemas automatically.
+        are excluded from schemas automatically. Falls back to
+        get_available_tools() if called before categorization.
         """
-        tools = (
-            [t for t, _spec in self._categorized_tools.native]
-            + [t for t, _spec in self._categorized_tools.hosted]
-            + list(self._categorized_tools.generic)
-        )
+        if self._initialized:
+            tools = (
+                [t for t, _spec in self._categorized_tools.native]
+                + [t for t, _spec in self._categorized_tools.hosted]
+                + list(self._categorized_tools.generic)
+            )
+        else:
+            tools = self.get_available_tools()
 
         schemas = []
         for tool in tools:
