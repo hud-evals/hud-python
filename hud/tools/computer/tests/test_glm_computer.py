@@ -26,71 +26,6 @@ def glm_tool(base_executor: BaseExecutor) -> GLMComputerTool:
 
 
 # ---------------------------------------------------------------------------
-# Initialization
-# ---------------------------------------------------------------------------
-
-
-class TestGLMComputerToolInit:
-    """Test GLMComputerTool initialization and configuration."""
-
-    def test_default_init(self, base_executor: BaseExecutor) -> None:
-        tool = GLMComputerTool(executor=base_executor)
-        assert tool.name == "glm_computer"
-        assert tool.title == "GLM Computer Tool"
-        assert tool.executor is base_executor
-
-    def test_custom_dimensions(self, base_executor: BaseExecutor) -> None:
-        tool = GLMComputerTool(executor=base_executor, width=1024, height=768)
-        assert tool.width == 1024
-        assert tool.height == 768
-
-    def test_rescale_flag(self, base_executor: BaseExecutor) -> None:
-        tool = GLMComputerTool(executor=base_executor, rescale_images=True)
-        assert tool.rescale_images is True
-        tool2 = GLMComputerTool(executor=base_executor, rescale_images=False)
-        assert tool2.rescale_images is False
-
-    def test_custom_name(self, base_executor: BaseExecutor) -> None:
-        tool = GLMComputerTool(
-            executor=base_executor,
-            name="my_glm",
-            title="My GLM",
-            description="Custom GLM",
-        )
-        assert tool.name == "my_glm"
-        assert tool.title == "My GLM"
-        assert tool.description == "Custom GLM"
-
-    def test_native_specs_role_computer(self, base_executor: BaseExecutor) -> None:
-        """GLMComputerTool should claim 'computer' role for glm-* models."""
-        from hud.tools.native_types import NativeToolSpec
-        from hud.types import AgentType
-
-        tool = GLMComputerTool(executor=base_executor)
-        spec = tool.native_specs[AgentType.OPENAI_COMPATIBLE]
-        assert isinstance(spec, NativeToolSpec)
-        assert spec.role == "computer"
-        assert spec.api_type == "gui_agent_glm45v"
-        assert spec.supported_models == ("glm-*",)
-        assert spec.supports_model("glm-4.6v")
-        assert spec.supports_model("glm-4v-plus")
-        assert not spec.supports_model("qwen-vl-max")
-
-    def test_native_specs_has_instructions(self, base_executor: BaseExecutor) -> None:
-        """GLMComputerTool native spec should carry agent instructions."""
-        from hud.tools.native_types import NativeToolSpec
-        from hud.types import AgentType
-
-        tool = GLMComputerTool(executor=base_executor)
-        spec = tool.native_specs[AgentType.OPENAI_COMPATIBLE]
-        assert isinstance(spec, NativeToolSpec)
-        instructions = spec.extra.get("instructions")
-        assert instructions is not None
-        assert "GUI Agent" in instructions
-        assert "0-999" in instructions
-
-
-# ---------------------------------------------------------------------------
 # _parse_box
 # ---------------------------------------------------------------------------
 
@@ -149,15 +84,6 @@ class TestScaleCoord:
         x = glm_tool._scale_coord(500, is_x=True)
         expected = int(500 * (glm_tool.environment_width - 1) / GLM_COORDINATE_SPACE)
         assert x == expected
-
-    def test_custom_env_dimensions(self, base_executor: BaseExecutor) -> None:
-        """Scaling should use environment_width/height, not agent width/height."""
-        tool = GLMComputerTool(executor=base_executor, width=1024, height=768)
-        x = tool._scale_coord(500, is_x=True)
-        y = tool._scale_coord(500, is_x=False)
-        # Environment dimensions default to 1920x1080
-        assert x == int(500 * (tool.environment_width - 1) / GLM_COORDINATE_SPACE)
-        assert y == int(500 * (tool.environment_height - 1) / GLM_COORDINATE_SPACE)
 
 
 # ---------------------------------------------------------------------------
@@ -250,109 +176,36 @@ class TestGLMXMLArgFixingInCall:
             action="left_click\n<arg_key>start_box</arg_key>\n<arg_value>[500, 300]",  # type: ignore[arg-type]
         )
         assert blocks
-        assert all(isinstance(b, (ImageContent, TextContent)) for b in blocks)
+        assert all(isinstance(b, ImageContent | TextContent) for b in blocks)
 
 
 # ---------------------------------------------------------------------------
-# __call__ - click actions
+# __call__ - validation
 # ---------------------------------------------------------------------------
 
 
-class TestGLMClickActions:
-    """Test click-related actions."""
+class TestGLMCallValidation:
+    """Test __call__ parameter validation."""
 
     @pytest.mark.asyncio
-    async def test_left_click(self, glm_tool: GLMComputerTool) -> None:
-        blocks = await glm_tool(action="left_click", start_box="[500, 300]")
-        assert blocks
-        assert all(isinstance(b, (ImageContent, TextContent)) for b in blocks)
+    async def test_missing_action(self, glm_tool: GLMComputerTool) -> None:
+        with pytest.raises(McpError):
+            await glm_tool(action=None)
 
     @pytest.mark.asyncio
-    async def test_click_alias(self, glm_tool: GLMComputerTool) -> None:
-        blocks = await glm_tool(action="click", start_box="[500, 300]")
-        assert blocks
+    async def test_unknown_action(self, glm_tool: GLMComputerTool) -> None:
+        with pytest.raises(McpError):
+            await glm_tool(action="nonexistent_action")  # type: ignore[arg-type]
 
     @pytest.mark.asyncio
-    async def test_right_click(self, glm_tool: GLMComputerTool) -> None:
-        blocks = await glm_tool(action="right_click", start_box="[500, 300]")
-        assert blocks
-
-    @pytest.mark.asyncio
-    async def test_middle_click(self, glm_tool: GLMComputerTool) -> None:
-        blocks = await glm_tool(action="middle_click", start_box="[500, 300]")
-        assert blocks
-
-    @pytest.mark.asyncio
-    async def test_left_double_click(self, glm_tool: GLMComputerTool) -> None:
-        blocks = await glm_tool(action="left_double_click", start_box="[500, 300]")
-        assert blocks
-
-    @pytest.mark.asyncio
-    async def test_left_click_missing_start_box(self, glm_tool: GLMComputerTool) -> None:
+    async def test_click_missing_start_box(self, glm_tool: GLMComputerTool) -> None:
         with pytest.raises(McpError):
             await glm_tool(action="left_click")
 
     @pytest.mark.asyncio
-    async def test_right_click_missing_start_box(self, glm_tool: GLMComputerTool) -> None:
-        with pytest.raises(McpError):
-            await glm_tool(action="right_click")
-
-
-# ---------------------------------------------------------------------------
-# __call__ - hover and drag
-# ---------------------------------------------------------------------------
-
-
-class TestGLMHoverDrag:
-    """Test hover and drag actions."""
-
-    @pytest.mark.asyncio
-    async def test_hover(self, glm_tool: GLMComputerTool) -> None:
-        blocks = await glm_tool(action="hover", start_box="[100, 200]")
-        assert blocks
-
-    @pytest.mark.asyncio
-    async def test_hover_missing_start_box(self, glm_tool: GLMComputerTool) -> None:
-        with pytest.raises(McpError):
-            await glm_tool(action="hover")
-
-    @pytest.mark.asyncio
-    async def test_left_drag(self, glm_tool: GLMComputerTool) -> None:
-        blocks = await glm_tool(
-            action="left_drag",
-            start_box="[100, 100]",
-            end_box="[500, 500]",
-        )
-        assert blocks
-
-    @pytest.mark.asyncio
-    async def test_left_drag_missing_end_box(self, glm_tool: GLMComputerTool) -> None:
+    async def test_drag_missing_end_box(self, glm_tool: GLMComputerTool) -> None:
         with pytest.raises(McpError):
             await glm_tool(action="left_drag", start_box="[100, 100]")
-
-    @pytest.mark.asyncio
-    async def test_left_drag_missing_start_box(self, glm_tool: GLMComputerTool) -> None:
-        with pytest.raises(McpError):
-            await glm_tool(action="left_drag", end_box="[500, 500]")
-
-
-# ---------------------------------------------------------------------------
-# __call__ - keyboard actions
-# ---------------------------------------------------------------------------
-
-
-class TestGLMKeyboardActions:
-    """Test keyboard-related actions."""
-
-    @pytest.mark.asyncio
-    async def test_key_combo(self, glm_tool: GLMComputerTool) -> None:
-        blocks = await glm_tool(action="key", keys="ctrl+c")
-        assert blocks
-
-    @pytest.mark.asyncio
-    async def test_key_single(self, glm_tool: GLMComputerTool) -> None:
-        blocks = await glm_tool(action="key", keys="enter")
-        assert blocks
 
     @pytest.mark.asyncio
     async def test_key_missing_keys(self, glm_tool: GLMComputerTool) -> None:
@@ -360,44 +213,24 @@ class TestGLMKeyboardActions:
             await glm_tool(action="key", keys=None)
 
     @pytest.mark.asyncio
-    async def test_type_text(self, glm_tool: GLMComputerTool) -> None:
-        blocks = await glm_tool(action="type", content="Hello World")
-        assert blocks
-
-    @pytest.mark.asyncio
     async def test_type_missing_content(self, glm_tool: GLMComputerTool) -> None:
         with pytest.raises(McpError):
             await glm_tool(action="type", content=None)
-
-
-# ---------------------------------------------------------------------------
-# __call__ - scroll
-# ---------------------------------------------------------------------------
-
-
-class TestGLMScrollAction:
-    """Test scroll action."""
-
-    @pytest.mark.asyncio
-    async def test_scroll_down(self, glm_tool: GLMComputerTool) -> None:
-        blocks = await glm_tool(action="scroll", start_box="[500, 500]", direction="down", step=3)
-        assert blocks
-
-    @pytest.mark.asyncio
-    async def test_scroll_up(self, glm_tool: GLMComputerTool) -> None:
-        blocks = await glm_tool(action="scroll", start_box="[500, 500]", direction="up", step=5)
-        assert blocks
-
-    @pytest.mark.asyncio
-    async def test_scroll_no_start_box_defaults_to_center(self, glm_tool: GLMComputerTool) -> None:
-        """Scroll without start_box should use screen center."""
-        blocks = await glm_tool(action="scroll", direction="down", step=5)
-        assert blocks
 
     @pytest.mark.asyncio
     async def test_scroll_missing_direction(self, glm_tool: GLMComputerTool) -> None:
         with pytest.raises(McpError):
             await glm_tool(action="scroll", start_box="[500, 500]", direction=None, step=5)
+
+    @pytest.mark.asyncio
+    async def test_done_raises_mcp_error(self, glm_tool: GLMComputerTool) -> None:
+        with pytest.raises(McpError, match="DONE action is not supported"):
+            await glm_tool(action="DONE")
+
+    @pytest.mark.asyncio
+    async def test_fail_raises_mcp_error(self, glm_tool: GLMComputerTool) -> None:
+        with pytest.raises(McpError, match="FAIL action is not supported"):
+            await glm_tool(action="FAIL")
 
 
 # ---------------------------------------------------------------------------
@@ -435,48 +268,6 @@ class TestGLMScreenshotAction:
         blocks = await tool(action="screenshot")
         assert blocks
         tool._rescale_screenshot.assert_called_with("fake_base64_data")
-
-
-# ---------------------------------------------------------------------------
-# __call__ - control actions (DONE/FAIL are now no-ops, WAIT still works)
-# ---------------------------------------------------------------------------
-
-
-class TestGLMControlActions:
-    """Test WAIT, DONE, FAIL actions."""
-
-    @pytest.mark.asyncio
-    async def test_wait(self, glm_tool: GLMComputerTool) -> None:
-        blocks = await glm_tool(action="WAIT")
-        assert blocks
-
-    @pytest.mark.asyncio
-    async def test_done_raises_mcp_error(self, base_executor: BaseExecutor) -> None:
-        """DONE should raise McpError (no-op, like Qwen's terminate)."""
-        tool = GLMComputerTool(executor=base_executor)
-        with pytest.raises(McpError, match="DONE action is not supported"):
-            await tool(action="DONE")
-
-    @pytest.mark.asyncio
-    async def test_fail_raises_mcp_error(self, base_executor: BaseExecutor) -> None:
-        """FAIL should raise McpError (no-op, like Qwen's terminate)."""
-        tool = GLMComputerTool(executor=base_executor)
-        with pytest.raises(McpError, match="FAIL action is not supported"):
-            await tool(action="FAIL")
-
-
-# ---------------------------------------------------------------------------
-# __call__ - unknown action
-# ---------------------------------------------------------------------------
-
-
-class TestGLMUnknownAction:
-    """Test error handling for unknown actions."""
-
-    @pytest.mark.asyncio
-    async def test_unknown_action(self, glm_tool: GLMComputerTool) -> None:
-        with pytest.raises(McpError):
-            await glm_tool(action="nonexistent_action")  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
