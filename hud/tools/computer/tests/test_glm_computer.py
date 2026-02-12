@@ -61,10 +61,31 @@ class TestGLMComputerToolInit:
         assert tool.title == "My GLM"
         assert tool.description == "Custom GLM"
 
-    def test_no_native_specs(self, base_executor: BaseExecutor) -> None:
-        """GLMComputerTool should have empty native_specs (works with any agent)."""
+    def test_native_specs_role_computer(self, base_executor: BaseExecutor) -> None:
+        """GLMComputerTool should claim 'computer' role for glm-* models."""
+        from hud.tools.native_types import NativeToolSpec
+        from hud.types import AgentType
+
         tool = GLMComputerTool(executor=base_executor)
-        assert tool.native_specs == {}
+        spec = tool.native_specs[AgentType.OPENAI_COMPATIBLE]
+        assert isinstance(spec, NativeToolSpec)
+        assert spec.role == "computer"
+        assert spec.api_type is None  # generic function calling, not a native API
+        assert spec.supported_models == ("glm-*",)
+        assert spec.supports_model("glm-4.6v")
+        assert spec.supports_model("glm-4v-plus")
+        assert not spec.supports_model("qwen-vl-max")
+
+    def test_native_specs_has_instructions(self, base_executor: BaseExecutor) -> None:
+        """GLMComputerTool native spec should carry agent instructions."""
+        from hud.types import AgentType
+
+        tool = GLMComputerTool(executor=base_executor)
+        spec = tool.native_specs[AgentType.OPENAI_COMPATIBLE]
+        instructions = spec.extra.get("instructions")
+        assert instructions is not None
+        assert "GUI Agent" in instructions
+        assert "0-999" in instructions
 
 
 # ---------------------------------------------------------------------------

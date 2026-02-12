@@ -14,15 +14,11 @@ Native PC actions:
 - WAIT(), DONE(), FAIL()
 - screenshot()
 
-Works with OpenAIChatAgent:
+Works with OpenAIChatAgent (no special system prompt needed):
 
     from hud.agents import OpenAIChatAgent
-    from hud.tools.computer.glm import GLM_CUA_INSTRUCTIONS
 
-    agent = OpenAIChatAgent.create(
-        model="glm-4.6v",
-        system_prompt=GLM_CUA_INSTRUCTIONS,
-    )
+    agent = OpenAIChatAgent.create(model="glm-4.6v")
 """
 
 from __future__ import annotations
@@ -35,7 +31,9 @@ from mcp import ErrorData, McpError
 from mcp.types import INVALID_PARAMS, ContentBlock
 from pydantic import Field
 
+from hud.tools.native_types import NativeToolSpec
 from hud.tools.types import ContentResult
+from hud.types import AgentType
 
 from .hud import HudComputerTool
 from .settings import computer_settings
@@ -48,30 +46,6 @@ logger = logging.getLogger(__name__)
 
 # GLM uses normalized 0-999 coordinate space
 GLM_COORDINATE_SPACE = 999
-
-# GLM CUA system instructions
-GLM_CUA_INSTRUCTIONS = """\
-You are a GUI Agent, and your primary task is to respond accurately to user \
-requests or questions. In addition to directly answering the user's queries, \
-you can also use tools or perform GUI operations directly until you fulfill \
-the user's request or provide a correct answer. You should carefully read and \
-understand the images and questions provided by the user, and engage in \
-thinking and reflection when appropriate. The coordinates involved are all \
-represented in thousandths (0-999).
-
-# Task Platform
-Ubuntu
-
-# Tool Call Format
-IMPORTANT: Always use valid JSON for function arguments. Do NOT use XML tags.
-Correct: {"action": "left_click", "start_box": "[500, 300]"}
-Wrong: {"action": "left_click<arg_key>start_box</arg_key><arg_value>[500, 300]"}
-
-# Some Additional Notes
-- Complete tasks autonomously without asking for confirmation.
-- If a task cannot be completed, use FAIL().
-- Coordinates use 0-999 scale (thousandths of screen dimensions).\
-""".strip()
 
 # All supported GLM PC actions with their call signatures:
 # - left_click(start_box='[x,y]', element_info='')
@@ -106,9 +80,9 @@ GLMAction = Literal[
 
 # Field definitions matching GLM's PC action space
 ACTION_FIELD = Field(
-    ...,
+    None,
     description=(
-        "Action to perform: "
+        "REQUIRED. Action to perform: "
         "left_click/right_click/middle_click/hover/left_double_click(start_box='[x,y]'), "
         "left_drag(start_box, end_box), "
         "key(keys='ctrl+c'), "
@@ -139,20 +113,30 @@ class GLMComputerTool(HudComputerTool):
     Uses GLM's native PC action space with normalized coordinates (0-999)
     that are automatically rescaled to actual screen dimensions.
 
-    Handles all model-specific quirks (XML arg fixing, DONE/FAIL no-ops)
-    so it works directly with OpenAIChatAgent -- no custom agent class needed.
+    All GLM-specific instructions (coordinate system, JSON format, action list)
+    are embedded in the tool description, so no special system prompt is needed.
 
     Usage:
         from hud.agents import OpenAIChatAgent
-        from hud.tools.computer.glm import GLM_CUA_INSTRUCTIONS
 
-        agent = OpenAIChatAgent.create(
-            model="glm-4.6v",
-            system_prompt=GLM_CUA_INSTRUCTIONS,
-        )
+        agent = OpenAIChatAgent.create(model="glm-4.6v")
     """
 
-    native_specs: ClassVar[NativeToolSpecs] = {}
+    native_specs: ClassVar[NativeToolSpecs] = {
+        AgentType.OPENAI_COMPATIBLE: NativeToolSpec(
+            role="computer",
+            supported_models=("glm-*",),
+            extra={
+                "instructions": (
+                    "You are a GUI Agent. Your task is to respond accurately to user "
+                    "requests by using tools or performing GUI operations until the task "
+                    "is fulfilled. Coordinates are in thousandths (0-999). "
+                    "Complete tasks autonomously without asking for confirmation. "
+                    "If a task cannot be completed, use FAIL()."
+                ),
+            },
+        ),
+    }
 
     def __init__(
         self,
@@ -167,7 +151,36 @@ class GLMComputerTool(HudComputerTool):
         description: str | None = None,
         **kwargs: Any,
     ) -> None:
-        """Initialize GLM Computer Tool with coordinate scaling."""
+        """Initialize GLM Computer Tool with coordinate scaling.
+
+        Args:
+            width: Target width for rescaling (None = use environment width)
+            height: Target height for rescaling (None = use environment height)
+            rescale_images: If True, rescale screenshots to agent dimensions
+            name: Tool name for MCP registration
+            title: Human-readable display name for the tool
+            description: Tool description (auto-generated if not provided)
+        """
+        custom_description = (
+            description
+            or f"""\
+Use this tool to interact with the computer via GLM's PC action space.
+* Coordinates use a 0-999 normalized scale (thousandths of screen dimensions).
+* The screen's resolution is {width}x{height}.
+* Always use valid JSON for function arguments. Do NOT use XML tags.
+  Correct: {{"action": "left_click", "start_box": "[500, 300]"}}
+  Wrong: {{"action": "left_click<arg_key>start_box</arg_key>..."}}
+* Available actions:
+  - left_click/right_click/middle_click(start_box='[x,y]')
+  - hover(start_box='[x,y]'), left_double_click(start_box='[x,y]')
+  - left_drag(start_box='[x,y]', end_box='[x,y]')
+  - key(keys='ctrl+c'), type(content='text')
+  - scroll(start_box='[x,y]', direction='up|down', step=5)
+  - screenshot(), WAIT(), DONE(), FAIL()
+* If a task cannot be completed, use FAIL().\
+""".strip()
+        )
+
         super().__init__(
             executor=executor,
             platform_type=platform_type,
@@ -177,8 +190,7 @@ class GLMComputerTool(HudComputerTool):
             rescale_images=rescale_images,
             name=name or "glm_computer",
             title=title or "GLM Computer Tool",
-            description=description
-            or "Control computer with GLM PC action space. Coordinates use 0-999 scale.",
+            description=custom_description,
             **kwargs,
         )
 
@@ -282,12 +294,12 @@ class GLMComputerTool(HudComputerTool):
 
     async def __call__(
         self,
-        action: GLMAction = ACTION_FIELD,
+        action: str | None = ACTION_FIELD,
         start_box: str | list | None = START_BOX_FIELD,
         end_box: str | list | None = END_BOX_FIELD,
         content: str | None = CONTENT_FIELD,
         keys: str | list[str] | None = KEYS_FIELD,
-        direction: Literal["up", "down"] | None = DIRECTION_FIELD,
+        direction: str | None = DIRECTION_FIELD,
         step: int = STEP_FIELD,
         element_info: str | None = ELEMENT_INFO_FIELD,
     ) -> list[ContentBlock]:
@@ -316,16 +328,30 @@ class GLMComputerTool(HudComputerTool):
 
         Coordinates are 0-999 normalized, automatically scaled to screen pixels.
         """
+        # --- Validate action is provided ---
+        if not action:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=(
+                        "'action' is required. Use one of: "
+                        "left_click, right_click, middle_click, hover, "
+                        "left_double_click, left_drag, key, type, scroll, "
+                        "screenshot, WAIT, DONE, FAIL"
+                    ),
+                )
+            )
+
         # --- Fix XML-mangled arguments ---
         if isinstance(action, str) and re.search(r"</?arg_", action):
             fixed = self._fix_xml_args({"action": action})
-            action = fixed.pop("action", action)  # type: ignore[assignment]
+            action = fixed.pop("action", action)
             # Apply any extracted parameters (start_box, content, etc.)
             start_box = fixed.pop("start_box", start_box)
             end_box = fixed.pop("end_box", end_box)
             content = fixed.pop("content", content)
             keys = fixed.pop("keys", keys)
-            direction = fixed.pop("direction", direction)  # type: ignore[assignment]
+            direction = fixed.pop("direction", direction)
 
         # --- Handle DONE/FAIL as no-ops (like Qwen's terminate/answer) ---
         if action == "DONE":
