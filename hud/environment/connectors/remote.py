@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 from hud.environment.connectors.mcp_config import MCPConfigConnectorMixin
@@ -63,10 +64,16 @@ class RemoteConnectorMixin(MCPConfigConnectorMixin):
         # Create mcp_config with standard MCP URL and hub slug in headers
         # Note: Authorization is injected at request time by httpx/aiohttp hooks
         # in hud.eval.instrument (uses contextvar for api_key).
+        # Generate a stable Environment-Id for this connection.
+        environment_id = str(uuid.uuid4())
+
         mcp_config = {
             "hud": {
                 "url": settings.hud_mcp_url,
-                "headers": {"Environment-Name": slug},
+                "headers": {
+                    "Environment-Name": slug,
+                    "Environment-Id": environment_id,
+                },
             }
         }
 
