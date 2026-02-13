@@ -91,6 +91,7 @@ def show_dev_ui(
     port: int,
     cursor_deeplink: str,
     is_docker: bool = False,
+    hot_reload_enabled: bool = True,
 ) -> None:
     """
     Show the minimal dev UI with live trace link.
@@ -104,6 +105,7 @@ def show_dev_ui(
         port: Port the server is running on
         cursor_deeplink: Pre-generated Cursor deeplink URL
         is_docker: Whether this is Docker mode (affects hot-reload message)
+        hot_reload_enabled: Whether hot-reload is active (watch paths configured)
     """
     import webbrowser
 
@@ -139,8 +141,12 @@ def show_dev_ui(
     # Display the Cursor link on its own line to prevent wrapping
     hud_console.link(cursor_deeplink)
     hud_console.info("")
-    hud_console.info(f"{hud_console.sym.SUCCESS} Hot-reload enabled")
-    if is_docker:
+    if hot_reload_enabled:
+        hud_console.info(f"{hud_console.sym.SUCCESS} Hot-reload enabled")
+    else:
+        hud_console.info("Hot-reload disabled")
+        hud_console.dim_info("Tip", "Pass --watch/-w to enable hot-reload")
+    if is_docker and hot_reload_enabled:
         hud_console.dim_info(
             "",
             "Container restarts on file changes in watched folders (-w), "

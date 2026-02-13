@@ -237,7 +237,7 @@ The `--` separator is required to distinguish HUD options from Docker arguments.
 
 | Command | Purpose | Hot-reload | Target Use Case |
 |---------|---------|------------|-----------------|
-| `hud dev` | Development with auto-restart | ✅ Yes | Local development iteration |
+| `hud dev` | Development server (`--watch` enables auto-restart) | ✅ Optional | Local development iteration |
 | `hud run` | Production execution | ❌ No | Production workloads, testing |
 | `hud debug` | Environment validation | ❌ No | Debugging and validation |
 
@@ -312,5 +312,5 @@ hud run my-env:dev --local -- -v $(pwd)/test-data:/app/data
 - [`hud pull`](/reference/cli/pull) - Get environments before running
 - [`hud analyze`](/reference/cli/analyze) - Inspect capabilities first
 - [`hud debug`](/reference/cli/debug) - Test environment compliance
-- [`hud dev`](/reference/cli/dev) - Development with hot-reload
+- [`hud dev`](/reference/cli/dev) - Development server (`--watch` for hot-reload)
 - [Build Environments](/build-environments) - Environment development guide

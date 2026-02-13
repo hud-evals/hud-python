@@ -27,6 +27,7 @@ def show_dev_server_info(
     transport: str,
     inspector: bool,
     interactive: bool,
+    hot_reload_enabled: bool = True,
     env_dir: Path | None = None,
     docker_mode: bool = False,
     telemetry: dict[str, Any] | None = None,
@@ -95,7 +96,11 @@ def show_dev_server_info(
                 hud_console.info(f"{hud_console.sym.SUCCESS} Interactive mode enabled")
 
     hud_console.info("")
-    hud_console.info(f"{hud_console.sym.SUCCESS} Hot-reload enabled")
+    if hot_reload_enabled:
+        hud_console.info(f"{hud_console.sym.SUCCESS} Hot-reload enabled")
+    else:
+        hud_console.info("Hot-reload disabled")
+        hud_console.dim_info("Tip", "Pass --watch/-w to enable hot-reload")
     hud_console.info("")
 
     return cursor_deeplink
@@ -162,6 +167,7 @@ async def run_mcp_module(
     inspector: bool,
     interactive: bool,
     new_trace: bool = False,
+    hot_reload_enabled: bool = True,
 ) -> None:
     """Run an MCP module directly.
 
@@ -318,6 +324,7 @@ async def run_mcp_module(
                 port=port,
                 cursor_deeplink=cursor_deeplink,
                 is_docker=False,
+                hot_reload_enabled=hot_reload_enabled,
             )
         else:
             # Full UI for HTTP without trace, or stdio mode
@@ -327,6 +334,7 @@ async def run_mcp_module(
                 transport=transport,
                 inspector=inspector,
                 interactive=interactive,
+                hot_reload_enabled=hot_reload_enabled,
                 env_dir=Path.cwd().parent if (Path.cwd().parent / "environment").exists() else None,
             )
 
@@ -505,7 +513,7 @@ def run_with_reload(
             hud_console.info(f"Starting: {' '.join(cmd)}")
 
         # Mark as reload after first run to suppress logs
-        env = {**os.environ, "_HUD_DEV_CHILD": "1"}
+        env = {**os.environ, "_HUD_DEV_CHILD": "1", "_HUD_DEV_HOT_RELOAD": "1"}
         if not is_first_run:
             env["_HUD_DEV_RELOAD"] = "1"
 
@@ -812,6 +820,7 @@ def run_docker_dev_server(
             port=port,
             cursor_deeplink=cursor_deeplink,
             is_docker=True,
+            hot_reload_enabled=bool(watch_paths),
         )
     else:
         # Full UI
@@ -825,15 +834,17 @@ def run_docker_dev_server(
             transport="http",
             inspector=inspector,
             interactive=interactive,
+            hot_reload_enabled=bool(watch_paths),
             env_dir=env_dir,
             docker_mode=True,
             telemetry=telemetry,
         )
-        hud_console.dim_info(
-            "",
-            "Container restarts on file changes in watched folders (-w), "
-            "rebuild with 'hud dev' if changing other files",
-        )
+        if watch_paths:
+            hud_console.dim_info(
+                "",
+                "Container restarts on file changes in watched folders (-w), "
+                "rebuild with 'hud dev' if changing other files",
+            )
         hud_console.info("")
 
     # Suppress logs unless verbose
@@ -926,7 +937,7 @@ def run_mcp_dev_server(
     docker_args: list[str] | None = None,
     new_trace: bool = False,
 ) -> None:
-    """Run MCP development server with hot-reload."""
+    """Run MCP development server with optional hot-reload."""
     docker_args = docker_args or []
     cwd = Path.cwd()
 
@@ -991,20 +1002,42 @@ def run_mcp_dev_server(
         else:
             extra_path = None
 
-    # Determine watch paths
-    watch_paths = watch if watch else ["."]
+    # Watch mode is opt-in.
+    watch_paths = watch or []
+    hot_reload_enabled = bool(watch_paths)
 
     # Check if child process
     is_child = os.environ.get("_HUD_DEV_CHILD") == "1"
 
-    if is_child:
-        # Use _run_with_sigterm to ensure proper signal handling in child process.
-        # This allows @mcp.shutdown handlers to run when the parent terminates us
-        # during hot-reload (process.terminate() sends SIGTERM on Unix).
-        from hud.server.server import _run_with_sigterm
+    from hud.server.server import _run_with_sigterm
 
-        _run_with_sigterm(run_mcp_module, module, transport, port, verbose, False, False, new_trace)
-    else:
-        run_with_reload(
-            module, watch_paths, transport, port, verbose, inspector, interactive, new_trace
+    if is_child:
+        child_hot_reload = os.environ.get("_HUD_DEV_HOT_RELOAD") == "1"
+        _run_with_sigterm(
+            run_mcp_module,
+            module,
+            transport,
+            port,
+            verbose,
+            False,
+            False,
+            new_trace,
+            child_hot_reload,
         )
+    else:
+        if hot_reload_enabled:
+            run_with_reload(
+                module, watch_paths, transport, port, verbose, inspector, interactive, new_trace
+            )
+        else:
+            _run_with_sigterm(
+                run_mcp_module,
+                module,
+                transport,
+                port,
+                verbose,
+                inspector,
+                interactive,
+                new_trace,
+                False,
+            )

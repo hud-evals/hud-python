@@ -67,7 +67,7 @@ Iterate locally with `hud dev`, then deploy to the platform:
 
 ```bash
 hud init          # Scaffold environment
-hud dev env:env   # Run as MCP server (Cursor/Claude Code can connect)
+hud dev env:env -w env.py -w tools/  # Run MCP server with hot-reload on watched paths
 hud deploy        # Deploy to platform → run evals at scale
 ```
 

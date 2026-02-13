@@ -476,12 +476,12 @@ def dev(
         help="Create a new dev trace on hud.ai (opens in browser)",
     ),
 ) -> None:
-    """🔥 Development mode - run MCP server with hot-reload.
+    """🔥 Development mode - run MCP server (hot-reload is opt-in via -w/--watch).
 
     [not dim]TWO MODES:
 
     1. Python Module:
-       hud dev                    # Auto-detects module
+       hud dev                    # Auto-detects module (no hot-reload by default)
        hud dev env:env            # Explicit module:attribute
        hud dev -w .               # Watch current directory
 

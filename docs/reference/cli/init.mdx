@@ -95,13 +95,16 @@ hud init my-env -p blank --force
 
 <Steps>
 <Step title="Start Development">
-Run with hot-reload and choose your preferred UI:
+Start the development server. Add `--watch` (`-w`) to enable hot-reload:
 ```bash
 # Inspector (HTTP, visual)
 hud dev --inspector
 
 # Interactive TUI (arrow keys)
 hud dev --interactive
+
+# Hot-reload specific paths
+hud dev -w controller -w environment --inspector
 ```
 </Step>
 
@@ -128,5 +131,5 @@ git push               # Push to GitHub
 
 - [Build Environments](/build-environments) – Quickstart tutorial
 - [Technical Spec](/build-environments/spec) – Exact runtime requirements
-- [hud dev](/reference/cli/dev) – Hot-reload server
+- [hud dev](/reference/cli/dev) – Development server (`--watch` for hot-reload)
 - [hud build](/reference/cli/build) – Build production images

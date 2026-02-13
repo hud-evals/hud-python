@@ -109,11 +109,11 @@ print(f"Reward: {result.reward}")
 Spawn your environment as an MCP server that Cursor, Claude Code, or any MCP client can connect to:
 
 ```bash
-# Python-only (no Docker, hot-reloads current directory)
+# Python-only (no Docker)
 hud dev env:env
 
-# Docker mode (if Dockerfile exists)
-hud dev -w env.py -w tools/    # -w enables hot-reload for those paths
+# Enable hot-reload for specific paths (Python or Docker mode)
+hud dev env:env -w env.py -w tools/
 ```
 
 Then in Cursor's MCP settings:
@@ -124,7 +124,7 @@ Then in Cursor's MCP settings:
 }
 ```
 
-Now your coding agent can call your tools directly. Edit your environment, save, and changes apply immediately.
+Now your coding agent can call your tools directly. Edit watched paths (`-w`), save, and the controller reloads automatically.
 
 The `env:env` syntax is like uvicorn—`module:attribute`. It tells `hud dev` to import `env.py` and run the `env` object as an MCP server.
 
