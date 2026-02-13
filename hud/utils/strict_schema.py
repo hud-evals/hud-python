@@ -109,7 +109,9 @@ def _ensure_strict_json_schema(
         elif json_schema["additionalProperties"] is True:
             # MCP schemas commonly allow extra fields; silently convert for strict mode.
             json_schema["additionalProperties"] = False
-        elif json_schema["additionalProperties"] and json_schema["additionalProperties"] is not False:
+        elif (
+            json_schema["additionalProperties"] and json_schema["additionalProperties"] is not False
+        ):
             # additionalProperties is a schema object — not allowed in strict mode.
             raise ValueError(
                 "additionalProperties should not be set for object types. This could be because "
@@ -233,9 +235,4 @@ def _is_list(obj: object) -> TypeGuard[list[object]]:
 
 
 def _has_more_than_n_keys(obj: dict[str, object], n: int) -> bool:
-    i = 0
-    for _ in obj:
-        i += 1
-        if i > n:
-            return True
-    return False
+    return any(i > n for i, _ in enumerate(obj, start=1))

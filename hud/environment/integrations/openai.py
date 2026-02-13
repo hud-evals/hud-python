@@ -46,9 +46,7 @@ class OpenAIMixin:
     # Format Conversion (no external deps)
     # =========================================================================
 
-    def as_openai_chat_tools(
-        self, *, strict: bool = False
-    ) -> list[ChatCompletionToolUnionParam]:
+    def as_openai_chat_tools(self, *, strict: bool = False) -> list[ChatCompletionToolUnionParam]:
         """Convert to OpenAI Chat Completions tool format.
 
         Args:
@@ -138,6 +136,7 @@ class OpenAIMixin:
                     "name": t.name,
                     "description": t.description or "",
                     "parameters": schema,
+                    **({"strict": True} if strict else {}),
                 }
             )
         return tools
