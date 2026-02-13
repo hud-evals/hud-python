@@ -195,3 +195,24 @@ class TestShowDevServerInfo:
         )
 
         assert result.startswith("cursor://")
+
+    @mock.patch("hud.cli.dev.hud_console")
+    def test_show_dev_server_info_without_hot_reload(self, mock_console):
+        """Test that no-watch mode does not claim hot-reload is enabled."""
+        from hud.cli.dev import show_dev_server_info
+
+        result = show_dev_server_info(
+            server_name="test-server",
+            port=8000,
+            transport="stdio",
+            inspector=False,
+            interactive=False,
+            hot_reload_enabled=False,
+        )
+
+        assert result.startswith("cursor://")
+        info_messages = [
+            str(call.args[0]) for call in mock_console.info.call_args_list if call.args
+        ]
+        assert any("Hot-reload disabled" in msg for msg in info_messages)
+        assert not any("Hot-reload enabled" in msg for msg in info_messages)
