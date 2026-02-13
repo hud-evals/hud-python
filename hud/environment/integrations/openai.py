@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from typing import TYPE_CHECKING, Any, cast
@@ -73,7 +74,11 @@ class OpenAIMixin:
         """
         tools: list[ChatCompletionToolUnionParam] = []
         for t in self.as_tools():
-            schema = dict(t.inputSchema) if t.inputSchema else {"type": "object", "properties": {}}
+            schema = (
+                copy.deepcopy(t.inputSchema)
+                if t.inputSchema
+                else {"type": "object", "properties": {}}
+            )
 
             if strict:
                 schema = ensure_strict_json_schema(schema)
@@ -125,7 +130,11 @@ class OpenAIMixin:
         """
         tools = []
         for t in self.as_tools():
-            schema = dict(t.inputSchema) if t.inputSchema else {"type": "object", "properties": {}}
+            schema = (
+                copy.deepcopy(t.inputSchema)
+                if t.inputSchema
+                else {"type": "object", "properties": {}}
+            )
 
             if strict:
                 schema = ensure_strict_json_schema(schema)
