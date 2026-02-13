@@ -192,8 +192,10 @@ class TestRemoteConnectorMixin:
             def mount(self, server: Any, *, prefix: str | None = None) -> None:
                 pass
 
+        from hud.settings import Settings
+
         env = TestEnv()
-        with patch("hud.settings.settings") as mock_settings:
+        with patch("hud.settings.settings", spec=Settings) as mock_settings:
             mock_settings.hud_mcp_url = "https://mcp.hud.ai"
             mock_settings.client_timeout = 300  # Used in connect_mcp for sse_read_timeout
 

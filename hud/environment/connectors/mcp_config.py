@@ -61,11 +61,10 @@ class MCPConfigConnectorMixin(BaseConnectorMixin):
         transport: Any = config
         if not is_local and "url" in server_config:
             request_timeout = 840
-            default_timeout = float(settings.__class__.model_fields["client_timeout"].default)
             timeout = (
                 min(request_timeout, settings.client_timeout)
                 if settings.client_timeout > 0
-                else default_timeout
+                else min(request_timeout, settings.__class__.model_fields["client_timeout"].default)
             )
             server_config.setdefault("sse_read_timeout", timeout)
             transport = _build_transport(server_config)
