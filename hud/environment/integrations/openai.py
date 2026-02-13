@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
-from hud.environment.utils.schema import ensure_strict_schema, validate_openai_schema
+from hud.utils.strict_schema import ensure_strict_json_schema
 
 if TYPE_CHECKING:
     import mcp.types as mcp_types
@@ -46,14 +47,11 @@ class OpenAIMixin:
     # Format Conversion (no external deps)
     # =========================================================================
 
-    def as_openai_chat_tools(
-        self, *, strict: bool = False, validate: bool = True
-    ) -> list[ChatCompletionToolUnionParam]:
+    def as_openai_chat_tools(self, *, strict: bool = False) -> list[ChatCompletionToolUnionParam]:
         """Convert to OpenAI Chat Completions tool format.
 
         Args:
             strict: Enable strict mode for structured outputs
-            validate: Validate schemas and skip incompatible tools with warnings
 
         Returns:
             List of tool definitions for OpenAI Chat Completions API.
@@ -76,18 +74,14 @@ class OpenAIMixin:
         """
         tools: list[ChatCompletionToolUnionParam] = []
         for t in self.as_tools():
-            schema = dict(t.inputSchema) if t.inputSchema else {"type": "object", "properties": {}}
-
-            # Validate schema for OpenAI compatibility
-            if validate:
-                errors = validate_openai_schema(schema, t.name)
-                if errors:
-                    for error in errors:
-                        logger.warning("Skipping tool: %s", error)
-                    continue
+            schema = (
+                copy.deepcopy(t.inputSchema)
+                if t.inputSchema
+                else {"type": "object", "properties": {}}
+            )
 
             if strict:
-                schema = ensure_strict_schema(schema)
+                schema = ensure_strict_json_schema(schema)
 
             tools.append(
                 cast(
@@ -105,14 +99,14 @@ class OpenAIMixin:
             )
         return tools
 
-    def as_openai_responses_tools(self, *, validate: bool = True) -> list[dict[str, Any]]:
+    def as_openai_responses_tools(self, *, strict: bool = False) -> list[dict[str, Any]]:
         """Convert to OpenAI Responses API tool format.
 
         Note: Like Chat Completions, you must execute tools yourself.
         OpenAI only auto-executes their built-in tools (code_interpreter, etc).
 
         Args:
-            validate: Validate schemas and skip incompatible tools with warnings
+            strict: Enable strict mode for structured outputs
 
         Returns:
             List of tool definitions for OpenAI Responses API.
@@ -136,15 +130,14 @@ class OpenAIMixin:
         """
         tools = []
         for t in self.as_tools():
-            schema = dict(t.inputSchema) if t.inputSchema else {"type": "object", "properties": {}}
+            schema = (
+                copy.deepcopy(t.inputSchema)
+                if t.inputSchema
+                else {"type": "object", "properties": {}}
+            )
 
-            # Validate schema for OpenAI compatibility
-            if validate:
-                errors = validate_openai_schema(schema, t.name)
-                if errors:
-                    for error in errors:
-                        logger.warning("Skipping tool: %s", error)
-                    continue
+            if strict:
+                schema = ensure_strict_json_schema(schema)
 
             tools.append(
                 {
@@ -152,6 +145,7 @@ class OpenAIMixin:
                     "name": t.name,
                     "description": t.description or "",
                     "parameters": schema,
+                    **({"strict": True} if strict else {}),
                 }
             )
         return tools
@@ -160,7 +154,7 @@ class OpenAIMixin:
     # Agents SDK Integration (requires openai-agents)
     # =========================================================================
 
-    def as_openai_agent_tools(self, *, validate: bool = True) -> list[Any]:
+    def as_openai_agent_tools(self) -> list[Any]:
         """Convert to OpenAI Agents SDK FunctionTool objects.
 
         This creates FunctionTool objects that automatically execute against
@@ -173,9 +167,6 @@ class OpenAIMixin:
         For direct MCP integration, consider using as_mcp_server().
 
         Requires: pip install openai-agents
-
-        Args:
-            validate: Validate schemas and skip incompatible tools with warnings
 
         Returns:
             List of FunctionTool objects for OpenAI Agents SDK.
@@ -203,16 +194,6 @@ class OpenAIMixin:
 
         tools = []
         for t in self.as_tools():
-            schema = dict(t.inputSchema) if t.inputSchema else {"type": "object", "properties": {}}
-
-            # Validate schema for OpenAI compatibility
-            if validate:
-                errors = validate_openai_schema(schema, t.name)
-                if errors:
-                    for error in errors:
-                        logger.warning("Skipping tool: %s", error)
-                    continue
-
             tool = _create_function_tool(self, t, FunctionTool)
             tools.append(tool)
         return tools
