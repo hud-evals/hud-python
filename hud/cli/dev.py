@@ -324,6 +324,7 @@ async def run_mcp_module(
                 port=port,
                 cursor_deeplink=cursor_deeplink,
                 is_docker=False,
+                hot_reload_enabled=hot_reload_enabled,
             )
         else:
             # Full UI for HTTP without trace, or stdio mode
@@ -819,6 +820,7 @@ def run_docker_dev_server(
             port=port,
             cursor_deeplink=cursor_deeplink,
             is_docker=True,
+            hot_reload_enabled=bool(watch_paths),
         )
     else:
         # Full UI
