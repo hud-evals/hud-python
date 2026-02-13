@@ -1,10 +1,10 @@
 ---
 title: "hud dev"
-description: "Hot-reload development server for MCP environments"
+description: "Development server for MCP environments (hot-reload is opt-in via --watch)"
 icon: "fire"
 ---
 
-The `hud dev` command provides development-time proxying for MCP environments, starting your image and exposing it over HTTP (default) or stdio.
+The `hud dev` command provides development-time proxying for MCP environments, starting your image and exposing it over HTTP (default) or stdio. Hot-reload is opt-in with `--watch`/`-w`.
 
 ## Synopsis
 
@@ -19,6 +19,7 @@ hud dev [DIRECTORY] [OPTIONS]
 **Key Features:**
 - **Auto-detection**: Determines image from `[tool.hud.image]` or `dir-name:dev`
 - **Project mount**: Mounts your project at `/app` (sets `PYTHONPATH=/app`)
+- **Opt-in hot-reload**: Use `--watch`/`-w` to enable file watching
 - **Interactive testing**: TUI for calling tools (HTTP transport only)
 - **HTTP/Stdio protocols**: Choose transport method (`http` default)
 - **Inspector support**: Launch MCP Inspector (HTTP mode)
@@ -40,7 +41,7 @@ hud dev [DIRECTORY] [OPTIONS]
 | `--transport`, `-t` | Transport protocol: `http` or `stdio` | `http` |
 | `--port`, `-p` | HTTP server port (ignored for stdio) | `8765` |
 | `--interactive` | Launch interactive tool testing interface | `false` |
-| `--no-reload` | Disable hot-reload supervision | `false` |
+| `--watch`, `-w` | Paths to watch for hot-reload (repeatable) | none |
 | `--verbose`, `-v` | Show detailed server logs | `false` |
 | `--inspector` | Launch MCP Inspector (HTTP mode only) | `false` |
 | `--no-logs` | Disable streaming Docker logs | `false` |
@@ -52,6 +53,14 @@ hud dev [DIRECTORY] [OPTIONS]
 
 ```bash
 hud dev
+```
+
+By default this runs without file watching.
+
+### Enable Hot-Reload
+
+```bash
+hud dev -w controller -w environment
 ```
 
 ### Build and Start
@@ -123,7 +132,9 @@ Interactive mode disables log streaming and hot-reload supervision to provide a 
    - Inspector and interactive UI are available in HTTP mode
 
 4. **Hot-Reload**:
-   - Depends on your container `CMD` (templates include `--reload` flags)
+   - Disabled by default
+   - Enabled only when `--watch`/`-w` is provided
+   - Watches the specified files/folders and restarts the controller on change
    - For best results, separate the restartable MCP controller from any long-lived backend
 
 ### Process Separation Architecture
@@ -210,7 +221,7 @@ hud dev . --transport stdio
      }
    }
    ```
-3. Edit files — changes apply immediately based on your container's reload behavior.
+3. Edit files in watched paths (`-w`) and the controller restarts automatically.
 
 ### Testing During Development
 

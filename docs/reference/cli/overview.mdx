@@ -11,7 +11,7 @@ The HUD CLI provides a complete toolkit for creating, developing, and running MC
   **Directory-based commands** for creating environments:
   - `hud init` — Create new environment
   - `hud deploy` — Build remotely & deploy to platform
-  - `hud dev` — Local development with hot‑reload
+  - `hud dev` — Local development (hot-reload via `--watch`)
   - `hud build` — Local build for validation
 </Card>
 
@@ -56,7 +56,7 @@ hud --version
 ### Local Development
 | Command | Input | Description | Example |
 |---------|-------|-------------|---------|
-| `hud dev` | Directory | Hot-reload development | `hud dev . --interactive` |
+| `hud dev` | Directory | Development server (`--watch` for hot-reload) | `hud dev . -w controller` |
 | `hud build` | Directory | Build image locally (for validation) | `hud build . --tag v1.0` |
 
 ### Running Workflow
@@ -105,14 +105,17 @@ This builds your environment remotely on HUD's infrastructure and deploys it. Or
 Use these commands when iterating on your environment locally before deploying:
 
 ```bash
-# Hot-reload development with interactive tool testing
+# Development server (no auto-reload by default)
 hud dev
+
+# Enable hot-reload explicitly
+hud dev -w controller -w environment
 
 # Build locally to validate before deploying
 hud build
 ```
 
-`hud dev` reloads your changes automatically and lets you test tools interactively. `hud build` creates a local Docker image and generates `hud.lock.yaml` for validation.
+`hud dev` runs your local development server; add `--watch` (`-w`) to enable automatic reloads. `hud build` creates a local Docker image and generates `hud.lock.yaml` for validation.
 
 ### Running an Environment
 
@@ -284,7 +287,7 @@ export ANCHOR_API_KEY=...
 ### Local Development
 <CardGroup cols={2}>
 <Card title="Dev Command" icon="code" href="/reference/cli/dev">
-  Develop with hot-reload and interactive testing
+  Develop locally with optional hot-reload and interactive testing
 </Card>
 
 <Card title="Build Command" icon="hammer" href="/reference/cli/build">

@@ -991,20 +991,34 @@ def run_mcp_dev_server(
         else:
             extra_path = None
 
-    # Determine watch paths
-    watch_paths = watch if watch else ["."]
+    # Determine watch paths:
+    # - Explicit --watch always wins.
+    # - No --watch means no auto-reload (opt-in only).
+    watch_paths = watch if watch else []
 
     # Check if child process
     is_child = os.environ.get("_HUD_DEV_CHILD") == "1"
 
-    if is_child:
-        # Use _run_with_sigterm to ensure proper signal handling in child process.
-        # This allows @mcp.shutdown handlers to run when the parent terminates us
-        # during hot-reload (process.terminate() sends SIGTERM on Unix).
-        from hud.server.server import _run_with_sigterm
+    from hud.server.server import _run_with_sigterm
 
+    if is_child:
+        # Child process path for reload loop workers.
         _run_with_sigterm(run_mcp_module, module, transport, port, verbose, False, False, new_trace)
     else:
-        run_with_reload(
-            module, watch_paths, transport, port, verbose, inspector, interactive, new_trace
-        )
+        if watch_paths:
+            run_with_reload(
+                module, watch_paths, transport, port, verbose, inspector, interactive, new_trace
+            )
+        else:
+            if verbose:
+                hud_console.info("Hot-reload disabled by default (use --watch to enable)")
+            _run_with_sigterm(
+                run_mcp_module,
+                module,
+                transport,
+                port,
+                verbose,
+                inspector,
+                interactive,
+                new_trace,
+            )
