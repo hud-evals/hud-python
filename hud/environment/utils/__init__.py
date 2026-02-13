@@ -8,7 +8,6 @@ from hud.environment.utils.formats import (
     result_to_string,
 )
 from hud.environment.utils.schema import (
-    ensure_strict_schema,
     json_type_to_python,
     schema_to_pydantic,
 )
@@ -24,7 +23,6 @@ __all__ = [
     "create_async_tool_fn",
     "create_sync_tool_fn",
     "create_tool_fns",
-    "ensure_strict_schema",
     "format_result",
     "json_type_to_python",
     "parse_tool_call",
