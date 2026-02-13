@@ -837,11 +837,12 @@ def run_docker_dev_server(
             docker_mode=True,
             telemetry=telemetry,
         )
-        hud_console.dim_info(
-            "",
-            "Container restarts on file changes in watched folders (-w), "
-            "rebuild with 'hud dev' if changing other files",
-        )
+        if watch_paths:
+            hud_console.dim_info(
+                "",
+                "Container restarts on file changes in watched folders (-w), "
+                "rebuild with 'hud dev' if changing other files",
+            )
         hud_console.info("")
 
     # Suppress logs unless verbose
@@ -1008,6 +1009,7 @@ def run_mcp_dev_server(
 
     from hud.server.server import _run_with_sigterm
 
+    if is_child:
         child_hot_reload = os.environ.get("_HUD_DEV_HOT_RELOAD") == "1"
         _run_with_sigterm(
             run_mcp_module,
@@ -1026,8 +1028,6 @@ def run_mcp_dev_server(
                 module, watch_paths, transport, port, verbose, inspector, interactive, new_trace
             )
         else:
-            from hud.server.server import _run_with_sigterm
-
             _run_with_sigterm(
                 run_mcp_module,
                 module,
