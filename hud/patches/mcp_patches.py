@@ -108,9 +108,12 @@ def patch_streamable_http_error_handling() -> None:
 
             async def handle_request_async(ctx: RequestContext, is_resumption: bool) -> None:
                 msg = ctx.session_message.message
-                # Use configured timeout, minimum 30s to prevent instant failures
-                timeout = max(settings.client_timeout, 15.0)
-                deadline = time.monotonic() + timeout
+                # Per-attempt timeout comes from transport's sse_read_timeout (840s).
+                # client_timeout caps total wall-clock retry duration for this request.
+                configured_timeout = float(settings.client_timeout)
+                default_timeout = float(settings.__class__.model_fields["client_timeout"].default)
+                global_timeout = configured_timeout if configured_timeout > 0 else default_timeout
+                deadline = time.monotonic() + global_timeout
                 retryable_exceptions = (
                     httpx.ConnectError,
                     httpx.ReadError,
@@ -162,7 +165,8 @@ def patch_streamable_http_error_handling() -> None:
                         if is_retryable(e):
                             if time.monotonic() >= deadline:
                                 logger.error(
-                                    "MCP request failed after timeout: %s",
+                                    "MCP request failed after timeout (%.0fs): %s",
+                                    global_timeout,
                                     _format_exception(e),
                                 )
                                 await send_error_response(e)
