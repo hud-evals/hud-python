@@ -161,8 +161,12 @@ class Settings(BaseSettings):
     )
 
     client_timeout: int = Field(
-        default=900,
-        description="Timeout in seconds for MCP client operations (default: 900 = 15 minutes)",
+        default=600,
+        ge=0,
+        description=(
+            "Global timeout in seconds for MCP requests "
+            "(per-attempt timeout is configured separately; 0 uses default)"
+        ),
         validation_alias="HUD_CLIENT_TIMEOUT",
     )
 
