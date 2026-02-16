@@ -344,7 +344,14 @@ class OpenAIAgent(MCPAgent):
             instructions=self.system_prompt,
             max_output_tokens=self.max_output_tokens,
             temperature=self.temperature,
-            tool_choice=self.tool_choice if self.tool_choice is not None else Omit(),
+            # Per-step forced-answer behavior: when the base agent sets
+            # `_force_answer_only`, override tool_choice so the model MUST call
+            # the `answer` function on this request.
+            tool_choice=(
+                ToolChoice(type="function", function={"name": "answer"})
+                if getattr(self, "_force_answer_only", False)
+                else (self.tool_choice if self.tool_choice is not None else Omit())
+            ),
             parallel_tool_calls=self.parallel_tool_calls,
             reasoning=self.reasoning if self.reasoning is not None else Omit(),
             tools=self._openai_tools if self._openai_tools else Omit(),

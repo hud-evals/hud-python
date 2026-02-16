@@ -143,14 +143,35 @@ class GeminiAgent(MCPAgent):
     async def get_response(self, messages: list[genai_types.Content]) -> AgentResponse:
         """Get response from Gemini including any tool calls."""
         # Build generate content config
-        generate_config = genai_types.GenerateContentConfig(
-            temperature=self.temperature,
-            top_p=self.top_p,
-            top_k=self.top_k,
-            max_output_tokens=self.max_output_tokens,
-            tools=self.gemini_tools,
-            system_instruction=self.system_prompt,
-        )
+        force_answer_only = getattr(self, "_force_answer_only", False)
+
+        tool_config: genai_types.ToolConfig | None = None
+        if force_answer_only:
+            # Restrict Gemini's function calling to the `answer` function only,
+            # matching sandbox's per-message forceToolOptions behavior.
+            try:
+                tool_config = genai_types.ToolConfig(
+                    function_calling_config=genai_types.FunctionCallingConfig(
+                        mode="ANY",
+                        allowed_function_names=["answer"],
+                    )
+                )
+            except Exception as exc:  # pragma: no cover - older SDKs
+                logger.debug(f"Could not construct FunctionCallingConfig: {exc}")
+                tool_config = None
+
+        generate_kwargs: dict[str, Any] = {
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "top_k": self.top_k,
+            "max_output_tokens": self.max_output_tokens,
+            "tools": self.gemini_tools,
+            "system_instruction": self.system_prompt,
+        }
+        if tool_config is not None:
+            generate_kwargs["tool_config"] = tool_config
+
+        generate_config = genai_types.GenerateContentConfig(**generate_kwargs)
 
         # Use async API to avoid blocking the event loop
         response = await self.gemini_client.aio.models.generate_content(
