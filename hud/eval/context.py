@@ -356,6 +356,12 @@ class EvalContext(Environment):
             quiet=quiet,
         )
 
+        # v5 validation overrides any environment-level integration calls.
+        if task.validation is not None:
+            ctx._integration_test_calls = [
+                (call.name, call.arguments or {}) for call in task.validation
+            ]
+
         # Store task info for scenario execution
         ctx._task = task
 
