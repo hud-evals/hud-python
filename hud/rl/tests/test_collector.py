@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 import json
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from hud.rl.collector import (
+    _source_with_split,
     build_rollout_records,
     collect_rollouts,
     write_rollouts_jsonl,
 )
 from hud.rl.schema import make_rollout_id
 from hud.types import Trace, TraceStep
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_make_rollout_id_is_stable() -> None:
@@ -81,6 +85,8 @@ async def test_collect_rollouts_repeats_tasks_and_uses_split() -> None:
     assert len(called_dataset) == 2
     assert called_dataset[0]["prompt"] == "Task prompt"
     assert len(records) == 2
+    assert records[0].source == "hud-evals/demo:test"
+    assert records[0].rollout_id == make_rollout_id("hud-evals/demo:test", 0, 0, "Task prompt")
     assert records[0].reward == 0.5
 
 
@@ -105,6 +111,14 @@ async def test_collect_rollouts_passes_auto_respond_into_agent_params() -> None:
     params = mock_run_dataset.call_args.kwargs["agent_params"]
     assert params["model"] == "claude-sonnet-4-5"
     assert params["auto_respond"] is False
+
+
+def test_source_with_split_keeps_hf_split_when_matching_directory_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "hud-evals" / "demo").mkdir(parents=True)
+    assert _source_with_split("hud-evals/demo", "test") == "hud-evals/demo:test"
 
 
 @pytest.mark.asyncio

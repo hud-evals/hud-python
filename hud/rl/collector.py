@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 from pydantic import BaseModel
 
 from hud.datasets import load_tasks, run_dataset
+from hud.datasets.loader import _load_raw_from_file
 from hud.types import Trace
 
 from .schema import RolloutRecord, make_rollout_id
@@ -35,70 +36,18 @@ def _to_jsonable(value: Any) -> Any:
 
 def _source_with_split(source: str, split: str) -> str:
     path = Path(source)
-    if path.exists() or ":" in source or "/" not in source:
+    if path.is_file() or ":" in source or "/" not in source:
         return source
     if split != "train":
         return f"{source}:{split}"
     return source
 
 
-def _load_raw_from_file_strict(path: Path) -> list[dict[str, Any]]:
-    raw_items: list[dict[str, Any]] = []
-
-    if path.suffix.lower() == ".jsonl":
-        with open(path, encoding="utf-8") as f:
-            for line_no, line in enumerate(f, 1):
-                line = line.strip()
-                if not line:
-                    continue
-
-                try:
-                    value = json.loads(line)
-                except json.JSONDecodeError as e:
-                    raise ValueError(f"line {line_no}: invalid JSON ({e.msg})") from e
-
-                if isinstance(value, dict):
-                    raw_items.append(value)
-                    continue
-
-                if isinstance(value, list):
-                    for idx, entry in enumerate(value):
-                        if isinstance(entry, dict):
-                            raw_items.append(entry)
-                        else:
-                            raise ValueError(
-                                f"line {line_no} item {idx}: expected object, got "
-                                f"{type(entry).__name__}"
-                            )
-                    continue
-
-                raise ValueError(
-                    f"line {line_no}: expected object or list[object], got {type(value).__name__}"
-                )
-        return raw_items
-
-    with open(path, encoding="utf-8") as f:
-        value = json.load(f)
-
-    if isinstance(value, dict):
-        return [value]
-
-    if isinstance(value, list):
-        for idx, entry in enumerate(value):
-            if isinstance(entry, dict):
-                raw_items.append(entry)
-            else:
-                raise ValueError(f"item {idx}: expected object, got {type(entry).__name__}")
-        return raw_items
-
-    raise ValueError(f"{path.name}: expected top-level object or array, got {type(value).__name__}")
-
-
 def _load_raw_tasks(source: str | Sequence[dict[str, Any]], split: str) -> list[dict[str, Any]]:
     if isinstance(source, str):
         path = Path(source)
         if path.exists() and path.suffix.lower() in {".json", ".jsonl"}:
-            return _load_raw_from_file_strict(path)
+            return _load_raw_from_file(path, strict=True)
 
         loaded = load_tasks(_source_with_split(source, split), raw=True)
         if not all(isinstance(item, dict) for item in loaded):
@@ -247,7 +196,7 @@ async def collect_rollouts(
         return []
 
     expanded_tasks = _expand_tasks(raw_tasks, group_size=group_size)
-    source_name = source if isinstance(source, str) else name
+    source_name = _source_with_split(source, split) if isinstance(source, str) else name
     final_agent_params = dict(agent_params or {})
     final_agent_params.setdefault("auto_respond", auto_respond)
 

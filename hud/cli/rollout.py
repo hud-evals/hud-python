@@ -27,10 +27,10 @@ def _resolve_agent(
     config: dict[str, Any] = {"verbose": verbose, "validate_api_key": False}
     model_defaults: dict[AgentType, str] = {
         AgentType.CLAUDE: "claude-sonnet-4-5",
-        AgentType.OPENAI: "gpt-5.1",
+        AgentType.OPENAI: "gpt-5",
         AgentType.OPERATOR: "computer-use-preview",
         AgentType.GEMINI: "gemini-3-pro-preview",
-        AgentType.GEMINI_CUA: "gemini-2.5-computer-use-preview-10-2025",
+        AgentType.GEMINI_CUA: "gemini-2.5-computer-use-preview",
         AgentType.OPENAI_COMPATIBLE: "gpt-5-mini",
         AgentType.INTEGRATION_TEST: "integration-test",
     }
