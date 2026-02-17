@@ -356,6 +356,7 @@ class TestBashSessionHeredoc:
     async def test_heredoc_integration(self):
         """Integration test: a real heredoc command completes without hanging."""
         session = _BashSession()
+        session._default_timeout = 5.0  # fail fast if sentinel is broken
         await session.start()
         try:
             result = await session.run("cat << 'EOF'\nhello from heredoc\nEOF")
@@ -369,11 +370,10 @@ class TestBashSessionHeredoc:
     async def test_heredoc_with_python_integration(self):
         """Integration test: python heredoc executes and returns output."""
         session = _BashSession()
+        session._default_timeout = 5.0
         await session.start()
         try:
-            result = await session.run(
-                "python3 << 'PYEOF'\nprint('result:', 2 + 2)\nPYEOF"
-            )
+            result = await session.run("python3 << 'PYEOF'\nprint('result:', 2 + 2)\nPYEOF")
             assert "result: 4" in result.stdout
             assert result.outcome.type == "exit"
             assert result.outcome.exit_code == 0
@@ -384,6 +384,7 @@ class TestBashSessionHeredoc:
     async def test_command_after_heredoc_still_works(self):
         """Integration test: session is usable for further commands after a heredoc."""
         session = _BashSession()
+        session._default_timeout = 5.0
         await session.start()
         try:
             r1 = await session.run("cat << 'EOF'\nfirst\nEOF")

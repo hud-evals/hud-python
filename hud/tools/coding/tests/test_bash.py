@@ -110,9 +110,11 @@ class TestBashSessionHeredoc:
         from hud.tools.coding.bash import ClaudeBashSession
 
         session = ClaudeBashSession()
+        session._timeout = 5.0  # fail fast if sentinel is broken
         await session.start()
         try:
             result = await session.run("cat << 'EOF'\nhello from heredoc\nEOF")
+            assert result.output is not None
             assert "hello from heredoc" in result.output
         finally:
             session.stop()
@@ -123,11 +125,11 @@ class TestBashSessionHeredoc:
         from hud.tools.coding.bash import ClaudeBashSession
 
         session = ClaudeBashSession()
+        session._timeout = 5.0
         await session.start()
         try:
-            result = await session.run(
-                "python3 << 'PYEOF'\nprint('result:', 2 + 2)\nPYEOF"
-            )
+            result = await session.run("python3 << 'PYEOF'\nprint('result:', 2 + 2)\nPYEOF")
+            assert result.output is not None
             assert "result: 4" in result.output
         finally:
             session.stop()
@@ -138,12 +140,15 @@ class TestBashSessionHeredoc:
         from hud.tools.coding.bash import ClaudeBashSession
 
         session = ClaudeBashSession()
+        session._timeout = 5.0
         await session.start()
         try:
             r1 = await session.run("cat << 'EOF'\nfirst\nEOF")
+            assert r1.output is not None
             assert "first" in r1.output
 
             r2 = await session.run("echo second")
+            assert r2.output is not None
             assert "second" in r2.output
         finally:
             session.stop()
