@@ -92,7 +92,7 @@ class OpenAIChatAgent(MCPAgent):
         # If a specific checkpoint is requested, inject it into extra_body
         # so the HUD gateway routes to the exact checkpoint for inference.
         if self.config.checkpoint:
-            extra_body = self.completion_kwargs.get("extra_body", {})
+            extra_body = self.completion_kwargs.get("extra_body") or {}
             extra_body["checkpoint"] = self.config.checkpoint
             self.completion_kwargs["extra_body"] = extra_body
 
