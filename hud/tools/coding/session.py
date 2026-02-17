@@ -153,18 +153,20 @@ class BashSession:
         assert self._process.stdout
         assert self._process.stderr
 
-        # Send command with sentinel for exit code capture
-        # Platform-specific syntax for command chaining and exit code
+        # Send command with sentinel for exit code capture.
+        # Use a newline before the sentinel echo (not ";" or "&") so that:
+        # 1. Heredoc delimiters aren't corrupted (e.g. EOF; echo '...' wouldn't match EOF)
+        # 2. The echo is a standalone command, avoiding syntax errors from leading ";"
         if sys.platform == "win32":
             if capture_exit_code:
-                cmd_line = f"{command} & echo {self._sentinel}%errorlevel%\n"
+                cmd_line = f"{command}\necho {self._sentinel}%errorlevel%\n"
             else:
-                cmd_line = f"{command} & echo {self._sentinel}\n"
+                cmd_line = f"{command}\necho {self._sentinel}\n"
         else:
             if capture_exit_code:
-                cmd_line = f"{command}; echo '{self._sentinel}'$?\n"
+                cmd_line = f"{command}\necho '{self._sentinel}'$?\n"
             else:
-                cmd_line = f"{command}; echo '{self._sentinel}'\n"
+                cmd_line = f"{command}\necho '{self._sentinel}'\n"
 
         self._process.stdin.write(cmd_line.encode())
         await self._process.stdin.drain()

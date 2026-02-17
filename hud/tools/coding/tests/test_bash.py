@@ -73,6 +73,87 @@ class TestBashSession:
         assert result.error == ""
 
 
+class TestBashSessionHeredoc:
+    """Tests for heredoc handling in ClaudeBashSession."""
+
+    @pytest.mark.asyncio
+    async def test_sentinel_on_own_line_after_heredoc(self):
+        """Sentinel echo must be on its own line so heredoc terminators aren't corrupted."""
+        session = _BashSession()
+        session._started = True
+
+        mock_process = MagicMock()
+        mock_process.returncode = None
+        mock_process.stdin = MagicMock()
+        mock_process.stdin.write = MagicMock()
+        mock_process.stdin.drain = AsyncMock()
+        mock_process.stdout = MagicMock()
+        mock_process.stdout.readuntil = AsyncMock(return_value=b"hello\n<<exit>>\n")
+        mock_process.stderr = MagicMock()
+        mock_process.stderr.read = AsyncMock(return_value=b"")
+
+        session._process = mock_process
+
+        heredoc_cmd = "python3 << 'EOF'\nprint('hello')\nEOF"
+        await session.run(heredoc_cmd)
+
+        written = mock_process.stdin.write.call_args[0][0].decode()
+
+        # EOF must be followed by newline, then the echo — never "EOF;" or "EOF echo"
+        assert "EOF\necho '<<exit>>'\n" in written
+        assert "EOF;" not in written
+        assert "EOF echo" not in written
+
+    @pytest.mark.asyncio
+    async def test_heredoc_integration(self):
+        """Integration test: a real heredoc command completes without hanging."""
+        from hud.tools.coding.bash import ClaudeBashSession
+
+        session = ClaudeBashSession()
+        session._timeout = 5.0  # fail fast if sentinel is broken
+        await session.start()
+        try:
+            result = await session.run("cat << 'EOF'\nhello from heredoc\nEOF")
+            assert result.output is not None
+            assert "hello from heredoc" in result.output
+        finally:
+            session.stop()
+
+    @pytest.mark.asyncio
+    async def test_heredoc_with_python_integration(self):
+        """Integration test: python heredoc executes and returns output."""
+        from hud.tools.coding.bash import ClaudeBashSession
+
+        session = ClaudeBashSession()
+        session._timeout = 5.0
+        await session.start()
+        try:
+            result = await session.run("python3 << 'PYEOF'\nprint('result:', 2 + 2)\nPYEOF")
+            assert result.output is not None
+            assert "result: 4" in result.output
+        finally:
+            session.stop()
+
+    @pytest.mark.asyncio
+    async def test_command_after_heredoc_still_works(self):
+        """Integration test: session is usable for further commands after a heredoc."""
+        from hud.tools.coding.bash import ClaudeBashSession
+
+        session = ClaudeBashSession()
+        session._timeout = 5.0
+        await session.start()
+        try:
+            r1 = await session.run("cat << 'EOF'\nfirst\nEOF")
+            assert r1.output is not None
+            assert "first" in r1.output
+
+            r2 = await session.run("echo second")
+            assert r2.output is not None
+            assert "second" in r2.output
+        finally:
+            session.stop()
+
+
 class TestBashTool:
     """Tests for BashTool."""
 

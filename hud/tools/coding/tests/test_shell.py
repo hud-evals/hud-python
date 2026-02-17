@@ -273,6 +273,129 @@ class TestBashSession:
         assert result.outcome.exit_code == 127
 
 
+class TestBashSessionHeredoc:
+    """Tests for heredoc handling in BashSession (session.py)."""
+
+    @pytest.mark.asyncio
+    async def test_sentinel_on_own_line_after_heredoc(self):
+        """Sentinel echo must be on its own line so heredoc terminators aren't corrupted."""
+        session = _BashSession()
+        session._started = True
+
+        mock_process = MagicMock()
+        mock_process.returncode = None
+        mock_process.stdin = MagicMock()
+        mock_process.stdin.write = MagicMock()
+        mock_process.stdin.drain = AsyncMock()
+
+        stdout_buffer = MagicMock()
+        stdout_buffer.decode.return_value = "hello\n<<exit>>0\n"
+        stdout_buffer.clear = MagicMock()
+
+        stderr_buffer = MagicMock()
+        stderr_buffer.decode.return_value = ""
+        stderr_buffer.clear = MagicMock()
+
+        mock_process.stdout = MagicMock()
+        mock_process.stdout._buffer = stdout_buffer
+        mock_process.stderr = MagicMock()
+        mock_process.stderr._buffer = stderr_buffer
+
+        session._process = mock_process
+
+        heredoc_cmd = "python3 << 'EOF'\nprint('hello')\nEOF"
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            await session.run(heredoc_cmd)
+
+        written = mock_process.stdin.write.call_args[0][0].decode()
+
+        # EOF must be followed by newline, then the echo — never "EOF;" or "EOF echo"
+        assert "EOF\necho '<<exit>>'" in written
+        assert "EOF;" not in written
+        assert "EOF echo" not in written
+
+    @pytest.mark.asyncio
+    async def test_sentinel_on_own_line_without_exit_code(self):
+        """Sentinel placement is correct even when capture_exit_code=False."""
+        session = _BashSession()
+        session._started = True
+
+        mock_process = MagicMock()
+        mock_process.returncode = None
+        mock_process.stdin = MagicMock()
+        mock_process.stdin.write = MagicMock()
+        mock_process.stdin.drain = AsyncMock()
+
+        stdout_buffer = MagicMock()
+        stdout_buffer.decode.return_value = "hello\n<<exit>>\n"
+        stdout_buffer.clear = MagicMock()
+
+        stderr_buffer = MagicMock()
+        stderr_buffer.decode.return_value = ""
+        stderr_buffer.clear = MagicMock()
+
+        mock_process.stdout = MagicMock()
+        mock_process.stdout._buffer = stdout_buffer
+        mock_process.stderr = MagicMock()
+        mock_process.stderr._buffer = stderr_buffer
+
+        session._process = mock_process
+
+        heredoc_cmd = "cat << 'END'\nsome text\nEND"
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            await session.run(heredoc_cmd, capture_exit_code=False)
+
+        written = mock_process.stdin.write.call_args[0][0].decode()
+
+        assert "END\necho '<<exit>>'\n" in written
+        assert "END;" not in written
+
+    @pytest.mark.asyncio
+    async def test_heredoc_integration(self):
+        """Integration test: a real heredoc command completes without hanging."""
+        session = _BashSession()
+        session._default_timeout = 5.0  # fail fast if sentinel is broken
+        await session.start()
+        try:
+            result = await session.run("cat << 'EOF'\nhello from heredoc\nEOF")
+            assert "hello from heredoc" in result.stdout
+            assert result.outcome.type == "exit"
+            assert result.outcome.exit_code == 0
+        finally:
+            session.stop()
+
+    @pytest.mark.asyncio
+    async def test_heredoc_with_python_integration(self):
+        """Integration test: python heredoc executes and returns output."""
+        session = _BashSession()
+        session._default_timeout = 5.0
+        await session.start()
+        try:
+            result = await session.run("python3 << 'PYEOF'\nprint('result:', 2 + 2)\nPYEOF")
+            assert "result: 4" in result.stdout
+            assert result.outcome.type == "exit"
+            assert result.outcome.exit_code == 0
+        finally:
+            session.stop()
+
+    @pytest.mark.asyncio
+    async def test_command_after_heredoc_still_works(self):
+        """Integration test: session is usable for further commands after a heredoc."""
+        session = _BashSession()
+        session._default_timeout = 5.0
+        await session.start()
+        try:
+            r1 = await session.run("cat << 'EOF'\nfirst\nEOF")
+            assert "first" in r1.stdout
+
+            r2 = await session.run("echo second")
+            assert "second" in r2.stdout
+        finally:
+            session.stop()
+
+
 class TestShellTool:
     """Tests for ShellTool."""
 
