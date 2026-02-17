@@ -6,6 +6,7 @@ from datetime import datetime
 
 import typer
 import yaml
+from rich.markup import escape
 from rich.table import Table
 
 from hud.utils.hud_console import HUDConsole
@@ -179,16 +180,16 @@ def list_environments(
         example_env = environments[0]
         example_ref = f"{example_env['name']}:{example_env['tag']}"
 
-        hud_console.print(f"Run an environment: [cyan]hud run {example_ref}[/cyan]")
-        hud_console.print(f"Analyze tools: [cyan]hud analyze {example_ref}[/cyan]")
-        hud_console.print(f"Debug server: [cyan]hud debug {example_ref}[/cyan]")
+        hud_console.print(f"Run an environment: [cyan]hud run {escape(example_ref)}[/cyan]")
+        hud_console.print(f"Analyze tools: [cyan]hud analyze {escape(example_ref)}[/cyan]")
+        hud_console.print(f"Debug server: [cyan]hud debug {escape(example_ref)}[/cyan]")
 
     hud_console.print("Pull more environments: [cyan]hud pull <org/name:tag>[/cyan]")
     hud_console.print("Build new environments: [cyan]hud build[/cyan]")
 
     if verbose:
         hud_console.info("")
-        hud_console.print(f"[dim]Registry location: {env_dir}[/dim]")
+        hud_console.print(f"[dim]Registry location: {escape(str(env_dir))}[/dim]")
 
 
 def list_command(

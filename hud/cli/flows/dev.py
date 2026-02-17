@@ -6,6 +6,8 @@ import json
 import logging
 from typing import Any
 
+from rich.markup import escape
+
 from hud.settings import settings
 from hud.shared.requests import make_request
 from hud.utils.hud_console import hud_console
@@ -136,7 +138,7 @@ def show_dev_ui(
     # Show other info below
     label = "Base image" if is_docker else "Server"
     hud_console.info("")
-    hud_console.print(f"{hud_console.sym.ITEM} {label}: {server_name}")
+    hud_console.print(f"{hud_console.sym.ITEM} {escape(label)}: {escape(server_name)}")
     hud_console.print(f"{hud_console.sym.ITEM} Cursor:")
     # Display the Cursor link on its own line to prevent wrapping
     hud_console.link(cursor_deeplink)

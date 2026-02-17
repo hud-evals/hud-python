@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import typer
+from rich.markup import escape
 
 from hud.utils.hud_console import HUDConsole
 
@@ -49,7 +50,7 @@ def show_dev_server_info(
 
     # Server section
     hud_console.section_title("Server")
-    hud_console.print(f"{hud_console.sym.ITEM} {server_name}")
+    hud_console.print(f"{hud_console.sym.ITEM} {escape(server_name)}")
     if transport == "http":
         hud_console.print(f"{hud_console.sym.ITEM} http://localhost:{port}/mcp")
     else:
@@ -72,11 +73,11 @@ def show_dev_server_info(
         # Show debugging URLs from telemetry
         if telemetry:
             if "live_url" in telemetry:
-                hud_console.print(f"{hud_console.sym.ITEM} Live URL: {telemetry['live_url']}")
+                hud_console.print(f"{hud_console.sym.ITEM} Live URL: {escape(telemetry['live_url'])}")
             if "vnc_url" in telemetry:
-                hud_console.print(f"{hud_console.sym.ITEM} VNC URL: {telemetry['vnc_url']}")
+                hud_console.print(f"{hud_console.sym.ITEM} VNC URL: {escape(telemetry['vnc_url'])}")
             if "cdp_url" in telemetry:
-                hud_console.print(f"{hud_console.sym.ITEM} CDP URL: {telemetry['cdp_url']}")
+                hud_console.print(f"{hud_console.sym.ITEM} CDP URL: {escape(telemetry['cdp_url'])}")
 
         # Check for VNC (browser environment)
         if env_dir and (env_dir / "environment" / "server.py").exists():
