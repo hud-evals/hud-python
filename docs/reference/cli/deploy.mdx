@@ -1,0 +1,305 @@
+---
+title: "hud deploy"
+description: "Deploy HUD environments directly to the platform"
+icon: "rocket"
+---
+
+The `hud deploy` command builds and deploys your environment directly to the HUD platform from a Dockerfile, without requiring a GitHub repository.
+
+<Note>
+This is the recommended way to deploy environments. Unlike `hud push` which pushes to Docker Hub, `hud deploy` builds remotely on HUD's infrastructure and stores the image in HUD's registry.
+</Note>
+
+## Usage
+
+```bash
+hud deploy [DIRECTORY] [OPTIONS]
+```
+
+## Arguments
+
+<ParamField path="directory" type="string" default=".">
+  Environment directory containing a Dockerfile.hud or Dockerfile
+</ParamField>
+
+## Options
+
+<ParamField path="--name" type="string">
+  Environment display name. Defaults to `[tool.hud].name` in pyproject.toml, or directory name. Short: `-n`
+</ParamField>
+
+<ParamField path="--env" type="string" repeatable>
+  Environment variable in KEY=VALUE format. Can be repeated. Short: `-e`
+</ParamField>
+
+<ParamField path="--env-file" type="string">
+  Path to .env file (default: .env in directory if exists)
+</ParamField>
+
+<ParamField path="--build-arg" type="string" repeatable>
+  Docker build argument in KEY=VALUE format. Can be repeated. Used for Dockerfile `ARG` directives.
+</ParamField>
+
+<ParamField path="--secret" type="string" repeatable>
+  Docker build secret. Format: `id=SECRET_ID,env=ENV_VAR` or `id=SECRET_ID,src=./path`. Encrypted at rest.
+</ParamField>
+
+<ParamField path="--no-cache" type="boolean" default="false">
+  Disable Docker build cache for a clean rebuild
+</ParamField>
+
+<ParamField path="--yes" type="boolean" default="false">
+  Skip confirmation prompts. Short: `-y`
+</ParamField>
+
+<ParamField path="--verbose" type="boolean" default="false">
+  Show detailed output including files added to tarball. Short: `-v`
+</ParamField>
+
+## Prerequisites
+
+<Warning>
+Requires `HUD_API_KEY`:
+```bash
+hud set HUD_API_KEY=your-api-key
+# or
+export HUD_API_KEY="your-api-key"
+```
+Get your API key at [hud.ai/settings](https://hud.ai/settings).
+</Warning>
+
+## What It Does
+
+<Steps>
+<Step title="Package Context">
+Creates a tarball of your build context, respecting `.dockerignore` and excluding sensitive files (`.env`, `.git`, etc.)
+</Step>
+
+<Step title="Upload">
+Uploads the tarball to HUD's build service via a secure presigned URL
+</Step>
+
+<Step title="Build">
+Triggers a remote build via AWS CodeBuild using your Dockerfile
+</Step>
+
+<Step title="Stream Logs">
+Streams build logs in real-time via WebSocket
+</Step>
+
+<Step title="Link">
+Creates `.hud/deploy.json` to link this directory to the deployed environment for future rebuilds
+</Step>
+</Steps>
+
+## Environment Variables, Build Arguments & Secrets
+
+Three flags for different purposes:
+
+| Flag | When Used | Stored In | Use For |
+|------|-----------|-----------|---------|
+| `--env` | Runtime | Platform (encrypted) | API keys, feature flags, runtime config |
+| `--build-arg` | Build time | Image layers | Repo URLs, build modes, versions |
+| `--secret` | Build time | Not stored in image | Private repo tokens, credentials during build |
+
+<Tabs>
+<Tab title="--env">
+
+**Runtime environment variables** — injected when the container runs.
+
+```bash
+hud deploy . -e API_KEY=secret -e DEBUG=true
+```
+
+Values are encrypted on the platform and can be changed without rebuilding.
+
+</Tab>
+<Tab title="--build-arg">
+
+**Build-time arguments** — passed to `docker build` for Dockerfile `ARG` directives.
+
+```dockerfile
+ARG REPO_URL
+RUN git clone ${REPO_URL} /app
+```
+
+```bash
+hud deploy . --build-arg REPO_URL=https://github.com/org/repo
+```
+
+Values are baked into image layers (visible in image history).
+
+</Tab>
+<Tab title="--secret">
+
+**Build-time secrets** — available during build but not stored in the image.
+
+```dockerfile
+RUN --mount=type=secret,id=GITHUB_TOKEN \
+    GITHUB_TOKEN=$(cat /run/secrets/GITHUB_TOKEN) && \
+    git clone https://${GITHUB_TOKEN}@github.com/org/private-repo /app
+```
+
+```bash
+hud deploy . --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN
+```
+
+Use `env=VAR` to read from environment, or `src=./file` to read from a file.
+
+</Tab>
+</Tabs>
+
+<Warning>
+**Common mistake:** Using `--env` for Dockerfile `ARG` values. If your Dockerfile has `ARG REPO_URL`, use `--build-arg REPO_URL=...`, not `-e REPO_URL=...`.
+</Warning>
+
+## Environment Name Resolution
+
+The environment name is determined in this order:
+
+1. `--name` flag (explicit)
+2. `[tool.hud].name` in pyproject.toml
+3. `[tool.hud].image` in pyproject.toml (name part, without tag)
+4. Directory name
+
+```toml
+# pyproject.toml
+[tool.hud]
+name = "My Browser Environment"
+```
+
+## Examples
+
+### Basic Deploy
+
+```bash
+# Deploy current directory
+hud deploy
+
+# Deploy specific directory
+hud deploy environments/browser
+```
+
+### With Environment Variables
+
+```bash
+# Pass runtime env vars
+hud deploy . -e API_KEY=secret -e DEBUG=true
+
+# Use env file
+hud deploy . --env-file .env.production
+```
+
+### With Build Arguments
+
+```bash
+# Pass Docker build arguments
+hud deploy . --build-arg NODE_ENV=production
+
+# Multiple build args
+hud deploy . --build-arg REPO_URL=https://github.com/org/repo --build-arg FOLDER_NAME=project
+```
+
+### With Build Secrets
+
+```bash
+# Secret from environment variable
+hud deploy . --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN
+
+# Secret from file
+hud deploy . --secret id=SSH_KEY,src=~/.ssh/deploy_key
+```
+
+### Combined Usage
+
+```bash
+# All three: build args + secrets for build, env vars for runtime
+hud deploy . --build-arg REPO_URL=https://github.com/org/repo \
+             --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN \
+             -e API_KEY=secret
+```
+
+### Custom Name
+
+```bash
+hud deploy . --name "Production Browser"
+```
+
+### Non-Interactive (CI/CD)
+
+```bash
+hud deploy . --yes --no-cache
+```
+
+## Rebuilding
+
+When you run `hud deploy` again in a linked directory:
+
+1. Reads `.hud/deploy.json` to find the existing environment
+2. Fetches stored environment variables from the platform
+3. Builds a new version of the same environment
+4. Version number auto-increments (0.1.0 → 0.1.1 → 0.1.2)
+
+## Project Linking
+
+After deployment, `.hud/deploy.json` is created:
+
+```json
+{
+  "registryId": "abc123-def456-...",
+  "version": "0.1.0"
+}
+```
+
+This links the directory to the platform environment. To unlink:
+
+```bash
+rm .hud/deploy.json
+```
+
+To link to a different existing environment:
+
+```bash
+hud link --id existing-registry-id
+```
+
+## .dockerignore
+
+Create a `.dockerignore` file to exclude files from the build context:
+
+```
+# .dockerignore
+.git
+.venv
+__pycache__
+*.pyc
+node_modules
+.env
+.env.*
+```
+
+<Note>
+Even without `.dockerignore`, HUD automatically excludes common sensitive files like `.env`, `.git`, and virtual environments.
+</Note>
+
+## Comparison with hud build + hud push
+
+| Feature | `hud deploy` | `hud build` + `hud push` |
+|---------|--------------|--------------------------|
+| Build location | Remote (HUD CodeBuild) | Local (Docker) |
+| Registry | HUD ECR | Docker Hub/GHCR |
+| Build args | Yes (`--build-arg`) | Yes (via `hud build`) |
+| Build secrets | Yes (`--secret`) | Yes (via `hud build`) |
+| Env var storage | HUD platform | Not stored |
+| Recommended for | Platform deployments | Docker Hub sharing |
+
+<Note>
+`hud push` only pushes an already-built image. Use `hud build --build-arg` and `hud build --secret` for local builds with build arguments and secrets, then `hud push` to share.
+</Note>
+
+## See Also
+
+- [`hud link`](/reference/cli/link) - Link directory to existing environment
+- [`hud build`](/reference/cli/build) - Build locally
+- [`hud push`](/reference/cli/push) - Push to Docker Hub
+- [Platform Environments](/platform/environments) - Managing environments on hud.ai

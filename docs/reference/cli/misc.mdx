@@ -68,3 +68,28 @@ hud set HUD_API_KEY=... ANTHROPIC_API_KEY=...
 ```
 
 Saves KEY=VALUE pairs to `~/.hud/.env` for default use in HUD.
+
+## hud cancel
+
+Cancel remote evaluation jobs submitted via `hud eval --remote`.
+
+```bash
+# Cancel all tasks in a job
+hud cancel <job_id>
+
+# Cancel a specific trace within a job
+hud cancel <job_id> --trace-id <trace_id>
+
+# Cancel ALL your active jobs (panic button)
+hud cancel --all
+```
+
+Options:
+- `<job_id>` - Job ID to cancel (positional argument)
+- `--trace-id, -t <trace_id>` - Cancel a specific trace within a job
+- `--all, -a` - Cancel all your active jobs
+- `--yes, -y` - Skip confirmation prompt
+
+<Note>
+Requires `HUD_API_KEY` to be set.
+</Note>

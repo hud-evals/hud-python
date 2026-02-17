@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import logging
 import platform
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from mcp import ErrorData, McpError
 from mcp.types import INVALID_PARAMS, ContentBlock
 from pydantic import Field
 
+from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult
+from hud.types import AgentType
 
 from .hud import HudComputerTool
 from .settings import computer_settings
@@ -47,6 +49,19 @@ class GeminiComputerTool(HudComputerTool):
     search, navigate, key_combination, drag_and_drop) to executor actions.
     """
 
+    native_specs: ClassVar[NativeToolSpecs] = {
+        AgentType.GEMINI: NativeToolSpec(
+            api_type="computer_use",
+            api_name="gemini_computer",
+            role="computer",  # Mutually exclusive with other computer tools when native
+        ),
+        AgentType.GEMINI_CUA: NativeToolSpec(
+            api_type="computer_use",
+            api_name="gemini_computer",
+            role="computer",  # Mutually exclusive with other computer tools when native
+        ),
+    }
+
     def __init__(
         self,
         # Define within environment based on platform
@@ -65,7 +80,33 @@ class GeminiComputerTool(HudComputerTool):
     ) -> None:
         """
         Initialize with Gemini's default dimensions.
+
+        Args:
+            width: Width for agent coordinate system (default: 1440)
+            height: Height for agent coordinate system (default: 900)
         """
+        # Create instance-level native_specs with display dimensions
+        instance_native_specs = {
+            AgentType.GEMINI: NativeToolSpec(
+                api_type="computer_use",
+                api_name="gemini_computer",
+                role="computer",
+                extra={
+                    "display_width": width,
+                    "display_height": height,
+                },
+            ),
+            AgentType.GEMINI_CUA: NativeToolSpec(
+                api_type="computer_use",
+                api_name="gemini_computer",
+                role="computer",
+                extra={
+                    "display_width": width,
+                    "display_height": height,
+                },
+            ),
+        }
+
         super().__init__(
             executor=executor,
             platform_type=platform_type,
@@ -76,6 +117,7 @@ class GeminiComputerTool(HudComputerTool):
             name=name or "gemini_computer",
             title=title or "Gemini Computer Tool",
             description=description or "Control computer with mouse, keyboard, and screenshots",
+            native_specs=instance_native_specs,
             **kwargs,
         )
 

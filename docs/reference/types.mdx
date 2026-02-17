@@ -1,0 +1,190 @@
+---
+title: "Types"
+description: "SDK type reference for HUD"
+icon: "code"
+---
+
+Core types used throughout the HUD SDK.
+
+## Task
+
+Created by calling an Environment. Holds configuration for running an evaluation.
+
+```python
+from hud import Environment
+
+env = Environment("my-env")
+task = env("scenario_name", arg1="value")  # Returns Task
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `env` | `Environment \| dict \| None` | Source environment |
+| `scenario` | `str \| None` | Scenario name to run |
+| `args` | `dict[str, Any]` | Script arguments |
+| `trace_id` | `str \| None` | Trace identifier |
+| `job_id` | `str \| None` | Parent job ID |
+| `group_id` | `str \| None` | Group ID for parallel runs |
+| `index` | `int` | Index in parallel execution |
+| `variants` | `dict[str, Any] \| None` | Variant assignment |
+
+## EvalContext
+
+Returned by `hud.eval()`. Extends Environment with evaluation tracking.
+
+```python
+async with hud.eval(task) as ctx:
+    print(ctx.prompt)      # Task prompt
+    print(ctx.variants)    # Current variant
+    ctx.reward = 1.0       # Set reward
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `trace_id` | `str` | Unique trace identifier |
+| `eval_name` | `str` | Evaluation name |
+| `prompt` | `str \| None` | Task prompt |
+| `variants` | `dict[str, Any]` | Current variant assignment |
+| `reward` | `float \| None` | Evaluation reward |
+| `answer` | `str \| None` | Submitted answer |
+| `error` | `BaseException \| None` | Error if failed |
+| `results` | `list[EvalContext]` | Results from parallel runs |
+| `headers` | `dict[str, str]` | Trace headers |
+
+## MCPToolCall
+
+Represents a tool call to execute.
+
+```python
+from hud.types import MCPToolCall
+
+call = MCPToolCall(
+    name="navigate",
+    arguments={"url": "https://example.com"}
+)
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `str` | Unique identifier (auto-generated) |
+| `name` | `str` | Tool name |
+| `arguments` | `dict[str, Any]` | Tool arguments |
+
+## MCPToolResult
+
+Result from executing a tool call.
+
+```python
+from hud.types import MCPToolResult
+
+result = MCPToolResult(
+    content=[TextContent(text="Success", type="text")],
+    isError=False
+)
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `content` | `list[ContentBlock]` | Result content blocks |
+| `structuredContent` | `dict \| None` | Structured result data |
+| `isError` | `bool` | Whether the call failed |
+
+## Trace
+
+Returned by `agent.run()`. Contains the result of an agent execution.
+
+```python
+from hud.types import Trace
+
+result = await agent.run(task, max_steps=20)
+print(result.reward, result.done)
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `reward` | `float` | Evaluation score (0.0-1.0) |
+| `done` | `bool` | Whether execution completed |
+| `content` | `str \| None` | Final response content |
+| `isError` | `bool` | Whether an error occurred |
+| `info` | `dict[str, Any]` | Additional metadata |
+| `trace` | `list[TraceStep]` | Execution trace steps |
+| `messages` | `list[Any]` | Final conversation state |
+
+## AgentResponse
+
+Returned by agent `get_response()` methods.
+
+```python
+from hud.types import AgentResponse
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tool_calls` | `list[MCPToolCall]` | Tools to execute |
+| `done` | `bool` | Whether agent should stop |
+| `content` | `str \| None` | Response text |
+| `reasoning` | `str \| None` | Model reasoning/thinking |
+| `info` | `dict[str, Any]` | Provider-specific metadata |
+| `isError` | `bool` | Error flag |
+
+## AgentType
+
+Enum of supported agent types.
+
+```python
+from hud.types import AgentType
+
+agent_cls = AgentType.CLAUDE.cls
+agent = agent_cls.create()
+```
+
+| Value | Agent Class |
+|-------|-------------|
+| `AgentType.CLAUDE` | `ClaudeAgent` |
+| `AgentType.OPENAI` | `OpenAIAgent` |
+| `AgentType.OPERATOR` | `OperatorAgent` |
+| `AgentType.GEMINI` | `GeminiAgent` |
+| `AgentType.GEMINI_CUA` | `GeminiCUAAgent` |
+| `AgentType.OPENAI_COMPATIBLE` | `OpenAIChatAgent` |
+
+## ContentBlock
+
+MCP content types (from `mcp.types`):
+
+```python
+from mcp.types import TextContent, ImageContent
+
+# Text
+TextContent(text="Hello", type="text")
+
+# Image
+ImageContent(data="base64...", mimeType="image/png", type="image")
+```
+
+## EvaluationResult
+
+Returned by evaluation tools.
+
+```python
+from hud.tools.types import EvaluationResult
+
+result = EvaluationResult(
+    reward=0.8,
+    done=True,
+    content="Task completed",
+    info={"score": 80}
+)
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `reward` | `float` | Score (0.0-1.0) |
+| `done` | `bool` | Task complete |
+| `content` | `str \| None` | Details |
+| `info` | `dict` | Metadata |
+
+## See Also
+
+- [Evals](/reference/evals) - hud.eval() reference
+- [Environments](/reference/environments) - Environment class
+- [Agents](/reference/agents) - Agent classes

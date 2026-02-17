@@ -1,5 +1,5 @@
 ---
-title: "LLM Quickstart"
+title: "Add to Cursor/Claude"
 description: "Add context about hud to any coding agent"
 icon: "sparkles"
 ---
@@ -8,47 +8,37 @@ icon: "sparkles"
 
 <Card title="Claude Desktop">
   ```bash
-  claude mcp add --transport http docs-hud https://docs.hud.so/mcp
+  claude mcp add --transport http docs-hud https://docs.hud.ai/mcp
   ```
 </Card>
 
 <Card title="Cursor" >
+  **1. Install HUD Docs MCP Server**
+  
   Add to MCP settings:
   ```json
   "docs-hud": {
-    "url": "https://docs.hud.so/mcp"
+    "url": "https://docs.hud.ai/mcp"
   }
   ```
   
   Or use one-click install:
   
-  [![Install MCP Server](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=docs-hud-so&config=eyJ1cmwiOiJodHRwczovL2RvY3MuaHVkLnNvL21jcCJ9)
+  [![Install MCP Server](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=docs-hud-so&config=eyJ1cmwiOiJodHRwczovL2RvY3MuaHVkLmFpL21jcCJ9)
+  
+  ---
+  
+  **2. Create Your First Environment**
+  
+  Get step-by-step guidance with an interactive Cursor command:
+  
+  [![Create Environment](https://cursor.com/deeplink/mcp-install-dark.svg)](cursor://anysphere.cursor-deeplink/command?name=create-hud-environment&text=%23+Create+Your+First+HUD+Environment%0A%0ASet+up+a+complete+HUD+environment+from+scratch+with+tools%2C+scenarios%2C+and+deployment.%0A%0A%23%23+Guidelines%0A%0A-+Ask+for+confirmation+before+running+install+commands%0A-+Use+%60inference.hud.ai%60+as+the+gateway+%28one+HUD_API_KEY+for+all+models%29%0A-+Use+emojis+and+celebrate+milestones%21%0A-+**EXPLAIN+concepts+as+you+go**+-+this+is+a+learning+experience%0A-+**NEVER+ask+user+to+paste+API+keys+in+chat**+-+guide+them+to+set+env+vars%0A%0A%23%23+Steps%0A%0A%23%23%23+1.+Prerequisites%0A%0ACheck+for+%60uv%60+and+%60hud%60%3A%0A-+%60uv+--version%60+-+if+missing%2C+install%3A+%60curl+-LsSf+https%3A%2F%2Fastral.sh%2Fuv%2Finstall.sh+%7C+sh%60%0A-+%60hud+--version%60+-+if+missing+or+PermissionError%2C+install%3A+%60uv+tool+install+hud-python+--python+3.12%60%0A%0ADocker+is+optional+for+local+dev+but+mention+it%27s+needed+for+%60hud+deploy%60.%0A%0A%23%23%23+2.+Initialize+Environment%0A%0ARun+%60hud+init%60+to+create%3A%0A-+%60env.py%60+-+Your+environment+with+tools+and+scenarios%0A-+%60Dockerfile.hud%60+-+Container+definition%0A-+%60pyproject.toml%60+-+Dependencies%0A%0A%F0%9F%8E%89+Celebrate+and+read+%60env.py%60+to+explain%3A%0A-+%60Environment%28%22name%22%29%60+-+the+container+for+tools%0A-+%60%40env.tool%28%29%60+-+functions+agents+can+call%0A-+%60%40env.scenario%28%22name%22%29%60+-+evaluation+definition+with+two+yields+%28prompt+%E2%86%92+reward%29%0A%0A%23%23%23+3.+Set+Up+API+Key%0A%0AGuide+user+to+https%3A%2F%2Fhud.ai%2Fproject%2Fapi-keys+and+help+set+%60HUD_API_KEY%60%3A%0A-+macOS%2FLinux%3A+%60export+HUD_API_KEY%3Dyour-key%60%0A-+Or+use+%60hud+set+HUD_API_KEY%3Dyour-key%60%0A%0AWait+for+confirmation+before+testing.%0A%0A%23%23%23+4.+Test+Locally%0A%0ARun+%60uv+run+env.py%60+and+explain+the+output%3A%0A-+Task+creation+from+scenario%0A-+Agent+running+with+tools%0A-+Evaluation+and+reward%0A%0A%F0%9F%8E%8A+Celebrate+success%21+Show+the+trace+URL+if+one+appears.%0A%0A%23%23%23+5.+Development+Workflow%0A%0AExplain+the+three+iteration+paths%3A%0A1.+%60uv+run+env.py%60+-+quick+script+test%0A2.+%60hud+dev+env%3Aenv%60+-+MCP+server+mode+%28Cursor+can+connect+at+%60http%3A%2F%2Flocalhost%3A8765%2Fmcp%60%29%0A3.+%60hud+deploy%60+-+push+to+platform+for+hosted+evals%0A%0A%23%23%23+6.+Deploy+%28Optional%29%0A%0AIf+user+wants+to+deploy%3A%0A-+Run+%60hud+deploy%60%0A-+Explain+it+packages%2C+uploads%2C+and+builds+remotely%0A-+Show+that+environment+appears+at+hud.ai%2Fenvironments%0A-+Mention+%60hud+deploy%60+again+for+updates%0A%0A%23%23%23+7.+Next+Steps%0A%0ASuggest%3A%0A-+Create+tasks+from+scenarios+on+hud.ai%0A-+Run+evaluations+across+models%0A-+Train+models+on+successful+traces%0A-+See+docs.hud.ai+for+the+full+guide%0A%0A%F0%9F%8E%89+Welcome+to+HUD%21)
 </Card>
 
-<Card title="Full Documentation" href="https://docs.hud.so/llms-full.txt">
+<Card title="Full Documentation" href="https://docs.hud.ai/llms-full.txt">
   Copy paste the full llms-full.txt
 </Card>
 
-## What you get
-
-Your AI assistant gains access to:
-- Complete HUD API reference and methods
-- Working code examples and implementations  
-- Architecture patterns and best practices
-- Real-time updates as documentation evolves
-
 <Tip>
-Try asking your assistant: "How do I create a custom agent in HUD?" or "Help me debug MCP tool calls"
+Try asking: "How do I create an Environment with tools?" or "How scenarios and evals work in HUD?"
 </Tip>
-
-## Next steps
-
-<CardGroup cols={2}>
-<Card title="Run your first evaluation" icon="play" href="/quickstart">
-  Get started with HUD in 3 minutes
-</Card>
-
-<Card title="Build an environment" icon="cube" href="/build-environments">
-  Create custom MCP environments
-</Card>
-</CardGroup>

@@ -1,0 +1,110 @@
+---
+title: "Trace Analysis Environment"
+description: "How we built an environment to let agents analyze their own traces—and how you can apply the same pattern"
+icon: "magnifying-glass-chart"
+---
+
+We use HUD to debug HUD. When an evaluation trace fails, we don't want to manually dig through logs—so we built an environment that lets an agent do it for us, using the same coding tools it would use for any debugging task. We even used the analysis environment to debug itself—running it on its own traces to find issues with the environment's preprocessing and prompt design.
+
+This page walks through how we built it, what we learned, and how you can apply the same pattern to build your own data analysis environments.
+
+<Card title="View the source code" icon="github" href="https://github.com/hud-evals/hud-trace-explorer">
+  The trace analysis environment is open source. Fork it as a starting point for your own.
+</Card>
+
+## What We Were Trying to Solve
+
+After running evaluations, we kept asking the same questions:
+- "Why did this trace fail?"
+- "Is the agent reward hacking?"
+- "What errors keep showing up?"
+
+Manually clicking through traces works for one or two. But when you're running hundreds of evals across multiple agents, you need something automated. The question was: what's the best way to give an agent access to trace data?
+
+## Why We Chose Coding Tools (and Not Custom MCP Tools)
+
+Our first instinct was to build specialized MCP tools—things like `get_trace_errors` or `get_tool_calls`. But we went with plain coding tools instead: bash, grep, read, list, glob.
+
+**The core idea:** recent research indicates that file-based tools provide the best way to interface with large datasets. Rather than stuffing everything into the LLM's context window, you give the model tools to explore data on demand.
+
+This works for a few reasons:
+
+**Models already know how to explore files.** Every coding agent knows how to read files and grep for patterns. Writing trace data to files means the model can immediately get to work—no new tool schemas to learn, no documentation to read.
+
+**It's flexible.** With files and bash, the agent can grep for specific error messages, cross-reference logs with tool calls, or build its own analysis pipeline. A fixed set of specialized endpoints can't anticipate every question you'll want to ask.
+
+**Images just work.** CUA traces include screenshots at each step. The HUD SDK's `ReadTool` already handles images—it base64-encodes them so the model can view them visually. No special image tool needed.
+
+## How the Environment Works
+
+The flow is straightforward:
+
+1. Fetch trace data from the HUD API (telemetry, logs, screenshots)
+2. Preprocess it into readable files
+3. Give the agent coding tools and a question
+4. Evaluate the response
+
+### The Files We Create
+
+Raw trace data is deeply nested JSON—telemetry spans, exception stacks, container logs. Dumping that as-is and saying "figure it out" wastes agent steps. So we preprocess it:
+
+| File | Purpose |
+|------|---------|
+| `trajectory_summary.txt` | Human-readable list of what happened: tool calls, errors, agent turns |
+| `trajectory.json` | Full span data when the agent needs to dig deeper |
+| `metadata.json` | Job, task, scenario details |
+| `prompt.txt` | The original task prompt |
+| `screenshots/step_XXXX.png` | CUA screenshots, viewable via the read tool |
+| `environment_logs.txt` | Container stdout/stderr |
+| `worker_logs.txt` | Orchestrator logs |
+
+**If you're building something similar**, this preprocessing step matters a lot. Give the agent a summary it can scan quickly, with the raw data available for drill-down. Without it, agents burn 5+ steps just figuring out the data structure.
+
+### Put Key Metadata in the Prompt
+
+Early on, we watched agents waste 5-7 steps just reading metadata files to understand what they were looking at. The fix was simple: include the important stuff directly in the initial prompt—trace ID, status, reward, scenario name, error info.
+
+Now the agent knows what it's dealing with before it reads a single file. If you're building your own environment, front-load the context that every analysis will need.
+
+## Where This Shows Up on the Platform
+
+### Agent Columns
+
+This is the main way people use trace analysis. In any evalset, you can add an **Agent column**—a custom column that automatically runs an analysis query on every completed trace.
+
+You configure:
+1. A query (e.g., "Did the agent complete the task?")
+2. Which data sources to include (trajectory, logs)
+
+Every trace that finishes spawns an analysis run. The result shows up in the column, so you can scan patterns across your whole evalset at a glance.
+
+Some queries we use a lot:
+- "Did the agent successfully complete the task? Explain why or why not."
+- "What errors or failures occurred during this trace?"
+- "Is there evidence of reward hacking or gaming the evaluation?"
+- "Could the agent have completed the task with fewer steps?"
+
+### One-Time Analysis
+
+On any trace page, the Analysis tab lets you ask a one-off question about that specific trace. Pick a suggested query or write your own, hit Analyze, and see the result. You can even click through to the analysis trace itself to see exactly how the agent investigated.
+
+## What We Learned (and What You Should Steal)
+
+If you want to build an environment where an agent analyzes structured data—logs, traces, reports, whatever—here's what worked for us:
+
+**Write data to files, give the agent coding tools.** Don't build custom MCP tools for data access. Models are already good at file exploration, and it's less code for you to maintain.
+
+**Preprocess your data.** A summary file that the agent can scan in one read is worth more than perfect raw data. Include both: summary for orientation, raw for drill-down.
+
+**Front-load context in the prompt.** Anything the agent will always need to know (IDs, status, high-level metadata) should be in the prompt, not in a file it has to go find.
+
+**Keep it read-only.** Analysis environments shouldn't modify the data they're analyzing. This makes them safe to run against production.
+
+**Make the analysis itself observable.** Every analysis creates its own trace. This lets you debug the debugger—meta-evaluation is surprisingly useful.
+
+## See Also
+
+- [Source Code on GitHub](https://github.com/hud-evals/hud-trace-explorer) - Fork this as a starting point
+- [Environments](/platform/environments) - How environments work on the platform
+- [Coding Tools](/tools/coding) - Shell, apply_patch, and related tools
+- [Filesystem Tools](/tools/filesystem) - Read, grep, and file navigation tools

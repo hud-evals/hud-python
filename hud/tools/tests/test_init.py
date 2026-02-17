@@ -11,7 +11,8 @@ def test_tools_imports():
     assert hud.tools is not None
 
     # Try importing key submodules
-    from hud.tools import base, bash, edit, utils
+    from hud.tools import base, utils
+    from hud.tools.coding import bash, edit
 
     assert base is not None
     assert bash is not None

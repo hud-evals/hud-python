@@ -6,6 +6,8 @@ import json
 import logging
 from typing import Any
 
+from rich.markup import escape
+
 from hud.settings import settings
 from hud.shared.requests import make_request
 from hud.utils.hud_console import hud_console
@@ -26,6 +28,7 @@ async def create_dynamic_trace(
       - mcp_config: points to the local MCP config (same as Cursor)
       - build_status: True if Docker mode (built image), False if basic Python mode
       - environment_name: Name of the environment/server/image
+      - git_info: Repository information (if available)
 
     Returns the full URL to the live trace when successful, otherwise None.
     """
@@ -33,17 +36,37 @@ async def create_dynamic_trace(
     # Endpoint TBD; use a sensible default path that the backend can wire up
     url = f"{api_base}/dev/dynamic-traces"
 
+    # Get git repository information
+    from hud.cli.utils.git import get_git_info
+
+    git_info = get_git_info()
+
     payload = {
         "mcp_config": mcp_config,
         "build_status": bool(build_status),
         "environment_name": environment_name,
     }
 
-    # Best-effort; if missing API key, log and continue
+    # Add git info if available
+    if git_info and git_info.get("remote_url"):
+        payload["git_info"] = git_info
+        logger.info("Detected git repository: %s", git_info.get("remote_url"))
+    else:
+        logger.info("No git repository detected")
+
+    # Require API key for dev mode
     api_key = settings.api_key
     if not api_key:
-        logger.warning("Skipping dynamic trace creation; missing HUD_API_KEY")
-        return None, None
+        hud_console.error("HUD_API_KEY is required for hud dev command")
+        hud_console.info("")
+        hud_console.info("Please set your API key using one of these methods:")
+        hud_console.info("  1. Set environment variable: export HUD_API_KEY=your_key")
+        hud_console.info("  2. Use hud set command: hud set api_key your_key")
+        hud_console.info("")
+        hud_console.info("Get your API key at: https://hud.ai/settings")
+        import sys
+
+        sys.exit(1)
 
     try:
         resp = await make_request("POST", url=url, json=payload, api_key=api_key)
@@ -70,6 +93,7 @@ def show_dev_ui(
     port: int,
     cursor_deeplink: str,
     is_docker: bool = False,
+    hot_reload_enabled: bool = True,
 ) -> None:
     """
     Show the minimal dev UI with live trace link.
@@ -83,6 +107,7 @@ def show_dev_ui(
         port: Port the server is running on
         cursor_deeplink: Pre-generated Cursor deeplink URL
         is_docker: Whether this is Docker mode (affects hot-reload message)
+        hot_reload_enabled: Whether hot-reload is active (watch paths configured)
     """
     import webbrowser
 
@@ -113,17 +138,21 @@ def show_dev_ui(
     # Show other info below
     label = "Base image" if is_docker else "Server"
     hud_console.info("")
-    hud_console.info(f"{hud_console.sym.ITEM} {label}: {server_name}")
-    hud_console.info(f"{hud_console.sym.ITEM} Cursor:")
+    hud_console.print(f"{hud_console.sym.ITEM} {escape(label)}: {escape(server_name)}")
+    hud_console.print(f"{hud_console.sym.ITEM} Cursor:")
     # Display the Cursor link on its own line to prevent wrapping
     hud_console.link(cursor_deeplink)
     hud_console.info("")
-    hud_console.info(f"{hud_console.sym.SUCCESS} Hot-reload enabled")
-    if is_docker:
+    if hot_reload_enabled:
+        hud_console.print(f"{hud_console.sym.SUCCESS} Hot-reload enabled")
+    else:
+        hud_console.info("Hot-reload disabled")
+        hud_console.dim_info("Tip", "Pass --watch/-w to enable hot-reload")
+    if is_docker and hot_reload_enabled:
         hud_console.dim_info(
             "",
-            "Container restarts on file changes (mounted volumes), "
-            "if changing tools run hud dev again",
+            "Container restarts on file changes in watched folders (-w), "
+            "rebuild with 'hud dev' if changing other files",
         )
     hud_console.info("")
 

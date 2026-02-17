@@ -8,16 +8,15 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel
 
-from hud.datasets import run_dataset
+from hud.datasets import load_tasks, run_dataset
 from hud.types import Trace
-from hud.utils.tasks import load_tasks
 
 from .schema import RolloutRecord, make_rollout_id
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from hud.agents import MCPAgent
+    from hud.types import AgentType
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -73,6 +72,24 @@ def _coerce_trace(result: Any) -> Trace:
             return Trace.model_validate(result.model_dump(mode="json"))
         except Exception:
             return Trace(isError=True, content=str(result), reward=0.0, done=True)
+
+    if hasattr(result, "trace_id") and hasattr(result, "reward"):
+        error_obj = getattr(result, "error", None)
+        info: dict[str, Any] = {}
+        for key in ("trace_id", "job_id", "group_id", "eval_name"):
+            value = getattr(result, key, None)
+            if value is not None:
+                info[key] = value
+        if error_obj is not None:
+            info["error"] = str(error_obj)
+
+        return Trace(
+            reward=float(getattr(result, "reward", 0.0) or 0.0),
+            done=True,
+            isError=error_obj is not None,
+            content=getattr(result, "answer", None),
+            info=info,
+        )
 
     return Trace(isError=True, content=str(result), reward=0.0, done=True)
 
@@ -154,8 +171,8 @@ async def collect_rollouts(
     *,
     name: str,
     source: str | Sequence[dict[str, Any]],
-    agent_class: type[MCPAgent],
-    agent_config: dict[str, Any] | None = None,
+    agent_type: AgentType | str,
+    agent_params: dict[str, Any] | None = None,
     max_concurrent: int = 30,
     metadata: dict[str, Any] | None = None,
     max_steps: int = 10,
@@ -174,15 +191,14 @@ async def collect_rollouts(
     expanded_tasks = _expand_tasks(raw_tasks, group_size=group_size)
     source_name = source if isinstance(source, str) else name
     results = await run_dataset(
-        name=name,
-        dataset=expanded_tasks,
-        agent_class=agent_class,
-        agent_config=agent_config,
+        expanded_tasks,
+        agent_type,
+        agent_params=agent_params,
+        group_size=1,
+        quiet=True,
         max_concurrent=max_concurrent,
-        metadata=metadata,
         max_steps=max_steps,
-        split=split,
-        auto_respond=auto_respond,
+        taskset=metadata["taskset"] if metadata and "taskset" in metadata else None,
     )
 
     return build_rollout_records(

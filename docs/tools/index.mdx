@@ -1,0 +1,218 @@
+---
+title: "Introduction"
+description: "Pre-built capabilities for computer control, shell execution, and more"
+icon: "toolbox"
+---
+
+<Tip>
+**Building custom tools?** See the [Tools SDK Reference](/reference/tools) for architecture details, base classes, native specs, and complete implementation examples.
+</Tip>
+
+Native tools are pre-built capabilities you add to environments—computer control, shell execution, file editing, web browsing. Each provider (Anthropic, OpenAI, Google) has its own tool specification. HUD handles the translation.
+
+## Why Native Tools?
+
+Claude uses `computer_20250124`. OpenAI uses `computer_use_preview`. Gemini uses function calling. You don't want to maintain three implementations.
+
+Add a tool to your environment, and HUD adapts it to whatever agent connects:
+
+```python
+from hud import Environment
+from hud.tools import AnthropicComputerTool, BashTool
+
+env = Environment("my-env")
+env.add_tool(AnthropicComputerTool())
+env.add_tool(BashTool())
+```
+
+Claude gets native `computer_20250124` and `bash_20250124`. OpenAI gets compatible function calls. Same environment, every agent.
+
+## How It Works
+
+Tools declare `native_specs` that tell agents how to register with their provider:
+
+```python
+class BashTool(BaseTool):
+    native_specs = {
+        AgentType.CLAUDE: NativeToolSpec(
+            api_type="bash_20250124",
+            api_name="bash",
+            beta="computer-use-2025-01-24",
+            role="shell",
+        ),
+    }
+```
+
+When an agent connects:
+1. SDK checks for native specs matching the agent type
+2. If found, registers using the provider's native format
+3. If not, falls back to standard function calling
+
+Tools with the same `role` are mutually exclusive—you can't have both `BashTool` (Claude) and `ShellTool` (OpenAI) active. When one is accepted natively, the other is excluded.
+
+## Choosing Tools
+
+Match tools to your agent:
+
+| Agent | Computer | Shell | Editor | Memory |
+|-------|----------|-------|--------|--------|
+| Claude | `AnthropicComputerTool` | `BashTool` | `EditTool` | `ClaudeMemoryTool` |
+| OpenAI | `OpenAIComputerTool` | `ShellTool` | `ApplyPatchTool` | `SessionMemoryTool` |
+| Gemini | `GeminiComputerTool` | `GeminiShellTool` | `GeminiEditTool` | `GeminiMemoryTool` |
+
+Filesystem tools are agent-agnostic. Choose based on output style:
+
+| Style | Read | Search | Glob | List |
+|-------|------|--------|------|------|
+| OpenCode | `ReadTool` | `GrepTool` | `GlobTool` | `ListTool` |
+| Gemini CLI | `GeminiReadTool` | `GeminiSearchTool` | `GeminiGlobTool` | `GeminiListTool` |
+
+```python
+from hud import Environment
+from hud.tools import AnthropicComputerTool, BashTool, EditTool
+from hud.tools.filesystem import ReadTool, GrepTool
+
+env = Environment("claude-env")
+env.add_tool(AnthropicComputerTool())
+env.add_tool(BashTool())
+env.add_tool(EditTool())
+env.add_tool(ReadTool())
+env.add_tool(GrepTool())
+```
+
+## Customizing Tools
+
+Need different behavior? Subclass:
+
+```python
+from mcp.types import ContentBlock
+from hud.tools import BashTool
+from hud.tools.types import ToolError
+
+class RestrictedBashTool(BashTool):
+    async def __call__(
+        self, command: str | None = None, restart: bool = False
+    ) -> list[ContentBlock]:
+        if command and ("rm -rf" in command or "sudo" in command):
+            raise ToolError("Command not allowed")
+        return await super().__call__(command, restart)
+```
+
+Your subclass inherits the native specs. Claude still gets `bash_20250124`, but with your restrictions.
+
+## Tool Hooks
+
+For simpler customization without subclassing, use `@tool.before` and `@tool.after`:
+
+```python
+from hud.tools import BashTool
+from hud.tools.types import ToolError
+
+bash = BashTool()
+
+@bash.before
+async def block_dangerous(command: str | None = None, **kwargs):
+    if command and "rm -rf" in command:
+        raise ToolError("Blocked dangerous command")
+
+@bash.after
+async def log_execution(command: str | None = None, result=None, **kwargs):
+    print(f"Executed: {command}")
+
+env.add_tool(bash)
+```
+
+**`@tool.before`** runs before execution:
+- Receives all tool arguments as kwargs
+- Return modified kwargs to change arguments
+- Return `None` to proceed unchanged
+- Raise an exception to block execution
+
+**`@tool.after`** runs after execution:
+- Receives tool arguments plus `result=`
+- Return modified result to change output
+- Return `None` to keep original result
+
+Stack multiple hooks—they run in registration order:
+
+```python
+@bash.before
+async def validate(command: str | None = None, **kwargs):
+    # First validation
+    ...
+
+@bash.before
+async def audit(command: str | None = None, **kwargs):
+    # Then audit logging
+    ...
+```
+
+## Creating New Tools
+
+For entirely new capabilities:
+
+```python
+from hud.tools import BaseTool
+from mcp.types import ContentBlock, TextContent
+
+class DatabaseTool(BaseTool):
+    def __init__(self, connection):
+        super().__init__(
+            env=connection,
+            name="database",
+            description="Execute SQL queries",
+        )
+    
+    async def __call__(self, query: str) -> list[ContentBlock]:
+        results = await self.env.execute(query)
+        return [TextContent(text=str(results), type="text")]
+```
+
+## For Model Training
+
+Training your own model? Three options:
+
+1. **Use existing tools** — Train your model on HUD's standard schemas
+2. **Subclass and adapt** — Modify behavior, keep compatible schemas
+3. **Define new specs** — Create schemas optimized for your model
+
+```python
+from hud.types import AgentType
+from hud.tools import BaseTool
+from hud.tools.native_types import NativeToolSpec
+
+class MyShellTool(BaseTool):
+    native_specs = {
+        AgentType.CUSTOM: NativeToolSpec(
+            api_type="my_shell_v1",
+            api_name="shell",
+            role="shell",
+        ),
+    }
+```
+
+## Tool Categories
+
+<CardGroup cols={2}>
+  <Card title="Agent Tools" icon="users" href="/tools/agents">
+    Run sub-agents as tools
+  </Card>
+  <Card title="Computer" icon="desktop" href="/tools/computer">
+    Mouse, keyboard, screenshots
+  </Card>
+  <Card title="Coding" icon="code" href="/tools/coding">
+    Shell execution, file editing
+  </Card>
+  <Card title="Filesystem" icon="folder-open" href="/tools/filesystem">
+    Read, search, and list files
+  </Card>
+  <Card title="Memory" icon="brain" href="/tools/memory">
+    Persistent storage
+  </Card>
+  <Card title="Web" icon="globe" href="/tools/web">
+    Browser automation, search
+  </Card>
+  <Card title="Grounding" icon="crosshairs" href="/tools/grounding">
+    Element description → coordinates
+  </Card>
+</CardGroup>

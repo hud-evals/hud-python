@@ -36,6 +36,14 @@ hud build [DIRECTORY] [OPTIONS]
   Target platform for Docker build. Defaults to `linux/amd64` if unspecified.
 </ParamField>
 
+<ParamField path="--build-arg" type="string" repeatable>
+  Docker build argument passed to `docker build --build-arg`. Can be repeated.
+</ParamField>
+
+<ParamField path="--secret" type="string" repeatable>
+  Docker build secret. Format: `id=SECRET_ID,env=ENV_VAR`. Passed to `docker build --secret`. Can be repeated.
+</ParamField>
+
 ## What It Does
 
 <Steps>
@@ -75,6 +83,12 @@ hud build . --no-cache --verbose
 
 # Force cross‑platform (useful on Apple Silicon)
 hud build . --platform linux/amd64
+
+# With build arguments (for Dockerfile ARG directives)
+hud build . --build-arg REPO_URL=https://github.com/org/repo
+
+# With build secrets (for private repos, not stored in image)
+hud build . --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN
 ```
 
 ## Image Naming
@@ -98,17 +112,24 @@ They’re recorded in the lock file as placeholders under `environment.variables
 Minimal structure you’ll see:
 
 ```yaml
-version: "1.0"
-image: "my-env:dev@sha256:..."
+version: "1.2"
+image: "my-env:0.1.0@sha256:..."
 build:
   generatedAt: "2025-01-01T12:00:00Z"
   hudVersion: "0.x.y"
   directory: "my-env"
   version: "0.1.0"
   sourceHash: "..."
+  baseImage: "python:3.11-slim"
+  platform: "linux/amd64"
 environment:
   initializeMs: 450
   toolCount: 3
+  runtime:
+    python: "3.11.6"
+    cuda: null
+    cudnn: null
+    pytorch: null
   variables:
     provided: { API_KEY: "${API_KEY}" }
     required: ["OTHER_KEY"]
@@ -116,25 +137,26 @@ tools:
   - name: setup
     description: Initialize environment
     inputSchema: { type: object }
+    internalTools: ["board", "seed"]
 ```
 
 ## Next Steps
 
 ```bash
-# Hot‑reload development
-hud dev
+# Development server (hot-reload is opt-in)
+hud dev -w controller -w environment
 
 # Run the built image locally (stdio)
 hud run my-env:dev --local
 
-# Push to registry
-hud push
+# Deploy via GitHub (recommended)
+git push
+# Connect on hud.ai → New → Environment
 ```
 
 ## See Also
 
 - [`hud init`](/reference/cli/init)
 - [`hud dev`](/reference/cli/dev)
-- [`hud push`](/reference/cli/push)
 - [`hud analyze`](/reference/cli/analyze)
-- [Build Environments](/build-environments)
+- [Deploy](/quick-links/deploy)

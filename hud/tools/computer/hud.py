@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import platform
-from typing import Literal
+from typing import Any, Literal
 
 from mcp import ErrorData, McpError
 from mcp.types import INVALID_PARAMS, ContentBlock, TextContent
@@ -13,7 +13,7 @@ from hud.tools.base import BaseTool
 from hud.tools.executors.base import BaseExecutor
 from hud.tools.executors.pyautogui import PyAutoGUIExecutor
 from hud.tools.executors.xdo import XDOExecutor
-from hud.tools.types import ContentResult, ToolError
+from hud.tools.types import ContentResult, Coordinate, ToolError
 
 from .settings import computer_settings
 
@@ -40,6 +40,7 @@ class HudComputerTool(BaseTool):
         name: str | None = None,
         title: str | None = None,
         description: str | None = None,
+        **kwargs: Any,
     ) -> None:
         """
         Initialize the HUD computer tool.
@@ -79,6 +80,7 @@ class HudComputerTool(BaseTool):
             title=title or "Computer Control",
             description=description or "Control computer with mouse, keyboard, and screenshots",
             meta=meta,
+            **kwargs,
         )
 
         # This is the static width and height of the environment screen
@@ -231,7 +233,23 @@ class HudComputerTool(BaseTool):
 
     async def __call__(
         self,
-        action: str = Field(..., description="The action name (click, press, write, move, etc.)"),
+        action: Literal[
+            "click",
+            "press",
+            "keydown",
+            "keyup",
+            "write",
+            "scroll",
+            "move",
+            "wait",
+            "drag",
+            "response",
+            "screenshot",
+            "position",
+            "hold_key",
+            "mouse_down",
+            "mouse_up",
+        ] = Field(..., description="The action name (click, press, write, move, etc.)"),
         # Click parameters
         x: int | None = Field(None, description="X coordinate for click/move/scroll actions"),
         y: int | None = Field(None, description="Y coordinate for click/move/scroll actions"),
@@ -254,8 +272,8 @@ class HudComputerTool(BaseTool):
         offset_x: int | None = Field(None, description="X offset for relative move"),
         offset_y: int | None = Field(None, description="Y offset for relative move"),
         # Drag parameters
-        path: list[tuple[int, int]] | None = Field(
-            None, description="Path for drag actions as list of (x, y) coordinates"
+        path: list[Coordinate] | None = Field(
+            None, description="Path for drag actions as list of {x, y} coordinates"
         ),
         # Wait parameter
         time: int | None = Field(None, description="Time in milliseconds for wait action"),
@@ -332,8 +350,9 @@ class HudComputerTool(BaseTool):
             elif action == "drag":
                 if path is None:
                     raise ToolError("path parameter is required for drag")
-                # Scale path from client space to screen space
-                scaled_path = self._scale_path(path)
+                # Convert Coordinate objects to tuples and scale from client space to screen space
+                path_tuples = [(point.x, point.y) for point in path]
+                scaled_path = self._scale_path(path_tuples)
                 result = await self.executor.drag(
                     path=scaled_path, pattern=pattern, hold_keys=hold_keys
                 )

@@ -19,6 +19,7 @@ import contextlib
 import json
 import logging
 import os
+import sys
 import time
 from pathlib import Path
 from typing import NamedTuple
@@ -49,6 +50,14 @@ class VersionInfo(NamedTuple):
     current: str
     is_outdated: bool
     checked_at: float
+
+
+def _is_in_virtualenv() -> bool:
+    if "uv/tools/" in sys.prefix.replace("\\", "/"):
+        return False
+    if sys.prefix != sys.base_prefix:
+        return True
+    return os.environ.get("VIRTUAL_ENV") is not None
 
 
 def _get_current_version() -> str:
@@ -227,12 +236,17 @@ def display_update_prompt(console: HUDConsole | None = None) -> None:
     try:
         info = check_for_updates()
         if info and info.is_outdated:
+            if _is_in_virtualenv():
+                upgrade_cmd = "uv sync --upgrade-package hud-python"
+            else:
+                upgrade_cmd = "uv tool upgrade hud-python"
+
             # Create update message
             update_msg = (
                 f"🆕 A new version of hud-python is available: "
                 f"[bold cyan]{info.latest}[/bold cyan] "
                 f"(current: [dim]{info.current}[/dim])\n"
-                f"   Run: [bold yellow]uv tool upgrade hud-python[/bold yellow] to update"
+                f"   Run: [bold yellow]{upgrade_cmd}[/bold yellow] to update"
             )
 
             # Display using console info

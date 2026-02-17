@@ -1,1 +1,1 @@
-"""Tests for RL module."""
+"""Tests for rollout collection helpers."""

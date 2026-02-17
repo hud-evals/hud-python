@@ -1,50 +1,27 @@
-"""HUD Telemetry - Tracing and job management for agent execution.
+"""HUD Telemetry - Lightweight telemetry for HUD SDK.
 
-Provides telemetry APIs for tracking agent execution and experiments.
+This module provides:
+- @instrument decorator for recording function calls
+- High-performance span export to HUD API
 
-Standard Usage:
-    >>> import hud
-    >>> with hud.trace("My Task"):
-    ...     do_work()
+Usage:
+    import hud
 
-    >>> with hud.job("My Job") as job:
-    ...     with hud.trace("Task", job_id=job.id):
-    ...         do_work()
+    @hud.instrument
+    async def my_function():
+        ...
 
-High-Concurrency Usage (200+ parallel tasks):
-    >>> import hud
-    >>> async with hud.async_job("Evaluation") as job:
-    ...     async with hud.async_trace("Task", job_id=job.id):
-    ...         await do_async_work()
-
-APIs:
-    - trace(), job() - Standard context managers (for typical usage)
-    - async_trace(), async_job() - Async context managers (for high concurrency)
-    - instrument() - Decorator for instrumenting functions
-    - get_trace() - Retrieve collected traces for replay
-
-Note:
-    Use async_trace/async_job only for high-concurrency scenarios (200+ tasks).
-    The run_dataset() function uses them automatically.
+    # Within an eval context, calls are recorded
+    async with hud.eval(task) as ctx:
+        result = await my_function()
 """
 
-from __future__ import annotations
-
-from .async_context import async_job, async_trace
-from .instrument import instrument
-from .job import Job, create_job, job
-from .replay import clear_trace, get_trace
-from .trace import Trace, trace
+from hud.telemetry.exporter import flush, queue_span, shutdown
+from hud.telemetry.instrument import instrument
 
 __all__ = [
-    "Job",
-    "Trace",
-    "async_job",
-    "async_trace",
-    "clear_trace",
-    "create_job",
-    "get_trace",
+    "flush",
     "instrument",
-    "job",
-    "trace",
+    "queue_span",
+    "shutdown",
 ]

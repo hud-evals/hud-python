@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from fastmcp import FastMCP
 
+from hud.tools.native_types import NativeToolSpec, NativeToolSpecs  # noqa: TC001
 from hud.tools.types import ContentBlock, EvaluationResult
 
 if TYPE_CHECKING:
@@ -13,6 +14,8 @@ if TYPE_CHECKING:
 
     from fastmcp.tools import FunctionTool
     from fastmcp.tools.tool import Tool, ToolResult
+
+    from hud.types import AgentType
 
 # Basic result types for tools
 BaseResult = list[ContentBlock] | EvaluationResult
@@ -33,7 +36,25 @@ class BaseTool(ABC):
     Tools that return miscallaneous content should return a pydantic model such as EvaluationResult.
     Both of these types of tools are processed via structuredContent.
     Any other type of tool will not be processed well by the client.
+
+    NATIVE SPECS:
+    Subclasses can define a `native_specs` class variable to declare framework-specific
+    native tool configurations. These are embedded in the tool's meta field and used by
+    agents to register tools with their provider's native API format.
+
+    Example:
+        class BashTool(BaseTool):
+            native_specs: ClassVar[NativeToolSpecs] = {
+                AgentType.CLAUDE: NativeToolSpec(
+                    api_type="bash_20250124",
+                    api_name="bash",
+                    beta="computer-use-2025-01-24",
+                ),
+            }
     """
+
+    # Class-level native tool specifications (override in subclasses)
+    native_specs: ClassVar[NativeToolSpecs] = {}
 
     def __init__(
         self,
@@ -42,6 +63,7 @@ class BaseTool(ABC):
         title: str | None = None,
         description: str | None = None,
         meta: dict[str, Any] | None = None,
+        native_specs: NativeToolSpecs | None = None,
     ) -> None:
         """Initialize the tool.
 
@@ -55,21 +77,64 @@ class BaseTool(ABC):
             title: Human-readable display name for the tool (auto-generated from class name)
             description: Tool description (auto-generated from docstring if not provided)
             meta: Metadata to include in MCP tool listing (e.g., resolution info)
+            native_specs: Instance-level native specs to merge with class-level specs
         """
         self.env = env
         self.name = name or self.__class__.__name__.lower().replace("tool", "")
         self.title = title or self.__class__.__name__.replace("Tool", "").replace("_", " ").title()
         self.description = description or (self.__doc__.strip() if self.__doc__ else None)
-        self.meta = meta
+        self.meta = meta or {}
         self._callbacks: dict[
             str,
             list[Callable[..., Awaitable[Any]]],
         ] = {}  # {"event_name": [callback_functions]}
 
+        # Merge class-level and instance-level native specs
+        self._native_specs: NativeToolSpecs = {
+            **self.__class__.native_specs,
+            **(native_specs or {}),
+        }
+
+        # Embed native specs in meta for MCP transport
+        if self._native_specs:
+            native_tools_meta: dict[str, Any] = {}
+            for agent_type, spec_or_list in self._native_specs.items():
+                if isinstance(spec_or_list, list):
+                    native_tools_meta[agent_type.value] = [
+                        s.model_dump(exclude_none=True) for s in spec_or_list
+                    ]
+                else:
+                    native_tools_meta[agent_type.value] = spec_or_list.model_dump(exclude_none=True)
+            self.meta["native_tools"] = native_tools_meta
+
         # Expose attributes FastMCP expects when registering an instance directly
         self.__name__ = self.name  # FastMCP uses fn.__name__ if name param omitted
         if self.description:
             self.__doc__ = self.description
+
+    def get_native_spec(
+        self, agent_type: AgentType, model: str | None = None
+    ) -> NativeToolSpec | None:
+        """Get the native tool spec for a specific agent type.
+
+        When the spec is a list, returns the first spec that supports the given model.
+
+        Args:
+            agent_type: The agent type to get the spec for
+            model: Optional model name for list-of-specs resolution
+
+        Returns:
+            NativeToolSpec if one exists for the agent type, None otherwise
+        """
+        spec_or_list = self._native_specs.get(agent_type)
+        if spec_or_list is None:
+            return None
+        if isinstance(spec_or_list, list):
+            for s in spec_or_list:
+                if s.supports_model(model):
+                    return s
+            return None
+        return spec_or_list
 
     @abstractmethod
     async def __call__(self, **kwargs: Any) -> ToolResult:
@@ -94,12 +159,25 @@ class BaseTool(ABC):
 
         This allows clean registration:
             server.add_tool(my_tool.mcp)
+
+        The tool's __call__ is wrapped to trigger before and after callbacks,
+        enabling pre-execution validation and post-execution processing.
         """
         if not hasattr(self, "_mcp_tool"):
+            from functools import wraps
+
             from fastmcp.tools import FunctionTool
 
+            original_call = self.__call__
+
+            @wraps(original_call)
+            async def wrapped_call(**kwargs: Any) -> Any:
+                kwargs = await self._run_before(kwargs)
+                result = await original_call(**kwargs)
+                return await self._run_after(kwargs, result)
+
             self._mcp_tool = FunctionTool.from_function(
-                self,
+                wrapped_call,
                 name=self.name,
                 title=self.title,
                 description=self.description,
@@ -107,36 +185,70 @@ class BaseTool(ABC):
             )
         return self._mcp_tool
 
-    def add_callback(self, event_type: str, callback: Callable[..., Awaitable[Any]]) -> None:
-        """Register a callback function for specific event
+    def before(
+        self, fn: Callable[..., Awaitable[dict[str, Any] | None]]
+    ) -> Callable[..., Awaitable[dict[str, Any] | None]]:
+        """Decorator to run a function before tool execution.
 
-        Args:
-            event_type: (Required) Specific event name to trigger callback
-                        e.g. "after_click", "before_navigate"
-            callback: (Required) Async function to call. Must be defined by `async def f(...)`
+        The callback receives tool kwargs and can:
+        - Return modified kwargs (dict) to change arguments
+        - Return None to proceed with original kwargs
+        - Raise an exception to block execution
+
+        Example:
+            ```python
+            bash = BashTool()
+
+
+            @bash.before
+            async def validate(command: str | None = None, **kwargs):
+                if command and "rm -rf" in command:
+                    raise ToolError("Blocked dangerous command")
+                return None  # Proceed with original args
+            ```
         """
-        if event_type not in self._callbacks:
-            self._callbacks[event_type] = []
-        self._callbacks[event_type].append(callback)
+        self._callbacks.setdefault("before", []).append(fn)
+        return fn
 
-    def remove_callback(self, event_type: str, callback: Callable[..., Awaitable[Any]]) -> None:
-        """Remove a registered callback
-        Args:
-            event_type: (Required) Specific event name to trigger callback
-                        e.g. "after_click", "before_navigate"
-            callback: (Required) Function to remove from callback list.
+    def after(self, fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+        """Decorator to run a function after tool execution.
+
+        The callback receives tool kwargs plus `result=` and can:
+        - Return modified result to change what's returned
+        - Return None to proceed with original result
+
+        Example:
+            ```python
+            bash = BashTool()
+
+
+            @bash.after
+            async def log_execution(command: str | None = None, result=None, **kwargs):
+                logger.info("Executed: %s", command)
+                return None  # Keep original result
+            ```
         """
-        if (event_type in self._callbacks) and (callback in self._callbacks[event_type]):
-            self._callbacks[event_type].remove(callback)
+        self._callbacks.setdefault("after", []).append(fn)
+        return fn
 
-    async def _trigger_callbacks(self, event_type: str, **kwargs: Any) -> None:
-        """Trigger all registered callback functions of an event type"""
-        callback_list = self._callbacks.get(event_type, [])
-        for callback in callback_list:
+    async def _run_before(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Run before callbacks. Can modify kwargs or raise to block."""
+        for callback in self._callbacks.get("before", []):
+            result = await callback(**kwargs)
+            if result is not None:
+                kwargs = result
+        return kwargs
+
+    async def _run_after(self, kwargs: dict[str, Any], result: Any) -> Any:
+        """Run after callbacks. Can modify result."""
+        for callback in self._callbacks.get("after", []):
             try:
-                await callback(**kwargs)
+                modified = await callback(result=result, **kwargs)
+                if modified is not None:
+                    result = modified
             except Exception as e:
-                logger.warning("Callback failed for %s: %s", event_type, e)
+                logger.warning("after callback failed: %s", e)
+        return result
 
 
 # Prefix for internal tool names
@@ -416,8 +528,12 @@ class BaseHub(FastMCP):
                 }
 
     # Override _list_tools to hide internal tools when mounted
-    async def _list_tools(self) -> list[Tool]:
-        """Override _list_tools to hide internal tools when mounted."""
+    async def _list_tools(self, context: Any = None) -> list[Tool]:
+        """Override _list_tools to hide internal tools when mounted.
+
+        Args:
+            context: MiddlewareContext passed by FastMCP (optional for backwards compat)
+        """
         return [
             tool
             for key, tool in self._tool_manager._tools.items()

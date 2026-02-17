@@ -7,12 +7,12 @@ icon: "terminal"
 The HUD CLI provides a complete toolkit for creating, developing, and running MCP environments. Commands are organized into two main workflows:
 
 <CardGroup cols={2}>
-<Card title="Build & Ship" icon="hammer" color="#6b21a8">
-  **Directory-based commands** for creating and sharing environments:
+<Card title="Create & Deploy" icon="rocket" color="#6b21a8">
+  **Directory-based commands** for creating environments:
   - `hud init` — Create new environment
-  - `hud dev` — Develop with hot‑reload
-  - `hud build` — Build and generate lock file
-  - `hud push` — Share to registry
+  - `hud deploy` — Build remotely & deploy to platform
+  - `hud dev` — Local development (hot-reload via `--watch`)
+  - `hud build` — Local build for validation
 </Card>
 
 <Card title="Run & Evaluate" icon="play" color="#0891b2">
@@ -21,7 +21,7 @@ The HUD CLI provides a complete toolkit for creating, developing, and running MC
   - `hud debug` — 5‑phase compliance test
   - `hud run` — Execute (Python module/command/Docker)
   - `hud eval` — Run agents on tasks/datasets
-  - `hud rl` — Train with GRPO on tasks
+  - `hud rft` — Fine-tune models (BETA, invite-only)
 </Card>
 </CardGroup>
 
@@ -29,7 +29,7 @@ The HUD CLI provides a complete toolkit for creating, developing, and running MC
 
 <CodeGroup>
 ```bash uv (Recommended)
-uv tool install hud-python
+uv tool install hud-python@latest --python 3.12
 hud --version
 ```
 
@@ -46,13 +46,18 @@ hud --version
 
 ## Commands
 
-### Building Workflow
+### Create & Deploy
 | Command | Input | Description | Example |
 |---------|-------|-------------|---------|
 | `hud init` | Directory | Create new environment | `hud init my-env` |
-| `hud dev` | Directory | Hot-reload development | `hud dev . --interactive` |
-| `hud build` | Directory | Build image & lock file | `hud build . --tag v1.0` |
-| `hud push` | Directory | Share to registry | `hud push . --tag prod` |
+| `hud deploy` | Directory | Build remotely & deploy to platform | `hud deploy .` |
+| `hud link` | Directory | Link to existing environment | `hud link --id abc123` |
+
+### Local Development
+| Command | Input | Description | Example |
+|---------|-------|-------------|---------|
+| `hud dev` | Directory | Development server (`--watch` for hot-reload) | `hud dev . -w controller` |
+| `hud build` | Directory | Build image locally (for validation) | `hud build . --tag v1.0` |
 
 ### Running Workflow
 | Command | Input | Description | Example |
@@ -61,7 +66,7 @@ hud --version
 | `hud debug` | Image/dir/config | 5‑phase compliance test | `hud debug my-env:latest` |
 | `hud run` | Module/command/image | Execute server (local/remote) | `hud run controller --reload` |
 | `hud eval` | Tasks/dataset | Run agent on tasks | `hud eval tasks.json claude` |
-| `hud rl` | Tasks/dataset | Train with GRPO | `hud rl tasks.json --local` |
+| `hud rft` | Tasks file | Fine-tune models (BETA, invite-only) | `hud rft run tasks.json` |
 
 ### Other Commands
 | Command | Description | Example |
@@ -75,7 +80,7 @@ hud --version
 
 ## Complete Workflows
 
-### Building an Environment
+### Creating & Deploying an Environment
 
 <Steps>
 <Step title="Initialize">
@@ -86,30 +91,31 @@ hud init my-env && cd my-env
 Creates `Dockerfile`, `pyproject.toml`, `controller/` (MCP server), optional `environment/` backend, `tasks.json`.
 </Step>
 
-<Step title="Develop">
-Run with hot-reload and interactive testing:
+<Step title="Deploy">
+Deploy directly to the HUD platform:
 ```bash
-hud dev
+hud deploy
 ```
-Your changes reload automatically. Test tools interactively with arrow keys.
-</Step>
-
-<Step title="Build">
-Create production image and lock file:
-```bash
-hud build
-```
-Generates `hud.lock.yaml` with metadata and labels image for reproducibility.
-</Step>
-
-<Step title="Push">
-Share to Docker and HUD registries:
-```bash
-hud push
-```
-Requires `HUD_API_KEY`. Auto-detects registry from Docker login.
+This builds your environment remotely on HUD's infrastructure and deploys it. Or push to GitHub and connect on [hud.ai](https://hud.ai) for automatic rebuilds.
 </Step>
 </Steps>
+
+### Local Development (Optional)
+
+Use these commands when iterating on your environment locally before deploying:
+
+```bash
+# Development server (no auto-reload by default)
+hud dev
+
+# Enable hot-reload explicitly
+hud dev -w controller -w environment
+
+# Build locally to validate before deploying
+hud build
+```
+
+`hud dev` runs your local development server; add `--watch` (`-w`) to enable automatic reloads. `hud build` creates a local Docker image and generates `hud.lock.yaml` for validation.
 
 ### Running an Environment
 
@@ -267,22 +273,25 @@ export ANCHOR_API_KEY=...
 
 ## Next Steps
 
-### Building Commands
+### Create & Deploy
 <CardGroup cols={2}>
 <Card title="Init Command" icon="sparkles" href="/reference/cli/init">
   Create new environments from scratch
 </Card>
 
+<Card title="Deploy Command" icon="rocket" href="/reference/cli/deploy">
+  Build remotely and deploy to HUD platform
+</Card>
+</CardGroup>
+
+### Local Development
+<CardGroup cols={2}>
 <Card title="Dev Command" icon="code" href="/reference/cli/dev">
-  Develop with hot-reload and interactive testing
+  Develop locally with optional hot-reload and interactive testing
 </Card>
 
 <Card title="Build Command" icon="hammer" href="/reference/cli/build">
-  Build images and generate lock files
-</Card>
-
-<Card title="Push Command" icon="upload" href="/reference/cli/push">
-  Share environments to registry
+  Build images locally for validation
 </Card>
 </CardGroup>
 

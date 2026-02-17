@@ -67,7 +67,7 @@ async def test_collect_rollouts_repeats_tasks_and_uses_split() -> None:
         records = await collect_rollouts(
             name="test-rollout",
             source="hud-evals/demo",
-            agent_class=cast("Any", object),
+            agent_type="claude",
             group_size=2,
             split="test",
             max_steps=3,
@@ -77,7 +77,7 @@ async def test_collect_rollouts_repeats_tasks_and_uses_split() -> None:
         )
 
     mock_load_tasks.assert_called_once_with("hud-evals/demo:test", raw=True)
-    called_dataset = mock_run_dataset.call_args.kwargs["dataset"]
+    called_dataset = mock_run_dataset.call_args.args[0]
     assert len(called_dataset) == 2
     assert called_dataset[0]["prompt"] == "Task prompt"
     assert len(records) == 2

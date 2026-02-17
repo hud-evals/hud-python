@@ -23,7 +23,7 @@ def test_collect_command_happy_path(
     mock_write_rollouts,
     tmp_path: Path,
 ) -> None:
-    mock_resolve_agent.return_value = (object, {"model": "x"})
+    mock_resolve_agent.return_value = (AgentType.CLAUDE, {"model": "x"})
     mock_collect_rollouts.return_value = [
         RolloutRecord(
             rollout_id="rollout_1",
@@ -41,12 +41,12 @@ def test_collect_command_happy_path(
         agent=AgentType.CLAUDE,
         model=None,
         allowed_tools="act,observe",
+        disallowed_tools=None,
         max_concurrent=5,
         max_steps=7,
         group_size=2,
         split="train",
         verbose=False,
-        vllm_base_url=None,
     )
 
     mock_resolve_agent.assert_called_once()

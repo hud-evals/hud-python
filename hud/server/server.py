@@ -16,9 +16,10 @@ from fastmcp.server.server import FastMCP, Transport
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from hud.cli.eval import run_full_dataset
+from hud.datasets import run_dataset
+from hud.eval.task import Task
 from hud.server.low_level import LowLevelServerWithInit
-from hud.types import Task
+from hud.types import LegacyTask
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
@@ -34,10 +35,47 @@ _sigterm_received = False
 
 
 def _run_with_sigterm(coro_fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
-    """Run *coro_fn* via anyio.run() and cancel on SIGTERM or SIGINT (POSIX)."""
+    """Run *coro_fn* via anyio.run() and cancel on SIGTERM or SIGINT (POSIX).
+
+    Uses SYNCHRONOUS signal handlers (signal.signal) to guarantee _sigterm_received
+    is set even when the event loop is blocked on I/O (e.g., stdin for stdio transport).
+
+    The async handlers (loop.add_signal_handler) are still registered to trigger
+    graceful cancellation, but the sync handlers are the primary mechanism for
+    setting the shutdown flag.
+    """
     global _sigterm_received
 
     sys.stderr.flush()
+
+    # Track original handlers for cleanup
+    _original_sigterm: Any = None
+    _original_sigint: Any = None
+
+    # Register SYNCHRONOUS signal handlers BEFORE starting the event loop.
+    # This is critical: loop.add_signal_handler only works when the event loop
+    # is actively polling, but with stdio transport the loop is often blocked
+    # on stdin reads. The sync handler fires immediately when the signal arrives.
+    if sys.platform != "win32" and os.getenv("FASTMCP_DISABLE_SIGTERM_HANDLER") != "1":
+
+        def _sync_sigterm_handler(signum: Any, frame: Any) -> None:
+            global _sigterm_received
+            _sigterm_received = True
+            logger.info("SIGTERM received (sync handler), setting shutdown flag")
+            sys.stderr.flush()
+
+        def _sync_sigint_handler(signum: Any, frame: Any) -> None:
+            # SIGINT is for hot-reload, don't set _sigterm_received
+            logger.info("SIGINT received (sync handler)")
+            sys.stderr.flush()
+
+        try:
+            _original_sigterm = signal.signal(signal.SIGTERM, _sync_sigterm_handler)
+            _original_sigint = signal.signal(signal.SIGINT, _sync_sigint_handler)
+            logger.info("Synchronous signal handlers registered")
+            sys.stderr.flush()
+        except (ValueError, OSError) as e:
+            logger.warning("Could not register synchronous signal handlers: %s", e)
 
     # Check if we're already in an event loop
     try:
@@ -48,17 +86,8 @@ def _run_with_sigterm(coro_fn: Callable[..., Any], *args: Any, **kwargs: Any) ->
             "Consider using await hub.run_async() instead of hub.run() in async contexts."
         )
 
-        task = loop.create_task(coro_fn(*args, **kwargs))
-
-        # Try to handle SIGTERM if possible
-        if sys.platform != "win32":
-
-            def handle_sigterm(signum: Any, frame: Any) -> None:
-                logger.info("SIGTERM received in async context, cancelling task...")
-                loop.call_soon_threadsafe(task.cancel)
-
-            signal.signal(signal.SIGTERM, handle_sigterm)
-
+        loop.create_task(coro_fn(*args, **kwargs))  # noqa: RUF006
+        # Sync handlers are already registered above, they will set _sigterm_received
         return
 
     except RuntimeError:
@@ -70,32 +99,33 @@ def _run_with_sigterm(coro_fn: Callable[..., Any], *args: Any, **kwargs: Any) ->
             loop = asyncio.get_running_loop()
             stop_evt = asyncio.Event()
 
-            # Handle SIGTERM for production shutdown
-            def handle_sigterm() -> None:
+            # Async handlers for graceful cancellation (in addition to sync handlers)
+            # These trigger the stop_evt to cancel the task group cleanly
+            def handle_sigterm_async() -> None:
                 global _sigterm_received
-                _sigterm_received = True
-                logger.info("Received SIGTERM signal, setting shutdown flag")
+                _sigterm_received = True  # Redundant with sync handler, but safe
+                logger.info("SIGTERM received (async handler), triggering shutdown")
+                sys.stderr.flush()
                 stop_evt.set()
 
-            # Handle SIGINT for hot-reload
-            def handle_sigint() -> None:
-                logger.info("Received SIGINT signal, triggering hot reload...")
-                # Don't set _sigterm_received for SIGINT
+            def handle_sigint_async() -> None:
+                logger.info("SIGINT received (async handler), triggering hot reload")
+                sys.stderr.flush()
                 stop_evt.set()
 
-            # Handle both SIGTERM and SIGINT for graceful shutdown
-            # In Docker containers, we always want to register our handlers
+            # Register async handlers - these may or may not fire depending on
+            # event loop state, but the sync handlers guarantee the flag is set
             try:
-                loop.add_signal_handler(signal.SIGTERM, handle_sigterm)
-                logger.info("SIGTERM handler registered")
+                loop.add_signal_handler(signal.SIGTERM, handle_sigterm_async)
+                logger.info("SIGTERM async handler registered")
             except (ValueError, OSError) as e:
-                logger.warning("Could not register SIGTERM handler: %s", e)
+                logger.warning("Could not register SIGTERM async handler: %s", e)
 
             try:
-                loop.add_signal_handler(signal.SIGINT, handle_sigint)
-                logger.info("SIGINT handler registered")
+                loop.add_signal_handler(signal.SIGINT, handle_sigint_async)
+                logger.info("SIGINT async handler registered")
             except (ValueError, OSError) as e:
-                logger.warning("Could not register SIGINT handler: %s", e)
+                logger.warning("Could not register SIGINT async handler: %s", e)
 
         try:
             async with anyio.create_task_group() as tg:
@@ -108,14 +138,27 @@ def _run_with_sigterm(coro_fn: Callable[..., Any], *args: Any, **kwargs: Any) ->
                         if stop_evt is not None:
                             await stop_evt.wait()
                         logger.info("Shutdown signal received, initiating graceful shutdown...")
+                        sys.stderr.flush()
                         tg.cancel_scope.cancel()
 
                     tg.start_soon(_watch)
         except* asyncio.CancelledError:
             # This ensures the task group cleans up properly
             logger.info("Task group cancelled, cleaning up...")
+            sys.stderr.flush()
 
-    anyio.run(_runner)
+    try:
+        anyio.run(_runner)
+    finally:
+        # Restore original signal handlers
+        if sys.platform != "win32":
+            try:
+                if _original_sigterm is not None:
+                    signal.signal(signal.SIGTERM, _original_sigterm)
+                if _original_sigint is not None:
+                    signal.signal(signal.SIGINT, _original_sigint)
+            except (ValueError, OSError):
+                pass
 
 
 class MCPServer(FastMCP):
@@ -242,6 +285,7 @@ class MCPServer(FastMCP):
         old_notification_handlers = self._mcp_server.notification_handlers
 
         self._mcp_server = LowLevelServerWithInit(
+            self,  # Pass FastMCP instance as required by parent class
             name=self.name,
             version=self.version,
             instructions=self.instructions,
@@ -486,7 +530,6 @@ class MCPServer(FastMCP):
         for key, prompt in router._prompt_manager._prompts.items():
             new_key = f"{prefix}_{key}" if prefix else key
             self._prompt_manager._prompts[new_key] = prompt
-        # await self.import_server(hidden_router, prefix=None, **kwargs)
 
     def _get_docker_logs(
         self,
@@ -594,9 +637,9 @@ class MCPServer(FastMCP):
                     # Recursively serialize MCP objects
                     def serialize_obj(obj: Any) -> Any:
                         """Recursively serialize MCP objects to JSON-compatible format."""
-                        if obj is None or isinstance(obj, (str, int, float, bool)):
+                        if obj is None or isinstance(obj, str | int | float | bool):
                             return obj
-                        if isinstance(obj, (list, tuple)):
+                        if isinstance(obj, list | tuple):
                             return [serialize_obj(item) for item in obj]
                         if isinstance(obj, dict):
                             return {k: serialize_obj(v) for k, v in obj.items()}
@@ -753,39 +796,24 @@ class MCPServer(FastMCP):
                         )
 
                     # Add MCP config to each task and validate basic structure
-                    tasks = []
+                    task_objects: list[LegacyTask] = []
                     for task_data in eval_request.tasks:
                         task_data["mcp_config"] = docker_config
-                        tasks.append(Task.model_validate(task_data).model_dump())
+                        task_objects.append(LegacyTask.model_validate(task_data))
 
-                    # Save tasks to temporary file
-                    import tempfile
-
-                    with tempfile.NamedTemporaryFile(
-                        mode="w", prefix="hud-eval-", suffix=".json", delete=False
-                    ) as f:
-                        json.dump(tasks, f)
-                        task_file = f.name
+                    agent_params: dict[str, Any] = {}
+                    if eval_request.model:
+                        agent_params["checkpoint_name"] = eval_request.model
 
                     # Fire and forget - launch evaluation in background
                     async def run_eval_background() -> None:
-                        try:
-                            await run_full_dataset(
-                                task_file,
-                                agent_type=agent_type,
-                                model=eval_request.model,
-                                max_steps=eval_request.max_steps,
-                                verbose=eval_request.verbose,
-                                group_size=eval_request.group_size,
-                            )
-                        except Exception as e:
-                            raise e
-                        finally:
-                            # Clean up temp file
-                            import os
-
-                            if os.path.exists(task_file):
-                                os.unlink(task_file)
+                        await run_dataset(
+                            [Task.from_v4(task) for task in task_objects],
+                            agent_type=agent_type,
+                            agent_params=agent_params,
+                            max_steps=eval_request.max_steps,
+                            group_size=eval_request.group_size,
+                        )
 
                     # Start the evaluation in the background (fire and forget)
                     asyncio.create_task(run_eval_background())  # noqa: RUF006
@@ -793,7 +821,7 @@ class MCPServer(FastMCP):
                     # Return immediately
                     response_data = {
                         "status": "started",
-                        "message": f"Evaluation launched with {len(tasks)} task(s)",
+                        "message": f"Evaluation launched with {len(task_objects)} task(s)",
                         "agent": eval_request.agent,
                         "model": eval_request.model,
                         "max_steps": eval_request.max_steps,
@@ -803,7 +831,9 @@ class MCPServer(FastMCP):
                     # Include group_size if > 1
                     if eval_request.group_size > 1:
                         response_data["group_size"] = eval_request.group_size
-                        response_data["total_episodes"] = len(tasks) * eval_request.group_size
+                        response_data["total_episodes"] = (
+                            len(task_objects) * eval_request.group_size
+                        )
 
                     return JSONResponse(response_data)
 

@@ -12,7 +12,6 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.tree import Tree
 
-from hud.clients import MCPClient
 from hud.utils.hud_console import HUDConsole
 
 console = Console()
@@ -45,15 +44,21 @@ async def analyze_environment(docker_cmd: list[str], output_format: str, verbose
     ) as progress:
         task = progress.add_task("Initializing MCP client...", total=None)
 
-        client = MCPClient(mcp_config=mcp_config, verbose=verbose, auto_trace=False)
+        from fastmcp import Client as FastMCPClient
+
+        from hud.cli.utils.mcp import analyze_environment as mcp_analyze
+
+        client = FastMCPClient(transport=mcp_config)
+        # Extract server name for display (first key in mcp_config)
+        server_name = next(iter(mcp_config.keys()), None)
 
         try:
-            await client.initialize()
+            await client.__aenter__()
             progress.update(task, description="[green]✓ Client initialized[/green]")
 
             # Analyze environment
             progress.update(task, description="Analyzing environment...")
-            analysis = await client.analyze_environment()
+            analysis = await mcp_analyze(client, verbose, server_name=server_name)
             progress.update(task, description="[green]✓ Analysis complete[/green]")
 
         except Exception as e:
@@ -71,7 +76,8 @@ async def analyze_environment(docker_cmd: list[str], output_format: str, verbose
 
             return
         finally:
-            await client.shutdown()
+            if client.is_connected():
+                await client.close()
 
     # Display results based on format
     if output_format == "json":
@@ -93,11 +99,11 @@ def display_interactive(analysis: dict) -> None:
     # Check if this is a live analysis (has metadata) or metadata-only analysis
     if "metadata" in analysis:
         # Live analysis format
-        for server in analysis["metadata"]["servers"]:
+        for server in analysis["metadata"].get("servers", []):
             meta_table.add_row("Server", f"[green]{server}[/green]")
         meta_table.add_row(
             "Initialized",
-            "[green]✓[/green]" if analysis["metadata"]["initialized"] else "[red]✗[/red]",
+            "[green]✓[/green]" if analysis["metadata"].get("initialized") else "[red]✗[/red]",
         )
     else:
         # Metadata-only format
@@ -141,8 +147,8 @@ def display_interactive(analysis: dict) -> None:
                     tool_node.add(f"[bright_black]{tool['description']}[/bright_black]")
 
                 # Show input schema if verbose
-                if analysis.get("verbose") and tool.get("input_schema"):
-                    schema_str = json.dumps(tool["input_schema"], indent=2)
+                if analysis.get("verbose") and tool.get("inputSchema"):
+                    schema_str = json.dumps(tool["inputSchema"], indent=2)
                     syntax = Syntax(schema_str, "json", theme="monokai", line_numbers=False)
                     tool_node.add(syntax)
 
@@ -167,6 +173,28 @@ def display_interactive(analysis: dict) -> None:
                 tool_node.add(syntax)
 
     console.print(tools_tree)
+
+    # Scenarios (Environment scripts exposed as prompt+resource)
+    if analysis.get("scenarios"):
+        hud_console.section_title("🎬 Scenarios")
+        scenarios_table = Table()
+        scenarios_table.add_column("Scenario", style="bright_white")
+        scenarios_table.add_column("Env", style="bright_black")
+        scenarios_table.add_column("Setup/Eval", style="bright_black")
+
+        for s in analysis["scenarios"][:20]:
+            setup = "✓" if s.get("has_setup_prompt") else "✗"
+            eval_ = "✓" if s.get("has_evaluate_resource") else "✗"
+            scenarios_table.add_row(
+                str(s.get("name", "")),
+                str(s.get("env", "")),
+                f"setup {setup} / eval {eval_}",
+            )
+
+        console.print(scenarios_table)
+        if len(analysis["scenarios"]) > 20:
+            remaining = len(analysis["scenarios"]) - 20
+            console.print(f"[bright_black]... and {remaining} more scenarios[/bright_black]")
 
     # Resources
     if analysis["resources"]:
@@ -230,8 +258,10 @@ def display_markdown(analysis: dict) -> None:
 
     # Check if this is live analysis or metadata-only
     if "metadata" in analysis:
-        md.append(f"- **Servers**: {', '.join(analysis['metadata']['servers'])}")
-        md.append(f"- **Initialized**: {'✓' if analysis['metadata']['initialized'] else '✗'}")
+        servers = analysis["metadata"].get("servers", [])
+        if servers:
+            md.append(f"- **Servers**: {', '.join(servers)}")
+        md.append(f"- **Initialized**: {'✓' if analysis['metadata'].get('initialized') else '✗'}")
     else:
         # Metadata-only format
         if "image" in analysis:
@@ -281,6 +311,17 @@ def display_markdown(analysis: dict) -> None:
             name = resource.get("name", "")
             mime_type = resource.get("mime_type", "")
             md.extend([f"| {uri} | {name} | {mime_type} |"])
+        md.append("")
+
+    # Scenarios
+    if analysis.get("scenarios"):
+        md.append("## Scenarios\n")
+        for s in analysis["scenarios"]:
+            name = s.get("name", "")
+            env = s.get("env", "")
+            setup = "✓" if s.get("has_setup_prompt") else "✗"
+            eval_ = "✓" if s.get("has_evaluate_resource") else "✗"
+            md.append(f"- **{name}** ({env}) — setup {setup} / eval {eval_}")
         md.append("")
 
     # Telemetry (only for live analysis)
@@ -344,22 +385,27 @@ async def _analyze_with_config(
     ) as progress:
         task = progress.add_task("Initializing MCP client...", total=None)
 
-        client = MCPClient(mcp_config=mcp_config, verbose=verbose)
+        from fastmcp import Client as FastMCPClient
+
+        from hud.cli.utils.mcp import analyze_environment as mcp_analyze
+
+        client = FastMCPClient(transport=mcp_config)
 
         try:
-            await client.initialize()
+            await client.__aenter__()
             progress.update(task, description="[green]✓ Client initialized[/green]")
 
             # Analyze environment
             progress.update(task, description="Analyzing environment...")
-            analysis = await client.analyze_environment()
+            analysis = await mcp_analyze(client, verbose)
             progress.update(task, description="[green]✓ Analysis complete[/green]")
 
         except Exception as e:
             progress.update(task, description=f"[red]✗ Failed: {e}[/red]")
             return
         finally:
-            await client.shutdown()
+            if client.is_connected():
+                await client.close()
 
     # Display results based on format
     if output_format == "json":

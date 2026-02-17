@@ -14,16 +14,17 @@ import typer
 
 from hud.utils.hud_console import HUDConsole
 
-# Presets mapping to environment folders in public SDK repo
+# Presets mapping to public GitHub repositories under hud-evals org
 GITHUB_OWNER = "hud-evals"
-GITHUB_REPO = "hud-python"
 GITHUB_BRANCH = "main"
 
 PRESET_MAP: dict[str, str | None] = {
-    "blank": "blank",
-    "deep-research": "deepresearch",
-    "browser": "browser",
-    "rubrics": "rubrics",
+    "blank": "hud-blank",
+    "deep-research": "hud-deepresearch",
+    "browser": "hud-browser",
+    "rubrics": "hud-rubrics",
+    "verilog-coding-template": "verilog-coding-template",
+    "data-science-template": "data-science-template",
 }
 
 SKIP_DIR_NAMES = {"node_modules", "__pycache__", "dist", "build", ".next", ".git"}
@@ -85,33 +86,40 @@ def _replace_placeholders(target_dir: Path, env_name: str) -> list[str]:
     return modified_files
 
 
-def _prompt_for_preset() -> str:
-    """Ask the user to choose a preset when not provided."""
+def _prompt_for_preset() -> str | None:
+    """Ask the user to choose a preset when not provided.
+
+    Returns None if the user cancels the selection.
+    """
     try:
         choices = [
             {"name": "blank", "message": "blank"},
-            {"name": "deep-research", "message": "deep-research"},
             {"name": "browser", "message": "browser"},
+            {"name": "deep-research", "message": "deep-research"},
             {"name": "rubrics", "message": "rubrics"},
+            {"name": "verilog-coding-template", "message": "verilog-coding-template"},
+            {"name": "data-science-template", "message": "data-science-template"},
         ]
         display_choices = [c["message"] for c in choices]
         selected = questionary.select(
             "Choose a preset", choices=display_choices, default=display_choices[0]
         ).ask()
         if not selected:
-            return "blank"
+            return None  # User cancelled
         for c in choices:
             if c["message"] == selected:
                 return c["name"]
         return "blank"
+    except KeyboardInterrupt:
+        return None  # User pressed Ctrl+C
     except Exception:
         return "blank"
 
 
-def _download_tarball_subdir(
-    owner: str, repo: str, ref: str, subdir: str, dest_dir: Path, files_created: list[str]
+def _download_tarball_repo(
+    owner: str, repo: str, ref: str, dest_dir: Path, files_created: list[str]
 ) -> None:
-    """Download a GitHub tarball and extract only a subdirectory."""
+    """Download a GitHub tarball and extract the entire repository."""
     tarball_url = f"https://codeload.github.com/{owner}/{repo}/tar.gz/{ref}"
 
     token = os.getenv("GITHUB_TOKEN")
@@ -140,16 +148,17 @@ def _download_tarball_subdir(
             if not members:
                 return
             top = members[0].name.split("/", 1)[0]
-            target_prefix = f"{top}/environments/{subdir.strip('/')}"
 
             for member in members:
                 name = member.name
-                if not (name == target_prefix or name.startswith(target_prefix + "/")):
+                if name == top:
                     continue
 
-                rel_path = name[len(target_prefix) :].lstrip("/")
+                if not name.startswith(top + "/"):
+                    continue
+
+                rel_path = name[len(top) + 1 :]
                 if not rel_path:
-                    dest_dir.mkdir(parents=True, exist_ok=True)
                     continue
 
                 out_path = (dest_dir / rel_path).resolve()
@@ -183,7 +192,14 @@ def create_environment(
     hud_console = HUDConsole()
 
     # Choose preset
-    preset_normalized = (preset or "").strip().lower() if preset else _prompt_for_preset()
+    if preset:
+        preset_normalized = preset.strip().lower()
+    else:
+        preset_result = _prompt_for_preset()
+        if preset_result is None:
+            # User cancelled the selection
+            raise typer.Exit(0)
+        preset_normalized = preset_result
 
     # If no name is provided, use the preset name as the environment name
     if name is None:
@@ -194,9 +210,9 @@ def create_environment(
     target_dir = Path.cwd() / name if directory == "." else Path(directory) / name
 
     if preset_normalized not in PRESET_MAP:
+        available = ", ".join(sorted(PRESET_MAP.keys()))
         hud_console.warning(
-            f"Unknown preset '{preset_normalized}', defaulting to 'blank' "
-            "(available: blank, deep-research, browser, rubrics)"
+            f"Unknown preset '{preset_normalized}', defaulting to 'blank' (available: {available})"
         )
         preset_normalized = "blank"
 
@@ -210,17 +226,14 @@ def create_environment(
             hud_console.warning(f"Overwriting existing files in {target_dir}")
 
     # Download preset from GitHub
-    env_folder = PRESET_MAP[preset_normalized]
-    if env_folder is None:
-        hud_console.error("Internal error: preset mapping missing folder name")
+    repo_name = PRESET_MAP[preset_normalized]
+    if repo_name is None:
+        hud_console.error("Internal error: preset mapping missing repo name")
         raise typer.Exit(1)
 
     hud_console.header(f"Initializing HUD Environment: {name} (preset: {preset_normalized})")
-    hud_console.section_title("Downloading template from public SDK")
-    source_url = (
-        f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/tree/"
-        f"{GITHUB_BRANCH}/environments/{env_folder}"
-    )
+    hud_console.section_title("Downloading template from GitHub")
+    source_url = f"https://github.com/{GITHUB_OWNER}/{repo_name}"
     hud_console.info("Source: " + source_url)
 
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -228,11 +241,10 @@ def create_environment(
     started = time.time()
     files_created_dl: list[str] = []
     try:
-        _download_tarball_subdir(
+        _download_tarball_repo(
             owner=GITHUB_OWNER,
-            repo=GITHUB_REPO,
+            repo=repo_name,
             ref=GITHUB_BRANCH,
-            subdir=env_folder,
             dest_dir=target_dir,
             files_created=files_created_dl,
         )

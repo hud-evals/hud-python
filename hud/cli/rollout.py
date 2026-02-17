@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import typer
 
 from hud.rl.collector import collect_rollouts, write_rollouts_jsonl
 from hud.types import AgentType
 from hud.utils.hud_console import HUDConsole
-
-if TYPE_CHECKING:
-    from hud.agents import MCPAgent
 
 rollout_app = typer.Typer(help="Collect rollout trajectories for RL/RFT workflows.")
 hud_console = HUDConsole()
@@ -24,67 +21,26 @@ def _resolve_agent(
     agent: AgentType,
     model: str | None,
     allowed_tools: list[str] | None,
+    disallowed_tools: list[str] | None,
     verbose: bool,
-    vllm_base_url: str | None,
-) -> tuple[type[MCPAgent], dict[str, Any]]:
-    if agent == AgentType.INTEGRATION_TEST:
-        from hud.agents.misc.integration_test_agent import IntegrationTestRunner
-
-        config: dict[str, Any] = {"verbose": verbose}
-        if allowed_tools:
-            config["allowed_tools"] = allowed_tools
-        return IntegrationTestRunner, config
-
-    if agent == AgentType.VLLM:
-        from hud.agents.openai_chat_generic import GenericOpenAIChatAgent
-
-        from .eval import _build_vllm_config
-
-        return GenericOpenAIChatAgent, _build_vllm_config(
-            vllm_base_url=vllm_base_url,
-            model=model,
-            allowed_tools=allowed_tools,
-            verbose=verbose,
-        )
-
-    if agent == AgentType.OPENAI:
-        from hud.agents import OperatorAgent
-
-        config = {"verbose": verbose, "validate_api_key": False}
-        if allowed_tools:
-            config["allowed_tools"] = allowed_tools
-        return OperatorAgent, config
-
-    if agent == AgentType.GEMINI:
-        from hud.agents import GeminiAgent
-
-        config = {
-            "model": model or "gemini-2.5-computer-use-preview-10-2025",
-            "verbose": verbose,
-            "validate_api_key": False,
-        }
-        if allowed_tools:
-            config["allowed_tools"] = allowed_tools
-        return GeminiAgent, config
-
-    if agent == AgentType.LITELLM:
-        from hud.agents.lite_llm import LiteAgent
-
-        config = {"model_name": model or "gpt-4o-mini", "verbose": verbose}
-        if allowed_tools:
-            config["allowed_tools"] = allowed_tools
-        return LiteAgent, config
-
-    from hud.agents import ClaudeAgent
-
-    config = {
-        "model": model or "claude-sonnet-4-20250514",
-        "verbose": verbose,
-        "validate_api_key": False,
+) -> tuple[AgentType, dict[str, Any]]:
+    config: dict[str, Any] = {"verbose": verbose, "validate_api_key": False}
+    model_defaults: dict[AgentType, str] = {
+        AgentType.CLAUDE: "claude-sonnet-4-5",
+        AgentType.OPENAI: "gpt-5.1",
+        AgentType.OPERATOR: "computer-use-preview",
+        AgentType.GEMINI: "gemini-3-pro-preview",
+        AgentType.GEMINI_CUA: "gemini-2.5-computer-use-preview-10-2025",
+        AgentType.OPENAI_COMPATIBLE: "gpt-5-mini",
+        AgentType.INTEGRATION_TEST: "integration-test",
     }
+    if agent != AgentType.INTEGRATION_TEST:
+        config["model"] = model or model_defaults[agent]
     if allowed_tools:
         config["allowed_tools"] = allowed_tools
-    return ClaudeAgent, config
+    if disallowed_tools:
+        config["disallowed_tools"] = disallowed_tools
+    return agent, config
 
 
 @rollout_app.command("collect")
@@ -117,6 +73,11 @@ def collect_command(
         "--allowed-tools",
         help="Comma-separated list of allowed tools.",
     ),
+    disallowed_tools: str | None = typer.Option(
+        None,
+        "--disallowed-tools",
+        help="Comma-separated list of disallowed tools.",
+    ),
     max_concurrent: int = typer.Option(
         30,
         "--max-concurrent",
@@ -146,11 +107,6 @@ def collect_command(
         "-v",
         help="Enable verbose agent logs.",
     ),
-    vllm_base_url: str | None = typer.Option(
-        None,
-        "--vllm-base-url",
-        help="Base URL for vLLM server (used with --agent vllm).",
-    ),
 ) -> None:
     """Collect and export rollout trajectories."""
     if source is None:
@@ -170,12 +126,17 @@ def collect_command(
         if allowed_tools
         else None
     )
-    agent_class, agent_config = _resolve_agent(
+    disallowed_tools_list = (
+        [tool.strip() for tool in disallowed_tools.split(",") if tool.strip()]
+        if disallowed_tools
+        else None
+    )
+    agent_type, agent_params = _resolve_agent(
         agent=agent,
         model=model,
         allowed_tools=allowed_tools_list,
+        disallowed_tools=disallowed_tools_list,
         verbose=verbose,
-        vllm_base_url=vllm_base_url,
     )
 
     run_name = f"Rollout Collection: {Path(source).name if Path(source).exists() else source}"
@@ -183,8 +144,8 @@ def collect_command(
         collect_rollouts(
             name=run_name,
             source=source,
-            agent_class=agent_class,
-            agent_config=agent_config,
+            agent_type=agent_type,
+            agent_params=agent_params,
             max_concurrent=max_concurrent,
             max_steps=max_steps,
             split=split,

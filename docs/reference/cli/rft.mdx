@@ -1,0 +1,135 @@
+---
+title: "hud rft"
+description: "Fine-Tuning commands (invite-only)"
+icon: "brain-circuit"
+---
+
+<Warning>
+RFT is currently in BETA. Features and APIs may change.
+</Warning>
+
+<Info>
+**Access Required**: RFT is available by invite only. Contact [founders@hud.ai](mailto:founders@hud.ai) to request access.
+</Info>
+
+The `hud rft` command group provides tools for fine-tuning models on HUD tasks.
+
+## Subcommands
+
+### `hud rft run`
+
+Launch a new RFT training job.
+
+```bash
+hud rft run [TASKS_FILE] [OPTIONS]
+```
+
+#### Arguments
+
+<ParamField path="tasks_file" type="string" required>
+  Path to tasks JSON/JSONL file
+</ParamField>
+
+#### Options
+
+<ParamField path="--provider" type="string" default="openai">
+  Provider to use for fine-tuning
+</ParamField>
+
+<ParamField path="--reasoning-effort" type="string" default="medium">
+  Reasoning effort level: low, medium, or high
+</ParamField>
+
+<ParamField path="--verbose" type="boolean" default="false">
+  Enable verbose output. Short: `-v`
+</ParamField>
+
+<ParamField path="--yes" type="boolean" default="false">
+  Auto-accept all prompts. Short: `-y`
+</ParamField>
+
+#### Example
+
+```bash
+# Launch RFT with default settings
+hud rft run tasks.json
+
+# Launch with high reasoning effort and auto-accept
+hud rft run tasks.json --reasoning-effort high --yes
+
+# Verbose mode for debugging
+hud rft run tasks.json --verbose
+```
+
+### `hud rft status`
+
+Check the status of an RFT training job.
+
+```bash
+hud rft status [MODEL_ID] [OPTIONS]
+```
+
+#### Arguments
+
+<ParamField path="model_id" type="string" required>
+  Model ID or job ID to check status for
+</ParamField>
+
+#### Options
+
+<ParamField path="--verbose" type="boolean" default="false">
+  Show full status details. Short: `-v`
+</ParamField>
+
+#### Example
+
+```bash
+# Check basic status
+hud rft status f5f050a3-99c1-4339-b819-ccb1325f79d8
+
+# View detailed status information
+hud rft status f5f050a3-99c1-4339-b819-ccb1325f79d8 --verbose
+```
+
+## Workflow Example
+
+1. **Prepare tasks**:
+   ```bash
+   hud get hud-evals/SheetBench-50
+   ```
+
+2. **Launch training**:
+   ```bash
+   hud rft run SheetBench-50.json
+   ```
+
+3. **Monitor progress**:
+   ```bash
+   hud rft status <model_id_from_launch>
+   ```
+
+4. **Use fine-tuned model**:
+   ```python
+   from openai import OpenAI
+   
+   client = OpenAI(
+       base_url="https://inference.hud.ai",
+       api_key=os.getenv("HUD_API_KEY")
+   )
+   
+   response = client.chat.completions.create(
+       model="<your_fine_tuned_model_id>",
+       messages=[{"role": "user", "content": "..."}]
+   )
+   ```
+
+## Requirements
+
+- Minimum 10 tasks in dataset
+- Tasks must have remote MCP configurations
+- No vision support in environment
+- Valid HUD_API_KEY
+
+## See Also
+
+- [Beta RFT Documentation](/beta/rft) - Detailed guide and examples

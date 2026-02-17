@@ -3,370 +3,462 @@
 from __future__ import annotations
 
 import asyncio
-import fnmatch
 import json
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import mcp.types as types
 
-from hud.agents.utils import log_agent_metadata_to_status, log_task_config_to_current_trace
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult, Trace
+from hud.tools.native_types import NativeToolSpec
+from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
 from hud.utils.hud_console import HUDConsole
-from hud.utils.mcp import MCPConfigPatch, patch_mcp_config, setup_hud_telemetry
+
+from .types import BaseCreateParams
 
 if TYPE_CHECKING:
-    from hud.clients.base import AgentMCPClient
-    from hud.datasets import Task
-
-    from .misc import ResponseAgent
+    from hud.environment import Environment
+    from hud.eval.context import EvalContext
 
 
 logger = logging.getLogger(__name__)
 
-GLOBAL_SYSTEM_PROMPT = "You are an assistant that can use tools to help the user. You will be given a task and you will need to use the tools to complete the task."  # noqa: E501
+
+@dataclass
+class CategorizedTools:
+    """Result of categorizing tools by native spec availability.
+
+    Used by agents to efficiently process tools with shared logic for
+    role-based mutual exclusion.
+    """
+
+    native: list[tuple[types.Tool, NativeToolSpec]] = field(default_factory=list)
+    """Tools with native specs for this agent (tool, spec) pairs."""
+
+    hosted: list[tuple[types.Tool, NativeToolSpec]] = field(default_factory=list)
+    """Hosted tools with native specs for this agent (tool, spec) pairs."""
+
+    generic: list[types.Tool] = field(default_factory=list)
+    """Tools without native specs that aren't role-blocked."""
+
+    claimed_roles: set[str] = field(default_factory=set)
+    """Roles claimed by native tools."""
+
+    skipped: list[tuple[types.Tool, str]] = field(default_factory=list)
+    """Tools skipped due to role conflicts (tool, reason) pairs."""
 
 
 class MCPAgent(ABC):
     """
     Base class for MCP-enabled agents.
 
-    Provides common behavior for agents that interact with MCP servers, including:
-    - Client management: accepts an `AgentMCPClient` or auto-creates one at
-      runtime when `run()` is called with a `Task` that includes `mcp_config`.
-    - Tool lifecycle: discovery, filtering (`allowed_tools`, `disallowed_tools`),
-      and automatic marking of lifecycle tools (setup/evaluate) from a `Task`.
-    - Messaging: system prompt handling, optional inclusion of setup output on
-      the first turn, and control over initial screenshots.
-    - Telemetry & UX: standardized logging/printing via `HUDConsole` and optional
-      automatic tracing (`auto_trace`).
+    Agents interact with MCP servers through an EvalContext:
+    - run(ctx): Main entry point - takes EvalContext from hud.eval()
+    - ctx.call_tool(): Used internally for all tool execution
+    - ctx.submit(): Called automatically with agent's final response
 
     Subclasses implement provider-specific formatting and response fetching
-    by overriding these abstract methods: `get_system_messages`, `get_response`,
-    `format_blocks`, and `format_tool_results`.
+    by overriding: `get_system_messages`, `get_response`, `format_blocks`,
+    and `format_tool_results`.
     """
 
-    metadata: dict[str, Any] | None = None
+    metadata: ClassVar[dict[str, Any] | None] = None
     required_tools: ClassVar[list[str]] = []  # Tools that must be available
+    config_cls: ClassVar[type[BaseAgentConfig]] = BaseAgentConfig
 
-    def __init__(
-        self,
-        mcp_client: AgentMCPClient | None = None,
-        # Filtering
-        allowed_tools: list[str] | None = None,
-        disallowed_tools: list[str] | None = None,
-        response_tool_name: str | None = None,
-        # Messages
-        system_prompt: str = GLOBAL_SYSTEM_PROMPT,
-        append_setup_output: bool = True,
-        initial_screenshot: bool = True,
-        # Misc
-        model_name: str = "mcp-agent",
-        checkpoint_name: str | None = None,
-        response_agent: ResponseAgent | None = None,
-        auto_trace: bool = True,
-        verbose: bool = False,
-    ) -> None:
-        """
-        Initialize the base MCP agent.
+    @classmethod
+    @abstractmethod
+    def agent_type(cls) -> AgentType:
+        """Return the AgentType for this agent.
 
-        Args:
-            mcp_client: Client for connecting to MCP servers. If None, a client
-                is auto-created at runtime when `run()` is called with a `Task`
-                that provides `mcp_config`.
-            allowed_tools: Names of tools to allow (None means allow all).
-            disallowed_tools: Names of tools to always exclude.
-            response_tool_name: Name of the tool to use for response.
-            system_prompt: System prompt to seed the conversation.
-            append_setup_output: Whether to append setup tool output to the
-                first turn's messages.
-            initial_screenshot: Whether to include an initial screenshot before
-                the first prompt (when supported by the environment).
-            model_name: Label used in telemetry/logging to identify the model.
-            response_agent: Optional automation that can respond to the model's
-                outputs to keep the loop going (e.g., auto-continue/stop).
-            auto_trace: If True, automatically creates a trace/span for runs.
-            verbose: If True, increases logging verbosity for developer UX.
-        """
-
-        self.mcp_client = mcp_client
-        self._auto_created_client = False  # Track if we created the client
-
-        self.model_name = model_name
-        self.checkpoint_name = checkpoint_name
-        self.console = HUDConsole(logger=logger)
-
-        # Set verbose mode if requested
-        if verbose:
-            self.console.set_verbose(True)
-
-        # User filtering
-        self.allowed_tools: list[str] | None = allowed_tools
-        self.disallowed_tools: list[str] | None = disallowed_tools
-        self._available_tools: list[types.Tool] | None = None
-
-        # Messages
-        self.system_prompt = system_prompt
-        self.append_setup_output = append_setup_output
-        self.initial_screenshot = initial_screenshot
-
-        # Initialize these here so methods can be called before initialize()
-        self._tool_map: dict[str, types.Tool] = {}  # Simplified: just name to tool
-        self.response_tool_name = response_tool_name
-
-        # Trace
-        self._auto_trace = auto_trace
-        self._auto_trace_cm: Any | None = None  # Store auto-created trace context manager
-
-        # Response agent to automatically interact with the model
-        self.response_agent = response_agent
-
-    async def initialize(self, task: str | Task | None = None) -> None:
-        """Initialize the agent with task-specific configuration."""
-        from hud.datasets import Task
-
-        # Create client if needed
-        if self.mcp_client is None and isinstance(task, Task) and task.mcp_config:
-            from hud.clients import MCPClient
-
-            self.mcp_client = MCPClient(mcp_config=task.mcp_config)
-            self._auto_created_client = True
-            self.console.debug("Auto-created MCPClient from task.mcp_config")
-
-        # Ensure we have a client
-        if self.mcp_client is None:
-            raise ValueError(
-                "No MCPClient. Please provide one when initializing the agent or pass a Task with mcp_config."  # noqa: E501
-            )
-
-        try:
-            client_cfg = getattr(self.mcp_client, "mcp_config", None)
-        except Exception:
-            client_cfg = None
-        await self._setup_config(client_cfg)
-
-        # Initialize client if needed
-        try:
-            await self.mcp_client.initialize()
-        except Exception as e:
-            self._handle_connection_error(e)
-
-        # If task is provided, apply agent_config and add lifecycle tools
-        if isinstance(task, Task) and task.agent_config:
-            if task.agent_config.get("system_prompt"):
-                self.system_prompt += "\n\n" + task.agent_config["system_prompt"]
-            if "append_setup_output" in task.agent_config:
-                self.append_setup_output = task.agent_config["append_setup_output"]
-            if "initial_screenshot" in task.agent_config:
-                self.initial_screenshot = task.agent_config["initial_screenshot"]
-            if "allowed_tools" in task.agent_config:
-                # If allowed_tools has already been set, we take the intersection of the two
-                # If the list had been empty, we were allowing all tools, so we overwrite this
-                if isinstance(self.allowed_tools, list) and len(self.allowed_tools) > 0:
-                    self.allowed_tools = [
-                        tool
-                        for tool in self.allowed_tools
-                        if tool in task.agent_config["allowed_tools"]
-                    ]
-                else:  # If allowed_tools is None, we overwrite it
-                    self.allowed_tools = task.agent_config["allowed_tools"]
-            if "disallowed_tools" in task.agent_config:
-                # If disallowed_tools has already been set, we take the union of the two
-                if isinstance(self.disallowed_tools, list):
-                    self.disallowed_tools.extend(task.agent_config["disallowed_tools"])
-                else:  # If disallowed_tools is None, we overwrite it
-                    self.disallowed_tools = task.agent_config["disallowed_tools"]
-            if "response_tool_name" in task.agent_config:
-                self.response_tool_name = task.agent_config["response_tool_name"]
-
-        all_tools = await self.mcp_client.list_tools()
-        self._available_tools = []
-
-        # Filter tools based on allowed and disallowed patterns
-        # No allowed tools and no disallowed tools -> we accept all tools
-        # No allowed tools and disallowed tools -> we accept all tools except the disallowed ones
-        for tool in all_tools:
-            if self.allowed_tools is not None and not any(
-                fnmatch.fnmatch(tool.name, pattern) for pattern in self.allowed_tools
-            ):
-                continue
-            if self.disallowed_tools is not None and any(
-                fnmatch.fnmatch(tool.name, pattern) for pattern in self.disallowed_tools
-            ):
-                continue
-            self._available_tools.append(tool)
-
-        self.console.info(
-            f"Agent initialized with {len(self.get_available_tools())} tools: {', '.join([t.name for t in self.get_available_tools()])}"  # noqa: E501
-        )
-
-        await log_agent_metadata_to_status(self.model_name, self.checkpoint_name)
-
-    async def run(self, prompt_or_task: str | Task | dict[str, Any], max_steps: int = 10) -> Trace:
-        """
-        Run the agent with the given prompt or task.
-
-        Args:
-            prompt_or_task: Either a string prompt for simple execution or a Task object
-            max_steps: Maximum number of steps (-1 for infinite)
+        Subclasses must implement this to return their corresponding AgentType enum value.
+        This is used for resolving native tool specifications.
 
         Returns:
-            Trace with reward, done, content, isError fields and trace steps
+            AgentType enum value for this agent
         """
-        # Import here to avoid circular imports
-        from hud.datasets import Task
+        raise NotImplementedError
 
-        if isinstance(prompt_or_task, dict):
-            prompt_or_task = Task(**prompt_or_task)
-        elif not isinstance(prompt_or_task, str) and not isinstance(prompt_or_task, Task):
-            raise TypeError(f"prompt_or_task must be str or Task, got {type(prompt_or_task)}")
+    def resolve_native_spec(self, tool: types.Tool) -> NativeToolSpec | None:
+        """Check if a tool has a native spec for this agent type and model.
 
-        try:
-            # Establish the connection with the MCP server/Environment
-            await self.initialize(prompt_or_task)
+        Looks up the tool's meta.native_tools field for a spec matching this agent's type.
+        If found, validates that the current model supports this native spec.
+        Returns a NativeToolSpec that can be used to register the tool with
+        the provider's native API format.
 
-            # Handle Task objects with full lifecycle
-            if isinstance(prompt_or_task, Task):
-                # Log a compact summary of task config to the current trace (async)
-                await log_task_config_to_current_trace(prompt_or_task)
+        When the spec data is a list (model-specific variants), specs are tried in order
+        and the first one whose supports_model() matches wins.
 
-                return await self.run_task(prompt_or_task, max_steps)
+        Falls back to legacy name-based detection for backwards compatibility with
+        old environments that don't emit native_tools metadata.
 
-            # Handle simple string prompts
-            elif isinstance(prompt_or_task, str):
-                context = text_to_blocks(prompt_or_task)
-                return await self._run_context(context, max_steps=max_steps)
+        Args:
+            tool: MCP Tool object to check for native specs
 
-        except Exception as e:
-            # Always return a Trace object for any exception
-            if self._is_connection_error(e):
-                # Return error trace for connection failures
-                return Trace(
-                    reward=0.0,
-                    done=True,
-                    content=self._get_connection_error_message(e),
-                    isError=True,
+        Returns:
+            NativeToolSpec if the tool has a native spec for this agent and the
+            current model supports it, None otherwise. When the model doesn't
+            match supported_models, returns None so the tool falls back to
+            generic function calling.
+        """
+        spec: NativeToolSpec | None = None
+        spec_data = None
+
+        # First try metadata-based resolution
+        if tool.meta:
+            native_tools = tool.meta.get("native_tools", {})
+            spec_data = native_tools.get(self.agent_type().value)
+
+            if isinstance(spec_data, list):
+                # List of specs -- pick first model-matching spec
+                for item in spec_data:
+                    if not isinstance(item, dict):
+                        continue
+                    candidate = _parse_spec_dict(item)
+                    if candidate and candidate.supports_model(self.model):
+                        spec = candidate
+                        break
+            elif isinstance(spec_data, dict):
+                spec = _parse_spec_dict(spec_data)
+
+        # Fall back to legacy name-based detection for old environments
+        # Only if metadata didn't contain specs for this agent type at all
+        if spec is None and not spec_data:
+            spec = self._legacy_native_spec_fallback(tool)
+
+        # Check if current model supports this native spec
+        if spec is not None and not spec.supports_model(self.model):
+            logger.debug(
+                "Model %s not in supported_models for native spec %s, falling back to functions",
+                self.model,
+                spec.api_type,
+            )
+            return None
+
+        return spec
+
+    def _legacy_native_spec_fallback(self, tool: types.Tool) -> NativeToolSpec | None:
+        """Detect native tools by name for backwards compatibility.
+
+        Override in subclasses to support old environments that expose tools
+        without native_tools metadata.
+
+        Args:
+            tool: MCP Tool object to check
+
+        Returns:
+            NativeToolSpec if the tool matches a known legacy pattern, None otherwise
+        """
+        return None
+
+    def get_tool_role(self, tool: types.Tool) -> str | None:
+        """Get the role of a tool from any of its native specs.
+
+        The role is used for mutual exclusion - when an agent accepts a tool
+        natively, other tools with the same role are excluded.
+
+        Checks metadata first, then falls back to legacy name-based detection
+        so old environments without native_tools metadata still get proper
+        role-based exclusion.
+
+        Args:
+            tool: MCP Tool object to check
+
+        Returns:
+            The role string if any native spec defines one, None otherwise
+        """
+        # Check metadata-based specs first
+        if tool.meta:
+            native_tools = tool.meta.get("native_tools", {})
+            if native_tools:
+                # Check all specs for a role (they should all have the same role)
+                for spec_data in native_tools.values():
+                    if isinstance(spec_data, dict) and spec_data.get("role"):
+                        return spec_data["role"]
+                    if isinstance(spec_data, list):
+                        for item in spec_data:
+                            if isinstance(item, dict) and item.get("role"):
+                                return item["role"]
+
+        # Fall back to legacy detection for old environments without metadata
+        legacy_spec = self._legacy_native_spec_fallback(tool)
+        if legacy_spec and legacy_spec.role:
+            return legacy_spec.role
+
+        return None
+
+    def categorize_tools(self, tools: list[types.Tool] | None = None) -> CategorizedTools:
+        """Categorize tools by native spec availability with role-based exclusion.
+
+        This shared method implements the two-pass tool processing logic:
+        1. First pass: identify native/hosted tools and claim their roles
+        2. Second pass: include generic tools if their role isn't claimed
+
+        Args:
+            tools: List of MCP tools to categorize. If None, uses get_available_tools()
+
+        Returns:
+            CategorizedTools with native, hosted, generic, and skipped tools
+        """
+        if tools is None:
+            tools = self.get_available_tools()
+
+        result = CategorizedTools()
+
+        # First pass: process tools with native specs for this agent
+        for tool in tools:
+            spec = self.resolve_native_spec(tool)
+            if not spec:
+                continue
+
+            # Check for role conflicts between native tools
+            if spec.role:
+                if spec.role in result.claimed_roles:
+                    # Another native tool already claimed this role - skip this one
+                    result.skipped.append(
+                        (tool, f"role '{spec.role}' already claimed by another native tool")
+                    )
+                    continue
+                result.claimed_roles.add(spec.role)
+
+            if spec.hosted:
+                result.hosted.append((tool, spec))
+            else:
+                result.native.append((tool, spec))
+
+        # Collect api_names claimed by native tools to prevent name collisions
+        claimed_api_names = {s.api_name for _, s in result.native if s.api_name}
+        claimed_api_names |= {s.api_name for _, s in result.hosted if s.api_name}
+
+        # Second pass: process tools without native specs (generic function tools)
+        for tool in tools:
+            spec = self.resolve_native_spec(tool)
+            if spec:
+                # Already processed in first pass
+                continue
+
+            # Check if this tool's role is already claimed by a native tool
+            tool_role = self.get_tool_role(tool)
+            if tool_role and tool_role in result.claimed_roles:
+                result.skipped.append((tool, f"role '{tool_role}' already claimed by native tool"))
+                continue
+
+            # Check if this tool's name collides with a native tool's api_name
+            if tool.name in claimed_api_names:
+                result.skipped.append(
+                    (tool, f"name '{tool.name}' collides with native tool api_name")
+                )
+                continue
+
+            result.generic.append(tool)
+
+        return result
+
+    def __init__(self, params: BaseCreateParams | None = None, **kwargs: Any) -> None:
+        if params is None:
+            import warnings
+
+            warnings.warn(
+                f"Passing kwargs to {self.__class__.__name__}() is deprecated. "
+                f"Use {self.__class__.__name__}.create(...) instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            CreateParams = type(
+                f"{self.config_cls.__name__}CreateParams",
+                (BaseCreateParams, self.config_cls),
+                {"__module__": self.config_cls.__module__},
+            )
+            params = CreateParams(**kwargs)
+
+        config_kwargs = {
+            k: getattr(params, k) for k in self.config_cls.model_fields if hasattr(params, k)
+        }
+        self.config = self.config_cls(**config_kwargs)
+
+        # v5: Store execution context (EvalContext/Environment) - agent uses ctx.call_tool()
+        self.ctx: EvalContext | Environment | None = params.ctx
+
+        self.model_name: str = getattr(params, "model_name", "MCPAgent")
+        self.model: str = getattr(params, "model", None) or "unknown"
+        self.auto_respond = params.auto_respond
+
+        self.console = HUDConsole(logger=logger)
+
+        if params.verbose:
+            self.console.set_verbose(True)
+
+        self.system_prompt = self.config.system_prompt
+
+        self._available_tools: list[types.Tool] | None = None
+        self._tool_map: dict[str, types.Tool] = {}
+        self._categorized_tools: CategorizedTools = CategorizedTools()
+        self._initialized: bool = False
+
+    @classmethod
+    def create(cls, **kwargs: Any) -> MCPAgent:
+        """
+        Factory method to create an agent with typed parameters.
+        """
+        CreateParams = type(
+            f"{cls.config_cls.__name__}CreateParams",
+            (BaseCreateParams, cls.config_cls),
+            {"__module__": cls.config_cls.__module__},
+        )
+        return cls(params=CreateParams(**kwargs))
+
+    async def _initialize_from_ctx(self, ctx: EvalContext) -> None:
+        """Initialize agent from EvalContext - discovers tools and sets up state.
+
+        This is the v5 initialization path. The agent uses ctx.call_tool() directly
+        for tool execution (no EnvironmentClient wrapper needed).
+        """
+        from hud.eval.context import EvalContext
+
+        if not isinstance(ctx, EvalContext):
+            raise TypeError(f"ctx must be EvalContext, got {type(ctx).__name__}")
+
+        # Refresh tools from connections, then get filtered list for agent
+        await ctx.list_tools()
+        self._available_tools = ctx.as_tools()
+        self._tool_map = {t.name: t for t in self._available_tools}
+
+        # Validate required tools are present
+        available_tool_names = {t.name for t in self._available_tools}
+        missing_tools = [tool for tool in self.required_tools if tool not in available_tool_names]
+        if missing_tools:
+            raise ValueError(
+                f"Required tools are missing: {missing_tools}. "
+                f"Available tools: {sorted(available_tool_names)}"
+            )
+
+        self.console.debug(
+            f"Discovered {len(self._available_tools)} tools from environment: "
+            f"{', '.join([t.name for t in self._available_tools])}"
+        )
+
+        self._categorized_tools = self.categorize_tools()
+        for tool, reason in self._categorized_tools.skipped:
+            logger.debug("Skipping tool %s: %s", tool.name, reason)
+
+        # Call hook for subclass-specific initialization (e.g., tool format conversion)
+        self._on_tools_ready()
+
+        self._initialized = True
+
+    def _on_tools_ready(self) -> None:
+        """Hook called after tools are discovered and validated.
+
+        Subclasses can override this to perform provider-specific setup,
+        such as converting MCP tools to the provider's format.
+
+        Called by _initialize_from_ctx() after _available_tools is populated.
+        """
+        return  # Default no-op - subclasses override for provider-specific setup
+
+    async def run(
+        self,
+        ctx: EvalContext,
+        *,
+        max_steps: int = 10,
+    ) -> Trace:
+        """
+        Run the agent on the given evaluation context.
+
+        The agent uses ctx.prompt as the task and ctx.call_tool() for tool execution.
+        Automatically calls ctx.submit() with the final answer.
+
+        Args:
+            ctx: EvalContext from hud.eval() - contains prompt and tools
+            max_steps: Maximum number of agent steps (-1 for infinite)
+
+        Returns:
+            Trace with done, content, isError fields
+
+        Example:
+            ```python
+            async with hud.eval(task) as ctx:
+                agent = ClaudeAgent.create()
+                await agent.run(ctx)
+            # ctx.reward is set by the scenario's evaluate phase
+            ```
+        """
+        from hud.eval.context import EvalContext
+
+        if not isinstance(ctx, EvalContext):
+            raise TypeError(f"ctx must be EvalContext, got {type(ctx).__name__}")
+
+        if not ctx.prompt:
+            if ctx.has_scenario:
+                # Scenario was specified but prompt is still empty
+                # (e.g., scenario returned empty string, or edge case not caught in scenarios.py)
+                scenario = ctx._task.scenario if ctx._task else "unknown"
+                raise ValueError(
+                    f"ctx.prompt is not set.\n\n"
+                    f"Scenario '{scenario}' was specified but returned an empty prompt.\n"
+                    f"Check that the scenario's setup function returns a non-empty string."
                 )
             else:
-                # Return error trace for any other exception
-                return Trace(
-                    reward=0.0,
-                    done=True,
-                    content=f"Task failed with error: {e}",
-                    isError=True,
-                    info={"error": str(e)},
+                # No scenario specified at all
+                raise ValueError(
+                    "ctx.prompt is not set.\n\n"
+                    "No scenario was specified in your task file.\n"
+                    "Either add a 'scenario' field to your task, or set ctx.prompt manually "
+                    "before running the agent."
                 )
+
+        # Store context for tool calls
+        self.ctx = ctx
+
+        # Initialize tools from context
+        if not self._initialized:
+            await self._initialize_from_ctx(ctx)
+
+        try:
+            # Build initial context - optionally append setup tool output
+            # Check ctx first (task-level override), then fall back to agent config
+            append_setup = getattr(ctx, "append_setup_output", False) or getattr(
+                self.config, "append_setup_output", False
+            )
+            initial_prompt = ctx.prompt
+            if append_setup:
+                setup_output = getattr(ctx, "setup_output", None)
+                if setup_output:
+                    initial_prompt = f"{initial_prompt}\n\n{setup_output}"
+
+            # Build initial blocks (text prompt + optional screenshot)
+            initial_blocks = text_to_blocks(initial_prompt)
+
+            result = await self._run_context(initial_blocks, max_steps=max_steps)
+
+            # Propagate error state to context for platform visibility
+            if result.isError and hasattr(ctx, "error"):
+                error_msg = result.info.get("error") if result.info else result.content
+                ctx.error = Exception(str(error_msg)) if error_msg else Exception("Agent error")
+
+            # Submit final answer to context (only if scenario is running)
+            if result.content and ctx.has_scenario:
+                await ctx.submit(result.content)
+
+            return result
+
+        except Exception as e:
+            logger.exception("Error while running agent:")
+            # Propagate error to context for platform visibility
+            if hasattr(ctx, "error"):
+                ctx.error = e
+            return Trace(
+                reward=0.0,
+                done=True,
+                content=f"Agent failed with error: {e}",
+                isError=True,
+                info={"error": str(e)},
+            )
         finally:
             # Cleanup auto-created resources
             await self._cleanup()
-
-    async def run_task(self, task: Task, max_steps: int = 10) -> Trace:
-        """
-        Execute a task with setup and evaluate phases.
-
-        Args:
-            task: Task object with prompt, setup, and evaluate configs
-            max_steps: Maximum steps for task execution (-1 for infinite)
-
-        Returns:
-            Trace with reward from evaluation
-        """
-        try:
-            # Setup phase
-            start_context: list[types.ContentBlock] = []
-
-            # Extract the initial task information
-            if task.prompt:
-                start_context.extend(text_to_blocks(task.prompt))
-
-            # Execute the setup tool and append the initial observation to the context
-            if task.setup_tool is not None:
-                self.console.progress_log(f"Setting up tool phase: {task.setup_tool}")
-                results = await self.call_tools(task.setup_tool)
-                if any(result.isError for result in results):
-                    return Trace(
-                        reward=0.0,
-                        done=True,
-                        content=f"Setup tool failed: {results}",
-                        isError=True,
-                        task=task,
-                    )
-
-                if self.append_setup_output and isinstance(results[0].content, list):
-                    start_context.extend(results[0].content)
-            if not self.initial_screenshot:
-                start_context = await self._filter_messages(start_context, include_types=["text"])
-
-            # Execute the task (agent loop) - this returns a empty trace object with the final response  # noqa: E501
-            prompt_result = await self._run_context(start_context, max_steps=max_steps)
-
-        except Exception as e:
-            self.console.error_log(f"Task execution failed: {e}")
-            # Create an error result but don't return yet - we still want to evaluate
-            prompt_result = Trace(reward=0.0, done=True, content=str(e), isError=True, task=task)
-            prompt_result.populate_from_context()
-
-        # Always evaluate if we have evaluate tool, regardless of errors
-        if task.evaluate_tool is not None:
-            try:
-                results = await self.call_tools(task.evaluate_tool)
-
-                if any(result.isError for result in results):
-                    self.console.warning_log(f"Evaluate tool returned error: {results}")
-                    # Still extract what we can from the error response
-                    if prompt_result is None:
-                        prompt_result = Trace(
-                            reward=0.0,
-                            done=True,
-                            content="Task failed before evaluation",
-                            isError=True,
-                            task=task,
-                        )
-                    prompt_result.reward = 0.0  # Default to 0 on error
-                else:
-                    # Extract reward and content from evaluation
-                    if results:
-                        reward = find_reward(results[0])
-                        self.console.info_log(f"Eval: {reward:.4f} {task.evaluate_tool}")
-                        eval_content = find_content(results[0])
-
-                        # Update the prompt result with evaluation reward
-                        if prompt_result is None:
-                            prompt_result = Trace(
-                                reward=reward,
-                                done=True,
-                                content=eval_content or "",
-                                isError=False,
-                                task=task,
-                            )
-                        else:
-                            prompt_result.reward = reward
-
-                            # Update the prompt result with evaluation content (if available)
-                            if eval_content:
-                                # Prompt result may already have final response content,
-                                # so we append to it
-                                if prompt_result.content:
-                                    prompt_result.content += "\n\n" + eval_content
-                                else:
-                                    prompt_result.content = eval_content
-
-            except Exception as e:
-                self.console.error_log(f"Evaluation phase failed: {e}")
-                # Ensure we have a result even if evaluation failed
-                if prompt_result is None:
-                    prompt_result = Trace(
-                        reward=0.0,
-                        done=True,
-                        content=f"Evaluation failed: {e}",
-                        isError=True,
-                        task=task,
-                    )
-
-        prompt_result.task = task
-
-        return prompt_result
 
     async def _run_context(
         self, context: list[types.ContentBlock], *, max_steps: int = 10
@@ -383,6 +475,8 @@ class MCPAgent(ABC):
         """
         final_response = None
         error = None
+
+        messages: list[Any] = []
 
         try:
             # Start with system messages
@@ -408,19 +502,17 @@ class MCPAgent(ABC):
 
                     # Check if we should stop
                     if response.done or not response.tool_calls:
-                        # Optional external ResponseAgent to decide whether to stop
-                        decision = "STOP"
-                        if self.response_agent is not None and response.content:
+                        # Use auto_respond to decide whether to stop
+                        decision: Literal["STOP", "CONTINUE"] = "STOP"
+                        if self.auto_respond and response.content:
                             try:
-                                decision = await self.response_agent.determine_response(
-                                    response.content
-                                )
-                            except Exception as e:
-                                self.console.warning_log(f"ResponseAgent failed: {e}")
-                        if decision == "STOP":
-                            # Try to submit response through lifecycle tool
-                            await self._maybe_submit_response(response, messages)
+                                from hud.agents.misc import ResponseAgent
 
+                                response_agent = ResponseAgent()
+                                decision = await response_agent.determine_response(response.content)
+                            except Exception as e:
+                                self.console.warning_log(f"Auto-respond failed: {e}")
+                        if decision == "STOP":
                             self.console.debug("Stopping execution")
                             final_response = response
                             break
@@ -431,11 +523,7 @@ class MCPAgent(ABC):
 
                     # 2. Execute tools
                     tool_calls = response.tool_calls
-                    for tool_call in tool_calls:
-                        self.console.info_log(f"{tool_call}")
                     tool_results = await self.call_tools(tool_calls)
-                    for tool_result in tool_results:
-                        self.console.info_log(f"{tool_result}")
 
                     # 3. Format tool results and add to messages
                     tool_messages = await self.format_tool_results(tool_calls, tool_results)
@@ -477,8 +565,17 @@ class MCPAgent(ABC):
             is_error = False
 
         # Ensure all parameters are the correct type
+        # Use ctx.reward if already set (e.g., from scenario evaluate), otherwise 0.0
+        # Note: For v4 tasks with evaluate_tool, reward is set in __aexit__ after this returns,
+        # so callers should prefer ctx.reward over Trace.reward for the final result.
+        reward = 0.0
+        if self.ctx is not None:
+            ctx_reward = getattr(self.ctx, "reward", None)
+            if ctx_reward is not None:
+                reward = ctx_reward
+
         trace_params = {
-            "reward": 0.0,
+            "reward": reward,
             "done": True,
             "messages": messages,
             "content": final_response.content if final_response else error,
@@ -487,16 +584,13 @@ class MCPAgent(ABC):
         }
         trace_result = Trace(**trace_params)
 
-        # Populate trace steps from current context
-        trace_result.populate_from_context()
-
         return trace_result
 
     async def call_tools(
         self, tool_call: MCPToolCall | list[MCPToolCall] | None = None
     ) -> list[MCPToolResult]:
         """
-        Call a tool through the MCP client.
+        Call tools through the bound EvalContext.
 
         Args:
             tool_call: MCPToolCall or list of MCPToolCall
@@ -510,20 +604,17 @@ class MCPAgent(ABC):
         if isinstance(tool_call, MCPToolCall):
             tool_call = [tool_call]
 
-        if self.mcp_client is None:
-            raise ValueError("Client is not initialized")
+        if self.ctx is None:
+            raise ValueError("Agent not bound to context - call run(ctx) first")
 
         results: list[MCPToolResult] = []
         for tc in tool_call:
             try:
                 self.console.debug(f"Calling tool: {tc}")
-                results.append(await self.mcp_client.call_tool(tc))
+                result = await self.ctx.call_tool(tc)
+                results.append(MCPToolResult(content=result.content, isError=result.isError))
             except TimeoutError as e:
                 self.console.error_log(f"Tool execution timed out: {e}")
-                try:
-                    await self.mcp_client.shutdown()
-                except Exception as close_err:
-                    self.console.debug(f"Failed to close MCP client cleanly: {close_err}")
                 raise
             except Exception as e:
                 self.console.error_log(f"Tool execution failed: {e}")
@@ -542,8 +633,6 @@ class MCPAgent(ABC):
         """
         Get response from the model including any tool calls.
 
-        NOTE: Subclasses should decorate this method with:
-            @hud.instrument(span_type="agent", record_args=False, record_result=True)
 
         Args:
             messages: Current conversation messages
@@ -603,45 +692,6 @@ class MCPAgent(ABC):
 
         return await self.format_blocks(blocks)
 
-    async def _maybe_submit_response(self, response: AgentResponse, messages: list[Any]) -> None:
-        """Submit response through lifecycle tool if available.
-
-        Args:
-            response: The agent's response
-            messages: The current message history (will be modified in-place)
-        """
-        if self.response_tool_name:
-            self.console.debug(f"Calling response lifecycle tool: {self.response_tool_name}")
-            try:
-                # Call the response tool with the agent's response
-                response_tool_call = MCPToolCall(
-                    name=self.response_tool_name, arguments={"response": response.content}
-                )
-                response_results = await self.call_tools(response_tool_call)
-
-                # Format and add the response tool results to messages
-                response_messages = await self.format_tool_results(
-                    [response_tool_call], response_results
-                )
-                messages.extend(response_messages)
-
-                # Mark the task as done
-                self.console.debug("Response lifecycle tool executed, marking task as done")
-            except Exception as e:
-                self.console.error_log(f"Response lifecycle tool failed: {e}")
-
-    async def _setup_config(self, mcp_config: dict[str, dict[str, Any]] | None) -> None:
-        """Inject metadata into the metadata of the initialize request."""
-        if not isinstance(mcp_config, dict):
-            return
-
-        if self.metadata:
-            patch_mcp_config(
-                mcp_config,
-                MCPConfigPatch(meta=self.metadata),
-            )
-        self._auto_trace_cm = setup_hud_telemetry(mcp_config, auto_trace=self._auto_trace)
-
     def get_available_tools(self) -> list[types.Tool]:
         """Get list of available MCP tools for LLM use (excludes lifecycle tools)."""
         if self._available_tools is None:
@@ -651,9 +701,23 @@ class MCPAgent(ABC):
         return self._available_tools
 
     def get_tool_schemas(self) -> list[dict]:
-        """Get tool schemas in a format suitable for the model."""
+        """Get tool schemas in a format suitable for the model.
+
+        Uses categorized tools so that skipped tools (role-blocked)
+        are excluded from schemas automatically. Falls back to
+        get_available_tools() if called before categorization.
+        """
+        if self._initialized:
+            tools = (
+                [t for t, _spec in self._categorized_tools.native]
+                + [t for t, _spec in self._categorized_tools.hosted]
+                + list(self._categorized_tools.generic)
+            )
+        else:
+            tools = self.get_available_tools()
+
         schemas = []
-        for tool in self.get_available_tools():
+        for tool in tools:
             schema = {
                 "name": tool.name,
                 "description": tool.description,
@@ -684,65 +748,29 @@ class MCPAgent(ABC):
 
     async def _cleanup(self) -> None:
         """Cleanup resources."""
-        # Clean up auto-created trace if any
-        if self._auto_trace_cm:
-            try:
-                self._auto_trace_cm.__exit__(None, None, None)
-                self.console.debug("Closed auto-created trace")
-            except Exception as e:
-                self.console.warning_log(f"Failed to close auto-created trace: {e}")
-            finally:
-                self._auto_trace_cm = None
+        # Clear context reference
+        self.ctx = None
 
-        # Clean up auto-created client
-        if self._auto_created_client and self.mcp_client:
-            try:
-                await self.mcp_client.shutdown()
-                self.console.debug("Closed auto-created MCPClient")
-            except Exception as e:
-                self.console.warning_log(f"Failed to close auto-created client: {e}")
-            finally:
-                self.mcp_client = None
-                self._auto_created_client = False
 
-    def _is_connection_error(self, e: Exception) -> bool:
-        """Check if an exception is a connection error."""
-        error_msg = str(e).lower()
-        return any(
-            pattern in error_msg
-            for pattern in [
-                "connection",
-                "connect",
-                "refused",
-                "failed",
-                "could not connect",
-                "mcp server",
-            ]
-        )
-
-    def _get_connection_error_message(self, e: Exception) -> str:
-        """Extract a helpful connection error message."""
-        import re
-
-        url_match = re.search(r"https?://[^\s]+", str(e))
-        url = url_match.group(0) if url_match else "the MCP server"
-        return f"Connection failed: Could not connect to {url}. Is your MCP client/server running?"
-
-    def _handle_connection_error(self, e: Exception) -> None:
-        """Handle connection errors with helpful messages."""
-        if self._is_connection_error(e):
-            msg = self._get_connection_error_message(e)
-            # Always show connection errors, not just when logging is enabled
-            self.console.error(f"❌ {msg}")
-            self.console.info("💡 Make sure the MCP server is started before running the agent.")
-
-            # For localhost, provide specific instructions
-            error_str = str(e).lower()
-            if "localhost" in error_str or "127.0.0.1" in error_str:
-                self.console.info("   Run 'hud dev' in another terminal to start the MCP server")
-
-            raise RuntimeError(msg) from e
-        raise
+def _parse_spec_dict(spec_dict: dict[str, Any]) -> NativeToolSpec | None:
+    """Parse a dict (from MCP meta) into a NativeToolSpec."""
+    if not spec_dict:
+        return None
+    known_fields = {"api_type", "api_name", "beta", "hosted", "role", "supported_models"}
+    extra = {k: v for k, v in spec_dict.items() if k not in known_fields}
+    supported_models_raw = spec_dict.get("supported_models")
+    supported_models: tuple[str, ...] | None = None
+    if supported_models_raw:
+        supported_models = tuple(supported_models_raw)
+    return NativeToolSpec(
+        api_type=spec_dict.get("api_type"),
+        api_name=spec_dict.get("api_name"),
+        beta=spec_dict.get("beta"),
+        hosted=spec_dict.get("hosted", False),
+        role=spec_dict.get("role"),
+        supported_models=supported_models,
+        extra=extra,
+    )
 
 
 def _format_error_result(error_message: str) -> MCPToolResult:
@@ -756,14 +784,45 @@ def text_to_blocks(text: str) -> list[types.ContentBlock]:
 def find_reward(result: MCPToolResult) -> float:
     """Find the reward in the result.
 
-    Agent accepts "reward", "grade", "score"
+    Agent accepts "reward", "grade", "score", or weighted subscores
 
+    If isError is True, return 0.0 (error results should not contribute positive reward).
     If not found, return 0.0
     """
+    # Error results should return 0.0 - don't extract reward from error responses
+    if result.isError:
+        logger.warning("Evaluate tool returned error, using reward=0.0")
+        return 0.0
+
     accept_keys = ["reward", "grade", "score"]
+
+    # Check for direct reward/grade/score keys
     for key in accept_keys:
         if isinstance(result.structuredContent, dict) and key in result.structuredContent:
             return result.structuredContent[key]
+
+    # Check for subscores and weights format
+    if (
+        isinstance(result.structuredContent, dict)
+        and "subscores" in result.structuredContent
+        and "weights" in result.structuredContent
+    ):
+        subscores = result.structuredContent["subscores"]
+        weights = result.structuredContent["weights"]
+        if isinstance(subscores, dict) and isinstance(weights, dict):
+            try:
+                # Multiply each subscore by its corresponding weight and sum
+                reward = sum(
+                    float(subscores[key]) * float(weights.get(key, 0.0))
+                    for key in subscores
+                    if key in weights
+                )
+                return reward
+            except (ValueError, TypeError) as e:
+                logger.error("Failed to parse subscores/weights: %s", e)
+                return 0.0
+
+    # Check for reward in JSON text content
     if isinstance(result.content, list):
         for content in result.content:
             if isinstance(content, types.TextContent):
@@ -774,6 +833,8 @@ def find_reward(result: MCPToolResult) -> float:
                             return value
                 except json.JSONDecodeError:
                     pass
+
+    logger.error("Couldn't parse reward from result: %s", str(result.structuredContent))
     return 0.0
 
 

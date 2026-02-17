@@ -1,0 +1,154 @@
+---
+title: "Tasksets"
+description: "Organize and manage collections of tasks for agent evaluations."
+icon: "list-check"
+---
+
+The Tasksets page at [hud.ai/evalsets](https://hud.ai/evalsets) lets you organize tasks into collections for running evaluations. Group related tasks together, track leaderboard results, and compare agent performance.
+
+## Overview
+
+Navigate to **Tasksets** to see two tabs:
+
+- **Leaderboards** — Public benchmarks with ranked results
+- **My Tasksets** — Your personal task collections
+
+<Frame>
+  <img src="/src/images/platform-tasksets.png" alt="Tasksets page showing leaderboards and personal tasksets" />
+</Frame>
+
+## Leaderboards
+
+The Leaderboards tab shows public benchmarks from the community:
+
+- **Dataset cards** — Each card shows a benchmark with ranked entries
+- **Metrics** — Average score, Best@3, Best@5
+- **Filter by organization** — Focus on specific providers
+- **Search** — Find specific benchmarks
+
+Click a leaderboard to see full results and submit your own runs.
+
+## Creating a Taskset
+
+Click **New Taskset** to create one:
+
+1. Enter a name for your taskset
+2. Click **Create**
+3. You're taken to your new (empty) taskset
+
+### Adding Tasks
+
+Once you have a taskset, add tasks in two ways:
+
+**From an Environment's Scenarios:**
+1. Go to an environment's Scenarios tab
+2. Click on a scenario
+3. Create tasks with specific arguments
+4. Select your taskset as the destination
+
+**Upload Tasks:**
+1. Open your taskset
+2. Click **Upload Tasks** in the header
+3. Paste a JSON array of task configurations
+4. The modal validates your tasks before upload
+
+<Frame>
+  <img src="/src/images/platform-taskset-upload.png" alt="Upload tasks modal" />
+</Frame>
+
+## Taskset Details
+
+Click on a taskset to see its detail page:
+
+### Leaderboard Tab
+
+Shows aggregated results for this taskset:
+
+- **Agent rankings** — Performance by agent/model
+- **Metrics** — Success rate, average score
+- **Trends** — Performance over time
+
+### Tasks Tab
+
+Lists all tasks in the taskset:
+
+- **Grid/List view** — Toggle between compact and detailed views
+- **Filters** — By status, tags, scenario
+- **Bulk actions** — Select multiple tasks to run or delete
+- **Task details** — Click to see configuration
+
+Each task shows:
+- Scenario name and arguments
+- Run history (success/fail indicators)
+- Tags for organization
+
+### Agents Tab
+
+Compare agent performance across all tasks:
+
+- **Agent matrix** — Side-by-side comparison
+- **Per-task breakdown** — See where agents succeed or fail
+- **Drill down** — Click to view specific runs
+
+### Jobs Tab
+
+Background jobs for this taskset:
+
+- **Batch runs** — Evaluation jobs in progress
+- **Status** — Queued, running, completed
+- **Results** — Click to see outcomes
+
+### Settings Tab
+
+Configure your taskset:
+
+- **Name** — Edit the display name
+
+## Running a Taskset
+
+Run all tasks in a taskset with one click:
+
+1. Open your taskset
+2. Click **Run Taskset** in the header
+3. Select model and configuration
+4. Jobs are queued and run in parallel
+
+Or run from the CLI:
+
+```bash
+hud eval my-taskset --model gpt-4o --group-size 10
+```
+
+## Task Configuration
+
+Tasks are defined with:
+
+```json
+{
+  "scenario": "checkout",
+  "args": {
+    "product_name": "Laptop"
+  },
+  "env": {
+    "name": "my-store-env"
+  },
+  "prompt": "Optional custom prompt override"
+}
+```
+
+- **scenario** — The scenario name to run
+- **args** — Arguments passed to the scenario
+- **env.name** — The environment containing the scenario
+- **prompt** — (Optional) Override the scenario's default prompt
+
+## Next Steps
+
+<CardGroup cols={2}>
+<Card title="Publishing Leaderboards" icon="trophy" href="/platform/publishing-leaderboards">
+  Run evaluations and publish public benchmarks
+</Card>
+
+<Card title="Environments" icon="cube" href="/platform/environments">
+  Create environments with scenarios
+</Card>
+</CardGroup>

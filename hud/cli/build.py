@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import os
 import re
 import subprocess
 import time
@@ -16,8 +17,9 @@ from typing import Any
 import typer
 import yaml
 
+from hud.cli.utils.environment import find_dockerfile
 from hud.cli.utils.source_hash import compute_source_hash, list_source_files
-from hud.clients import MCPClient
+from hud.shared.hints import render_hints, secrets_in_build_args
 from hud.utils.hud_console import HUDConsole
 from hud.version import __version__ as hud_version
 
@@ -244,7 +246,17 @@ def get_docker_image_id(image: str) -> str | None:
 
 
 def extract_env_vars_from_dockerfile(dockerfile_path: Path) -> tuple[list[str], list[str]]:
-    """Extract required and optional environment variables from Dockerfile."""
+    """Extract required and optional RUNTIME environment variables from Dockerfile.
+
+    Only ENV directives are considered for runtime env vars.
+    ARG directives are build-time only and are NOT added to required env vars
+    (those should be passed via --build-arg during build).
+
+    ARG variables are tracked only to detect patterns like:
+        ARG MY_VAR
+        ENV MY_VAR=$MY_VAR
+    where the ARG value is exposed as a runtime ENV.
+    """
     required = []
     optional = []
 
@@ -253,20 +265,20 @@ def extract_env_vars_from_dockerfile(dockerfile_path: Path) -> tuple[list[str], 
 
     # Parse both ENV and ARG directives
     content = dockerfile_path.read_text()
-    arg_vars = set()  # Track ARG variables
+    arg_vars = set()  # Track ARG variables (for detecting ENV $ARG patterns)
 
     for line in content.splitlines():
         line = line.strip()
 
         # Look for ARG directives (build-time variables)
+        # These are NOT runtime env vars - only track them to detect ENV $ARG patterns
         if line.startswith("ARG "):
             parts = line[4:].strip().split("=", 1)
             var_name = parts[0].strip()
             if len(parts) == 1 or not parts[1].strip():
-                # No default value = required
+                # No default value - track it but DON'T add to required
+                # ARG is build-time only, not runtime
                 arg_vars.add(var_name)
-                if var_name not in required:
-                    required.append(var_name)
 
         # Look for ENV directives (runtime variables)
         elif line.startswith("ENV "):
@@ -274,6 +286,7 @@ def extract_env_vars_from_dockerfile(dockerfile_path: Path) -> tuple[list[str], 
             var_name = parts[0].strip()
 
             # Check if it references an ARG variable (e.g., ENV MY_VAR=$MY_VAR)
+            # This pattern exposes the build-time ARG as a runtime ENV
             if len(parts) == 2 and parts[1].strip().startswith("$"):
                 ref_var = parts[1].strip()[1:]
                 if ref_var in arg_vars and var_name not in required:
@@ -288,6 +301,167 @@ def extract_env_vars_from_dockerfile(dockerfile_path: Path) -> tuple[list[str], 
                     required.append(var_name)
 
     return required, optional
+
+
+def parse_base_image(dockerfile_path: Path) -> str | None:
+    """Extract the base image from the first FROM directive in Dockerfile.
+
+    For multi-stage builds, returns the image from the first FROM. Strips any
+    trailing AS <stage> segment.
+    """
+    try:
+        if not dockerfile_path.exists():
+            return None
+        for raw_line in dockerfile_path.read_text().splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.upper().startswith("FROM "):
+                rest = line[5:].strip()
+                # Remove stage alias if present
+                lower = rest.lower()
+                if " as " in lower:
+                    # Split using the original case string at the index of lower-case match
+                    idx = lower.index(" as ")
+                    rest = rest[:idx]
+                return rest.strip()
+    except Exception:
+        return None
+    return None
+
+
+def check_dockerfile_for_secrets(directory: Path, dockerfile: Path) -> list[str]:
+    """Run docker buildx build --check to detect secrets in ARG/ENV.
+
+    Returns a list of variable names that were flagged as potential secrets.
+    This is a fast, non-building lint check.
+    """
+    hud_console = HUDConsole()
+
+    cmd = ["docker", "buildx", "build", "--check"]
+    if dockerfile.name != "Dockerfile":
+        cmd.extend(["-f", str(dockerfile)])
+    cmd.append(str(directory))
+
+    try:
+        result = subprocess.run(  # noqa: S603
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        output = result.stdout + result.stderr
+
+        pattern = r'Do not use ARG or ENV instructions for sensitive data \((ARG|ENV) "([^"]+)"\)'
+        matches = re.findall(pattern, output)
+
+        if matches:
+            secret_vars = [f"{var_type} {var_name}" for var_type, var_name in matches]
+            return secret_vars
+
+    except subprocess.TimeoutExpired:
+        hud_console.warning("Dockerfile check timed out")
+    except Exception as e:
+        hud_console.debug(f"Dockerfile secrets check failed: {e}")
+
+    return []
+
+
+def display_secrets_warning(secret_vars: list[str]) -> None:
+    """Display a warning about secrets found in Dockerfile ARG/ENV."""
+
+    hud_console = HUDConsole()
+    hud_console.print("")
+    render_hints([secrets_in_build_args(secret_vars)])
+    hud_console.print("")
+
+
+def collect_runtime_metadata(image: str, *, verbose: bool = False) -> dict[str, str | None]:
+    """Probe container to capture Python/CUDA/cuDNN/PyTorch versions.
+
+    Runs a tiny Python snippet inside the built image using docker run.
+    """
+    hud_console = HUDConsole()
+
+    runtime_script = (
+        "import json, platform\n"
+        "info = {'python': platform.python_version()}\n"
+        "try:\n"
+        "    import torch\n"
+        "    info['pytorch'] = getattr(torch, '__version__', None)\n"
+        "    cuda_version = None\n"
+        "    try:\n"
+        "        cuda_version = getattr(getattr(torch, 'version', None), 'cuda', None)\n"
+        "    except Exception:\n"
+        "        cuda_version = None\n"
+        "    if cuda_version:\n"
+        "        info['cuda'] = cuda_version\n"
+        "    try:\n"
+        "        cudnn_version = torch.backends.cudnn.version()\n"
+        "    except Exception:\n"
+        "        cudnn_version = None\n"
+        "    if cudnn_version:\n"
+        "        info['cudnn'] = str(cudnn_version)\n"
+        "except Exception:\n"
+        "    pass\n"
+        "info.setdefault('pytorch', None)\n"
+        "info.setdefault('cuda', None)\n"
+        "info.setdefault('cudnn', None)\n"
+        "print(json.dumps(info))\n"
+    )
+
+    for binary in ("python", "python3"):
+        cmd = [
+            "docker",
+            "run",
+            "--rm",
+            image,
+            binary,
+            "-c",
+            runtime_script,
+        ]
+        try:
+            result = subprocess.run(  # noqa: S603
+                cmd, capture_output=True, text=True, check=False
+            )
+        except FileNotFoundError:
+            return {}
+
+        if result.returncode != 0:
+            if verbose:
+                hud_console.debug(
+                    f"Runtime probe failed with {binary}: {result.stderr.strip() or 'no stderr'}"
+                )
+            continue
+
+        output = (result.stdout or "").strip()
+        if not output:
+            return {}
+
+        try:
+            data = json.loads(output.splitlines()[-1])
+        except json.JSONDecodeError:
+            if verbose:
+                hud_console.debug(
+                    "Runtime probe returned non-JSON output; skipping metadata capture"
+                )
+            return {}
+
+        if not isinstance(data, dict):
+            if verbose:
+                hud_console.debug(
+                    "Runtime probe returned JSON that is not an object; skipping metadata capture"
+                )
+            return {}
+
+        return {
+            "python": data.get("python"),
+            "cuda": data.get("cuda"),
+            "cudnn": data.get("cudnn"),
+            "pytorch": data.get("pytorch"),
+        }
+
+    return {}
 
 
 async def analyze_mcp_environment(
@@ -309,10 +483,16 @@ async def analyze_mcp_environment(
     from hud.cli.analyze import parse_docker_command
 
     mcp_config = parse_docker_command(docker_cmd)
+    # Extract server name for display (first key in mcp_config)
+    server_name = next(iter(mcp_config.keys()), None)
 
     # Initialize client and measure timing
+    from fastmcp import Client as FastMCPClient
+
+    from hud.cli.utils.mcp import analyze_environment
+
     start_time = time.time()
-    client = MCPClient(mcp_config=mcp_config, verbose=verbose, auto_trace=False)
+    client = FastMCPClient(transport=mcp_config)
     initialized = False
 
     try:
@@ -320,21 +500,69 @@ async def analyze_mcp_environment(
             hud_console.info("Initializing MCP client...")
 
         # Add timeout to fail fast instead of hanging (60 seconds)
-        await asyncio.wait_for(client.initialize(), timeout=60.0)
+        await asyncio.wait_for(client.__aenter__(), timeout=60.0)
         initialized = True
         initialize_ms = int((time.time() - start_time) * 1000)
 
-        # Delegate to standard analysis helper for consistency
-        full_analysis = await client.analyze_environment()
+        # Delegate to standard analysis helper
+        full_analysis = await analyze_environment(client, verbose, server_name=server_name)
 
-        # Normalize to build's expected fields
+        # Normalize and enrich with internalTools if a hub map is present
         tools_list = full_analysis.get("tools", [])
-        return {
+        hub_map = full_analysis.get("hub_tools", {}) or full_analysis.get("hubTools", {})
+
+        normalized_tools: list[dict[str, Any]] = []
+        internal_total = 0
+        for t in tools_list:
+            # Extract core fields (support object or dict forms)
+            if hasattr(t, "name"):
+                name = getattr(t, "name", None)
+                description = getattr(t, "description", None)
+                input_schema = getattr(t, "inputSchema", None)
+                existing_internal = getattr(t, "internalTools", None)
+            else:
+                name = t.get("name")
+                description = t.get("description")
+                # accept either inputSchema or input_schema
+                input_schema = t.get("inputSchema") or t.get("input_schema")
+                # accept either internalTools or internal_tools
+                existing_internal = t.get("internalTools") or t.get("internal_tools")
+
+            tool_entry: dict[str, Any] = {"name": name}
+            if description:
+                tool_entry["description"] = description
+            if input_schema:
+                tool_entry["inputSchema"] = input_schema
+
+            # Merge internal tools: preserve any existing declaration and add hub_map[name]
+            merged_internal: list[str] = []
+            if isinstance(existing_internal, list):
+                merged_internal.extend([str(x) for x in existing_internal])
+            if isinstance(hub_map, dict) and name in hub_map and isinstance(hub_map[name], list):
+                merged_internal.extend([str(x) for x in hub_map[name]])
+            if merged_internal:
+                # Deduplicate while preserving order
+                merged_internal = list(dict.fromkeys(merged_internal))
+                tool_entry["internalTools"] = merged_internal
+                internal_total += len(merged_internal)
+
+            normalized_tools.append(tool_entry)
+
+        result = {
             "initializeMs": initialize_ms,
             "toolCount": len(tools_list),
-            "tools": tools_list,
+            "internalToolCount": internal_total,
+            "tools": normalized_tools,
             "success": True,
         }
+        if hub_map:
+            result["hub_tools"] = hub_map
+        # Include prompts and resources from analysis
+        if full_analysis.get("prompts"):
+            result["prompts"] = full_analysis["prompts"]
+        if full_analysis.get("resources"):
+            result["resources"] = full_analysis["resources"]
+        return result
     except TimeoutError:
         from hud.shared.exceptions import HudException
 
@@ -350,9 +578,9 @@ async def analyze_mcp_environment(
         raise HudException from e
     finally:
         # Only shutdown if we successfully initialized
-        if initialized:
+        if initialized and client.is_connected():
             try:
-                await client.shutdown()
+                await client.close()
             except Exception:
                 # Ignore shutdown errors
                 hud_console.warning("Failed to shutdown MCP client")
@@ -365,31 +593,85 @@ def build_docker_image(
     verbose: bool = False,
     build_args: dict[str, str] | None = None,
     platform: str | None = None,
+    secrets: list[str] | None = None,
+    remote_cache: str | None = None,
 ) -> bool:
     """Build a Docker image from a directory."""
     hud_console = HUDConsole()
     build_args = build_args or {}
+    secrets = secrets or []
 
-    # Check if Dockerfile exists
-    dockerfile = directory / "Dockerfile"
-    if not dockerfile.exists():
+    # Check if Dockerfile exists (prefer Dockerfile.hud)
+    dockerfile = find_dockerfile(directory)
+    if dockerfile is None:
         hud_console.error(f"No Dockerfile found in {directory}")
+        hud_console.info("Expected: Dockerfile.hud or Dockerfile")
         return False
 
-    # Default platform to match RL pipeline unless explicitly overridden
+    # Build command - use buildx when remote cache is enabled
     effective_platform = platform if platform is not None else "linux/amd64"
+    cmd = ["docker", "buildx", "build"] if remote_cache else ["docker", "build"]
 
-    # Build command
-    cmd = ["docker", "build"]
+    # Specify dockerfile explicitly if not the default name
+    if dockerfile.name != "Dockerfile":
+        cmd.extend(["-f", str(dockerfile)])
+
     if effective_platform:
         cmd.extend(["--platform", effective_platform])
     cmd.extend(["-t", tag])
     if no_cache:
         cmd.append("--no-cache")
 
+    # Add remote cache support for ECR
+    if remote_cache:
+        try:
+            # Validate ECR repo name
+            if not re.match(r"^[a-z0-9]([a-z0-9\-_/]*[a-z0-9])?$", remote_cache):
+                hud_console.error(f"Invalid ECR repo name: {remote_cache}")
+                hud_console.info(
+                    "ECR repo names must contain only lowercase letters, numbers, hyphens, underscores, and forward slashes"  # noqa: E501
+                )
+                return False
+
+            # Get required environment variables
+            aws_account_id = os.getenv("AWS_ACCOUNT_ID")
+            aws_region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+
+            if not aws_account_id:
+                hud_console.error("AWS_ACCOUNT_ID environment variable not set")
+                return False
+
+            # ECR cache image reference
+            cache_image = (
+                f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/{remote_cache}:cache"
+            )
+
+            # Add cache arguments with proper ECR format
+            cmd.extend(
+                [
+                    "--cache-from",
+                    f"type=registry,ref={cache_image}",
+                    "--cache-to",
+                    f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}",
+                    "--load",  # Load image to local Docker after build
+                ]
+            )
+
+            hud_console.success(f"Remote cache configured: {cache_image}")
+
+        except typer.Exit:
+            raise
+        except Exception as e:
+            hud_console.error(f"Remote cache setup error: {e}")
+            return False
+
     # Add build args
     for key, value in build_args.items():
         cmd.extend(["--build-arg", f"{key}={value}"])
+
+    # Add secrets
+    for secret in secrets:
+        cmd.extend(["--secret", secret])
 
     cmd.append(str(directory))
 
@@ -398,7 +680,10 @@ def build_docker_image(
 
     try:
         # Use Docker's native output formatting - no capture, let Docker handle display
-        result = subprocess.run(cmd, check=False)  # noqa: S603
+        env = os.environ.copy()
+        if secrets:
+            env["DOCKER_BUILDKIT"] = "1"
+        result = subprocess.run(cmd, check=False, env=env)  # noqa: S603
         return result.returncode == 0
     except Exception as e:
         hud_console.error(f"Build error: {e}")
@@ -412,10 +697,14 @@ def build_environment(
     verbose: bool = False,
     env_vars: dict[str, str] | None = None,
     platform: str | None = None,
+    secrets: list[str] | None = None,
+    remote_cache: str | None = None,
+    build_args: dict[str, str] | None = None,
 ) -> None:
     """Build a HUD environment and generate lock file."""
     hud_console = HUDConsole()
     env_vars = env_vars or {}
+    build_args = build_args or {}
     hud_console.header("HUD Environment Build")
 
     # Resolve directory
@@ -450,15 +739,17 @@ def build_environment(
 
     # Step 2: If no lock, check for Dockerfile
     if not base_name:
-        dockerfile_path = env_dir / "Dockerfile"
-        if not dockerfile_path.exists():
+        dockerfile_path = find_dockerfile(env_dir)
+        if dockerfile_path is None:
             hud_console.error(f"Not a valid environment directory: {directory}")
-            hud_console.info("Expected: Dockerfile or hud.lock.yaml")
+            hud_console.info("Expected: Dockerfile.hud, Dockerfile, or hud.lock.yaml")
             raise typer.Exit(1)
 
         # First build - use directory name
         base_name = env_dir.name
         hud_console.info(f"First build - using base name: {base_name}")
+        if dockerfile_path.name == "Dockerfile.hud":
+            hud_console.info("Using Dockerfile.hud")
 
     # If user provides --tag, respect it; otherwise use base name only (version added later)
     if tag:
@@ -480,8 +771,10 @@ def build_environment(
         temp_tag,
         no_cache,
         verbose,
-        build_args=None,
+        build_args=build_args or None,
         platform=platform,
+        secrets=secrets,
+        remote_cache=remote_cache,
     ):
         hud_console.error("Docker build failed")
         raise typer.Exit(1)
@@ -516,10 +809,22 @@ def build_environment(
     finally:
         loop.close()
 
-    hud_console.success(f"Analyzed environment: {analysis['toolCount']} tools found")
+    # Show analysis results including hub tools, prompts, resources
+    tool_count = analysis["toolCount"]
+    prompt_count = len(analysis.get("prompts") or [])
+    resource_count = len(analysis.get("resources") or [])
+
+    parts = [f"{tool_count} tools"]
+    if prompt_count:
+        parts.append(f"{prompt_count} prompts")
+    if resource_count:
+        parts.append(f"{resource_count} resources")
+
+    tool_msg = f"Analyzed environment: {', '.join(parts)} found"
+    hud_console.success(tool_msg)
 
     # Extract environment variables from Dockerfile
-    dockerfile_path = env_dir / "Dockerfile"
+    dockerfile_path = find_dockerfile(env_dir) or env_dir / "Dockerfile"
     required_env, optional_env = extract_env_vars_from_dockerfile(dockerfile_path)
 
     # Show env vars detected from .env file
@@ -541,6 +846,11 @@ def build_environment(
         )
         hud_console.info("These will be added to the required list in the lock file")
 
+    # Check for secrets in ARG/ENV instructions
+    secret_vars = check_dockerfile_for_secrets(env_dir, dockerfile_path)
+    if secret_vars:
+        display_secrets_warning(secret_vars)
+
     # Check for existing version and increment
     lock_path = env_dir / "hud.lock.yaml"
     existing_version = get_existing_version(lock_path)
@@ -558,9 +868,14 @@ def build_environment(
     if image_tag:
         base_name = image_tag.split(":")[0] if ":" in image_tag else image_tag
 
+    # Collect runtime metadata and compute base image/platform
+    runtime_info = collect_runtime_metadata(temp_tag, verbose=verbose)
+    base_image = parse_base_image(dockerfile_path)
+    effective_platform = platform if platform is not None else "linux/amd64"
+
     # Create lock file content with images subsection at top
     lock_content = {
-        "version": "1.1",  # Lock file format version
+        "version": "1.3",  # Lock file format version
         "images": {
             "local": f"{base_name}:{new_version}",  # Local tag with version
             "full": None,  # Will be set with digest after build
@@ -573,12 +888,19 @@ def build_environment(
             "version": new_version,
             # Fast source fingerprint for change detection
             "sourceHash": compute_source_hash(env_dir),
+            "baseImage": base_image,
+            "platform": effective_platform,
         },
         "environment": {
             "initializeMs": analysis["initializeMs"],
             "toolCount": analysis["toolCount"],
         },
     }
+
+    if runtime_info:
+        lock_content["environment"]["runtime"] = runtime_info
+    internal_count = int(analysis.get("internalToolCount", 0) or 0)
+    lock_content["environment"]["internalToolCount"] = internal_count
 
     # Add environment variables section if any exist
     # Include env vars from .env file as well
@@ -616,14 +938,33 @@ def build_environment(
 
     # Add tools with full schemas for RL config generation
     if analysis["tools"]:
-        lock_content["tools"] = [
-            {
+        tools_serialized: list[dict[str, Any]] = []
+        for tool in analysis["tools"]:
+            entry: dict[str, Any] = {
                 "name": tool["name"],
+                # Preserve legacy shape: always include description/inputSchema
                 "description": tool.get("description", ""),
                 "inputSchema": tool.get("inputSchema", {}),
             }
-            for tool in analysis["tools"]
-        ]
+            if tool.get("internalTools"):
+                entry["internalTools"] = tool.get("internalTools")
+            tools_serialized.append(entry)
+        lock_content["tools"] = tools_serialized
+
+    # Add hub tools if present (analyze_environment returns hub_tools with snake_case)
+    hub_tools = analysis.get("hub_tools") or analysis.get("hubTools")
+    if hub_tools:
+        lock_content["hubTools"] = hub_tools
+
+    # Add prompts if present
+    prompts = analysis.get("prompts")
+    if prompts:
+        lock_content["prompts"] = prompts
+
+    # Add resources if present
+    resources = analysis.get("resources")
+    if resources:
+        lock_content["resources"] = resources
 
     # Write lock file
     lock_path = env_dir / "hud.lock.yaml"
@@ -655,11 +996,51 @@ def build_environment(
     version_tag = f"{base_name}:{new_version}"
     latest_tag = f"{base_name}:latest"
 
-    label_cmd = ["docker", "build"]
+    # Build command - use buildx when remote cache is enabled
+    label_cmd = ["docker", "buildx", "build"] if remote_cache else ["docker", "build"]
+
+    # Specify dockerfile explicitly if not the default name
+    if dockerfile_path and dockerfile_path.name != "Dockerfile":
+        label_cmd.extend(["-f", str(dockerfile_path)])
+
     # Use same defaulting for the second build step
     label_platform = platform if platform is not None else "linux/amd64"
     if label_platform:
         label_cmd.extend(["--platform", label_platform])
+
+    # Add remote cache support for final build
+    if remote_cache:
+        try:
+            if not re.match(r"^[a-z0-9]([a-z0-9\-_/]*[a-z0-9])?$", remote_cache):
+                hud_console.error(f"Invalid ECR repo name: {remote_cache}")
+                raise typer.Exit(1)
+
+            aws_account_id = os.getenv("AWS_ACCOUNT_ID")
+            aws_region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+
+            if not aws_account_id:
+                hud_console.error("AWS_ACCOUNT_ID environment variable not set")
+                raise typer.Exit(1)
+
+            cache_image = (
+                f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/{remote_cache}:cache"
+            )
+
+            label_cmd.extend(
+                [
+                    "--cache-from",
+                    f"type=registry,ref={cache_image}",
+                    "--cache-to",
+                    f"mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref={cache_image}",
+                    "--load",  # Load image to local Docker after build
+                ]
+            )
+        except typer.Exit:
+            raise
+        except Exception as e:
+            hud_console.error(f"Remote cache setup error: {e}")
+            raise typer.Exit(1) from e
+
     label_cmd.extend(
         [
             "--label",
@@ -677,16 +1058,27 @@ def build_environment(
     if image_tag and image_tag not in [version_tag, latest_tag]:
         label_cmd.extend(["-t", image_tag])
 
+    # Add build args to final image build (same as initial build)
+    for key, value in build_args.items():
+        label_cmd.extend(["--build-arg", f"{key}={value}"])
+
+    # Add secrets to final image build (same as initial build)
+    for secret in secrets or []:
+        label_cmd.extend(["--secret", secret])
+
     label_cmd.append(str(env_dir))
 
     # Run rebuild using Docker's native output formatting
+    env = os.environ.copy()
+    if secrets:
+        env["DOCKER_BUILDKIT"] = "1"
     if verbose:
         # Show Docker's native output when verbose
-        result = subprocess.run(label_cmd, check=False)  # noqa: S603
+        result = subprocess.run(label_cmd, check=False, env=env)  # noqa: S603
     else:
         # Capture output for error reporting, but don't show unless it fails
         result = subprocess.run(  # noqa: S603
-            label_cmd, capture_output=True, text=True, check=False
+            label_cmd, capture_output=True, text=True, check=False, env=env
         )
 
     if result.returncode != 0:
@@ -780,6 +1172,15 @@ def build_command(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
     env_vars: dict[str, str] | None = None,
     platform: str | None = None,
+    secrets: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--secret",
+        help=("Docker build secret (repeatable), e.g. --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN"),
+    ),
+    remote_cache: str | None = None,
+    build_args: dict[str, str] | None = None,
 ) -> None:
     """Build a HUD environment and generate lock file."""
-    build_environment(directory, tag, no_cache, verbose, env_vars, platform)
+    build_environment(
+        directory, tag, no_cache, verbose, env_vars, platform, secrets, remote_cache, build_args
+    )

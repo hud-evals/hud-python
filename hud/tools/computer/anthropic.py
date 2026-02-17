@@ -2,19 +2,24 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from mcp import ErrorData, McpError
 from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ContentBlock
 from pydantic import Field
 
+from hud.tools.native_types import NativeToolSpec, NativeToolSpecs
 from hud.tools.types import ContentResult
+from hud.types import AgentType
 
 from .hud import HudComputerTool
 from .settings import computer_settings
 
 if TYPE_CHECKING:
-    from anthropic.types.beta import BetaToolComputerUse20250124Param
+    from anthropic.types.beta import (
+        BetaToolComputerUse20250124Param,
+        BetaToolComputerUse20251124Param,
+    )
 
     from hud.tools.executors.base import BaseExecutor
 
@@ -60,12 +65,32 @@ ANTHROPIC_TO_CLA_KEYS = {
 
 
 class AnthropicComputerTool(HudComputerTool):
-    """
-    Anthropic Computer Use tool for interacting with the computer.
+    """Anthropic Computer Use tool for interacting with the computer.
+
+    Supports computer_20251124 (Opus 4.5/4.6 with zoom) and
+    computer_20250124 (Sonnet 4.5, Haiku 4.5, Sonnet 4, Opus 4).
     """
 
     name: str = "computer"
     api_type: str = "computer_20250124"
+
+    native_specs: ClassVar[NativeToolSpecs] = {
+        AgentType.CLAUDE: [
+            NativeToolSpec(
+                api_type="computer_20251124",
+                api_name="computer",
+                beta="computer-use-2025-11-24",
+                role="computer",
+                supported_models=("claude-opus-4-5*", "claude-opus-4-6*"),
+            ),
+            NativeToolSpec(
+                api_type="computer_20250124",
+                api_name="computer",
+                beta="computer-use-2025-01-24",
+                role="computer",
+            ),
+        ],
+    }
 
     def __init__(
         self,
@@ -87,13 +112,40 @@ class AnthropicComputerTool(HudComputerTool):
         Initialize with Anthropic's default dimensions.
 
         Args:
-            width: Target width for rescaling (None = use environment width)
-            height: Target height for rescaling (None = use environment height)
+            width: Width for agent coordinate system (default: 1400)
+            height: Height for agent coordinate system (default: 850)
             rescale_images: If True, rescale screenshots. If False, only rescale action coordinates
             name: Tool name for MCP registration (auto-generated from class name if not provided)
             title: Human-readable display name for the tool (auto-generated from class name)
             description: Tool description (auto-generated from docstring if not provided)
         """
+        # Create instance-level native_specs with display dimensions
+        instance_native_specs: NativeToolSpecs = {
+            AgentType.CLAUDE: [
+                NativeToolSpec(
+                    api_type="computer_20251124",
+                    api_name="computer",
+                    beta="computer-use-2025-11-24",
+                    role="computer",
+                    supported_models=("claude-opus-4-5*", "claude-opus-4-6*"),
+                    extra={
+                        "display_width": width,
+                        "display_height": height,
+                    },
+                ),
+                NativeToolSpec(
+                    api_type="computer_20250124",
+                    api_name="computer",
+                    beta="computer-use-2025-01-24",
+                    role="computer",
+                    extra={
+                        "display_width": width,
+                        "display_height": height,
+                    },
+                ),
+            ],
+        }
+
         super().__init__(
             executor=executor,
             platform_type=platform_type,
@@ -104,20 +156,49 @@ class AnthropicComputerTool(HudComputerTool):
             name=name or "anthropic_computer",
             title=title or "Anthropic Computer Tool",
             description=description or "Control computer with mouse, keyboard, and screenshot",
+            native_specs=instance_native_specs,
             **kwargs,
         )
 
-    def to_params(self) -> BetaToolComputerUse20250124Param:
-        """Convert to Anthropic tool parameters."""
+    def to_params(
+        self, api_type: str | None = None
+    ) -> BetaToolComputerUse20250124Param | BetaToolComputerUse20251124Param:
+        """Convert to Anthropic tool parameters.
+
+        Args:
+            api_type: Override the api_type (e.g., "computer_20251124" for Opus 4.5/4.6).
+                      Defaults to self.api_type.
+        """
+        effective_type = api_type or self.api_type
+        if effective_type == "computer_20251124":
+            return cast(
+                "BetaToolComputerUse20251124Param",
+                {
+                    "type": "computer_20251124",
+                    "name": self.name,
+                    "display_width_px": self.width,
+                    "display_height_px": self.height,
+                    "enable_zoom": True,
+                },
+            )
         return cast(
             "BetaToolComputerUse20250124Param",
             {
-                "type": self.api_type,
+                "type": effective_type,
                 "name": self.name,
                 "display_width_px": self.width,
                 "display_height_px": self.height,
             },
         )
+
+    def _parse_hold_keys(self, text: str | None) -> list[str] | None:
+        """Parse modifier keys from text, splitting combos like 'ctrl+shift' into separate keys."""
+        if not text:
+            return None
+        mapped = self._map_anthropic_key_to_cla(text)
+        if "+" in mapped:
+            return [k.strip() for k in mapped.split("+")]
+        return [mapped]
 
     def _map_anthropic_key_to_cla(self, key: str) -> str:
         """Map Anthropic key name to CLA standard key."""
@@ -141,13 +222,13 @@ class AnthropicComputerTool(HudComputerTool):
     async def __call__(
         self,
         action: str = Field(..., description="The action to perform on the computer"),
-        coordinate: list[int] | tuple[int, int] | None = Field(
+        coordinate: list[int] | None = Field(
             None, description="The coordinate to interact with on the computer [x, y]"
         ),
         text: str | None = Field(
             None, description="The text to type on the computer or key to press"
         ),
-        start_coordinate: list[int] | tuple[int, int] | None = Field(
+        start_coordinate: list[int] | None = Field(
             None, description="The starting coordinate for drag actions [x, y]"
         ),
         scroll_direction: str | None = Field(
@@ -155,6 +236,10 @@ class AnthropicComputerTool(HudComputerTool):
         ),
         scroll_amount: int | None = Field(None, description="The amount to scroll"),
         duration: float | None = Field(None, description="The duration of the action in seconds"),
+        region: tuple[int, int, int, int] | list[int] | None = Field(
+            None, description="The region for zoom action [x0, y0, x1, y1]"
+        ),
+        repeat: int = Field(1, description="Number of times to repeat the key action (1-100)"),
         take_screenshot_on_click: bool = Field(
             True, description="Whether to take a screenshot after clicking"
         ),
@@ -190,42 +275,55 @@ class AnthropicComputerTool(HudComputerTool):
                 result = ContentResult(error="Failed to take screenshot")
 
         elif action == "left_click" or action == "click":
+            hold_keys = self._parse_hold_keys(text)
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 logger.info("Scaled coordinates: %s, %s", scaled_x, scaled_y)
-                result = await self.executor.click(x=scaled_x, y=scaled_y)
+                result = await self.executor.click(x=scaled_x, y=scaled_y, hold_keys=hold_keys)
             else:
-                result = await self.executor.click()
+                result = await self.executor.click(hold_keys=hold_keys)
 
         elif action == "double_click":
+            hold_keys = self._parse_hold_keys(text)
             if coord_tuple and len(coord_tuple) >= 2:
                 # Use pattern for double-click
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
-                result = await self.executor.click(x=scaled_x, y=scaled_y, pattern=[100])
+                result = await self.executor.click(
+                    x=scaled_x, y=scaled_y, pattern=[100], hold_keys=hold_keys
+                )
             else:
-                result = await self.executor.click(pattern=[100])
+                result = await self.executor.click(pattern=[100], hold_keys=hold_keys)
 
         elif action == "triple_click":
+            hold_keys = self._parse_hold_keys(text)
             if coord_tuple and len(coord_tuple) >= 2:
                 # Use pattern for triple-click
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
-                result = await self.executor.click(x=scaled_x, y=scaled_y, pattern=[100, 100])
+                result = await self.executor.click(
+                    x=scaled_x, y=scaled_y, pattern=[100, 100], hold_keys=hold_keys
+                )
             else:
-                result = await self.executor.click(pattern=[100, 100])
+                result = await self.executor.click(pattern=[100, 100], hold_keys=hold_keys)
 
         elif action == "right_click":
+            hold_keys = self._parse_hold_keys(text)
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
-                result = await self.executor.click(x=scaled_x, y=scaled_y, button="right")
+                result = await self.executor.click(
+                    x=scaled_x, y=scaled_y, button="right", hold_keys=hold_keys
+                )
             else:
-                result = await self.executor.click(button="right")
+                result = await self.executor.click(button="right", hold_keys=hold_keys)
 
         elif action == "middle_click":
+            hold_keys = self._parse_hold_keys(text)
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
-                result = await self.executor.click(x=scaled_x, y=scaled_y, button="middle")
+                result = await self.executor.click(
+                    x=scaled_x, y=scaled_y, button="middle", hold_keys=hold_keys
+                )
             else:
-                result = await self.executor.click(button="middle")
+                result = await self.executor.click(button="middle", hold_keys=hold_keys)
 
         elif action == "mouse_move" or action == "move":
             if coord_tuple and len(coord_tuple) >= 2:
@@ -244,6 +342,13 @@ class AnthropicComputerTool(HudComputerTool):
 
         elif action == "key":
             if text:
+                if not isinstance(repeat, int) or repeat < 1:
+                    repeat = 1
+                if repeat > 100:
+                    raise McpError(
+                        ErrorData(code=INVALID_PARAMS, message="repeat exceeds maximum of 100")
+                    )
+
                 # Anthropic sends single key or combo like "ctrl+a"
                 # Map to CLA standard key format
                 mapped_key = self._map_anthropic_key_to_cla(text)
@@ -254,7 +359,9 @@ class AnthropicComputerTool(HudComputerTool):
                 else:
                     keys_list = [mapped_key]
 
-                result = await self.executor.press(keys=keys_list)
+                for i in range(repeat):
+                    is_last = i == repeat - 1
+                    result = await self.executor.press(keys=keys_list, take_screenshot=is_last)
             else:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="text is required for key"))
 
@@ -275,6 +382,8 @@ class AnthropicComputerTool(HudComputerTool):
                     )
                 )
 
+            # Map modifier key to CLA format (e.g., "Control" -> "ctrl")
+            hold_keys = self._parse_hold_keys(text)
             # Convert scroll amount from "clicks" to pixels
             # Anthropic's scroll_amount represents wheel clicks, not pixels
             # Standard conversion: 1 wheel click ≈ 100 pixels (3 lines of text)
@@ -296,10 +405,16 @@ class AnthropicComputerTool(HudComputerTool):
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 result = await self.executor.scroll(
-                    x=scaled_x, y=scaled_y, scroll_x=scroll_x, scroll_y=scroll_y
+                    x=scaled_x,
+                    y=scaled_y,
+                    scroll_x=scroll_x,
+                    scroll_y=scroll_y,
+                    hold_keys=hold_keys,
                 )
             else:
-                result = await self.executor.scroll(scroll_x=scroll_x, scroll_y=scroll_y)
+                result = await self.executor.scroll(
+                    scroll_x=scroll_x, scroll_y=scroll_y, hold_keys=hold_keys
+                )
 
         elif action == "left_click_drag" or action == "drag":
             # Anthropic sends drag with start and end coordinates
@@ -387,12 +502,69 @@ class AnthropicComputerTool(HudComputerTool):
         elif action == "cursor_position":
             result = await self.executor.position()
 
+        elif action == "zoom":
+            # Zoom action: capture a region of the screen and optionally resize
+            if region is None:
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="region is required for zoom action")
+                )
+            if not isinstance(region, list | tuple) or len(region) != 4:
+                raise McpError(
+                    ErrorData(
+                        code=INVALID_PARAMS,
+                        message="region must be a tuple/list of 4 integers (x0, y0, x1, y1)",
+                    )
+                )
+            if not all(isinstance(coord, int) and coord >= 0 for coord in region):
+                raise McpError(
+                    ErrorData(
+                        code=INVALID_PARAMS,
+                        message="region coordinates must be non-negative integers",
+                    )
+                )
+
+            x0, y0, x1, y1 = region
+            # Scale coordinates from agent space to screen space
+            x0, y0 = self._scale_coordinates(x0, y0)
+            x1, y1 = self._scale_coordinates(x1, y1)
+
+            # Ensure coordinates are valid after scaling
+            if x0 is None or y0 is None or x1 is None or y1 is None:
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="Failed to scale region coordinates")
+                )
+
+            width = x1 - x0
+            height = y1 - y0
+
+            if width <= 0 or height <= 0:
+                raise McpError(
+                    ErrorData(
+                        code=INVALID_PARAMS, message="region must have positive width and height"
+                    )
+                )
+
+            # Use executor's zoom method to capture and resize the region
+            result = await self.executor.zoom(
+                x0=x0,
+                y0=y0,
+                x1=x1,
+                y1=y1,
+                target_width=self.environment_width,
+                target_height=self.environment_height,
+            )
+
         else:
             # Unknown action
             raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Invalid action: {action}"))
 
-        # Rescale screenshot in result if present
-        if isinstance(result, ContentResult) and result.base64_image and self.rescale_images:
+        # Zoom returns full-resolution crops -- skip rescaling for zoom
+        if (
+            isinstance(result, ContentResult)
+            and result.base64_image
+            and self.rescale_images
+            and action != "zoom"
+        ):
             rescaled_image = await self._rescale_screenshot(result.base64_image)
             result.base64_image = rescaled_image
 

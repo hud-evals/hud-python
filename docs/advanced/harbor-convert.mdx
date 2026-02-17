@@ -1,0 +1,164 @@
+---
+title: "Converting Harbor Benchmarks"
+description: "Import Harbor tasks into HUD with a single command"
+icon: "ship"
+---
+
+[Harbor](https://github.com/laude-institute/harbor) is a framework for evaluating agents in container environments. HUD can convert any Harbor dataset (including [Terminal-Bench](https://github.com/laude-institute/terminal-bench-2)) into HUD environments and run them on the platform.
+
+## Quick Start
+
+```bash
+# 1. Clone the benchmark
+git clone https://github.com/laude-institute/terminal-bench-2.git
+
+# 2. Convert to HUD format
+hud convert ./terminal-bench-2/ --output ./tb2-hud
+
+# 3. Deploy all environments (~3 min per environment, leave it running)
+hud deploy ./tb2-hud --all
+
+# 4. Run evaluation
+hud eval ./tb2-hud/taskset.json
+```
+
+That's it. The converter handles Dockerfile adaptation, build context, test scripts, and reward parsing automatically.
+
+<Tip>
+Each environment takes roughly 3 minutes to build and deploy. For datasets with many environments,
+`hud deploy --all` runs them sequentially -- just leave it running and check back when it's done.
+</Tip>
+
+## What Gets Converted
+
+A Harbor task directory:
+
+```
+task-name/
+├── task.toml              # Config (timeout, metadata)
+├── instruction.md         # Agent prompt
+├── environment/
+│   ├── Dockerfile         # Container setup
+│   └── (build context)    # Any files the Dockerfile references
+├── tests/
+│   └── test.sh            # Verification script
+└── solution/              # Ignored
+```
+
+Becomes a HUD environment:
+
+```
+hud-harbor-dataset/
+├── env.py                 # MCP environment with run-task scenario
+├── Dockerfile.hud         # Harbor Dockerfile + HUD MCP layer
+├── pyproject.toml         # Dependencies
+├── (build context files)  # Copied from environment/
+└── tasks/
+    └── task-name/
+        ├── instruction.md
+        ├── task.toml
+        └── tests/test.sh
+```
+
+Plus a `taskset.json` that references all tasks across all environments.
+
+## How It Works
+
+### Environment Grouping
+
+Tasks with identical Dockerfiles are grouped into a single HUD environment. If every task has a unique Dockerfile (common in Terminal-Bench), each gets its own environment.
+
+### Dockerfile Adaptation
+
+The converter takes the Harbor Dockerfile verbatim and appends a HUD layer:
+
+- Installs `uv` standalone (works on any base image -- Debian, Ubuntu, Alpine, etc.)
+- Installs `hud-python` and `openai` as dependencies
+- Copies task data into `/harbor/tasks/`
+- Sets the MCP server as the entrypoint
+
+`CMD` and `ENTRYPOINT` from the original Dockerfile are commented out and replaced.
+
+### Reward Parsing
+
+Harbor test scripts write results to `/logs/verifier/`. The converter supports both formats:
+
+- `reward.txt` -- a single float (`1.0` for pass, `0.0` for fail)
+- `reward.json` -- `{"reward": 1.0}` or just a float
+
+## Running Tasks
+
+### Option 1: Upload as a Taskset (recommended)
+
+The generated `taskset.json` can be uploaded directly to the HUD platform for managed evaluation, leaderboards, and comparison across models:
+
+1. Go to [hud.ai/evalsets](https://hud.ai/evalsets) and create a new taskset
+2. Click **Upload Tasks** and paste the contents of `taskset.json`
+3. Run evaluations from the platform UI or via `hud eval`
+
+See the [Tasksets guide](/platform/tasksets) for full details on creating and managing tasksets.
+
+### Option 2: CLI eval
+
+Run the taskset directly from the command line:
+
+```bash
+hud eval ./tb2-hud/taskset.json
+```
+
+### Option 3: Python SDK
+
+Run tasks programmatically with any agent:
+
+```python
+import asyncio
+import hud
+from hud.agents.claude import ClaudeAgent
+from hud.eval.task import Task
+
+async def main():
+    task = Task(
+        env={"name": "hud-harbor-terminal-bench-2-sample-g1"},
+        scenario="hud-harbor-terminal-bench-2-sample-g1:run-task",
+        args={"task_id": "build-pmars"},
+    )
+
+    agent = ClaudeAgent.create(model="claude-sonnet-4-20250514")
+
+    async with hud.eval(task, name="harbor-demo") as ctx:
+        result = await agent.run(ctx, max_steps=30)
+
+    print(f"Reward: {ctx.reward}")
+
+asyncio.run(main())
+```
+
+Or load the full taskset as Task objects:
+
+```python
+import json
+from pathlib import Path
+
+from hud.eval.task import Task
+
+taskset = json.loads(Path("./tb2-hud/taskset.json").read_text())
+tasks = [Task(**t) for t in taskset]
+```
+
+## Supported Harbor Patterns
+
+| Pattern | Status |
+|---------|--------|
+| Simple Dockerfiles (`FROM` + `RUN`) | Supported |
+| `COPY` from local build context | Supported |
+| Multi-stage builds | Supported |
+| `ENV`, `ARG`, build scripts | Supported |
+| `CMD` / `ENTRYPOINT` replacement | Supported |
+| Tasks without Dockerfile | Supported (fallback image) |
+| `task.toml` metadata passthrough | Supported |
+| `docker-compose.yaml` (multi-service) | Not yet supported |
+
+## Limitations
+
+- **Docker Compose**: Tasks using `docker-compose.yaml` for multi-service setups are not currently supported (HUD environments are single-container).
+- **Pre-built images**: The converter rebuilds from the source Dockerfile rather than using the `docker_image` field in `task.toml`. This ensures full reproducibility but takes longer on first deploy.
