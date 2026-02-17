@@ -73,7 +73,8 @@ def show_dev_server_info(
         # Show debugging URLs from telemetry
         if telemetry:
             if "live_url" in telemetry:
-                hud_console.print(f"{hud_console.sym.ITEM} Live URL: {escape(telemetry['live_url'])}")
+                url = escape(telemetry["live_url"])
+                hud_console.print(f"{hud_console.sym.ITEM} Live URL: {url}")
             if "vnc_url" in telemetry:
                 hud_console.print(f"{hud_console.sym.ITEM} VNC URL: {escape(telemetry['vnc_url'])}")
             if "cdp_url" in telemetry:
