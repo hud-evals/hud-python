@@ -119,6 +119,13 @@ class OpenAIChatConfig(BaseAgentConfig):
 
     model_name: str = "OpenAI Chat"
     model: str = Field(default="gpt-5-mini", validation_alias=_model_alias)
+    checkpoint: str | None = Field(
+        default=None,
+        description="Specific checkpoint name for inference routing. "
+        "When set, the HUD gateway routes to this exact checkpoint rather than "
+        "the model's current active checkpoint. Passed as 'checkpoint' in the "
+        "request body's extra_body.",
+    )
     openai_client: Any = None  # AsyncOpenAI
     api_key: str | None = None
     base_url: str | None = None

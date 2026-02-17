@@ -4,7 +4,7 @@ description: "Deploy, manage, and monitor agent environments on the HUD platform
 icon: "cube"
 ---
 
-The Environments page at [hud.ai/environments](https://hud.ai/environments) is where you deploy, configure, and monitor your agent environments. Connect a GitHub repo or push via CLI, configure environment variables, and see live build status.
+The Environments page at [hud.ai/environments](https://hud.ai/environments) is where you deploy, configure, and monitor your agent environments. Connect a GitHub repo, deploy via CLI, or import a Docker image — then configure environment variables and see live build status.
 
 ## Overview
 
@@ -71,35 +71,64 @@ HUD automatically rebuilds your environment when you push changes to the connect
 
 Start from a pre-built template:
 
-- **Blank** — Minimal starter environment
-- **Browser** — Browser automation with Playwright
-- **Deep Research** — Web research and analysis tools
+- **Blank Environment** — Minimal starter for creating custom environments from scratch
+- **Deep Research** — Advanced research environment with Exa search integration
+- **Rubrics** — Environment for creating and evaluating with rubrics (TLDC methodology)
+- **Browser** — Local browser automation environment
+- **Remote Browser (Anchor)** — Cloud browser automation with Anchor, Steel, Browserbase, and Kernel providers
+- **Coding** — Full-featured coding environment with language servers, linters, and development tools
 
-### Push via CLI (Advanced)
+### Deploy via CLI
 
-For automated pipelines or custom registries, you can push directly via CLI:
+For automated pipelines or local deployments, you can deploy directly via CLI:
 
 ```bash
-hud build         # Build Docker image
-hud push          # Push to registry (requires HUD_API_KEY)
+hud deploy        # Build remotely & deploy to platform (requires HUD_API_KEY)
 ```
 
-See [`hud push`](/reference/cli/push) for details.
+See [`hud deploy`](/reference/cli/deploy) for details.
+
+### Develop Locally First
+
+The creation page also includes an expandable **Develop an Environment Locally** tutorial that walks through:
+
+1. `hud init` — Create a new environment from a template
+2. `hud dev` — Run locally with hot-reload
+3. Edit tools in `controller/tools.py` using `@mcp.tool`
+4. `hud deploy` — Deploy directly to the platform, or push to GitHub and import for automatic rebuilds
 
 ## Environment Details
 
-Click on an environment to see its detail page with several tabs:
+Click on an environment to see its detail page. The available tabs depend on ownership and registry type:
+
+| Tab | Shown for |
+|-----|-----------|
+| **Overview** | Always |
+| **Scenarios** | Always |
+| **Builds** | Owners (GitHub-connected and CLI-deployed) |
+| **Files** | Owners with a connected GitHub repository |
+| **Settings** | Owners |
+
+<Note>
+Public environments viewed by non-owners only show the **Overview** and **Scenarios** tabs.
+</Note>
 
 ### Overview Tab
 
-The main landing page shows:
+The main landing page is a rich detail view with two columns:
 
-- **Source** — GitHub repo link or "Pushed via CLI"
-- **Visibility** — Public or private
-- **Tools** — Available tools with their schemas
-- **Code Snippet** — Copy-paste code to use this environment
+**Left side:**
+- **Editable description** — Owners can add/edit a description for the environment
+- **Info section** — Source (GitHub repo link or "Deployed via CLI"), visibility, build status, branch/commit info, linked evalsets
+- **Recent Builds** — Quick summary of the last few builds with status badges
+- **Env var warning** — If required environment variables are missing, a warning banner links to Settings
+- **Scenarios** — Inline scenario cards showing name, description, and run counts. Click a scenario to select it.
+- **Tools** — Horizontal scrollable gallery of tool cards showing name, description, and input schema
+- **Integrations** — Code snippets for using the environment via the SDK or CLI
 
-If environment variables are missing, you'll see a warning banner linking to Settings.
+**Right side (sticky panel):**
+- **Configure** — Set environment variables and select a scenario to run
+- **Scenario Runner** — When a scenario is selected, shows integration options
 
 ### Scenarios Tab
 
@@ -117,17 +146,21 @@ Click a scenario to see its full definition and create tasks from it.
 
 ### Builds Tab
 
-Shows build history and status (for GitHub-connected environments):
+Shows build history and status for both GitHub-connected and CLI-deployed environments:
 
 - **Status** — Building, Success, or Failed
 - **Duration** — How long the build took
-- **Commit** — Git commit that triggered the build
+- **Commit** — Git commit that triggered the build (for GitHub builds)
 - **Logs** — Click to view full build output
 
 Failed builds show error details to help debug issues.
 
+### Files Tab
+
+Browse the source code of GitHub-connected environments directly in the browser. Shows a file tree and source viewer for the connected repository and branch.
+
 <Note>
-Builds tab is only available for environments connected to GitHub. Environments pushed via CLI don't show builds.
+The Files tab is only available for environments with a connected GitHub repository.
 </Note>
 
 ### Settings Tab
