@@ -21,19 +21,15 @@ The header shows real-time stats: environments run in the last 24 hours and curr
 
 ## Creating an Environment
 
-Click **New Environment** to open the creation page. You have several options:
+Click **New Environment** to create one. You have three options:
 
-### Import a GitHub URL
+### Import from GitHub
 
-Paste any HUD-compatible GitHub repository URL into the top input and click **Import**. HUD will clone the repo, build the Docker image, and deploy it.
+Connect a GitHub repository containing your environment code.
 
-### Import a Docker Image
+#### Connect GitHub
 
-Paste a Docker image path (e.g. `hudevals/hud-remote-browser`) into the Docker image input and click **Add Image**. HUD will pull and validate the image automatically.
-
-### Import from GitHub Repositories
-
-Connect your GitHub account to browse and import repositories directly:
+First, connect your GitHub account by installing the GitHub App:
 
 1. Click **Connect GitHub** to install the HUD GitHub App
 2. You'll be redirected to GitHub to authorize the installation
@@ -49,9 +45,19 @@ Connect your GitHub account to browse and import repositories directly:
 You can change repository access later in your GitHub settings.
 </Note>
 
-Once connected, select a repository from the list and click to import it. You can filter by organization and search across all your repos.
+#### Build from Repository
 
-HUD will clone the repo, build the Docker image, and push it to the HUD registry. Watch build logs in real-time on the Builds tab.
+Once GitHub is connected:
+
+1. Select a repository from the list
+2. Choose a branch (defaults to `main`)
+3. Click **Import**
+
+<Frame>
+  <img src="/src/images/remote-builds/select-repo.png" alt="Repository selection" />
+</Frame>
+
+HUD will clone your repo, build the Docker image, and push it to the HUD registry. Watch build logs in real-time on the Builds tab.
 
 #### Automatic Rebuilds
 
@@ -89,7 +95,7 @@ The creation page also includes an expandable **Develop an Environment Locally**
 1. `hud init` — Create a new environment from a template
 2. `hud dev` — Run locally with hot-reload
 3. Edit tools in `controller/tools.py` using `@mcp.tool`
-4. Push to GitHub and import above for automatic builds
+4. `hud deploy` — Deploy directly to the platform, or push to GitHub and import for automatic rebuilds
 
 ## Environment Details
 
