@@ -187,3 +187,141 @@ class TestEvalContextFromEnvironment:
         assert ctx.variants == {"model": "gpt-4o"}
         assert ctx.group_id == "group-123"
         assert ctx.index == 5
+
+
+class TestEvalContextFromTask:
+    """Tests for EvalContext.from_task factory."""
+
+    def test_v5_validation_populates_integration_calls(self) -> None:
+        """Task.validation is mapped to integration test calls for replay."""
+        from hud.environment import Environment
+        from hud.eval.task import Task
+        from hud.types import MCPToolCall
+
+        env = Environment("test-env")
+        validation_calls = [
+            MCPToolCall(name="tool_a", arguments={"x": 1}),
+            MCPToolCall(name="tool_b", arguments={"y": "ok"}),
+        ]
+        task = Task(
+            env=env,
+            scenario="demo",
+            args={},
+            validation=validation_calls,
+        )
+
+        ctx = EvalContext.from_task(task)
+        assert ctx._integration_test_calls == [
+            ("tool_a", {"x": 1}),
+            ("tool_b", {"y": "ok"}),
+        ]
+
+    def test_v5_validation_overrides_environment_integration_calls(self) -> None:
+        """Task.validation takes precedence over env-level integration calls."""
+        from hud.environment import Environment
+        from hud.eval.task import Task
+        from hud.types import MCPToolCall
+
+        env = Environment("test-env")
+        env._integration_test_calls = [("old_tool", {"stale": True})]
+
+        task = Task(
+            env=env,
+            scenario="demo",
+            args={},
+            validation=[MCPToolCall(name="new_tool", arguments={"fresh": True})],
+        )
+
+        ctx = EvalContext.from_task(task)
+        assert ctx._integration_test_calls == [("new_tool", {"fresh": True})]
+
+    def test_v5_empty_validation_clears_environment_integration_calls(self) -> None:
+        """Task.validation=[] still overrides env-level integration calls."""
+        from hud.environment import Environment
+        from hud.eval.task import Task
+
+        env = Environment("test-env")
+        env._integration_test_calls = [("old_tool", {"stale": True})]
+
+        task = Task(
+            env=env,
+            scenario="demo",
+            args={},
+            validation=[],
+        )
+
+        ctx = EvalContext.from_task(task)
+
+        assert ctx._integration_test_calls == []
+
+    def test_v4_integration_test_tool_remains_supported(self) -> None:
+        """Legacy integration_test_tool still populates integration calls."""
+        from hud.eval.task import Task
+
+        task = Task.from_v4(
+            {
+                "prompt": "test",
+                "mcp_config": {"server": {"url": "http://localhost"}},
+                "evaluate_tool": {"name": "check", "arguments": {}},
+                "integration_test_tool": [
+                    {"name": "legacy_tool", "arguments": {"v": 1}},
+                ],
+            }
+        )
+
+        ctx = EvalContext.from_task(task)
+        assert ctx._integration_test_calls == [("legacy_tool", {"v": 1})]
+
+    def test_v5_validation_replays_with_integration_runner(self) -> None:
+        """IntegrationTestRunner executes v5 Task.validation calls via EvalContext.from_task."""
+        import asyncio
+
+        from mcp import types as mcp_types
+
+        from hud.agents.misc import IntegrationTestRunner
+        from hud.environment import Environment
+        from hud.eval.task import Task
+        from hud.types import MCPToolCall, MCPToolResult
+
+        executed_calls: list[tuple[str, dict[str, object]]] = []
+
+        async def _run() -> None:
+            env = Environment("test-env")
+            validation_calls = [
+                MCPToolCall(name="tool_a", arguments={"x": 1}),
+                MCPToolCall(name="tool_b", arguments={"y": "ok"}),
+            ]
+            task = Task(
+                env=env,
+                scenario="demo",
+                args={},
+                validation=validation_calls,
+            )
+
+            ctx = EvalContext.from_task(task)
+
+            async def fake_call_tool(call, /, **kwargs):
+                if isinstance(call, tuple):
+                    name = str(call[0])
+                    arguments = dict(call[1]) if len(call) > 1 else {}
+                else:
+                    name = str(call)
+                    arguments = {}
+                executed_calls.append((name, arguments))
+                return MCPToolResult(
+                    content=[mcp_types.TextContent(type="text", text="ok")],
+                    isError=False,
+                )
+
+            ctx.call_tool = fake_call_tool  # type: ignore[method-assign]
+
+            runner = IntegrationTestRunner.create()
+            result = await runner.run(ctx)
+            assert result.done is True
+
+        asyncio.run(_run())
+
+        assert executed_calls == [
+            ("tool_a", {"x": 1}),
+            ("tool_b", {"y": "ok"}),
+        ]
