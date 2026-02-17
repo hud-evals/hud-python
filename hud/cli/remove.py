@@ -162,7 +162,7 @@ def remove_all_environments(
 
     hud_console.info("")
     hud_console.info("Note: Docker images may still exist locally.")
-    hud_console.info("To remove them, use: [cyan]docker image prune[/cyan]")
+    hud_console.print("To remove them, use: [cyan]docker image prune[/cyan]")
 
 
 def remove_command(

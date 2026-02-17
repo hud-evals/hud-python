@@ -49,41 +49,41 @@ def show_dev_server_info(
 
     # Server section
     hud_console.section_title("Server")
-    hud_console.info(f"{hud_console.sym.ITEM} {server_name}")
+    hud_console.print(f"{hud_console.sym.ITEM} {server_name}")
     if transport == "http":
-        hud_console.info(f"{hud_console.sym.ITEM} http://localhost:{port}/mcp")
+        hud_console.print(f"{hud_console.sym.ITEM} http://localhost:{port}/mcp")
     else:
-        hud_console.info(f"{hud_console.sym.ITEM} (stdio)")
+        hud_console.print(f"{hud_console.sym.ITEM} (stdio)")
 
     # Quick Links (only for HTTP mode)
     if transport == "http":
         hud_console.section_title("Quick Links")
-        hud_console.info(f"{hud_console.sym.ITEM} Docs: http://localhost:{port}/docs")
-        hud_console.info(f"{hud_console.sym.ITEM} Cursor:")
+        hud_console.print(f"{hud_console.sym.ITEM} Docs: http://localhost:{port}/docs")
+        hud_console.print(f"{hud_console.sym.ITEM} Cursor:")
         # Display the Cursor link on its own line to prevent wrapping
         hud_console.link(cursor_deeplink)
 
         # Show eval endpoint if in Docker mode
         if docker_mode:
-            hud_console.info(
+            hud_console.print(
                 f"{hud_console.sym.ITEM} Eval API: http://localhost:{port}/eval (POST)"
             )
 
         # Show debugging URLs from telemetry
         if telemetry:
             if "live_url" in telemetry:
-                hud_console.info(f"{hud_console.sym.ITEM} Live URL: {telemetry['live_url']}")
+                hud_console.print(f"{hud_console.sym.ITEM} Live URL: {telemetry['live_url']}")
             if "vnc_url" in telemetry:
-                hud_console.info(f"{hud_console.sym.ITEM} VNC URL: {telemetry['vnc_url']}")
+                hud_console.print(f"{hud_console.sym.ITEM} VNC URL: {telemetry['vnc_url']}")
             if "cdp_url" in telemetry:
-                hud_console.info(f"{hud_console.sym.ITEM} CDP URL: {telemetry['cdp_url']}")
+                hud_console.print(f"{hud_console.sym.ITEM} CDP URL: {telemetry['cdp_url']}")
 
         # Check for VNC (browser environment)
         if env_dir and (env_dir / "environment" / "server.py").exists():
             try:
                 content = (env_dir / "environment" / "server.py").read_text()
                 if "x11vnc" in content.lower() or "vnc" in content.lower():
-                    hud_console.info(f"{hud_console.sym.ITEM} VNC: http://localhost:8080/vnc.html")
+                    hud_console.print(f"{hud_console.sym.ITEM} VNC: http://localhost:8080/vnc.html")
             except Exception:  # noqa: S110
                 pass
 
@@ -91,13 +91,13 @@ def show_dev_server_info(
         if inspector or interactive:
             hud_console.info("")
             if inspector:
-                hud_console.info(f"{hud_console.sym.SUCCESS} Inspector launching...")
+                hud_console.print(f"{hud_console.sym.SUCCESS} Inspector launching...")
             if interactive:
-                hud_console.info(f"{hud_console.sym.SUCCESS} Interactive mode enabled")
+                hud_console.print(f"{hud_console.sym.SUCCESS} Interactive mode enabled")
 
     hud_console.info("")
     if hot_reload_enabled:
-        hud_console.info(f"{hud_console.sym.SUCCESS} Hot-reload enabled")
+        hud_console.print(f"{hud_console.sym.SUCCESS} Hot-reload enabled")
     else:
         hud_console.info("Hot-reload disabled")
         hud_console.dim_info("Tip", "Pass --watch/-w to enable hot-reload")
@@ -230,7 +230,7 @@ async def run_mcp_module(
         hud_console.error(f"Failed to import module '{module_name}'")
         hud_console.info(f"Error: {e}")
         hud_console.info("")
-        hud_console.info("[bold cyan]Troubleshooting:[/bold cyan]")
+        hud_console.print("[bold cyan]Troubleshooting:[/bold cyan]")
         hud_console.info("  • Verify module exists and is importable")
         hud_console.info("  • Check for __init__.py in module directory")
         hud_console.info("  • Check for import errors in the module")
@@ -238,7 +238,7 @@ async def run_mcp_module(
             import traceback
 
             hud_console.info("")
-            hud_console.info("[bold cyan]Full traceback:[/bold cyan]")
+            hud_console.print("[bold cyan]Full traceback:[/bold cyan]")
             hud_console.info(traceback.format_exc())
         sys.exit(1)
 
@@ -271,14 +271,14 @@ async def run_mcp_module(
         available = [k for k in dir(module) if not k.startswith("_")]
         hud_console.info(f"Available in module: {available}")
         hud_console.info("")
-        hud_console.info("[bold cyan]Expected structure:[/bold cyan]")
+        hud_console.print("[bold cyan]Expected structure:[/bold cyan]")
         hud_console.info("  from hud.environment import Environment")
         hud_console.info("  env = Environment('my-env')  # or mcp = ...")
         raise AttributeError(f"Module '{module_name}' must define 'mcp', 'env', or 'environment'")
 
     # Only show full header on first run, brief message on reload
     if is_reload:
-        hud_console.info(f"{hud_console.sym.SUCCESS} Reloaded")
+        hud_console.print(f"{hud_console.sym.SUCCESS} Reloaded")
         # Run server without showing full UI
     else:
         # Show full header on first run
@@ -344,7 +344,7 @@ async def run_mcp_module(
         env_dir = cwd.parent / "environment"
         if env_dir.exists() and (env_dir / "server.py").exists():
             hud_console.info("")
-            hud_console.info(
+            hud_console.print(
                 f"{hud_console.sym.FLOW} Don't forget to start the environment "
                 "backend in another terminal:"
             )
@@ -976,11 +976,11 @@ def run_mcp_dev_server(
         if module is None:
             hud_console.error("Could not auto-detect module in current directory")
             hud_console.info("")
-            hud_console.info("[bold cyan]Expected:[/bold cyan]")
+            hud_console.print("[bold cyan]Expected:[/bold cyan]")
             hud_console.info("  • __init__.py file in current directory")
             hud_console.info("  • Module must define 'mcp' or 'env' variable")
             hud_console.info("")
-            hud_console.info("[bold cyan]Examples:[/bold cyan]")
+            hud_console.print("[bold cyan]Examples:[/bold cyan]")
             hud_console.info("  hud dev controller")
             hud_console.info("  cd controller && hud dev")
             hud_console.info("  hud dev --docker  # For Docker-based environments")

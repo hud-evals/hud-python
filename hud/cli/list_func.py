@@ -59,8 +59,8 @@ def list_environments(
         else:
             hud_console.info("No environments found in local registry.")
             hud_console.info("")
-            hud_console.info("Pull environments with: [cyan]hud pull <org/name:tag>[/cyan]")
-            hud_console.info("Build environments with: [cyan]hud build[/cyan]")
+            hud_console.print("Pull environments with: [cyan]hud pull <org/name:tag>[/cyan]")
+            hud_console.print("Build environments with: [cyan]hud build[/cyan]")
         return
 
     # Collect all environments using the registry helper
@@ -131,8 +131,8 @@ def list_environments(
     if not environments:
         hud_console.info("No environments found matching criteria.")
         hud_console.info("")
-        hud_console.info("Pull environments with: [cyan]hud pull <org/name:tag>[/cyan]")
-        hud_console.info("Build environments with: [cyan]hud build[/cyan]")
+        hud_console.print("Pull environments with: [cyan]hud pull <org/name:tag>[/cyan]")
+        hud_console.print("Build environments with: [cyan]hud build[/cyan]")
         return
 
     # Create table
@@ -179,16 +179,16 @@ def list_environments(
         example_env = environments[0]
         example_ref = f"{example_env['name']}:{example_env['tag']}"
 
-        hud_console.info(f"Run an environment: [cyan]hud run {example_ref}[/cyan]")
-        hud_console.info(f"Analyze tools: [cyan]hud analyze {example_ref}[/cyan]")
-        hud_console.info(f"Debug server: [cyan]hud debug {example_ref}[/cyan]")
+        hud_console.print(f"Run an environment: [cyan]hud run {example_ref}[/cyan]")
+        hud_console.print(f"Analyze tools: [cyan]hud analyze {example_ref}[/cyan]")
+        hud_console.print(f"Debug server: [cyan]hud debug {example_ref}[/cyan]")
 
-    hud_console.info("Pull more environments: [cyan]hud pull <org/name:tag>[/cyan]")
-    hud_console.info("Build new environments: [cyan]hud build[/cyan]")
+    hud_console.print("Pull more environments: [cyan]hud pull <org/name:tag>[/cyan]")
+    hud_console.print("Build new environments: [cyan]hud build[/cyan]")
 
     if verbose:
         hud_console.info("")
-        hud_console.info(f"[dim]Registry location: {env_dir}[/dim]")
+        hud_console.print(f"[dim]Registry location: {env_dir}[/dim]")
 
 
 def list_command(
