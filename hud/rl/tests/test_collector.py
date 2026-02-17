@@ -84,6 +84,45 @@ async def test_collect_rollouts_repeats_tasks_and_uses_split() -> None:
     assert records[0].reward == 0.5
 
 
+@pytest.mark.asyncio
+async def test_collect_rollouts_passes_auto_respond_into_agent_params() -> None:
+    raw_task = {"prompt": "Task prompt", "mcp_config": {"local": {"url": "http://localhost"}}}
+
+    with (
+        patch("hud.rl.collector.load_tasks", return_value=[raw_task]),
+        patch("hud.rl.collector.run_dataset", new_callable=AsyncMock) as mock_run_dataset,
+    ):
+        mock_run_dataset.return_value = [Trace(reward=1.0, done=True)]
+
+        await collect_rollouts(
+            name="test-rollout",
+            source="hud-evals/demo",
+            agent_type="claude",
+            agent_params={"model": "claude-sonnet-4-5"},
+            auto_respond=False,
+        )
+
+    params = mock_run_dataset.call_args.kwargs["agent_params"]
+    assert params["model"] == "claude-sonnet-4-5"
+    assert params["auto_respond"] is False
+
+
+@pytest.mark.asyncio
+async def test_collect_rollouts_raises_on_non_dict_entries_in_local_json(tmp_path) -> None:
+    tasks_path = tmp_path / "tasks.json"
+    tasks_path.write_text(
+        json.dumps([{"prompt": "ok", "mcp_config": {"local": {"url": "x"}}}, "not-an-object"]),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="item 1: expected object"):
+        await collect_rollouts(
+            name="test-rollout",
+            source=str(tasks_path),
+            agent_type="claude",
+        )
+
+
 def test_write_rollouts_jsonl(tmp_path) -> None:
     record = build_rollout_records(
         source="tasks.json",
