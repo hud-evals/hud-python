@@ -16,12 +16,8 @@ from __future__ import annotations
 from hud.eval.display import display_results
 
 from .loader import load_dataset, load_tasks, save_tasks
-from .runner import run_dataset, run_single_task
-from .utils import (
-    BatchRequest,
-    SingleTaskRequest,
-    submit_rollouts,
-)
+from .runner import run_dataset, run_dataset_async, run_single_task
+from .utils import BatchRequest, SingleTaskRequest, submit_rollouts
 
 __all__ = [
     "BatchRequest",
@@ -30,6 +26,7 @@ __all__ = [
     "load_dataset",  # Deprecated alias
     "load_tasks",
     "run_dataset",
+    "run_dataset_async",
     "run_single_task",
     "save_tasks",
     "submit_rollouts",
