@@ -73,6 +73,10 @@ class ScenarioHandle(Generic[P]):
             task = my_scenario.task(difficulty=3)
             task.env = {"name": "custom-image-name"}
             task.validation = [...]
+
+        Raises:
+            TypeError: If any arg is not JSON-serializable (required for
+                Task transport over MCP / platform API).
         """
         from hud.eval.task import Task
 
@@ -82,6 +86,23 @@ class ScenarioHandle(Generic[P]):
             scenario=f"{self._env_name}:{self._scenario_name}",
             args=dict(bound.arguments),
         )
+
+
+def _validate_scenario_params(fn_name: str, sig: inspect.Signature, hints: dict[str, Any]) -> None:
+    """Validate that all scenario parameters have JSON-serializable types."""
+    from pydantic import TypeAdapter
+
+    for p in sig.parameters.values():
+        annotation = hints.get(p.name, inspect.Parameter.empty)
+        if annotation is inspect.Parameter.empty or annotation is Any:
+            continue
+        try:
+            TypeAdapter(annotation).json_schema()
+        except Exception:
+            raise TypeError(
+                f"Scenario '{fn_name}' parameter '{p.name}' has type "
+                f"'{annotation}' which is not JSON-serializable. "
+            ) from None
 
 
 def _normalize_prompt_yield(value: Any) -> list[str]:
@@ -663,6 +684,8 @@ class ScenarioMixin:
                     for p in sig.parameters.values()
                     if p.annotation is not inspect.Parameter.empty
                 }
+
+            _validate_scenario_params(scenario_name, sig, param_annotations)
 
             async def prompt_handler(**handler_args: Any) -> list[str]:
                 from pydantic import TypeAdapter
