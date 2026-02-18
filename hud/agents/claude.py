@@ -199,6 +199,29 @@ class ClaudeAgent(MCPAgent):
         """Get response from Claude including any tool calls."""
         messages_cached = self._add_prompt_caching(messages)
 
+        # Support forced-answer behavior from MCPAgent by restricting tools and
+        # tool_choice when _force_answer_only is set. This mirrors sandbox's
+        # per-message forceToolOptions behavior.
+        force_answer_only = getattr(self, "_force_answer_only", False)
+
+        tools_for_call: list[BetaToolUnionParam] = self.claude_tools
+        tool_choice: dict[str, Any] = {
+            "type": "auto",
+            "disable_parallel_tool_use": True,
+        }
+
+        if force_answer_only:
+            answer_tools = [
+                t for t in self.claude_tools if getattr(t, "name", None) == "answer"
+            ]
+            if answer_tools:
+                tools_for_call = answer_tools
+                tool_choice = {
+                    "type": "tool",
+                    "name": "answer",
+                    "disable_parallel_tool_use": True,
+                }
+
         # betas to use - collected during tool conversion based on native specs
         # Only pass betas when non-empty; an empty list can produce an empty
         # anthropic-beta header which the API rejects.
@@ -212,8 +235,8 @@ class ClaudeAgent(MCPAgent):
                     system=self.system_prompt if self.system_prompt is not None else Omit(),
                     max_tokens=self.max_tokens,
                     messages=messages_cached,
-                    tools=self.claude_tools,
-                    tool_choice={"type": "auto", "disable_parallel_tool_use": True},
+                    tools=tools_for_call,
+                    tool_choice=tool_choice,
                     betas=betas,
                 )
                 messages.append(BetaMessageParam(role="assistant", content=response.content))
@@ -228,8 +251,8 @@ class ClaudeAgent(MCPAgent):
                 system=self.system_prompt if self.system_prompt is not None else Omit(),
                 max_tokens=self.max_tokens,
                 messages=messages_cached,
-                tools=self.claude_tools,
-                tool_choice={"type": "auto", "disable_parallel_tool_use": True},
+                tools=tools_for_call,
+                tool_choice=tool_choice,
                 betas=betas,
             ) as stream:
                 # allow backend to accumulate message content

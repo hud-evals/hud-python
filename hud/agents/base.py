@@ -487,6 +487,8 @@ class MCPAgent(ABC):
             self.console.debug(f"Messages: {messages}")
 
             step_count = 0
+            answer_submitted = False
+
             while max_steps == -1 or step_count < max_steps:
                 step_count += 1
                 if max_steps == -1:
@@ -494,52 +496,91 @@ class MCPAgent(ABC):
                 else:
                     self.console.debug(f"Step {step_count}/{max_steps}")
 
+                # If we've reached max_steps without submitting an answer, force the
+                # next model call to use the `answer` tool only. Provider-specific
+                # agents (Claude/OpenAI/Gemini) implement this by honoring the
+                # `_force_answer_only` attribute via their native tool-choice APIs.
+                if max_steps != -1 and step_count >= max_steps and not answer_submitted:
+                    try:
+                        tools = self.get_available_tools()
+                    except RuntimeError:
+                        tools = self._available_tools or []
+
+                    if tools and any(getattr(t, "name", None) == "answer" for t in tools):
+                        # Set a flag checked by provider agents to restrict tools
+                        setattr(self, "_force_answer_only", True)
+                        self.console.warning_log(
+                            f"Reached max_steps ({max_steps}) without submitting answer. "
+                            "Prompting model to submit answer now."
+                        )
+                        # Also inject a clear instruction so the model knows what to do
+                        messages.extend(
+                            await self.format_message(
+                                (
+                                    "You have reached the maximum number of steps allowed. "
+                                    "You MUST use the `answer` tool NOW to submit your final "
+                                    "answer based on all the information you have gathered so far. "
+                                    "Do not use any other tools. Submit your answer immediately."
+                                )
+                            )
+                        )
+
                 try:
                     # 1. Get model response
                     response = await self.get_response(messages)
 
                     self.console.debug(f"Agent:\n{response}")
 
-                    # Check if we should stop
-                    if response.done or not response.tool_calls:
-                        # Use auto_respond to decide whether to stop
-                        decision: Literal["STOP", "CONTINUE"] = "STOP"
-                        if self.auto_respond and response.content:
-                            try:
-                                from hud.agents.misc import ResponseAgent
+                    # Track whether an answer was submitted in this step
+                    if response.tool_calls:
+                        for tool_call in response.tool_calls:
+                            if getattr(tool_call, "name", "") == "answer":
+                                answer_submitted = True
+                                # Clear forced-answer flag once we've seen an answer
+                                if hasattr(self, "_force_answer_only"):
+                                    setattr(self, "_force_answer_only", False)
+                                break
 
-                                response_agent = ResponseAgent()
-                                decision = await response_agent.determine_response(response.content)
-                            except Exception as e:
-                                self.console.warning_log(f"Auto-respond failed: {e}")
-                        if decision == "STOP":
-                            self.console.debug("Stopping execution")
-                            final_response = response
-                            break
-                        else:
-                            self.console.debug("Continuing execution")
-                            messages.extend(await self.format_message(decision))
-                            continue
+                        # Check if we should stop
+                        if response.done or not response.tool_calls:
+                            # Use auto_respond to decide whether to stop
+                            decision: Literal["STOP", "CONTINUE"] = "STOP"
+                            if self.auto_respond and response.content:
+                                try:
+                                    from hud.agents.misc import ResponseAgent
 
-                    # 2. Execute tools
-                    tool_calls = response.tool_calls
-                    tool_results = await self.call_tools(tool_calls)
+                                    response_agent = ResponseAgent()
+                                    decision = await response_agent.determine_response(response.content)
+                                except Exception as e:
+                                    self.console.warning_log(f"Auto-respond failed: {e}")
+                            if decision == "STOP":
+                                self.console.debug("Stopping execution")
+                                final_response = response
+                                break
+                            else:
+                                self.console.debug("Continuing execution")
+                                messages.extend(await self.format_message(decision))
+                                continue
 
-                    # 3. Format tool results and add to messages
-                    tool_messages = await self.format_tool_results(tool_calls, tool_results)
-                    messages.extend(tool_messages)
+                        # 2. Execute tools
+                        tool_calls = response.tool_calls
+                        tool_results = await self.call_tools(tool_calls)
 
-                    # Compact step completion display
-                    step_info = f"\n[bold]Step {step_count}"
-                    if max_steps != -1:
-                        step_info += f"/{max_steps}"
-                    step_info += "[/bold]"
+                        # 3. Format tool results and add to messages
+                        tool_messages = await self.format_tool_results(tool_calls, tool_results)
+                        messages.extend(tool_messages)
 
-                    # Show tool calls and results in compact format
-                    for call, result in zip(tool_calls, tool_results, strict=False):
-                        step_info += f"\n{call}\n{result}"
+                        # Compact step completion display
+                        step_info = f"\n[bold]Step {step_count}"
+                        if max_steps != -1:
+                            step_info += f"/{max_steps}"
+                        step_info += "[/bold]"
 
-                    self.console.info_log(step_info)
+                        # Show tool calls and results in compact format
+                        for call, result in zip(tool_calls, tool_results, strict=False):
+                            step_info += f"\n{call}\n{result}"
+
+                        self.console.info_log(step_info)
 
                 except Exception as e:
                     self.console.error_log(f"Step failed: {e}")
