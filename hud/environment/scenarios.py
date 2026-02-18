@@ -40,8 +40,8 @@ class ScenarioHandle(Generic[P]):
     Example::
 
         @env.scenario(name="fix_bug")
-        async def fix_bug(difficulty: int = 1, hint: str | None = None):
-            ...
+        async def fix_bug(difficulty: int = 1, hint: str | None = None): ...
+
 
         # IDE autocomplete + Pyright type-checking on scenario kwargs:
         task = fix_bug.task(difficulty=3, hint="look at line 42")
