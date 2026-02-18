@@ -106,7 +106,7 @@ def collect_command(
         try:
             source = find_tasks_file(None, msg="Select a tasks file to collect rollouts from")
             hud_console.success(f"Selected: {source}")
-        except (FileNotFoundError, Exception):
+        except Exception:
             hud_console.error(
                 "No source provided and no task/eval JSON files found in current directory"
             )
