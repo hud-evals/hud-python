@@ -121,6 +121,10 @@ def test_source_with_split_keeps_hf_split_when_matching_directory_exists(
     assert _source_with_split("hud-evals/demo", "test") == "hud-evals/demo:test"
 
 
+def test_source_with_split_keeps_hf_split_for_slash_free_dataset() -> None:
+    assert _source_with_split("imdb", "test") == "imdb:test"
+
+
 @pytest.mark.asyncio
 async def test_collect_rollouts_raises_on_non_dict_entries_in_local_json(tmp_path) -> None:
     tasks_path = tmp_path / "tasks.json"

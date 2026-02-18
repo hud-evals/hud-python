@@ -36,7 +36,7 @@ def _to_jsonable(value: Any) -> Any:
 
 def _source_with_split(source: str, split: str) -> str:
     path = Path(source)
-    if path.is_file() or ":" in source or "/" not in source:
+    if path.is_file() or ":" in source:
         return source
     if split != "train":
         return f"{source}:{split}"
