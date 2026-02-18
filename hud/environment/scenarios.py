@@ -51,11 +51,12 @@ class ScenarioHandle(Generic[P]):
     def __init__(
         self,
         fn: Any,
-        env_name: str,
+        env: Any,
         scenario_name: str,
     ) -> None:
         self._fn = fn
-        self._env_name = env_name
+        self._env = env
+        self._env_name: str = env.name
         self._scenario_name = scenario_name
         self._sig = inspect.signature(fn)
         functools.update_wrapper(self, fn)
@@ -82,7 +83,7 @@ class ScenarioHandle(Generic[P]):
 
         bound = self._sig.bind(*args, **kwargs)
         return Task(
-            env={"name": self._env_name},
+            env=self._env,
             scenario=f"{self._env_name}:{self._scenario_name}",
             args=dict(bound.arguments),
         )
@@ -826,6 +827,6 @@ class ScenarioMixin:
                 scenario_id,
             )
 
-            return ScenarioHandle(fn=fn, env_name=self.name, scenario_name=scenario_name)
+            return ScenarioHandle(fn=fn, env=self, scenario_name=scenario_name)
 
         return decorator
