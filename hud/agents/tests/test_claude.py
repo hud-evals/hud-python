@@ -440,7 +440,8 @@ class TestClaudeAgent:
     ) -> None:
         """Invalid streamed tool JSON should trigger one retry with wrapped payload."""
         invalid_json_error = ValueError(
-            'Unable to parse tool parameter JSON from model. Please retry your request or adjust your '
+            "Unable to parse tool parameter JSON from model. Please retry your request or "
+            "adjust your "
             'prompt. Error: expected value at line 1 column 10. JSON: {"labels": bug}'
         )
         first_stream = MockErrorStreamContextManager(invalid_json_error)
@@ -449,9 +450,7 @@ class TestClaudeAgent:
         mock_response.content = [MagicMock(type="text", text="Recovered")]
         second_stream = MockStreamContextManager(mock_response)
 
-        mock_anthropic.beta.messages.stream = MagicMock(
-            side_effect=[first_stream, second_stream]
-        )
+        mock_anthropic.beta.messages.stream = MagicMock(side_effect=[first_stream, second_stream])
 
         agent = ClaudeAgent.create(
             model_client=mock_anthropic,

@@ -86,7 +86,12 @@ class ClaudeAgent(MCPAgent):
             logger.debug("Legacy fallback: detected %s as computer tool", tool.name)
             model_lower = (self.model or "").lower()
             if any(
-                fnmatch.fnmatch(model_lower, p) for p in ("claude-opus-4-5*", "claude-opus-4-6*", "claude-sonnet-4-6*")
+                fnmatch.fnmatch(model_lower, p)
+                for p in (
+                    "claude-opus-4-5*",
+                    "claude-opus-4-6*",
+                    "claude-sonnet-4-6*",
+                )
             ):
                 return NativeToolSpec(
                     api_type="computer_20251124",
@@ -150,15 +155,15 @@ class ClaudeAgent(MCPAgent):
 
         # these will be initialized in _convert_tools_for_claude
         self.has_computer_tool = False
-        self.tool_mapping: dict[str, str] = {}
-        self.claude_tools: list[BetaToolUnionParam] = []
-        self._required_betas: set[str] = set()
+        self.tool_mapping = {}
+        self.claude_tools = []
+        self._required_betas = set()
 
     def _on_tools_ready(self) -> None:
         """Build Claude-specific tool mappings after tools are discovered."""
         self._convert_tools_for_claude()
 
-    async def get_system_messages(self) -> list[BetaMessageParam]:
+    async def get_system_messages(self) -> list[types.ContentBlock]:
         """No system messages for Claude because applied in get_response"""
         return []
 
@@ -274,7 +279,12 @@ class ClaudeAgent(MCPAgent):
                             pass
                         # get final message
                         response = await stream.get_final_message()
-                        messages.append(BetaMessageParam(role="assistant", content=response.content))
+                        messages.append(
+                            BetaMessageParam(
+                                role="assistant",
+                                content=response.content,
+                            )
+                        )
                         break
                 except ValueError as exc:
                     invalid_json = self._extract_invalid_tool_json(exc)
