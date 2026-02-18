@@ -435,10 +435,10 @@ class TestClaudeAgent:
         assert response.tool_calls[0].arguments == {"x": "value"}
 
     @pytest.mark.asyncio
-    async def test_get_response_retries_once_on_invalid_streamed_tool_json(
+    async def test_get_response_retries_same_generation_once_on_invalid_streamed_tool_json(
         self, mock_anthropic: AsyncAnthropic
     ) -> None:
-        """Invalid streamed tool JSON should trigger one retry with wrapped payload."""
+        """First invalid streamed tool JSON should retry without adding guidance."""
         invalid_json_error = ValueError(
             "Unable to parse tool parameter JSON from model. Please retry your request or "
             "adjust your "
@@ -472,7 +472,52 @@ class TestClaudeAgent:
 
         assert response.content == "Recovered"
         assert mock_anthropic.beta.messages.stream.call_count == 2
-        # Original user message + retry guidance + assistant response
+        # Original user message + assistant response (no guidance message needed)
+        assert len(messages) == 2
+        assert messages[1]["role"] == "assistant"
+
+    @pytest.mark.asyncio
+    async def test_get_response_adds_invalid_json_guidance_after_second_failure(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Second consecutive invalid JSON failure should add INVALID_JSON guidance."""
+        invalid_json_error = ValueError(
+            "Unable to parse tool parameter JSON from model. Please retry your request or "
+            "adjust your "
+            'prompt. Error: expected value at line 1 column 10. JSON: {"labels": bug}'
+        )
+        first_stream = MockErrorStreamContextManager(invalid_json_error)
+        second_stream = MockErrorStreamContextManager(invalid_json_error)
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(type="text", text="Recovered after guidance")]
+        third_stream = MockStreamContextManager(mock_response)
+
+        mock_anthropic.beta.messages.stream = MagicMock(
+            side_effect=[first_stream, second_stream, third_stream]
+        )
+
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            validate_api_key=False,
+        )
+        agent.claude_tools = []
+        agent.tool_mapping = {}
+        agent.has_computer_tool = False
+        agent._initialized = True
+
+        messages: list[BetaMessageParam] = [
+            cast(
+                "BetaMessageParam",
+                {"role": "user", "content": [{"type": "text", "text": "Create a Linear ticket"}]},
+            )
+        ]
+
+        response = await agent.get_response(messages)
+
+        assert response.content == "Recovered after guidance"
+        assert mock_anthropic.beta.messages.stream.call_count == 3
+        # Original user message + INVALID_JSON guidance + assistant response
         assert len(messages) == 3
         retry_message = messages[1]
         assert retry_message["role"] == "user"

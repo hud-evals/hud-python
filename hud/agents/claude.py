@@ -262,7 +262,8 @@ class ClaudeAgent(MCPAgent):
         else:
             # Regular Anthropic client supports .stream()
             response = None
-            for attempt in range(2):
+            invalid_json_failures = 0
+            for _ in range(3):
                 messages_cached = self._add_prompt_caching(messages)
                 try:
                     async with self.anthropic_client.beta.messages.stream(
@@ -289,11 +290,24 @@ class ClaudeAgent(MCPAgent):
                 except ValueError as exc:
                     invalid_json = self._extract_invalid_tool_json(exc)
                     is_retryable = invalid_json is not None
-                    if (not is_retryable) or attempt == 1:
+                    if not is_retryable:
                         raise
 
-                    logger.warning("Claude returned invalid streamed tool JSON; retrying once")
-                    messages.append(self._build_invalid_tool_json_retry_message(invalid_json))
+                    invalid_json_failures += 1
+                    if invalid_json_failures == 1:
+                        logger.warning(
+                            "Claude returned invalid streamed tool JSON; retrying same generation once"
+                        )
+                        continue
+
+                    if invalid_json_failures == 2:
+                        logger.warning(
+                            "Claude returned invalid streamed tool JSON twice; retrying once with INVALID_JSON guidance"
+                        )
+                        messages.append(self._build_invalid_tool_json_retry_message(invalid_json))
+                        continue
+
+                    raise
 
             if response is None:
                 raise ValueError("Claude response missing after stream retries")
