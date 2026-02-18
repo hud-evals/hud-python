@@ -99,6 +99,30 @@ class MockStreamContextManager:
         return self.response
 
 
+class MockErrorStreamContextManager:
+    """Mock stream context manager that raises a fixed error while streaming."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    async def __aenter__(self) -> MockErrorStreamContextManager:
+        return self
+
+    async def __aexit__(
+        self, exc_type: type | None, exc_val: Exception | None, exc_tb: Any
+    ) -> bool:
+        return False
+
+    def __aiter__(self) -> MockErrorStreamContextManager:
+        return self
+
+    async def __anext__(self) -> None:
+        raise self.error
+
+    async def get_final_message(self) -> MagicMock:
+        raise AssertionError("get_final_message should not be called when stream iteration fails")
+
+
 class TestClaudeHelperFunctions:
     """Test helper functions for Claude message formatting."""
 
@@ -409,6 +433,76 @@ class TestClaudeAgent:
         assert len(response.tool_calls) == 1
         assert response.tool_calls[0].name == "my_tool"
         assert response.tool_calls[0].arguments == {"x": "value"}
+
+    @pytest.mark.asyncio
+    async def test_get_response_retries_once_on_invalid_streamed_tool_json(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Invalid streamed tool JSON should trigger one retry with wrapped payload."""
+        invalid_json_error = ValueError(
+            'Unable to parse tool parameter JSON from model. Please retry your request or adjust your '
+            'prompt. Error: expected value at line 1 column 10. JSON: {"labels": bug}'
+        )
+        first_stream = MockErrorStreamContextManager(invalid_json_error)
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(type="text", text="Recovered")]
+        second_stream = MockStreamContextManager(mock_response)
+
+        mock_anthropic.beta.messages.stream = MagicMock(
+            side_effect=[first_stream, second_stream]
+        )
+
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            validate_api_key=False,
+        )
+        agent.claude_tools = []
+        agent.tool_mapping = {}
+        agent.has_computer_tool = False
+        agent._initialized = True
+
+        messages: list[BetaMessageParam] = [
+            cast(
+                "BetaMessageParam",
+                {"role": "user", "content": [{"type": "text", "text": "Create a Linear ticket"}]},
+            )
+        ]
+
+        response = await agent.get_response(messages)
+
+        assert response.content == "Recovered"
+        assert mock_anthropic.beta.messages.stream.call_count == 2
+        # Original user message + retry guidance + assistant response
+        assert len(messages) == 3
+        retry_message = messages[1]
+        assert retry_message["role"] == "user"
+        retry_content = cast("list[dict[str, Any]]", retry_message["content"])
+        assert "INVALID_JSON" in retry_content[0]["text"]
+
+    @pytest.mark.asyncio
+    async def test_get_response_does_not_retry_unrelated_value_error(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Non-tool-json ValueErrors should propagate immediately."""
+        unrelated_error = ValueError("stream exploded for unrelated reason")
+        mock_anthropic.beta.messages.stream = MagicMock(
+            return_value=MockErrorStreamContextManager(unrelated_error)
+        )
+
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            validate_api_key=False,
+        )
+        agent.claude_tools = []
+        agent.tool_mapping = {}
+        agent.has_computer_tool = False
+        agent._initialized = True
+
+        with pytest.raises(ValueError, match="unrelated reason"):
+            await agent.get_response([])
+
+        assert mock_anthropic.beta.messages.stream.call_count == 1
 
 
 class TestClaudeAgentBedrock:
