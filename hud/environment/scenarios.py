@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import functools
 import inspect
 import json
 import logging
-from typing import TYPE_CHECKING, Any, get_type_hints
+from typing import TYPE_CHECKING, Any, Generic, ParamSpec, get_type_hints
 
 from mcp.types import TextContent
 from pydantic import BaseModel, ConfigDict
@@ -19,9 +20,90 @@ if TYPE_CHECKING:
     from fastmcp.resources import ResourceManager
     from fastmcp.tools import ToolManager
 
-__all__ = ["ScenarioMixin", "ScenarioSession"]
+    from hud.eval.task import Task
+
+__all__ = ["ScenarioHandle", "ScenarioMixin", "ScenarioSession"]
+
+P = ParamSpec("P")
 
 logger = logging.getLogger(__name__)
+
+
+class ScenarioHandle(Generic[P]):
+    """Wraps a scenario function, providing a typed ``.task()`` factory.
+
+    Returned by ``@env.scenario``.  Behaves as the original async-generator
+    function (``__call__`` delegates), but adds ``.task()`` which creates a
+    :class:`~hud.eval.task.Task` whose keyword arguments are type-checked
+    against the scenario function's signature via ``ParamSpec``.
+
+    Example::
+
+        @env.scenario(name="fix_bug")
+        async def fix_bug(difficulty: int = 1, hint: str | None = None): ...
+
+
+        # IDE autocomplete + Pyright type-checking on scenario kwargs:
+        task = fix_bug.task(difficulty=3, hint="look at line 42")
+        task.validation = [{"name": "bash", "arguments": {"command": "..."}}]
+    """
+
+    def __init__(
+        self,
+        fn: Any,
+        env: Any,
+        scenario_name: str,
+    ) -> None:
+        self._fn = fn
+        self._env = env
+        self._env_name: str = env.name
+        self._scenario_name = scenario_name
+        self._sig = inspect.signature(fn)
+        functools.update_wrapper(self, fn)
+
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> AsyncGenerator[Any, None]:
+        return self._fn(*args, **kwargs)
+
+    def task(self, *args: P.args, **kwargs: P.kwargs) -> Task:
+        """Create a :class:`~hud.eval.task.Task` with typed scenario kwargs.
+
+        Positional and keyword arguments match the scenario function signature.
+        The Task's ``env`` defaults to this scenario's environment name;
+        override via attribute assignment::
+
+            task = my_scenario.task(difficulty=3)
+            task.env = {"name": "custom-image-name"}
+            task.validation = [...]
+
+        Raises:
+            TypeError: If any arg is not JSON-serializable (required for
+                Task transport over MCP / platform API).
+        """
+        from hud.eval.task import Task
+
+        bound = self._sig.bind(*args, **kwargs)
+        return Task(
+            env=self._env,
+            scenario=f"{self._env_name}:{self._scenario_name}",
+            args=dict(bound.arguments),
+        )
+
+
+def _validate_scenario_params(fn_name: str, sig: inspect.Signature, hints: dict[str, Any]) -> None:
+    """Validate that all scenario parameters have JSON-serializable types."""
+    from pydantic import TypeAdapter
+
+    for p in sig.parameters.values():
+        annotation = hints.get(p.name, inspect.Parameter.empty)
+        if annotation is inspect.Parameter.empty or annotation is Any:
+            continue
+        try:
+            TypeAdapter(annotation).json_schema()
+        except Exception:
+            raise TypeError(
+                f"Scenario '{fn_name}' parameter '{p.name}' has type "
+                f"'{annotation}' which is not JSON-serializable. "
+            ) from None
 
 
 def _normalize_prompt_yield(value: Any) -> list[str]:
@@ -487,8 +569,8 @@ class ScenarioMixin:
         description: str | None = None,
         required_env_vars: list[str] | None = None,
     ) -> Callable[
-        [Callable[..., AsyncGenerator[Any, None]]],
-        Callable[..., AsyncGenerator[Any, None]],
+        [Callable[P, AsyncGenerator[Any, None]]],
+        ScenarioHandle[P],
     ]:
         """Decorator to register a scenario with setup and evaluate phases.
 
@@ -518,8 +600,8 @@ class ScenarioMixin:
         """
 
         def decorator(
-            fn: Callable[..., AsyncGenerator[Any, None]],
-        ) -> Callable[..., AsyncGenerator[Any, None]]:
+            fn: Callable[P, AsyncGenerator[Any, None]],
+        ) -> ScenarioHandle[P]:
             scenario_name = name or fn.__name__
 
             # Validate scenario name - colons are reserved as env:scenario separator
@@ -603,6 +685,8 @@ class ScenarioMixin:
                     for p in sig.parameters.values()
                     if p.annotation is not inspect.Parameter.empty
                 }
+
+            _validate_scenario_params(scenario_name, sig, param_annotations)
 
             async def prompt_handler(**handler_args: Any) -> list[str]:
                 from pydantic import TypeAdapter
@@ -743,6 +827,6 @@ class ScenarioMixin:
                 scenario_id,
             )
 
-            return fn
+            return ScenarioHandle(fn=fn, env=self, scenario_name=scenario_name)
 
         return decorator
