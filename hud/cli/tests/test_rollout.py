@@ -62,3 +62,34 @@ def test_collect_command_exits_without_source(mock_find_tasks_file) -> None:
         rollout_cli.collect_command(source=None)
 
     mock_find_tasks_file.assert_called_once()
+
+
+def test_resolve_agent_only_sets_model_when_explicit() -> None:
+    _, config_without_model = rollout_cli._resolve_agent(
+        agent=AgentType.OPENAI,
+        model=None,
+        allowed_tools=None,
+        disallowed_tools=None,
+        verbose=False,
+    )
+    assert "model" not in config_without_model
+
+    _, config_with_model = rollout_cli._resolve_agent(
+        agent=AgentType.OPENAI,
+        model="gpt-5-mini",
+        allowed_tools=None,
+        disallowed_tools=None,
+        verbose=False,
+    )
+    assert config_with_model["model"] == "gpt-5-mini"
+
+
+def test_resolve_agent_never_sets_model_for_integration_test() -> None:
+    _, config = rollout_cli._resolve_agent(
+        agent=AgentType.INTEGRATION_TEST,
+        model="integration-test",
+        allowed_tools=None,
+        disallowed_tools=None,
+        verbose=False,
+    )
+    assert "model" not in config

@@ -25,17 +25,8 @@ def _resolve_agent(
     verbose: bool,
 ) -> tuple[AgentType, dict[str, Any]]:
     config: dict[str, Any] = {"verbose": verbose, "validate_api_key": False}
-    model_defaults: dict[AgentType, str] = {
-        AgentType.CLAUDE: "claude-sonnet-4-5",
-        AgentType.OPENAI: "gpt-5",
-        AgentType.OPERATOR: "computer-use-preview",
-        AgentType.GEMINI: "gemini-3-pro-preview",
-        AgentType.GEMINI_CUA: "gemini-2.5-computer-use-preview",
-        AgentType.OPENAI_COMPATIBLE: "gpt-5-mini",
-        AgentType.INTEGRATION_TEST: "integration-test",
-    }
-    if agent != AgentType.INTEGRATION_TEST:
-        config["model"] = model or model_defaults[agent]
+    if model is not None and agent != AgentType.INTEGRATION_TEST:
+        config["model"] = model
     if allowed_tools:
         config["allowed_tools"] = allowed_tools
     if disallowed_tools:
