@@ -402,10 +402,14 @@ class EvalContext(Environment):
         if self._task is None or self._task.scenario is None:
             return
 
-        result = await self.run_scenario_evaluate(self._task.scenario)
-        if result is not None:
-            self.evaluation_result = result
-            self.reward = result.reward
+        try:
+            result = await self.run_scenario_evaluate(self._task.scenario)
+        except Exception as e:
+            self.error = e
+            return
+
+        self.evaluation_result = result
+        self.reward = result.reward
 
     # =========================================================================
     # Summary Context - Attribute Access Control

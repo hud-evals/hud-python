@@ -497,7 +497,7 @@ class ScenarioMixin:
             )
             return prompt_text
 
-    async def run_scenario_evaluate(self, scenario_name: str) -> EvaluationResult | None:
+    async def run_scenario_evaluate(self, scenario_name: str) -> EvaluationResult:
         """Run a scenario's evaluate phase and return the evaluation result.
 
         Uses _active_session created by run_scenario_setup():
@@ -509,11 +509,12 @@ class ScenarioMixin:
 
         Returns:
             EvaluationResult with reward, done, content, subscores, etc.
-            Returns None if evaluation failed.
+
+        Raises:
+            ValueError: If no active session or evaluation fails.
         """
         if not self._active_session:
-            logger.warning("No active session for scenario '%s'", scenario_name)
-            return None
+            raise ValueError(f"No active session for scenario '{scenario_name}'. ")
 
         session = self._active_session
         self._active_session = None  # Clear after use
@@ -521,8 +522,7 @@ class ScenarioMixin:
         if session.is_local:
             # Local scenario - use generator
             if not session.generator:
-                logger.warning("Local scenario '%s' has no generator", session.local_name)
-                return None
+                raise ValueError(f"Local scenario '{session.local_name}' has no generator")
 
             answer = session.answer
             try:
@@ -557,8 +557,15 @@ class ScenarioMixin:
                         )
                         return result
             except Exception as e:
+                # Clean up duplicated "Error reading resource '...': " prefixes
+                # from fastmcp wrapping the error on both server and client side
+                error_str = str(e)
+                resource_prefix = f"Error reading resource '{session.resource_uri}': "
+                if error_str.startswith(resource_prefix):
+                    error_str = error_str[len(resource_prefix) :]
                 logger.warning("Failed to get scenario result from %s: %s", session.resource_uri, e)
-            return None
+                raise ValueError(error_str) from e
+            raise ValueError("Remote scenario returned empty or unparseable result")
 
     def scenario(
         self,
@@ -797,9 +804,6 @@ class ScenarioMixin:
             async def resource_handler() -> str:
                 # Delegate to run_scenario_evaluate (consolidates client/server logic)
                 result = await scenario_self.run_scenario_evaluate(scenario_name_ref)
-
-                if result is None:
-                    raise ValueError(f"Scenario '{scenario_name_ref}' evaluation failed")
 
                 # Serialize full EvaluationResult (includes reward, done, content, subscores)
                 # Use model_dump to get all fields, excluding None values for cleaner output

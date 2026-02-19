@@ -1315,8 +1315,8 @@ class TestScenarioSessionState:
             await env.submit("test", "answer")
 
     @pytest.mark.asyncio
-    async def test_evaluate_before_setup_returns_none(self) -> None:
-        """Calling evaluate() before setup() should return None."""
+    async def test_evaluate_before_setup_raises(self) -> None:
+        """Calling evaluate() before setup() should raise ValueError."""
         env = Environment("test-env")
 
         @env.scenario("test")
@@ -1324,12 +1324,12 @@ class TestScenarioSessionState:
             yield "Prompt"
             yield 1.0
 
-        result = await env.run_scenario_evaluate("test")
-        assert result is None
+        with pytest.raises(ValueError, match="No active session"):
+            await env.run_scenario_evaluate("test")
 
     @pytest.mark.asyncio
-    async def test_double_evaluate_returns_none(self) -> None:
-        """Calling evaluate() twice should return None on second call."""
+    async def test_double_evaluate_raises(self) -> None:
+        """Calling evaluate() twice should raise ValueError on second call."""
         env = Environment("test-env")
 
         @env.scenario("test")
@@ -1345,9 +1345,9 @@ class TestScenarioSessionState:
         assert result1 is not None
         assert result1.reward == 0.75
 
-        # Second call - session cleared
-        result2 = await env.run_scenario_evaluate("test")
-        assert result2 is None
+        # Second call - session cleared, should raise
+        with pytest.raises(ValueError, match="No active session"):
+            await env.run_scenario_evaluate("test")
 
     @pytest.mark.asyncio
     async def test_submit_wrong_scenario_raises(self) -> None:
