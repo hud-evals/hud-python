@@ -261,6 +261,7 @@ class MCPToolCall(CallToolRequestParams):
     """A tool call."""
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # Unique identifier for reference
+    annotation: str | None = None  # Optional explanation of why this action is taken
 
     def __str__(self) -> str:
         """Format tool call as plain text."""
@@ -273,13 +274,21 @@ class MCPToolCall(CallToolRequestParams):
             except (TypeError, ValueError):
                 args_str = str(self.arguments)[:60]
 
-        return f"→ {self.name}({args_str})"
+        s = f"→ {self.name}({args_str})"
+        if self.annotation:
+            s += f"  # {self.annotation}"
+        return s
 
     def __rich__(self) -> str:
         """Rich representation with color formatting."""
+        from rich.markup import escape
+
         from hud.utils.hud_console import hud_console
 
-        return hud_console.format_tool_call(self.name, self.arguments)
+        s = hud_console.format_tool_call(self.name, self.arguments)
+        if self.annotation:
+            s += f"  [bright_black]# {escape(self.annotation)}[/bright_black]"
+        return s
 
 
 class MCPToolResult(CallToolResult):

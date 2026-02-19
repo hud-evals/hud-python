@@ -155,6 +155,63 @@ class TestTaskValidation:
         assert isinstance(task.agent_config, TaskAgentConfig)
         assert task.agent_config.system_prompt == "Hello"
 
+
+class TestValidationAnnotation:
+    """Tests that annotation is preserved through validation sequences (golden traces)."""
+
+    def test_validation_preserves_annotation_from_mcp_tool_call(self) -> None:
+        """Annotation set on MCPToolCall objects survives Task construction."""
+        from hud.types import MCPToolCall
+
+        task = Task(
+            env={"name": "browser"},
+            scenario="checkout",
+            validation=[
+                MCPToolCall(name="click", arguments={"x": 1}, annotation="Open the cart"),
+                MCPToolCall(name="submit", arguments={}, annotation="Confirm purchase"),
+            ],
+        )
+
+        assert task.validation is not None
+        assert task.validation[0].annotation == "Open the cart"
+        assert task.validation[1].annotation == "Confirm purchase"
+
+    def test_validation_preserves_annotation_from_dict(self) -> None:
+        """Annotation in raw dicts is preserved through convert_validation."""
+        task = Task(
+            env={"name": "browser"},
+            scenario="checkout",
+            validation=[  # type: ignore[arg-type]
+                {"name": "click", "arguments": {"x": 1}, "annotation": "Open the cart"},
+                {"name": "submit", "arguments": {}},
+            ],
+        )
+
+        assert task.validation is not None
+        assert task.validation[0].annotation == "Open the cart"
+        assert task.validation[1].annotation is None
+
+    def test_v5_validation_annotation_roundtrip(self) -> None:
+        """Annotation survives full Task serialize -> deserialize roundtrip."""
+        from hud.types import MCPToolCall
+
+        task = Task(
+            env={"name": "browser"},
+            scenario="checkout",
+            validation=[
+                MCPToolCall(name="click", arguments={"x": 1}, annotation="Step 1"),
+            ],
+        )
+
+        data = task.model_dump(mode="json")
+        restored = Task(**data)
+
+        assert restored.validation is not None
+        assert restored.validation[0].annotation == "Step 1"
+        assert restored.validation[0].name == "click"
+        assert restored.validation[0].arguments == {"x": 1}
+
+
 class TestV4AgentConfigToolFilters:
     """Tests for v4 agent_config.allowed_tools and disallowed_tools processing."""
 
