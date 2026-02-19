@@ -36,6 +36,8 @@ class TestTaskDataclass:
     def test_copy_creates_new_instance(self) -> None:
         """copy() creates a new Task instance."""
         original = Task(
+            id="task-123",
+            slug="demo-slug",
             env={"name": "test"},
             scenario="checkout",
             args={"user_id": "alice"},
@@ -44,9 +46,42 @@ class TestTaskDataclass:
 
         assert copied is not original
         assert copied.env is original.env  # Env reference is shared (intentional)
+        assert copied.id is None
+        assert copied.slug is None
         assert copied.scenario == original.scenario
         assert copied.args == original.args
         assert copied.args is not original.args  # Args are deep copied
+
+    def test_copy_with_deep_true_preserves_env_ref_and_deep_copies_args(self) -> None:
+        """copy(deep=True) keeps env shared but deep-copies mutable task data."""
+        original = Task(
+            env={"name": "test"},
+            scenario="checkout",
+            args={"user": {"id": "alice"}},
+        )
+
+        copied = original.copy(deep=True)
+        assert copied.env is original.env
+        assert copied.args is not original.args
+        assert copied.args == original.args
+
+        assert copied.args is not None
+        assert original.args is not None
+        copied.args["user"]["id"] = "bob"
+        assert original.args["user"]["id"] == "alice"
+
+    def test_copy_with_update_validates_payload(self) -> None:
+        """copy(update=...) re-validates updates through Task validators."""
+        from pydantic import ValidationError
+
+        original = Task(
+            env={"name": "test"},
+            scenario="checkout",
+            args={"user_id": "alice"},
+        )
+
+        with pytest.raises(ValidationError):
+            original.copy(update={"env": {"include": ["navigate"]}})
 
 
 class TestEnvironmentCall:

@@ -433,7 +433,7 @@ class InteractiveMCPTester:
             # Show next steps tutorial
             self.console.section_title("Next Steps")
             self.console.info("🏗️  Ready to test with real agents? Run:")
-            self.console.info("    [cyan]hud build[/cyan]")
+            self.console.print("    [cyan]hud build[/cyan]")
             self.console.info("")
             self.console.info("This will:")
             self.console.info("  1. Build your environment image")
@@ -441,8 +441,10 @@ class InteractiveMCPTester:
             self.console.info("  3. Prepare it for testing with agents")
             self.console.info("")
             self.console.info("Then you can:")
-            self.console.info("  • Test locally: [cyan]hud run <image>[/cyan]")
-            self.console.info("  • Push to registry: [cyan]hud push --image <registry/name>[/cyan]")
+            self.console.print("  • Test locally: [cyan]hud run <image>[/cyan]")
+            self.console.print(
+                "  • Push to registry: [cyan]hud push --image <registry/name>[/cyan]"
+            )
             self.console.info("  • Use with agents via the lock file")
 
             console.print("\n[dim]Happy testing! 🎉[/dim]")

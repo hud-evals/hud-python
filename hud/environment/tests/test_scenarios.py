@@ -1092,6 +1092,75 @@ class TestScenarioNameNormalization:
             await env.run_scenario_setup("my_env:test", {})
 
 
+class TestScenarioRemoteErrors:
+    """Test remote scenario error mapping."""
+
+    @pytest.mark.asyncio
+    async def test_remote_setup_error_when_scenarios_unavailable_reraises_original(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If prompt listing also fails, preserve the original setup error."""
+        env = Environment("test-env")
+
+        async def timeout_get_prompt(_name: str, _arguments: dict[str, str] | None = None) -> Any:
+            raise RuntimeError("Transport error: ReadTimeout")
+
+        async def failing_list_prompts() -> list[Any]:
+            raise RuntimeError("list prompts failed")
+
+        monkeypatch.setattr(env, "get_prompt", timeout_get_prompt)
+        monkeypatch.setattr(env, "list_prompts", failing_list_prompts)
+
+        with pytest.raises(RuntimeError, match="Transport error: ReadTimeout"):
+            await env.run_scenario_setup("remote-env:solve-task", {})
+
+    @pytest.mark.asyncio
+    async def test_remote_not_found_shows_scenario_guidance(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Scenario-not-found errors show guidance when prompt is absent."""
+        env = Environment("test-env")
+
+        async def failing_get_prompt(_name: str, _arguments: dict[str, str] | None = None) -> Any:
+            raise RuntimeError("Transport error: ReadTimeout")
+
+        async def empty_list_prompts() -> list[Any]:
+            return []
+
+        monkeypatch.setattr(env, "get_prompt", failing_get_prompt)
+        monkeypatch.setattr(env, "list_prompts", empty_list_prompts)
+
+        with pytest.raises(ValueError, match="Scenario not found") as exc_info:
+            await env.run_scenario_setup("remote-env:solve-task", {})
+
+        error_message = str(exc_info.value)
+        assert "SDK looked for: remote-env:solve-task" in error_message
+        assert "Available scenarios:" in error_message
+
+    @pytest.mark.asyncio
+    async def test_remote_existing_prompt_reraises_original_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If prompt exists remotely, preserve original setup/rendering error."""
+        env = Environment("test-env")
+
+        async def failing_get_prompt(_name: str, _arguments: dict[str, str] | None = None) -> Any:
+            raise RuntimeError("Error rendering prompt coding:bug_fix.")
+
+        class _Prompt:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+        async def list_prompts_with_existing_scenario() -> list[Any]:
+            return [_Prompt("coding:bug_fix")]
+
+        monkeypatch.setattr(env, "get_prompt", failing_get_prompt)
+        monkeypatch.setattr(env, "list_prompts", list_prompts_with_existing_scenario)
+
+        with pytest.raises(RuntimeError, match="Error rendering prompt coding:bug_fix"):
+            await env.run_scenario_setup("coding:bug_fix", {})
+
+
 class TestScenarioMalformedNames:
     """Test handling of malformed scenario names."""
 
@@ -1240,8 +1309,8 @@ class TestScenarioSessionState:
             await env.submit("test", "answer")
 
     @pytest.mark.asyncio
-    async def test_evaluate_before_setup_returns_none(self) -> None:
-        """Calling evaluate() before setup() should return None."""
+    async def test_evaluate_before_setup_raises(self) -> None:
+        """Calling evaluate() before setup() should raise ValueError."""
         env = Environment("test-env")
 
         @env.scenario("test")
@@ -1249,12 +1318,12 @@ class TestScenarioSessionState:
             yield "Prompt"
             yield 1.0
 
-        result = await env.run_scenario_evaluate("test")
-        assert result is None
+        with pytest.raises(ValueError, match="No active session"):
+            await env.run_scenario_evaluate("test")
 
     @pytest.mark.asyncio
-    async def test_double_evaluate_returns_none(self) -> None:
-        """Calling evaluate() twice should return None on second call."""
+    async def test_double_evaluate_raises(self) -> None:
+        """Calling evaluate() twice should raise ValueError on second call."""
         env = Environment("test-env")
 
         @env.scenario("test")
@@ -1270,9 +1339,9 @@ class TestScenarioSessionState:
         assert result1 is not None
         assert result1.reward == 0.75
 
-        # Second call - session cleared
-        result2 = await env.run_scenario_evaluate("test")
-        assert result2 is None
+        # Second call - session cleared, should raise
+        with pytest.raises(ValueError, match="No active session"):
+            await env.run_scenario_evaluate("test")
 
     @pytest.mark.asyncio
     async def test_submit_wrong_scenario_raises(self) -> None:

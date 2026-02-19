@@ -110,6 +110,8 @@ def _load_from_huggingface(dataset_name: str) -> list[Task]:
 
 def _load_raw_from_api(dataset_name: str) -> list[dict[str, Any]]:
     """Load raw task dicts from HUD API."""
+    from hud.datasets.utils import _normalize_task_dict
+
     headers = {}
     if settings.api_key:
         headers["Authorization"] = f"Bearer {settings.api_key}"
@@ -126,13 +128,11 @@ def _load_raw_from_api(dataset_name: str) -> list[dict[str, Any]]:
         # Extract tasks dict from response
         tasks_dict = data.get("tasks", {})
 
-        raw_items: list[dict[str, Any]] = []
-        for task_id, task_data in tasks_dict.items():
-            if task_data.get("id") is None:
-                task_data["id"] = task_id
-            raw_items.append(task_data)
-
-        return raw_items
+        return [
+            _normalize_task_dict(task_data)
+            for task_data in tasks_dict.values()
+            if isinstance(task_data, dict)
+        ]
 
 
 def _load_from_api(dataset_name: str) -> list[Task]:
@@ -282,8 +282,13 @@ def save_tasks(
                 "Use Task.from_v4(legacy_task) to convert from LegacyTask."
             )
 
-    # Convert tasks to dicts (Task is a Pydantic model)
-    task_dicts = [task.model_dump(mode="json", exclude_none=True) for task in tasks]
+    # Convert tasks to dicts (Task is a Pydantic model).
+    # id is internal/platform-assigned; uploads should identify via slug.
+    task_dicts: list[dict[str, Any]] = []
+    for task in tasks:
+        task_data = task.model_dump(mode="json", exclude_none=True)
+        task_data.pop("id", None)
+        task_dicts.append(task_data)
 
     # Build request payload
     payload: dict[str, Any] = {
@@ -296,7 +301,7 @@ def save_tasks(
     try:
         with httpx.Client(timeout=60) as client:
             response = client.post(
-                f"{settings.hud_api_url}/tasks/evalset",
+                f"{settings.hud_api_url}/tasks/upload",
                 json=payload,
                 headers=headers,
             )

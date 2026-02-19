@@ -116,6 +116,54 @@ class TestEvalContext:
         assert "0.95" in repr_str
 
 
+class TestScenarioErrorPropagation:
+    """Tests for scenario evaluate errors being captured on EvalContext."""
+
+    @pytest.mark.asyncio
+    async def test_scenario_evaluate_error_sets_context_error(self) -> None:
+        """Scenario evaluate failure sets self.error on EvalContext."""
+        ctx = EvalContext(name="test-task", quiet=True)
+        # Simulate a task with a scenario
+        mock_task = MagicMock()
+        mock_task.scenario = "test-scenario"
+        ctx._task = mock_task
+
+        async def failing_evaluate(name: str):
+            raise RuntimeError("Command '['git', 'apply']' returned non-zero exit status 1.")
+
+        ctx.run_scenario_evaluate = failing_evaluate  # type: ignore[method-assign]
+
+        await ctx._run_task_scenario_evaluate()
+
+        assert ctx.error is not None
+        assert "git" in str(ctx.error)
+        assert ctx.success is False
+        assert ctx.reward is None
+
+    @pytest.mark.asyncio
+    async def test_scenario_evaluate_success_sets_reward(self) -> None:
+        """Successful scenario evaluate sets reward and evaluation_result."""
+        from hud.tools.types import EvaluationResult
+
+        ctx = EvalContext(name="test-task", quiet=True)
+        mock_task = MagicMock()
+        mock_task.scenario = "test-scenario"
+        ctx._task = mock_task
+
+        async def successful_evaluate(name: str):
+            return EvaluationResult(reward=0.85, done=True)
+
+        ctx.run_scenario_evaluate = successful_evaluate  # type: ignore[method-assign]
+
+        await ctx._run_task_scenario_evaluate()
+
+        assert ctx.error is None
+        assert ctx.success is True
+        assert ctx.reward == 0.85
+        assert ctx.evaluation_result is not None
+        assert ctx.evaluation_result.reward == 0.85
+
+
 class TestEvalContextPrompt:
     """Tests for EvalContext.prompt feature."""
 

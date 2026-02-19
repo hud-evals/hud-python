@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 
 import typer
+from rich.markup import escape
 
 from hud.utils.hud_console import HUDConsole
 
@@ -91,8 +92,8 @@ def remove_environment(
             if image:
                 hud_console.info("")
                 hud_console.info("Note: The Docker image may still exist locally.")
-                hud_console.info(
-                    f"To remove it, run: [cyan]docker rmi {image.split('@')[0]}[/cyan]"
+                hud_console.print(
+                    f"To remove it, run: [cyan]docker rmi {escape(image.split('@')[0])}[/cyan]"
                 )
     except Exception as e:
         hud_console.error(f"Failed to remove environment: {e}")

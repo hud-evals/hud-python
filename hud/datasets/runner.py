@@ -187,7 +187,7 @@ async def run_single_task(
         ```
     """
     # Determine trace name
-    effective_trace_name = trace_name or task_id or task.id or "single_task"
+    effective_trace_name = trace_name or task_id or task.slug or "single_task"
 
     # Run with explicit eval context parameters
     async with hud.eval(
