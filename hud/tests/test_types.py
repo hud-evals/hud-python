@@ -183,9 +183,7 @@ def test_mcp_tool_call_rich_with_annotation():
     """__rich__ includes escaped annotation in bright_black markup."""
     with patch("hud.utils.hud_console.hud_console") as mock_console:
         mock_console.format_tool_call.return_value = "formatted"
-        tool_call = MCPToolCall(
-            name="test", arguments={}, annotation="has [brackets] & stuff"
-        )
+        tool_call = MCPToolCall(name="test", arguments={}, annotation="has [brackets] & stuff")
         result = tool_call.__rich__()
         assert "[bright_black]" in result
         assert "has \\[brackets] & stuff" in result

@@ -168,34 +168,40 @@ class TestParseToolCallAnnotationIsolation:
         """OpenAI-format dict with extra annotation key drops it."""
         from hud.environment.utils.formats import parse_tool_call
 
-        tc, _ = parse_tool_call({
-            "function": {"name": "click", "arguments": '{"x": 1}'},
-            "id": "call_1",
-            "annotation": "injected",
-        })
+        tc, _ = parse_tool_call(
+            {
+                "function": {"name": "click", "arguments": '{"x": 1}'},
+                "id": "call_1",
+                "annotation": "injected",
+            }
+        )
         assert tc.annotation is None
 
     def test_claude_format_does_not_propagate_annotation(self) -> None:
         """Claude-format dict with extra annotation key drops it."""
         from hud.environment.utils.formats import parse_tool_call
 
-        tc, _ = parse_tool_call({
-            "type": "tool_use",
-            "name": "click",
-            "input": {"x": 1},
-            "id": "tu_1",
-            "annotation": "injected",
-        })
+        tc, _ = parse_tool_call(
+            {
+                "type": "tool_use",
+                "name": "click",
+                "input": {"x": 1},
+                "id": "tu_1",
+                "annotation": "injected",
+            }
+        )
         assert tc.annotation is None
 
     def test_gemini_format_does_not_propagate_annotation(self) -> None:
         """Gemini-format dict with extra annotation key drops it."""
         from hud.environment.utils.formats import parse_tool_call
 
-        tc, _ = parse_tool_call({
-            "functionCall": {"name": "click", "args": {"x": 1}},
-            "annotation": "injected",
-        })
+        tc, _ = parse_tool_call(
+            {
+                "functionCall": {"name": "click", "args": {"x": 1}},
+                "annotation": "injected",
+            }
+        )
         assert tc.annotation is None
 
 

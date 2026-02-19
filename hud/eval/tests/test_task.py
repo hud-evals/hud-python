@@ -181,7 +181,7 @@ class TestValidationAnnotation:
         task = Task(
             env={"name": "browser"},
             scenario="checkout",
-            validation=[
+            validation=[  # type: ignore[arg-type]
                 {"name": "click", "arguments": {"x": 1}, "annotation": "Open the cart"},
                 {"name": "submit", "arguments": {}},
             ],
