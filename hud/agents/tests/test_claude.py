@@ -756,6 +756,43 @@ class TestClaudeAgentComputerTool20251124:
         assert "fine-grained-tool-streaming-2025-05-14" not in agent._required_betas
 
 
+class TestRemoveOldImages:
+    """Test _remove_old_images pruning logic."""
+
+    @staticmethod
+    def _make_tool_result_msg(tool_id: str) -> dict:
+        return {"role": "user", "content": [
+            tool_use_content_block(tool_id, [
+                text_to_content_block("ok"),
+                base64_to_content_block("img"),
+            ])
+        ]}
+
+    @staticmethod
+    def _count_images(messages: list) -> int:
+        import json
+        return json.dumps(messages).count('"type": "image"')
+
+    def test_no_pruning_under_limit(self) -> None:
+        """50 images should not be pruned (default max_images=99)."""
+        client = MagicMock(spec=["messages", "beta"])
+        agent = ClaudeAgent.create(model_client=client, validate_api_key=False)
+
+        messages: list = [self._make_tool_result_msg(f"t{i}") for i in range(50)]
+        agent._remove_old_images(messages)
+        assert self._count_images(messages) == 50
+
+    def test_prunes_over_limit(self) -> None:
+        """101 images should be pruned down to max_images."""
+        client = MagicMock(spec=["messages", "beta"])
+        agent = ClaudeAgent.create(model_client=client, validate_api_key=False)
+
+        messages: list = [self._make_tool_result_msg(f"t{i}") for i in range(101)]
+        assert self._count_images(messages) == 101
+        agent._remove_old_images(messages)
+        assert self._count_images(messages) == agent.config.max_images
+
+
 class TestClaudeAgentBetaHeader:
     """Test that the Anthropic-Beta header is handled correctly."""
 
