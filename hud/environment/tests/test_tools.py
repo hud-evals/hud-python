@@ -149,6 +149,62 @@ class TestCallTool:
                 await env.call_tool("nonexistent")
 
 
+class TestParseToolCallAnnotationIsolation:
+    """Verify parse_tool_call never propagates annotation from input dicts.
+
+    Annotations are a human-only field for golden traces. Agent code paths
+    go through parse_tool_call, so this test pins the guarantee that even
+    if an LLM response dict contains an 'annotation' key, it is dropped.
+    """
+
+    def test_generic_dict_does_not_propagate_annotation(self) -> None:
+        """Generic {name, arguments, annotation} dict drops annotation."""
+        from hud.environment.utils.formats import parse_tool_call
+
+        tc, _ = parse_tool_call({"name": "click", "arguments": {"x": 1}, "annotation": "injected"})
+        assert tc.annotation is None
+
+    def test_openai_format_does_not_propagate_annotation(self) -> None:
+        """OpenAI-format dict with extra annotation key drops it."""
+        from hud.environment.utils.formats import parse_tool_call
+
+        tc, _ = parse_tool_call(
+            {
+                "function": {"name": "click", "arguments": '{"x": 1}'},
+                "id": "call_1",
+                "annotation": "injected",
+            }
+        )
+        assert tc.annotation is None
+
+    def test_claude_format_does_not_propagate_annotation(self) -> None:
+        """Claude-format dict with extra annotation key drops it."""
+        from hud.environment.utils.formats import parse_tool_call
+
+        tc, _ = parse_tool_call(
+            {
+                "type": "tool_use",
+                "name": "click",
+                "input": {"x": 1},
+                "id": "tu_1",
+                "annotation": "injected",
+            }
+        )
+        assert tc.annotation is None
+
+    def test_gemini_format_does_not_propagate_annotation(self) -> None:
+        """Gemini-format dict with extra annotation key drops it."""
+        from hud.environment.utils.formats import parse_tool_call
+
+        tc, _ = parse_tool_call(
+            {
+                "functionCall": {"name": "click", "args": {"x": 1}},
+                "annotation": "injected",
+            }
+        )
+        assert tc.annotation is None
+
+
 class TestMockMode:
     """Tests for mock mode."""
 
