@@ -236,6 +236,7 @@ class ClaudeAgent(MCPAgent):
 
     async def get_response(self, messages: list[BetaMessageParam]) -> AgentResponse:
         """Get response from Claude including any tool calls."""
+        self._remove_old_images(messages)
         messages_cached = self._add_prompt_caching(messages)
         # betas to use - collected during tool conversion based on native specs
         # Only pass betas when non-empty; an empty list can produce an empty
@@ -567,6 +568,39 @@ class ClaudeAgent(MCPAgent):
                     description=tool.description,
                     input_schema=tool.inputSchema,
                 )
+
+    def _remove_old_images(self, messages: list[BetaMessageParam]) -> None:
+        """Keep only the newest ``max_images`` images; replace older ones with a placeholder."""
+        max_images = self.config.max_images
+        placeholder = {"type": "text", "text": "[image removed]"}
+
+        raw_messages: list[dict] = cast("list[dict]", messages)
+
+        refs: list[tuple[list, int]] = []
+        for msg in reversed(raw_messages):
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            for i, block in enumerate(content):
+                if block.get("type") == "image":
+                    refs.append((content, i))
+                elif block.get("type") == "tool_result":
+                    inner = block.get("content")
+                    if not isinstance(inner, list):
+                        continue
+                    for j, ib in enumerate(inner):
+                        if ib.get("type") == "image":
+                            refs.append((inner, j))
+
+        if len(refs) <= max_images:
+            return
+
+        for container, idx in refs[max_images:]:
+            container[idx] = dict(placeholder)
+
+        logger.info("Pruned images from conversation: %d -> %d", len(refs), max_images)
 
     def _add_prompt_caching(self, messages: list[BetaMessageParam]) -> list[BetaMessageParam]:
         """Add prompt caching to messages."""

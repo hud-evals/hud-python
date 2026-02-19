@@ -40,6 +40,10 @@ class ClaudeConfig(BaseAgentConfig):
     max_tokens: int = 16384
     use_computer_beta: bool = True
     validate_api_key: bool = True
+    max_images: int = Field(
+        default=99,
+        description="Maximum number of images to keep in conversation due to Anthropic API limit.",
+    )
 
 
 class ClaudeCreateParams(BaseCreateParams, ClaudeConfig):
