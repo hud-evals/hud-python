@@ -761,16 +761,23 @@ class TestRemoveOldImages:
 
     @staticmethod
     def _make_tool_result_msg(tool_id: str) -> dict:
-        return {"role": "user", "content": [
-            tool_use_content_block(tool_id, [
-                text_to_content_block("ok"),
-                base64_to_content_block("img"),
-            ])
-        ]}
+        return {
+            "role": "user",
+            "content": [
+                tool_use_content_block(
+                    tool_id,
+                    [
+                        text_to_content_block("ok"),
+                        base64_to_content_block("img"),
+                    ],
+                )
+            ],
+        }
 
     @staticmethod
     def _count_images(messages: list) -> int:
         import json
+
         return json.dumps(messages).count('"type": "image"')
 
     def test_no_pruning_under_limit(self) -> None:
