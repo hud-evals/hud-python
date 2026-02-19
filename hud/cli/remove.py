@@ -5,7 +5,6 @@ from __future__ import annotations
 import shutil
 
 import typer
-
 from rich.markup import escape
 
 from hud.utils.hud_console import HUDConsole

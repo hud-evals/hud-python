@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import inspect
 import json
@@ -434,11 +435,8 @@ class ScenarioMixin:
                 prompts: list[Any] | None = None
 
                 # Fetch available scenarios for error context
-                try:
+                with contextlib.suppress(Exception):
                     prompts = await self.list_prompts()  # type: ignore[attr-defined]
-                except Exception:
-                    # If we can't verify scenario existence, preserve the original setup failure.
-                    pass
 
                 if prompts is None:
                     raise
@@ -451,8 +449,8 @@ class ScenarioMixin:
                         f"Scenario IDs have the format 'environment_name:scenario_name'.\n"
                         f"If you only specify 'scenario_name', the SDK uses your task's env name "
                         f"as the prefix.\n"
-                        f"This won't work if the HUD environment was declared with a different name."
-                        f"\n\n"
+                        f"This won't work if the HUD environment was declared with "
+                        f"a different name.\n\n"
                         f"  You requested: {scenario_name}\n"
                         f"  SDK looked for: {prompt_id}\n"
                         f"\n"

@@ -51,7 +51,7 @@ def show_dev_server_info(
     # Server section
     hud_console.section_title("Server")
     hud_console.console.print(f"{hud_console.sym.ITEM} {escape(server_name)}", highlight=False)
-    _print = lambda msg: hud_console.console.print(msg, highlight=False)  # noqa: E731
+    _print = lambda msg: hud_console.console.print(msg, highlight=False)
     if transport == "http":
         _print(f"{hud_console.sym.ITEM} http://localhost:{port}/mcp")
     else:

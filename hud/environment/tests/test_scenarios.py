@@ -1102,9 +1102,7 @@ class TestScenarioRemoteErrors:
         """If prompt listing also fails, preserve the original setup error."""
         env = Environment("test-env")
 
-        async def timeout_get_prompt(
-            _name: str, _arguments: dict[str, str] | None = None
-        ) -> Any:
+        async def timeout_get_prompt(_name: str, _arguments: dict[str, str] | None = None) -> Any:
             raise RuntimeError("Transport error: ReadTimeout")
 
         async def failing_list_prompts() -> list[Any]:
@@ -1123,9 +1121,7 @@ class TestScenarioRemoteErrors:
         """Scenario-not-found errors show guidance when prompt is absent."""
         env = Environment("test-env")
 
-        async def failing_get_prompt(
-            _name: str, _arguments: dict[str, str] | None = None
-        ) -> Any:
+        async def failing_get_prompt(_name: str, _arguments: dict[str, str] | None = None) -> Any:
             raise RuntimeError("Transport error: ReadTimeout")
 
         async def empty_list_prompts() -> list[Any]:
@@ -1148,9 +1144,7 @@ class TestScenarioRemoteErrors:
         """If prompt exists remotely, preserve original setup/rendering error."""
         env = Environment("test-env")
 
-        async def failing_get_prompt(
-            _name: str, _arguments: dict[str, str] | None = None
-        ) -> Any:
+        async def failing_get_prompt(_name: str, _arguments: dict[str, str] | None = None) -> Any:
             raise RuntimeError("Error rendering prompt coding:bug_fix.")
 
         class _Prompt:

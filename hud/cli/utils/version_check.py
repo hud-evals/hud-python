@@ -26,7 +26,6 @@ from typing import NamedTuple
 
 import httpx
 from packaging import version
-
 from rich.markup import escape
 
 from hud.utils.hud_console import HUDConsole
