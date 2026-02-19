@@ -431,40 +431,37 @@ class ScenarioMixin:
                     conn_name or "(not found in router)",
                 )
             except Exception as e:
+                prompts: list[Any] | None = None
+
                 # Fetch available scenarios for error context
                 try:
                     prompts = await self.list_prompts()  # type: ignore[attr-defined]
-                    scenario_prompts = [p.name for p in prompts if ":" in p.name]
-                    available = "\n    ".join(scenario_prompts) if scenario_prompts else "(none)"
                 except Exception:
-                    available = "(could not fetch)"
-                    scenario_prompts = []
+                    # If we can't verify scenario existence, preserve the original setup failure.
+                    pass
 
-                original_error = str(e)
-                if prompt_id in scenario_prompts:
+                if prompts is None:
+                    raise
+
+                scenario_prompts = [p.name for p in prompts if ":" in p.name]
+                if prompt_id not in scenario_prompts:
+                    available = "\n    ".join(scenario_prompts) if scenario_prompts else "(none)"
                     raise ValueError(
-                        f"⚠️ ERROR: Scenario '{prompt_id}' exists but failed to execute.\n\n"
-                        f"The scenario was found but encountered an error during setup:\n"
-                        f"  {original_error}\n\n"
-                        f"This could be caused by:\n"
-                        f"  - Missing or invalid scenario arguments\n"
-                        f"  - An error in the scenario's setup function\n"
-                        f"  - Connection or serialization issues\n\n"
-                        f"Check the scenario definition and required arguments."
+                        f"⚠️ ERROR: Scenario not found.\n\n"
+                        f"Scenario IDs have the format 'environment_name:scenario_name'.\n"
+                        f"If you only specify 'scenario_name', the SDK uses your task's env name "
+                        f"as the prefix.\n"
+                        f"This won't work if the HUD environment was declared with a different name."
+                        f"\n\n"
+                        f"  You requested: {scenario_name}\n"
+                        f"  SDK looked for: {prompt_id}\n"
+                        f"\n"
+                        f"Available scenarios:\n    {available}\n\n"
+                        f"Fix: Use one of the scenario IDs above in your task JSON."
                     ) from e
 
-                raise ValueError(
-                    f"⚠️ ERROR: Scenario not found.\n\n"
-                    f"Scenario IDs have the format 'environment_name:scenario_name'.\n"
-                    f"If you only specify 'scenario_name', the SDK uses your task's env name "
-                    f"as the prefix.\n"
-                    f"This won't work if the HUD environment was declared with a different name."
-                    f"\n\n"
-                    f"  You requested: {scenario_name}\n"
-                    f"  SDK looked for: {prompt_id}\n\n"
-                    f"Available scenarios:\n    {available}\n\n"
-                    f"Fix: Use one of the scenario IDs above in your task JSON."
-                ) from e
+                # Prompt exists remotely; original setup/rendering error.
+                raise
 
             # Extract prompt text from response
             prompt_text: str | None = None
