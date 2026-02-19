@@ -128,12 +128,11 @@ def _load_raw_from_api(dataset_name: str) -> list[dict[str, Any]]:
         # Extract tasks dict from response
         tasks_dict = data.get("tasks", {})
 
-        raw_items: list[dict[str, Any]] = []
-        for task_data in tasks_dict.values():
-            if isinstance(task_data, dict):
-                raw_items.append(_normalize_task_dict(task_data))
-
-        return raw_items
+        return [
+            _normalize_task_dict(task_data)
+            for task_data in tasks_dict.values()
+            if isinstance(task_data, dict)
+        ]
 
 
 def _load_from_api(dataset_name: str) -> list[Task]:

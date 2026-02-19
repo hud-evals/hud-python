@@ -65,6 +65,8 @@ class TestTaskDataclass:
         assert copied.args is not original.args
         assert copied.args == original.args
 
+        assert copied.args is not None
+        assert original.args is not None
         copied.args["user"]["id"] = "bob"
         assert original.args["user"]["id"] == "alice"
 
