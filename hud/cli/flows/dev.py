@@ -138,8 +138,9 @@ def show_dev_ui(
     # Show other info below
     label = "Base image" if is_docker else "Server"
     hud_console.info("")
-    hud_console.print(f"{hud_console.sym.ITEM} {escape(label)}: {escape(server_name)}")
-    hud_console.print(f"{hud_console.sym.ITEM} Cursor:")
+    _print = lambda msg: hud_console.console.print(msg, highlight=False)  # noqa: E731
+    _print(f"{hud_console.sym.ITEM} {escape(label)}: {escape(server_name)}")
+    _print(f"{hud_console.sym.ITEM} Cursor:")
     # Display the Cursor link on its own line to prevent wrapping
     hud_console.link(cursor_deeplink)
     hud_console.info("")

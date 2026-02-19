@@ -51,41 +51,40 @@ def show_dev_server_info(
     # Server section
     hud_console.section_title("Server")
     hud_console.console.print(f"{hud_console.sym.ITEM} {escape(server_name)}", highlight=False)
+    _print = lambda msg: hud_console.console.print(msg, highlight=False)  # noqa: E731
     if transport == "http":
-        hud_console.print(f"{hud_console.sym.ITEM} http://localhost:{port}/mcp")
+        _print(f"{hud_console.sym.ITEM} http://localhost:{port}/mcp")
     else:
-        hud_console.print(f"{hud_console.sym.ITEM} (stdio)")
+        _print(f"{hud_console.sym.ITEM} (stdio)")
 
     # Quick Links (only for HTTP mode)
     if transport == "http":
         hud_console.section_title("Quick Links")
-        hud_console.print(f"{hud_console.sym.ITEM} Docs: http://localhost:{port}/docs")
-        hud_console.print(f"{hud_console.sym.ITEM} Cursor:")
+        _print(f"{hud_console.sym.ITEM} Docs: http://localhost:{port}/docs")
+        _print(f"{hud_console.sym.ITEM} Cursor:")
         # Display the Cursor link on its own line to prevent wrapping
         hud_console.link(cursor_deeplink)
 
         # Show eval endpoint if in Docker mode
         if docker_mode:
-            hud_console.print(
-                f"{hud_console.sym.ITEM} Eval API: http://localhost:{port}/eval (POST)"
-            )
+            _print(f"{hud_console.sym.ITEM} Eval API: http://localhost:{port}/eval (POST)")
 
         # Show debugging URLs from telemetry
         if telemetry:
             if "live_url" in telemetry:
                 url = escape(telemetry["live_url"])
-                hud_console.print(f"{hud_console.sym.ITEM} Live URL: {url}")
+                _print(f"{hud_console.sym.ITEM} Live URL: {url}")
             if "vnc_url" in telemetry:
-                hud_console.print(f"{hud_console.sym.ITEM} VNC URL: {escape(telemetry['vnc_url'])}")
+                _print(f"{hud_console.sym.ITEM} VNC URL: {escape(telemetry['vnc_url'])}")
             if "cdp_url" in telemetry:
-                hud_console.print(f"{hud_console.sym.ITEM} CDP URL: {escape(telemetry['cdp_url'])}")
+                _print(f"{hud_console.sym.ITEM} CDP URL: {escape(telemetry['cdp_url'])}")
 
         # Check for VNC (browser environment)
         if env_dir and (env_dir / "environment" / "server.py").exists():
             try:
                 content = (env_dir / "environment" / "server.py").read_text()
                 if "x11vnc" in content.lower() or "vnc" in content.lower():
-                    hud_console.print(f"{hud_console.sym.ITEM} VNC: http://localhost:8080/vnc.html")
+                    _print(f"{hud_console.sym.ITEM} VNC: http://localhost:8080/vnc.html")
             except Exception:  # noqa: S110
                 pass
 
