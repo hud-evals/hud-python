@@ -283,7 +283,12 @@ class MCPToolCall(CallToolRequestParams):
         """Rich representation with color formatting."""
         from hud.utils.hud_console import hud_console
 
-        return hud_console.format_tool_call(self.name, self.arguments)
+        from rich.markup import escape
+
+        s = hud_console.format_tool_call(self.name, self.arguments)
+        if self.annotation:
+            s += f"  [bright_black]# {escape(self.annotation)}[/bright_black]"
+        return s
 
 
 class MCPToolResult(CallToolResult):
