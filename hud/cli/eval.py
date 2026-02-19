@@ -96,7 +96,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # max_steps = 10
 # group_size = 1
 # byok = false  # Remote only; use encrypted env vars on the platform.
-# task_ids = ["task_1", "task_2"]
+# task_ids = ["checkout-smoke", "0"]  # slugs or 0-based indices
 # verbose = true
 # very_verbose = true
 # auto_respond = true
@@ -627,15 +627,18 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         hud_console.error(f"No tasks found in: {cfg.source}")
         raise typer.Exit(1)
 
-    # Filter by task IDs if provided
+    # Filter by task slugs (or positional indices) if provided
     if cfg.task_ids:
-        id_set = set(cfg.task_ids)
-        # Match by task.id or index
-        filtered = [t for i, t in enumerate(tasks) if t.id in id_set or str(i) in id_set]
+        selector_set = set(cfg.task_ids)
+        filtered = []
+        for i, task in enumerate(tasks):
+            task_slug = getattr(task, "slug", None)
+            if (isinstance(task_slug, str) and task_slug in selector_set) or str(i) in selector_set:
+                filtered.append(task)
         if not filtered:
-            hud_console.error(f"No tasks found matching IDs: {', '.join(cfg.task_ids)}")
+            hud_console.error(f"No tasks found matching slugs/indices: {', '.join(cfg.task_ids)}")
             raise typer.Exit(1)
-        hud_console.info(f"Filtered to {len(filtered)} task(s) by ID")
+        hud_console.info(f"Filtered to {len(filtered)} task(s) by slug/index")
         tasks = filtered
     elif not cfg.all:
         # Single task mode (no --all, --full, or --task-ids)
@@ -809,7 +812,11 @@ def eval_command(
         help="Automatically prompt the agent to continue if it does not respond with a tool call",
     ),
     group_size: int | None = typer.Option(None, "--group-size", help="Runs per task"),
-    task_ids: str | None = typer.Option(None, "--task-ids", help="Comma-separated task IDs to run"),
+    task_ids: str | None = typer.Option(
+        None,
+        "--task-ids",
+        help="Comma-separated task slugs (or 0-based indices) to run",
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
     remote: bool = typer.Option(
         False, "--remote", help="Submit tasks to platform for remote execution"

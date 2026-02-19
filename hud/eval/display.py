@@ -276,13 +276,18 @@ def _get_task_label(task: Any, index: int) -> str:
     """Get a display label for a task."""
     if task is None:
         return f"task_{index}"
-    if isinstance(task, dict):
-        return task.get("id") or task.get("prompt", "")[:25] or f"task_{index}"
-    task_id = getattr(task, "id", None)
-    if task_id:
-        return task_id
-    prompt = getattr(task, "prompt", None) or getattr(task, "scenario", None)
-    if prompt:
+
+    def _field(key: str) -> Any:
+        if isinstance(task, dict):
+            return task.get(key)
+        return getattr(task, key, None)
+
+    task_slug = _field("slug")
+    if isinstance(task_slug, str) and task_slug:
+        return task_slug
+
+    prompt = _field("prompt") or _field("scenario")
+    if isinstance(prompt, str) and prompt:
         return prompt[:25]
     return f"task_{index}"
 

@@ -127,10 +127,14 @@ def _load_raw_from_api(dataset_name: str) -> list[dict[str, Any]]:
         tasks_dict = data.get("tasks", {})
 
         raw_items: list[dict[str, Any]] = []
-        for task_id, task_data in tasks_dict.items():
-            if task_data.get("id") is None:
-                task_data["id"] = task_id
-            raw_items.append(task_data)
+        for task_data in tasks_dict.values():
+            item = dict(task_data)
+            if not item.get("slug"):
+                external_id = item.get("external_id")
+                if isinstance(external_id, str) and external_id:
+                    item["slug"] = external_id
+            item.pop("external_id", None)
+            raw_items.append(item)
 
         return raw_items
 
@@ -282,8 +286,13 @@ def save_tasks(
                 "Use Task.from_v4(legacy_task) to convert from LegacyTask."
             )
 
-    # Convert tasks to dicts (Task is a Pydantic model)
-    task_dicts = [task.model_dump(mode="json", exclude_none=True) for task in tasks]
+    # Convert tasks to dicts (Task is a Pydantic model).
+    # id is internal/platform-assigned; uploads should identify via slug.
+    task_dicts: list[dict[str, Any]] = []
+    for task in tasks:
+        task_data = task.model_dump(mode="json", exclude_none=True)
+        task_data.pop("id", None)
+        task_dicts.append(task_data)
 
     # Build request payload
     payload: dict[str, Any] = {
@@ -296,7 +305,7 @@ def save_tasks(
     try:
         with httpx.Client(timeout=60) as client:
             response = client.post(
-                f"{settings.hud_api_url}/tasks/evalset",
+                f"{settings.hud_api_url}/tasks/upload",
                 json=payload,
                 headers=headers,
             )

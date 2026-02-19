@@ -155,7 +155,6 @@ class TestTaskValidation:
         assert isinstance(task.agent_config, TaskAgentConfig)
         assert task.agent_config.system_prompt == "Hello"
 
-
 class TestV4AgentConfigToolFilters:
     """Tests for v4 agent_config.allowed_tools and disallowed_tools processing."""
 

@@ -36,6 +36,8 @@ class TestTaskDataclass:
     def test_copy_creates_new_instance(self) -> None:
         """copy() creates a new Task instance."""
         original = Task(
+            id="task-123",
+            slug="demo-slug",
             env={"name": "test"},
             scenario="checkout",
             args={"user_id": "alice"},
@@ -44,6 +46,8 @@ class TestTaskDataclass:
 
         assert copied is not original
         assert copied.env is original.env  # Env reference is shared (intentional)
+        assert copied.id is None
+        assert copied.slug is None
         assert copied.scenario == original.scenario
         assert copied.args == original.args
         assert copied.args is not original.args  # Args are deep copied

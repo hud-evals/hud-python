@@ -92,14 +92,25 @@ class BatchRequest(BaseModel):
     )
 
 
+def _normalize_task_dict(task_dict: dict[str, Any]) -> dict[str, Any]:
+    """Normalize API/internal task identity fields to SDK slug."""
+    normalized = dict(task_dict)
+    if not normalized.get("slug"):
+        external_id = normalized.get("external_id")
+        if isinstance(external_id, str) and external_id:
+            normalized["slug"] = external_id
+    normalized.pop("external_id", None)
+    return normalized
+
+
 def _normalize_tasks(tasks: Sequence[TaskInput]) -> list[dict[str, Any]]:
     """Convert tasks to list of dicts for remote API submission."""
     result = []
     for t in tasks:
         if isinstance(t, dict):
-            result.append(t)
+            result.append(_normalize_task_dict(t))
         elif hasattr(t, "model_dump"):
-            result.append(t.model_dump(mode="json"))
+            result.append(_normalize_task_dict(t.model_dump(mode="json")))
         else:
             raise TypeError(f"Cannot convert {type(t).__name__} to dict")
     return result
@@ -151,16 +162,18 @@ async def submit_rollouts(
                 and not server_cfg.get("url")
             )
             if is_local:
+                task_label = td.get("slug") or td.get("id") or i
                 raise ValueError(
                     f"Remote execution requires URL-based mcp_config. "
-                    f"Task {td.get('id') or i} uses local Docker config for '{server_name}'. "
+                    f"Task {task_label} uses local Docker config for '{server_name}'. "
                     "Convert to remote with: hud convert <tasks_file>"
                 )
 
     # Build single task requests
     requests: list[SingleTaskRequest] = []
     for task_idx, td in enumerate(task_dicts):
-        base_task_id = td.get("id") or f"task_{task_idx}"
+        base_task_id = td.get("slug") or td.get("id") or f"task_{task_idx}"
+        base_task_id = str(base_task_id)
         trace_name = td.get("prompt") or td.get("scenario") or base_task_id
 
         for rollout_idx in range(group_size):

@@ -26,7 +26,7 @@ Usage:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import (
     BaseModel,
@@ -125,7 +125,8 @@ class Task(BaseModel):
     When entered as a context manager, creates an EvalContext.
 
     Attributes:
-        id: Optional task identifier for filtering/tracking
+        id: Internal platform task version identifier
+        slug: Stable user-defined task identifier for filtering and sync
         env: Environment instance (auto-created from dict/EnvConfig via validator)
         scenario: Scenario name to run (from @env.scenario)
         args: Scenario arguments
@@ -164,7 +165,15 @@ class Task(BaseModel):
     # Fields - env accepts Environment | EnvConfig | dict, auto-converts to Environment
     env: Any = Field(default=None)  # Typed as Any for input flexibility, validated below
     scenario: str | None = None
-    id: str | None = None
+    id: str | None = Field(
+        default=None,
+        description="Internal platform task version ID. Reserved for platform-assigned values.",
+    )
+    slug: str | None = Field(
+        default=None,
+        max_length=20,
+        description="Stable task slug for task filtering and sync workflows.",
+    )
     args: dict[str, Any] | None = Field(
         default=None,
         description="Scenario arguments. None indicates a template (args filled in later).",
@@ -326,6 +335,9 @@ class Task(BaseModel):
             # Preserve id
             if data.get("id"):
                 result["id"] = data["id"]
+            # Preserve slug
+            if data.get("slug"):
+                result["slug"] = data["slug"]
 
             return result
 
@@ -357,14 +369,38 @@ class Task(BaseModel):
         # Model validator handles v4 detection and conversion
         return cls(**source)
 
-    def copy(self) -> Task:
+    def copy(
+        self,
+        *,
+        include: Any = None,
+        exclude: Any = None,
+        update: dict[str, Any] | None = None,
+        deep: bool = False,
+    ) -> Task:
         """Create a copy of this Task config.
 
         Note: env is shared (not deep copied) since Environment instances
         should be reused. Args and validation are deep copied.
+        Task identity fields (id, slug) are reset unless explicitly provided
+        in ``update``.
         """
+        update_data = dict(update or {})
+        update_data.setdefault("id", None)
+        update_data.setdefault("slug", None)
+
+        if include is not None or exclude is not None:
+            # BaseModel.model_copy() does not support include/exclude. Build
+            # through dump+validate to preserve callers that rely on filtering.
+            data = self.model_dump(mode="python", include=include, exclude=exclude)
+            data.update(update_data)
+            return cast("Task", type(self).model_validate(data))
+
+        if update is not None or deep:
+            return cast("Task", super().model_copy(update=update_data, deep=deep))
+
         return Task(
-            id=self.id,
+            id=None,
+            slug=None,
             env=self.env,  # Share reference
             scenario=self.scenario,
             args=self.args.copy() if self.args is not None else None,
