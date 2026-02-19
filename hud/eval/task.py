@@ -26,6 +26,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import (
@@ -392,11 +393,28 @@ class Task(BaseModel):
             # BaseModel.model_copy() does not support include/exclude. Build
             # through dump+validate to preserve callers that rely on filtering.
             data = self.model_dump(mode="python", include=include, exclude=exclude)
+            if deep:
+                if isinstance(data.get("args"), dict):
+                    data["args"] = deepcopy(data["args"])
+                if isinstance(data.get("validation"), list):
+                    data["validation"] = deepcopy(data["validation"])
             data.update(update_data)
             return cast("Task", type(self).model_validate(data))
 
         if update is not None or deep:
-            return cast("Task", super().model_copy(update=update_data, deep=deep))
+            # Preserve validation and env-sharing semantics.
+            data = self.model_dump(mode="python")
+            # Keep the existing Environment reference unless explicitly overridden.
+            if "env" not in update_data:
+                data["env"] = self.env
+            if isinstance(data.get("args"), dict):
+                data["args"] = deepcopy(data["args"]) if deep else data["args"].copy()
+            if isinstance(data.get("validation"), list):
+                data["validation"] = (
+                    deepcopy(data["validation"]) if deep else data["validation"].copy()
+                )
+            data.update(update_data)
+            return cast("Task", type(self).model_validate(data))
 
         return Task(
             id=None,

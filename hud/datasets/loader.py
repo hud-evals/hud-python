@@ -110,6 +110,8 @@ def _load_from_huggingface(dataset_name: str) -> list[Task]:
 
 def _load_raw_from_api(dataset_name: str) -> list[dict[str, Any]]:
     """Load raw task dicts from HUD API."""
+    from hud.datasets.utils import _normalize_task_dict
+
     headers = {}
     if settings.api_key:
         headers["Authorization"] = f"Bearer {settings.api_key}"
@@ -128,13 +130,8 @@ def _load_raw_from_api(dataset_name: str) -> list[dict[str, Any]]:
 
         raw_items: list[dict[str, Any]] = []
         for task_data in tasks_dict.values():
-            item = dict(task_data)
-            if not item.get("slug"):
-                external_id = item.get("external_id")
-                if isinstance(external_id, str) and external_id:
-                    item["slug"] = external_id
-            item.pop("external_id", None)
-            raw_items.append(item)
+            if isinstance(task_data, dict):
+                raw_items.append(_normalize_task_dict(task_data))
 
         return raw_items
 
