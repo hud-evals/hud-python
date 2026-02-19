@@ -72,13 +72,12 @@ async def _send_job_enter(
     group: int,
     api_key: str | None,
     taskset: str | None = None,
-    tasks: list[dict[str, Any]] | None = None,
     hud_eval_config: dict[str, Any] | None = None,
-) -> list[str] | None:
+) -> None:
     """Send job enter payload (async request before traces start).
 
-    Returns task_version_ids on success, None if telemetry is disabled.
-    Raises on any failure (network, bad response, etc).
+    Registers the job with the platform. Tasks must already exist in the
+    taskset.
     """
     import httpx
 
@@ -87,14 +86,13 @@ async def _send_job_enter(
 
     api_key = api_key or settings.api_key
     if not settings.telemetry_enabled or not api_key:
-        return None
+        return
 
     payload = JobEnterPayload(
         name=name,
         variants=variants,
         group=group,
         taskset=taskset,
-        tasks=tasks if taskset else None,  # only send tasks if taskset specified
         hud_eval_config=hud_eval_config,
     )
 
@@ -106,12 +104,6 @@ async def _send_job_enter(
         )
 
     resp.raise_for_status()
-    data = resp.json()
-    if isinstance(data, dict):
-        ids = data.get("task_version_ids")
-        if isinstance(ids, list) and all(isinstance(x, str) for x in ids):
-            return ids
-    raise ValueError(f"Job registration failed: unexpected response: {data}")
 
 
 @asynccontextmanager
@@ -260,29 +252,20 @@ async def run_eval(
 
     if total_evals == 1:
         if tasks:
-            # Even for single-task evals, --taskset requires a job_enter call so the run
-            # and task are linked to the taskset (via job_id + task_version_id).
             job_id_for_run = job_id
             if taskset:
                 eval_name = _get_eval_name(tasks=tasks, group=group)
                 if job_id_for_run is None:
                     job_id_for_run = str(uuid.uuid4())
 
-                task_data = None
-                if not tasks[0].id:
-                    task_data = [tasks[0].model_dump(mode="json", exclude_none=True)]
-
-                created_task_version_ids = await _send_job_enter(
+                await _send_job_enter(
                     job_id=job_id_for_run,
                     name=eval_name,
                     variants=variants,
                     group=group,
                     api_key=api_key,
                     taskset=taskset,
-                    tasks=task_data,
                 )
-                if created_task_version_ids and not tasks[0].id:
-                    tasks[0].id = created_task_version_ids[0]
 
             # Single task - use EvalContext.from_task()
             ctx = EvalContext.from_task(
@@ -322,41 +305,14 @@ async def run_eval(
         job_url = f"https://hud.ai/jobs/{implicit_job_id}"
 
         # Send job enter (sync request before traces start)
-        # Serialize tasks for auto-add to taskset (only tasks without existing backend id).
-        # For v5 scenario tasks, the backend task_version_id is carried in Task.id.
-        tasks_data = None
-        tasks_to_create: list[Task] = []
-        if taskset and tasks:
-            tasks_to_create = [t for t in tasks if not t.id]
-            tasks_data = (
-                [t.model_dump(mode="json", exclude_none=True) for t in tasks_to_create]
-                if tasks_to_create
-                else None
-            )
-        created_task_version_ids = await _send_job_enter(
+        await _send_job_enter(
             job_id=implicit_job_id,
             name=eval_name,
             variants=variants,
             group=group,
             api_key=api_key,
             taskset=taskset,
-            tasks=tasks_data,
         )
-        if created_task_version_ids and tasks_to_create:
-            # Assign backend IDs back onto the in-memory tasks so trace enter includes
-            # task_version_id.
-            # Platform guarantees ordered one-to-one mapping, but warn if counts differ.
-            if len(created_task_version_ids) != len(tasks_to_create):
-                logger.warning(
-                    "Task count mismatch: sent %d tasks, received %d IDs. "
-                    "Some tasks may not be linked to the taskset.",
-                    len(tasks_to_create),
-                    len(created_task_version_ids),
-                )
-            for task_obj, task_version_id in zip(
-                tasks_to_create, created_task_version_ids, strict=False
-            ):
-                task_obj.id = task_version_id
 
         # Print job URL (not individual trace URLs)
         if not quiet:
