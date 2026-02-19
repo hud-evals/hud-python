@@ -50,7 +50,7 @@ def show_dev_server_info(
 
     # Server section
     hud_console.section_title("Server")
-    hud_console.print(f"{hud_console.sym.ITEM} {escape(server_name)}")
+    hud_console.console.print(f"{hud_console.sym.ITEM} {escape(server_name)}", highlight=False)
     if transport == "http":
         hud_console.print(f"{hud_console.sym.ITEM} http://localhost:{port}/mcp")
     else:
