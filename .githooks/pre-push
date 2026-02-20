@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Pre-push CI check for hud-python
-# Mirrors the GitHub Actions CI workflow (ruff + pyright + pytest)
+# Pre-push CI check for hud-python (ruff + pyright)
 
 cd "$(git rev-parse --show-toplevel)"
 
@@ -14,8 +13,5 @@ uv run --with=".[dev]" ruff check .
 
 echo "==> pyright"
 uv run --with=".[dev]" pyright
-
-echo "==> pytest"
-uv run --with=".[dev]" pytest --rootdir=hud -q
 
 echo "✓ All checks passed"
