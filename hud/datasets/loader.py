@@ -26,24 +26,36 @@ logger = logging.getLogger(__name__)
 __all__ = ["load_dataset", "load_tasks", "save_tasks"]
 
 
-def _load_raw_from_file(path: Path) -> list[dict[str, Any]]:
+def _load_raw_from_file(path: Path, *, strict: bool = False) -> list[dict[str, Any]]:
     """Load raw task dicts from a local JSON or JSONL file."""
     raw_items: list[dict[str, Any]] = []
+
+    def _append_if_dict(item: Any, *, context: str) -> None:
+        if isinstance(item, dict):
+            raw_items.append(item)
+        elif strict:
+            raise ValueError(f"{context}: expected object, got {type(item).__name__}")
 
     if path.suffix == ".jsonl":
         # JSONL: one task per line
         with open(path, encoding="utf-8") as f:
-            for line in f:
+            for line_no, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
                 item = json.loads(line)
                 # Handle case where line contains a list
                 if isinstance(item, list):
-                    raw_items.extend(i for i in item if isinstance(i, dict))
+                    for idx, entry in enumerate(item):
+                        _append_if_dict(entry, context=f"line {line_no} item {idx}")
                 elif isinstance(item, dict):
                     raw_items.append(item)
                 else:
+                    if strict:
+                        raise ValueError(
+                            f"line {line_no}: expected object or list[object], "
+                            f"got {type(item).__name__}"
+                        )
                     raise ValueError(
                         f"Invalid JSONL format: expected dict or list, got {type(item)}"
                     )
@@ -53,7 +65,8 @@ def _load_raw_from_file(path: Path) -> list[dict[str, Any]]:
             data = json.load(f)
 
         if isinstance(data, list):
-            raw_items = [item for item in data if isinstance(item, dict)]
+            for idx, entry in enumerate(data):
+                _append_if_dict(entry, context=f"item {idx}")
         elif isinstance(data, dict):
             raw_items = [data]
         else:
