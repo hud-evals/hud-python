@@ -197,7 +197,7 @@ def run_local_server(
             cmd.extend(extra_args)
 
         try:
-            result = subprocess.run(cmd)  # noqa: S603
+            result = subprocess.run(cmd)
             sys.exit(result.returncode)
         except KeyboardInterrupt:
             hud_console.info("\n👋 Shutting down...")

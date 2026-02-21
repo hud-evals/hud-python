@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Pre-push CI check for hud-python (ruff + pyright)
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "==> ruff format --check"
+uv run --with=".[dev]" ruff format . --check
+
+echo "==> ruff check"
+uv run --with=".[dev]" ruff check .
+
+echo "==> pyright"
+uv run --with=".[dev]" pyright
+
+echo "✓ All checks passed"

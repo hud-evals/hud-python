@@ -98,38 +98,25 @@ def queue_span(span: dict[str, Any]) -> None:
     upload_api_key = api_key
 
     # Upload immediately via thread pool
-    import asyncio
+    executor = _get_export_executor()
 
-    try:
-        loop = asyncio.get_running_loop()
-        # In async context - use thread pool
-        executor = _get_export_executor()
+    def _upload() -> bool:
+        return _do_upload(task_run_id, [span], settings.hud_telemetry_url, upload_api_key)
 
-        def _upload() -> bool:
-            return _do_upload(task_run_id, [span], settings.hud_telemetry_url, upload_api_key)
+    future = executor.submit(_upload)
+    _pending_futures.append(future)
 
-        future = loop.run_in_executor(executor, _upload)
-        _pending_futures.append(future)  # type: ignore[arg-type]
-
-        def _cleanup_done(f: cf.Future[bool]) -> None:
-            with contextlib.suppress(Exception):
-                _ = f.exception()
-            with contextlib.suppress(ValueError):
-                _pending_futures.remove(f)
-            # Remove from pending spans on success
-            if not f.exception():
-                with contextlib.suppress(Exception):
-                    if task_run_id in _pending_spans and span in _pending_spans[task_run_id]:
-                        _pending_spans[task_run_id].remove(span)
-
-        future.add_done_callback(_cleanup_done)  # type: ignore[arg-type]
-
-    except RuntimeError:
-        # No event loop - upload synchronously
-        if _do_upload(task_run_id, [span], settings.hud_telemetry_url, upload_api_key):
+    def _cleanup_done(f: cf.Future[bool]) -> None:
+        with contextlib.suppress(Exception):
+            _ = f.exception()
+        with contextlib.suppress(ValueError):
+            _pending_futures.remove(f)
+        if not f.exception():
             with contextlib.suppress(Exception):
                 if task_run_id in _pending_spans and span in _pending_spans[task_run_id]:
                     _pending_spans[task_run_id].remove(span)
+
+    future.add_done_callback(_cleanup_done)
 
 
 def flush(task_run_id: str | None = None) -> None:
@@ -146,6 +133,14 @@ def flush(task_run_id: str | None = None) -> None:
     if not api_key or not settings.telemetry_enabled:
         _pending_spans.clear()
         return
+
+    if _pending_futures:
+        done, _ = cf.wait(list(_pending_futures), timeout=5.0)
+        for f in done:
+            with contextlib.suppress(Exception):
+                _ = f.exception()
+            with contextlib.suppress(ValueError):
+                _pending_futures.remove(f)
 
     if task_run_id:
         # Flush specific task

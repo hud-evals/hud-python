@@ -77,7 +77,7 @@ def clone_repository(url: str) -> tuple[bool, str]:
 
     try:
         # Run git clone with quiet flag
-        subprocess.run(  # noqa: S603
+        subprocess.run(
             cmd,
             capture_output=True,
             text=True,

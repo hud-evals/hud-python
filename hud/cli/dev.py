@@ -407,7 +407,7 @@ async def launch_inspector(port: int) -> None:
                 stderr=subprocess.DEVNULL,
             )
         else:
-            subprocess.Popen(  # noqa: S603, ASYNC220
+            subprocess.Popen(  # noqa: ASYNC220
                 cmd,
                 env=env,
                 stdout=subprocess.DEVNULL,
@@ -518,9 +518,7 @@ def run_with_reload(
         if not is_first_run:
             env["_HUD_DEV_RELOAD"] = "1"
 
-        process = subprocess.Popen(  # noqa: S603
-            cmd, env=env
-        )
+        process = subprocess.Popen(cmd, env=env)
 
         is_first_run = False
 
@@ -639,7 +637,7 @@ def run_docker_dev_server(
 
         # Check if container is still running
         try:
-            result = subprocess.run(  # noqa: S603
+            result = subprocess.run(
                 ["docker", "ps", "-q", "-f", f"name={container_name}"],  # noqa: S607
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
@@ -648,7 +646,7 @@ def run_docker_dev_server(
             )
             if not result.stdout.strip():
                 # Container is not running, just try to remove it
-                subprocess.run(  # noqa: S603
+                subprocess.run(
                     ["docker", "rm", "-f", container_name],  # noqa: S607
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -660,7 +658,7 @@ def run_docker_dev_server(
 
         try:
             # First try to stop gracefully
-            subprocess.run(  # noqa: S603
+            subprocess.run(
                 ["docker", "stop", container_name],  # noqa: S607
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -671,7 +669,7 @@ def run_docker_dev_server(
             # Force kill if stop times out
             hud_console.debug(f"Container {container_name} stop timeout, forcing kill")
             with contextlib.suppress(Exception):
-                subprocess.run(  # noqa: S603
+                subprocess.run(
                     ["docker", "kill", container_name],  # noqa: S607
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,

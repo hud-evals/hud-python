@@ -71,7 +71,7 @@ def get_docker_username() -> str | None:
                         # Try to get credentials from helper
                         helper = config["credsStore"]
                         try:
-                            result = subprocess.run(  # noqa: S603
+                            result = subprocess.run(
                                 [f"docker-credential-{helper}", "list"],
                                 capture_output=True,
                                 text=True,
@@ -81,7 +81,7 @@ def get_docker_username() -> str | None:
                                 for url in creds:
                                     if "docker.io" in url:
                                         # Try to get the username
-                                        get_result = subprocess.run(  # noqa: S603
+                                        get_result = subprocess.run(
                                             [f"docker-credential-{helper}", "get"],
                                             input=url,
                                             capture_output=True,
@@ -104,7 +104,7 @@ def get_docker_username() -> str | None:
 def get_docker_image_labels(image: str) -> dict:
     """Get labels from a Docker image."""
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             ["docker", "inspect", "--format", "{{json .Config.Labels}}", image],  # noqa: S607
             capture_output=True,
             text=True,
@@ -254,7 +254,7 @@ def push_environment(
     image_to_push = None
     if version_tag:
         try:
-            subprocess.run(["docker", "inspect", version_tag], capture_output=True, check=True)  # noqa: S603, S607
+            subprocess.run(["docker", "inspect", version_tag], capture_output=True, check=True)  # noqa: S607
             image_to_push = version_tag
             hud_console.info(f"Found version-tagged image: {version_tag}")
         except subprocess.CalledProcessError:
@@ -262,7 +262,7 @@ def push_environment(
 
     if not image_to_push:
         try:
-            subprocess.run(["docker", "inspect", local_tag], capture_output=True, check=True)  # noqa: S603, S607
+            subprocess.run(["docker", "inspect", local_tag], capture_output=True, check=True)  # noqa: S607
             image_to_push = local_tag
         except subprocess.CalledProcessError:
             hud_console.error(f"Local image not found: {local_tag}")
@@ -285,13 +285,13 @@ def push_environment(
 
     # Tag the image for push
     hud_console.progress_message(f"Tagging {image_to_push} as {image}")
-    subprocess.run(["docker", "tag", image_to_push, image], check=True)  # noqa: S603, S607
+    subprocess.run(["docker", "tag", image_to_push, image], check=True)  # noqa: S607
 
     # Push the image
     hud_console.progress_message(f"Pushing {image} to registry...")
 
     # Show push output (filtered for cleaner display)
-    process = subprocess.Popen(  # noqa: S603
+    process = subprocess.Popen(
         ["docker", "push", image],  # noqa: S607
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -329,7 +329,7 @@ def push_environment(
         raise typer.Exit(1)
 
     # Get the digest of the pushed image
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         ["docker", "inspect", "--format", "{{index .RepoDigests 0}}", image],  # noqa: S607
         capture_output=True,
         text=True,
