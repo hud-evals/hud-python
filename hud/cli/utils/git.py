@@ -24,7 +24,7 @@ def get_git_remote_url(cwd: Path | None = None) -> str | None:
 
     try:
         # Check if we're in a git repository
-        subprocess.run(  # noqa: S603
+        subprocess.run(
             ["git", "rev-parse", "--git-dir"],  # noqa: S607
             cwd=cwd,
             capture_output=True,
@@ -32,7 +32,7 @@ def get_git_remote_url(cwd: Path | None = None) -> str | None:
         )
 
         # Get the remote origin URL
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             ["git", "config", "--get", "remote.origin.url"],  # noqa: S607
             cwd=cwd,
             capture_output=True,
@@ -109,7 +109,7 @@ def get_git_info(cwd: Path | None = None) -> dict[str, Any]:
 
     try:
         # Get current branch
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],  # noqa: S607
             cwd=cwd,
             capture_output=True,
@@ -119,7 +119,7 @@ def get_git_info(cwd: Path | None = None) -> dict[str, Any]:
         info["branch"] = result.stdout.strip()
 
         # Get current commit (short hash)
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],  # noqa: S607
             cwd=cwd,
             capture_output=True,

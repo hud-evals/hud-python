@@ -24,7 +24,7 @@ def run_stdio_server(image: str, docker_args: list[str], verbose: bool) -> None:
 
     # Run docker directly with stdio passthrough
     try:
-        result = subprocess.run(docker_cmd, stdin=sys.stdin)  # noqa: S603
+        result = subprocess.run(docker_cmd, stdin=sys.stdin)
         sys.exit(result.returncode)
     except KeyboardInterrupt:
         hud_console.info("\n👋 Shutting down...")

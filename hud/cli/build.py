@@ -207,7 +207,7 @@ def get_existing_version(lock_path: Path) -> str | None:
 def get_docker_image_digest(image: str) -> str | None:
     """Get the digest of a Docker image."""
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             ["docker", "inspect", "--format", "{{.RepoDigests}}", image],  # noqa: S607
             capture_output=True,
             text=True,
@@ -230,7 +230,7 @@ def get_docker_image_digest(image: str) -> str | None:
 def get_docker_image_id(image: str) -> str | None:
     """Get the ID of a Docker image."""
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             ["docker", "inspect", "--format", "{{.Id}}", image],  # noqa: S607
             capture_output=True,
             text=True,
@@ -344,7 +344,7 @@ def check_dockerfile_for_secrets(directory: Path, dockerfile: Path) -> list[str]
     cmd.append(str(directory))
 
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
@@ -421,9 +421,7 @@ def collect_runtime_metadata(image: str, *, verbose: bool = False) -> dict[str, 
             runtime_script,
         ]
         try:
-            result = subprocess.run(  # noqa: S603
-                cmd, capture_output=True, text=True, check=False
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
         except FileNotFoundError:
             return {}
 
@@ -683,7 +681,7 @@ def build_docker_image(
         env = os.environ.copy()
         if secrets:
             env["DOCKER_BUILDKIT"] = "1"
-        result = subprocess.run(cmd, check=False, env=env)  # noqa: S603
+        result = subprocess.run(cmd, check=False, env=env)
         return result.returncode == 0
     except Exception as e:
         hud_console.error(f"Build error: {e}")
@@ -1074,12 +1072,10 @@ def build_environment(
         env["DOCKER_BUILDKIT"] = "1"
     if verbose:
         # Show Docker's native output when verbose
-        result = subprocess.run(label_cmd, check=False, env=env)  # noqa: S603
+        result = subprocess.run(label_cmd, check=False, env=env)
     else:
         # Capture output for error reporting, but don't show unless it fails
-        result = subprocess.run(  # noqa: S603
-            label_cmd, capture_output=True, text=True, check=False, env=env
-        )
+        result = subprocess.run(label_cmd, capture_output=True, text=True, check=False, env=env)
 
     if result.returncode != 0:
         hud_console.error("Failed to rebuild with label")
@@ -1112,7 +1108,7 @@ def build_environment(
         hud_console.warning("Could not retrieve image digest")
 
     # Remove temp image after we're done
-    subprocess.run(["docker", "rmi", "-f", temp_tag], capture_output=True)  # noqa: S603, S607
+    subprocess.run(["docker", "rmi", "-f", temp_tag], capture_output=True)  # noqa: S607
 
     # Add to local registry
     if image_id:

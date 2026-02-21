@@ -45,7 +45,7 @@ def _add_hud_dependency(directory: Path) -> str:
         return "exists"
 
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             ["uv", "add", "hud-python", "openai"],  # noqa: S607
             capture_output=True,
             text=True,

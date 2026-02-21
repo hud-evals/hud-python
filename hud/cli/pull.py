@@ -21,7 +21,7 @@ def get_docker_manifest(image: str) -> dict | None:
     """Get manifest from Docker registry without pulling the image."""
     try:
         # Try docker manifest inspect (requires experimental features)
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             ["docker", "manifest", "inspect", image],  # noqa: S607
             capture_output=True,
             text=True,
@@ -282,7 +282,7 @@ def pull_environment(
     hud_console.progress_message(f"Pulling {image_ref}...")
 
     # Run docker pull with progress
-    process = subprocess.Popen(  # noqa: S603
+    process = subprocess.Popen(
         ["docker", "pull", image_ref],  # noqa: S607
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

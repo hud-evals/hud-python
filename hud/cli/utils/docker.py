@@ -30,7 +30,7 @@ def get_docker_cmd(image: str) -> list[str] | None:
         List of command parts or None if not found
     """
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             ["docker", "inspect", image],  # noqa: S607
             capture_output=True,
             text=True,
@@ -49,7 +49,7 @@ def get_docker_cmd(image: str) -> list[str] | None:
 
 def image_exists(image_name: str) -> bool:
     """Check if a Docker image exists locally."""
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         ["docker", "image", "inspect", image_name],  # noqa: S607
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -67,7 +67,7 @@ def remove_container(container_name: str) -> bool:
         True if successful or container doesn't exist, False on error
     """
     try:
-        subprocess.run(  # noqa: S603
+        subprocess.run(
             ["docker", "rm", "-f", container_name],  # noqa: S607
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -288,7 +288,7 @@ def require_docker_running() -> None:
         raise typer.Exit(1)
 
     try:
-        result = subprocess.run(  # noqa: UP022, S603
+        result = subprocess.run(  # noqa: UP022
             [docker_path, "info"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

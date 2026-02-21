@@ -116,7 +116,7 @@ class XDOExecutor(BaseExecutor):
             import subprocess
 
             # Try without display prefix if DISPLAY is already set
-            result = subprocess.run(  # noqa: S603
+            result = subprocess.run(
                 ["xdotool", "getdisplaygeometry"],  # noqa: S607
                 capture_output=True,
                 timeout=2,

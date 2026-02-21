@@ -58,7 +58,7 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
         test_cmd = command + (["echo", "Server OK"] if "docker" in command[0] else [])
         logger.command([*test_cmd[:3], "..."] if len(test_cmd) > 3 else test_cmd)
 
-        result = subprocess.run(  # noqa: S603, ASYNC221
+        result = subprocess.run(  # noqa: ASYNC221
             command[:1],
             capture_output=True,
             text=True,
@@ -118,7 +118,7 @@ async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: 
         logger.command(command)
         logger.stdio(f"Sending: {json.dumps(init_request)}")
 
-        proc = subprocess.Popen(  # noqa: S603, ASYNC220
+        proc = subprocess.Popen(  # noqa: ASYNC220
             command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,

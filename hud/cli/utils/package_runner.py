@@ -226,7 +226,7 @@ def run_with_reload(
             if verbose:
                 logger.info("Starting process: %s", " ".join(cmd))
 
-            process = subprocess.Popen(cmd, env=os.environ)  # noqa: S603
+            process = subprocess.Popen(cmd, env=os.environ)
 
             # Watch for changes
             try:
