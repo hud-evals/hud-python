@@ -19,14 +19,14 @@ What you get:
 
 Usage:
   # Local mode - just like running `codex` on your machine
-  uv run python examples/06_codex_coding_agent.py --local
+  uv run python examples/01_codex_coding_agent.py --local
 
   # Hub mode - sandboxed cloud execution with full telemetry
   export HUD_API_KEY="sk-hud-..."
-  uv run python examples/06_codex_coding_agent.py
+  uv run python examples/01_codex_coding_agent.py
 
   # Custom task
-  uv run python examples/06_codex_coding_agent.py --local \\
+  uv run python examples/01_codex_coding_agent.py --local \\
     --task "Create a Python script that prints the Fibonacci sequence"
 
 Requirements:
@@ -269,23 +269,23 @@ def _parse_args() -> argparse.Namespace:
         epilog="""
 Examples:
   # Local mode (no Docker, no HUD_API_KEY required)
-  uv run python examples/06_codex_coding_agent.py --local
+  uv run python examples/01_codex_coding_agent.py --local
 
   # Local mode with custom working directory
-  uv run python examples/06_codex_coding_agent.py --local --work-dir ./codex_output
+  uv run python examples/01_codex_coding_agent.py --local --work-dir ./codex_output
 
   # Hub mode (full telemetry, requires HUD_API_KEY)
-  uv run python examples/06_codex_coding_agent.py
+  uv run python examples/01_codex_coding_agent.py
 
   # Custom task
-  uv run python examples/06_codex_coding_agent.py --local \\
+  uv run python examples/01_codex_coding_agent.py --local \\
     --task "Create a Python script that prints the Fibonacci sequence up to 10 numbers"
 
   # Verbose output
-  uv run python examples/06_codex_coding_agent.py --local --verbose
+  uv run python examples/01_codex_coding_agent.py --local --verbose
 
   # Use a different Codex model
-  uv run python examples/06_codex_coding_agent.py --local --model gpt-5.1-codex
+  uv run python examples/01_codex_coding_agent.py --local --model gpt-5.1-codex
 """,
     )
     parser.add_argument(
