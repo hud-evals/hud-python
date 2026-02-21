@@ -70,23 +70,35 @@ Build a custom MCPAgent using HUD Gateway for unified model access:
 HUD_API_KEY=sk-hud-... python examples/05_custom_agent.py
 ```
 
-## Dataset Evaluation
-
-### run_evaluation.py
-Generic dataset evaluation runner using the programmatic API.
+### 06_codex_coding_agent.py
+Build your own Codex - a 1:1 recreation of OpenAI's Codex CLI using HUD's `ShellTool` and `ApplyPatchTool`. Supports local mode (tools run on your machine) and hub mode (sandboxed cloud execution with full telemetry).
 
 ```bash
-# Run all tasks in a dataset
-python examples/run_evaluation.py hud-evals/SheetBench-50
+# Local mode - just like running `codex` on your machine
+uv run python examples/06_codex_coding_agent.py --local
 
-# Run specific tasks by index
-python examples/run_evaluation.py hud-evals/SheetBench-50 --task-ids 0 1 2
+# Hub mode - sandboxed cloud execution
+uv run python examples/06_codex_coding_agent.py
 
-# Use different agent and concurrency
-python examples/run_evaluation.py hud-evals/OSWorld-Verified-Gold --agent operator --max-concurrent 50
+# Custom task
+uv run python examples/06_codex_coding_agent.py --local \
+  --task "Create a Python script that prints the Fibonacci sequence"
 ```
 
-For production evaluations, prefer the CLI: `hud eval --help`
+> Requires `HUD_API_KEY`. Uses HUD Gateway for inference.
+
+### 07_opencode_agent.py
+OpenCode-style coding agent with `EditTool`, `ShellTool`, and filesystem exploration tools (`ReadTool`, `GrepTool`, `GlobTool`, `ListTool`). Includes a read-only plan mode for safe codebase exploration.
+
+```bash
+# Build mode - full coding capabilities
+uv run python examples/07_opencode_agent.py --task "Fix the bug in main.py"
+
+# Plan mode - read-only exploration
+uv run python examples/07_opencode_agent.py --plan --task "How does auth work?"
+```
+
+> Requires `HUD_API_KEY`. Works with any model via `--model`.
 
 ## Key Concepts
 
