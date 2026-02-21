@@ -614,7 +614,8 @@ class EvalContext(Environment):
             return self
 
         # Start tracking
-        self._token = _current_trace_headers.set(self.headers)
+        if self._trace_enabled:
+            self._token = _current_trace_headers.set(self.headers)
         self._api_key_token = _current_api_key.set(self._eval_api_key)
 
         # Register trace first (environment connection can fail)
@@ -659,7 +660,8 @@ class EvalContext(Environment):
             error_msg = str(self.error)
 
         # Flush any pending telemetry spans for this trace
-        flush(self.trace_id)
+        if self._trace_enabled:
+            flush(self.trace_id)
 
         # Disconnect environment (parent class) - also runs evaluate tools
         await super().__aexit__(exc_type, exc_val, exc_tb)
@@ -724,8 +726,7 @@ class EvalContext(Environment):
 
     def _print_eval_link(self) -> None:
         """Print a nicely formatted eval link."""
-        # Skip if link printing is suppressed (e.g., parallel child traces)
-        if self._suppress_link:
+        if self._suppress_link or not self._trace_enabled:
             return
 
         from hud.eval.display import print_link
@@ -735,8 +736,7 @@ class EvalContext(Environment):
 
     def _print_single_result(self, error_msg: str | None) -> None:
         """Print a single eval result summary."""
-        # Skip if link printing is suppressed (e.g., parallel child traces)
-        if self._suppress_link:
+        if self._suppress_link or not self._trace_enabled:
             return
 
         from hud.eval.display import print_single_result
