@@ -85,7 +85,7 @@ class ScenarioHandle(Generic[P]):
         bound = self._sig.bind(*args, **kwargs)
         return Task(
             env=self._env,
-            scenario=f"{self._env_name}:{self._scenario_name}",
+            scenario=self._scenario_name,
             args=dict(bound.arguments),
         )
 

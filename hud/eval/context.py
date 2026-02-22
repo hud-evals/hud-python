@@ -589,11 +589,17 @@ class EvalContext(Environment):
             return
 
         try:
+            eval_result_dict = (
+                self.evaluation_result.model_dump(exclude_none=True, exclude={"info"})
+                if self.evaluation_result
+                else None
+            )
             payload = EvalExitPayload(
                 **self._build_base_payload().model_dump(),
                 reward=self.reward,
                 success=self.success,
                 error_message=error_message,
+                evaluation_result=eval_result_dict,
             )
             await make_request(
                 method="POST",
