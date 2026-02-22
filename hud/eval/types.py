@@ -45,6 +45,7 @@ class EvalExitPayload(EvalPayload):
     reward: float | None = None
     success: bool = True
     error_message: str | None = None
+    evaluation_result: dict[str, Any] | None = None
 
 
 class JobEnterPayload(BaseModel):
