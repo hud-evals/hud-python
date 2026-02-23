@@ -1159,24 +1159,103 @@ def build_environment(
     hud_console.info("The lock file can be used to reproduce this exact environment.")
 
 
+def _parse_extra_args(extra_args: list[str]) -> tuple[dict[str, str], dict[str, str]]:
+    """Parse -e/--env and --build-arg from extra CLI arguments."""
+    env_vars: dict[str, str] = {}
+    build_args: dict[str, str] = {}
+    i = 0
+    while i < len(extra_args):
+        if extra_args[i] == "-e" and i + 1 < len(extra_args):
+            env_arg = extra_args[i + 1]
+            if "=" in env_arg:
+                key, value = env_arg.split("=", 1)
+                env_vars[key] = value
+            i += 2
+        elif extra_args[i].startswith("--env="):
+            env_arg = extra_args[i][6:]
+            if "=" in env_arg:
+                key, value = env_arg.split("=", 1)
+                env_vars[key] = value
+            i += 1
+        elif extra_args[i] == "--env" and i + 1 < len(extra_args):
+            env_arg = extra_args[i + 1]
+            if "=" in env_arg:
+                key, value = env_arg.split("=", 1)
+                env_vars[key] = value
+            i += 2
+        elif extra_args[i] == "--build-arg" and i + 1 < len(extra_args):
+            build_arg = extra_args[i + 1]
+            if "=" in build_arg:
+                key, value = build_arg.split("=", 1)
+                build_args[key] = value
+            i += 2
+        elif extra_args[i].startswith("--build-arg="):
+            build_arg = extra_args[i][12:]
+            if "=" in build_arg:
+                key, value = build_arg.split("=", 1)
+                build_args[key] = value
+            i += 1
+        else:
+            i += 1
+    return env_vars, build_args
+
+
 def build_command(
-    directory: str = typer.Argument(".", help="Environment directory to build"),
+    params: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
+        None,
+        help="Environment directory followed by optional arguments (e.g., '. -e API_KEY=secret')",
+    ),
     tag: str | None = typer.Option(
         None, "--tag", "-t", help="Docker image tag (default: from pyproject.toml)"
     ),
     no_cache: bool = typer.Option(False, "--no-cache", help="Build without Docker cache"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
-    env_vars: dict[str, str] | None = None,
-    platform: str | None = None,
+    platform: str | None = typer.Option(
+        None, "--platform", help="Set Docker target platform (e.g., linux/amd64)"
+    ),
     secrets: list[str] | None = typer.Option(  # noqa: B008
         None,
         "--secret",
         help=("Docker build secret (repeatable), e.g. --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN"),
     ),
-    remote_cache: str | None = None,
-    build_args: dict[str, str] | None = None,
+    remote_cache: str | None = typer.Option(
+        None, "--remote-cache", help="Enable remote cache using Amazon ECR with specified repo name"
+    ),
 ) -> None:
-    """Build a HUD environment and generate lock file."""
+    """🏗️ Build a HUD environment and generate lock file.
+
+    [not dim]This command:
+    - Builds a Docker image from your environment
+    - Analyzes the MCP server to extract metadata
+    - Generates a hud.lock.yaml file for reproducibility
+
+    Examples:
+        hud build                    # Build current directory
+        hud build environments/text_2048 -e API_KEY=secret
+        hud build . --tag my-env:v1.0 -e VAR1=value1 -e VAR2=value2
+        hud build . --no-cache       # Force rebuild
+        hud build . --remote-cache my-cache-repo   # Use ECR remote cache (requires AWS_ACCOUNT_ID and AWS_DEFAULT_REGION)
+        hud build . --build-arg NODE_ENV=production  # Pass Docker build args
+        hud build . --secret id=MY_KEY,env=MY_KEY  # Pass build secrets, reading $MY_KEY env var. These will be encrypted at rest.
+        hud build . --secret id=MY_KEY,src=./my_key.txt  # Pass build secret from file.[/not dim]
+    """  # noqa: E501
+    if params:
+        directory = params[0]
+        extra_args = params[1:] if len(params) > 1 else []
+    else:
+        directory = "."
+        extra_args = []
+
+    env_vars, build_args = _parse_extra_args(extra_args)
+
     build_environment(
-        directory, tag, no_cache, verbose, env_vars, platform, secrets, remote_cache, build_args
+        directory,
+        tag,
+        no_cache,
+        verbose,
+        env_vars or None,
+        platform,
+        secrets,
+        remote_cache,
+        build_args or None,
     )

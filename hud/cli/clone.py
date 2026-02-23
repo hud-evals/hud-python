@@ -47,6 +47,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+import typer
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -183,3 +184,43 @@ def print_error(error_msg: str) -> None:
             padding=(1, 2),
         )
     )
+
+
+def clone_command(
+    url: str = typer.Argument(
+        ...,
+        help="Git repository URL to clone",
+    ),
+) -> None:
+    """🚀 Clone a git repository quietly with a pretty output.
+
+    [not dim]This command wraps 'git clone' with the --quiet flag and displays
+    a rich formatted success message. If the repository contains a clone
+    message in pyproject.toml, it will be displayed as a tutorial.
+
+    Configure clone messages in your repository's pyproject.toml:
+
+    [tool.hud.clone]
+    title = "🚀 My Project"
+    message = "Thanks for cloning! Run 'pip install -e .' to get started."
+
+    # Or use markdown format:
+    # markdown = "## Welcome!\\n\\nHere's how to get started..."
+    # style = "cyan"
+
+    Examples:
+        hud clone https://github.com/user/repo.git[/not dim]
+    """
+    success, result = clone_repository(url)
+
+    if success:
+        clone_config = get_clone_message(result)
+        print_tutorial(clone_config)
+    else:
+        print_error(result)
+        raise typer.Exit(1)
+
+
+def quickstart_command() -> None:
+    """Quickstart with evaluating an agent!"""
+    clone_command("https://github.com/hud-evals/quickstart.git")

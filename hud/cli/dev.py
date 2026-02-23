@@ -924,6 +924,88 @@ def run_docker_dev_server(
         cleanup_container()
 
 
+def dev_command(
+    params: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
+        None,
+        help="Module path or extra Docker args (when using --docker)",
+    ),
+    docker: bool = typer.Option(
+        False,
+        "--docker",
+        help="Run in Docker with volume mounts for hot-reload (for complex environments)",
+    ),
+    stdio: bool = typer.Option(
+        False,
+        "--stdio",
+        help="Use stdio transport (default: HTTP)",
+    ),
+    port: int = typer.Option(8765, "--port", "-p", help="HTTP server port (ignored for stdio)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed logs"),
+    inspector: bool = typer.Option(
+        False, "--inspector", help="Launch MCP Inspector (HTTP mode only)"
+    ),
+    interactive: bool = typer.Option(
+        False, "--interactive", help="Launch interactive testing mode (HTTP mode only)"
+    ),
+    watch: list[str] = typer.Option(  # noqa: B008
+        [],
+        "--watch",
+        "-w",
+        help="Paths to watch for hot-reload (repeatable: -w tools -w env.py)",
+    ),
+    new: bool = typer.Option(
+        False,
+        "--new",
+        help="Create a new dev trace on hud.ai (opens in browser)",
+    ),
+) -> None:
+    """🔥 Development mode - run MCP server (hot-reload is opt-in via -w/--watch).
+
+    [not dim]TWO MODES:
+
+    1. Python Module:
+       hud dev                    # Auto-detects module (no hot-reload by default)
+       hud dev env:env            # Explicit module:attribute
+       hud dev -w .               # Watch current directory
+
+    2. Docker (Complex environments):
+       hud dev                        # Auto-detects Dockerfile, no hot-reload
+       hud dev -w tools -w env.py     # Mount & watch specific paths
+       hud dev -w tools               # Just watch tools folder
+
+    For Docker mode, use --watch to specify which folders to mount and watch.
+    Paths not in --watch stay in the built image (no hot-reload).
+
+    Examples:
+        hud dev                      # Auto-detect mode
+        hud dev --new                # Create live dev trace on hud.ai
+        hud dev env:env              # Run specific module
+        hud dev --inspector          # Launch MCP Inspector
+        hud dev --interactive        # Launch interactive testing mode
+        hud dev -w 'tools env.py'    # Docker: hot-reload tools/ and env.py
+
+    Local development pattern (Docker + local scenarios):
+        Terminal 1: hud dev -w 'tools env.py' --port 8000
+        Terminal 2: python local_test.py  # Uses connect_url()[/not dim]
+    """
+    module = params[0] if params and not docker else None
+    docker_args = params if docker else []
+    watch_paths = watch if watch else None
+
+    run_mcp_dev_server(
+        module,
+        stdio,
+        port,
+        verbose,
+        inspector,
+        interactive,
+        watch_paths,
+        docker=docker,
+        docker_args=docker_args,
+        new_trace=new,
+    )
+
+
 def run_mcp_dev_server(
     module: str | None,
     stdio: bool,

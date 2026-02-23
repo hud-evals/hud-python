@@ -15,6 +15,22 @@ console = Console()
 hud_console = HUDConsole()
 
 
+def rft_status_typer_command(
+    model_id: str = typer.Argument(
+        ...,
+        help="Model ID or job ID to check status for",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Show full status details",
+    ),
+) -> None:
+    """Check the status of an RFT job."""
+    rft_status_command(model_id=model_id, verbose=verbose)
+
+
 def rft_status_command(
     model_id: str,
     verbose: bool = False,

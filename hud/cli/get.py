@@ -34,7 +34,7 @@ def get_command(
         None, "--limit", "-l", help="Limit number of examples to download"
     ),
 ) -> None:
-    """Download a HuggingFace dataset and save it as JSON (list) or JSONL."""
+    """📥 Download a HuggingFace dataset and save it as JSONL."""
     console.print(f"\n[cyan]📥 Downloading dataset: {dataset_name}[/cyan]")
 
     # Import datasets library
@@ -152,7 +152,7 @@ def get_command(
 
     # Show next steps
     console.print("\n[dim]Next steps:[/dim]")
-    console.print(f"[dim]• Use for training: hud rl {output}[/dim]")
+    console.print(f"[dim]• Use for training: hud rft run {output}[/dim]")
     console.print(f"[dim]• Use for evaluation: hud eval {output}[/dim]")
 
 

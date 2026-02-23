@@ -12,7 +12,7 @@ def test_hud_debug_directory_mode_accepts_dockerfile_hud(tmp_path: Path, monkeyp
     (tmp_path / "pyproject.toml").write_text("[project]\nname = 'test'\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    import hud.cli.__init__ as cli
+    import hud.cli.debug as debug_mod
     from hud.cli.utils import environment as env_utils
 
     monkeypatch.setattr(env_utils, "image_exists", lambda _image: True)
@@ -23,8 +23,8 @@ def test_hud_debug_directory_mode_accepts_dockerfile_hud(tmp_path: Path, monkeyp
         captured["command"] = command
         return max_phase
 
-    monkeypatch.setattr(cli, "debug_mcp_stdio", _fake_debug_mcp_stdio)
-    cli.debug(params=["."], config=None, cursor=None, build=False, max_phase=1)
+    monkeypatch.setattr(debug_mod, "debug_mcp_stdio", _fake_debug_mcp_stdio)
+    debug_mod.debug_command(params=["."], config=None, cursor=None, build=False, max_phase=1)
 
     command = captured["command"]
     assert isinstance(command, list)

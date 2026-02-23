@@ -336,5 +336,13 @@ def pull_command(
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
 ) -> None:
-    """Pull HUD environment from registry with metadata preview."""
+    """📥 Pull HUD environment from registry with metadata preview.
+
+    [not dim]Shows environment details before downloading.
+
+    Examples:
+        hud pull hud.lock.yaml               # Pull from lock file
+        hud pull myuser/myenv:latest        # Pull by image reference
+        hud pull myuser/myenv --verify-only # Check metadata only[/not dim]
+    """
     pull_environment(target, lock_file, yes, verify_only, verbose)

@@ -6,6 +6,11 @@ import json
 import os
 from pathlib import Path
 
+import typer
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
 
 def parse_cursor_config(server_name: str) -> tuple[list[str] | None, str | None]:
     """
@@ -90,3 +95,49 @@ def get_cursor_config_path() -> Path:
         # Try Windows path
         cursor_config_path = Path(os.environ.get("USERPROFILE", "")) / ".cursor" / "mcp.json"
     return cursor_config_path
+
+
+def cursor_list_command() -> None:
+    """📋 List all MCP servers configured in Cursor."""
+    console = Console()
+    console.print(Panel.fit("📋 [bold cyan]Cursor MCP Servers[/bold cyan]", border_style="cyan"))
+
+    servers, error = list_cursor_servers()
+
+    if error:
+        console.print(f"[red]❌ {error}[/red]")
+        raise typer.Exit(1)
+
+    if not servers:
+        console.print("[yellow]No servers found in Cursor config[/yellow]")
+        return
+
+    table = Table(title="Available Servers")
+    table.add_column("Server Name", style="cyan")
+    table.add_column("Command Preview", style="dim")
+
+    config_path = get_cursor_config_path()
+    if config_path.exists():
+        with open(config_path) as f:
+            config = json.load(f)
+            mcp_servers = config.get("mcpServers", {})
+
+            for server_name in servers:
+                server_config = mcp_servers.get(server_name, {})
+                command = server_config.get("command", "")
+                args = server_config.get("args", [])
+
+                if args:
+                    preview = f"{command} {' '.join(args[:2])}"
+                    if len(args) > 2:
+                        preview += " ..."
+                else:
+                    preview = command
+
+                table.add_row(server_name, preview)
+
+    console.print(table)
+    console.print(f"\n[dim]Config location: {config_path}[/dim]")
+    console.print(
+        "\n[green]Tip:[/green] Use [cyan]hud debug --cursor <server-name>[/cyan] to debug a server"
+    )

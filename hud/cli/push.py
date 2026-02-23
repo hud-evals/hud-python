@@ -488,17 +488,30 @@ def push_environment(
 
 
 def push_command(
-    directory: str = ".",
-    image: str | None = None,
-    tag: str | None = None,
-    sign: bool = False,
-    yes: bool = False,
-    verbose: bool = False,
+    directory: str = typer.Argument(".", help="Environment directory containing hud.lock.yaml"),
+    image: str | None = typer.Option(None, "--image", "-i", help="Override registry image name"),
+    tag: str | None = typer.Option(
+        None, "--tag", "-t", help="Override tag (e.g., 'v1.0', 'latest')"
+    ),
+    sign: bool = typer.Option(
+        False, "--sign", help="Sign the image with cosign (not yet implemented)"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
 ) -> None:
-    """Push HUD environment to registry."""
+    """📤 Push HUD environment to registry.
+
+    [not dim]Reads hud.lock.yaml from the directory and pushes to registry.
+    Auto-detects your Docker username if --image not specified.
+
+    Examples:
+        hud push                     # Push with auto-detected name
+        hud push --tag v1.0          # Push with specific tag
+        hud push . --image myuser/myenv:v1.0
+        hud push --yes               # Skip confirmation[/not dim]
+    """
     hud_console = HUDConsole()
 
-    # Deprecation warning
     hud_console.warning(
         "hud push is deprecated for platform builds. Use 'hud deploy' instead for remote builds."
     )

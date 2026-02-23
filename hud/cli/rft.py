@@ -115,6 +115,45 @@ def _select_model(models: list[dict[str, Any]]) -> dict[str, Any]:
     return selected
 
 
+def rft_run_command(
+    tasks_file: str = typer.Argument(
+        ...,
+        help="Path to tasks file (JSON/JSONL)",
+    ),
+    model_id: str | None = typer.Option(
+        None,
+        "--model-id",
+        "-m",
+        help="Model ID to train (skip interactive selection)",
+    ),
+    reasoning_effort: str = typer.Option(
+        "medium",
+        "--reasoning-effort",
+        help="Reasoning effort level (low, medium, high)",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Enable verbose output",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Auto-accept all prompts",
+    ),
+) -> None:
+    """Launch an RFT training job."""
+    rft_command(
+        tasks_file=tasks_file,
+        reasoning_effort=reasoning_effort,
+        verbose=verbose,
+        yes=yes,
+        model_id=model_id,
+    )
+
+
 def rft_command(
     tasks_file: str,
     reasoning_effort: str = "medium",

@@ -8,7 +8,9 @@ import json
 import subprocess
 import threading
 import time
+from pathlib import Path
 
+import typer
 from rich.console import Console
 
 from hud.utils.hud_console import HUDConsole
@@ -16,6 +18,151 @@ from hud.utils.hud_console import HUDConsole
 from .utils.logging import CaptureLogger, Colors, analyze_error_for_hints
 
 console = Console()
+
+
+def debug_command(
+    params: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
+        None,
+        help="Docker image, environment directory, or config file followed by optional Docker arguments",  # noqa: E501
+    ),
+    config: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        "-c",
+        help="JSON config file with MCP configuration",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+    ),
+    cursor: str | None = typer.Option(
+        None,
+        "--cursor",
+        help="Debug a server from Cursor config",
+    ),
+    build: bool = typer.Option(
+        False,
+        "--build",
+        "-b",
+        help="Build image before debugging (for directory mode)",
+    ),
+    max_phase: int = typer.Option(
+        5,
+        "--max-phase",
+        "-p",
+        min=1,
+        max=5,
+        help="Maximum debug phase (1-5)",
+    ),
+) -> None:
+    """🐛 Debug MCP environment - test initialization, tools, and readiness.
+
+    [not dim]Examples:
+        hud debug .                              # Debug current directory
+        hud debug environments/browser           # Debug specific directory
+        hud debug . --build                      # Build then debug
+        hud debug hud-text-2048:latest          # Debug Docker image
+        hud debug my-mcp-server:v1 -e API_KEY=xxx
+        hud debug --config mcp-config.json
+        hud debug --cursor text-2048-dev
+        hud debug . --max-phase 3               # Stop after phase 3[/not dim]
+    """
+    from .utils.cursor import parse_cursor_config
+    from .utils.environment import (
+        build_environment,
+        get_image_name,
+        image_exists,
+        is_environment_directory,
+    )
+
+    hud_console = HUDConsole()
+
+    command = None
+    docker_args: list[str] = []
+
+    if config:
+        with open(config) as f:
+            mcp_config = json.load(f)
+
+        server_name = next(iter(mcp_config.keys()))
+        server_config = mcp_config[server_name]
+        command = [server_config["command"], *server_config.get("args", [])]
+    elif cursor:
+        command, error = parse_cursor_config(cursor)
+        if error or command is None:
+            console.print(f"[red]❌ {error or 'Failed to parse cursor config'}[/red]")
+            raise typer.Exit(1)
+    elif params:
+        first_param = params[0]
+        docker_args = params[1:] if len(params) > 1 else []
+
+        p = Path(first_param)
+        if is_environment_directory(p):
+            directory = first_param
+            image_name, source = get_image_name(directory)
+
+            if source == "auto":
+                hud_console.info(f"Auto-generated image name: {image_name}")
+
+            if build or not image_exists(image_name):
+                if not build and not image_exists(image_name):
+                    if typer.confirm(f"Image {image_name} not found. Build it now?"):
+                        build = True
+                    else:
+                        raise typer.Exit(1)
+
+                if build and not build_environment(directory, image_name):
+                    raise typer.Exit(1)
+
+            from .utils.docker import create_docker_run_command
+
+            command = create_docker_run_command(
+                image_name, docker_args=docker_args, env_dir=directory
+            )
+        else:
+            image = first_param
+            from .utils.docker import create_docker_run_command
+
+            cwd = Path.cwd()
+            if (cwd / ".env").exists():
+                command = create_docker_run_command(
+                    image,
+                    docker_args=docker_args,
+                    env_dir=cwd,
+                )
+            else:
+                from .utils.docker import build_run_command
+
+                command = build_run_command(image, docker_args)
+    else:
+        console.print(
+            "[red]Error: Must specify a directory, Docker image, --config, or --cursor[/red]"
+        )
+        console.print("\nExamples:")
+        console.print("  hud debug .                      # Debug current directory")
+        console.print("  hud debug environments/browser   # Debug specific directory")
+        console.print("  hud debug hud-text-2048:latest  # Debug Docker image")
+        console.print("  hud debug --config mcp-config.json")
+        console.print("  hud debug --cursor my-server")
+        raise typer.Exit(1)
+
+    logger = CaptureLogger(print_output=True)
+    phases_completed = asyncio.run(debug_mcp_stdio(command, logger, max_phase=max_phase))
+
+    hud_console = HUDConsole()
+
+    hud_console.info("")
+    hud_console.section_title("Debug Summary")
+
+    if phases_completed == max_phase:
+        hud_console.success(f"All {max_phase} phases completed successfully!")
+        if max_phase == 5:
+            hud_console.info("Your MCP server is fully functional and ready for production use.")
+    else:
+        hud_console.warning(f"Completed {phases_completed} out of {max_phase} phases")
+        hud_console.info("Check the errors above for troubleshooting.")
+
+    if phases_completed < max_phase:
+        raise typer.Exit(1)
 
 
 async def debug_mcp_stdio(command: list[str], logger: CaptureLogger, max_phase: int = 5) -> int:
