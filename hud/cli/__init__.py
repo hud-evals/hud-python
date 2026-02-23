@@ -31,13 +31,11 @@ SUPPORT_HINT = (
 from .analyze import analyze_command  # noqa: E402
 from .build import build_command  # noqa: E402
 from .cancel import cancel_command  # noqa: E402
-from .clone import clone_command, quickstart_command  # noqa: E402
 from .convert import convert_command  # noqa: E402
 from .debug import debug_command  # noqa: E402
 from .deploy import deploy_command  # noqa: E402
 from .dev import dev_command  # noqa: E402
 from .eval import eval_command  # noqa: E402
-from .get import get_command  # noqa: E402
 from .init import init_command  # noqa: E402
 from .link import link_command  # noqa: E402
 from .list_func import list_command  # noqa: E402
@@ -49,7 +47,6 @@ from .rft import rft_run_command  # noqa: E402
 from .rft_status import rft_status_typer_command  # noqa: E402
 from .run import run_command  # noqa: E402
 from .set_cmd import set_command  # noqa: E402
-from .utils.cursor import cursor_list_command  # noqa: E402
 
 _EXTRA_ARGS = {"allow_extra_args": True, "ignore_unknown_options": True}
 
@@ -66,14 +63,10 @@ app.command(name="pull")(pull_command)
 app.command(name="list")(list_command)
 app.command(name="remove")(remove_command)
 app.command(name="init")(init_command)
-app.command(name="clone")(clone_command)
-app.command(name="quickstart")(quickstart_command)
-app.command(name="get")(get_command)
 app.command(name="convert")(convert_command)
 app.command(name="cancel")(cancel_command)
 app.command(name="models")(models_command)
 app.command(name="set")(set_command)
-app.command(name="cursor-list")(cursor_list_command)
 
 
 # Version command (trivial, stays inline)
