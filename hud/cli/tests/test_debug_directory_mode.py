@@ -24,7 +24,7 @@ def test_hud_debug_directory_mode_accepts_dockerfile_hud(tmp_path: Path, monkeyp
         return max_phase
 
     monkeypatch.setattr(debug_mod, "debug_mcp_stdio", _fake_debug_mcp_stdio)
-    debug_mod.debug_command(params=["."], config=None, cursor=None, build=False, max_phase=1)
+    debug_mod.debug_command(params=["."], config=None, build=False, max_phase=1)
 
     command = captured["command"]
     assert isinstance(command, list)

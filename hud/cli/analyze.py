@@ -34,11 +34,6 @@ def analyze_command(
         file_okay=True,
         dir_okay=False,
     ),
-    cursor: str | None = typer.Option(
-        None,
-        "--cursor",
-        help="Analyze a server from Cursor config",
-    ),
     output_format: str = typer.Option(
         "interactive",
         "--format",
@@ -65,22 +60,10 @@ def analyze_command(
     Examples:
         hud analyze hudpython/test_init      # Fast metadata inspection
         hud analyze my-env --live            # Full container analysis
-        hud analyze --config mcp-config.json # From MCP config
-        hud analyze --cursor text-2048-dev   # From Cursor config[/not dim]
+        hud analyze --config mcp-config.json # From MCP config[/not dim]
     """
     if config:
         asyncio.run(analyze_environment_from_config(config, output_format, verbose))
-    elif cursor:
-        from .utils.cursor import parse_cursor_config
-
-        command, error = parse_cursor_config(cursor)
-        if error or command is None:
-            console.print(f"[red]❌ {error or 'Failed to parse cursor config'}[/red]")
-            raise typer.Exit(1)
-        mcp_config = {
-            "local": {"command": command[0], "args": command[1:] if len(command) > 1 else []}
-        }
-        asyncio.run(analyze_environment_from_mcp_config(mcp_config, output_format, verbose))
     elif params:
         image, *docker_args = params
         if live or docker_args:
@@ -93,12 +76,11 @@ def analyze_command(
 
             asyncio.run(analyze_from_metadata(image, output_format, verbose))
     else:
-        console.print("[red]Error: Must specify either a Docker image, --config, or --cursor[/red]")
+        console.print("[red]Error: Must specify either a Docker image or --config[/red]")
         console.print("\nExamples:")
         console.print("  hud analyze hudpython/test_init       # Fast metadata analysis")
         console.print("  hud analyze my-env --live             # Live container analysis")
         console.print("  hud analyze --config mcp-config.json  # From config file")
-        console.print("  hud analyze --cursor my-server        # From Cursor")
         raise typer.Exit(1)
 
 

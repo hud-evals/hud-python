@@ -34,11 +34,6 @@ def debug_command(
         file_okay=True,
         dir_okay=False,
     ),
-    cursor: str | None = typer.Option(
-        None,
-        "--cursor",
-        help="Debug a server from Cursor config",
-    ),
     build: bool = typer.Option(
         False,
         "--build",
@@ -63,10 +58,8 @@ def debug_command(
         hud debug hud-text-2048:latest          # Debug Docker image
         hud debug my-mcp-server:v1 -e API_KEY=xxx
         hud debug --config mcp-config.json
-        hud debug --cursor text-2048-dev
         hud debug . --max-phase 3               # Stop after phase 3[/not dim]
     """
-    from .utils.cursor import parse_cursor_config
     from .utils.environment import (
         build_environment,
         get_image_name,
@@ -86,11 +79,6 @@ def debug_command(
         server_name = next(iter(mcp_config.keys()))
         server_config = mcp_config[server_name]
         command = [server_config["command"], *server_config.get("args", [])]
-    elif cursor:
-        command, error = parse_cursor_config(cursor)
-        if error or command is None:
-            console.print(f"[red]❌ {error or 'Failed to parse cursor config'}[/red]")
-            raise typer.Exit(1)
     elif params:
         first_param = params[0]
         docker_args = params[1:] if len(params) > 1 else []
@@ -135,14 +123,13 @@ def debug_command(
                 command = build_run_command(image, docker_args)
     else:
         console.print(
-            "[red]Error: Must specify a directory, Docker image, --config, or --cursor[/red]"
+            "[red]Error: Must specify a directory, Docker image, or --config[/red]"
         )
         console.print("\nExamples:")
         console.print("  hud debug .                      # Debug current directory")
         console.print("  hud debug environments/browser   # Debug specific directory")
         console.print("  hud debug hud-text-2048:latest  # Debug Docker image")
         console.print("  hud debug --config mcp-config.json")
-        console.print("  hud debug --cursor my-server")
         raise typer.Exit(1)
 
     logger = CaptureLogger(print_output=True)

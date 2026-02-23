@@ -36,7 +36,7 @@ def test_analyze_no_params_errors():
     import typer
 
     with pytest.raises(typer.Exit):
-        analyze_command(params=None, config=None, cursor=None, output_format="json", verbose=False)  # type: ignore
+        analyze_command(params=None, config=None, output_format="json", verbose=False)  # type: ignore
 
 
 @patch("hud.cli.analyze.analyze_environment_from_config", new_callable=AsyncMock)
@@ -44,17 +44,7 @@ def test_analyze_no_params_errors():
 def test_analyze_from_config(mock_run, mock_func, tmp_path: Path):
     cfg = tmp_path / "cfg.json"
     cfg.write_text("{}")
-    analyze_command(params=None, config=cfg, cursor=None, output_format="json", verbose=False)  # type: ignore
-    assert mock_run.called
-
-
-@patch("hud.cli.analyze.console")
-@patch("hud.cli.utils.cursor.parse_cursor_config")
-@patch("hud.cli.analyze.analyze_environment_from_mcp_config", new_callable=AsyncMock)
-@patch("hud.cli.analyze.asyncio.run")
-def test_analyze_from_cursor(mock_run, mock_analyze, mock_parse, mock_console):
-    mock_parse.return_value = (["cmd", "arg"], None)
-    analyze_command(params=None, config=None, cursor="server", output_format="json", verbose=False)  # type: ignore
+    analyze_command(params=None, config=cfg, output_format="json", verbose=False)  # type: ignore
     assert mock_run.called
 
 

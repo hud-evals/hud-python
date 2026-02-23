@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import tempfile
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -66,23 +65,6 @@ class TestCLICommands:
             except Exception:
                 logger.exception("Error deleting temp file")
 
-    def test_analyze_with_cursor_server(self) -> None:
-        """Test analyze command with Cursor server."""
-        with patch("hud.cli.utils.cursor.parse_cursor_config") as mock_parse:
-            mock_parse.return_value = (["python", "server.py"], None)
-            with patch("hud.cli.analyze.asyncio.run") as mock_run:
-                result = runner.invoke(app, ["analyze", "dummy", "--cursor", "test-server"])
-                assert result.exit_code == 0
-                mock_run.assert_called_once()
-
-    def test_analyze_cursor_server_not_found(self) -> None:
-        """Test analyze with non-existent Cursor server."""
-        with patch("hud.cli.utils.cursor.parse_cursor_config") as mock_parse:
-            mock_parse.return_value = (None, "Server 'test' not found")
-            result = runner.invoke(app, ["analyze", "--cursor", "test"])
-            assert result.exit_code == 1
-            assert "Server 'test' not found" in result.output
-
     def test_analyze_no_arguments_shows_error(self) -> None:
         """Test analyze without arguments shows error."""
         result = runner.invoke(app, ["analyze"])
@@ -130,59 +112,11 @@ class TestCLICommands:
             except Exception:
                 logger.exception("Error deleting temp file")
 
-    def test_debug_with_cursor_server(self) -> None:
-        """Test debug command with Cursor server."""
-        with patch("hud.cli.utils.cursor.parse_cursor_config") as mock_parse:
-            mock_parse.return_value = (["python", "server.py"], None)
-            with patch("hud.cli.debug.asyncio.run") as mock_run:
-                mock_run.return_value = 5
-                result = runner.invoke(app, ["debug", "dummy", "--cursor", "test-server"])
-                assert result.exit_code == 0
-
     def test_debug_no_arguments_shows_error(self) -> None:
         """Test debug without arguments shows error."""
         result = runner.invoke(app, ["debug"])
         assert result.exit_code == 1
         assert "Error" in result.output
-
-    def test_cursor_list_command(self) -> None:
-        """Test cursor-list command."""
-        with patch("hud.cli.utils.cursor.list_cursor_servers") as mock_list:
-            mock_list.return_value = (["server1", "server2"], None)
-            with patch("hud.cli.utils.cursor.get_cursor_config_path") as mock_path:
-                mock_path.return_value = Path("/home/user/.cursor/mcp.json")
-                with patch("pathlib.Path.exists") as mock_exists:
-                    mock_exists.return_value = True
-                    with patch("builtins.open", create=True) as mock_open:
-                        mock_open.return_value.__enter__.return_value.read.return_value = (
-                            json.dumps(
-                                {
-                                    "mcpServers": {
-                                        "server1": {"command": "python", "args": ["srv1.py"]},
-                                        "server2": {"command": "node", "args": ["srv2.js"]},
-                                    }
-                                }
-                            )
-                        )
-                        result = runner.invoke(app, ["cursor-list"])
-                        assert result.exit_code == 0
-                        assert "Available Servers" in result.output
-
-    def test_cursor_list_no_servers(self) -> None:
-        """Test cursor-list with no servers."""
-        with patch("hud.cli.utils.cursor.list_cursor_servers") as mock_list:
-            mock_list.return_value = ([], None)
-            result = runner.invoke(app, ["cursor-list"])
-            assert result.exit_code == 0
-            assert "No servers found" in result.output
-
-    def test_cursor_list_error(self) -> None:
-        """Test cursor-list with error."""
-        with patch("hud.cli.utils.cursor.list_cursor_servers") as mock_list:
-            mock_list.return_value = (None, "Config not found")
-            result = runner.invoke(app, ["cursor-list"])
-            assert result.exit_code == 1
-            assert "Config not found" in result.output
 
     def test_version_command(self) -> None:
         """Test version command."""
