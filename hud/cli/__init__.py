@@ -45,7 +45,6 @@ from .push import push_command  # noqa: E402
 from .remove import remove_command  # noqa: E402
 from .rft import rft_run_command  # noqa: E402
 from .rft_status import rft_status_typer_command  # noqa: E402
-from .run import run_command  # noqa: E402
 
 _EXTRA_ARGS = {"allow_extra_args": True, "ignore_unknown_options": True}
 
@@ -53,7 +52,6 @@ app.command(name="analyze", context_settings=_EXTRA_ARGS)(analyze_command)
 app.command(name="debug", context_settings=_EXTRA_ARGS)(debug_command)
 app.command(name="dev", context_settings=_EXTRA_ARGS)(dev_command)
 app.command(name="build", context_settings=_EXTRA_ARGS)(build_command)
-app.command(name="run", context_settings=_EXTRA_ARGS)(run_command)
 app.command(name="deploy")(deploy_command)
 app.command(name="link")(link_command)
 app.command(name="eval")(eval_command)

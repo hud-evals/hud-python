@@ -15,27 +15,18 @@ from hud.utils.hud_console import HUDConsole
 
 async def stream_build_logs(
     build_id: str,
-    api_key: str,
-    api_url: str,
     console: HUDConsole | None = None,
     max_reconnects: int = 3,
 ) -> str:
-    """Stream build logs from the HUD backend via WebSocket.
+    """Stream build logs from the HUD backend via WebSocket."""
+    from hud.cli.utils.api import require_api_key
+    from hud.settings import settings
 
-    Args:
-        build_id: The build ID to stream logs for
-        api_key: HUD API key for authentication
-        api_url: Base API URL (e.g., https://api.hud.ai)
-        console: Optional HUDConsole for output
-        max_reconnects: Maximum number of reconnection attempts
-
-    Returns:
-        Final build status (e.g., "SUCCEEDED", "FAILED", "STOPPED")
-    """
+    api_key = require_api_key()
     if console is None:
         console = HUDConsole()
 
-    # Convert HTTP URL to WebSocket URL
+    api_url = settings.hud_api_url
     ws_url = api_url.replace("https://", "wss://").replace("http://", "ws://")
     ws_url = f"{ws_url.rstrip('/')}/builds/{build_id}/logs?api_key={api_key}"
 
@@ -202,30 +193,21 @@ def _print_log_line(
 
 async def poll_build_status(
     build_id: str,
-    api_key: str,
-    api_url: str,
     console: HUDConsole | None = None,
     poll_interval: float = 5.0,
     max_wait: float = 3600.0,
 ) -> dict[str, Any]:
-    """Poll for build status as a fallback when WebSocket is not available.
-
-    Args:
-        build_id: The build ID to poll
-        api_key: HUD API key for authentication
-        api_url: Base API URL
-        console: Optional HUDConsole for output
-        poll_interval: Seconds between polls
-        max_wait: Maximum time to wait in seconds
-
-    Returns:
-        Final build status response
-    """
+    """Poll for build status as a fallback when WebSocket is not available."""
     import httpx
+
+    from hud.cli.utils.api import hud_headers
+    from hud.settings import settings
 
     if console is None:
         console = HUDConsole()
 
+    api_url = settings.hud_api_url
+    headers = hud_headers()
     start_time = asyncio.get_event_loop().time()
     last_status = ""
 
@@ -239,7 +221,7 @@ async def poll_build_status(
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     f"{api_url.rstrip('/')}/builds/{build_id}/status",
-                    headers={"X-API-Key": api_key},
+                    headers=headers,
                     timeout=30.0,
                 )
                 response.raise_for_status()

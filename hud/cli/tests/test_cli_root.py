@@ -10,7 +10,6 @@ from hud.cli.build import build_command
 from hud.cli.dev import dev_command
 from hud.cli.pull import pull_command
 from hud.cli.push import push_command
-from hud.cli.run import run_command
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,43 +61,6 @@ def test_build_env_var_parsing(mock_build_env):
     # args: directory, tag, no_cache, verbose, env_vars, platform, secrets, remote_cache, build_args
     env_vars = args[4]
     assert env_vars == {"A": "B", "C": "D", "E": "F"}
-
-
-@patch("hud.cli.utils.runner.run_mcp_server")
-def test_run_local_calls_runner(mock_runner):
-    run_command(
-        params=["img:latest"],
-        local=True,
-        transport="stdio",
-        port=1234,
-        url=None,  # type: ignore
-        api_key=None,
-        run_id=None,
-        verbose=False,
-    )
-    assert mock_runner.called
-
-
-@patch("hud.cli.utils.remote_runner.run_remote_server")
-def test_run_remote_calls_remote(mock_remote):
-    run_command(
-        params=["img:latest"],
-        local=False,
-        transport="http",
-        port=8765,
-        url="https://x",
-        api_key=None,
-        run_id=None,
-        verbose=True,
-    )
-    assert mock_remote.called
-
-
-def test_run_no_params_errors():
-    import typer
-
-    with pytest.raises(typer.Exit):
-        run_command(params=None)  # type: ignore
 
 
 @patch("hud.cli.dev.run_mcp_dev_server")
