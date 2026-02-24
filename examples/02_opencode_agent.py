@@ -16,13 +16,13 @@ What you get:
 
 Usage:
   # Build mode - full coding capabilities
-  uv run python examples/07_opencode_agent.py --task "Fix the bug in main.py"
+  uv run python examples/02_opencode_agent.py --task "Fix the bug in main.py"
 
   # Plan mode - read-only exploration
-  uv run python examples/07_opencode_agent.py --plan --task "How does auth work?"
+  uv run python examples/02_opencode_agent.py --plan --task "How does auth work?"
 
   # Verbose output
-  uv run python examples/07_opencode_agent.py --verbose --task "Add error handling"
+  uv run python examples/02_opencode_agent.py --verbose --task "Add error handling"
 
 Requirements:
   - Install deps: `uv sync`
@@ -216,19 +216,19 @@ def _parse_args() -> argparse.Namespace:
         epilog="""
 Examples:
   # Build mode - make changes to code
-  uv run python examples/07_opencode_agent.py --task "Add error handling to api.py"
+  uv run python examples/02_opencode_agent.py --task "Add error handling to api.py"
 
   # Plan mode - read-only exploration
-  uv run python examples/07_opencode_agent.py --plan --task "How does auth work?"
+  uv run python examples/02_opencode_agent.py --plan --task "How does auth work?"
 
   # Custom working directory
-  uv run python examples/07_opencode_agent.py --work-dir ./my-project --task "Fix bugs"
+  uv run python examples/02_opencode_agent.py --work-dir ./my-project --task "Fix bugs"
 
   # Verbose output
-  uv run python examples/07_opencode_agent.py --verbose --task "Refactor utils"
+  uv run python examples/02_opencode_agent.py --verbose --task "Refactor utils"
 
   # Use Claude
-  uv run python examples/07_opencode_agent.py --model claude-sonnet-4-5 --task "Add tests"
+  uv run python examples/02_opencode_agent.py --model claude-sonnet-4-5 --task "Add tests"
 """,
     )
     parser.add_argument(

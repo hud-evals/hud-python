@@ -14,6 +14,8 @@ from rich.table import Table
 from hud.settings import settings
 from hud.utils.hud_console import HUDConsole
 
+from .utils.api import hud_headers
+from .utils.lockfile import load_lock
 from .utils.registry import save_to_registry
 
 
@@ -21,7 +23,7 @@ def get_docker_manifest(image: str) -> dict | None:
     """Get manifest from Docker registry without pulling the image."""
     try:
         # Try docker manifest inspect (requires experimental features)
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             ["docker", "manifest", "inspect", image],  # noqa: S607
             capture_output=True,
             text=True,
@@ -65,9 +67,7 @@ def fetch_lock_from_registry(reference: str) -> dict | None:
         url_safe_path = "/".join(quote(part, safe="") for part in reference.split("/"))
         registry_url = f"{settings.hud_api_url.rstrip('/')}/registry/envs/{url_safe_path}"
 
-        headers = {}
-        if settings.api_key:
-            headers["Authorization"] = f"Bearer {settings.api_key}"
+        headers = hud_headers()
 
         response = requests.get(registry_url, headers=headers, timeout=10)
 
@@ -138,8 +138,7 @@ def pull_environment(
 
         hud_console.info(f"Reading lock file: {lock_file}")
         if lock_path:
-            with open(lock_path) as f:
-                lock_data = yaml.safe_load(f)
+            lock_data = load_lock(lock_path)
 
         image_ref = lock_data.get("image", "") if lock_data else ""
 
@@ -282,7 +281,7 @@ def pull_environment(
     hud_console.progress_message(f"Pulling {image_ref}...")
 
     # Run docker pull with progress
-    process = subprocess.Popen(  # noqa: S603
+    process = subprocess.Popen(
         ["docker", "pull", image_ref],  # noqa: S607
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -336,5 +335,13 @@ def pull_command(
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
 ) -> None:
-    """Pull HUD environment from registry with metadata preview."""
+    """📥 Pull HUD environment from registry with metadata preview.
+
+    [not dim]Shows environment details before downloading.
+
+    Examples:
+        hud pull hud.lock.yaml               # Pull from lock file
+        hud pull myuser/myenv:latest        # Pull by image reference
+        hud pull myuser/myenv --verify-only # Check metadata only[/not dim]
+    """
     pull_environment(target, lock_file, yes, verify_only, verbose)

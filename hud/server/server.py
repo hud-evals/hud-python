@@ -569,7 +569,7 @@ class MCPServer(FastMCP):
 
         try:
             # Run docker logs to get output
-            result = subprocess.run(  # noqa: S603
+            result = subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

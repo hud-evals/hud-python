@@ -121,7 +121,6 @@
               "reference/cli/push",
               "reference/cli/analyze",
               "reference/cli/debug",
-              "reference/cli/run",
               "reference/cli/eval",
               "reference/cli/rft",
               "reference/cli/misc"

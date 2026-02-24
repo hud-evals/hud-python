@@ -106,19 +106,11 @@ def deploy_environment(
     hud_console = HUDConsole()
     hud_console.header("HUD Environment Deploy")
 
-    # Import settings lazily
-    from hud.settings import settings
-
     env_dir = Path(directory).resolve()
 
-    # Check for API key
-    if not settings.api_key:
-        hud_console.error("No HUD API key found")
-        hud_console.warning("A HUD API key is required to deploy environments.")
-        hud_console.info("\nTo get started:")
-        hud_console.info("1. Get your API key at: https://hud.ai/settings")
-        hud_console.info("2. Set it via: hud set HUD_API_KEY=your-key-here")
-        raise typer.Exit(1)
+    from hud.cli.utils.api import require_api_key
+
+    require_api_key("deploy environments")
 
     # Check for Dockerfile
     dockerfile = find_dockerfile(env_dir)
@@ -267,8 +259,6 @@ def deploy_environment(
                 build_secrets=build_secrets_dict,
                 no_cache=no_cache,
                 registry_id=registry_id,
-                api_key=settings.api_key,
-                api_url=settings.hud_api_url,
                 console=hud_console,
                 verbose=verbose,
             )
@@ -294,30 +284,15 @@ async def _deploy_async(
     build_secrets: dict[str, str],
     no_cache: bool,
     registry_id: str | None,
-    api_key: str,
-    api_url: str,
     console: HUDConsole,
     verbose: bool = False,
 ) -> dict:
-    """Async deployment flow.
+    """Async deployment flow."""
+    from hud.cli.utils.api import hud_headers
+    from hud.settings import settings
 
-    Args:
-        tarball_path: Path to the tarball
-        name: Environment name
-        env_vars: Environment variables
-        build_args: Docker build arguments
-        build_secrets: Resolved Docker build secrets (id -> value)
-        no_cache: Whether to disable cache
-        registry_id: Optional existing registry ID
-        api_key: HUD API key
-        api_url: HUD API URL
-        console: HUDConsole for output
-        verbose: Verbose mode
-
-    Returns:
-        Result dict with success status and details
-    """
-    headers = {"X-API-Key": api_key}
+    api_url = settings.hud_api_url
+    headers = hud_headers()
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         # Step 1: Get presigned upload URL
@@ -420,8 +395,6 @@ async def _deploy_async(
         try:
             final_status = await stream_build_logs(
                 build_id=build_id,
-                api_key=api_key,
-                api_url=api_url,
                 console=console,
             )
         except Exception as e:
@@ -431,8 +404,6 @@ async def _deploy_async(
             # Fall back to polling
             status_response = await poll_build_status(
                 build_id=build_id,
-                api_key=api_key,
-                api_url=api_url,
                 console=console,
             )
             final_status = status_response.get("status", "UNKNOWN")

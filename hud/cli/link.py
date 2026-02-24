@@ -34,10 +34,9 @@ def link_environment(
     env_dir = Path(directory).resolve()
 
     # Check for API key
-    if not settings.api_key:
-        hud_console.error("No HUD API key found")
-        hud_console.info("Set your API key: hud set HUD_API_KEY=your-key-here")
-        raise typer.Exit(1)
+    from hud.cli.utils.api import hud_headers, require_api_key
+
+    require_api_key("link environments")
 
     # Check if already linked
     deploy_link_path = env_dir / ".hud" / "deploy.json"
@@ -61,7 +60,7 @@ def link_environment(
         try:
             response = httpx.get(
                 f"{settings.hud_api_url.rstrip('/')}/registry/envs",
-                headers={"X-API-Key": settings.api_key},
+                headers=hud_headers(),
                 params={"limit": 20, "sort_by": "updated_at"},
                 timeout=30.0,
             )
@@ -113,7 +112,7 @@ def link_environment(
     try:
         response = httpx.get(
             f"{settings.hud_api_url.rstrip('/')}/registry/envs/{registry_id}",
-            headers={"X-API-Key": settings.api_key},
+            headers=hud_headers(),
             timeout=30.0,
         )
         response.raise_for_status()

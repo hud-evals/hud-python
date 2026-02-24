@@ -121,7 +121,7 @@ class TestFetchLockFromRegistry:
         call_args = mock_get.call_args
         assert "org/env%3Alatest" in call_args[0][0]
 
-    @mock.patch("hud.cli.pull.settings")
+    @mock.patch("hud.settings.settings")
     @mock.patch("requests.get")
     def test_fetch_lock_with_auth(self, mock_get, mock_settings):
         """Test fetching with API key."""

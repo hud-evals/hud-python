@@ -140,8 +140,8 @@ def update_pyproject_toml(directory: str | Path, image_name: str, silent: bool =
                 hud_console.warning(f"Could not update pyproject.toml: {e}")
 
 
-def build_environment(directory: str | Path, image_name: str, no_cache: bool = False) -> bool:
-    """Build Docker image for an environment.
+def docker_build(directory: str | Path, image_name: str, no_cache: bool = False) -> bool:
+    """Build Docker image for an environment (simple wrapper around ``docker build``).
 
     Returns:
         True if build succeeded, False otherwise
@@ -178,7 +178,7 @@ def build_environment(directory: str | Path, image_name: str, no_cache: bool = F
     hud_console.info("")  # Empty line before Docker output
 
     # Just run Docker build directly - it has its own nice live display
-    result = subprocess.run(build_cmd)  # noqa: S603
+    result = subprocess.run(build_cmd)
 
     if result.returncode == 0:
         hud_console.info("")  # Empty line after Docker output
@@ -193,7 +193,7 @@ def build_environment(directory: str | Path, image_name: str, no_cache: bool = F
 
 def image_exists(image_name: str) -> bool:
     """Check if a Docker image exists locally."""
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         ["docker", "image", "inspect", image_name],  # noqa: S607
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

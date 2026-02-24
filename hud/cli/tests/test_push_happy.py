@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     "hud.cli.push.get_docker_image_labels",
     return_value={"org.hud.manifest.head": "abc", "org.hud.version": "0.1.0"},
 )
-@patch("hud.cli.push.requests.post")
+@patch("httpx.post")
 @patch("hud.cli.push.subprocess.Popen")
 @patch("hud.cli.push.subprocess.run")
 def test_push_happy_path(

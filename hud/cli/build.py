@@ -194,12 +194,10 @@ def get_existing_version(lock_path: Path) -> str | None:
         return None
 
     try:
-        with open(lock_path) as f:
-            lock_data = yaml.safe_load(f)
+        from hud.cli.utils.lockfile import load_lock
 
-        # Look for internal version in build metadata
-        build_data = lock_data.get("build", {})
-        return build_data.get("version", None)
+        lock_data = load_lock(lock_path)
+        return lock_data.get("build", {}).get("version", None)
     except Exception:
         return None
 
@@ -207,7 +205,7 @@ def get_existing_version(lock_path: Path) -> str | None:
 def get_docker_image_digest(image: str) -> str | None:
     """Get the digest of a Docker image."""
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             ["docker", "inspect", "--format", "{{.RepoDigests}}", image],  # noqa: S607
             capture_output=True,
             text=True,
@@ -230,7 +228,7 @@ def get_docker_image_digest(image: str) -> str | None:
 def get_docker_image_id(image: str) -> str | None:
     """Get the ID of a Docker image."""
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             ["docker", "inspect", "--format", "{{.Id}}", image],  # noqa: S607
             capture_output=True,
             text=True,
@@ -344,7 +342,7 @@ def check_dockerfile_for_secrets(directory: Path, dockerfile: Path) -> list[str]
     cmd.append(str(directory))
 
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
@@ -421,9 +419,7 @@ def collect_runtime_metadata(image: str, *, verbose: bool = False) -> dict[str, 
             runtime_script,
         ]
         try:
-            result = subprocess.run(  # noqa: S603
-                cmd, capture_output=True, text=True, check=False
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
         except FileNotFoundError:
             return {}
 
@@ -683,7 +679,7 @@ def build_docker_image(
         env = os.environ.copy()
         if secrets:
             env["DOCKER_BUILDKIT"] = "1"
-        result = subprocess.run(cmd, check=False, env=env)  # noqa: S603
+        result = subprocess.run(cmd, check=False, env=env)
         return result.returncode == 0
     except Exception as e:
         hud_console.error(f"Build error: {e}")
@@ -718,15 +714,15 @@ def build_environment(
     require_docker_running()
 
     # Step 1: Check for hud.lock.yaml (previous build)
-    lock_path = env_dir / "hud.lock.yaml"
+    from hud.cli.utils.lockfile import LOCK_FILENAME, get_local_image, load_lock
+
+    lock_path = env_dir / LOCK_FILENAME
     base_name = None
 
     if lock_path.exists():
         try:
-            with open(lock_path) as f:
-                lock_data = yaml.safe_load(f)
-            # Get base name from lock file (strip version/digest)
-            lock_image = lock_data.get("images", {}).get("local") or lock_data.get("image", "")
+            lock_data = load_lock(lock_path)
+            lock_image = get_local_image(lock_data)
             if lock_image:
                 # Remove @sha256:... digest if present
                 if "@" in lock_image:
@@ -1074,12 +1070,10 @@ def build_environment(
         env["DOCKER_BUILDKIT"] = "1"
     if verbose:
         # Show Docker's native output when verbose
-        result = subprocess.run(label_cmd, check=False, env=env)  # noqa: S603
+        result = subprocess.run(label_cmd, check=False, env=env)
     else:
         # Capture output for error reporting, but don't show unless it fails
-        result = subprocess.run(  # noqa: S603
-            label_cmd, capture_output=True, text=True, check=False, env=env
-        )
+        result = subprocess.run(label_cmd, capture_output=True, text=True, check=False, env=env)
 
     if result.returncode != 0:
         hud_console.error("Failed to rebuild with label")
@@ -1112,7 +1106,7 @@ def build_environment(
         hud_console.warning("Could not retrieve image digest")
 
     # Remove temp image after we're done
-    subprocess.run(["docker", "rmi", "-f", temp_tag], capture_output=True)  # noqa: S603, S607
+    subprocess.run(["docker", "rmi", "-f", temp_tag], capture_output=True)  # noqa: S607
 
     # Add to local registry
     if image_id:
@@ -1164,23 +1158,63 @@ def build_environment(
 
 
 def build_command(
-    directory: str = typer.Argument(".", help="Environment directory to build"),
+    params: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
+        None,
+        help="Environment directory followed by optional arguments (e.g., '. -e API_KEY=secret')",
+    ),
     tag: str | None = typer.Option(
         None, "--tag", "-t", help="Docker image tag (default: from pyproject.toml)"
     ),
     no_cache: bool = typer.Option(False, "--no-cache", help="Build without Docker cache"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
-    env_vars: dict[str, str] | None = None,
-    platform: str | None = None,
+    platform: str | None = typer.Option(
+        None, "--platform", help="Set Docker target platform (e.g., linux/amd64)"
+    ),
     secrets: list[str] | None = typer.Option(  # noqa: B008
         None,
         "--secret",
         help=("Docker build secret (repeatable), e.g. --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN"),
     ),
-    remote_cache: str | None = None,
-    build_args: dict[str, str] | None = None,
+    remote_cache: str | None = typer.Option(
+        None, "--remote-cache", help="Enable remote cache using Amazon ECR with specified repo name"
+    ),
 ) -> None:
-    """Build a HUD environment and generate lock file."""
+    """🏗️ Build a HUD environment and generate lock file.
+
+    [not dim]This command:
+    - Builds a Docker image from your environment
+    - Analyzes the MCP server to extract metadata
+    - Generates a hud.lock.yaml file for reproducibility
+
+    Examples:
+        hud build                    # Build current directory
+        hud build environments/text_2048 -e API_KEY=secret
+        hud build . --tag my-env:v1.0 -e VAR1=value1 -e VAR2=value2
+        hud build . --no-cache       # Force rebuild
+        hud build . --remote-cache my-cache-repo   # Use ECR remote cache (requires AWS_ACCOUNT_ID and AWS_DEFAULT_REGION)
+        hud build . --build-arg NODE_ENV=production  # Pass Docker build args
+        hud build . --secret id=MY_KEY,env=MY_KEY  # Pass build secrets, reading $MY_KEY env var. These will be encrypted at rest.
+        hud build . --secret id=MY_KEY,src=./my_key.txt  # Pass build secret from file.[/not dim]
+    """  # noqa: E501
+    if params:
+        directory = params[0]
+        extra_args = params[1:] if len(params) > 1 else []
+    else:
+        directory = "."
+        extra_args = []
+
+    from hud.cli.utils.args import split_docker_passthrough
+
+    env_vars, build_args, _ = split_docker_passthrough(extra_args)
+
     build_environment(
-        directory, tag, no_cache, verbose, env_vars, platform, secrets, remote_cache, build_args
+        directory,
+        tag,
+        no_cache,
+        verbose,
+        env_vars or None,
+        platform,
+        secrets,
+        remote_cache,
+        build_args or None,
     )

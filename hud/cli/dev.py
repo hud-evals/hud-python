@@ -407,7 +407,7 @@ async def launch_inspector(port: int) -> None:
                 stderr=subprocess.DEVNULL,
             )
         else:
-            subprocess.Popen(  # noqa: S603, ASYNC220
+            subprocess.Popen(  # noqa: ASYNC220
                 cmd,
                 env=env,
                 stdout=subprocess.DEVNULL,
@@ -518,9 +518,7 @@ def run_with_reload(
         if not is_first_run:
             env["_HUD_DEV_RELOAD"] = "1"
 
-        process = subprocess.Popen(  # noqa: S603
-            cmd, env=env
-        )
+        process = subprocess.Popen(cmd, env=env)
 
         is_first_run = False
 
@@ -613,8 +611,8 @@ def run_docker_dev_server(
     import signal
 
     import typer
-    import yaml
 
+    from hud.cli.utils.lockfile import find_lock, get_local_image, load_lock
     from hud.server import MCPServer
 
     # Ensure Docker CLI and daemon are available before proceeding
@@ -639,7 +637,7 @@ def run_docker_dev_server(
 
         # Check if container is still running
         try:
-            result = subprocess.run(  # noqa: S603
+            result = subprocess.run(
                 ["docker", "ps", "-q", "-f", f"name={container_name}"],  # noqa: S607
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
@@ -648,7 +646,7 @@ def run_docker_dev_server(
             )
             if not result.stdout.strip():
                 # Container is not running, just try to remove it
-                subprocess.run(  # noqa: S603
+                subprocess.run(
                     ["docker", "rm", "-f", container_name],  # noqa: S607
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -660,7 +658,7 @@ def run_docker_dev_server(
 
         try:
             # First try to stop gracefully
-            subprocess.run(  # noqa: S603
+            subprocess.run(
                 ["docker", "stop", container_name],  # noqa: S607
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -671,7 +669,7 @@ def run_docker_dev_server(
             # Force kill if stop times out
             hud_console.debug(f"Container {container_name} stop timeout, forcing kill")
             with contextlib.suppress(Exception):
-                subprocess.run(  # noqa: S603
+                subprocess.run(
                     ["docker", "kill", container_name],  # noqa: S607
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -688,27 +686,19 @@ def run_docker_dev_server(
         signal.signal(signal.SIGHUP, signal_handler)
 
     # Find environment directory (current or parent with hud.lock.yaml)
-    env_dir = cwd
-    lock_path = env_dir / "hud.lock.yaml"
+    lock_path = find_lock(cwd)
+    if lock_path is None:
+        hud_console.error("No hud.lock.yaml found")
+        hud_console.info("Run 'hud build' first to create an image")
+        raise typer.Exit(1)
 
-    if not lock_path.exists():
-        # Try parent directory
-        if (cwd.parent / "hud.lock.yaml").exists():
-            env_dir = cwd.parent
-            lock_path = env_dir / "hud.lock.yaml"
-        else:
-            hud_console.error("No hud.lock.yaml found")
-            hud_console.info("Run 'hud build' first to create an image")
-            raise typer.Exit(1)
+    env_dir = lock_path.parent
 
     # Load lock file to get image name
     try:
-        with open(lock_path) as f:
-            lock_data = yaml.safe_load(f)
+        lock_data = load_lock(lock_path)
 
-        # Get image from new or legacy format
-        images = lock_data.get("images", {})
-        image_name = images.get("local") or lock_data.get("image")
+        image_name = get_local_image(lock_data)
 
         if not image_name:
             hud_console.error("No image reference found in hud.lock.yaml")
@@ -924,6 +914,88 @@ def run_docker_dev_server(
     finally:
         # Final cleanup attempt
         cleanup_container()
+
+
+def dev_command(
+    params: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
+        None,
+        help="Module path or extra Docker args (when using --docker)",
+    ),
+    docker: bool = typer.Option(
+        False,
+        "--docker",
+        help="Run in Docker with volume mounts for hot-reload (for complex environments)",
+    ),
+    stdio: bool = typer.Option(
+        False,
+        "--stdio",
+        help="Use stdio transport (default: HTTP)",
+    ),
+    port: int = typer.Option(8765, "--port", "-p", help="HTTP server port (ignored for stdio)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed logs"),
+    inspector: bool = typer.Option(
+        False, "--inspector", help="Launch MCP Inspector (HTTP mode only)"
+    ),
+    interactive: bool = typer.Option(
+        False, "--interactive", help="Launch interactive testing mode (HTTP mode only)"
+    ),
+    watch: list[str] = typer.Option(  # noqa: B008
+        [],
+        "--watch",
+        "-w",
+        help="Paths to watch for hot-reload (repeatable: -w tools -w env.py)",
+    ),
+    new: bool = typer.Option(
+        False,
+        "--new",
+        help="Create a new dev trace on hud.ai (opens in browser)",
+    ),
+) -> None:
+    """🔥 Development mode - run MCP server (hot-reload is opt-in via -w/--watch).
+
+    [not dim]TWO MODES:
+
+    1. Python Module:
+       hud dev                    # Auto-detects module (no hot-reload by default)
+       hud dev env:env            # Explicit module:attribute
+       hud dev -w .               # Watch current directory
+
+    2. Docker (Complex environments):
+       hud dev                        # Auto-detects Dockerfile, no hot-reload
+       hud dev -w tools -w env.py     # Mount & watch specific paths
+       hud dev -w tools               # Just watch tools folder
+
+    For Docker mode, use --watch to specify which folders to mount and watch.
+    Paths not in --watch stay in the built image (no hot-reload).
+
+    Examples:
+        hud dev                      # Auto-detect mode
+        hud dev --new                # Create live dev trace on hud.ai
+        hud dev env:env              # Run specific module
+        hud dev --inspector          # Launch MCP Inspector
+        hud dev --interactive        # Launch interactive testing mode
+        hud dev -w 'tools env.py'    # Docker: hot-reload tools/ and env.py
+
+    Local development pattern (Docker + local scenarios):
+        Terminal 1: hud dev -w 'tools env.py' --port 8000
+        Terminal 2: python local_test.py  # Uses connect_url()[/not dim]
+    """
+    module = params[0] if params and not docker else None
+    docker_args = params if docker else []
+    watch_paths = watch if watch else None
+
+    run_mcp_dev_server(
+        module,
+        stdio,
+        port,
+        verbose,
+        inspector,
+        interactive,
+        watch_paths,
+        docker=docker,
+        docker_args=docker_args,
+        new_trace=new,
+    )
 
 
 def run_mcp_dev_server(

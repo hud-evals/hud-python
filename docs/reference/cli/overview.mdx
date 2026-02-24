@@ -19,7 +19,6 @@ The HUD CLI provides a complete toolkit for creating, developing, and running MC
   **Target-based commands** for using environments and agents:
   - `hud analyze` — Inspect capabilities (fast/live)
   - `hud debug` — 5‑phase compliance test
-  - `hud run` — Execute (Python module/command/Docker)
   - `hud eval` — Run agents on tasks/datasets
   - `hud rft` — Fine-tune models (BETA, invite-only)
 </Card>
@@ -64,7 +63,6 @@ hud --version
 |---------|-------|-------------|---------|
 | `hud analyze` | Image or config | Inspect tools & capabilities | `hud analyze org/env` |
 | `hud debug` | Image/dir/config | 5‑phase compliance test | `hud debug my-env:latest` |
-| `hud run` | Module/command/image | Execute server (local/remote) | `hud run controller --reload` |
 | `hud eval` | Tasks/dataset | Run agent on tasks | `hud eval tasks.json claude` |
 | `hud rft` | Tasks file | Fine-tune models (BETA, invite-only) | `hud rft run tasks.json` |
 
@@ -136,13 +134,6 @@ hud debug hudpython/text_init:latest
 Validates through 5 phases of initialization.
 </Step>
 
-<Step title="Run">
-Execute in production mode:
-```bash
-hud run hudpython/text_init:latest        # Remote (default)
-hud run hudpython/text_init:latest --local  # Local Docker
-```
-</Step>
 </Steps>
 
 ## Common Usage
@@ -157,13 +148,6 @@ hud debug my-image:latest -e DEBUG=true -p 8080:8080
 
 # From registry
 hud analyze ghcr.io/org/image:v1.0.0
-```
-
-### Arbitrary Commands (Python/Node/etc.)
-```bash
-# Run any command as MCP server (stdio/http)
-hud run --cmd "python -m controller" -t http -p 8765
-hud run --cmd "node mcp-server.js"
 ```
 
 ### Cursor Integration
@@ -303,9 +287,5 @@ export ANCHOR_API_KEY=...
 
 <Card title="Debug Command" icon="bug" href="/reference/cli/debug">
   Test MCP protocol compliance
-</Card>
-
-<Card title="Run Command" icon="play" href="/reference/cli/run">
-  Execute servers locally or remotely
 </Card>
 </CardGroup>
