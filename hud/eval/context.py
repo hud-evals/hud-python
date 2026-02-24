@@ -476,6 +476,17 @@ class EvalContext(Environment):
 
         try:
             result = await self.run_scenario_evaluate(scenario_name)
+            self.evaluation_result = result
+            self.reward = result.reward
+
+            self._emit_scenario_span(
+                "scenario_evaluate",
+                "completed",
+                scenario_name,
+                start_time,
+                _now_iso(),
+                result={"reward": result.reward},
+            )
         except Exception as e:
             self.error = e
             self._emit_scenario_span(
@@ -486,20 +497,6 @@ class EvalContext(Environment):
                 _now_iso(),
                 error=str(e),
             )
-            return
-
-        self.evaluation_result = result
-        self.reward = result.reward
-
-        # Emit "completed" span with reward
-        self._emit_scenario_span(
-            "scenario_evaluate",
-            "completed",
-            scenario_name,
-            start_time,
-            _now_iso(),
-            result={"reward": result.reward} if result else None,
-        )
 
     # =========================================================================
     # Summary Context - Attribute Access Control
