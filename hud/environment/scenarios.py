@@ -196,6 +196,8 @@ class ScenarioSession(BaseModel):
     resource_uri: str  # Full URI for reading evaluation result
     generator: Any | None = None  # AsyncGenerator (if local) - Any to avoid validation issues
     answer: str | None = None  # Submitted answer
+    exclude_tools: list[str] | None = None  # fnmatch patterns to hide from agent
+    exclude_sources: list[str] | None = None  # Connection names to hide from agent
 
 
 class ScenarioMixin:
@@ -247,6 +249,9 @@ class ScenarioMixin:
     # Scenario function registry
     _scenarios: dict[str, Callable[..., AsyncGenerator[Any, Any]]]
 
+    # Per-scenario tool exclusions: scenario_name -> (exclude_tools, exclude_sources)
+    _scenario_exclusions: dict[str, tuple[list[str], list[str]]]
+
     # Single active scenario session - used for BOTH:
     # - Client-side: when we run scenarios (local or remote)
     # - Server-side: when external clients call our scenarios via MCP
@@ -256,6 +261,7 @@ class ScenarioMixin:
     def _init_scenarios(self) -> None:
         """Initialize scenario state. Called from Environment.__init__."""
         self._scenarios = {}
+        self._scenario_exclusions = {}
         self._active_session = None
 
         # Register _hud_submit tool (underscore = hidden from agent)
@@ -391,6 +397,7 @@ class ScenarioMixin:
             prompt_text = prompt_parts[0] if len(prompt_parts) == 1 else "\n".join(prompt_parts)
 
             # Create session for local scenario
+            excl = self._scenario_exclusions.get(local_name)
             self._active_session = ScenarioSession(
                 local_name=local_name,
                 full_name=scenario_name,
@@ -398,6 +405,8 @@ class ScenarioMixin:
                 connection_name=None,
                 resource_uri=f"{self.name}:{local_name}",
                 generator=gen,
+                exclude_tools=excl[0] if excl else None,
+                exclude_sources=excl[1] if excl else None,
             )
 
             logger.debug(
@@ -478,6 +487,11 @@ class ScenarioMixin:
                     f"Check that the scenario returns a valid prompt string."
                 )
 
+            # Extract tool exclusion from remote prompt metadata if present
+            remote_meta = getattr(result, "meta", None) or {}
+            exclude_tools_meta = remote_meta.get("exclude_tools")
+            exclude_sources_meta = remote_meta.get("exclude_sources")
+
             # Create session for remote scenario - use router's connection info
             self._active_session = ScenarioSession(
                 local_name=local_name,
@@ -486,6 +500,8 @@ class ScenarioMixin:
                 connection_name=conn_name,
                 resource_uri=prompt_id,  # Resource has same URI as prompt
                 generator=None,
+                exclude_tools=exclude_tools_meta,
+                exclude_sources=exclude_sources_meta,
             )
 
             logger.debug(
@@ -570,6 +586,8 @@ class ScenarioMixin:
         name: str | None = None,
         description: str | None = None,
         required_env_vars: list[str] | None = None,
+        exclude_tools: list[str] | None = None,
+        exclude_sources: list[str] | None = None,
     ) -> Callable[
         [Callable[P, AsyncGenerator[Any, None]]],
         ScenarioHandle[P],
@@ -587,6 +605,11 @@ class ScenarioMixin:
             required_env_vars: Optional list of environment variable names this scenario requires.
                 These are used by the HUD platform to check if users have configured the
                 necessary API keys/credentials before running this specific scenario.
+            exclude_tools: Optional fnmatch patterns for tool names to hide from the agent
+                when this scenario is active (e.g. ``["browser_*", "screenshot"]``).
+                The environment can still call excluded tools in its own code.
+            exclude_sources: Optional connection/hub names whose tools should be hidden
+                from the agent (e.g. ``["browser"]``).
 
         Example:
             @env.scenario(required_env_vars=["OPENAI_API_KEY"])
@@ -630,6 +653,12 @@ class ScenarioMixin:
 
             # Store the generator function
             self._scenarios[scenario_name] = fn
+
+            if exclude_tools or exclude_sources:
+                self._scenario_exclusions[scenario_name] = (
+                    exclude_tools or [],
+                    exclude_sources or [],
+                )
 
             # Get function signature for prompt arguments with type info
             sig = inspect.signature(fn)
@@ -785,6 +814,10 @@ class ScenarioMixin:
                 scenario_meta["arguments"] = prompt_args
             if required_env_vars:
                 scenario_meta["required_env_vars"] = required_env_vars
+            if exclude_tools:
+                scenario_meta["exclude_tools"] = exclude_tools
+            if exclude_sources:
+                scenario_meta["exclude_sources"] = exclude_sources
 
             prompt = FunctionPrompt(
                 name=scenario_id,
