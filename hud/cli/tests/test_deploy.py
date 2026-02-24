@@ -184,8 +184,6 @@ class TestDeployAsync:
                 build_secrets={},
                 no_cache=False,
                 registry_id=None,
-                api_key="test-key",
-                api_url="https://api.hud.ai",
                 console=console,
             )
 
@@ -214,8 +212,6 @@ class TestDeployAsync:
                 build_secrets={},
                 no_cache=False,
                 registry_id=None,
-                api_key="test-key",
-                api_url="https://api.hud.ai",
                 console=console,
             )
 
