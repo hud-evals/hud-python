@@ -140,8 +140,8 @@ def update_pyproject_toml(directory: str | Path, image_name: str, silent: bool =
                 hud_console.warning(f"Could not update pyproject.toml: {e}")
 
 
-def build_environment(directory: str | Path, image_name: str, no_cache: bool = False) -> bool:
-    """Build Docker image for an environment.
+def docker_build(directory: str | Path, image_name: str, no_cache: bool = False) -> bool:
+    """Build Docker image for an environment (simple wrapper around ``docker build``).
 
     Returns:
         True if build succeeded, False otherwise

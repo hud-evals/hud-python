@@ -24,12 +24,13 @@ def models_command(
         hud models              # List all models
         hud models --json       # Output as JSON[/not dim]
     """
+    from hud.cli.utils.api import hud_headers
     from hud.settings import settings
 
     try:
         response = httpx.get(
             f"{settings.hud_gateway_url}/models",
-            headers={"Authorization": f"Bearer {settings.api_key}"} if settings.api_key else {},
+            headers=hud_headers(),
             timeout=30.0,
         )
         response.raise_for_status()

@@ -139,7 +139,7 @@ class TestPushEnvironment:
 
         assert exc_info.value.exit_code == 1
 
-    @mock.patch("requests.post")
+    @mock.patch("httpx.post")
     @mock.patch("subprocess.Popen")
     @mock.patch("subprocess.run")
     @mock.patch("hud.cli.push.get_docker_username")

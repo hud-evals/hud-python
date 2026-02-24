@@ -12,6 +12,8 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from hud.settings import settings
 from hud.utils.hud_console import HUDConsole
 
+from .api import hud_headers
+from .lockfile import load_lock
 from .registry import (
     extract_digest_from_image,
     list_registry_entries,
@@ -34,9 +36,7 @@ def fetch_lock_from_registry(reference: str) -> dict | None:
         url_safe_path = "/".join(quote(part, safe="") for part in reference.split("/"))
         registry_url = f"{settings.hud_api_url.rstrip('/')}/registry/envs/{url_safe_path}"
 
-        headers = {}
-        if settings.api_key:
-            headers["Authorization"] = f"Bearer {settings.api_key}"
+        headers = hud_headers()
 
         response = requests.get(registry_url, headers=headers, timeout=10)
 
@@ -71,8 +71,7 @@ def check_local_cache(reference: str) -> dict | None:
 
         for _, lock_file in list_registry_entries():
             try:
-                with open(lock_file) as f:
-                    lock_data = yaml.safe_load(f)
+                lock_data = load_lock(lock_file)
                 # Check if this matches our reference
                 if lock_data and "image" in lock_data:
                     image = lock_data["image"]

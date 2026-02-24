@@ -5,12 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 
 import typer
-import yaml
 from rich.markup import escape
 from rich.table import Table
 
 from hud.utils.hud_console import HUDConsole
 
+from .utils.lockfile import load_lock
 from .utils.registry import extract_name_and_tag, get_registry_dir, list_registry_entries
 
 
@@ -69,9 +69,7 @@ def list_environments(
 
     for digest, lock_file in list_registry_entries():
         try:
-            # Read lock file
-            with open(lock_file) as f:
-                lock_data = yaml.safe_load(f)
+            lock_data = load_lock(lock_file)
 
             # Extract metadata
             image = lock_data.get("image", "unknown")

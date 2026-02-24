@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from urllib.parse import quote
 
-import requests
+import httpx
 import typer
 import yaml
 
@@ -15,7 +15,7 @@ from hud.cli.utils.env_check import ensure_built
 from hud.utils.hud_console import HUDConsole
 
 
-def _get_response_text(response: requests.Response) -> str:
+def _get_response_text(response: httpx.Response) -> str:
     try:
         return response.json().get("detail", "No detail available")
     except Exception:
@@ -128,9 +128,10 @@ def push_environment(
     hud_console.header("HUD Environment Push")
 
     # Import settings lazily after any environment setup
+    from hud.cli.utils.api import require_api_key
+    from hud.cli.utils.lockfile import LOCK_FILENAME, get_local_image, load_lock
     from hud.settings import settings
 
-    # Find hud.lock.yaml in specified directory
     env_dir = Path(directory)
 
     # Ensure environment is built and up-to-date (hash-based); interactive prompt
@@ -140,30 +141,17 @@ def push_environment(
         raise
     except Exception as e:
         HUDConsole().debug(f"Skipping pre-push build check: {e}")
-    lock_path = env_dir / "hud.lock.yaml"
 
+    lock_path = env_dir / LOCK_FILENAME
     if not lock_path.exists():
-        hud_console.error(f"No hud.lock.yaml found in {directory}")
+        hud_console.error(f"No {LOCK_FILENAME} found in {directory}")
         hud_console.info("Run 'hud build' first to generate a lock file")
         raise typer.Exit(1)
 
-    # Check for API key first
-    if not settings.api_key:
-        hud_console.error("No HUD API key found")
-        hud_console.warning("A HUD API key is required to push environments.")
-        hud_console.info("\nTo get started:")
-        hud_console.info("1. Get your API key at: https://hud.ai/settings")
-        hud_console.info("Set it in your environment or run: hud set HUD_API_KEY=your-key-here")
-        hud_console.command_example("hud push", "Try again")
-        hud_console.info("")
-        raise typer.Exit(1)
+    require_api_key("push environments")
 
-    # Load lock file
-    with open(lock_path) as f:
-        lock_data = yaml.safe_load(f)
-
-    # Handle both old and new lock file formats
-    local_image = lock_data.get("images", {}).get("local") or lock_data.get("image", "")
+    lock_data = load_lock(lock_path)
+    local_image = get_local_image(lock_data)
 
     # Get internal version from lock file
     internal_version = lock_data.get("build", {}).get("version", None)
@@ -173,19 +161,10 @@ def push_environment(
         # Check if user is logged in
         username = get_docker_username()
         if username:
-            # Extract image name from lock file (handle @sha256:... format)
-            base_image = local_image.split("@")[0] if "@" in local_image else local_image
+            from hud.cli.utils.registry import extract_name_and_tag
 
-            if ":" in base_image:
-                base_name = base_image.split(":")[0]
-                current_tag = base_image.split(":")[1]
-            else:
-                base_name = base_image
-                current_tag = "latest"
-
-            # Remove any existing registry prefix
-            if "/" in base_name:
-                base_name = base_name.split("/")[-1]
+            full_name, current_tag = extract_name_and_tag(local_image)
+            base_name = full_name.split("/")[-1] if "/" in full_name else full_name
 
             # Use provided tag, or internal version, or current tag as fallback
             if tag:
@@ -435,9 +414,9 @@ def push_environment(
         if github_url:
             payload["github_url"] = github_url
 
-        headers = {"Authorization": f"Bearer {settings.api_key}"}
+        from hud.cli.utils.api import hud_headers
 
-        response = requests.post(registry_url, json=payload, headers=headers, timeout=10)
+        response = httpx.post(registry_url, json=payload, headers=hud_headers(), timeout=10)
 
         if response.status_code in [200, 201]:
             hud_console.success("Metadata uploaded to HUD registry")
@@ -459,11 +438,11 @@ def push_environment(
             hud_console.warning(f"Could not upload to registry: {response.status_code}")
             hud_console.warning(_get_response_text(response))
             hud_console.info("Share hud.lock.yaml manually\n")
-    except requests.exceptions.Timeout:
+    except httpx.TimeoutException:
         hud_console.warning("Registry upload timed out")
         hud_console.info("The registry might be slow or unavailable")
         hud_console.info("Your Docker push succeeded - share hud.lock.yaml manually")
-    except requests.exceptions.ConnectionError:
+    except httpx.ConnectError:
         hud_console.warning("Could not connect to HUD registry")
         hud_console.info("Check your internet connection")
         hud_console.info("Your Docker push succeeded - share hud.lock.yaml manually")

@@ -124,8 +124,9 @@ def load_from_registry(digest: str) -> dict[str, Any] | None:
         return None
 
     try:
-        with open(lock_path) as f:
-            return yaml.safe_load(f)
+        from hud.cli.utils.lockfile import load_lock
+
+        return load_lock(lock_path)
     except Exception:
         return None
 

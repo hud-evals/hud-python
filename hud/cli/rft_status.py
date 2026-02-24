@@ -41,16 +41,17 @@ def rft_status_command(
     # hud_console.header("RFT Job Status")
 
     # Preflight check: API key
-    if not settings.api_key:
-        hud_console.error("HUD_API_KEY not found in environment.")
-        hud_console.info("Run 'hud set HUD_API_KEY=...' or export it.")
-        raise typer.Exit(1)
+    from hud.cli.utils.api import require_api_key
+
+    require_api_key("check RFT status")
 
     # Prepare request
     base_url = settings.hud_rl_url
     url = f"{base_url}/training/jobs/{model_id}/raw-status"
 
-    headers = {"Authorization": f"Bearer {settings.api_key}"}
+    from hud.cli.utils.api import hud_headers
+
+    headers = hud_headers()
 
     hud_console.info(f"Fetching status for model: {model_id}")
 

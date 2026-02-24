@@ -194,12 +194,10 @@ def get_existing_version(lock_path: Path) -> str | None:
         return None
 
     try:
-        with open(lock_path) as f:
-            lock_data = yaml.safe_load(f)
+        from hud.cli.utils.lockfile import load_lock
 
-        # Look for internal version in build metadata
-        build_data = lock_data.get("build", {})
-        return build_data.get("version", None)
+        lock_data = load_lock(lock_path)
+        return lock_data.get("build", {}).get("version", None)
     except Exception:
         return None
 
@@ -716,15 +714,15 @@ def build_environment(
     require_docker_running()
 
     # Step 1: Check for hud.lock.yaml (previous build)
-    lock_path = env_dir / "hud.lock.yaml"
+    from hud.cli.utils.lockfile import LOCK_FILENAME, get_local_image, load_lock
+
+    lock_path = env_dir / LOCK_FILENAME
     base_name = None
 
     if lock_path.exists():
         try:
-            with open(lock_path) as f:
-                lock_data = yaml.safe_load(f)
-            # Get base name from lock file (strip version/digest)
-            lock_image = lock_data.get("images", {}).get("local") or lock_data.get("image", "")
+            lock_data = load_lock(lock_path)
+            lock_image = get_local_image(lock_data)
             if lock_image:
                 # Remove @sha256:... digest if present
                 if "@" in lock_image:
@@ -1159,46 +1157,6 @@ def build_environment(
     hud_console.info("The lock file can be used to reproduce this exact environment.")
 
 
-def _parse_extra_args(extra_args: list[str]) -> tuple[dict[str, str], dict[str, str]]:
-    """Parse -e/--env and --build-arg from extra CLI arguments."""
-    env_vars: dict[str, str] = {}
-    build_args: dict[str, str] = {}
-    i = 0
-    while i < len(extra_args):
-        if extra_args[i] == "-e" and i + 1 < len(extra_args):
-            env_arg = extra_args[i + 1]
-            if "=" in env_arg:
-                key, value = env_arg.split("=", 1)
-                env_vars[key] = value
-            i += 2
-        elif extra_args[i].startswith("--env="):
-            env_arg = extra_args[i][6:]
-            if "=" in env_arg:
-                key, value = env_arg.split("=", 1)
-                env_vars[key] = value
-            i += 1
-        elif extra_args[i] == "--env" and i + 1 < len(extra_args):
-            env_arg = extra_args[i + 1]
-            if "=" in env_arg:
-                key, value = env_arg.split("=", 1)
-                env_vars[key] = value
-            i += 2
-        elif extra_args[i] == "--build-arg" and i + 1 < len(extra_args):
-            build_arg = extra_args[i + 1]
-            if "=" in build_arg:
-                key, value = build_arg.split("=", 1)
-                build_args[key] = value
-            i += 2
-        elif extra_args[i].startswith("--build-arg="):
-            build_arg = extra_args[i][12:]
-            if "=" in build_arg:
-                key, value = build_arg.split("=", 1)
-                build_args[key] = value
-            i += 1
-        else:
-            i += 1
-    return env_vars, build_args
-
 
 def build_command(
     params: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
@@ -1246,7 +1204,9 @@ def build_command(
         directory = "."
         extra_args = []
 
-    env_vars, build_args = _parse_extra_args(extra_args)
+    from hud.cli.utils.args import split_docker_passthrough
+
+    env_vars, build_args, _ = split_docker_passthrough(extra_args)
 
     build_environment(
         directory,

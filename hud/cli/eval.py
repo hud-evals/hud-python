@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 from rich import box
 from rich.table import Table
 
+from hud.cli.utils.api import require_api_key
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.env import resolve_env_vars
@@ -222,18 +223,12 @@ class EvalConfig(BaseModel):
             return
 
         if self.remote:
-            if not settings.api_key:
-                hud_console.error("HUD_API_KEY is required for remote execution")
-                hud_console.info("Set it: hud set HUD_API_KEY=your-key-here")
-                raise typer.Exit(1)
+            require_api_key("run remote evaluations")
             return
 
         # Gateway mode only requires HUD_API_KEY
         if self.gateway:
-            if not settings.api_key:
-                hud_console.error("HUD_API_KEY is required for gateway mode")
-                hud_console.info("Set it: hud set HUD_API_KEY=your-key-here")
-                raise typer.Exit(1)
+            require_api_key("use gateway mode")
             return
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:

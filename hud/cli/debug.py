@@ -61,7 +61,7 @@ def debug_command(
         hud debug . --max-phase 3               # Stop after phase 3[/not dim]
     """
     from .utils.environment import (
-        build_environment,
+        docker_build,
         get_image_name,
         image_exists,
         is_environment_directory,
@@ -98,7 +98,7 @@ def debug_command(
                     else:
                         raise typer.Exit(1)
 
-                if build and not build_environment(directory, image_name):
+                if build and not docker_build(directory, image_name):
                     raise typer.Exit(1)
 
             from .utils.docker import create_docker_run_command

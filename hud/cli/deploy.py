@@ -112,13 +112,9 @@ def deploy_environment(
     env_dir = Path(directory).resolve()
 
     # Check for API key
-    if not settings.api_key:
-        hud_console.error("No HUD API key found")
-        hud_console.warning("A HUD API key is required to deploy environments.")
-        hud_console.info("\nTo get started:")
-        hud_console.info("1. Get your API key at: https://hud.ai/settings")
-        hud_console.info("2. Set it via: hud set HUD_API_KEY=your-key-here")
-        raise typer.Exit(1)
+    from hud.cli.utils.api import require_api_key
+
+    require_api_key("deploy environments")
 
     # Check for Dockerfile
     dockerfile = find_dockerfile(env_dir)
@@ -317,7 +313,9 @@ async def _deploy_async(
     Returns:
         Result dict with success status and details
     """
-    headers = {"X-API-Key": api_key}
+    from hud.cli.utils.api import hud_headers
+
+    headers = hud_headers()
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         # Step 1: Get presigned upload URL

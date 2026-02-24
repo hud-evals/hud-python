@@ -611,8 +611,8 @@ def run_docker_dev_server(
     import signal
 
     import typer
-    import yaml
 
+    from hud.cli.utils.lockfile import find_lock, get_local_image, load_lock
     from hud.server import MCPServer
 
     # Ensure Docker CLI and daemon are available before proceeding
@@ -686,27 +686,19 @@ def run_docker_dev_server(
         signal.signal(signal.SIGHUP, signal_handler)
 
     # Find environment directory (current or parent with hud.lock.yaml)
-    env_dir = cwd
-    lock_path = env_dir / "hud.lock.yaml"
+    lock_path = find_lock(cwd)
+    if lock_path is None:
+        hud_console.error("No hud.lock.yaml found")
+        hud_console.info("Run 'hud build' first to create an image")
+        raise typer.Exit(1)
 
-    if not lock_path.exists():
-        # Try parent directory
-        if (cwd.parent / "hud.lock.yaml").exists():
-            env_dir = cwd.parent
-            lock_path = env_dir / "hud.lock.yaml"
-        else:
-            hud_console.error("No hud.lock.yaml found")
-            hud_console.info("Run 'hud build' first to create an image")
-            raise typer.Exit(1)
+    env_dir = lock_path.parent
 
     # Load lock file to get image name
     try:
-        with open(lock_path) as f:
-            lock_data = yaml.safe_load(f)
+        lock_data = load_lock(lock_path)
 
-        # Get image from new or legacy format
-        images = lock_data.get("images", {})
-        image_name = images.get("local") or lock_data.get("image")
+        image_name = get_local_image(lock_data)
 
         if not image_name:
             hud_console.error("No image reference found in hud.lock.yaml")

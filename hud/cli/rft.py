@@ -44,10 +44,9 @@ def _patch_mcp_urls_to_staging(tasks: list[dict[str, Any]]) -> list[dict[str, An
 def _fetch_models() -> list[dict[str, Any]]:
     """Fetch trainable models from the HUD API for the user's team."""
     url = f"{settings.hud_api_url}/models/"
-    headers = {
-        "Authorization": f"Bearer {settings.api_key}",
-        "x-api-key": settings.api_key or "",
-    }
+    from hud.cli.utils.api import hud_headers
+
+    headers = hud_headers()
     params = {"team_only": "true", "limit": 200}
 
     try:
@@ -167,10 +166,9 @@ def rft_command(
     hud_console.header("HUD RFT (Reinforcement Fine-Tuning)")
 
     # Preflight check: API key
-    if not settings.api_key:
-        hud_console.error("HUD_API_KEY not found in environment.")
-        hud_console.info("Run 'hud set HUD_API_KEY=...' or export it.")
-        raise typer.Exit(1)
+    from hud.cli.utils.api import require_api_key
+
+    require_api_key("run RFT jobs")
 
     # Model selection
     selected_model_id: str
@@ -316,7 +314,9 @@ def rft_command(
     base_url = settings.hud_rl_url
     url = f"{base_url}/training/jobs"
 
-    headers = {"Authorization": f"Bearer {settings.api_key}", "Content-Type": "application/json"}
+    from hud.cli.utils.api import hud_headers
+
+    headers = hud_headers({"Content-Type": "application/json"})
 
     hud_console.info(
         f"Submitting job to {url}... (this may take a few minutes to run all safety checks)"

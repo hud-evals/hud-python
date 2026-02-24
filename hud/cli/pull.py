@@ -14,6 +14,8 @@ from rich.table import Table
 from hud.settings import settings
 from hud.utils.hud_console import HUDConsole
 
+from .utils.api import hud_headers
+from .utils.lockfile import load_lock
 from .utils.registry import save_to_registry
 
 
@@ -65,9 +67,7 @@ def fetch_lock_from_registry(reference: str) -> dict | None:
         url_safe_path = "/".join(quote(part, safe="") for part in reference.split("/"))
         registry_url = f"{settings.hud_api_url.rstrip('/')}/registry/envs/{url_safe_path}"
 
-        headers = {}
-        if settings.api_key:
-            headers["Authorization"] = f"Bearer {settings.api_key}"
+        headers = hud_headers()
 
         response = requests.get(registry_url, headers=headers, timeout=10)
 
@@ -138,8 +138,7 @@ def pull_environment(
 
         hud_console.info(f"Reading lock file: {lock_file}")
         if lock_path:
-            with open(lock_path) as f:
-                lock_data = yaml.safe_load(f)
+            lock_data = load_lock(lock_path)
 
         image_ref = lock_data.get("image", "") if lock_data else ""
 
