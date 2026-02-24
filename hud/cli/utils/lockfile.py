@@ -33,7 +33,4 @@ def get_local_image(lock_data: dict[str, Any]) -> str:
     Checks ``images.local`` (new format) then ``image`` (legacy).
     Returns empty string if neither exists.
     """
-    return (
-        lock_data.get("images", {}).get("local")
-        or lock_data.get("image", "")
-    )
+    return lock_data.get("images", {}).get("local") or lock_data.get("image", "")

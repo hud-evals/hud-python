@@ -122,9 +122,7 @@ def debug_command(
 
                 command = build_run_command(image, docker_args)
     else:
-        console.print(
-            "[red]Error: Must specify a directory, Docker image, or --config[/red]"
-        )
+        console.print("[red]Error: Must specify a directory, Docker image, or --config[/red]")
         console.print("\nExamples:")
         console.print("  hud debug .                      # Debug current directory")
         console.print("  hud debug environments/browser   # Debug specific directory")

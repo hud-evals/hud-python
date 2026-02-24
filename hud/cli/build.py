@@ -1157,7 +1157,6 @@ def build_environment(
     hud_console.info("The lock file can be used to reproduce this exact environment.")
 
 
-
 def build_command(
     params: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
         None,

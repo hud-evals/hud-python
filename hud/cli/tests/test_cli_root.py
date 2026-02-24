@@ -126,7 +126,5 @@ def test_pull_command_wrapper(mock_pull):
 
 @patch("hud.cli.push.push_environment")
 def test_push_command_wrapper(mock_push, tmp_path: Path):
-    push_command(
-        directory=str(tmp_path), image=None, tag=None, sign=False, yes=True, verbose=True
-    )
+    push_command(directory=str(tmp_path), image=None, tag=None, sign=False, yes=True, verbose=True)
     assert mock_push.called
