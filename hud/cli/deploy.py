@@ -114,7 +114,7 @@ def deploy_environment(
     # Check for API key
     from hud.cli.utils.api import require_api_key
 
-    require_api_key("deploy environments")
+    api_key = require_api_key("deploy environments")
 
     # Check for Dockerfile
     dockerfile = find_dockerfile(env_dir)
@@ -263,7 +263,7 @@ def deploy_environment(
                 build_secrets=build_secrets_dict,
                 no_cache=no_cache,
                 registry_id=registry_id,
-                api_key=settings.api_key,
+                api_key=api_key,
                 api_url=settings.hud_api_url,
                 console=hud_console,
                 verbose=verbose,
