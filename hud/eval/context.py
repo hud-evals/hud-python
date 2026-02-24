@@ -400,6 +400,9 @@ class EvalContext(Environment):
         error: str | None = None,
     ) -> None:
         """Emit a scenario lifecycle span for real-time stage visibility."""
+        if not self._trace_enabled:
+            return
+
         span = {
             "name": name,
             "trace_id": _normalize_trace_id(self.trace_id),
