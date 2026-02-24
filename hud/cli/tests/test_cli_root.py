@@ -58,8 +58,6 @@ def test_build_env_var_parsing(mock_build_env):
         platform=None,
     )
     assert mock_build_env.called
-    _, kwargs = mock_build_env.call_args
-    # build_environment is called positionally
     args = mock_build_env.call_args[0]
     # args: directory, tag, no_cache, verbose, env_vars, platform, secrets, remote_cache, build_args
     env_vars = args[4]
