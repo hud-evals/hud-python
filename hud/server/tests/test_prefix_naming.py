@@ -13,7 +13,8 @@ import socket
 from contextlib import suppress
 
 import pytest
-from fastmcp import Client as MCPClient, FastMCP
+from fastmcp import Client as MCPClient
+from fastmcp import FastMCP
 
 from hud.server import MCPServer
 
@@ -88,6 +89,7 @@ async def test_mcp_client_can_list_and_call_prefixed_tool() -> None:
 
             result = await client.call_tool("ns_greet", {"name": "world"})
             from mcp.types import TextContent
+
             first = result.content[0]
             assert isinstance(first, TextContent)
             assert "hello world" in first.text
