@@ -1725,3 +1725,144 @@ class TestNormalizationEdgeCases:
 
         assert result is not None
         assert result.reward == 1.5
+
+
+class TestScenarioToolExclusion:
+    """Tests for per-scenario tool exclusion (exclude_tools / exclude_sources)."""
+
+    @pytest.mark.asyncio
+    async def test_as_tools_excludes_by_name_pattern(self) -> None:
+        """as_tools() hides tools matching exclude_tools fnmatch patterns."""
+        env = Environment("test-env")
+
+        @env.tool()
+        def browser_navigate(url: str) -> str:
+            """Navigate."""
+            return url
+
+        @env.tool()
+        def browser_screenshot() -> str:
+            """Screenshot."""
+            return "img"
+
+        @env.tool()
+        def bash(cmd: str) -> str:
+            """Run command."""
+            return cmd
+
+        @env.scenario("headless", exclude_tools=["browser_*"])
+        async def headless():
+            yield "Do it"
+            yield 1.0
+
+        await env._build_routing()
+        await env.run_scenario_setup("headless", {})
+
+        names = [t.name for t in env.as_tools()]
+        assert "browser_navigate" not in names
+        assert "browser_screenshot" not in names
+        assert "bash" in names
+
+    @pytest.mark.asyncio
+    async def test_as_tools_excludes_by_source(self) -> None:
+        """as_tools() hides all tools from an excluded source connection."""
+        import mcp.types as mcp_types
+
+        from hud.environment.connection import ConnectionConfig, ConnectionType, Connector
+
+        env = Environment("test-env")
+
+        @env.tool()
+        def local_tool() -> str:
+            """Local."""
+            return "local"
+
+        connector = Connector(
+            transport={},
+            config=ConnectionConfig(),
+            name="remote-hub",
+            connection_type=ConnectionType.REMOTE,
+        )
+        connector._tools_cache = [
+            mcp_types.Tool(name="remote_a", inputSchema={"type": "object"}),
+            mcp_types.Tool(name="remote_b", inputSchema={"type": "object"}),
+        ]
+        env._connections["remote-hub"] = connector
+
+        @env.scenario("no-remote", exclude_sources=["remote-hub"])
+        async def no_remote():
+            yield "Local only"
+            yield 1.0
+
+        await env._build_routing()
+        await env.run_scenario_setup("no-remote", {})
+
+        names = [t.name for t in env.as_tools()]
+        assert "local_tool" in names
+        assert "remote_a" not in names
+        assert "remote_b" not in names
+
+    @pytest.mark.asyncio
+    async def test_exclude_tools_and_sources_compose(self) -> None:
+        """exclude_tools and exclude_sources are OR'd -- either hides the tool."""
+        import mcp.types as mcp_types
+
+        from hud.environment.connection import ConnectionConfig, ConnectionType, Connector
+
+        env = Environment("test-env")
+
+        @env.tool()
+        def bash(cmd: str) -> str:
+            """Bash."""
+            return cmd
+
+        @env.tool()
+        def local_nav() -> str:
+            """Nav."""
+            return "nav"
+
+        connector = Connector(
+            transport={},
+            config=ConnectionConfig(),
+            name="hub",
+            connection_type=ConnectionType.REMOTE,
+        )
+        connector._tools_cache = [
+            mcp_types.Tool(name="remote_a", inputSchema={"type": "object"}),
+            mcp_types.Tool(name="remote_b", inputSchema={"type": "object"}),
+        ]
+        env._connections["hub"] = connector
+
+        @env.scenario(
+            "combined",
+            exclude_tools=["local_nav"],
+            exclude_sources=["hub"],
+        )
+        async def combined():
+            yield "Combined"
+            yield 1.0
+
+        await env._build_routing()
+        await env.run_scenario_setup("combined", {})
+
+        names = [t.name for t in env.as_tools()]
+        assert "bash" in names
+        assert "local_nav" not in names
+        assert "remote_a" not in names
+        assert "remote_b" not in names
+
+    @pytest.mark.asyncio
+    async def test_meta_propagates_exclusions(self) -> None:
+        """Scenario prompt meta includes exclusion config for remote propagation."""
+        env = Environment("test-env")
+
+        @env.scenario("headless", exclude_tools=["browser_*"], exclude_sources=["hub"])
+        async def headless():
+            yield "Prompt"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:headless")
+        assert prompt is not None
+        assert prompt.meta is not None
+        assert prompt.meta.get("exclude_tools") == ["browser_*"]
+        assert prompt.meta.get("exclude_sources") == ["hub"]
