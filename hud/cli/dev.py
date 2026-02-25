@@ -883,6 +883,20 @@ def run_docker_dev_server(
         # Import all tools from the FastMCP proxy
         await proxy.import_server(fastmcp_proxy)
 
+        from fastmcp.exceptions import NotFoundError as FastMCPNotFoundError
+
+        _original_call_tool = proxy._call_tool
+
+        async def _passthrough_call_tool(context: Any) -> Any:
+            try:
+                return await _original_call_tool(context)
+            except FastMCPNotFoundError:
+                return await fastmcp_proxy._tool_manager.call_tool(
+                    context.message.name, context.message.arguments or {}
+                )
+
+        proxy._call_tool = _passthrough_call_tool  # type: ignore[assignment]
+
         # Launch inspector if requested
         if inspector:
             await launch_inspector(port)
