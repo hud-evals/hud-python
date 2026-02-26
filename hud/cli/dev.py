@@ -420,8 +420,6 @@ async def launch_inspector(port: int) -> None:
 
 def launch_interactive_thread(port: int, verbose: bool) -> None:
     """Launch interactive testing mode in separate thread."""
-    import os
-    import signal
     import time
 
     def run_interactive() -> None:
@@ -447,7 +445,9 @@ def launch_interactive_thread(port: int, verbose: bool) -> None:
                 hud_console.error(f"Interactive mode error: {e}")
 
         # Interactive session ended — tell the dev server to shut down
-        os.kill(os.getpid(), signal.SIGINT)
+        import _thread
+
+        _thread.interrupt_main()
 
     interactive_thread = threading.Thread(target=run_interactive, daemon=True)
     interactive_thread.start()
