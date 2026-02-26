@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -235,6 +236,64 @@ class TestEvalContextFromEnvironment:
         assert ctx.variants == {"model": "gpt-4o"}
         assert ctx.group_id == "group-123"
         assert ctx.index == 5
+
+    def test_assigns_hud_environment_headers_per_context(self) -> None:
+        """Each EvalContext gets its own HUD environment id."""
+        from hud.environment import Environment
+        from hud.environment.connection import ConnectionConfig, ConnectionType, Connector
+
+        parent = Environment("parent-env")
+        parent_headers = {
+            "Environment-Name": "browser",
+            "Environment-Id": "parent-env-id",
+            "mcp-session-id": "parent-session-id",
+        }
+        parent._connections["hud"] = Connector(
+            transport=SimpleNamespace(url="https://mcp.hud.so/jsonrpc", headers=parent_headers),
+            config=ConnectionConfig(),
+            name="hud",
+            connection_type=ConnectionType.REMOTE,
+        )
+
+        ctx_a = EvalContext.from_environment(parent, name="task-a", trace_id="trace-a")
+        ctx_b = EvalContext.from_environment(parent, name="task-b", trace_id="trace-b")
+
+        headers_a = ctx_a._connections["hud"]._transport.headers
+        headers_b = ctx_b._connections["hud"]._transport.headers
+
+        assert headers_a["Environment-Name"] == "browser"
+        assert headers_b["Environment-Name"] == "browser"
+        assert headers_a["Environment-Id"] != "parent-env-id"
+        assert headers_b["Environment-Id"] != "parent-env-id"
+        assert headers_a["Environment-Id"] != headers_b["Environment-Id"]
+
+        assert headers_a is not headers_b
+        assert parent_headers["Environment-Id"] == "parent-env-id"
+        assert parent_headers["mcp-session-id"] == "parent-session-id"
+
+    def test_does_not_rewrite_non_hud_headers(self) -> None:
+        """Non-HUD MCP connectors keep their existing env/session headers."""
+        from hud.environment import Environment
+        from hud.environment.connection import ConnectionConfig, ConnectionType, Connector
+
+        parent = Environment("parent-env")
+        original_headers = {
+            "Environment-Name": "browser",
+            "Environment-Id": "existing-env-id",
+            "mcp-session-id": "existing-session-id",
+        }
+        parent._connections["external"] = Connector(
+            transport=SimpleNamespace(url="https://example.com/mcp", headers=original_headers),
+            config=ConnectionConfig(),
+            name="external",
+            connection_type=ConnectionType.REMOTE,
+        )
+
+        ctx = EvalContext.from_environment(parent, name="task-a", trace_id="trace-a")
+        copied_headers = ctx._connections["external"]._transport.headers
+
+        assert copied_headers["Environment-Id"] == "existing-env-id"
+        assert copied_headers["mcp-session-id"] == "existing-session-id"
 
 
 class TestEvalContextFromTask:
