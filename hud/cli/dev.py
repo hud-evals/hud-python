@@ -591,6 +591,38 @@ def run_with_reload(
             break
 
 
+async def build_proxy(backend: Any, name: str = "HUD Docker Dev Proxy") -> Any:
+    """Build an MCPServer proxy that forwards all requests to *backend*.
+
+    ``import_server()`` copies tools/resources/prompts visible via listing
+    RPCs.  Environment hides ``_``-prefixed tools (like ``_hud_submit``)
+    from listings, so a passthrough patch on ``_call_tool`` ensures those
+    unlisted tools are still callable by forwarding to the backend's tool
+    manager.
+    """
+    from fastmcp import FastMCP
+    from fastmcp.exceptions import NotFoundError as FastMCPNotFoundError
+
+    from hud.server import MCPServer
+
+    fastmcp_proxy = FastMCP.as_proxy(backend)
+    proxy = MCPServer(name=name)
+    await proxy.import_server(fastmcp_proxy)
+
+    _original_call_tool = proxy._call_tool
+
+    async def _passthrough_call_tool(context: Any) -> Any:
+        try:
+            return await _original_call_tool(context)
+        except FastMCPNotFoundError:
+            return await fastmcp_proxy._tool_manager.call_tool(
+                context.message.name, context.message.arguments or {}
+            )
+
+    proxy._call_tool = _passthrough_call_tool  # type: ignore[assignment]
+    return proxy
+
+
 def run_docker_dev_server(
     port: int,
     verbose: bool,
@@ -618,7 +650,6 @@ def run_docker_dev_server(
     import typer
 
     from hud.cli.utils.lockfile import find_lock, get_local_image, load_lock
-    from hud.server import MCPServer
 
     # Ensure Docker CLI and daemon are available before proceeding
     from .utils.docker import require_docker_running
@@ -852,7 +883,6 @@ def run_docker_dev_server(
 
     # Create and run proxy with HUD helpers
     async def run_proxy() -> None:
-        from fastmcp import FastMCP
         from fastmcp.server.proxy import ProxyClient
 
         # Create ProxyClient without custom log handler since we capture Docker logs directly
@@ -876,17 +906,10 @@ def run_docker_dev_server(
 
         os.environ["_HUD_DEV_DOCKER_MCP_CONFIG"] = json.dumps(mcp_config)
 
-        # Create FastMCP proxy using the ProxyClient
-        fastmcp_proxy = FastMCP.as_proxy(proxy_client)
-
-        # Wrap in MCPServer to get /docs and REST wrappers
-        proxy = MCPServer(name="HUD Docker Dev Proxy")
+        proxy = await build_proxy(proxy_client)
 
         # Enable logs endpoint on HTTP server
         os.environ["_HUD_DEV_LOGS_PROVIDER"] = "enabled"
-
-        # Import all tools from the FastMCP proxy
-        await proxy.import_server(fastmcp_proxy)
 
         # Launch inspector if requested
         if inspector:

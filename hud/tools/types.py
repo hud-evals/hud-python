@@ -38,6 +38,12 @@ class SubScore(BaseModel):
     name: str = Field(..., description="Name of this subscore component")
     weight: float = Field(default=1.0, description="Weight of this subscore (for weighted average)")
     value: float = Field(..., description="Value of this subscore, usually 0.0 to 1.0")
+    metadata: dict[str, Any] | None = Field(default=None, exclude=True)
+
+    @property
+    def score(self) -> float:
+        """Alias for value. Deprecated — use .value instead."""
+        return self.value
 
 
 class EvaluationResult(BaseModel):
