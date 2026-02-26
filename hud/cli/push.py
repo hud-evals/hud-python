@@ -447,18 +447,6 @@ def push_environment(
         hud_console.warning(f"Registry upload failed: {e}")
         hud_console.info("Share hud.lock.yaml manually")
 
-    # Show usage examples
-    hud_console.section_title("What's Next?")
-
-    hud_console.info("Test locally:")
-    hud_console.command_example(f"hud dev {image}")
-    hud_console.info("")
-    hud_console.info("Share environment:")
-    hud_console.info(
-        "  Share the updated hud.lock.yaml for others to reproduce your exact environment"
-    )
-
-    # TODO: Upload lock file to HUD registry
     if sign:
         hud_console.warning("Signing not yet implemented")
 
