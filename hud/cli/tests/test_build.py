@@ -333,14 +333,12 @@ class TestBuildEnvironment:
     @mock.patch("hud.cli.build.build_docker_image")
     @mock.patch("hud.cli.build.collect_runtime_metadata")
     @mock.patch("hud.cli.build.analyze_mcp_environment")
-    @mock.patch("hud.cli.build.save_to_registry")
     @mock.patch("hud.cli.build.get_docker_image_id")
     @mock.patch("subprocess.run")
     def test_build_environment_success(
         self,
         mock_run,
         mock_get_id,
-        mock_save_registry,
         mock_analyze,
         mock_collect_runtime,
         mock_build_docker,
@@ -415,14 +413,12 @@ ENV API_KEY
     @mock.patch("hud.cli.build.build_docker_image")
     @mock.patch("hud.cli.build.collect_runtime_metadata")
     @mock.patch("hud.cli.build.analyze_mcp_environment")
-    @mock.patch("hud.cli.build.save_to_registry")
     @mock.patch("hud.cli.build.get_docker_image_id")
     @mock.patch("subprocess.run")
     def test_build_environment_internal_tools(
         self,
         mock_run,
         mock_get_id,
-        mock_save_registry,
         mock_analyze,
         mock_collect_runtime,
         mock_build_docker,

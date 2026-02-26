@@ -66,15 +66,19 @@ hud --version
 | `hud eval` | Tasks/dataset | Run agent on tasks | `hud eval tasks.json claude` |
 | `hud rft` | Tasks file | Fine-tune models (BETA, invite-only) | `hud rft run tasks.json` |
 
-### Other Commands
+### Registry & Management
 | Command | Description | Example |
 |---------|-------------|---------|
-| `hud get` | Download HF dataset to tasks file | `hud get hud-evals/2048-basic -o tasks.jsonl` |
-| `hud quickstart` | Clone quickstart repo | `hud quickstart` |
-| `hud cursor-list` | List Cursor MCP servers | `hud cursor-list` |
-| `hud version` | Show CLI version | `hud version` |
-| `hud clone` | Clone any git repo (pretty output) | `hud clone https://github.com/...` |
+| `hud push` | Push built image to registry | `hud push .` |
+| `hud cancel` | Cancel remote eval jobs | `hud cancel <job_id>` |
+
+### Utilities
+| Command | Description | Example |
+|---------|-------------|---------|
 | `hud set` | Persist API keys to ~/.hud/.env | `hud set HUD_API_KEY=...` |
+| `hud models` | List available inference models | `hud models --json` |
+| `hud convert` | Convert external task formats to HUD | `hud convert ./tasks --from webarena` |
+| `hud version` | Show CLI version | `hud version` |
 
 ## Complete Workflows
 
@@ -148,15 +152,6 @@ hud debug my-image:latest -e DEBUG=true -p 8080:8080
 
 # From registry
 hud analyze ghcr.io/org/image:v1.0.0
-```
-
-### Cursor Integration
-```bash
-# Debug Cursor server
-hud debug --cursor my-dev-server
-
-# List all servers
-hud cursor-list
 ```
 
 ## Output Formats

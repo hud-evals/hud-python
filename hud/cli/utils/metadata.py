@@ -13,12 +13,6 @@ from hud.settings import settings
 from hud.utils.hud_console import HUDConsole
 
 from .api import hud_headers
-from .lockfile import load_lock
-from .registry import (
-    extract_digest_from_image,
-    list_registry_entries,
-    load_from_registry,
-)
 
 console = Console()
 hud_console = HUDConsole()
@@ -56,35 +50,6 @@ def fetch_lock_from_registry(reference: str) -> dict | None:
         return None
 
 
-def check_local_cache(reference: str) -> dict | None:
-    """Check local cache for lock file."""
-    # First try exact digest match
-    digest = extract_digest_from_image(reference)
-    lock_data = load_from_registry(digest)
-    if lock_data:
-        return lock_data
-
-    # If not found and reference has a name, search by name pattern
-    if "/" in reference:
-        # Look for any cached version of this image
-        ref_base = reference.split("@")[0].split(":")[0]
-
-        for _, lock_file in list_registry_entries():
-            try:
-                lock_data = load_lock(lock_file)
-                # Check if this matches our reference
-                if lock_data and "image" in lock_data:
-                    image = lock_data["image"]
-                    # Match by name (ignoring tag/digest)
-                    img_base = image.split("@")[0].split(":")[0]
-                    if ref_base in img_base or img_base in ref_base:
-                        return lock_data
-            except Exception:
-                hud_console.error("Error loading lock file")
-
-    return None
-
-
 async def analyze_from_metadata(reference: str, output_format: str, verbose: bool) -> None:
     """Analyze environment from cached or registry metadata."""
     import json
@@ -96,69 +61,45 @@ async def analyze_from_metadata(reference: str, output_format: str, verbose: boo
     hud_console.info("")
 
     lock_data = None
-    source = None
 
-    # 1. Check local cache first
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
-        task = progress.add_task("Checking local cache...", total=None)
+        task = progress.add_task("Checking HUD registry...", total=None)
 
-        lock_data = check_local_cache(reference)
-        if lock_data:
-            progress.update(task, description="[green]✓ Found in local cache[/green]")
-            source = "local"
+        # Parse reference to get org/name format
+        if "/" in reference and "@" not in reference and ":" not in reference:
+            registry_ref = reference
+        elif "/" in reference:
+            parts = reference.split("/")
+            if len(parts) >= 2:
+                if parts[0] in ["docker.io", "registry-1.docker.io", "index.docker.io"]:
+                    registry_ref = "/".join(parts[1:]).split("@")[0]
+                else:
+                    registry_ref = "/".join(parts[:2]).split("@")[0]
+            else:
+                registry_ref = reference
         else:
+            registry_ref = reference
+
+        if not settings.api_key:
             progress.update(
-                task, description="[yellow]→ Not in cache, checking registry...[/yellow]"
+                task, description="[yellow]→ No API key (checking public registry)...[/yellow]"
             )
 
-            # 2. Try HUD registry
-            # Parse reference to get org/name format
-            if "/" in reference and "@" not in reference and ":" not in reference:
-                # Already in org/name format
-                registry_ref = reference
-            elif "/" in reference:
-                # Extract org/name from full reference
-                parts = reference.split("/")
-                if len(parts) >= 2:
-                    # Handle docker.io/org/name or just org/name
-                    if parts[0] in ["docker.io", "registry-1.docker.io", "index.docker.io"]:
-                        # Remove registry prefix but keep tag
-                        registry_ref = "/".join(parts[1:]).split("@")[0]
-                    else:
-                        # Keep org/name:tag format
-                        registry_ref = "/".join(parts[:2]).split("@")[0]
-                else:
-                    registry_ref = reference
-            else:
-                registry_ref = reference
-
-            if not settings.api_key:
-                progress.update(
-                    task, description="[yellow]→ No API key (checking public registry)...[/yellow]"
-                )
-
-            lock_data = fetch_lock_from_registry(registry_ref)
-            if lock_data:
-                progress.update(task, description="[green]✓ Found in HUD registry[/green]")
-                source = "registry"
-
-                # Save to local cache for next time
-                from .registry import save_to_registry
-
-                save_to_registry(lock_data, lock_data.get("image", ""), verbose=False)
-            else:
-                progress.update(task, description="[red]✗ Not found[/red]")
+        lock_data = fetch_lock_from_registry(registry_ref)
+        if lock_data:
+            progress.update(task, description="[green]✓ Found in HUD registry[/green]")
+        else:
+            progress.update(task, description="[red]✗ Not found[/red]")
 
     if not lock_data:
         hud_console.error("Environment metadata not found")
         console.print("\n[yellow]This environment hasn't been analyzed yet.[/yellow]")
         console.print("\nOptions:")
-        console.print(f"  1. Pull it first: [cyan]hud pull {reference}[/cyan]")
-        console.print(f"  2. Run live analysis: [cyan]hud analyze {reference} --live[/cyan]")
+        console.print(f"  1. Run live analysis: [cyan]hud analyze {reference} --live[/cyan]")
         if not settings.api_key:
             console.print(
                 "  3. Set HUD_API_KEY in your environment or run: hud set HUD_API_KEY=your-key-here"
@@ -167,8 +108,8 @@ async def analyze_from_metadata(reference: str, output_format: str, verbose: boo
 
     # Convert lock data to analysis format
     analysis = {
-        "status": "metadata" if source == "local" else "registry",
-        "source": source,
+        "status": "registry",
+        "source": "registry",
         "tools": [],
         "resources": [],
         "prompts": [],
@@ -276,10 +217,7 @@ async def analyze_from_metadata(reference: str, output_format: str, verbose: boo
 
     # Display results
     hud_console.info("")
-    if source == "local":
-        hud_console.dim_info("Source:", "Local cache")
-    else:
-        hud_console.dim_info("Source:", "HUD registry")
+    hud_console.dim_info("Source:", "HUD registry")
 
     if "image" in analysis:
         hud_console.dim_info("Image:", analysis["image"])

@@ -161,7 +161,7 @@ def push_environment(
         # Check if user is logged in
         username = get_docker_username()
         if username:
-            from hud.cli.utils.registry import extract_name_and_tag
+            from hud.cli.utils.docker import extract_name_and_tag
 
             full_name, current_tag = extract_name_and_tag(local_image)
             base_name = full_name.split("/")[-1] if "/" in full_name else full_name
@@ -420,9 +420,6 @@ def push_environment(
 
         if response.status_code in [200, 201]:
             hud_console.success("Metadata uploaded to HUD registry")
-            hud_console.info("Others can now pull with:")
-            hud_console.command_example(f"hud pull {name_with_tag}")
-            hud_console.info("")
         elif response.status_code == 401:
             hud_console.error("Authentication failed")
             hud_console.info("Check your HUD_API_KEY is valid")
@@ -454,7 +451,7 @@ def push_environment(
     hud_console.section_title("What's Next?")
 
     hud_console.info("Test locally:")
-    hud_console.command_example(f"hud run {image}")
+    hud_console.command_example(f"hud dev {image}")
     hud_console.info("")
     hud_console.info("Share environment:")
     hud_console.info(

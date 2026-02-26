@@ -8,7 +8,6 @@ import pytest
 from hud.cli.analyze import analyze_command
 from hud.cli.build import build_command
 from hud.cli.dev import dev_command
-from hud.cli.pull import pull_command
 from hud.cli.push import push_command
 
 if TYPE_CHECKING:
@@ -76,12 +75,6 @@ def test_dev_calls_runner(mock_dev):
         watch=None,  # type: ignore
     )
     assert mock_dev.called
-
-
-@patch("hud.cli.pull.pull_environment")
-def test_pull_command_wrapper(mock_pull):
-    pull_command(target="org/name:tag", lock_file=None, yes=True, verify_only=True, verbose=False)
-    assert mock_pull.called
 
 
 @patch("hud.cli.push.push_environment")

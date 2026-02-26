@@ -10,10 +10,9 @@ import typer
 
 from hud.cli.push import push_environment
 from hud.cli.utils.api import require_api_key
-from hud.cli.utils.docker import require_docker_running
+from hud.cli.utils.docker import extract_name_and_tag, require_docker_running
 from hud.cli.utils.env_check import find_environment_dir
 from hud.cli.utils.lockfile import load_lock
-from hud.cli.utils.registry import extract_name_and_tag
 from hud.datasets import load_tasks
 from hud.settings import settings
 from hud.utils.hud_console import hud_console
