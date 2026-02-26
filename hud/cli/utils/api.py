@@ -31,6 +31,7 @@ def hud_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
     headers: dict[str, str] = {}
     if settings.api_key:
         headers["Authorization"] = f"Bearer {settings.api_key}"
+        headers["X-API-Key"] = settings.api_key
     if extra:
         headers.update(extra)
     return headers
