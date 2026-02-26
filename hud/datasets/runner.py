@@ -215,5 +215,7 @@ async def run_single_task(
         result = await agent.run(ctx, max_steps=max_steps)
         # Reward is computed by EvalContext.__aexit__ from evaluate tools
 
-    # Return the Trace (ctx.reward is set by EvalContext.__aexit__)
+    # Propagate reward from EvalContext (set in __aexit__) to returned Trace
+    if ctx.reward is not None:
+        result.reward = ctx.reward
     return result
