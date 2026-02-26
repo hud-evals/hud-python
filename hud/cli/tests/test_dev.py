@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import socket
+from contextlib import suppress
 from unittest import mock
+
+import pytest
 
 from hud.cli.dev import auto_detect_module, should_use_docker_mode
 
@@ -216,3 +221,101 @@ class TestShowDevServerInfo:
         ]
         assert any("Hot-reload disabled" in msg for msg in info_messages)
         assert not any("Hot-reload enabled" in msg for msg in info_messages)
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class TestDockerProxyPassthrough:
+    """Integration test: the Docker dev proxy forwards unlisted tools.
+
+    Mirrors the real ``hud dev --docker`` flow end-to-end over HTTP:
+
+    1. An Environment with a scenario runs on an HTTP port (simulates Docker).
+    2. ``build_proxy`` — the same function ``run_docker_dev_server`` calls —
+       constructs the proxy with its _call_tool passthrough.
+    3. A client connects to the proxy and calls ``_hud_submit``.
+
+    If ``build_proxy`` is changed or its passthrough breaks, this test fails.
+    """
+
+    @pytest.mark.asyncio
+    async def test_hud_submit_forwarded_over_http(self) -> None:
+        from fastmcp import Client
+        from fastmcp.server.proxy import ProxyClient
+
+        from hud.cli.dev import build_proxy
+        from hud.environment import Environment
+
+        backend = Environment("test-env")
+
+        @backend.tool()
+        def public_tool() -> str:
+            return "public"
+
+        @backend.scenario("greet")
+        async def greet(name: str = "world"):
+            yield f"Hello, {name}!"
+            yield 1.0
+
+        backend_port = _free_port()
+        backend_task = asyncio.create_task(
+            backend.run_async(
+                transport="http",
+                host="127.0.0.1",
+                port=backend_port,
+                path="/mcp",
+                log_level="ERROR",
+                show_banner=False,
+            )
+        )
+        await asyncio.sleep(0.1)
+
+        try:
+            backend_url = f"http://127.0.0.1:{backend_port}/mcp"
+            proxy_client = ProxyClient(backend_url, name="test-proxy-client")
+            proxy = await build_proxy(proxy_client, name="test-proxy")
+
+            # _hud_submit should be hidden from listings but still callable
+            proxy_tools = await proxy.get_tools()
+            assert "_hud_submit" not in proxy_tools
+            assert "public_tool" in proxy_tools
+
+            proxy_port = _free_port()
+            proxy_task = asyncio.create_task(
+                proxy.run_async(
+                    transport="http",
+                    host="127.0.0.1",
+                    port=proxy_port,
+                    path="/mcp",
+                    log_level="ERROR",
+                    show_banner=False,
+                )
+            )
+            await asyncio.sleep(0.1)
+
+            try:
+                proxy_url = f"http://127.0.0.1:{proxy_port}/mcp"
+
+                async with Client(proxy_url) as client:
+                    await client.get_prompt("test-env:greet", {"name": "world"})
+
+                    result = await client.call_tool(
+                        "_hud_submit", {"scenario": "greet", "answer": "42"}
+                    )
+                    text = str(result)
+                    assert "submitted" in text.lower() or "answer" in text.lower()
+
+                    result = await client.call_tool("public_tool", {})
+                    assert "public" in str(result).lower()
+            finally:
+                proxy_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await proxy_task
+        finally:
+            backend_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await backend_task
