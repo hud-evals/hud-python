@@ -23,8 +23,6 @@ from hud.shared.hints import render_hints, secrets_in_build_args
 from hud.utils.hud_console import HUDConsole
 from hud.version import __version__ as hud_version
 
-from .utils.registry import save_to_registry
-
 
 def parse_version(version_str: str) -> tuple[int, int, int]:
     """Parse version string like '1.0.0' or '1.0' into tuple of integers."""
@@ -1108,12 +1106,6 @@ def build_environment(
     # Remove temp image after we're done
     subprocess.run(["docker", "rmi", "-f", temp_tag], capture_output=True)  # noqa: S607
 
-    # Add to local registry
-    if image_id:
-        # Save to local registry using the helper
-        local_ref = lock_content.get("images", {}).get("local", version_tag)
-        save_to_registry(lock_content, local_ref, verbose)
-
     # Update tasks.json files with new version
     hud_console.progress_message("Updating task files with new version...")
     updated_task_files = update_tasks_json_versions(
@@ -1148,11 +1140,10 @@ def build_environment(
     hud_console.section_title("Next Steps")
     hud_console.info("Test locally:")
     hud_console.command_example("hud dev", "Hot-reload development")
-    hud_console.command_example(f"hud run {version_tag}", "Run the built image")
+    hud_console.command_example(f"hud debug {version_tag}", "Test MCP compliance")
     hud_console.info("")
-    hud_console.info("Publish to registry:")
-    hud_console.command_example("hud push", f"Push as {version_tag}")
-    hud_console.command_example("hud push --tag latest", "Push with custom tag")
+    hud_console.info("Deploy to platform:")
+    hud_console.command_example("hud deploy", "Build remotely and deploy")
     hud_console.info("")
     hud_console.info("The lock file can be used to reproduce this exact environment.")
 

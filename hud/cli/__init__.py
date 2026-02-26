@@ -38,11 +38,8 @@ from .dev import dev_command  # noqa: E402
 from .eval import eval_command  # noqa: E402
 from .init import init_command  # noqa: E402
 from .link import link_command  # noqa: E402
-from .list_func import list_command  # noqa: E402
 from .models import models_command  # noqa: E402
-from .pull import pull_command  # noqa: E402
 from .push import push_command  # noqa: E402
-from .remove import remove_command  # noqa: E402
 from .rft import rft_run_command  # noqa: E402
 from .rft_status import rft_status_typer_command  # noqa: E402
 
@@ -55,10 +52,7 @@ app.command(name="build", context_settings=_EXTRA_ARGS)(build_command)
 app.command(name="deploy")(deploy_command)
 app.command(name="link")(link_command)
 app.command(name="eval")(eval_command)
-app.command(name="push")(push_command)
-app.command(name="pull")(pull_command)
-app.command(name="list")(list_command)
-app.command(name="remove")(remove_command)
+app.command(name="push", hidden=True)(push_command)
 app.command(name="init")(init_command)
 app.command(name="convert")(convert_command)
 app.command(name="cancel")(cancel_command)
@@ -154,10 +148,9 @@ def main() -> None:
             console.print(
                 "  1. Create a new environment: [cyan]hud init my-env && cd my-env[/cyan]"
             )
-            console.print("  2. Develop with hot-reload: [cyan]hud dev --interactive[/cyan]")
-            console.print("  3. Build for production:    [cyan]hud build[/cyan]")
-            console.print("  4. Deploy to HUD platform:  [cyan]hud deploy[/cyan]")
-            console.print("  5. Run evaluations:         [cyan]hud eval tasks.jsonl[/cyan]")
+            console.print("  2. Start dev server:        [cyan]hud dev[/cyan]")
+            console.print("  3. Deploy to HUD platform:  [cyan]hud deploy[/cyan]")
+            console.print("  4. Run evaluations:         [cyan]hud eval tasks.jsonl[/cyan]")
             console.print("\n[yellow]Training:[/yellow]")
             console.print("  [cyan]hud rft run tasks.jsonl[/cyan]      Launch an RFT training job")
             console.print("  [cyan]hud rft status <model-id>[/cyan]  Check training status\n")

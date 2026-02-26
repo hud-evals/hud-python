@@ -19,6 +19,29 @@ from .config import parse_env_file
 # to allow folder mode with only a Dockerfile or only a pyproject.toml.
 
 
+def extract_name_and_tag(image_ref: str) -> tuple[str, str]:
+    """Extract organization/name and tag from Docker image reference.
+
+    Examples:
+        docker.io/hudpython/test_init:latest@sha256:... -> (hudpython/test_init, latest)
+        hudpython/myenv:v1.0 -> (hudpython/myenv, v1.0)
+        myorg/myapp -> (myorg/myapp, latest)
+    """
+    if "@" in image_ref:
+        image_ref = image_ref.split("@")[0]
+
+    if image_ref.startswith(("docker.io/", "registry-1.docker.io/", "index.docker.io/")):
+        image_ref = "/".join(image_ref.split("/")[1:])
+
+    if ":" in image_ref:
+        name, tag = image_ref.rsplit(":", 1)
+    else:
+        name = image_ref
+        tag = "latest"
+
+    return name, tag
+
+
 def get_docker_cmd(image: str) -> list[str] | None:
     """
     Extract the CMD from a Docker image.
