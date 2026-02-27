@@ -1866,3 +1866,105 @@ class TestScenarioToolExclusion:
         assert prompt.meta is not None
         assert prompt.meta.get("exclude_tools") == ["browser_*"]
         assert prompt.meta.get("exclude_sources") == ["hub"]
+
+    @pytest.mark.asyncio
+    async def test_as_tools_allowed_tools_rescues_excluded_tool(self) -> None:
+        """allowed_tools rescues a tool that was excluded by exclude_tools."""
+        env = Environment("test-env")
+
+        @env.tool()
+        def browser_navigate(url: str) -> str:
+            """Navigate."""
+            return url
+
+        @env.tool()
+        def browser_screenshot() -> str:
+            """Screenshot."""
+            return "img"
+
+        @env.tool()
+        def bash(cmd: str) -> str:
+            """Run command."""
+            return cmd
+
+        @env.scenario(
+            "partial",
+            exclude_tools=["browser_*"],
+            allowed_tools=["browser_navigate"],
+        )
+        async def partial():
+            yield "Do it"
+            yield 1.0
+
+        await env._build_routing()
+        await env.run_scenario_setup("partial", {})
+
+        names = [t.name for t in env.as_tools()]
+        assert "browser_navigate" in names
+        assert "browser_screenshot" not in names
+        assert "bash" in names
+
+    @pytest.mark.asyncio
+    async def test_as_tools_allowed_tools_rescues_from_excluded_source(self) -> None:
+        """allowed_tools rescues a specific tool from an excluded source."""
+        import mcp.types as mcp_types
+
+        from hud.environment.connection import ConnectionConfig, ConnectionType, Connector
+
+        env = Environment("test-env")
+
+        @env.tool()
+        def local_tool() -> str:
+            """Local."""
+            return "local"
+
+        connector = Connector(
+            transport={},
+            config=ConnectionConfig(),
+            name="sentry",
+            connection_type=ConnectionType.REMOTE,
+        )
+        connector._tools_cache = [
+            mcp_types.Tool(name="sentry_get_issue", inputSchema={"type": "object"}),
+            mcp_types.Tool(name="sentry_create_issue", inputSchema={"type": "object"}),
+            mcp_types.Tool(name="sentry_list_events", inputSchema={"type": "object"}),
+        ]
+        env._connections["sentry"] = connector
+
+        @env.scenario(
+            "limited-sentry",
+            exclude_sources=["sentry"],
+            allowed_tools=["sentry_get_issue"],
+        )
+        async def limited_sentry():
+            yield "Investigate"
+            yield 1.0
+
+        await env._build_routing()
+        await env.run_scenario_setup("limited-sentry", {})
+
+        names = [t.name for t in env.as_tools()]
+        assert "local_tool" in names
+        assert "sentry_get_issue" in names
+        assert "sentry_create_issue" not in names
+        assert "sentry_list_events" not in names
+
+    @pytest.mark.asyncio
+    async def test_meta_propagates_allowed_tools(self) -> None:
+        """Scenario prompt meta includes allowed_tools for remote propagation."""
+        env = Environment("test-env")
+
+        @env.scenario(
+            "selective",
+            exclude_sources=["hub"],
+            allowed_tools=["hub_read"],
+        )
+        async def selective():
+            yield "Prompt"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:selective")
+        assert prompt is not None
+        assert prompt.meta is not None
+        assert prompt.meta.get("exclude_sources") == ["hub"]
+        assert prompt.meta.get("allowed_tools") == ["hub_read"]
