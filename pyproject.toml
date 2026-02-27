@@ -113,8 +113,6 @@ agents = [
     "anthropic>=0.78.0",
     "google-genai",
     "openai-agents",
-    # Dataset loading (HuggingFace)
-    "datasets>=2.14.0",
     # Image processing for screenshots/grounding
     "pillow>=11.1.0",
     # Jupyter kernel support

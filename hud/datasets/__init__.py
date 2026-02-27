@@ -3,7 +3,7 @@
 Provides unified task loading, saving, and execution for HUD evaluations.
 
 Key functions:
-- load_tasks(): Load tasks from JSON, JSONL, HuggingFace, or HUD API
+- load_tasks(): Load tasks from JSON, JSONL, or HUD API
 - save_tasks(): Save tasks to the HUD API
 - run_dataset(): Run an agent on a dataset of tasks
 - submit_rollouts(): Submit tasks for remote execution

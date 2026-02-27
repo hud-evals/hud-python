@@ -3,7 +3,6 @@
 Unified interface for loading evaluation tasks from:
 - HUD API (v5 format)
 - Local JSON/JSONL files (v4 LegacyTask format, auto-converted)
-- HuggingFace datasets (v4 LegacyTask format, auto-converted)
 """
 
 from __future__ import annotations
@@ -71,43 +70,6 @@ def _load_from_file(path: Path) -> list[Task]:
     return [Task(**{**item, "args": item.get("args") or {}}) for item in raw_items]
 
 
-def _load_raw_from_huggingface(dataset_name: str) -> list[dict[str, Any]]:
-    """Load raw task dicts from HuggingFace dataset."""
-    try:
-        from datasets import load_dataset as hf_load_dataset
-    except ImportError as e:
-        raise ImportError(
-            "Please install 'datasets' to load from HuggingFace: uv pip install datasets"
-        ) from e
-
-    # Parse dataset name and optional split
-    if ":" in dataset_name:
-        name, split = dataset_name.split(":", 1)
-    else:
-        name = dataset_name
-        split = "train"  # Default split
-
-    logger.info("Loading from HuggingFace dataset: %s (split=%s)", name, split)
-    dataset = hf_load_dataset(name, split=split)
-
-    raw_items: list[dict[str, Any]] = []
-    for item in dataset:
-        if not isinstance(item, dict):
-            raise ValueError(f"Invalid HuggingFace dataset: expected dict, got {type(item)}")
-        raw_items.append(dict(item))
-
-    return raw_items
-
-
-def _load_from_huggingface(dataset_name: str) -> list[Task]:
-    """Load tasks from HuggingFace dataset."""
-    raw_items = _load_raw_from_huggingface(dataset_name)
-    from hud.eval.task import Task
-
-    # Default args to {} for runnable tasks (None = template)
-    return [Task(**{**item, "args": item.get("args") or {}}) for item in raw_items]
-
-
 def _load_raw_from_api(dataset_name: str) -> tuple[list[dict[str, Any]], str | None]:
     """Load raw task dicts from HUD API.
 
@@ -165,7 +127,6 @@ def load_tasks(source: str, *, raw: bool = False) -> list[Task] | list[dict[str,
     Supports multiple sources with auto-detection:
     - Local file path (JSON or JSONL)
     - HUD API dataset slug (e.g., "hud-evals/SheetBench-50")
-    - HuggingFace dataset (e.g., "username/dataset" or "username/dataset:split")
 
     Automatically detects and converts v4 LegacyTask format to v5 Task.
 
@@ -173,35 +134,12 @@ def load_tasks(source: str, *, raw: bool = False) -> list[Task] | list[dict[str,
         source: Task source. Can be:
             - Path to a local JSON/JSONL file
             - HUD API dataset slug (e.g., "hud-evals/SheetBench-50")
-            - HuggingFace dataset name (e.g., "hud-evals/tasks" or "hud-evals/tasks:train")
         raw: If True, return raw dicts without validation or env var substitution.
             Useful for preserving template strings like "${HUD_API_KEY}".
 
     Returns:
         - If raw=False (default): list[Task] ready to use with hud.eval()
         - If raw=True: list[dict] with raw task data
-
-    Example:
-        ```python
-        import hud
-        from hud.datasets import load_tasks
-
-        # Load from HUD API
-        tasks = load_tasks("hud-evals/SheetBench-50")
-
-        # Load from local file (v4 format auto-converted)
-        tasks = load_tasks("./my-tasks.json")
-
-        # Load from HuggingFace
-        tasks = load_tasks("hud-evals/benchmark:test")
-
-        # Load raw dicts (preserves env var placeholders)
-        raw_tasks = load_tasks("./tasks.json", raw=True)
-
-        # Run evaluation
-        async with hud.eval(tasks) as ctx:
-            await agent.run(ctx)
-        ```
 
     Raises:
         ValueError: If task loading fails
@@ -214,31 +152,14 @@ def load_tasks(source: str, *, raw: bool = False) -> list[Task] | list[dict[str,
         logger.info("Loaded %d tasks from %s", len(items), source)
         return items
 
-    # Try HUD API first
-    try:
-        logger.info("Trying HUD API: %s", source)
-        if raw:
-            items, _ = _load_raw_from_api(source)
-        else:
-            items = _load_from_api(source)
-        logger.info("Loaded %d tasks from HUD API: %s", len(items), source)
-        return items
-    except Exception as hud_error:
-        logger.debug("HUD API load failed (%s), trying HuggingFace", hud_error)
-
-    # Try HuggingFace as fallback
-    try:
-        logger.info("Trying HuggingFace dataset: %s", source)
-        items = _load_raw_from_huggingface(source) if raw else _load_from_huggingface(source)
-        logger.info("Loaded %d tasks from HuggingFace: %s", len(items), source)
-        return items
-    except ImportError:
-        raise ValueError(
-            f"Failed to load tasks from '{source}'. "
-            "Install 'datasets' package for HuggingFace support."
-        ) from None
-    except Exception as hf_error:
-        raise ValueError(f"Failed to load tasks from '{source}': {hf_error}") from hf_error
+    # Try HUD API
+    logger.info("Trying HUD API: %s", source)
+    if raw:
+        items, _ = _load_raw_from_api(source)
+    else:
+        items = _load_from_api(source)
+    logger.info("Loaded %d tasks from HUD API: %s", len(items), source)
+    return items
 
 
 def save_tasks(
