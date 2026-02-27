@@ -420,11 +420,12 @@ async def _deploy_async(
             console.warning(f"Failed to get final status: {e}")
             status_data = {"status": final_status}
 
-        # Display summary
+        # Display summary — prefer backend-returned name over local name
         display_build_summary(
             status_response=status_data,
             registry_id=registry_id or "",
             console=console,
+            env_name=status_data.get("registry_name") or name,
         )
 
         success = final_status == "SUCCEEDED"
