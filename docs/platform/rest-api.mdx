@@ -1,0 +1,368 @@
+---
+title: "REST API"
+description: "Programmatically run scenarios and retrieve trace results via the HUD REST API"
+icon: "code"
+---
+
+The HUD platform exposes a REST API for programmatically triggering scenario runs and retrieving trace results. All endpoints require an API key via HTTP Bearer authentication:
+
+```
+Authorization: Bearer sk-hud-your-api-key
+```
+
+Get your API key at [hud.ai/settings/api-keys](https://hud.ai/settings/api-keys).
+
+## Run a Scenario
+
+`POST /agent/run` triggers a scenario and optionally waits for the result.
+
+```bash
+curl -X POST https://api.hud.ai/agent/run \
+  -H "Authorization: Bearer $HUD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "env_name": "healthcare-admin-ui",
+    "scenario_name": "healthcare-admin-ui:add-patient-condition",
+    "scenario_args": {"patient_id": "P-007", "condition": "I10"},
+    "model": "claude-sonnet-4-20250514",
+    "max_steps": 50,
+    "sync": true,
+    "timeout": 300
+  }'
+```
+
+### Request Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `env_name` | string | *required* | Environment name |
+| `scenario_name` | string | *required* | Scenario to run (as defined in the environment) |
+| `scenario_args` | object | `{}` | Scenario argument values |
+| `model` | string | *required* | Model name (e.g. `gpt-4o`, `claude-sonnet-4-20250514`) |
+| `max_steps` | integer | `100` | Maximum agent steps (1-500) |
+| `sync` | boolean | `true` | If `true`, polls for completion and returns result. If `false`, returns immediately with `trace_id` |
+| `timeout` | integer | `300` | Timeout in seconds for sync mode (30-600s). Ignored if `sync=false` |
+| `evalset_id` | string | `null` | Optional evalset ID to create a task in |
+| `callback` | object | `null` | Webhook callback config (see [Callbacks](#callbacks)) |
+
+### Response
+
+```json
+{
+  "trace_id": "030083f2-e046-4b20-a184-cfcf16cd8830",
+  "trace_url": "https://hud.ai/trace/030083f2-e046-4b20-a184-cfcf16cd8830",
+  "status": "completed",
+  "reward": 0.6,
+  "final_response": "I've added Essential hypertension (I10) to patient P-007.",
+  "steps_taken": 4,
+  "duration_seconds": 112.3,
+  "error": null
+}
+```
+
+When `sync=false`, only `trace_id`, `trace_url`, and `status` (`"running"`) are returned. Use the trace read-back endpoints below to poll for the result.
+
+---
+
+## Read Back Trace Results
+
+After a run completes (or while polling with `sync=false`), use these endpoints to retrieve trace data.
+
+### Get Trace Details
+
+`GET /telemetry/traces/{trace_id}` returns reward, status, scenario config, and optionally the full trajectory and logs.
+
+```bash
+curl -H "Authorization: Bearer $HUD_API_KEY" \
+  "https://api.hud.ai/telemetry/traces/{trace_id}?include_trajectory=true"
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `include_trajectory` | boolean | `false` | Include full trajectory (all agent actions and observations) |
+| `include_logs` | boolean | `false` | Include environment logs (container stdout/stderr) |
+| `include_rollout_logs` | boolean | `false` | Include orchestrator/worker logs |
+
+**Response:**
+
+```json
+{
+  "trace_id": "030083f2-e046-4b20-a184-cfcf16cd8830",
+  "job_id": null,
+  "status": "completed",
+  "reward": 0.6,
+  "error": null,
+  "external_id": "0001",
+  "scenario": "add-patient-condition",
+  "scenario_args": [{"name": "patient_id", "value": "P-007"}],
+  "prompt": "Add a new diagnosis of Essential hypertension...",
+  "metadata": {},
+  "trajectory": [...],
+  "trajectory_length": 10
+}
+```
+
+### Get Full Trace Telemetry
+
+`GET /telemetry/trace/{trace_id}` returns the full trace with signed screenshot URLs and complete trajectory steps.
+
+```bash
+curl -H "Authorization: Bearer $HUD_API_KEY" \
+  "https://api.hud.ai/telemetry/trace/{trace_id}"
+```
+
+This is the heavier endpoint -- it fetches all telemetry spans from storage, signs screenshot URLs, and returns the complete trajectory. Use `GET /telemetry/traces/{trace_id}` for a lighter read.
+
+### Batch Status Check
+
+`POST /telemetry/traces/status` checks status for multiple traces in a single request. Useful for lightweight polling.
+
+```bash
+curl -X POST https://api.hud.ai/telemetry/traces/status \
+  -H "Authorization: Bearer $HUD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"trace_ids": ["trace-1", "trace-2", "trace-3"]}'
+```
+
+**Response:**
+
+```json
+{
+  "traces": {
+    "trace-1": {"status": "completed", "full_trajectory": true},
+    "trace-2": {"status": "running", "full_trajectory": false},
+    "trace-3": {"status": "error", "full_trajectory": true}
+  }
+}
+```
+
+---
+
+## Task Management
+
+### Upload Tasks to a Taskset
+
+`POST /tasks/upload` creates or updates tasks in a taskset (evalset). Tasks are resolved against their environment's scenarios. If the taskset doesn't exist, it's created automatically.
+
+```bash
+curl -X POST https://api.hud.ai/tasks/upload \
+  -H "Authorization: Bearer $HUD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-checkout-taskset",
+    "tasks": [
+      {
+        "slug": "checkout-laptop",
+        "scenario": "checkout",
+        "args": {"product_name": "Laptop"},
+        "env": {"name": "my-store-env"}
+      },
+      {
+        "slug": "checkout-phone",
+        "scenario": "checkout",
+        "args": {"product_name": "Phone"},
+        "env": {"name": "my-store-env"}
+      }
+    ]
+  }'
+```
+
+#### Request Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Taskset name. Created if it doesn't exist |
+| `tasks` | array | List of tasks to upload |
+| `tasks[].slug` | string \| null | Stable task identifier (stored as `external_id`). Used for upsert — if a task with this slug exists, it's updated. Must not be a 4-digit number (reserved for auto-assigned IDs) |
+| `tasks[].scenario` | string | Scenario name to run |
+| `tasks[].args` | object | Scenario argument values |
+| `tasks[].env` | object | Environment config (required) |
+| `tasks[].env.name` | string | Environment name (required for scenario resolution) |
+| `tasks[].env.include` | string[] | Tool whitelist (optional) |
+| `tasks[].env.exclude` | string[] | Tool blacklist (optional) |
+| `tasks[].agent_config` | object \| null | Agent behavior overrides |
+| `tasks[].agent_config.system_prompt` | string \| null | Custom system prompt |
+| `tasks[].validation` | array \| null | Tool calls representing successful completion (stored in metadata) |
+
+#### Response
+
+```json
+{
+  "evalset_id": "a1b2c3d4-...",
+  "evalset_name": "my-checkout-taskset",
+  "tasks_created": 2,
+  "tasks_updated": 0
+}
+```
+
+Tasks with a matching `slug` in the same taskset are updated instead of duplicated.
+
+### Add Tasks by Evalset ID
+
+`POST /tasks/evalsets/{evalset_id}/tasks` adds tasks to an existing taskset by its UUID. This endpoint uses the internal task format with explicit `scenario_id` references.
+
+```bash
+curl -X POST https://api.hud.ai/tasks/evalsets/{evalset_id}/tasks \
+  -H "Authorization: Bearer $HUD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tasks": [
+      {
+        "prompt": "Add item to cart and complete checkout",
+        "tier": 1,
+        "scenario_id": "scenario-uuid-here",
+        "scenario_args": [
+          {"name": "product_name", "value": "Laptop"}
+        ]
+      }
+    ]
+  }'
+```
+
+#### Request Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tasks` | array | List of tasks (min 1) |
+| `tasks[].prompt` | string \| null | Task prompt |
+| `tasks[].tier` | integer | Task difficulty tier |
+| `tasks[].scenario_id` | string \| null | Scenario UUID to run |
+| `tasks[].scenario_args` | array \| null | `[{"name": "...", "value": "..."}]` argument values |
+| `tasks[].external_id` | string | Task identifier (auto-assigned if omitted) |
+| `tasks[].tags` | string[] | Tags for organization |
+| `tasks[].env_config` | object \| null | Tool include/exclude lists |
+| `tasks[].agent_config` | object \| null | Agent behavior overrides |
+| `tasks[].metadata` | object \| null | Arbitrary metadata |
+
+#### Response
+
+```json
+{
+  "tasks_added": 1
+}
+```
+
+---
+
+## Job Endpoints
+
+If you create runs with `skip_job=false`, you can query job-level data.
+
+### Get Job Telemetry
+
+`GET /telemetry/job/{job_id}` returns job metrics, all task runs with rewards, timing, and metadata.
+
+```bash
+curl -H "Authorization: Bearer $HUD_API_KEY" \
+  "https://api.hud.ai/telemetry/job/{job_id}"
+```
+
+### List Trace IDs for a Job
+
+`GET /telemetry/job/{job_id}/trace-ids` returns all trace IDs associated with a job.
+
+```bash
+curl -H "Authorization: Bearer $HUD_API_KEY" \
+  "https://api.hud.ai/telemetry/job/{job_id}/trace-ids"
+```
+
+---
+
+## Callbacks
+
+Instead of polling, you can configure a webhook callback to receive results when a trace completes.
+
+```json
+{
+  "env_name": "healthcare-admin-ui",
+  "scenario_name": "healthcare-admin-ui:add-patient-condition",
+  "scenario_args": {},
+  "model": "claude-sonnet-4-20250514",
+  "sync": false,
+  "callback": {
+    "url": "https://your-server.com/webhook",
+    "include_reward": true,
+    "include_response": true,
+    "include_trajectory": false,
+    "retry_count": 3,
+    "metadata": {"my_custom_id": "abc-123"}
+  }
+}
+```
+
+When the trace completes, HUD sends a POST to your URL:
+
+```json
+{
+  "trace_id": "030083f2-...",
+  "status": "completed",
+  "completed_at": "2026-02-25T06:00:27Z",
+  "reward": 0.6,
+  "response": "I've added Essential hypertension...",
+  "metadata": {"my_custom_id": "abc-123"}
+}
+```
+
+### Callback Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `url` | string | *required* | URL to POST results to |
+| `include_reward` | boolean | `true` | Include reward in payload |
+| `include_response` | boolean | `true` | Include agent's final response |
+| `include_trajectory` | boolean | `false` | Include full trajectory (can be large) |
+| `retry_count` | integer | `3` | Number of retries on failure (0-10) |
+| `headers` | object | `null` | Custom headers to include |
+| `metadata` | object | `null` | Arbitrary metadata echoed back in the callback |
+
+---
+
+## Async Polling Pattern
+
+A common pattern for programmatic use: launch with `sync=false`, then poll the lightweight status endpoint until completion, then fetch the full result.
+
+```python
+import httpx
+import asyncio
+
+API_KEY = "sk-hud-..."
+BASE = "https://api.hud.ai"
+HEADERS = {"Authorization": f"Bearer {API_KEY}"}
+
+async def run_and_poll():
+    async with httpx.AsyncClient() as client:
+        # 1. Launch the run
+        resp = await client.post(f"{BASE}/agent/run", headers=HEADERS, json={
+            "env_name": "healthcare-admin-ui",
+            "scenario_name": "healthcare-admin-ui:add-patient-condition",
+            "scenario_args": {"patient_id": "P-007"},
+            "model": "claude-sonnet-4-20250514",
+            "sync": False,
+        })
+        trace_id = resp.json()["trace_id"]
+        print(f"Launched: {resp.json()['trace_url']}")
+
+        # 2. Poll for completion
+        while True:
+            status_resp = await client.post(
+                f"{BASE}/telemetry/traces/status",
+                headers=HEADERS,
+                json={"trace_ids": [trace_id]},
+            )
+            trace_status = status_resp.json()["traces"].get(trace_id, {})
+            if trace_status.get("status") in ("completed", "error"):
+                break
+            await asyncio.sleep(5)
+
+        # 3. Fetch the result
+        result = await client.get(
+            f"{BASE}/telemetry/traces/{trace_id}",
+            headers=HEADERS,
+            params={"include_trajectory": "true"},
+        )
+        data = result.json()
+        print(f"Reward: {data['reward']}")
+        print(f"Steps: {data.get('trajectory_length')}")
+```
