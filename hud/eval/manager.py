@@ -120,8 +120,6 @@ async def run_eval(
     max_concurrent: int | None = None,
     trace: bool = True,
     quiet: bool = False,
-    taskset: str | None = None,
-    taskset_id: str | None = None,
 ) -> AsyncGenerator[EvalContext, None]:
     """Standalone eval context manager.
 
@@ -139,7 +137,7 @@ async def run_eval(
         variants: A/B test configuration (dict with list values expanded)
         group: Runs per variant for statistical significance
         group_ids: Optional list of group IDs
-        job_id: Job ID to link to
+        job_id: Pre-registered job ID. Skips implicit job creation if provided.
         group_id: Group ID for parallel evaluations
         trace_id: Pre-assigned trace ID (auto-generated if not provided)
         api_key: API key for backend calls
@@ -252,28 +250,13 @@ async def run_eval(
 
     if total_evals == 1:
         if tasks:
-            job_id_for_run = job_id
-            if taskset or taskset_id:
-                eval_name = _get_eval_name(tasks=tasks, group=group)
-                if job_id_for_run is None:
-                    job_id_for_run = str(uuid.uuid4())
-
-                await _send_job_enter(
-                    job_id=job_id_for_run,
-                    name=eval_name,
-                    variants=variants,
-                    group=group,
-                    api_key=api_key,
-                    taskset_id=taskset_id,
-                )
-
             # Single task - use EvalContext.from_task()
             ctx = EvalContext.from_task(
                 tasks[0],
                 name=name,
                 trace_id=trace_id,
                 api_key=api_key,
-                job_id=job_id_for_run,
+                job_id=job_id,
                 group_id=group_id,
                 variants=variant_combos[0],
                 code_snippet=code_snippet,
@@ -304,15 +287,15 @@ async def run_eval(
         implicit_job_id = job_id or str(uuid.uuid4())
         job_url = f"https://hud.ai/jobs/{implicit_job_id}"
 
-        # Send job enter (sync request before traces start)
-        await _send_job_enter(
-            job_id=implicit_job_id,
-            name=eval_name,
-            variants=variants,
-            group=group,
-            api_key=api_key,
-            taskset_id=taskset_id,
-        )
+        # Register job if not already provided by caller
+        if not job_id:
+            await _send_job_enter(
+                job_id=implicit_job_id,
+                name=eval_name,
+                variants=variants,
+                group=group,
+                api_key=api_key,
+            )
 
         # Print job URL (not individual trace URLs)
         if not quiet:

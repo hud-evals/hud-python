@@ -609,21 +609,26 @@ class EvalConfig(BaseModel):
 
 async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
     """Run evaluation with the given config using run_dataset()."""
-    from hud.datasets import load_tasks, run_dataset
+    from pathlib import Path
+
+    from hud.datasets import run_dataset
+    from hud.datasets.loader import _load_from_api, _load_from_file
 
     if cfg.source is None or cfg.agent_type is None:
         raise ValueError("source and agent_type must be set")
 
-    # Load tasks using unified loader (handles v4→v5 conversion automatically)
+    # Load tasks — use internal loaders to capture taskset_id from API sources
     hud_console.info(f"📊 Loading tasks from: {cfg.source}…")
-    tasks = load_tasks(cfg.source)
+    path = Path(cfg.source)
+    taskset_id: str | None = None
+    if path.exists() and path.suffix in {".json", ".jsonl"}:
+        tasks = _load_from_file(path)
+    else:
+        tasks, taskset_id = _load_from_api(cfg.source)
 
     if not tasks:
         hud_console.error(f"No tasks found in: {cfg.source}")
         raise typer.Exit(1)
-
-    # Extract taskset_id from API-loaded tasks (set by loader in metadata)
-    taskset_id: str | None = tasks[0].metadata.get("taskset_id") if tasks else None
 
     # Filter by task slugs (or positional indices) if provided
     if cfg.task_ids:
@@ -653,15 +658,16 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
 
     max_steps = cfg.max_steps
 
+    import uuid
+
+    from hud.eval.manager import _send_job_enter
+
     # Remote execution - submit to HUD platform
     if cfg.remote:
         agent_kwargs = {
             k: v for k, v in agent_kwargs.items() if k not in ("api_key", "model_client")
         }
-        import uuid
-
         from hud.datasets.utils import submit_rollouts
-        from hud.eval.manager import _send_job_enter
 
         job_id = str(uuid.uuid4())
         hud_console.info(
@@ -728,6 +734,19 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             f"group_size: {cfg.group_size})…"
         )
 
+    # Register job with taskset association if tasks came from API
+    job_id: str | None = None
+    if taskset_id:
+        job_id = str(uuid.uuid4())
+        await _send_job_enter(
+            job_id=job_id,
+            name=f"eval ({cfg.source})" if cfg.source else "eval",
+            variants=None,
+            group=cfg.group_size,
+            api_key=None,
+            taskset_id=taskset_id,
+        )
+
     # Run using run_dataset
     results = await run_dataset(
         tasks,
@@ -737,7 +756,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         max_concurrent=cfg.max_concurrent,
         group_size=cfg.group_size,
         quiet=cfg.quiet,
-        taskset_id=taskset_id,
+        job_id=job_id,
     )
 
     # Show reward for single task

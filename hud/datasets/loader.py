@@ -101,16 +101,16 @@ def _load_raw_from_api(dataset_name: str) -> tuple[list[dict[str, Any]], str | N
         return tasks, taskset_id
 
 
-def _load_from_api(dataset_name: str) -> list[Task]:
-    """Load tasks from HUD API."""
+def _load_from_api(dataset_name: str) -> tuple[list[Task], str | None]:
+    """Load tasks from HUD API.
+
+    Returns (tasks, taskset_id) tuple.
+    """
     from hud.eval.task import Task
 
     raw_items, taskset_id = _load_raw_from_api(dataset_name)
     tasks = [Task(**{**item, "args": item.get("args") or {}}) for item in raw_items]
-    if taskset_id:
-        for task in tasks:
-            task.metadata["taskset_id"] = taskset_id
-    return tasks
+    return tasks, taskset_id
 
 
 @overload
@@ -157,7 +157,7 @@ def load_tasks(source: str, *, raw: bool = False) -> list[Task] | list[dict[str,
     if raw:
         items, _ = _load_raw_from_api(source)
     else:
-        items = _load_from_api(source)
+        items, _ = _load_from_api(source)
     logger.info("Loaded %d tasks from HUD API: %s", len(items), source)
     return items
 
