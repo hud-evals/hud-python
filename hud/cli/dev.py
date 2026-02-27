@@ -211,18 +211,15 @@ async def run_mcp_module(
 
             apply_default_warning_filters(verbose=False)
 
-    # Ensure proper directory is in sys.path based on module name
+    # Always add cwd so top-level packages are importable.
+    # For dotted modules like "backend.agents.env", the user runs from the
+    # project root where "backend" is a package — cwd must be on the path.
+    # auto_detect_module() handles the special case of needing cwd.parent
+    # for "package.main" imports separately via its extra_path return.
     cwd = Path.cwd()
-    if "." in module_name:
-        # For package.module imports (like server.server), add parent to sys.path
-        parent = str(cwd.parent)
-        if parent not in sys.path:
-            sys.path.insert(0, parent)
-    else:
-        # For simple module imports, add current directory
-        cwd_str = str(cwd)
-        if cwd_str not in sys.path:
-            sys.path.insert(0, cwd_str)
+    cwd_str = str(cwd)
+    if cwd_str not in sys.path:
+        sys.path.insert(0, cwd_str)
 
     # Import the module
     try:

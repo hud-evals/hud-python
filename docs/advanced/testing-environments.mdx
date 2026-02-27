@@ -129,6 +129,102 @@ hud dev -w scenarios -w tools --port 8765
 
 System services (postgres, VNC, browsers) persist across reloads.
 
+## Remote Testing
+
+After deploying with `hud deploy`, verify your environment works end-to-end before running full evaluations.
+
+### Quick Smoke Test
+
+The fastest way to test a deployed environment is `POST /agent/run` with `sync: true`. This launches a real agent against your remote environment and waits for the result:
+
+```python
+import httpx
+
+resp = httpx.post(
+    "https://api.hud.ai/agent/run",
+    headers={"Authorization": f"Bearer {HUD_API_KEY}"},
+    json={
+        "env_name": "my-env",
+        "scenario_name": "my-env:count",
+        "scenario_args": {"sentence": "strawberry", "letter": "r"},
+        "model": "gpt-4o-mini",
+        "max_steps": 10,
+        "sync": True,
+        "timeout": 120,
+    },
+    timeout=130,
+)
+result = resp.json()
+print(f"Reward: {result['reward']}, Trace: {result['trace_url']}")
+```
+
+If `reward` is what you expect and the trace looks clean, your deployment is working.
+
+### Using hud eval --remote
+
+For running against a tasks file or dataset, `hud eval --remote` submits tasks to HUD infrastructure:
+
+```bash
+# Single task (debug mode) — runs first task only
+hud eval tasks.json claude --remote
+
+# Full dataset
+hud eval tasks.json claude --remote --full
+
+# Specific tasks
+hud eval tasks.json claude --remote --task-ids task_1,task_3
+```
+
+Both the agent and environment run remotely. No local compute, no local Docker. Monitor at the job URL printed to the console, or at [hud.ai/jobs](https://hud.ai/jobs).
+
+### Async Runs with Polling
+
+For programmatic integrations (CI, custom harnesses), launch with `sync: false` and poll:
+
+```python
+import httpx
+import asyncio
+
+async def run_and_check():
+    async with httpx.AsyncClient() as client:
+        # Launch
+        resp = await client.post(
+            "https://api.hud.ai/agent/run",
+            headers={"Authorization": f"Bearer {HUD_API_KEY}"},
+            json={
+                "env_name": "my-env",
+                "scenario_name": "my-env:count",
+                "scenario_args": {"sentence": "strawberry", "letter": "r"},
+                "model": "gpt-4o-mini",
+                "sync": False,
+            },
+        )
+        trace_id = resp.json()["trace_id"]
+
+        # Poll
+        while True:
+            status = await client.post(
+                "https://api.hud.ai/telemetry/traces/status",
+                headers={"Authorization": f"Bearer {HUD_API_KEY}"},
+                json={"trace_ids": [trace_id]},
+            )
+            info = status.json()["traces"].get(trace_id, {})
+            if info.get("status") in ("completed", "error"):
+                break
+            await asyncio.sleep(5)
+
+        # Fetch result
+        result = await client.get(
+            f"https://api.hud.ai/telemetry/traces/{trace_id}",
+            headers={"Authorization": f"Bearer {HUD_API_KEY}"},
+            params={"include_trajectory": "true"},
+        )
+        data = result.json()
+        print(f"Reward: {data['reward']}, Steps: {data.get('trajectory_length')}")
+```
+
+See [REST API](/platform/rest-api) for callbacks (webhook instead of polling) and batch status checks.
+
 ## Debugging Build Failures
 
 `hud build` runs the exact same pipeline as **New → Environment** on [hud.ai](https://hud.ai)—so if it passes locally, it'll work in production. If the build fails or the container crashes on startup, use `hud debug`:
