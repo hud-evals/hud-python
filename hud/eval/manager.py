@@ -71,13 +71,12 @@ async def _send_job_enter(
     variants: dict[str, Any] | None,
     group: int,
     api_key: str | None,
-    taskset: str | None = None,
+    taskset_id: str | None = None,
     hud_eval_config: dict[str, Any] | None = None,
 ) -> None:
     """Send job enter payload (async request before traces start).
 
-    Registers the job with the platform. Tasks must already exist in the
-    taskset.
+    Registers the job with the platform.
     """
     import httpx
 
@@ -92,7 +91,7 @@ async def _send_job_enter(
         name=name,
         variants=variants,
         group=group,
-        taskset=taskset,
+        taskset_id=taskset_id,
         hud_eval_config=hud_eval_config,
     )
 
@@ -122,6 +121,7 @@ async def run_eval(
     trace: bool = True,
     quiet: bool = False,
     taskset: str | None = None,
+    taskset_id: str | None = None,
 ) -> AsyncGenerator[EvalContext, None]:
     """Standalone eval context manager.
 
@@ -253,7 +253,7 @@ async def run_eval(
     if total_evals == 1:
         if tasks:
             job_id_for_run = job_id
-            if taskset:
+            if taskset or taskset_id:
                 eval_name = _get_eval_name(tasks=tasks, group=group)
                 if job_id_for_run is None:
                     job_id_for_run = str(uuid.uuid4())
@@ -264,7 +264,7 @@ async def run_eval(
                     variants=variants,
                     group=group,
                     api_key=api_key,
-                    taskset=taskset,
+                    taskset_id=taskset_id,
                 )
 
             # Single task - use EvalContext.from_task()
@@ -311,7 +311,7 @@ async def run_eval(
             variants=variants,
             group=group,
             api_key=api_key,
-            taskset=taskset,
+            taskset_id=taskset_id,
         )
 
         # Print job URL (not individual trace URLs)

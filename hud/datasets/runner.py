@@ -30,6 +30,7 @@ async def run_dataset(
     group_size: int = 1,
     quiet: bool = True,
     taskset: str | None = None,
+    taskset_id: str | None = None,
 ) -> list[EvalContext]:
     """Run an agent on a dataset of tasks.
 
@@ -98,6 +99,7 @@ async def run_dataset(
         max_concurrent=max_concurrent,
         quiet=quiet,
         taskset=taskset,
+        taskset_id=taskset_id,
     ) as ctx:
         # Build agent params - use system_prompt from ctx (set from task.agent_config)
         final_agent_params = dict(agent_params or {})

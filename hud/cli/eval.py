@@ -622,9 +622,8 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         hud_console.error(f"No tasks found in: {cfg.source}")
         raise typer.Exit(1)
 
-    # Default taskset to source when loading from API (not a local file)
-    if cfg.taskset is None and not Path(cfg.source).exists():
-        cfg.taskset = cfg.source
+    # Extract taskset_id from API-loaded tasks (set by loader in metadata)
+    taskset_id: str | None = tasks[0].metadata.get("taskset_id") if tasks else None
 
     # Filter by task slugs (or positional indices) if provided
     if cfg.task_ids:
@@ -695,7 +694,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             variants=None,
             group=cfg.group_size,
             api_key=None,
-            taskset=cfg.taskset,
+            taskset_id=taskset_id,
             hud_eval_config=eval_cfg_dict,
         )
 
@@ -738,7 +737,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         max_concurrent=cfg.max_concurrent,
         group_size=cfg.group_size,
         quiet=cfg.quiet,
-        taskset=cfg.taskset,
+        taskset_id=taskset_id,
     )
 
     # Show reward for single task

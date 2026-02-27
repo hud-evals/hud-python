@@ -108,8 +108,11 @@ def _load_from_huggingface(dataset_name: str) -> list[Task]:
     return [Task(**{**item, "args": item.get("args") or {}}) for item in raw_items]
 
 
-def _load_raw_from_api(dataset_name: str) -> list[dict[str, Any]]:
-    """Load raw task dicts from HUD API."""
+def _load_raw_from_api(dataset_name: str) -> tuple[list[dict[str, Any]], str | None]:
+    """Load raw task dicts from HUD API.
+
+    Returns (tasks, taskset_id) tuple.
+    """
     from hud.datasets.utils import _normalize_task_dict
 
     headers = {}
@@ -125,23 +128,27 @@ def _load_raw_from_api(dataset_name: str) -> list[dict[str, Any]]:
         response.raise_for_status()
         data = response.json()
 
-        # Extract tasks dict from response
+        taskset_id = data.get("evalset_id")
         tasks_dict = data.get("tasks", {})
 
-        return [
+        tasks = [
             _normalize_task_dict(task_data)
             for task_data in tasks_dict.values()
             if isinstance(task_data, dict)
         ]
+        return tasks, taskset_id
 
 
 def _load_from_api(dataset_name: str) -> list[Task]:
     """Load tasks from HUD API."""
     from hud.eval.task import Task
 
-    raw_items = _load_raw_from_api(dataset_name)
-    # Default args to {} for runnable tasks (None = template)
-    return [Task(**{**item, "args": item.get("args") or {}}) for item in raw_items]
+    raw_items, taskset_id = _load_raw_from_api(dataset_name)
+    tasks = [Task(**{**item, "args": item.get("args") or {}}) for item in raw_items]
+    if taskset_id:
+        for task in tasks:
+            task.metadata["taskset_id"] = taskset_id
+    return tasks
 
 
 @overload
@@ -210,7 +217,10 @@ def load_tasks(source: str, *, raw: bool = False) -> list[Task] | list[dict[str,
     # Try HUD API first
     try:
         logger.info("Trying HUD API: %s", source)
-        items = _load_raw_from_api(source) if raw else _load_from_api(source)
+        if raw:
+            items, _ = _load_raw_from_api(source)
+        else:
+            items = _load_from_api(source)
         logger.info("Loaded %d tasks from HUD API: %s", len(items), source)
         return items
     except Exception as hud_error:
