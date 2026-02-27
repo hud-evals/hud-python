@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import uuid
+from copy import deepcopy
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -74,12 +76,36 @@ class Connector:
     def copy(self) -> Connector:
         """Create a copy of this connector with fresh (unconnected) state.
 
-        The copy shares transport config but has its own client instance,
-        allowing parallel execution without conflicts.
+        The copy uses a fresh transport object and client instance so mutable
+        transport/session state cannot leak across parallel traces.
         """
+        copied_transport = deepcopy(self._transport)
+        copied_config = ConnectionConfig(
+            prefix=self.config.prefix,
+            include=list(self.config.include) if self.config.include is not None else None,
+            exclude=list(self.config.exclude) if self.config.exclude is not None else None,
+            transform=self.config.transform,
+        )
+        from hud.utils.mcp import _is_hud_server
+
+        url = getattr(copied_transport, "url", None)
+        headers = getattr(copied_transport, "headers", None)
+        if isinstance(copied_transport, dict):
+            url = copied_transport.get("url")
+            headers = copied_transport.get("headers")
+        if (
+            isinstance(url, str)
+            and _is_hud_server(url)
+            and isinstance(headers, dict)
+            and (headers.get("Environment-Name") or headers.get("environment-name"))
+        ):
+            env_name = headers.get("Environment-Name") or headers["environment-name"]
+            headers["Environment-Name"] = env_name
+            headers["Environment-Id"] = str(uuid.uuid4())
+
         return Connector(
-            transport=self._transport,
-            config=self.config,
+            transport=copied_transport,
+            config=copied_config,
             name=self.name,
             connection_type=self.connection_type,
             auth=self._auth,

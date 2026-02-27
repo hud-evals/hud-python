@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 from rich import box
 from rich.table import Table
 
+from hud.cli.utils.api import require_api_key
 from hud.settings import settings
 from hud.types import AgentType
 from hud.utils.env import resolve_env_vars
@@ -96,7 +97,7 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # max_steps = 10
 # group_size = 1
 # byok = false  # Remote only; use encrypted env vars on the platform.
-# task_ids = ["task_1", "task_2"]
+# task_ids = ["checkout-smoke", "0"]  # slugs or 0-based indices
 # verbose = true
 # very_verbose = true
 # auto_respond = true
@@ -222,18 +223,12 @@ class EvalConfig(BaseModel):
             return
 
         if self.remote:
-            if not settings.api_key:
-                hud_console.error("HUD_API_KEY is required for remote execution")
-                hud_console.info("Set it: hud set HUD_API_KEY=your-key-here")
-                raise typer.Exit(1)
+            require_api_key("run remote evaluations")
             return
 
         # Gateway mode only requires HUD_API_KEY
         if self.gateway:
-            if not settings.api_key:
-                hud_console.error("HUD_API_KEY is required for gateway mode")
-                hud_console.info("Set it: hud set HUD_API_KEY=your-key-here")
-                raise typer.Exit(1)
+            require_api_key("use gateway mode")
             return
 
         if self.agent_type == AgentType.OPENAI_COMPATIBLE:
@@ -627,15 +622,18 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         hud_console.error(f"No tasks found in: {cfg.source}")
         raise typer.Exit(1)
 
-    # Filter by task IDs if provided
+    # Filter by task slugs (or positional indices) if provided
     if cfg.task_ids:
-        id_set = set(cfg.task_ids)
-        # Match by task.id or index
-        filtered = [t for i, t in enumerate(tasks) if t.id in id_set or str(i) in id_set]
+        selector_set = set(cfg.task_ids)
+        filtered = []
+        for i, task in enumerate(tasks):
+            task_slug = getattr(task, "slug", None)
+            if (isinstance(task_slug, str) and task_slug in selector_set) or str(i) in selector_set:
+                filtered.append(task)
         if not filtered:
-            hud_console.error(f"No tasks found matching IDs: {', '.join(cfg.task_ids)}")
+            hud_console.error(f"No tasks found matching slugs/indices: {', '.join(cfg.task_ids)}")
             raise typer.Exit(1)
-        hud_console.info(f"Filtered to {len(filtered)} task(s) by ID")
+        hud_console.info(f"Filtered to {len(filtered)} task(s) by slug/index")
         tasks = filtered
     elif not cfg.all:
         # Single task mode (no --all, --full, or --task-ids)
@@ -687,32 +685,15 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
                         sanitized[agent_name] = agent_settings
                 eval_cfg_dict["agent_config"] = sanitized
 
-        tasks_to_create = [t for t in tasks if cfg.taskset and not t.id]
-        tasks_data = (
-            [t.model_dump(mode="json", exclude_none=True) for t in tasks_to_create]
-            if tasks_to_create
-            else None
-        )
-
-        ids = await _send_job_enter(
+        await _send_job_enter(
             job_id=job_id,
             name=f"eval ({cfg.source})" if cfg.source else "eval",
             variants=None,
             group=cfg.group_size,
             api_key=None,
             taskset=cfg.taskset,
-            tasks=tasks_data,
             hud_eval_config=eval_cfg_dict,
         )
-
-        if cfg.taskset and ids:
-            if len(ids) != len(tasks_to_create):
-                hud_console.warning(
-                    f"Task count mismatch: sent {len(tasks_to_create)} tasks, "
-                    f"received {len(ids)} IDs. Some tasks may not be linked."
-                )
-            for task_obj, task_version_id in zip(tasks_to_create, ids, strict=False):
-                task_obj.id = task_version_id
 
         trace_ids = await submit_rollouts(
             tasks=tasks,
@@ -809,7 +790,11 @@ def eval_command(
         help="Automatically prompt the agent to continue if it does not respond with a tool call",
     ),
     group_size: int | None = typer.Option(None, "--group-size", help="Runs per task"),
-    task_ids: str | None = typer.Option(None, "--task-ids", help="Comma-separated task IDs to run"),
+    task_ids: str | None = typer.Option(
+        None,
+        "--task-ids",
+        help="Comma-separated task slugs (or 0-based indices) to run",
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
     remote: bool = typer.Option(
         False, "--remote", help="Submit tasks to platform for remote execution"

@@ -1092,6 +1092,75 @@ class TestScenarioNameNormalization:
             await env.run_scenario_setup("my_env:test", {})
 
 
+class TestScenarioRemoteErrors:
+    """Test remote scenario error mapping."""
+
+    @pytest.mark.asyncio
+    async def test_remote_setup_error_when_scenarios_unavailable_reraises_original(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If prompt listing also fails, preserve the original setup error."""
+        env = Environment("test-env")
+
+        async def timeout_get_prompt(_name: str, _arguments: dict[str, str] | None = None) -> Any:
+            raise RuntimeError("Transport error: ReadTimeout")
+
+        async def failing_list_prompts() -> list[Any]:
+            raise RuntimeError("list prompts failed")
+
+        monkeypatch.setattr(env, "get_prompt", timeout_get_prompt)
+        monkeypatch.setattr(env, "list_prompts", failing_list_prompts)
+
+        with pytest.raises(RuntimeError, match="Transport error: ReadTimeout"):
+            await env.run_scenario_setup("remote-env:solve-task", {})
+
+    @pytest.mark.asyncio
+    async def test_remote_not_found_shows_scenario_guidance(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Scenario-not-found errors show guidance when prompt is absent."""
+        env = Environment("test-env")
+
+        async def failing_get_prompt(_name: str, _arguments: dict[str, str] | None = None) -> Any:
+            raise RuntimeError("Transport error: ReadTimeout")
+
+        async def empty_list_prompts() -> list[Any]:
+            return []
+
+        monkeypatch.setattr(env, "get_prompt", failing_get_prompt)
+        monkeypatch.setattr(env, "list_prompts", empty_list_prompts)
+
+        with pytest.raises(ValueError, match="Scenario not found") as exc_info:
+            await env.run_scenario_setup("remote-env:solve-task", {})
+
+        error_message = str(exc_info.value)
+        assert "SDK looked for: remote-env:solve-task" in error_message
+        assert "Available scenarios:" in error_message
+
+    @pytest.mark.asyncio
+    async def test_remote_existing_prompt_reraises_original_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If prompt exists remotely, preserve original setup/rendering error."""
+        env = Environment("test-env")
+
+        async def failing_get_prompt(_name: str, _arguments: dict[str, str] | None = None) -> Any:
+            raise RuntimeError("Error rendering prompt coding:bug_fix.")
+
+        class _Prompt:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+        async def list_prompts_with_existing_scenario() -> list[Any]:
+            return [_Prompt("coding:bug_fix")]
+
+        monkeypatch.setattr(env, "get_prompt", failing_get_prompt)
+        monkeypatch.setattr(env, "list_prompts", list_prompts_with_existing_scenario)
+
+        with pytest.raises(RuntimeError, match="Error rendering prompt coding:bug_fix"):
+            await env.run_scenario_setup("coding:bug_fix", {})
+
+
 class TestScenarioMalformedNames:
     """Test handling of malformed scenario names."""
 
@@ -1240,8 +1309,8 @@ class TestScenarioSessionState:
             await env.submit("test", "answer")
 
     @pytest.mark.asyncio
-    async def test_evaluate_before_setup_returns_none(self) -> None:
-        """Calling evaluate() before setup() should return None."""
+    async def test_evaluate_before_setup_raises(self) -> None:
+        """Calling evaluate() before setup() should raise ValueError."""
         env = Environment("test-env")
 
         @env.scenario("test")
@@ -1249,12 +1318,12 @@ class TestScenarioSessionState:
             yield "Prompt"
             yield 1.0
 
-        result = await env.run_scenario_evaluate("test")
-        assert result is None
+        with pytest.raises(ValueError, match="No active session"):
+            await env.run_scenario_evaluate("test")
 
     @pytest.mark.asyncio
-    async def test_double_evaluate_returns_none(self) -> None:
-        """Calling evaluate() twice should return None on second call."""
+    async def test_double_evaluate_raises(self) -> None:
+        """Calling evaluate() twice should raise ValueError on second call."""
         env = Environment("test-env")
 
         @env.scenario("test")
@@ -1270,9 +1339,9 @@ class TestScenarioSessionState:
         assert result1 is not None
         assert result1.reward == 0.75
 
-        # Second call - session cleared
-        result2 = await env.run_scenario_evaluate("test")
-        assert result2 is None
+        # Second call - session cleared, should raise
+        with pytest.raises(ValueError, match="No active session"):
+            await env.run_scenario_evaluate("test")
 
     @pytest.mark.asyncio
     async def test_submit_wrong_scenario_raises(self) -> None:
@@ -1656,3 +1725,144 @@ class TestNormalizationEdgeCases:
 
         assert result is not None
         assert result.reward == 1.5
+
+
+class TestScenarioToolExclusion:
+    """Tests for per-scenario tool exclusion (exclude_tools / exclude_sources)."""
+
+    @pytest.mark.asyncio
+    async def test_as_tools_excludes_by_name_pattern(self) -> None:
+        """as_tools() hides tools matching exclude_tools fnmatch patterns."""
+        env = Environment("test-env")
+
+        @env.tool()
+        def browser_navigate(url: str) -> str:
+            """Navigate."""
+            return url
+
+        @env.tool()
+        def browser_screenshot() -> str:
+            """Screenshot."""
+            return "img"
+
+        @env.tool()
+        def bash(cmd: str) -> str:
+            """Run command."""
+            return cmd
+
+        @env.scenario("headless", exclude_tools=["browser_*"])
+        async def headless():
+            yield "Do it"
+            yield 1.0
+
+        await env._build_routing()
+        await env.run_scenario_setup("headless", {})
+
+        names = [t.name for t in env.as_tools()]
+        assert "browser_navigate" not in names
+        assert "browser_screenshot" not in names
+        assert "bash" in names
+
+    @pytest.mark.asyncio
+    async def test_as_tools_excludes_by_source(self) -> None:
+        """as_tools() hides all tools from an excluded source connection."""
+        import mcp.types as mcp_types
+
+        from hud.environment.connection import ConnectionConfig, ConnectionType, Connector
+
+        env = Environment("test-env")
+
+        @env.tool()
+        def local_tool() -> str:
+            """Local."""
+            return "local"
+
+        connector = Connector(
+            transport={},
+            config=ConnectionConfig(),
+            name="remote-hub",
+            connection_type=ConnectionType.REMOTE,
+        )
+        connector._tools_cache = [
+            mcp_types.Tool(name="remote_a", inputSchema={"type": "object"}),
+            mcp_types.Tool(name="remote_b", inputSchema={"type": "object"}),
+        ]
+        env._connections["remote-hub"] = connector
+
+        @env.scenario("no-remote", exclude_sources=["remote-hub"])
+        async def no_remote():
+            yield "Local only"
+            yield 1.0
+
+        await env._build_routing()
+        await env.run_scenario_setup("no-remote", {})
+
+        names = [t.name for t in env.as_tools()]
+        assert "local_tool" in names
+        assert "remote_a" not in names
+        assert "remote_b" not in names
+
+    @pytest.mark.asyncio
+    async def test_exclude_tools_and_sources_compose(self) -> None:
+        """exclude_tools and exclude_sources are OR'd -- either hides the tool."""
+        import mcp.types as mcp_types
+
+        from hud.environment.connection import ConnectionConfig, ConnectionType, Connector
+
+        env = Environment("test-env")
+
+        @env.tool()
+        def bash(cmd: str) -> str:
+            """Bash."""
+            return cmd
+
+        @env.tool()
+        def local_nav() -> str:
+            """Nav."""
+            return "nav"
+
+        connector = Connector(
+            transport={},
+            config=ConnectionConfig(),
+            name="hub",
+            connection_type=ConnectionType.REMOTE,
+        )
+        connector._tools_cache = [
+            mcp_types.Tool(name="remote_a", inputSchema={"type": "object"}),
+            mcp_types.Tool(name="remote_b", inputSchema={"type": "object"}),
+        ]
+        env._connections["hub"] = connector
+
+        @env.scenario(
+            "combined",
+            exclude_tools=["local_nav"],
+            exclude_sources=["hub"],
+        )
+        async def combined():
+            yield "Combined"
+            yield 1.0
+
+        await env._build_routing()
+        await env.run_scenario_setup("combined", {})
+
+        names = [t.name for t in env.as_tools()]
+        assert "bash" in names
+        assert "local_nav" not in names
+        assert "remote_a" not in names
+        assert "remote_b" not in names
+
+    @pytest.mark.asyncio
+    async def test_meta_propagates_exclusions(self) -> None:
+        """Scenario prompt meta includes exclusion config for remote propagation."""
+        env = Environment("test-env")
+
+        @env.scenario("headless", exclude_tools=["browser_*"], exclude_sources=["hub"])
+        async def headless():
+            yield "Prompt"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts.get("test-env:headless")
+        assert prompt is not None
+        assert prompt.meta is not None
+        assert prompt.meta.get("exclude_tools") == ["browser_*"]
+        assert prompt.meta.get("exclude_sources") == ["hub"]

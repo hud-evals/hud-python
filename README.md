@@ -56,7 +56,7 @@ response = await client.chat.completions.create(
 )
 ```
 
-Every call is traced at [hud.ai](https://hud.ai). → [Docs](https://docs.hud.ai/quick-links/gateway)
+Every call is traced at [hud.ai](https://hud.ai). → [Docs](https://docs.hud.ai/quick-links/models)
 
 ### Environments
 
@@ -110,7 +110,7 @@ async with env("solve-math", problem="What is 2+2?", answer=4, variants={"model"
     await ctx.submit(response.choices[0].message.content)
 ```
 
-**Variants** test configurations. **Groups** repeat for distribution. Results stream to [hud.ai](https://hud.ai). → [Docs](https://docs.hud.ai/quick-links/ab-testing)
+**Variants** test configurations. **Groups** repeat for distribution. Results stream to [hud.ai](https://hud.ai). → [Docs](https://docs.hud.ai/quick-links/evals)
 
 ### Deploy & Train
 

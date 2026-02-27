@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 
 import typer
-import yaml
 
 from hud.utils.hud_console import hud_console
 
@@ -138,10 +137,10 @@ def ensure_built(env_dir: Path, *, interactive: bool = True) -> dict[str, Any]:
             )
             return {}
 
-    # Load lock file
+    from hud.cli.utils.lockfile import load_lock
+
     try:
-        with open(lock_path) as f:
-            lock_data: dict[str, Any] = yaml.safe_load(f) or {}
+        lock_data: dict[str, Any] = load_lock(lock_path)
     except Exception:
         lock_data = {}
 
@@ -179,8 +178,7 @@ def ensure_built(env_dir: Path, *, interactive: bool = True) -> dict[str, Any]:
             if hud_console.confirm("Rebuild now (runs 'hud build')?", default=True):
                 require_docker_running()
                 build_environment(str(env_dir), platform="linux/amd64")
-                with open(lock_path) as f:
-                    lock_data = yaml.safe_load(f) or {}
+                lock_data = load_lock(lock_path)
             else:
                 hud_console.hint("Continuing without rebuild; this may use an outdated image.")
             # else:

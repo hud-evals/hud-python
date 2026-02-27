@@ -187,7 +187,7 @@ async def run_single_task(
         ```
     """
     # Determine trace name
-    effective_trace_name = trace_name or task_id or task.id or "single_task"
+    effective_trace_name = trace_name or task_id or task.slug or "single_task"
 
     # Run with explicit eval context parameters
     async with hud.eval(
@@ -215,5 +215,7 @@ async def run_single_task(
         result = await agent.run(ctx, max_steps=max_steps)
         # Reward is computed by EvalContext.__aexit__ from evaluate tools
 
-    # Return the Trace (ctx.reward is set by EvalContext.__aexit__)
+    # Propagate reward from EvalContext (set in __aexit__) to returned Trace
+    if ctx.reward is not None:
+        result.reward = ctx.reward
     return result

@@ -430,22 +430,7 @@ class InteractiveMCPTester:
             console.print("\n[cyan]Disconnecting...[/cyan]")
             await self.disconnect()
 
-            # Show next steps tutorial
-            self.console.section_title("Next Steps")
-            self.console.info("🏗️  Ready to test with real agents? Run:")
-            self.console.info("    [cyan]hud build[/cyan]")
-            self.console.info("")
-            self.console.info("This will:")
-            self.console.info("  1. Build your environment image")
-            self.console.info("  2. Generate a hud.lock.yaml file")
-            self.console.info("  3. Prepare it for testing with agents")
-            self.console.info("")
-            self.console.info("Then you can:")
-            self.console.info("  • Test locally: [cyan]hud run <image>[/cyan]")
-            self.console.info("  • Push to registry: [cyan]hud push --image <registry/name>[/cyan]")
-            self.console.info("  • Use with agents via the lock file")
-
-            console.print("\n[dim]Happy testing! 🎉[/dim]")
+            self.console.info("Session ended.")
 
 
 async def run_interactive_mode(server_url: str, verbose: bool = False) -> None:

@@ -358,6 +358,27 @@ def test_evaluation_result_explicit_done_false():
 # Tests for SubScore validation
 
 
+def test_subscore_metadata_excluded_from_dump():
+    """Test SubScore.metadata is excluded from model_dump."""
+    s = SubScore(name="x", value=1.0, metadata={"k": "v"})
+    d = s.model_dump()
+    assert "metadata" not in d
+    assert s.metadata == {"k": "v"}
+
+
+def test_subscore_metadata_none_by_default():
+    """Test SubScore.metadata defaults to None."""
+    s = SubScore(name="x", value=0.5)
+    assert s.metadata is None
+
+
+def test_subscore_score_alias():
+    """Test SubScore.score returns same as .value."""
+    s = SubScore(name="x", value=0.8)
+    assert s.score == 0.8
+    assert s.score == s.value
+
+
 def test_subscore_forbids_extra_fields():
     """Test SubScore rejects extra fields."""
     import pytest

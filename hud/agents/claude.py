@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import logging
 from inspect import cleandoc
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
@@ -85,7 +86,12 @@ class ClaudeAgent(MCPAgent):
             logger.debug("Legacy fallback: detected %s as computer tool", tool.name)
             model_lower = (self.model or "").lower()
             if any(
-                fnmatch.fnmatch(model_lower, p) for p in ("claude-opus-4-5*", "claude-opus-4-6*")
+                fnmatch.fnmatch(model_lower, p)
+                for p in (
+                    "claude-opus-4-5*",
+                    "claude-opus-4-6*",
+                    "claude-sonnet-4-6*",
+                )
             ):
                 return NativeToolSpec(
                     api_type="computer_20251124",
@@ -149,15 +155,15 @@ class ClaudeAgent(MCPAgent):
 
         # these will be initialized in _convert_tools_for_claude
         self.has_computer_tool = False
-        self.tool_mapping: dict[str, str] = {}
-        self.claude_tools: list[BetaToolUnionParam] = []
-        self._required_betas: set[str] = set()
+        self.tool_mapping = {}
+        self.claude_tools = []
+        self._required_betas = set()
 
     def _on_tools_ready(self) -> None:
         """Build Claude-specific tool mappings after tools are discovered."""
         self._convert_tools_for_claude()
 
-    async def get_system_messages(self) -> list[BetaMessageParam]:
+    async def get_system_messages(self) -> list[types.ContentBlock]:
         """No system messages for Claude because applied in get_response"""
         return []
 
@@ -195,10 +201,42 @@ class ClaudeAgent(MCPAgent):
 
         return [BetaMessageParam(role="user", content=anthropic_blocks)]
 
+    @staticmethod
+    def _extract_invalid_tool_json(exc: Exception) -> str | None:
+        """Extract malformed tool JSON payload from Anthropic stream errors.
+
+        Returns None when the exception is unrelated to tool JSON parsing.
+        """
+        message = str(exc)
+        parse_error_prefix = "Unable to parse tool parameter JSON from model."
+        if parse_error_prefix not in message:
+            return None
+
+        marker = "JSON: "
+        marker_index = message.find(marker)
+        if marker_index == -1:
+            return ""
+
+        return message[marker_index + len(marker) :].strip()
+
+    @staticmethod
+    def _build_invalid_tool_json_retry_message(invalid_json: str) -> BetaMessageParam:
+        """Build a user message prompting the model to re-emit valid tool JSON."""
+        wrapped = json.dumps({"INVALID_JSON": invalid_json}, ensure_ascii=True)
+        retry_text = (
+            "Your previous tool-call arguments were invalid JSON and could not be parsed.\n"
+            "Retry the same intended tool call once with valid JSON arguments only.\n"
+            "Ensure all strings are quoted and all arrays/objects are valid JSON.\n"
+            f"Malformed payload (wrapped): {wrapped}"
+        )
+        return BetaMessageParam(
+            role="user",
+            content=[text_to_content_block(retry_text)],
+        )
+
     async def get_response(self, messages: list[BetaMessageParam]) -> AgentResponse:
         """Get response from Claude including any tool calls."""
         messages_cached = self._add_prompt_caching(messages)
-
         # betas to use - collected during tool conversion based on native specs
         # Only pass betas when non-empty; an empty list can produce an empty
         # anthropic-beta header which the API rejects.
@@ -223,21 +261,58 @@ class ClaudeAgent(MCPAgent):
                 ) from None
         else:
             # Regular Anthropic client supports .stream()
-            async with self.anthropic_client.beta.messages.stream(
-                model=self.config.model,
-                system=self.system_prompt if self.system_prompt is not None else Omit(),
-                max_tokens=self.max_tokens,
-                messages=messages_cached,
-                tools=self.claude_tools,
-                tool_choice={"type": "auto", "disable_parallel_tool_use": True},
-                betas=betas,
-            ) as stream:
-                # allow backend to accumulate message content
-                async for _ in stream:
-                    pass
-                # get final message
-                response = await stream.get_final_message()
-                messages.append(BetaMessageParam(role="assistant", content=response.content))
+            response = None
+            invalid_json_failures = 0
+            for _ in range(3):
+                messages_cached = self._add_prompt_caching(messages)
+                try:
+                    async with self.anthropic_client.beta.messages.stream(
+                        model=self.config.model,
+                        system=self.system_prompt if self.system_prompt is not None else Omit(),
+                        max_tokens=self.max_tokens,
+                        messages=messages_cached,
+                        tools=self.claude_tools,
+                        tool_choice={"type": "auto", "disable_parallel_tool_use": True},
+                        betas=betas,
+                    ) as stream:
+                        # allow backend to accumulate message content
+                        async for _ in stream:
+                            pass
+                        # get final message
+                        response = await stream.get_final_message()
+                        messages.append(
+                            BetaMessageParam(
+                                role="assistant",
+                                content=response.content,
+                            )
+                        )
+                        break
+                except ValueError as exc:
+                    invalid_json = self._extract_invalid_tool_json(exc)
+                    is_retryable = invalid_json is not None
+                    if not is_retryable:
+                        raise
+
+                    invalid_json_failures += 1
+                    if invalid_json_failures == 1:
+                        logger.warning(
+                            "Claude returned invalid streamed tool JSON; "
+                            "retrying same generation once"
+                        )
+                        continue
+
+                    if invalid_json_failures == 2:
+                        logger.warning(
+                            "Claude returned invalid streamed tool JSON twice; "
+                            "retrying once with INVALID_JSON guidance"
+                        )
+                        messages.append(self._build_invalid_tool_json_retry_message(invalid_json))
+                        continue
+
+                    raise
+
+            if response is None:
+                raise ValueError("Claude response missing after stream retries")
 
         # Process response
         result = AgentResponse(content="", tool_calls=[], done=True)

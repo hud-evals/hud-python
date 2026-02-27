@@ -356,6 +356,12 @@ class EvalContext(Environment):
             quiet=quiet,
         )
 
+        # v5 validation overrides any environment-level integration calls.
+        if task.validation is not None:
+            ctx._integration_test_calls = [
+                (call.name, call.arguments or {}) for call in task.validation
+            ]
+
         # Store task info for scenario execution
         ctx._task = task
 
@@ -396,10 +402,14 @@ class EvalContext(Environment):
         if self._task is None or self._task.scenario is None:
             return
 
-        result = await self.run_scenario_evaluate(self._task.scenario)
-        if result is not None:
-            self.evaluation_result = result
-            self.reward = result.reward
+        try:
+            result = await self.run_scenario_evaluate(self._task.scenario)
+        except Exception as e:
+            self.error = e
+            return
+
+        self.evaluation_result = result
+        self.reward = result.reward
 
     # =========================================================================
     # Summary Context - Attribute Access Control
@@ -579,11 +589,17 @@ class EvalContext(Environment):
             return
 
         try:
+            eval_result_dict = (
+                self.evaluation_result.model_dump(exclude_none=True, exclude={"info"})
+                if self.evaluation_result
+                else None
+            )
             payload = EvalExitPayload(
                 **self._build_base_payload().model_dump(),
                 reward=self.reward,
                 success=self.success,
                 error_message=error_message,
+                evaluation_result=eval_result_dict,
             )
             await make_request(
                 method="POST",
@@ -604,7 +620,8 @@ class EvalContext(Environment):
             return self
 
         # Start tracking
-        self._token = _current_trace_headers.set(self.headers)
+        if self._trace_enabled:
+            self._token = _current_trace_headers.set(self.headers)
         self._api_key_token = _current_api_key.set(self._eval_api_key)
 
         # Register trace first (environment connection can fail)
@@ -649,7 +666,8 @@ class EvalContext(Environment):
             error_msg = str(self.error)
 
         # Flush any pending telemetry spans for this trace
-        flush(self.trace_id)
+        if self._trace_enabled:
+            flush(self.trace_id)
 
         # Disconnect environment (parent class) - also runs evaluate tools
         await super().__aexit__(exc_type, exc_val, exc_tb)
@@ -714,8 +732,7 @@ class EvalContext(Environment):
 
     def _print_eval_link(self) -> None:
         """Print a nicely formatted eval link."""
-        # Skip if link printing is suppressed (e.g., parallel child traces)
-        if self._suppress_link:
+        if self._suppress_link or not self._trace_enabled:
             return
 
         from hud.eval.display import print_link
@@ -725,8 +742,7 @@ class EvalContext(Environment):
 
     def _print_single_result(self, error_msg: str | None) -> None:
         """Print a single eval result summary."""
-        # Skip if link printing is suppressed (e.g., parallel child traces)
-        if self._suppress_link:
+        if self._suppress_link or not self._trace_enabled:
             return
 
         from hud.eval.display import print_single_result

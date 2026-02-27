@@ -282,3 +282,35 @@ def create_environment(
     hud_console.command_example("hud dev --inspector")
     hud_console.info("\n3. Review the README in this preset for specific instructions.")
     hud_console.info("\n4. Customize as needed.")
+
+
+def init_command(
+    name: str = typer.Argument(None, help="Environment name (default: directory name)"),
+    directory: str = typer.Option(".", "--dir", "-d", help="Target directory"),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing files"),
+    preset: str | None = typer.Option(
+        None,
+        "--preset",
+        "-p",
+        help="Download a preset: blank, deep-research, browser, rubrics",
+    ),
+) -> None:
+    """🚀 Initialize a HUD environment.
+
+    [not dim]• Empty directory: Choose a preset interactively
+    • Existing project: Add Dockerfile.hud and hud.py
+
+    Use --preset to skip selection and download a specific template.
+
+    Examples:
+        hud init                    # Auto-detect mode
+        hud init my-env             # Initialize with custom name
+        hud init --preset browser   # Download browser preset[/not dim]
+
+    """
+    if preset:
+        create_environment(name, directory, force, preset)
+    else:
+        from hud.cli.flows.init import smart_init
+
+        smart_init(name, directory, force)

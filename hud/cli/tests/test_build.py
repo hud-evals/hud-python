@@ -60,12 +60,12 @@ class TestIncrementVersion:
     def test_increment_minor(self):
         """Test incrementing minor version."""
         assert increment_version("1.2.3", "minor") == "1.3.0"
-        assert increment_version("0.5.25", "minor") == "0.6.0"
+        assert increment_version("0.5.28", "minor") == "0.6.0"
 
     def test_increment_major(self):
         """Test incrementing major version."""
         assert increment_version("1.2.3", "major") == "2.0.0"
-        assert increment_version("0.5.25", "major") == "1.0.0"
+        assert increment_version("0.5.28", "major") == "1.0.0"
 
     def test_increment_with_v_prefix(self):
         """Test incrementing version with v prefix."""
@@ -333,14 +333,12 @@ class TestBuildEnvironment:
     @mock.patch("hud.cli.build.build_docker_image")
     @mock.patch("hud.cli.build.collect_runtime_metadata")
     @mock.patch("hud.cli.build.analyze_mcp_environment")
-    @mock.patch("hud.cli.build.save_to_registry")
     @mock.patch("hud.cli.build.get_docker_image_id")
     @mock.patch("subprocess.run")
     def test_build_environment_success(
         self,
         mock_run,
         mock_get_id,
-        mock_save_registry,
         mock_analyze,
         mock_collect_runtime,
         mock_build_docker,
@@ -415,14 +413,12 @@ ENV API_KEY
     @mock.patch("hud.cli.build.build_docker_image")
     @mock.patch("hud.cli.build.collect_runtime_metadata")
     @mock.patch("hud.cli.build.analyze_mcp_environment")
-    @mock.patch("hud.cli.build.save_to_registry")
     @mock.patch("hud.cli.build.get_docker_image_id")
     @mock.patch("subprocess.run")
     def test_build_environment_internal_tools(
         self,
         mock_run,
         mock_get_id,
-        mock_save_registry,
         mock_analyze,
         mock_collect_runtime,
         mock_build_docker,

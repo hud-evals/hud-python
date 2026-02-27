@@ -7,13 +7,14 @@ from pathlib import Path
 from typing import Any
 
 import typer
-import yaml
 
 from hud.cli.push import push_environment
-from hud.cli.utils.docker import require_docker_running
+from hud.cli.utils.api import require_api_key
+from hud.cli.utils.docker import extract_name_and_tag, require_docker_running
 from hud.cli.utils.env_check import find_environment_dir
-from hud.cli.utils.registry import extract_name_and_tag
+from hud.cli.utils.lockfile import load_lock
 from hud.datasets import load_tasks
+from hud.settings import settings
 from hud.utils.hud_console import hud_console
 
 logger = logging.getLogger(__name__)
@@ -68,10 +69,8 @@ def _ensure_pushed(
         # If Docker or login is not configured, the push function will fail and halt.
         push_environment(str(env_dir), yes=True)
 
-        # Reload lock after push
         lock_path = env_dir / "hud.lock.yaml"
-        with open(lock_path) as f:
-            lock_data = yaml.safe_load(f) or {}
+        lock_data = load_lock(lock_path)
 
     return lock_data
 
@@ -271,13 +270,7 @@ def convert_tasks_to_remote(tasks_file: str) -> str:
     # Use the same raw tasks for validation (they have mcp_config structure)
     tasks = raw_tasks
 
-    # Ensure HUD_API_KEY is available: prefer process env, else load from env_dir/.env
-    from hud.settings import settings
-
-    if not settings.api_key or not settings.api_key.strip():
-        hud_console.error("HUD_API_KEY is not set")
-        hud_console.info("Set it in your environment or run: hud set HUD_API_KEY=your-key-here")
-        raise typer.Exit(1)
+    require_api_key("convert tasks")
 
     # Check if tasks already have remote URLs
     already_remote = _validate_tasks(tasks)
@@ -304,8 +297,7 @@ def convert_tasks_to_remote(tasks_file: str) -> str:
 
     # Load lock data directly
     try:
-        with open(lock_path) as f:
-            lock_data: dict[str, Any] = yaml.safe_load(f) or {}
+        lock_data: dict[str, Any] = load_lock(lock_path)
     except Exception as e:
         hud_console.error(f"Failed to read hud.lock.yaml: {e}")
         raise typer.Exit(1) from e

@@ -302,6 +302,37 @@ class TestConnector:
         with pytest.raises(RuntimeError, match="Not connected"):
             await connector.call_tool("tool1", {})
 
+    def test_copy_clones_transport_and_config(self) -> None:
+        """copy() returns isolated transport/config objects."""
+        transport = {
+            "url": "https://mcp.hud.so/jsonrpc",
+            "headers": {"Environment-Name": "browser", "Environment-Id": "env-1"},
+        }
+        connector = Connector(
+            transport=transport,
+            config=ConnectionConfig(include=["tool1"], exclude=["tool2"]),
+            name="hud",
+            connection_type=ConnectionType.REMOTE,
+        )
+
+        copied = connector.copy()
+
+        assert copied is not connector
+        assert copied._transport is not transport
+        assert copied._transport["headers"] is not transport["headers"]
+        assert copied._transport["headers"]["Environment-Name"] == "browser"
+        assert copied._transport["headers"]["Environment-Id"] != "env-1"
+        assert copied.config is not connector.config
+        assert copied.config.include == ["tool1"]
+        assert copied.config.exclude == ["tool2"]
+
+        copied._transport["headers"]["Environment-Id"] = "env-3"
+        assert copied.config.include is not None
+        copied.config.include.append("tool3")
+
+        assert transport["headers"]["Environment-Id"] == "env-1"
+        assert connector.config.include == ["tool1"]
+
     def test_repr(self) -> None:
         """__repr__ shows useful info."""
         connector = Connector(

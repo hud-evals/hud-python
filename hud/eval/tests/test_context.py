@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -116,6 +117,54 @@ class TestEvalContext:
         assert "0.95" in repr_str
 
 
+class TestScenarioErrorPropagation:
+    """Tests for scenario evaluate errors being captured on EvalContext."""
+
+    @pytest.mark.asyncio
+    async def test_scenario_evaluate_error_sets_context_error(self) -> None:
+        """Scenario evaluate failure sets self.error on EvalContext."""
+        ctx = EvalContext(name="test-task", quiet=True)
+        # Simulate a task with a scenario
+        mock_task = MagicMock()
+        mock_task.scenario = "test-scenario"
+        ctx._task = mock_task
+
+        async def failing_evaluate(name: str):
+            raise RuntimeError("Command '['git', 'apply']' returned non-zero exit status 1.")
+
+        ctx.run_scenario_evaluate = failing_evaluate  # type: ignore[method-assign]
+
+        await ctx._run_task_scenario_evaluate()
+
+        assert ctx.error is not None
+        assert "git" in str(ctx.error)
+        assert ctx.success is False
+        assert ctx.reward is None
+
+    @pytest.mark.asyncio
+    async def test_scenario_evaluate_success_sets_reward(self) -> None:
+        """Successful scenario evaluate sets reward and evaluation_result."""
+        from hud.tools.types import EvaluationResult
+
+        ctx = EvalContext(name="test-task", quiet=True)
+        mock_task = MagicMock()
+        mock_task.scenario = "test-scenario"
+        ctx._task = mock_task
+
+        async def successful_evaluate(name: str):
+            return EvaluationResult(reward=0.85, done=True)
+
+        ctx.run_scenario_evaluate = successful_evaluate  # type: ignore[method-assign]
+
+        await ctx._run_task_scenario_evaluate()
+
+        assert ctx.error is None
+        assert ctx.success is True
+        assert ctx.reward == 0.85
+        assert ctx.evaluation_result is not None
+        assert ctx.evaluation_result.reward == 0.85
+
+
 class TestEvalContextPrompt:
     """Tests for EvalContext.prompt feature."""
 
@@ -187,3 +236,199 @@ class TestEvalContextFromEnvironment:
         assert ctx.variants == {"model": "gpt-4o"}
         assert ctx.group_id == "group-123"
         assert ctx.index == 5
+
+    def test_assigns_hud_environment_headers_per_context(self) -> None:
+        """Each EvalContext gets its own HUD environment id."""
+        from hud.environment import Environment
+        from hud.environment.connection import ConnectionConfig, ConnectionType, Connector
+
+        parent = Environment("parent-env")
+        parent_headers = {
+            "Environment-Name": "browser",
+            "Environment-Id": "parent-env-id",
+            "mcp-session-id": "parent-session-id",
+        }
+        parent._connections["hud"] = Connector(
+            transport=SimpleNamespace(url="https://mcp.hud.so/jsonrpc", headers=parent_headers),
+            config=ConnectionConfig(),
+            name="hud",
+            connection_type=ConnectionType.REMOTE,
+        )
+
+        ctx_a = EvalContext.from_environment(parent, name="task-a", trace_id="trace-a")
+        ctx_b = EvalContext.from_environment(parent, name="task-b", trace_id="trace-b")
+
+        headers_a = ctx_a._connections["hud"]._transport.headers
+        headers_b = ctx_b._connections["hud"]._transport.headers
+
+        assert headers_a["Environment-Name"] == "browser"
+        assert headers_b["Environment-Name"] == "browser"
+        assert headers_a["Environment-Id"] != "parent-env-id"
+        assert headers_b["Environment-Id"] != "parent-env-id"
+        assert headers_a["Environment-Id"] != headers_b["Environment-Id"]
+
+        assert headers_a is not headers_b
+        assert parent_headers["Environment-Id"] == "parent-env-id"
+        assert parent_headers["mcp-session-id"] == "parent-session-id"
+
+    def test_does_not_rewrite_non_hud_headers(self) -> None:
+        """Non-HUD MCP connectors keep their existing env/session headers."""
+        from hud.environment import Environment
+        from hud.environment.connection import ConnectionConfig, ConnectionType, Connector
+
+        parent = Environment("parent-env")
+        original_headers = {
+            "Environment-Name": "browser",
+            "Environment-Id": "existing-env-id",
+            "mcp-session-id": "existing-session-id",
+        }
+        parent._connections["external"] = Connector(
+            transport=SimpleNamespace(url="https://example.com/mcp", headers=original_headers),
+            config=ConnectionConfig(),
+            name="external",
+            connection_type=ConnectionType.REMOTE,
+        )
+
+        ctx = EvalContext.from_environment(parent, name="task-a", trace_id="trace-a")
+        copied_headers = ctx._connections["external"]._transport.headers
+
+        assert copied_headers["Environment-Id"] == "existing-env-id"
+        assert copied_headers["mcp-session-id"] == "existing-session-id"
+
+
+class TestEvalContextFromTask:
+    """Tests for EvalContext.from_task factory."""
+
+    def test_v5_validation_populates_integration_calls(self) -> None:
+        """Task.validation is mapped to integration test calls for replay."""
+        from hud.environment import Environment
+        from hud.eval.task import Task
+        from hud.types import MCPToolCall
+
+        env = Environment("test-env")
+        validation_calls = [
+            MCPToolCall(name="tool_a", arguments={"x": 1}),
+            MCPToolCall(name="tool_b", arguments={"y": "ok"}),
+        ]
+        task = Task(
+            env=env,
+            scenario="demo",
+            args={},
+            validation=validation_calls,
+        )
+
+        ctx = EvalContext.from_task(task)
+        assert ctx._integration_test_calls == [
+            ("tool_a", {"x": 1}),
+            ("tool_b", {"y": "ok"}),
+        ]
+
+    def test_v5_validation_overrides_environment_integration_calls(self) -> None:
+        """Task.validation takes precedence over env-level integration calls."""
+        from hud.environment import Environment
+        from hud.eval.task import Task
+        from hud.types import MCPToolCall
+
+        env = Environment("test-env")
+        env._integration_test_calls = [("old_tool", {"stale": True})]
+
+        task = Task(
+            env=env,
+            scenario="demo",
+            args={},
+            validation=[MCPToolCall(name="new_tool", arguments={"fresh": True})],
+        )
+
+        ctx = EvalContext.from_task(task)
+        assert ctx._integration_test_calls == [("new_tool", {"fresh": True})]
+
+    def test_v5_empty_validation_clears_environment_integration_calls(self) -> None:
+        """Task.validation=[] still overrides env-level integration calls."""
+        from hud.environment import Environment
+        from hud.eval.task import Task
+
+        env = Environment("test-env")
+        env._integration_test_calls = [("old_tool", {"stale": True})]
+
+        task = Task(
+            env=env,
+            scenario="demo",
+            args={},
+            validation=[],
+        )
+
+        ctx = EvalContext.from_task(task)
+
+        assert ctx._integration_test_calls == []
+
+    def test_v4_integration_test_tool_remains_supported(self) -> None:
+        """Legacy integration_test_tool still populates integration calls."""
+        from hud.eval.task import Task
+
+        task = Task.from_v4(
+            {
+                "prompt": "test",
+                "mcp_config": {"server": {"url": "http://localhost"}},
+                "evaluate_tool": {"name": "check", "arguments": {}},
+                "integration_test_tool": [
+                    {"name": "legacy_tool", "arguments": {"v": 1}},
+                ],
+            }
+        )
+
+        ctx = EvalContext.from_task(task)
+        assert ctx._integration_test_calls == [("legacy_tool", {"v": 1})]
+
+    def test_v5_validation_replays_with_integration_runner(self) -> None:
+        """IntegrationTestRunner executes v5 Task.validation calls via EvalContext.from_task."""
+        import asyncio
+
+        from mcp import types as mcp_types
+
+        from hud.agents.misc import IntegrationTestRunner
+        from hud.environment import Environment
+        from hud.eval.task import Task
+        from hud.types import MCPToolCall, MCPToolResult
+
+        executed_calls: list[tuple[str, dict[str, object]]] = []
+
+        async def _run() -> None:
+            env = Environment("test-env")
+            validation_calls = [
+                MCPToolCall(name="tool_a", arguments={"x": 1}),
+                MCPToolCall(name="tool_b", arguments={"y": "ok"}),
+            ]
+            task = Task(
+                env=env,
+                scenario="demo",
+                args={},
+                validation=validation_calls,
+            )
+
+            ctx = EvalContext.from_task(task)
+
+            async def fake_call_tool(call, /, **kwargs):
+                if isinstance(call, tuple):
+                    name = str(call[0])
+                    arguments = dict(call[1]) if len(call) > 1 else {}
+                else:
+                    name = str(call)
+                    arguments = {}
+                executed_calls.append((name, arguments))
+                return MCPToolResult(
+                    content=[mcp_types.TextContent(type="text", text="ok")],
+                    isError=False,
+                )
+
+            ctx.call_tool = fake_call_tool  # type: ignore[method-assign]
+
+            runner = IntegrationTestRunner.create()
+            result = await runner.run(ctx)
+            assert result.done is True
+
+        asyncio.run(_run())
+
+        assert executed_calls == [
+            ("tool_a", {"x": 1}),
+            ("tool_b", {"y": "ok"}),
+        ]

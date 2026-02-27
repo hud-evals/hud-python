@@ -26,6 +26,7 @@ from typing import NamedTuple
 
 import httpx
 from packaging import version
+from rich.markup import escape
 
 from hud.utils.hud_console import HUDConsole
 
@@ -241,16 +242,12 @@ def display_update_prompt(console: HUDConsole | None = None) -> None:
             else:
                 upgrade_cmd = "uv tool upgrade hud-python"
 
-            # Create update message
-            update_msg = (
-                f"🆕 A new version of hud-python is available: "
-                f"[bold cyan]{info.latest}[/bold cyan] "
-                f"(current: [dim]{info.current}[/dim])\n"
-                f"   Run: [bold yellow]{upgrade_cmd}[/bold yellow] to update"
+            console.print(
+                f"[yellow]🆕 A new version of hud-python is available: "
+                f"[bold cyan]{escape(info.latest)}[/bold cyan] "
+                f"(current: [dim]{escape(info.current)}[/dim])\n"
+                f"   Run: [bold yellow]{escape(upgrade_cmd)}[/bold yellow] to update[/yellow]"
             )
-
-            # Display using console info
-            console.info(f"[yellow]{update_msg}[/yellow]")
     except Exception:  # noqa: S110
         # Never let version checking disrupt the user's workflow
         pass

@@ -519,16 +519,22 @@ class MCPServer(FastMCP):
                 )
 
             new_key = f"{prefix}_{key}" if prefix else key
+            if prefix:
+                tool = tool.model_copy(update={"name": new_key})
             self._tool_manager._tools[new_key] = tool
 
         # Import resources directly
         for key, resource in router._resource_manager._resources.items():
             new_key = f"{prefix}_{key}" if prefix else key
+            if prefix:
+                resource = resource.model_copy(update={"name": new_key})
             self._resource_manager._resources[new_key] = resource
 
         # Import prompts directly
         for key, prompt in router._prompt_manager._prompts.items():
             new_key = f"{prefix}_{key}" if prefix else key
+            if prefix:
+                prompt = prompt.model_copy(update={"name": new_key})
             self._prompt_manager._prompts[new_key] = prompt
 
     def _get_docker_logs(
@@ -569,7 +575,7 @@ class MCPServer(FastMCP):
 
         try:
             # Run docker logs to get output
-            result = subprocess.run(  # noqa: S603
+            result = subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

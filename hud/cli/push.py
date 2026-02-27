@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from urllib.parse import quote
 
-import requests
+import httpx
 import typer
 import yaml
 
@@ -15,7 +15,7 @@ from hud.cli.utils.env_check import ensure_built
 from hud.utils.hud_console import HUDConsole
 
 
-def _get_response_text(response: requests.Response) -> str:
+def _get_response_text(response: httpx.Response) -> str:
     try:
         return response.json().get("detail", "No detail available")
     except Exception:
@@ -71,7 +71,7 @@ def get_docker_username() -> str | None:
                         # Try to get credentials from helper
                         helper = config["credsStore"]
                         try:
-                            result = subprocess.run(  # noqa: S603
+                            result = subprocess.run(
                                 [f"docker-credential-{helper}", "list"],
                                 capture_output=True,
                                 text=True,
@@ -81,7 +81,7 @@ def get_docker_username() -> str | None:
                                 for url in creds:
                                     if "docker.io" in url:
                                         # Try to get the username
-                                        get_result = subprocess.run(  # noqa: S603
+                                        get_result = subprocess.run(
                                             [f"docker-credential-{helper}", "get"],
                                             input=url,
                                             capture_output=True,
@@ -104,7 +104,7 @@ def get_docker_username() -> str | None:
 def get_docker_image_labels(image: str) -> dict:
     """Get labels from a Docker image."""
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             ["docker", "inspect", "--format", "{{json .Config.Labels}}", image],  # noqa: S607
             capture_output=True,
             text=True,
@@ -128,9 +128,10 @@ def push_environment(
     hud_console.header("HUD Environment Push")
 
     # Import settings lazily after any environment setup
+    from hud.cli.utils.api import require_api_key
+    from hud.cli.utils.lockfile import LOCK_FILENAME, get_local_image, load_lock
     from hud.settings import settings
 
-    # Find hud.lock.yaml in specified directory
     env_dir = Path(directory)
 
     # Ensure environment is built and up-to-date (hash-based); interactive prompt
@@ -140,30 +141,17 @@ def push_environment(
         raise
     except Exception as e:
         HUDConsole().debug(f"Skipping pre-push build check: {e}")
-    lock_path = env_dir / "hud.lock.yaml"
 
+    lock_path = env_dir / LOCK_FILENAME
     if not lock_path.exists():
-        hud_console.error(f"No hud.lock.yaml found in {directory}")
+        hud_console.error(f"No {LOCK_FILENAME} found in {directory}")
         hud_console.info("Run 'hud build' first to generate a lock file")
         raise typer.Exit(1)
 
-    # Check for API key first
-    if not settings.api_key:
-        hud_console.error("No HUD API key found")
-        hud_console.warning("A HUD API key is required to push environments.")
-        hud_console.info("\nTo get started:")
-        hud_console.info("1. Get your API key at: https://hud.ai/settings")
-        hud_console.info("Set it in your environment or run: hud set HUD_API_KEY=your-key-here")
-        hud_console.command_example("hud push", "Try again")
-        hud_console.info("")
-        raise typer.Exit(1)
+    require_api_key("push environments")
 
-    # Load lock file
-    with open(lock_path) as f:
-        lock_data = yaml.safe_load(f)
-
-    # Handle both old and new lock file formats
-    local_image = lock_data.get("images", {}).get("local") or lock_data.get("image", "")
+    lock_data = load_lock(lock_path)
+    local_image = get_local_image(lock_data)
 
     # Get internal version from lock file
     internal_version = lock_data.get("build", {}).get("version", None)
@@ -173,19 +161,10 @@ def push_environment(
         # Check if user is logged in
         username = get_docker_username()
         if username:
-            # Extract image name from lock file (handle @sha256:... format)
-            base_image = local_image.split("@")[0] if "@" in local_image else local_image
+            from hud.cli.utils.docker import extract_name_and_tag
 
-            if ":" in base_image:
-                base_name = base_image.split(":")[0]
-                current_tag = base_image.split(":")[1]
-            else:
-                base_name = base_image
-                current_tag = "latest"
-
-            # Remove any existing registry prefix
-            if "/" in base_name:
-                base_name = base_name.split("/")[-1]
+            full_name, current_tag = extract_name_and_tag(local_image)
+            base_name = full_name.split("/")[-1] if "/" in full_name else full_name
 
             # Use provided tag, or internal version, or current tag as fallback
             if tag:
@@ -254,7 +233,7 @@ def push_environment(
     image_to_push = None
     if version_tag:
         try:
-            subprocess.run(["docker", "inspect", version_tag], capture_output=True, check=True)  # noqa: S603, S607
+            subprocess.run(["docker", "inspect", version_tag], capture_output=True, check=True)  # noqa: S607
             image_to_push = version_tag
             hud_console.info(f"Found version-tagged image: {version_tag}")
         except subprocess.CalledProcessError:
@@ -262,7 +241,7 @@ def push_environment(
 
     if not image_to_push:
         try:
-            subprocess.run(["docker", "inspect", local_tag], capture_output=True, check=True)  # noqa: S603, S607
+            subprocess.run(["docker", "inspect", local_tag], capture_output=True, check=True)  # noqa: S607
             image_to_push = local_tag
         except subprocess.CalledProcessError:
             hud_console.error(f"Local image not found: {local_tag}")
@@ -285,13 +264,13 @@ def push_environment(
 
     # Tag the image for push
     hud_console.progress_message(f"Tagging {image_to_push} as {image}")
-    subprocess.run(["docker", "tag", image_to_push, image], check=True)  # noqa: S603, S607
+    subprocess.run(["docker", "tag", image_to_push, image], check=True)  # noqa: S607
 
     # Push the image
     hud_console.progress_message(f"Pushing {image} to registry...")
 
     # Show push output (filtered for cleaner display)
-    process = subprocess.Popen(  # noqa: S603
+    process = subprocess.Popen(
         ["docker", "push", image],  # noqa: S607
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -329,7 +308,7 @@ def push_environment(
         raise typer.Exit(1)
 
     # Get the digest of the pushed image
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         ["docker", "inspect", "--format", "{{index .RepoDigests 0}}", image],  # noqa: S607
         capture_output=True,
         text=True,
@@ -435,15 +414,12 @@ def push_environment(
         if github_url:
             payload["github_url"] = github_url
 
-        headers = {"Authorization": f"Bearer {settings.api_key}"}
+        from hud.cli.utils.api import hud_headers
 
-        response = requests.post(registry_url, json=payload, headers=headers, timeout=10)
+        response = httpx.post(registry_url, json=payload, headers=hud_headers(), timeout=10)
 
         if response.status_code in [200, 201]:
             hud_console.success("Metadata uploaded to HUD registry")
-            hud_console.info("Others can now pull with:")
-            hud_console.command_example(f"hud pull {name_with_tag}")
-            hud_console.info("")
         elif response.status_code == 401:
             hud_console.error("Authentication failed")
             hud_console.info("Check your HUD_API_KEY is valid")
@@ -459,11 +435,11 @@ def push_environment(
             hud_console.warning(f"Could not upload to registry: {response.status_code}")
             hud_console.warning(_get_response_text(response))
             hud_console.info("Share hud.lock.yaml manually\n")
-    except requests.exceptions.Timeout:
+    except httpx.TimeoutException:
         hud_console.warning("Registry upload timed out")
         hud_console.info("The registry might be slow or unavailable")
         hud_console.info("Your Docker push succeeded - share hud.lock.yaml manually")
-    except requests.exceptions.ConnectionError:
+    except httpx.ConnectError:
         hud_console.warning("Could not connect to HUD registry")
         hud_console.info("Check your internet connection")
         hud_console.info("Your Docker push succeeded - share hud.lock.yaml manually")
@@ -471,34 +447,35 @@ def push_environment(
         hud_console.warning(f"Registry upload failed: {e}")
         hud_console.info("Share hud.lock.yaml manually")
 
-    # Show usage examples
-    hud_console.section_title("What's Next?")
-
-    hud_console.info("Test locally:")
-    hud_console.command_example(f"hud run {image}")
-    hud_console.info("")
-    hud_console.info("Share environment:")
-    hud_console.info(
-        "  Share the updated hud.lock.yaml for others to reproduce your exact environment"
-    )
-
-    # TODO: Upload lock file to HUD registry
     if sign:
         hud_console.warning("Signing not yet implemented")
 
 
 def push_command(
-    directory: str = ".",
-    image: str | None = None,
-    tag: str | None = None,
-    sign: bool = False,
-    yes: bool = False,
-    verbose: bool = False,
+    directory: str = typer.Argument(".", help="Environment directory containing hud.lock.yaml"),
+    image: str | None = typer.Option(None, "--image", "-i", help="Override registry image name"),
+    tag: str | None = typer.Option(
+        None, "--tag", "-t", help="Override tag (e.g., 'v1.0', 'latest')"
+    ),
+    sign: bool = typer.Option(
+        False, "--sign", help="Sign the image with cosign (not yet implemented)"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
 ) -> None:
-    """Push HUD environment to registry."""
+    """📤 Push HUD environment to registry.
+
+    [not dim]Reads hud.lock.yaml from the directory and pushes to registry.
+    Auto-detects your Docker username if --image not specified.
+
+    Examples:
+        hud push                     # Push with auto-detected name
+        hud push --tag v1.0          # Push with specific tag
+        hud push . --image myuser/myenv:v1.0
+        hud push --yes               # Skip confirmation[/not dim]
+    """
     hud_console = HUDConsole()
 
-    # Deprecation warning
     hud_console.warning(
         "hud push is deprecated for platform builds. Use 'hud deploy' instead for remote builds."
     )

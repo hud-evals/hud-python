@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
+import functools
 import inspect
 import json
 import logging
-from typing import TYPE_CHECKING, Any, get_type_hints
+from typing import TYPE_CHECKING, Any, Generic, ParamSpec, get_type_hints
 
 from mcp.types import TextContent
 from pydantic import BaseModel, ConfigDict
@@ -19,9 +21,90 @@ if TYPE_CHECKING:
     from fastmcp.resources import ResourceManager
     from fastmcp.tools import ToolManager
 
-__all__ = ["ScenarioMixin", "ScenarioSession"]
+    from hud.eval.task import Task
+
+__all__ = ["ScenarioHandle", "ScenarioMixin", "ScenarioSession"]
+
+P = ParamSpec("P")
 
 logger = logging.getLogger(__name__)
+
+
+class ScenarioHandle(Generic[P]):
+    """Wraps a scenario function, providing a typed ``.task()`` factory.
+
+    Returned by ``@env.scenario``.  Behaves as the original async-generator
+    function (``__call__`` delegates), but adds ``.task()`` which creates a
+    :class:`~hud.eval.task.Task` whose keyword arguments are type-checked
+    against the scenario function's signature via ``ParamSpec``.
+
+    Example::
+
+        @env.scenario(name="fix_bug")
+        async def fix_bug(difficulty: int = 1, hint: str | None = None): ...
+
+
+        # IDE autocomplete + Pyright type-checking on scenario kwargs:
+        task = fix_bug.task(difficulty=3, hint="look at line 42")
+        task.validation = [{"name": "bash", "arguments": {"command": "..."}}]
+    """
+
+    def __init__(
+        self,
+        fn: Any,
+        env: Any,
+        scenario_name: str,
+    ) -> None:
+        self._fn = fn
+        self._env = env
+        self._env_name: str = env.name
+        self._scenario_name = scenario_name
+        self._sig = inspect.signature(fn)
+        functools.update_wrapper(self, fn)
+
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> AsyncGenerator[Any, None]:
+        return self._fn(*args, **kwargs)
+
+    def task(self, *args: P.args, **kwargs: P.kwargs) -> Task:
+        """Create a :class:`~hud.eval.task.Task` with typed scenario kwargs.
+
+        Positional and keyword arguments match the scenario function signature.
+        The Task's ``env`` defaults to this scenario's environment name;
+        override via attribute assignment::
+
+            task = my_scenario.task(difficulty=3)
+            task.env = {"name": "custom-image-name"}
+            task.validation = [...]
+
+        Raises:
+            TypeError: If any arg is not JSON-serializable (required for
+                Task transport over MCP / platform API).
+        """
+        from hud.eval.task import Task
+
+        bound = self._sig.bind(*args, **kwargs)
+        return Task(
+            env=self._env,
+            scenario=self._scenario_name,
+            args=dict(bound.arguments),
+        )
+
+
+def _validate_scenario_params(fn_name: str, sig: inspect.Signature, hints: dict[str, Any]) -> None:
+    """Validate that all scenario parameters have JSON-serializable types."""
+    from pydantic import TypeAdapter
+
+    for p in sig.parameters.values():
+        annotation = hints.get(p.name, inspect.Parameter.empty)
+        if annotation is inspect.Parameter.empty or annotation is Any:
+            continue
+        try:
+            TypeAdapter(annotation).json_schema()
+        except Exception:
+            raise TypeError(
+                f"Scenario '{fn_name}' parameter '{p.name}' has type "
+                f"'{annotation}' which is not JSON-serializable. "
+            ) from None
 
 
 def _normalize_prompt_yield(value: Any) -> list[str]:
@@ -113,6 +196,8 @@ class ScenarioSession(BaseModel):
     resource_uri: str  # Full URI for reading evaluation result
     generator: Any | None = None  # AsyncGenerator (if local) - Any to avoid validation issues
     answer: str | None = None  # Submitted answer
+    exclude_tools: list[str] | None = None  # fnmatch patterns to hide from agent
+    exclude_sources: list[str] | None = None  # Connection names to hide from agent
 
 
 class ScenarioMixin:
@@ -164,6 +249,9 @@ class ScenarioMixin:
     # Scenario function registry
     _scenarios: dict[str, Callable[..., AsyncGenerator[Any, Any]]]
 
+    # Per-scenario tool exclusions: scenario_name -> (exclude_tools, exclude_sources)
+    _scenario_exclusions: dict[str, tuple[list[str], list[str]]]
+
     # Single active scenario session - used for BOTH:
     # - Client-side: when we run scenarios (local or remote)
     # - Server-side: when external clients call our scenarios via MCP
@@ -173,6 +261,7 @@ class ScenarioMixin:
     def _init_scenarios(self) -> None:
         """Initialize scenario state. Called from Environment.__init__."""
         self._scenarios = {}
+        self._scenario_exclusions = {}
         self._active_session = None
 
         # Register _hud_submit tool (underscore = hidden from agent)
@@ -308,6 +397,7 @@ class ScenarioMixin:
             prompt_text = prompt_parts[0] if len(prompt_parts) == 1 else "\n".join(prompt_parts)
 
             # Create session for local scenario
+            excl = self._scenario_exclusions.get(local_name)
             self._active_session = ScenarioSession(
                 local_name=local_name,
                 full_name=scenario_name,
@@ -315,6 +405,8 @@ class ScenarioMixin:
                 connection_name=None,
                 resource_uri=f"{self.name}:{local_name}",
                 generator=gen,
+                exclude_tools=excl[0] if excl else None,
+                exclude_sources=excl[1] if excl else None,
             )
 
             logger.debug(
@@ -349,40 +441,34 @@ class ScenarioMixin:
                     conn_name or "(not found in router)",
                 )
             except Exception as e:
-                # Fetch available scenarios for error context
-                try:
-                    prompts = await self.list_prompts()  # type: ignore[attr-defined]
-                    scenario_prompts = [p.name for p in prompts if ":" in p.name]
-                    available = "\n    ".join(scenario_prompts) if scenario_prompts else "(none)"
-                except Exception:
-                    available = "(could not fetch)"
-                    scenario_prompts = []
+                prompts: list[Any] | None = None
 
-                original_error = str(e)
-                if prompt_id in scenario_prompts:
+                # Fetch available scenarios for error context
+                with contextlib.suppress(Exception):
+                    prompts = await self.list_prompts()  # type: ignore[attr-defined]
+
+                if prompts is None:
+                    raise
+
+                scenario_prompts = [p.name for p in prompts if ":" in p.name]
+                if prompt_id not in scenario_prompts:
+                    available = "\n    ".join(scenario_prompts) if scenario_prompts else "(none)"
                     raise ValueError(
-                        f"⚠️ ERROR: Scenario '{prompt_id}' exists but failed to execute.\n\n"
-                        f"The scenario was found but encountered an error during setup:\n"
-                        f"  {original_error}\n\n"
-                        f"This could be caused by:\n"
-                        f"  - Missing or invalid scenario arguments\n"
-                        f"  - An error in the scenario's setup function\n"
-                        f"  - Connection or serialization issues\n\n"
-                        f"Check the scenario definition and required arguments."
+                        f"⚠️ ERROR: Scenario not found.\n\n"
+                        f"Scenario IDs have the format 'environment_name:scenario_name'.\n"
+                        f"If you only specify 'scenario_name', the SDK uses your task's env name "
+                        f"as the prefix.\n"
+                        f"This won't work if the HUD environment was declared with "
+                        f"a different name.\n\n"
+                        f"  You requested: {scenario_name}\n"
+                        f"  SDK looked for: {prompt_id}\n"
+                        f"\n"
+                        f"Available scenarios:\n    {available}\n\n"
+                        f"Fix: Use one of the scenario IDs above in your task JSON."
                     ) from e
 
-                raise ValueError(
-                    f"⚠️ ERROR: Scenario not found.\n\n"
-                    f"Scenario IDs have the format 'environment_name:scenario_name'.\n"
-                    f"If you only specify 'scenario_name', the SDK uses your task's env name "
-                    f"as the prefix.\n"
-                    f"This won't work if the HUD environment was declared with a different name."
-                    f"\n\n"
-                    f"  You requested: {scenario_name}\n"
-                    f"  SDK looked for: {prompt_id}\n\n"
-                    f"Available scenarios:\n    {available}\n\n"
-                    f"Fix: Use one of the scenario IDs above in your task JSON."
-                ) from e
+                # Prompt exists remotely; original setup/rendering error.
+                raise
 
             # Extract prompt text from response
             prompt_text: str | None = None
@@ -401,6 +487,11 @@ class ScenarioMixin:
                     f"Check that the scenario returns a valid prompt string."
                 )
 
+            # Extract tool exclusion from remote prompt metadata if present
+            remote_meta = getattr(result, "meta", None) or {}
+            exclude_tools_meta = remote_meta.get("exclude_tools")
+            exclude_sources_meta = remote_meta.get("exclude_sources")
+
             # Create session for remote scenario - use router's connection info
             self._active_session = ScenarioSession(
                 local_name=local_name,
@@ -409,6 +500,8 @@ class ScenarioMixin:
                 connection_name=conn_name,
                 resource_uri=prompt_id,  # Resource has same URI as prompt
                 generator=None,
+                exclude_tools=exclude_tools_meta,
+                exclude_sources=exclude_sources_meta,
             )
 
             logger.debug(
@@ -418,7 +511,7 @@ class ScenarioMixin:
             )
             return prompt_text
 
-    async def run_scenario_evaluate(self, scenario_name: str) -> EvaluationResult | None:
+    async def run_scenario_evaluate(self, scenario_name: str) -> EvaluationResult:
         """Run a scenario's evaluate phase and return the evaluation result.
 
         Uses _active_session created by run_scenario_setup():
@@ -430,11 +523,12 @@ class ScenarioMixin:
 
         Returns:
             EvaluationResult with reward, done, content, subscores, etc.
-            Returns None if evaluation failed.
+
+        Raises:
+            ValueError: If no active session or evaluation fails.
         """
         if not self._active_session:
-            logger.warning("No active session for scenario '%s'", scenario_name)
-            return None
+            raise ValueError(f"No active session for scenario '{scenario_name}'. ")
 
         session = self._active_session
         self._active_session = None  # Clear after use
@@ -442,8 +536,7 @@ class ScenarioMixin:
         if session.is_local:
             # Local scenario - use generator
             if not session.generator:
-                logger.warning("Local scenario '%s' has no generator", session.local_name)
-                return None
+                raise ValueError(f"Local scenario '{session.local_name}' has no generator")
 
             answer = session.answer
             try:
@@ -478,17 +571,26 @@ class ScenarioMixin:
                         )
                         return result
             except Exception as e:
+                # Clean up duplicated "Error reading resource '...': " prefixes
+                # from fastmcp wrapping the error on both server and client side
+                error_str = str(e)
+                resource_prefix = f"Error reading resource '{session.resource_uri}': "
+                if error_str.startswith(resource_prefix):
+                    error_str = error_str[len(resource_prefix) :]
                 logger.warning("Failed to get scenario result from %s: %s", session.resource_uri, e)
-            return None
+                raise ValueError(error_str) from e
+            raise ValueError("Remote scenario returned empty or unparseable result")
 
     def scenario(
         self,
         name: str | None = None,
         description: str | None = None,
         required_env_vars: list[str] | None = None,
+        exclude_tools: list[str] | None = None,
+        exclude_sources: list[str] | None = None,
     ) -> Callable[
-        [Callable[..., AsyncGenerator[Any, None]]],
-        Callable[..., AsyncGenerator[Any, None]],
+        [Callable[P, AsyncGenerator[Any, None]]],
+        ScenarioHandle[P],
     ]:
         """Decorator to register a scenario with setup and evaluate phases.
 
@@ -503,6 +605,11 @@ class ScenarioMixin:
             required_env_vars: Optional list of environment variable names this scenario requires.
                 These are used by the HUD platform to check if users have configured the
                 necessary API keys/credentials before running this specific scenario.
+            exclude_tools: Optional fnmatch patterns for tool names to hide from the agent
+                when this scenario is active (e.g. ``["browser_*", "screenshot"]``).
+                The environment can still call excluded tools in its own code.
+            exclude_sources: Optional connection/hub names whose tools should be hidden
+                from the agent (e.g. ``["browser"]``).
 
         Example:
             @env.scenario(required_env_vars=["OPENAI_API_KEY"])
@@ -518,8 +625,8 @@ class ScenarioMixin:
         """
 
         def decorator(
-            fn: Callable[..., AsyncGenerator[Any, None]],
-        ) -> Callable[..., AsyncGenerator[Any, None]]:
+            fn: Callable[P, AsyncGenerator[Any, None]],
+        ) -> ScenarioHandle[P]:
             scenario_name = name or fn.__name__
 
             # Validate scenario name - colons are reserved as env:scenario separator
@@ -546,6 +653,12 @@ class ScenarioMixin:
 
             # Store the generator function
             self._scenarios[scenario_name] = fn
+
+            if exclude_tools or exclude_sources:
+                self._scenario_exclusions[scenario_name] = (
+                    exclude_tools or [],
+                    exclude_sources or [],
+                )
 
             # Get function signature for prompt arguments with type info
             sig = inspect.signature(fn)
@@ -603,6 +716,8 @@ class ScenarioMixin:
                     for p in sig.parameters.values()
                     if p.annotation is not inspect.Parameter.empty
                 }
+
+            _validate_scenario_params(scenario_name, sig, param_annotations)
 
             async def prompt_handler(**handler_args: Any) -> list[str]:
                 from pydantic import TypeAdapter
@@ -699,6 +814,10 @@ class ScenarioMixin:
                 scenario_meta["arguments"] = prompt_args
             if required_env_vars:
                 scenario_meta["required_env_vars"] = required_env_vars
+            if exclude_tools:
+                scenario_meta["exclude_tools"] = exclude_tools
+            if exclude_sources:
+                scenario_meta["exclude_sources"] = exclude_sources
 
             prompt = FunctionPrompt(
                 name=scenario_id,
@@ -716,9 +835,6 @@ class ScenarioMixin:
             async def resource_handler() -> str:
                 # Delegate to run_scenario_evaluate (consolidates client/server logic)
                 result = await scenario_self.run_scenario_evaluate(scenario_name_ref)
-
-                if result is None:
-                    raise ValueError(f"Scenario '{scenario_name_ref}' evaluation failed")
 
                 # Serialize full EvaluationResult (includes reward, done, content, subscores)
                 # Use model_dump to get all fields, excluding None values for cleaner output
@@ -743,6 +859,6 @@ class ScenarioMixin:
                 scenario_id,
             )
 
-            return fn
+            return ScenarioHandle(fn=fn, env=self, scenario_name=scenario_name)
 
         return decorator

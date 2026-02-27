@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import typer
+from rich.markup import escape
 
 from hud.utils.hud_console import HUDConsole
 
@@ -49,41 +50,41 @@ def show_dev_server_info(
 
     # Server section
     hud_console.section_title("Server")
-    hud_console.info(f"{hud_console.sym.ITEM} {server_name}")
+    hud_console.console.print(f"{hud_console.sym.ITEM} {escape(server_name)}", highlight=False)
+    _print = lambda msg: hud_console.console.print(msg, highlight=False)
     if transport == "http":
-        hud_console.info(f"{hud_console.sym.ITEM} http://localhost:{port}/mcp")
+        _print(f"{hud_console.sym.ITEM} http://localhost:{port}/mcp")
     else:
-        hud_console.info(f"{hud_console.sym.ITEM} (stdio)")
+        _print(f"{hud_console.sym.ITEM} (stdio)")
 
     # Quick Links (only for HTTP mode)
     if transport == "http":
         hud_console.section_title("Quick Links")
-        hud_console.info(f"{hud_console.sym.ITEM} Docs: http://localhost:{port}/docs")
-        hud_console.info(f"{hud_console.sym.ITEM} Cursor:")
+        _print(f"{hud_console.sym.ITEM} Docs: http://localhost:{port}/docs")
+        _print(f"{hud_console.sym.ITEM} Cursor:")
         # Display the Cursor link on its own line to prevent wrapping
         hud_console.link(cursor_deeplink)
 
         # Show eval endpoint if in Docker mode
         if docker_mode:
-            hud_console.info(
-                f"{hud_console.sym.ITEM} Eval API: http://localhost:{port}/eval (POST)"
-            )
+            _print(f"{hud_console.sym.ITEM} Eval API: http://localhost:{port}/eval (POST)")
 
         # Show debugging URLs from telemetry
         if telemetry:
             if "live_url" in telemetry:
-                hud_console.info(f"{hud_console.sym.ITEM} Live URL: {telemetry['live_url']}")
+                url = escape(telemetry["live_url"])
+                _print(f"{hud_console.sym.ITEM} Live URL: {url}")
             if "vnc_url" in telemetry:
-                hud_console.info(f"{hud_console.sym.ITEM} VNC URL: {telemetry['vnc_url']}")
+                _print(f"{hud_console.sym.ITEM} VNC URL: {escape(telemetry['vnc_url'])}")
             if "cdp_url" in telemetry:
-                hud_console.info(f"{hud_console.sym.ITEM} CDP URL: {telemetry['cdp_url']}")
+                _print(f"{hud_console.sym.ITEM} CDP URL: {escape(telemetry['cdp_url'])}")
 
         # Check for VNC (browser environment)
         if env_dir and (env_dir / "environment" / "server.py").exists():
             try:
                 content = (env_dir / "environment" / "server.py").read_text()
                 if "x11vnc" in content.lower() or "vnc" in content.lower():
-                    hud_console.info(f"{hud_console.sym.ITEM} VNC: http://localhost:8080/vnc.html")
+                    _print(f"{hud_console.sym.ITEM} VNC: http://localhost:8080/vnc.html")
             except Exception:  # noqa: S110
                 pass
 
@@ -91,13 +92,13 @@ def show_dev_server_info(
         if inspector or interactive:
             hud_console.info("")
             if inspector:
-                hud_console.info(f"{hud_console.sym.SUCCESS} Inspector launching...")
+                hud_console.print(f"{hud_console.sym.SUCCESS} Inspector launching...")
             if interactive:
-                hud_console.info(f"{hud_console.sym.SUCCESS} Interactive mode enabled")
+                hud_console.print(f"{hud_console.sym.SUCCESS} Interactive mode enabled")
 
     hud_console.info("")
     if hot_reload_enabled:
-        hud_console.info(f"{hud_console.sym.SUCCESS} Hot-reload enabled")
+        hud_console.print(f"{hud_console.sym.SUCCESS} Hot-reload enabled")
     else:
         hud_console.info("Hot-reload disabled")
         hud_console.dim_info("Tip", "Pass --watch/-w to enable hot-reload")
@@ -230,7 +231,7 @@ async def run_mcp_module(
         hud_console.error(f"Failed to import module '{module_name}'")
         hud_console.info(f"Error: {e}")
         hud_console.info("")
-        hud_console.info("[bold cyan]Troubleshooting:[/bold cyan]")
+        hud_console.print("[bold cyan]Troubleshooting:[/bold cyan]")
         hud_console.info("  • Verify module exists and is importable")
         hud_console.info("  • Check for __init__.py in module directory")
         hud_console.info("  • Check for import errors in the module")
@@ -238,7 +239,7 @@ async def run_mcp_module(
             import traceback
 
             hud_console.info("")
-            hud_console.info("[bold cyan]Full traceback:[/bold cyan]")
+            hud_console.print("[bold cyan]Full traceback:[/bold cyan]")
             hud_console.info(traceback.format_exc())
         sys.exit(1)
 
@@ -271,14 +272,14 @@ async def run_mcp_module(
         available = [k for k in dir(module) if not k.startswith("_")]
         hud_console.info(f"Available in module: {available}")
         hud_console.info("")
-        hud_console.info("[bold cyan]Expected structure:[/bold cyan]")
+        hud_console.print("[bold cyan]Expected structure:[/bold cyan]")
         hud_console.info("  from hud.environment import Environment")
         hud_console.info("  env = Environment('my-env')  # or mcp = ...")
         raise AttributeError(f"Module '{module_name}' must define 'mcp', 'env', or 'environment'")
 
     # Only show full header on first run, brief message on reload
     if is_reload:
-        hud_console.info(f"{hud_console.sym.SUCCESS} Reloaded")
+        hud_console.print(f"{hud_console.sym.SUCCESS} Reloaded")
         # Run server without showing full UI
     else:
         # Show full header on first run
@@ -344,7 +345,7 @@ async def run_mcp_module(
         env_dir = cwd.parent / "environment"
         if env_dir.exists() and (env_dir / "server.py").exists():
             hud_console.info("")
-            hud_console.info(
+            hud_console.print(
                 f"{hud_console.sym.FLOW} Don't forget to start the environment "
                 "backend in another terminal:"
             )
@@ -406,7 +407,7 @@ async def launch_inspector(port: int) -> None:
                 stderr=subprocess.DEVNULL,
             )
         else:
-            subprocess.Popen(  # noqa: S603, ASYNC220
+            subprocess.Popen(  # noqa: ASYNC220
                 cmd,
                 env=env,
                 stdout=subprocess.DEVNULL,
@@ -442,6 +443,11 @@ def launch_interactive_thread(port: int, verbose: bool) -> None:
         except Exception as e:
             if verbose:
                 hud_console.error(f"Interactive mode error: {e}")
+
+        # Interactive session ended — tell the dev server to shut down
+        import _thread
+
+        _thread.interrupt_main()
 
     interactive_thread = threading.Thread(target=run_interactive, daemon=True)
     interactive_thread.start()
@@ -517,9 +523,7 @@ def run_with_reload(
         if not is_first_run:
             env["_HUD_DEV_RELOAD"] = "1"
 
-        process = subprocess.Popen(  # noqa: S603
-            cmd, env=env
-        )
+        process = subprocess.Popen(cmd, env=env)
 
         is_first_run = False
 
@@ -587,6 +591,38 @@ def run_with_reload(
             break
 
 
+async def build_proxy(backend: Any, name: str = "HUD Docker Dev Proxy") -> Any:
+    """Build an MCPServer proxy that forwards all requests to *backend*.
+
+    ``import_server()`` copies tools/resources/prompts visible via listing
+    RPCs.  Environment hides ``_``-prefixed tools (like ``_hud_submit``)
+    from listings, so a passthrough patch on ``_call_tool`` ensures those
+    unlisted tools are still callable by forwarding to the backend's tool
+    manager.
+    """
+    from fastmcp import FastMCP
+    from fastmcp.exceptions import NotFoundError as FastMCPNotFoundError
+
+    from hud.server import MCPServer
+
+    fastmcp_proxy = FastMCP.as_proxy(backend)
+    proxy = MCPServer(name=name)
+    await proxy.import_server(fastmcp_proxy)
+
+    _original_call_tool = proxy._call_tool
+
+    async def _passthrough_call_tool(context: Any) -> Any:
+        try:
+            return await _original_call_tool(context)
+        except FastMCPNotFoundError:
+            return await fastmcp_proxy._tool_manager.call_tool(
+                context.message.name, context.message.arguments or {}
+            )
+
+    proxy._call_tool = _passthrough_call_tool  # type: ignore[assignment]
+    return proxy
+
+
 def run_docker_dev_server(
     port: int,
     verbose: bool,
@@ -612,9 +648,8 @@ def run_docker_dev_server(
     import signal
 
     import typer
-    import yaml
 
-    from hud.server import MCPServer
+    from hud.cli.utils.lockfile import find_lock, get_local_image, load_lock
 
     # Ensure Docker CLI and daemon are available before proceeding
     from .utils.docker import require_docker_running
@@ -638,7 +673,7 @@ def run_docker_dev_server(
 
         # Check if container is still running
         try:
-            result = subprocess.run(  # noqa: S603
+            result = subprocess.run(
                 ["docker", "ps", "-q", "-f", f"name={container_name}"],  # noqa: S607
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
@@ -647,7 +682,7 @@ def run_docker_dev_server(
             )
             if not result.stdout.strip():
                 # Container is not running, just try to remove it
-                subprocess.run(  # noqa: S603
+                subprocess.run(
                     ["docker", "rm", "-f", container_name],  # noqa: S607
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -659,7 +694,7 @@ def run_docker_dev_server(
 
         try:
             # First try to stop gracefully
-            subprocess.run(  # noqa: S603
+            subprocess.run(
                 ["docker", "stop", container_name],  # noqa: S607
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -670,7 +705,7 @@ def run_docker_dev_server(
             # Force kill if stop times out
             hud_console.debug(f"Container {container_name} stop timeout, forcing kill")
             with contextlib.suppress(Exception):
-                subprocess.run(  # noqa: S603
+                subprocess.run(
                     ["docker", "kill", container_name],  # noqa: S607
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -687,27 +722,19 @@ def run_docker_dev_server(
         signal.signal(signal.SIGHUP, signal_handler)
 
     # Find environment directory (current or parent with hud.lock.yaml)
-    env_dir = cwd
-    lock_path = env_dir / "hud.lock.yaml"
+    lock_path = find_lock(cwd)
+    if lock_path is None:
+        hud_console.error("No hud.lock.yaml found")
+        hud_console.info("Run 'hud build' first to create an image")
+        raise typer.Exit(1)
 
-    if not lock_path.exists():
-        # Try parent directory
-        if (cwd.parent / "hud.lock.yaml").exists():
-            env_dir = cwd.parent
-            lock_path = env_dir / "hud.lock.yaml"
-        else:
-            hud_console.error("No hud.lock.yaml found")
-            hud_console.info("Run 'hud build' first to create an image")
-            raise typer.Exit(1)
+    env_dir = lock_path.parent
 
     # Load lock file to get image name
     try:
-        with open(lock_path) as f:
-            lock_data = yaml.safe_load(f)
+        lock_data = load_lock(lock_path)
 
-        # Get image from new or legacy format
-        images = lock_data.get("images", {})
-        image_name = images.get("local") or lock_data.get("image")
+        image_name = get_local_image(lock_data)
 
         if not image_name:
             hud_console.error("No image reference found in hud.lock.yaml")
@@ -856,7 +883,6 @@ def run_docker_dev_server(
 
     # Create and run proxy with HUD helpers
     async def run_proxy() -> None:
-        from fastmcp import FastMCP
         from fastmcp.server.proxy import ProxyClient
 
         # Create ProxyClient without custom log handler since we capture Docker logs directly
@@ -880,17 +906,10 @@ def run_docker_dev_server(
 
         os.environ["_HUD_DEV_DOCKER_MCP_CONFIG"] = json.dumps(mcp_config)
 
-        # Create FastMCP proxy using the ProxyClient
-        fastmcp_proxy = FastMCP.as_proxy(proxy_client)
-
-        # Wrap in MCPServer to get /docs and REST wrappers
-        proxy = MCPServer(name="HUD Docker Dev Proxy")
+        proxy = await build_proxy(proxy_client)
 
         # Enable logs endpoint on HTTP server
         os.environ["_HUD_DEV_LOGS_PROVIDER"] = "enabled"
-
-        # Import all tools from the FastMCP proxy
-        await proxy.import_server(fastmcp_proxy)
 
         # Launch inspector if requested
         if inspector:
@@ -923,6 +942,88 @@ def run_docker_dev_server(
     finally:
         # Final cleanup attempt
         cleanup_container()
+
+
+def dev_command(
+    params: list[str] = typer.Argument(  # type: ignore[arg-type]  # noqa: B008
+        None,
+        help="Module path or extra Docker args (when using --docker)",
+    ),
+    docker: bool = typer.Option(
+        False,
+        "--docker",
+        help="Run in Docker with volume mounts for hot-reload (for complex environments)",
+    ),
+    stdio: bool = typer.Option(
+        False,
+        "--stdio",
+        help="Use stdio transport (default: HTTP)",
+    ),
+    port: int = typer.Option(8765, "--port", "-p", help="HTTP server port (ignored for stdio)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed logs"),
+    inspector: bool = typer.Option(
+        False, "--inspector", help="Launch MCP Inspector (HTTP mode only)"
+    ),
+    interactive: bool = typer.Option(
+        False, "--interactive", help="Launch interactive testing mode (HTTP mode only)"
+    ),
+    watch: list[str] = typer.Option(  # noqa: B008
+        [],
+        "--watch",
+        "-w",
+        help="Paths to watch for hot-reload (repeatable: -w tools -w env.py)",
+    ),
+    new: bool = typer.Option(
+        False,
+        "--new",
+        help="Create a new dev trace on hud.ai (opens in browser)",
+    ),
+) -> None:
+    """🔥 Development mode - run MCP server (hot-reload is opt-in via -w/--watch).
+
+    [not dim]TWO MODES:
+
+    1. Python Module:
+       hud dev                    # Auto-detects module (no hot-reload by default)
+       hud dev env:env            # Explicit module:attribute
+       hud dev -w .               # Watch current directory
+
+    2. Docker (Complex environments):
+       hud dev                        # Auto-detects Dockerfile, no hot-reload
+       hud dev -w tools -w env.py     # Mount & watch specific paths
+       hud dev -w tools               # Just watch tools folder
+
+    For Docker mode, use --watch to specify which folders to mount and watch.
+    Paths not in --watch stay in the built image (no hot-reload).
+
+    Examples:
+        hud dev                      # Auto-detect mode
+        hud dev --new                # Create live dev trace on hud.ai
+        hud dev env:env              # Run specific module
+        hud dev --inspector          # Launch MCP Inspector
+        hud dev --interactive        # Launch interactive testing mode
+        hud dev -w 'tools env.py'    # Docker: hot-reload tools/ and env.py
+
+    Local development pattern (Docker + local scenarios):
+        Terminal 1: hud dev -w 'tools env.py' --port 8000
+        Terminal 2: python local_test.py  # Uses connect_url()[/not dim]
+    """
+    module = params[0] if params and not docker else None
+    docker_args = params if docker else []
+    watch_paths = watch if watch else None
+
+    run_mcp_dev_server(
+        module,
+        stdio,
+        port,
+        verbose,
+        inspector,
+        interactive,
+        watch_paths,
+        docker=docker,
+        docker_args=docker_args,
+        new_trace=new,
+    )
 
 
 def run_mcp_dev_server(
@@ -976,11 +1077,11 @@ def run_mcp_dev_server(
         if module is None:
             hud_console.error("Could not auto-detect module in current directory")
             hud_console.info("")
-            hud_console.info("[bold cyan]Expected:[/bold cyan]")
+            hud_console.print("[bold cyan]Expected:[/bold cyan]")
             hud_console.info("  • __init__.py file in current directory")
             hud_console.info("  • Module must define 'mcp' or 'env' variable")
             hud_console.info("")
-            hud_console.info("[bold cyan]Examples:[/bold cyan]")
+            hud_console.print("[bold cyan]Examples:[/bold cyan]")
             hud_console.info("  hud dev controller")
             hud_console.info("  cd controller && hud dev")
             hud_console.info("  hud dev --docker  # For Docker-based environments")

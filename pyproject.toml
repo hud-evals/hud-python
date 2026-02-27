@@ -1,6 +1,6 @@
 [project]
 name = "hud-python"
-version = "0.5.25"
+version = "0.5.28"
 description = "SDK for the HUD platform."
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
@@ -35,7 +35,6 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
 ]
 
 [project.urls]
@@ -53,7 +52,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build]
 exclude = [
-    "environments/",
     "docs/",
     "examples/",
     "**/checkpoints/",
@@ -67,10 +65,9 @@ title = "🚀 Welcome to HUD SDK!"
 message = """[bold cyan]Thanks for using the hud SDK![/bold cyan]
 
 [yellow]Quick Start:[/yellow]
-• Install in development mode: [green]pip install -e .[/green]
+• Install dependencies: [green]uv sync[/green]
 • Try the CLI: [green]hud --help[/green]
-• Analyze an MCP server: [green]hud analyze hud-text-2048:latest[/green]
-• Read the docs: [green]docs/[/green]
+• Read the docs: [green]https://docs.hud.ai[/green]
 
 [dim]For more examples, check out the [cyan]examples/[/cyan] directory.[/dim]
 
@@ -190,6 +187,7 @@ lint.ignore = [
     "W293",   # Ignore blank line contains whitespace
     "PLC0415", # Allow function-local imports.
     "S101", # Allow assert statements.
+    "S603", # subprocess calls with shell=False are fine.
     "E731", # Allow lambda assignments.
 ]
 
@@ -197,7 +195,6 @@ lint.ignore = [
 "**/tests/**/*.py" = ["PYI", "B", "S", "ANN"]
 "*.ipynb" = ["ALL"] # Disables all rules for Jupyter.
 "**/examples/**/*.py" = ["ALL"]
-"**/environments/**/*.py" = ["ALL"]
 
 
 [tool.ruff.format]
@@ -222,7 +219,6 @@ source = ["hud"]
 omit = [
     "*/tests/*",
     "*/examples/*",
-    "hud/misc/*",
 ]
 
 [tool.coverage.report]
@@ -243,15 +239,13 @@ fail_under = 58
 omit = [
     "*/tests/*",
     "*/examples/*",
-    "hud/misc/*",
 ]
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
 testpaths = ["hud", "examples"]
-# Ignore the dev folder and other non-test directories
-addopts = "--ignore=dev --ignore=ref --ignore=test_env --ignore=environments"
+addopts = ""
 markers = [
     "integration: marks tests as integration tests (require HUD_API_KEY, network access)",
 ]

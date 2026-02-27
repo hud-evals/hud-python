@@ -191,12 +191,35 @@ class Environment(
     def as_tools(self) -> list[mcp_types.Tool]:
         """Return tools in MCP format (base format).
 
-        Applies agent-level include/exclude filtering if set.
+        Applies scenario-level and agent-level filtering in order:
+        1. Scenario-level: exclude_tools (fnmatch) and exclude_sources (connection names)
+        2. Agent-level: _agent_include/_agent_exclude (fnmatch)
+
         Supports fnmatch-style wildcards (e.g., "*setup*", "browser_*").
         """
         import fnmatch
 
         tools = self._router.tools
+
+        # Scenario-level exclusion (from @env.scenario(exclude_tools/exclude_sources))
+        session = self._active_session
+        if session:
+            excluded_sources = set(session.exclude_sources) if session.exclude_sources else None
+            excluded_patterns = session.exclude_tools
+
+            if excluded_sources or excluded_patterns:
+                filtered = []
+                for tool in tools:
+                    if excluded_sources:
+                        source = self._router._tool_routing.get(tool.name, "")
+                        if source in excluded_sources:
+                            continue
+                    if excluded_patterns and any(
+                        fnmatch.fnmatch(tool.name, pat) for pat in excluded_patterns
+                    ):
+                        continue
+                    filtered.append(tool)
+                tools = filtered
 
         # Apply agent-level filtering (from v4 allowed_tools/disallowed_tools)
         if self._agent_include is not None or self._agent_exclude is not None:
