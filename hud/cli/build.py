@@ -556,6 +556,8 @@ async def analyze_mcp_environment(
             result["prompts"] = full_analysis["prompts"]
         if full_analysis.get("resources"):
             result["resources"] = full_analysis["resources"]
+        if "scenarios" in full_analysis:
+            result["scenarios"] = full_analysis["scenarios"]
         return result
     except TimeoutError:
         from hud.shared.exceptions import HudException
@@ -959,6 +961,10 @@ def build_environment(
     resources = analysis.get("resources")
     if resources:
         lock_content["resources"] = resources
+
+    # Add scenarios if present
+    if "scenarios" in analysis:
+        lock_content["scenarios"] = analysis["scenarios"]
 
     # Write lock file
     lock_path = env_dir / "hud.lock.yaml"

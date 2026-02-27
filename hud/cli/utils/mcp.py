@@ -156,8 +156,15 @@ def _derive_scenarios(analysis: dict[str, Any]) -> list[dict[str, Any]]:
             "has_evaluate_resource": False,
         }
         meta = p.get("meta")
-        if meta and isinstance(meta, dict) and "code" in meta:
-            scenario_info["code"] = meta["code"]
+        if meta and isinstance(meta, dict):
+            if "code" in meta:
+                scenario_info["code"] = meta["code"]
+            et = meta.get("exclude_tools")
+            if isinstance(et, list):
+                scenario_info["exclude_tools"] = [x for x in et if isinstance(x, str)]
+            es = meta.get("exclude_sources")
+            if isinstance(es, list):
+                scenario_info["exclude_sources"] = [x for x in es if isinstance(x, str)]
         scenarios_by_id[scenario_id] = scenario_info
 
     for r in analysis.get("resources", []):
