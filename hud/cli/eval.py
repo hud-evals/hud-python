@@ -622,6 +622,10 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         hud_console.error(f"No tasks found in: {cfg.source}")
         raise typer.Exit(1)
 
+    # Default taskset to source when loading from API (not a local file)
+    if cfg.taskset is None and not Path(cfg.source).exists():
+        cfg.taskset = cfg.source
+
     # Filter by task slugs (or positional indices) if provided
     if cfg.task_ids:
         selector_set = set(cfg.task_ids)
