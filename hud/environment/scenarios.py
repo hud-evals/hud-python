@@ -90,6 +90,7 @@ class ScenarioHandle(Generic[P]):
         )
 
 
+
 def _validate_scenario_params(fn_name: str, sig: inspect.Signature, hints: dict[str, Any]) -> None:
     """Validate that all scenario parameters have JSON-serializable types."""
     from pydantic import TypeAdapter
