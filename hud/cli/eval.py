@@ -96,7 +96,6 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # max_concurrent = 30
 # max_steps = 10
 # group_size = 1
-# byok = false  # Remote only; use encrypted env vars on the platform.
 # task_ids = ["checkout-smoke", "0"]  # slugs or 0-based indices
 # verbose = true
 # very_verbose = true
@@ -160,7 +159,6 @@ class EvalConfig(BaseModel):
         "verbose",
         "very_verbose",
         "group_size",
-        "byok",
         "remote",
         "auto_respond",
         "quiet",
@@ -182,11 +180,10 @@ class EvalConfig(BaseModel):
     very_verbose: bool = False
     auto_respond: bool | None = None  # Continue without prompting
     group_size: int = 1
-    byok: bool = False
     remote: bool = False
     quiet: bool = False  # Suppress opening browser for eval links
     gateway: bool = False  # Use HUD Gateway for LLM API calls
-    taskset: str | None = None  # Taskset slug to associate job with
+    taskset: str | None = None  # Taskset name to associate job with
 
     # Base agent config (these merge with task's agent_config)
     allowed_tools: list[str] | None = None
@@ -214,11 +211,6 @@ class EvalConfig(BaseModel):
 
     def validate_api_keys(self) -> None:
         """Validate required API keys for the selected agent. Raises typer.Exit on failure."""
-        # BYOK requires remote execution (check before agent_type guard)
-        if self.byok and not self.remote:
-            hud_console.error("--byok requires --remote (BYOK only works with remote execution)")
-            raise typer.Exit(1)
-
         if self.agent_type is None:
             return
 
@@ -547,8 +539,6 @@ class EvalConfig(BaseModel):
             table.add_row("remote", "[bold green]True[/bold green] (submitting to platform)")
         if self.gateway:
             table.add_row("gateway", "[bold green]True[/bold green] (routing via HUD Gateway)")
-        if self.byok:
-            table.add_row("byok", "[bold green]True[/bold green] (remote only)")
 
         # Tool filters (only if set)
         if self.allowed_tools:
@@ -609,18 +599,41 @@ class EvalConfig(BaseModel):
 
 async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
     """Run evaluation with the given config using run_dataset()."""
-    from hud.datasets import load_tasks, run_dataset
+    from pathlib import Path
+
+    from hud.datasets import run_dataset
+    from hud.datasets.loader import _load_from_api, _load_from_file
 
     if cfg.source is None or cfg.agent_type is None:
         raise ValueError("source and agent_type must be set")
 
-    # Load tasks using unified loader (handles v4→v5 conversion automatically)
+    # Load tasks — use internal loaders to capture taskset_id from API sources
     hud_console.info(f"📊 Loading tasks from: {cfg.source}…")
-    tasks = load_tasks(cfg.source)
+    path = Path(cfg.source)
+    taskset_id: str | None = None
+    try:
+        if path.exists() and path.suffix in {".json", ".jsonl"}:
+            tasks = _load_from_file(path)
+        else:
+            tasks, taskset_id = _load_from_api(cfg.source)
+    except Exception as e:
+        hud_console.error(f"Failed to load tasks from {cfg.source}: {e}")
+        raise typer.Exit(1) from e
 
     if not tasks:
         hud_console.error(f"No tasks found in: {cfg.source}")
         raise typer.Exit(1)
+
+    # TODO: --taskset with file source should sync local tasks to the platform taskset
+    # (diff, save, then run). For now it just resolves the slug and associates the job.
+    if cfg.taskset:
+        from hud.datasets.loader import resolve_taskset_id
+
+        try:
+            taskset_id = resolve_taskset_id(cfg.taskset)
+        except Exception as e:
+            hud_console.error(f"Failed to resolve taskset '{cfg.taskset}': {e}")
+            raise typer.Exit(1) from e
 
     # Filter by task slugs (or positional indices) if provided
     if cfg.task_ids:
@@ -650,15 +663,16 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
 
     max_steps = cfg.max_steps
 
+    import uuid
+
+    from hud.eval.manager import _get_eval_name, _send_job_enter
+
     # Remote execution - submit to HUD platform
     if cfg.remote:
         agent_kwargs = {
             k: v for k, v in agent_kwargs.items() if k not in ("api_key", "model_client")
         }
-        import uuid
-
         from hud.datasets.utils import submit_rollouts
-        from hud.eval.manager import _send_job_enter
 
         job_id = str(uuid.uuid4())
         hud_console.info(
@@ -687,11 +701,11 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
 
         await _send_job_enter(
             job_id=job_id,
-            name=f"eval ({cfg.source})" if cfg.source else "eval",
+            name=_get_eval_name(tasks=tasks, group=cfg.group_size),
             variants=None,
             group=cfg.group_size,
             api_key=None,
-            taskset=cfg.taskset,
+            taskset_id=taskset_id,
             hud_eval_config=eval_cfg_dict,
         )
 
@@ -702,7 +716,6 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             agent_params=agent_kwargs,
             max_steps=max_steps,
             group_size=cfg.group_size,
-            use_byok=cfg.byok,
         )
 
         if not trace_ids:
@@ -734,7 +747,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         max_concurrent=cfg.max_concurrent,
         group_size=cfg.group_size,
         quiet=cfg.quiet,
-        taskset=cfg.taskset,
+        taskset_id=taskset_id,
     )
 
     # Show reward for single task
@@ -750,7 +763,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
 
 
 def eval_command(
-    source: str | None = typer.Argument(None, help="HuggingFace dataset or task JSON file"),
+    source: str | None = typer.Argument(None, help="Taskset slug or task JSON file"),
     agent: str | None = typer.Argument(
         None,
         help="Agent: claude, openai, operator, gemini, gemini_cua, openai_compatible, integration_test",  # noqa: E501
@@ -799,11 +812,6 @@ def eval_command(
     remote: bool = typer.Option(
         False, "--remote", help="Submit tasks to platform for remote execution"
     ),
-    byok: bool = typer.Option(
-        False,
-        "--byok",
-        help="Remote only: use BYOK keys from encrypted env vars for inference",
-    ),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Suppress opening browser for eval links"
     ),
@@ -811,18 +819,18 @@ def eval_command(
         False, "--gateway", "-g", help="Route LLM API calls through HUD Gateway"
     ),
     taskset: str | None = typer.Option(
-        None, "--taskset", "-t", help="Taskset slug to associate job with"
+        None, "--taskset", "-t", help="Taskset name to associate job with"
     ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
 
     Examples:
         hud eval tasks.json claude
-        hud eval hud-evals/SheetBench-50 claude --full
+        hud eval "My Tasks" claude --full              # Load from platform taskset
+        hud eval tasks.json claude --taskset "My Tasks" # Associate file tasks with taskset
         hud eval tasks.json claude --config max_tokens=32768
-        hud eval tasks.json openai --config temperature=0.7
-        hud eval tasks.json claude --full --remote  # Remote execution
-        hud eval tasks.json claude --gateway  # Route LLM calls through HUD Gateway
+        hud eval tasks.json claude --full --remote     # Remote execution
+        hud eval tasks.json claude --gateway           # Route LLM calls through HUD Gateway
     """
     hud_console.info("🔧 Initializing evaluation...")
 
@@ -853,7 +861,6 @@ def eval_command(
         group_size=group_size,
         config=config,
         remote=remote,
-        byok=byok,
         quiet=quiet,
         gateway=gateway,
         taskset=taskset,

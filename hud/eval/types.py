@@ -54,7 +54,7 @@ class JobEnterPayload(BaseModel):
     name: str | None = None
     variants: dict[str, Any] | None = None  # Full variant config
     group: int | None = None
-    taskset: str | None = None  # taskset slug to associate job with
+    taskset_id: str | None = None  # evalset UUID to associate job with
     hud_eval_config: dict[str, Any] | None = None  # replayable hud eval config (no secrets)
 
 

@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from hud.eval.context import EvalContext, get_current_trace_headers
-from hud.eval.manager import run_eval
+from hud.eval.manager import _get_eval_name, run_eval
+from hud.eval.task import Task
 
 
 class TestRunEvalNoArgs:
@@ -150,3 +151,88 @@ class TestRunEvalErrorHandling:
             error_msg = mock_exit.call_args[0][0]
             assert error_msg is not None
             assert "test error" in error_msg
+
+
+class TestGetEvalName:
+    """Tests for _get_eval_name() naming convention."""
+
+    def test_no_tasks(self) -> None:
+        assert _get_eval_name() == "Task Run: eval"
+
+    def test_no_tasks_with_group(self) -> None:
+        assert _get_eval_name(group=4) == "Task Run: eval (4 times)"
+
+    def test_single_task_with_scenario(self) -> None:
+        tasks = [Task(env={"name": "browser"}, scenario="checkout")]
+        assert _get_eval_name(tasks=tasks) == "Task Run: checkout"
+
+    def test_single_task_with_scenario_and_group(self) -> None:
+        tasks = [Task(env={"name": "browser"}, scenario="checkout")]
+        assert _get_eval_name(tasks=tasks, group=4) == "Task Run: checkout (4 times)"
+
+    def test_single_task_no_scenario_uses_env_name(self) -> None:
+        tasks = [Task(env={"name": "my-env"})]
+        assert _get_eval_name(tasks=tasks) == "Task Run: my-env"
+
+    def test_multiple_tasks(self) -> None:
+        tasks = [
+            Task(env={"name": "browser"}, scenario="checkout"),
+            Task(env={"name": "browser"}, scenario="login"),
+        ]
+        assert _get_eval_name(tasks=tasks) == "Batch Run: 2 tasks"
+
+    def test_multiple_tasks_with_group(self) -> None:
+        tasks = [
+            Task(env={"name": "browser"}, scenario="checkout"),
+            Task(env={"name": "browser"}, scenario="login"),
+            Task(env={"name": "browser"}, scenario="search"),
+        ]
+        assert _get_eval_name(tasks=tasks, group=3) == "Batch Run: 3 tasks (3 times)"
+
+
+class TestRunEvalTasksetId:
+    """Tests for taskset_id flow through run_eval."""
+
+    @pytest.mark.asyncio
+    async def test_taskset_id_triggers_job_registration(self) -> None:
+        """run_eval(taskset_id=...) registers a job even for single task."""
+        with (
+            patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
+            patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
+            patch("hud.eval.manager._send_job_enter", new_callable=AsyncMock) as mock_enter,
+        ):
+            async with run_eval(taskset_id="ts-123", quiet=True) as ctx:
+                pass
+
+            mock_enter.assert_called_once()
+            call_kwargs = mock_enter.call_args[1]
+            assert call_kwargs["taskset_id"] == "ts-123"
+            assert ctx.job_id == call_kwargs["job_id"]
+
+    @pytest.mark.asyncio
+    async def test_no_taskset_no_job_for_single_task(self) -> None:
+        """run_eval() without taskset_id does not register a job for single task."""
+        with (
+            patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
+            patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
+            patch("hud.eval.manager._send_job_enter", new_callable=AsyncMock) as mock_enter,
+        ):
+            async with run_eval(quiet=True) as ctx:
+                pass
+
+            mock_enter.assert_not_called()
+            assert ctx.job_id is None
+
+    @pytest.mark.asyncio
+    async def test_provided_job_id_skips_registration(self) -> None:
+        """run_eval(job_id=..., taskset_id=...) uses provided job_id without registering."""
+        with (
+            patch.object(EvalContext, "_eval_enter", new_callable=AsyncMock),
+            patch.object(EvalContext, "_eval_exit", new_callable=AsyncMock),
+            patch("hud.eval.manager._send_job_enter", new_callable=AsyncMock) as mock_enter,
+        ):
+            async with run_eval(job_id="existing-job", taskset_id="ts-123", quiet=True) as ctx:
+                pass
+
+            mock_enter.assert_not_called()
+            assert ctx.job_id == "existing-job"

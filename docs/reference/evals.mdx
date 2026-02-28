@@ -26,6 +26,7 @@ async with hud.eval() as ctx:
 | `group` | `int` | Runs per variant for statistical significance | `1` |
 | `group_ids` | `list[str] \| None` | Custom group IDs for parallel runs | `None` |
 | `job_id` | `str \| None` | Job ID to link traces to | `None` |
+| `taskset_id` | `str \| None` | Platform taskset UUID to associate the job with | `None` |
 | `api_key` | `str \| None` | API key for backend calls | `None` |
 | `max_concurrent` | `int \| None` | Maximum concurrent evaluations | `None` |
 | `trace` | `bool` | Send telemetry to backend | `True` |

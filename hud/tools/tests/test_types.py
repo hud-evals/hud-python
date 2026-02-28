@@ -437,3 +437,80 @@ def test_evaluation_result_isError_flag():
 
     assert result.isError is True
     assert result.reward == 0.0
+
+
+# Tests for SubScore and EvaluationResult validators
+
+
+def test_subscore_value_range_rejected():
+    """Test SubScore rejects values outside [0, 1]."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        SubScore(name="test", value=-0.1)
+    with pytest.raises(ValidationError):
+        SubScore(name="test", value=1.5)
+
+
+def test_check_subscores_duplicate_names_warns():
+    """Test duplicate subscore names produce a warning."""
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        EvaluationResult(
+            reward=0.5,
+            subscores=[
+                SubScore(name="accuracy", weight=0.5, value=0.5),
+                SubScore(name="accuracy", weight=0.5, value=0.5),
+            ],
+        )
+    assert any("Duplicate subscore names" in str(x.message) for x in w)
+
+
+def test_check_subscores_weights_not_summing_to_one_warns():
+    """Test positive weights not summing to ~1.0 produce a warning."""
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        EvaluationResult(
+            reward=0.75,
+            subscores=[
+                SubScore(name="a", weight=0.5, value=1.0),
+                SubScore(name="b", weight=0.25, value=1.0),
+            ],
+        )
+    assert any("Positive subscore weights should sum to ~1.0" in str(x.message) for x in w)
+
+
+def test_check_subscores_reward_mismatch_warns():
+    """Test weighted sum not matching reward produces a warning."""
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        EvaluationResult(
+            reward=0.5,
+            subscores=[SubScore(name="a", weight=1.0, value=0.8)],
+        )
+    assert any("Subscores don't match reward" in str(x.message) for x in w)
+
+
+def test_check_subscores_valid_with_negative_weights():
+    """Test valid subscores with negative weights produce no warnings."""
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        # Positive: 0.6 + 0.4 = 1.0
+        # Weighted sum: 0.6*1.0 + 0.4*0.5 + (-0.2)*1.0 = 0.6
+        EvaluationResult(
+            reward=0.6,
+            subscores=[
+                SubScore(name="quality", weight=0.6, value=1.0),
+                SubScore(name="speed", weight=0.4, value=0.5),
+                SubScore(name="penalty", weight=-0.2, value=1.0),
+            ],
+        )
+    assert len(w) == 0
