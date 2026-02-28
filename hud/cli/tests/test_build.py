@@ -60,12 +60,12 @@ class TestIncrementVersion:
     def test_increment_minor(self):
         """Test incrementing minor version."""
         assert increment_version("1.2.3", "minor") == "1.3.0"
-        assert increment_version("0.5.28", "minor") == "0.6.0"
+        assert increment_version("0.5.29", "minor") == "0.6.0"
 
     def test_increment_major(self):
         """Test incrementing major version."""
         assert increment_version("1.2.3", "major") == "2.0.0"
-        assert increment_version("0.5.28", "major") == "1.0.0"
+        assert increment_version("0.5.29", "major") == "1.0.0"
 
     def test_increment_with_v_prefix(self):
         """Test incrementing version with v prefix."""
