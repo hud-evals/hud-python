@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 from mcp.types import ContentBlock, ImageContent, TextContent
-import warnings
-
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -38,7 +37,11 @@ class SubScore(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., description="Name of this subscore component")
-    weight: float = Field(default=1.0, description="Weight of this subscore (for weighted average). Negative weights represent penalties.")
+    weight: float = Field(
+        default=1.0,
+        description="Weight of this subscore (for weighted average). "
+        "Negative weights represent penalties.",
+    )
     value: float = Field(..., ge=0.0, le=1.0, description="Value of this subscore, 0.0 to 1.0")
     metadata: dict[str, Any] | None = Field(default=None, exclude=True)
 
