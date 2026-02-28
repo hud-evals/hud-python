@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from hud.datasets import run_dataset
+from hud.datasets import run_dataset, run_dataset_async
 from hud.types import LegacyTask, MCPToolCall
 
 
@@ -239,3 +239,30 @@ class TestRunDatasetExtended:
                 quiet=True,
                 taskset=None,
             )
+
+    @pytest.mark.asyncio
+    async def test_run_dataset_async_empty(self):
+        """Test async runner rejects empty datasets."""
+        from hud.types import AgentType
+
+        with pytest.raises(ValueError, match="No tasks to run"):
+            await run_dataset_async([], agent_type=AgentType.CLAUDE)
+
+    @pytest.mark.asyncio
+    async def test_run_dataset_async_group_size(self):
+        """Test async runner repeats tasks for group_size."""
+        from hud.eval.task import Task
+        from hud.types import Trace
+
+        task = Task(env={"name": "test"}, scenario="sample", args={})
+        traces = [Trace(reward=1.0, done=True), Trace(reward=2.0, done=True)]
+
+        with patch(
+            "hud.datasets.runner.run_single_task", new=AsyncMock(side_effect=traces)
+        ) as mock_run:
+            results = await run_dataset_async([task], agent_type="claude", group_size=2)
+
+            assert results == traces
+            assert mock_run.call_count == 2
+            assert mock_run.call_args_list[0].kwargs["trace_name"] == "sample #1"
+            assert mock_run.call_args_list[1].kwargs["trace_name"] == "sample #2"
