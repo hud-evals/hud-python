@@ -85,14 +85,17 @@ See [Platform Models](/platform/models) for training details.
 Prefer the command line? Use `hud eval` for running evaluations locally or remotely:
 
 ```bash
-# Run a taskset with a model
-hud eval my-taskset claude --full
+# Run a platform taskset with a model
+hud eval "My Tasks" claude --full
 
 # Run with multiple repeats for variance
-hud eval my-taskset claude --full --group-size 5
+hud eval "My Tasks" claude --full --group-size 5
 
 # Run remotely on HUD infrastructure
-hud eval my-taskset claude --full --remote
+hud eval "My Tasks" claude --full --remote
+
+# Run from a local file, linked to a platform taskset
+hud eval tasks.json claude --full --taskset "My Tasks"
 ```
 
 See [`hud eval` CLI reference](/reference/cli/eval) for all options.

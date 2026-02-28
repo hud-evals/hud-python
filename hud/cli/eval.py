@@ -96,7 +96,6 @@ _DEFAULT_CONFIG_TEMPLATE = """# HUD Eval Configuration
 # max_concurrent = 30
 # max_steps = 10
 # group_size = 1
-# byok = false  # Remote only; use encrypted env vars on the platform.
 # task_ids = ["checkout-smoke", "0"]  # slugs or 0-based indices
 # verbose = true
 # very_verbose = true
@@ -160,7 +159,6 @@ class EvalConfig(BaseModel):
         "verbose",
         "very_verbose",
         "group_size",
-        "byok",
         "remote",
         "auto_respond",
         "quiet",
@@ -182,7 +180,6 @@ class EvalConfig(BaseModel):
     very_verbose: bool = False
     auto_respond: bool | None = None  # Continue without prompting
     group_size: int = 1
-    byok: bool = False
     remote: bool = False
     quiet: bool = False  # Suppress opening browser for eval links
     gateway: bool = False  # Use HUD Gateway for LLM API calls
@@ -214,11 +211,6 @@ class EvalConfig(BaseModel):
 
     def validate_api_keys(self) -> None:
         """Validate required API keys for the selected agent. Raises typer.Exit on failure."""
-        # BYOK requires remote execution (check before agent_type guard)
-        if self.byok and not self.remote:
-            hud_console.error("--byok requires --remote (BYOK only works with remote execution)")
-            raise typer.Exit(1)
-
         if self.agent_type is None:
             return
 
@@ -547,8 +539,6 @@ class EvalConfig(BaseModel):
             table.add_row("remote", "[bold green]True[/bold green] (submitting to platform)")
         if self.gateway:
             table.add_row("gateway", "[bold green]True[/bold green] (routing via HUD Gateway)")
-        if self.byok:
-            table.add_row("byok", "[bold green]True[/bold green] (remote only)")
 
         # Tool filters (only if set)
         if self.allowed_tools:
@@ -726,7 +716,6 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             agent_params=agent_kwargs,
             max_steps=max_steps,
             group_size=cfg.group_size,
-            use_byok=cfg.byok,
         )
 
         if not trace_ids:
@@ -823,11 +812,6 @@ def eval_command(
     remote: bool = typer.Option(
         False, "--remote", help="Submit tasks to platform for remote execution"
     ),
-    byok: bool = typer.Option(
-        False,
-        "--byok",
-        help="Remote only: use BYOK keys from encrypted env vars for inference",
-    ),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Suppress opening browser for eval links"
     ),
@@ -842,11 +826,11 @@ def eval_command(
 
     Examples:
         hud eval tasks.json claude
-        hud eval hud-evals/SheetBench-50 claude --full
+        hud eval "My Tasks" claude --full              # Load from platform taskset
+        hud eval tasks.json claude --taskset "My Tasks" # Associate file tasks with taskset
         hud eval tasks.json claude --config max_tokens=32768
-        hud eval tasks.json openai --config temperature=0.7
-        hud eval tasks.json claude --full --remote  # Remote execution
-        hud eval tasks.json claude --gateway  # Route LLM calls through HUD Gateway
+        hud eval tasks.json claude --full --remote     # Remote execution
+        hud eval tasks.json claude --gateway           # Route LLM calls through HUD Gateway
     """
     hud_console.info("🔧 Initializing evaluation...")
 
@@ -877,7 +861,6 @@ def eval_command(
         group_size=group_size,
         config=config,
         remote=remote,
-        byok=byok,
         quiet=quiet,
         gateway=gateway,
         taskset=taskset,

@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["load_dataset", "load_tasks", "save_tasks"]
+__all__ = ["load_dataset", "load_tasks", "resolve_taskset_id", "save_tasks"]
 
 
 def _load_raw_from_file(path: Path) -> list[dict[str, Any]]:
@@ -162,7 +162,9 @@ def load_tasks(source: str, *, raw: bool = False) -> list[Task] | list[dict[str,
         - If raw=True: list[dict] with raw task data
 
     Raises:
-        ValueError: If task loading fails
+        httpx.HTTPStatusError: If API returns an error (e.g., 404 for unknown taskset).
+        httpx.ConnectError: If API is unreachable.
+        ValueError: If file format is invalid.
     """
     # Check if it's a local file
     path = Path(source)
