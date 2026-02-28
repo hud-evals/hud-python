@@ -30,6 +30,7 @@ async def run_dataset(
     group_size: int = 1,
     quiet: bool = True,
     job_id: str | None = None,
+    taskset_id: str | None = None,
 ) -> list[EvalContext]:
     """Run an agent on a dataset of tasks.
 
@@ -50,6 +51,7 @@ async def run_dataset(
         job_id: Pre-registered job ID. If provided, traces are grouped under this job
             and no implicit job is created. If None, a job is created automatically
             for parallel execution.
+        taskset_id: Taskset UUID to associate the job with on the platform.
 
     Returns:
         List of EvalContext results from each task execution. Access `.reward` on each.
@@ -101,6 +103,7 @@ async def run_dataset(
         max_concurrent=max_concurrent,
         quiet=quiet,
         job_id=job_id,
+        taskset_id=taskset_id,
     ) as ctx:
         # Build agent params - use system_prompt from ctx (set from task.agent_config)
         final_agent_params = dict(agent_params or {})

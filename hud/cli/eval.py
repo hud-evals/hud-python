@@ -660,7 +660,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
 
     import uuid
 
-    from hud.eval.manager import _send_job_enter
+    from hud.eval.manager import _get_eval_name, _send_job_enter
 
     # Remote execution - submit to HUD platform
     if cfg.remote:
@@ -696,7 +696,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
 
         await _send_job_enter(
             job_id=job_id,
-            name=f"eval ({cfg.source})" if cfg.source else "eval",
+            name=_get_eval_name(tasks=tasks, group=cfg.group_size),
             variants=None,
             group=cfg.group_size,
             api_key=None,
@@ -734,19 +734,6 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
             f"group_size: {cfg.group_size})…"
         )
 
-    # Register job with taskset association if tasks came from API
-    job_id: str | None = None
-    if taskset_id:
-        job_id = str(uuid.uuid4())
-        await _send_job_enter(
-            job_id=job_id,
-            name=f"eval ({cfg.source})" if cfg.source else "eval",
-            variants=None,
-            group=cfg.group_size,
-            api_key=None,
-            taskset_id=taskset_id,
-        )
-
     # Run using run_dataset
     results = await run_dataset(
         tasks,
@@ -756,7 +743,7 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         max_concurrent=cfg.max_concurrent,
         group_size=cfg.group_size,
         quiet=cfg.quiet,
-        job_id=job_id,
+        taskset_id=taskset_id,
     )
 
     # Show reward for single task

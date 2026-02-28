@@ -118,6 +118,7 @@ async def run_eval(
     trace_id: str | None = None,
     api_key: str | None = None,
     max_concurrent: int | None = None,
+    taskset_id: str | None = None,
     trace: bool = True,
     quiet: bool = False,
 ) -> AsyncGenerator[EvalContext, None]:
@@ -142,6 +143,7 @@ async def run_eval(
         trace_id: Pre-assigned trace ID (auto-generated if not provided)
         api_key: API key for backend calls
         max_concurrent: Maximum concurrent evals (None = unlimited)
+        taskset_id: Taskset UUID to associate the job with on the platform.
         trace: Whether to send trace data to backend (default True)
         quiet: Whether to suppress printing links (default False)
 
@@ -295,6 +297,7 @@ async def run_eval(
                 variants=variants,
                 group=group,
                 api_key=api_key,
+                taskset_id=taskset_id,
             )
 
         # Print job URL (not individual trace URLs)
