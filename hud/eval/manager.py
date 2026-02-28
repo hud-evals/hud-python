@@ -31,38 +31,26 @@ logger = logging.getLogger(__name__)
 
 
 def _get_eval_name(tasks: list[Task] | None = None, group: int = 1) -> str:
-    """Extract a nice name for job display.
+    """Build a job display name.
 
-    Args:
-        tasks: List of Task objects
-        group: Group size (runs per task)
-
-    Returns:
-        Name like "scenario (group=5)" for single task or "eval (50 tasks)" for batch
+    Convention:
+        1 task, group=1:  "Task Run: {scenario}"
+        1 task, group>1:  "Task Run: {scenario} (4 times)"
+        N tasks, group=1: "Batch Run: N tasks"
+        N tasks, group>1: "Batch Run: N tasks (4 times)"
     """
+    suffix = f" ({group} times)" if group > 1 else ""
+
     if not tasks:
-        return "eval"
+        return f"Task Run: eval{suffix}"
 
-    # Single task: use scenario/env name
     if len(tasks) == 1:
-        name = None
-        if tasks[0].scenario:
-            name = tasks[0].scenario
-        elif tasks[0].env and hasattr(tasks[0].env, "name"):
+        name = tasks[0].scenario
+        if not name and tasks[0].env and hasattr(tasks[0].env, "name"):
             name = tasks[0].env.name
+        return f"Task Run: {name or 'eval'}{suffix}"
 
-        if name:
-            if group > 1:
-                return f"{name} (group={group})"
-            return name
-        return "eval"
-
-    # Batch: use generic name with count
-    parts = [f"{len(tasks)} tasks"]
-    if group > 1:
-        parts.append(f"group={group}")
-
-    return f"eval ({', '.join(parts)})"
+    return f"Batch Run: {len(tasks)} tasks{suffix}"
 
 
 async def _send_job_enter(
