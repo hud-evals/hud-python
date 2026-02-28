@@ -70,6 +70,26 @@ def _load_from_file(path: Path) -> list[Task]:
     return [Task(**{**item, "args": item.get("args") or {}}) for item in raw_items]
 
 
+def resolve_taskset_id(slug: str) -> str:
+    """Resolve a taskset slug/name to its UUID via the HUD API."""
+    headers = {}
+    if settings.api_key:
+        headers["Authorization"] = f"Bearer {settings.api_key}"
+
+    with httpx.Client() as client:
+        response = client.get(
+            f"{settings.hud_api_url}/tasks/evalset/{slug}",
+            headers=headers,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+    evalset_id = data.get("evalset_id")
+    if not evalset_id:
+        raise ValueError(f"Could not resolve taskset '{slug}' — not found or no access")
+    return evalset_id
+
+
 def _load_raw_from_api(dataset_name: str) -> tuple[list[dict[str, Any]], str | None]:
     """Load raw task dicts from HUD API.
 

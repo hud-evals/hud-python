@@ -186,7 +186,7 @@ class EvalConfig(BaseModel):
     remote: bool = False
     quiet: bool = False  # Suppress opening browser for eval links
     gateway: bool = False  # Use HUD Gateway for LLM API calls
-    taskset: str | None = None  # Taskset slug to associate job with
+    taskset: str | None = None  # Taskset name to associate job with
 
     # Base agent config (these merge with task's agent_config)
     allowed_tools: list[str] | None = None
@@ -634,8 +634,16 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
         hud_console.error(f"No tasks found in: {cfg.source}")
         raise typer.Exit(1)
 
+    # TODO: --taskset with file source should sync local tasks to the platform taskset
+    # (diff, save, then run). For now it just resolves the slug and associates the job.
     if cfg.taskset:
-        taskset_id = cfg.taskset
+        from hud.datasets.loader import resolve_taskset_id
+
+        try:
+            taskset_id = resolve_taskset_id(cfg.taskset)
+        except Exception as e:
+            hud_console.error(f"Failed to resolve taskset '{cfg.taskset}': {e}")
+            raise typer.Exit(1) from e
 
     # Filter by task slugs (or positional indices) if provided
     if cfg.task_ids:
@@ -827,7 +835,7 @@ def eval_command(
         False, "--gateway", "-g", help="Route LLM API calls through HUD Gateway"
     ),
     taskset: str | None = typer.Option(
-        None, "--taskset", "-t", help="Taskset slug to associate job with"
+        None, "--taskset", "-t", help="Taskset name to associate job with"
     ),
 ) -> None:
     """🚀 Run evaluation on datasets or individual tasks with agents.
