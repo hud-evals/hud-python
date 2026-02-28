@@ -199,6 +199,7 @@ class ScenarioSession(BaseModel):
     answer: str | None = None  # Submitted answer
     exclude_tools: list[str] | None = None  # fnmatch patterns to hide from agent
     exclude_sources: list[str] | None = None  # Connection names to hide from agent
+    allowed_tools: list[str] | None = None  # fnmatch patterns to rescue from exclusions
 
 
 class ScenarioMixin:
@@ -250,8 +251,8 @@ class ScenarioMixin:
     # Scenario function registry
     _scenarios: dict[str, Callable[..., AsyncGenerator[Any, Any]]]
 
-    # Per-scenario tool exclusions: scenario_name -> (exclude_tools, exclude_sources)
-    _scenario_exclusions: dict[str, tuple[list[str], list[str]]]
+    # Per-scenario tool exclusions: scenario_name -> (exclude_tools, exclude_sources, allowed_tools)
+    _scenario_exclusions: dict[str, tuple[list[str], list[str], list[str]]]
 
     # Single active scenario session - used for BOTH:
     # - Client-side: when we run scenarios (local or remote)
@@ -408,6 +409,7 @@ class ScenarioMixin:
                 generator=gen,
                 exclude_tools=excl[0] if excl else None,
                 exclude_sources=excl[1] if excl else None,
+                allowed_tools=excl[2] if excl else None,
             )
 
             logger.debug(
@@ -492,6 +494,7 @@ class ScenarioMixin:
             remote_meta = getattr(result, "meta", None) or {}
             exclude_tools_meta = remote_meta.get("exclude_tools")
             exclude_sources_meta = remote_meta.get("exclude_sources")
+            allowed_tools_meta = remote_meta.get("allowed_tools")
 
             # Create session for remote scenario - use router's connection info
             self._active_session = ScenarioSession(
@@ -503,6 +506,7 @@ class ScenarioMixin:
                 generator=None,
                 exclude_tools=exclude_tools_meta,
                 exclude_sources=exclude_sources_meta,
+                allowed_tools=allowed_tools_meta,
             )
 
             logger.debug(
@@ -589,6 +593,7 @@ class ScenarioMixin:
         required_env_vars: list[str] | None = None,
         exclude_tools: list[str] | None = None,
         exclude_sources: list[str] | None = None,
+        allowed_tools: list[str] | None = None,
     ) -> Callable[
         [Callable[P, AsyncGenerator[Any, None]]],
         ScenarioHandle[P],
@@ -611,6 +616,9 @@ class ScenarioMixin:
                 The environment can still call excluded tools in its own code.
             exclude_sources: Optional connection/hub names whose tools should be hidden
                 from the agent (e.g. ``["browser"]``).
+            allowed_tools: Optional fnmatch patterns for tool names to rescue back
+                after exclusions (e.g. exclude all sentry tools via exclude_sources
+                but allow ``["sentry_get_issue"]``).
 
         Example:
             @env.scenario(required_env_vars=["OPENAI_API_KEY"])
@@ -655,10 +663,11 @@ class ScenarioMixin:
             # Store the generator function
             self._scenarios[scenario_name] = fn
 
-            if exclude_tools or exclude_sources:
+            if exclude_tools or exclude_sources or allowed_tools:
                 self._scenario_exclusions[scenario_name] = (
                     exclude_tools or [],
                     exclude_sources or [],
+                    allowed_tools or [],
                 )
 
             # Get function signature for prompt arguments with type info
@@ -819,6 +828,8 @@ class ScenarioMixin:
                 scenario_meta["exclude_tools"] = exclude_tools
             if exclude_sources:
                 scenario_meta["exclude_sources"] = exclude_sources
+            if allowed_tools:
+                scenario_meta["allowed_tools"] = allowed_tools
 
             prompt = FunctionPrompt(
                 name=scenario_id,

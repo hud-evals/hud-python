@@ -4,7 +4,7 @@ description: "Run agents on tasks or datasets"
 icon: "robot"
 ---
 
-The `hud eval` command runs an agent on a tasks file or HuggingFace dataset.
+The `hud eval` command runs an agent on a tasks file or platform taskset.
 
 <Note>
 **Local Execution Dependencies**: Running Claude or Gemini agents locally requires additional packages:
@@ -23,7 +23,7 @@ hud eval [SOURCE] [AGENT] [OPTIONS]
 ## Arguments
 
 <ParamField path="source" type="string">
-  HuggingFace dataset (e.g., `hud-evals/SheetBench-50`) or task JSON/JSONL file.
+  Platform taskset name (e.g., `My Tasks`) or local task JSON/JSONL file. When loading from a platform taskset, the job is automatically associated with that taskset.
 </ParamField>
 
 <ParamField path="agent" type="string">
@@ -82,6 +82,18 @@ hud eval [SOURCE] [AGENT] [OPTIONS]
   Use ResponseAgent to decide when to stop/continue. Default: True for `--full`.
 </ParamField>
 
+### Taskset Association
+
+<ParamField path="--taskset" type="string">
+  Taskset name to associate the job with. Resolves the name to a taskset UUID on the platform. Useful when running from a local file but wanting the job to appear under a platform taskset.
+</ParamField>
+
+### LLM Routing
+
+<ParamField path="--gateway" type="boolean" default="false">
+  Route LLM API calls through HUD Gateway. If you have API keys stored on the platform, they're used automatically (BYOK) at a lower credit cost. Otherwise, pooled keys are used.
+</ParamField>
+
 ### Output & Confirmation
 
 <ParamField path="--verbose, -v" type="boolean" default="false">
@@ -90,6 +102,10 @@ hud eval [SOURCE] [AGENT] [OPTIONS]
 
 <ParamField path="--very-verbose, -vv" type="boolean" default="false">
   Enable debug-level logs.
+</ParamField>
+
+<ParamField path="--quiet" type="boolean" default="false">
+  Suppress opening the browser for eval links.
 </ParamField>
 
 <ParamField path="--yes, -y" type="boolean" default="false">
@@ -107,14 +123,16 @@ On first run, a template is created:
 ```toml
 # .hud_eval.toml
 [eval]
-# source = "hud-evals/SheetBench-50"
+# source = "My Tasks"
 # agent = "claude"
 # full = false
 # max_concurrent = 30
 # max_steps = 10
 # group_size = 1
-# task_ids = ["task_1", "task_2"]
+# task_ids = ["checkout-smoke", "0"]  # slugs or 0-based indices
 # auto_respond = true
+# gateway = false
+# quiet = false
 
 [agent]
 # allowed_tools = ["computer", "playwright"]
@@ -141,11 +159,17 @@ On first run, a template is created:
 ## Examples
 
 ```bash
-# Single task (debug mode)
-hud eval tasks.json claude
+# Run a platform taskset (single task)
+hud eval "My Tasks" claude
 
-# Full dataset evaluation
-hud eval hud-evals/SheetBench-50 claude --full
+# Full taskset evaluation
+hud eval "My Tasks" claude --full
+
+# Run from a local file
+hud eval tasks.json claude --full
+
+# Local file, associated with a platform taskset
+hud eval tasks.json claude --full --taskset "My Tasks"
 
 # Run specific tasks by ID
 hud eval tasks.json claude --task-ids task_1,task_5
@@ -158,13 +182,16 @@ hud eval tasks.json claude --config max_tokens=32768
 hud eval tasks.json openai --config temperature=0.7
 
 # High concurrency
-hud eval hud-evals/SheetBench-50 claude --full --max-concurrent 100
+hud eval "My Tasks" claude --full --max-concurrent 100
 
 # Variance estimation (run each task 3 times)
-hud eval tasks.json claude --full --group-size 3
+hud eval "My Tasks" claude --full --group-size 3
 
 # Remote execution on HUD platform
-hud eval hud-evals/SheetBench-50 claude --full --remote
+hud eval "My Tasks" claude --full --remote
+
+# Route through HUD Gateway (no provider API keys needed)
+hud eval tasks.json claude --full --gateway
 
 # OpenAI-compatible endpoint (vLLM, Ollama, etc.)
 hud eval tasks.json openai_compatible \
@@ -187,8 +214,9 @@ When agent is omitted, an interactive selector shows presets:
 ❯ Claude Sonnet 4.5
   GPT-5
   Operator (OpenAI Computer Use)
-  Gemini 2.5 Computer Use
-  Grok 4.1 Fast
+  Gemini 3 Pro Preview
+  Gemini CUA (Gemini Computer Use)
+  Grok 4-1 Fast (xAI)
 ```
 
 ## Remote Execution
@@ -196,7 +224,7 @@ When agent is omitted, an interactive selector shows presets:
 With `--remote`, both the **agent** and **environment** run on HUD infrastructure:
 
 ```bash
-hud eval hud-evals/SheetBench-50 claude --full --remote
+hud eval "My Tasks" claude --full --remote
 ```
 
 - **Remote agent**: Runs on HUD workers (no local compute needed)

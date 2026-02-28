@@ -137,36 +137,20 @@ class TestLoadTasks:
 
     @patch("hud.datasets.loader.httpx.Client")
     @patch("hud.datasets.loader.settings")
-    def test_load_tasks_http_error(
+    def test_load_tasks_taskset_not_found(
         self, mock_settings: MagicMock, mock_client_class: MagicMock
     ) -> None:
-        """load_tasks() raises ValueError on HTTP error."""
+        """load_tasks() raises HTTPStatusError when taskset doesn't exist."""
         import httpx
 
         mock_settings.hud_api_url = "https://api.hud.ai"
         mock_settings.api_key = "test_key"
 
-        mock_client = MagicMock()
-        mock_client.get.side_effect = httpx.HTTPError("Network error")
-        mock_client.__enter__.return_value = mock_client
-        mock_client.__exit__.return_value = None
-        mock_client_class.return_value = mock_client
-
-        with pytest.raises(ValueError, match="Failed to load tasks"):
-            load_tasks("test-org/test-dataset")
-
-    @patch("hud.datasets.loader.httpx.Client")
-    @patch("hud.datasets.loader.settings")
-    def test_load_tasks_json_error(
-        self, mock_settings: MagicMock, mock_client_class: MagicMock
-    ) -> None:
-        """load_tasks() raises ValueError on JSON processing error."""
-        mock_settings.hud_api_url = "https://api.hud.ai"
-        mock_settings.api_key = "test_key"
-
         mock_response = MagicMock()
-        mock_response.json.side_effect = Exception("Invalid JSON")
-        mock_response.raise_for_status = MagicMock()
+        mock_response.status_code = 404
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Not Found", request=MagicMock(), response=mock_response
+        )
 
         mock_client = MagicMock()
         mock_client.get.return_value = mock_response
@@ -174,8 +158,28 @@ class TestLoadTasks:
         mock_client.__exit__.return_value = None
         mock_client_class.return_value = mock_client
 
-        with pytest.raises(ValueError, match="Failed to load tasks"):
-            load_tasks("test-org/test-dataset")
+        with pytest.raises(httpx.HTTPStatusError):
+            load_tasks("nonexistent-taskset")
+
+    @patch("hud.datasets.loader.httpx.Client")
+    @patch("hud.datasets.loader.settings")
+    def test_load_tasks_network_error(
+        self, mock_settings: MagicMock, mock_client_class: MagicMock
+    ) -> None:
+        """load_tasks() raises ConnectError when API is unreachable."""
+        import httpx
+
+        mock_settings.hud_api_url = "https://api.hud.ai"
+        mock_settings.api_key = "test_key"
+
+        mock_client = MagicMock()
+        mock_client.get.side_effect = httpx.ConnectError("Connection refused")
+        mock_client.__enter__.return_value = mock_client
+        mock_client.__exit__.return_value = None
+        mock_client_class.return_value = mock_client
+
+        with pytest.raises(httpx.ConnectError):
+            load_tasks("my-taskset")
 
     @patch("hud.datasets.loader.httpx.Client")
     @patch("hud.datasets.loader.settings")

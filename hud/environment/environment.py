@@ -192,8 +192,9 @@ class Environment(
         """Return tools in MCP format (base format).
 
         Applies scenario-level and agent-level filtering in order:
-        1. Scenario-level: exclude_tools (fnmatch) and exclude_sources (connection names)
-        2. Agent-level: _agent_include/_agent_exclude (fnmatch)
+        1. Scenario-level: exclude_sources and exclude_tools remove tools
+        2. Scenario-level: allowed_tools rescues specific tools back from exclusions
+        3. Agent-level: _agent_include/_agent_exclude (fnmatch)
 
         Supports fnmatch-style wildcards (e.g., "*setup*", "browser_*").
         """
@@ -220,6 +221,16 @@ class Environment(
                         continue
                     filtered.append(tool)
                 tools = filtered
+
+            # Rescue: add back tools matching allowed_tools patterns
+            allowed_patterns = session.allowed_tools
+            if allowed_patterns:
+                visible_names = {t.name for t in tools}
+                for tool in self._router.tools:
+                    if tool.name not in visible_names and any(
+                        fnmatch.fnmatch(tool.name, pat) for pat in allowed_patterns
+                    ):
+                        tools.append(tool)
 
         # Apply agent-level filtering (from v4 allowed_tools/disallowed_tools)
         if self._agent_include is not None or self._agent_exclude is not None:
