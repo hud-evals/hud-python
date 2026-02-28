@@ -621,14 +621,21 @@ async def _run_evaluation(cfg: EvalConfig) -> tuple[list[Any], list[Any]]:
     hud_console.info(f"📊 Loading tasks from: {cfg.source}…")
     path = Path(cfg.source)
     taskset_id: str | None = None
-    if path.exists() and path.suffix in {".json", ".jsonl"}:
-        tasks = _load_from_file(path)
-    else:
-        tasks, taskset_id = _load_from_api(cfg.source)
+    try:
+        if path.exists() and path.suffix in {".json", ".jsonl"}:
+            tasks = _load_from_file(path)
+        else:
+            tasks, taskset_id = _load_from_api(cfg.source)
+    except Exception as e:
+        hud_console.error(f"Failed to load tasks from {cfg.source}: {e}")
+        raise typer.Exit(1) from e
 
     if not tasks:
         hud_console.error(f"No tasks found in: {cfg.source}")
         raise typer.Exit(1)
+
+    if cfg.taskset:
+        taskset_id = cfg.taskset
 
     # Filter by task slugs (or positional indices) if provided
     if cfg.task_ids:
