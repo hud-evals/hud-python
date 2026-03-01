@@ -106,16 +106,17 @@ print(result.reward, result.done)
 | `done` | `bool` | Whether execution completed |
 | `content` | `str \| None` | Final response content |
 | `isError` | `bool` | Whether an error occurred |
+| `citations` | `list[dict[str, Any]]` | Provider-normalized citations from final inference |
 | `info` | `dict[str, Any]` | Additional metadata |
 | `trace` | `list[TraceStep]` | Execution trace steps |
 | `messages` | `list[Any]` | Final conversation state |
 
-## AgentResponse
+## InferenceResult
 
-Returned by agent `get_response()` methods.
+Returned by agent `get_response()` methods. Represents the result of a single LLM inference call.
 
 ```python
-from hud.types import AgentResponse
+from hud.types import InferenceResult
 ```
 
 | Field | Type | Description |
@@ -124,8 +125,11 @@ from hud.types import AgentResponse
 | `done` | `bool` | Whether agent should stop |
 | `content` | `str \| None` | Response text |
 | `reasoning` | `str \| None` | Model reasoning/thinking |
+| `citations` | `list[dict[str, Any]]` | Provider-normalized citations |
 | `info` | `dict[str, Any]` | Provider-specific metadata |
 | `isError` | `bool` | Error flag |
+
+> **Note:** `AgentResponse` is available as a backwards-compatible alias for `InferenceResult`.
 
 ## AgentType
 

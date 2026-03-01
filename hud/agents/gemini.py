@@ -10,7 +10,7 @@ from google import genai
 from google.genai import types as genai_types
 
 from hud.settings import settings
-from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
 
@@ -140,7 +140,7 @@ class GeminiAgent(MCPAgent):
 
         return [genai_types.Content(role="user", parts=gemini_parts)]
 
-    async def get_response(self, messages: list[genai_types.Content]) -> AgentResponse:
+    async def get_response(self, messages: list[genai_types.Content]) -> InferenceResult:
         """Get response from Gemini including any tool calls."""
         # Build generate content config
         generate_config = genai_types.GenerateContentConfig(
@@ -165,7 +165,7 @@ class GeminiAgent(MCPAgent):
             messages.append(response.candidates[0].content)
 
         # Process response
-        result = AgentResponse(content="", tool_calls=[], done=True)
+        result = InferenceResult(content="", tool_calls=[], done=True)
         collected_tool_calls: list[MCPToolCall] = []
 
         if not response.candidates:
@@ -199,6 +199,60 @@ class GeminiAgent(MCPAgent):
         result.content = text_content
         if thinking_content:
             result.reasoning = thinking_content
+
+        # Extract grounding citations from groundingMetadata
+        grounding_meta = getattr(candidate, "grounding_metadata", None)
+        if grounding_meta:
+            citations: list[dict[str, Any]] = []
+
+            # Build a lookup from chunk index → source info
+            chunks = getattr(grounding_meta, "grounding_chunks", None) or []
+            chunk_sources: list[dict[str, Any]] = []
+            for chunk in chunks:
+                web = getattr(chunk, "web", None)
+                if web:
+                    chunk_sources.append({
+                        "source": getattr(web, "uri", "") or "",
+                        "title": getattr(web, "title", None),
+                    })
+                else:
+                    chunk_sources.append({"source": "", "title": None})
+
+            # Walk groundingSupports for text-segment anchoring
+            supports = getattr(grounding_meta, "grounding_supports", None) or []
+            seen_chunk_indices: set[int] = set()
+            for support in supports:
+                segment = getattr(support, "segment", None)
+                support_chunk_indices = (
+                    getattr(support, "grounding_chunk_indices", None) or []
+                )
+                segment_text = getattr(segment, "text", "") or "" if segment else ""
+                start_idx = getattr(segment, "start_index", None) if segment else None
+                end_idx = getattr(segment, "end_index", None) if segment else None
+
+                for idx in support_chunk_indices:
+                    seen_chunk_indices.add(idx)
+                    source_info = chunk_sources[idx] if idx < len(chunk_sources) else {}
+                    citations.append({
+                        "type": "grounding",
+                        "text": segment_text,
+                        "source": source_info.get("source", ""),
+                        "title": source_info.get("title"),
+                        "start_index": start_idx,
+                        "end_index": end_idx,
+                    })
+
+            # Include any chunks not referenced by a support entry
+            for idx, src in enumerate(chunk_sources):
+                if idx not in seen_chunk_indices and src.get("source"):
+                    citations.append({
+                        "type": "grounding",
+                        "text": "",
+                        "source": src["source"],
+                        "title": src.get("title"),
+                    })
+
+            result.citations = citations
 
         return result
 

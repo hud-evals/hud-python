@@ -10,7 +10,7 @@ from google.genai import types as genai_types
 
 from hud.tools.computer.settings import computer_settings
 from hud.tools.native_types import NativeToolSpec
-from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult
 from hud.utils.types import with_signature
 
 from .base import MCPAgent
@@ -157,7 +157,7 @@ class GeminiCUAAgent(GeminiAgent):
         # For non-computer tools, use the parent implementation
         return super()._to_gemini_tool(tool)
 
-    async def get_response(self, messages: list[genai_types.Content]) -> AgentResponse:
+    async def get_response(self, messages: list[genai_types.Content]) -> InferenceResult:
         """Get response from Gemini including any tool calls.
 
         Extends parent to trim old screenshots before making API call.

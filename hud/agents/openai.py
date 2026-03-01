@@ -32,7 +32,7 @@ from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 
 from hud.settings import settings
 from hud.tools.native_types import NativeToolSpec
-from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
+from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult, Trace
 from hud.utils.strict_schema import ensure_strict_json_schema
 from hud.utils.types import with_signature
 
@@ -324,7 +324,7 @@ class OpenAIAgent(MCPAgent):
             content.append(ResponseInputTextParam(type="input_text", text=""))
         return [Message(role="user", content=content)]
 
-    async def get_response(self, messages: ResponseInputParam) -> AgentResponse:
+    async def get_response(self, messages: ResponseInputParam) -> InferenceResult:
         """Send the latest input items to OpenAI's Responses API."""
         new_items: ResponseInputParam = messages[self._message_cursor :]
         if not new_items:
@@ -357,19 +357,42 @@ class OpenAIAgent(MCPAgent):
         self.last_response_id = response.id
         self._message_cursor = len(messages)
 
-        agent_response = AgentResponse(content="", tool_calls=[], done=True)
+        agent_response = InferenceResult(content="", tool_calls=[], done=True)
         text_chunks: list[str] = []
         reasoning_chunks: list[str] = []
 
+        citations: list[dict[str, Any]] = []
+
         for item in response.output:
             if item.type == "message":
-                text = "".join(
-                    content.text
-                    for content in item.content
-                    if isinstance(content, ResponseOutputText)
-                )
-                if text:
-                    text_chunks.append(text)
+                for content_block in item.content:
+                    if isinstance(content_block, ResponseOutputText):
+                        if content_block.text:
+                            text_chunks.append(content_block.text)
+                        # Extract citations from annotations
+                        if content_block.annotations:
+                            for ann in content_block.annotations:
+                                ann_type = getattr(ann, "type", "")
+                                if ann_type == "url_citation":
+                                    cit_obj = getattr(ann, "url_citation", ann)
+                                    citations.append({
+                                        "type": "url_citation",
+                                        "text": getattr(cit_obj, "title", "") or "",
+                                        "source": getattr(cit_obj, "url", "") or "",
+                                        "title": getattr(cit_obj, "title", None),
+                                        "start_index": getattr(ann, "start_index", None),
+                                        "end_index": getattr(ann, "end_index", None),
+                                    })
+                                elif ann_type == "file_citation":
+                                    cit_obj = getattr(ann, "file_citation", ann)
+                                    citations.append({
+                                        "type": "file_citation",
+                                        "text": getattr(cit_obj, "filename", "") or "",
+                                        "source": getattr(cit_obj, "file_id", "") or "",
+                                        "title": getattr(cit_obj, "filename", None),
+                                        "start_index": getattr(ann, "start_index", None),
+                                        "end_index": getattr(ann, "end_index", None),
+                                    })
             elif item.type == "reasoning":
                 reasoning_chunks.append("".join(summary.text for summary in item.summary))
             else:
@@ -381,6 +404,7 @@ class OpenAIAgent(MCPAgent):
             agent_response.done = False
 
         agent_response.content = "".join(text_chunks)
+        agent_response.citations = citations
         if reasoning_chunks:
             agent_response.reasoning = "\n".join(reasoning_chunks)
         return agent_response

@@ -22,7 +22,7 @@ from hud.tools.coding import BashTool
 from hud.tools.computer.anthropic import AnthropicComputerTool
 from hud.tools.hosted import GoogleSearchTool
 from hud.tools.native_types import NativeToolSpec
-from hud.types import AgentResponse, AgentType
+from hud.types import AgentType, InferenceResult
 
 
 def _free_port() -> int:
@@ -193,8 +193,8 @@ class TestNativeToolSpecAgentIntegration:
                 def get_system_messages(self) -> list[Any]:
                     return []
 
-                async def get_response(self, messages: list[Any]) -> AgentResponse:
-                    return AgentResponse(content="test", done=True)
+                async def get_response(self, messages: list[Any]) -> InferenceResult:
+                    return InferenceResult(content="test", done=True)
 
                 def format_blocks(self, blocks: list[Any]) -> list[Any]:
                     return blocks
@@ -271,8 +271,8 @@ class TestNativeToolSpecAgentIntegration:
             def get_system_messages(self) -> list[Any]:
                 return []
 
-            async def get_response(self, messages: list[Any]) -> AgentResponse:
-                return AgentResponse(content="test", done=True)
+            async def get_response(self, messages: list[Any]) -> InferenceResult:
+                return InferenceResult(content="test", done=True)
 
             def format_blocks(self, blocks: list[Any]) -> list[Any]:
                 return blocks
@@ -347,8 +347,8 @@ class TestNativeToolSpecAgentIntegration:
             def get_system_messages(self) -> list[Any]:
                 return []
 
-            async def get_response(self, messages: list[Any]) -> AgentResponse:
-                return AgentResponse(content="test", done=True)
+            async def get_response(self, messages: list[Any]) -> InferenceResult:
+                return InferenceResult(content="test", done=True)
 
             def format_blocks(self, blocks: list[Any]) -> list[Any]:
                 return blocks
@@ -412,8 +412,8 @@ class TestToolWithoutNativeSpecs:
                 def get_system_messages(self) -> list[Any]:
                     return []
 
-                async def get_response(self, messages: list[Any]) -> AgentResponse:
-                    return AgentResponse(content="test", done=True)
+                async def get_response(self, messages: list[Any]) -> InferenceResult:
+                    return InferenceResult(content="test", done=True)
 
                 def format_blocks(self, blocks: list[Any]) -> list[Any]:
                     return blocks

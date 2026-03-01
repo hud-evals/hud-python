@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 import mcp.types as types
 
 from hud.tools.native_types import NativeToolSpec
-from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
+from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult, Trace
 from hud.utils.hud_console import HUDConsole
 
 from .types import BaseCreateParams
@@ -440,7 +440,13 @@ class MCPAgent(ABC):
 
             # Submit final answer to context (only if scenario is running)
             if result.content and ctx.has_scenario:
-                await ctx.submit(result.content)
+                if result.citations:
+                    await ctx.submit({
+                        "content": result.content,
+                        "citations": result.citations,
+                    })
+                else:
+                    await ctx.submit(result.content)
 
             return result
 
@@ -473,7 +479,7 @@ class MCPAgent(ABC):
         Returns:
             Trace with reward, done, content fields and trace steps
         """
-        final_response = None
+        final_response: InferenceResult | None = None
         error = None
 
         messages: list[Any] = []
@@ -564,7 +570,6 @@ class MCPAgent(ABC):
         else:
             is_error = False
 
-        # Ensure all parameters are the correct type
         # Use ctx.reward if already set (e.g., from scenario evaluate), otherwise 0.0
         # Note: For v4 tasks with evaluate_tool, reward is set in __aexit__ after this returns,
         # so callers should prefer ctx.reward over Trace.reward for the final result.
@@ -574,17 +579,15 @@ class MCPAgent(ABC):
             if ctx_reward is not None:
                 reward = ctx_reward
 
-        trace_params = {
-            "reward": reward,
-            "done": True,
-            "messages": messages,
-            "content": final_response.content if final_response else error,
-            "isError": is_error,
-            "info": {"error": error} if error else {},
-        }
-        trace_result = Trace(**trace_params)
-
-        return trace_result
+        return Trace(
+            reward=reward,
+            done=True,
+            messages=messages,
+            content=final_response.content if final_response else error,
+            isError=is_error,
+            citations=final_response.citations if final_response else [],
+            info={"error": error} if error else {},
+        )
 
     async def call_tools(
         self, tool_call: MCPToolCall | list[MCPToolCall] | None = None
@@ -629,7 +632,7 @@ class MCPAgent(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def get_response(self, messages: list[Any]) -> AgentResponse:
+    async def get_response(self, messages: list[Any]) -> InferenceResult:
         """
         Get response from the model including any tool calls.
 

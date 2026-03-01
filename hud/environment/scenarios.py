@@ -152,6 +152,63 @@ def _normalize_prompt_yield(value: Any) -> list[str]:
     return [str(value)]
 
 
+def _build_answer_for_generator(session: ScenarioSession) -> Any:
+    """Build the value to send into the scenario generator via ``asend()``.
+
+    When ``session.returns_type`` is set the raw answer (str or dict) is
+    deserialized into an ``AgentAnswer[T]``.  Otherwise the raw answer
+    (a plain str) is forwarded directly for backwards compatibility.
+    """
+    from hud.tools.types import AgentAnswer, Citation
+
+    raw_answer = session.answer
+
+    if session.returns_type is None:
+        # No structured return type — pass the raw string (backwards compat)
+        if isinstance(raw_answer, dict):
+            return raw_answer.get("content", "")
+        return raw_answer
+
+    # Extract text content and citations from the answer payload
+    if isinstance(raw_answer, dict):
+        raw_text: str = raw_answer.get("content", "")
+        raw_citations: list[dict[str, Any]] = raw_answer.get("citations", [])
+    elif isinstance(raw_answer, str):
+        raw_text = raw_answer
+        raw_citations = []
+    else:
+        raw_text = str(raw_answer) if raw_answer is not None else ""
+        raw_citations = []
+
+    # Parse content with the returns Pydantic model
+    returns_cls = session.returns_type
+    try:
+        from pydantic import TypeAdapter
+
+        adapter = TypeAdapter(returns_cls)
+        parsed_content = adapter.validate_json(raw_text)
+    except Exception:
+        # JSON parsing failed — try validating as-is (e.g. plain string type)
+        try:
+            adapter = TypeAdapter(returns_cls)
+            parsed_content = adapter.validate_python(raw_text)
+        except Exception:
+            logger.warning(
+                "Could not parse answer into %s for scenario '%s', passing raw string",
+                returns_cls.__name__ if hasattr(returns_cls, "__name__") else str(returns_cls),
+                session.local_name,
+            )
+            parsed_content = raw_text
+
+    citations = [Citation(**c) for c in raw_citations]
+
+    return AgentAnswer(
+        content=parsed_content,
+        raw=raw_text,
+        citations=citations,
+    )
+
+
 def _normalize_eval_yield(value: Any) -> EvaluationResult:
     """Convert various second-yield types to EvaluationResult.
 
@@ -196,9 +253,11 @@ class ScenarioSession(BaseModel):
     connection_name: str | None  # Which connection served it (if remote)
     resource_uri: str  # Full URI for reading evaluation result
     generator: Any | None = None  # AsyncGenerator (if local) - Any to avoid validation issues
-    answer: str | None = None  # Submitted answer
+    answer: str | dict[str, Any] | None = None  # Submitted answer (str or structured)
     exclude_tools: list[str] | None = None  # fnmatch patterns to hide from agent
     exclude_sources: list[str] | None = None  # Connection names to hide from agent
+    returns_type: Any | None = None  # Pydantic model class for structured answers
+    enable_citations: bool = False
     allowed_tools: list[str] | None = None  # fnmatch patterns to rescue from exclusions
 
 
@@ -254,6 +313,9 @@ class ScenarioMixin:
     # Per-scenario tool exclusions: scenario_name -> (exclude_tools, exclude_sources, allowed_tools)
     _scenario_exclusions: dict[str, tuple[list[str], list[str], list[str]]]
 
+    # Per-scenario output config: scenario_name -> (returns_type, enable_citations)
+    _scenario_output_config: dict[str, tuple[type | None, bool]]
+
     # Single active scenario session - used for BOTH:
     # - Client-side: when we run scenarios (local or remote)
     # - Server-side: when external clients call our scenarios via MCP
@@ -264,12 +326,13 @@ class ScenarioMixin:
         """Initialize scenario state. Called from Environment.__init__."""
         self._scenarios = {}
         self._scenario_exclusions = {}
+        self._scenario_output_config = {}
         self._active_session = None
 
         # Register _hud_submit tool (underscore = hidden from agent)
         self._register_hud_submit_tool()
 
-    async def submit(self, scenario: str, answer: str) -> None:
+    async def submit(self, scenario: str, answer: str | dict[str, Any]) -> None:
         """Submit the agent's answer for a scenario's evaluate phase.
 
         Uses _active_session to route to the correct connection (if remote)
@@ -277,7 +340,8 @@ class ScenarioMixin:
 
         Args:
             scenario: Name of the scenario (may include env prefix like "env:name")
-            answer: The agent's answer/result to submit
+            answer: The agent's answer — either a plain string or a dict with
+                ``content`` (str), ``citations``, ``annotations``, ``grounding``.
         """
         local_name = scenario.split(":")[-1] if ":" in scenario else scenario
 
@@ -305,7 +369,12 @@ class ScenarioMixin:
             if not conn or not conn.client:
                 raise ValueError(f"Connection '{conn_name}' not available")
 
-            await conn.call_tool("_hud_submit", {"scenario": local_name, "answer": answer})
+            # Serialize structured answers to JSON string for MCP transport
+            transport_answer = json.dumps(answer) if isinstance(answer, dict) else answer
+
+            await conn.call_tool(
+                "_hud_submit", {"scenario": local_name, "answer": transport_answer}
+            )
             logger.debug("Sent answer to connection '%s' for scenario '%s'", conn_name, local_name)
 
     def _register_hud_submit_tool(self) -> None:
@@ -400,6 +469,7 @@ class ScenarioMixin:
 
             # Create session for local scenario
             excl = self._scenario_exclusions.get(local_name)
+            out_cfg = self._scenario_output_config.get(local_name)
             self._active_session = ScenarioSession(
                 local_name=local_name,
                 full_name=scenario_name,
@@ -410,6 +480,8 @@ class ScenarioMixin:
                 exclude_tools=excl[0] if excl else None,
                 exclude_sources=excl[1] if excl else None,
                 allowed_tools=excl[2] if excl else None,
+                returns_type=out_cfg[0] if out_cfg else None,
+                enable_citations=out_cfg[1] if out_cfg else False,
             )
 
             logger.debug(
@@ -543,15 +615,14 @@ class ScenarioMixin:
             if not session.generator:
                 raise ValueError(f"Local scenario '{session.local_name}' has no generator")
 
-            answer = session.answer
+            answer_to_send = _build_answer_for_generator(session)
             try:
-                raw_result = await session.generator.asend(answer)
+                raw_result = await session.generator.asend(answer_to_send)
                 # Normalize to EvaluationResult (handles float, EvaluationResult, dict)
                 result = _normalize_eval_yield(raw_result)
                 logger.debug(
-                    "Local scenario %s evaluate: answer=%s, result=%s",
+                    "Local scenario %s evaluate: result=%s",
                     session.local_name,
-                    answer[:50] if answer and len(answer) > 50 else answer,
                     result,
                 )
                 return result
@@ -594,6 +665,8 @@ class ScenarioMixin:
         exclude_tools: list[str] | None = None,
         exclude_sources: list[str] | None = None,
         allowed_tools: list[str] | None = None,
+        returns: type | None = None,
+        enable_citations: bool = False,
     ) -> Callable[
         [Callable[P, AsyncGenerator[Any, None]]],
         ScenarioHandle[P],
@@ -619,6 +692,15 @@ class ScenarioMixin:
             allowed_tools: Optional fnmatch patterns for tool names to rescue back
                 after exclusions (e.g. exclude all sentry tools via exclude_sources
                 but allow ``["sentry_get_issue"]``).
+            returns: Optional Pydantic model class defining the expected answer
+                schema.  When set, the agent's answer is parsed into this type
+                and delivered to the evaluate phase as
+                ``AgentAnswer[returns]``.  The JSON schema is embedded in the
+                scenario's MCP prompt metadata so agents and the platform can
+                request structured output from the provider.
+            enable_citations: When True, the agent is requested to extract
+                source citations from the provider response.  Citations are
+                delivered to the evaluate phase on ``AgentAnswer.citations``.
 
         Example:
             @env.scenario(required_env_vars=["OPENAI_API_KEY"])
@@ -662,6 +744,9 @@ class ScenarioMixin:
 
             # Store the generator function
             self._scenarios[scenario_name] = fn
+
+            if returns is not None or enable_citations:
+                self._scenario_output_config[scenario_name] = (returns, enable_citations)
 
             if exclude_tools or exclude_sources or allowed_tools:
                 self._scenario_exclusions[scenario_name] = (
@@ -830,6 +915,18 @@ class ScenarioMixin:
                 scenario_meta["exclude_sources"] = exclude_sources
             if allowed_tools:
                 scenario_meta["allowed_tools"] = allowed_tools
+            if returns is not None:
+                from pydantic import TypeAdapter
+
+                try:
+                    scenario_meta["returns_schema"] = TypeAdapter(returns).json_schema()
+                except Exception:
+                    logger.warning(
+                        "Could not generate JSON schema for returns type on scenario '%s'",
+                        scenario_name,
+                    )
+            if enable_citations:
+                scenario_meta["enable_citations"] = True
 
             prompt = FunctionPrompt(
                 name=scenario_id,

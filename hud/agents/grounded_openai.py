@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from pydantic import ConfigDict, field_validator
 
 from hud.tools.grounding import GroundedComputerTool, Grounder, GrounderConfig
-from hud.types import AgentResponse, MCPToolCall, MCPToolResult
+from hud.types import InferenceResult, MCPToolCall, MCPToolResult
 from hud.utils.types import with_signature
 
 if TYPE_CHECKING:
@@ -103,7 +103,7 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
             return []
         return [self.grounded_tool.get_openai_tool_schema()]
 
-    async def get_response(self, messages: Any) -> AgentResponse:
+    async def get_response(self, messages: Any) -> InferenceResult:
         """Get response from the planning model and handle grounded tool calls.
 
         This method:
@@ -115,7 +115,7 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
             messages: Conversation messages
 
         Returns:
-            AgentResponse with either content or tool calls for MCP execution
+            InferenceResult with either content or tool calls for MCP execution
         """
         tool_schemas = self.get_tool_schemas()
 
@@ -179,7 +179,7 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
         self.conversation_history = messages.copy()
 
         if not msg.tool_calls:
-            return AgentResponse(
+            return InferenceResult(
                 content=msg.content or "",
                 reasoning=msg.reasoning_content,
                 tool_calls=[],
@@ -190,7 +190,7 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
         tc = msg.tool_calls[0]
 
         if tc.function.name != "computer":
-            return AgentResponse(
+            return InferenceResult(
                 content=f"Error: Model called unexpected tool '{tc.function.name}'",
                 reasoning=msg.reasoning_content,
                 tool_calls=[],
@@ -202,7 +202,7 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
         try:
             args = json.loads(tc.function.arguments or "{}")
         except json.JSONDecodeError:
-            return AgentResponse(
+            return InferenceResult(
                 content="Error: Invalid tool arguments",
                 reasoning=msg.reasoning_content,
                 tool_calls=[],
@@ -212,7 +212,7 @@ class GroundedOpenAIChatAgent(OpenAIChatAgent):
 
         tool_call = MCPToolCall(name="computer", arguments=args, id=tc.id)
 
-        return AgentResponse(
+        return InferenceResult(
             content=msg.content or "",
             reasoning=msg.reasoning_content,
             tool_calls=[tool_call],

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from hud.agents.base import MCPAgent
-from hud.types import AgentResponse, AgentType, BaseAgentConfig, Trace
+from hud.types import AgentType, BaseAgentConfig, InferenceResult, Trace
 
 if TYPE_CHECKING:
     from hud.eval.context import EvalContext
@@ -78,7 +78,7 @@ class IntegrationTestRunner(MCPAgent):
     async def get_system_messages(self) -> list[Any]:
         return []
 
-    async def get_response(self, messages: list[Any]) -> AgentResponse:
+    async def get_response(self, messages: list[Any]) -> InferenceResult:
         raise NotImplementedError("IntegrationTestRunner does not implement agent loop")
 
     async def format_blocks(self, blocks: list[Any]) -> list[Any]:

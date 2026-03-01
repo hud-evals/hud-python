@@ -10,7 +10,7 @@ import pytest
 from hud.agents.base import BaseCreateParams, MCPAgent, find_content, find_reward, text_to_blocks
 from hud.environment.router import ToolRouter
 from hud.eval.context import EvalContext
-from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult
 
 
 class DummyConfig(BaseAgentConfig):
@@ -33,7 +33,7 @@ class MockEvalContext(EvalContext):
         # Core attributes
         self.prompt = prompt
         self._tools = tools or []
-        self._submitted: str | None = None
+        self._submitted: str | dict[str, Any] | None = None
         self.reward: float | None = None
         self._call_tool_handler: Any = None
 
@@ -50,7 +50,7 @@ class MockEvalContext(EvalContext):
         self.group_id: str | None = None
         self.index = 0
         self.variants: dict[str, Any] = {}
-        self.answer: str | None = None
+        self.answer: str | dict[str, Any] | None = None
         self.system_prompt: str | None = None
         self.error: BaseException | None = None
         self.metadata: dict[str, Any] = {}
@@ -85,7 +85,7 @@ class MockEvalContext(EvalContext):
             isError=False,
         )
 
-    async def submit(self, answer: str) -> None:
+    async def submit(self, answer: str | dict[str, Any]) -> None:
         self._submitted = answer
 
 
@@ -104,8 +104,8 @@ class DummyAgent(MCPAgent):
     async def get_system_messages(self) -> list[types.ContentBlock]:
         return [types.TextContent(type="text", text="sys")]
 
-    async def get_response(self, messages: list[Any]) -> AgentResponse:
-        return AgentResponse(content="ok", tool_calls=[], done=True)
+    async def get_response(self, messages: list[Any]) -> InferenceResult:
+        return InferenceResult(content="ok", tool_calls=[], done=True)
 
     async def format_blocks(self, blocks: list[Any]) -> list[Any]:
         return blocks

@@ -63,7 +63,7 @@ class MockEvalContext(EvalContext):
             isError=False,
         )
 
-    async def submit(self, answer: str) -> None:
+    async def submit(self, answer: str | dict[str, Any]) -> None:
         self._submitted = answer
 
 

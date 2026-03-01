@@ -24,7 +24,7 @@ class MockEvalContext(EvalContext):
         # Core attributes
         self.prompt = "Test prompt"
         self._tools = tools or []
-        self._submitted: str | None = None
+        self._submitted: str | dict[str, Any] | None = None
         self.reward: float | None = None
 
         # Environment attributes
@@ -40,7 +40,7 @@ class MockEvalContext(EvalContext):
         self.group_id: str | None = None
         self.index = 0
         self.variants: dict[str, Any] = {}
-        self.answer: str | None = None
+        self.answer: str | dict[str, Any] | None = None
         self.system_prompt: str | None = None
         self.error: BaseException | None = None
         self.metadata: dict[str, Any] = {}
@@ -63,7 +63,7 @@ class MockEvalContext(EvalContext):
             isError=False,
         )
 
-    async def submit(self, answer: str) -> None:
+    async def submit(self, answer: str | dict[str, Any]) -> None:
         self._submitted = answer
 
 
@@ -367,3 +367,152 @@ class TestGeminiToolConversion:
         agent.ctx = ctx
         with pytest.raises(ValueError, match="requires both a description"):
             await agent._initialize_from_ctx(ctx)
+
+
+class TestGeminiCitations:
+    """Tests for Gemini grounding citation extraction."""
+
+    @pytest.fixture
+    def mock_gemini_client(self) -> MagicMock:
+        client = MagicMock(spec=genai.Client)
+        client.aio = MagicMock()
+        client.aio.models = MagicMock()
+        client.aio.models.generate_content = AsyncMock()
+        return client
+
+    def _make_agent(self, client: MagicMock) -> GeminiAgent:
+        agent = GeminiAgent.create(model_client=client, validate_api_key=False)
+        agent.gemini_tools = []
+        agent._initialized = True
+        return agent
+
+    def _text_candidate(self, text: str = "answer") -> MagicMock:
+        candidate = MagicMock()
+        part = MagicMock()
+        part.text = text
+        part.function_call = None
+        part.thought = False
+        candidate.content = MagicMock()
+        candidate.content.parts = [part]
+        return candidate
+
+    @pytest.mark.asyncio
+    async def test_no_grounding_metadata(self, mock_gemini_client: MagicMock) -> None:
+        """No citations when groundingMetadata is absent."""
+        agent = self._make_agent(mock_gemini_client)
+        candidate = self._text_candidate()
+        candidate.grounding_metadata = None
+        resp = MagicMock()
+        resp.candidates = [candidate]
+        mock_gemini_client.aio.models.generate_content = AsyncMock(return_value=resp)
+
+        result = await agent.get_response([])
+        assert result.citations == []
+
+    @pytest.mark.asyncio
+    async def test_grounding_chunks_only(self, mock_gemini_client: MagicMock) -> None:
+        """Chunks without supports produce citations with source but no anchoring."""
+        agent = self._make_agent(mock_gemini_client)
+        candidate = self._text_candidate()
+
+        chunk = MagicMock()
+        chunk.web = MagicMock()
+        chunk.web.uri = "https://example.com"
+        chunk.web.title = "Example"
+
+        grounding_meta = MagicMock()
+        grounding_meta.grounding_chunks = [chunk]
+        grounding_meta.grounding_supports = []
+        candidate.grounding_metadata = grounding_meta
+
+        resp = MagicMock()
+        resp.candidates = [candidate]
+        mock_gemini_client.aio.models.generate_content = AsyncMock(return_value=resp)
+
+        result = await agent.get_response([])
+        assert len(result.citations) == 1
+        assert result.citations[0]["source"] == "https://example.com"
+        assert result.citations[0]["title"] == "Example"
+        assert result.citations[0]["text"] == ""
+
+    @pytest.mark.asyncio
+    async def test_grounding_supports_with_anchoring(self, mock_gemini_client: MagicMock) -> None:
+        """Supports produce citations with start_index/end_index from segments."""
+        agent = self._make_agent(mock_gemini_client)
+        candidate = self._text_candidate("The sky is blue because of Rayleigh scattering.")
+
+        chunk = MagicMock()
+        chunk.web = MagicMock()
+        chunk.web.uri = "https://physics.org/scattering"
+        chunk.web.title = "Scattering"
+
+        support = MagicMock()
+        support.segment = MagicMock()
+        support.segment.text = "Rayleigh scattering"
+        support.segment.start_index = 28
+        support.segment.end_index = 47
+        support.grounding_chunk_indices = [0]
+
+        grounding_meta = MagicMock()
+        grounding_meta.grounding_chunks = [chunk]
+        grounding_meta.grounding_supports = [support]
+        candidate.grounding_metadata = grounding_meta
+
+        resp = MagicMock()
+        resp.candidates = [candidate]
+        mock_gemini_client.aio.models.generate_content = AsyncMock(return_value=resp)
+
+        result = await agent.get_response([])
+        assert len(result.citations) == 1
+        cit = result.citations[0]
+        assert cit["type"] == "grounding"
+        assert cit["text"] == "Rayleigh scattering"
+        assert cit["source"] == "https://physics.org/scattering"
+        assert cit["start_index"] == 28
+        assert cit["end_index"] == 47
+
+    @pytest.mark.asyncio
+    async def test_multiple_supports_and_chunks(self, mock_gemini_client: MagicMock) -> None:
+        """Multiple supports across multiple chunks produce the right citations."""
+        agent = self._make_agent(mock_gemini_client)
+        candidate = self._text_candidate()
+
+        chunk_a = MagicMock()
+        chunk_a.web = MagicMock()
+        chunk_a.web.uri = "https://a.com"
+        chunk_a.web.title = "A"
+
+        chunk_b = MagicMock()
+        chunk_b.web = MagicMock()
+        chunk_b.web.uri = "https://b.com"
+        chunk_b.web.title = "B"
+
+        support1 = MagicMock()
+        support1.segment = MagicMock()
+        support1.segment.text = "fact one"
+        support1.segment.start_index = 0
+        support1.segment.end_index = 8
+        support1.grounding_chunk_indices = [0]
+
+        support2 = MagicMock()
+        support2.segment = MagicMock()
+        support2.segment.text = "fact two"
+        support2.segment.start_index = 10
+        support2.segment.end_index = 18
+        support2.grounding_chunk_indices = [1]
+
+        grounding_meta = MagicMock()
+        grounding_meta.grounding_chunks = [chunk_a, chunk_b]
+        grounding_meta.grounding_supports = [support1, support2]
+        candidate.grounding_metadata = grounding_meta
+
+        resp = MagicMock()
+        resp.candidates = [candidate]
+        mock_gemini_client.aio.models.generate_content = AsyncMock(return_value=resp)
+
+        result = await agent.get_response([])
+        assert len(result.citations) == 2
+        assert result.citations[0]["source"] == "https://a.com"
+        assert result.citations[0]["text"] == "fact one"
+        assert result.citations[1]["source"] == "https://b.com"
+        assert result.citations[1]["text"] == "fact two"

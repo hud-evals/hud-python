@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 from mcp.types import ContentBlock, ImageContent, TextContent
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+T = TypeVar("T")
 
 
 class Coordinate(BaseModel):
@@ -178,6 +180,88 @@ class ContentResult(BaseModel):
             blocks.append(ImageContent(data=self.base64_image, mimeType="image/png", type="image"))
 
         return blocks
+
+
+class Citation(BaseModel):
+    """Normalized citation from any provider.
+
+    All providers express the same concept — "this part of my answer came
+    from this source" — using different names and shapes.  This type
+    unifies them into a single format:
+
+    - **OpenAI**: ``url_citation`` / ``file_citation`` annotations on
+      ``ResponseOutputText``.  Each has ``url``/``file_id``, ``title``,
+      and ``start_index``/``end_index`` anchoring the citation in the
+      output text.
+    - **Claude**: ``cite`` content blocks referencing passages in
+      provided documents.  Has ``cited_text``, ``document_title``,
+      and character ranges in the *source* document.
+    - **Gemini**: ``groundingChunks`` (source URIs) and
+      ``groundingSupports`` (output-text segments mapped to chunks)
+      from ``groundingMetadata``.
+
+    The ``type`` field preserves the provider-specific category so
+    downstream code can distinguish URL citations from document
+    citations from grounding references when needed.
+
+    Aligns with A2A ``Part`` metadata: citations are metadata on a
+    ``TextPart`` that link a span of agent output to its source.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: str = Field(
+        default="citation",
+        description="Citation kind: 'url_citation', 'file_citation', "
+        "'document_citation', 'grounding', or generic 'citation'",
+    )
+    text: str = Field(default="", description="The cited passage or annotated text span")
+    source: str = Field(default="", description="URL, file ID, or document identifier")
+    title: str | None = Field(default=None, description="Title of the source")
+    start_index: int | None = Field(
+        default=None, description="Start character index in the agent's output text"
+    )
+    end_index: int | None = Field(
+        default=None, description="End character index in the agent's output text"
+    )
+    provider_data: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Raw provider-specific data for advanced use",
+    )
+
+
+class AgentAnswer(BaseModel, Generic[T]):
+    """Wrapper holding an agent's structured answer alongside response metadata.
+
+    When a scenario specifies ``returns=SomeModel``, the answer received
+    by the scenario's evaluate phase is an ``AgentAnswer[SomeModel]``.
+
+    Attributes:
+        content: The parsed structured answer (instance of ``T``).
+        raw: The original answer string before parsing.
+        citations: Normalized citations from any provider, unified into
+            a single :class:`Citation` type regardless of whether the
+            provider calls them "annotations", "citations", or "grounding".
+
+    Designed for forward-compatibility with A2A: ``content`` maps to a
+    ``DataPart``, ``raw`` maps to a ``TextPart``, and ``citations`` are
+    metadata on those parts.
+
+    Example::
+
+        @env.scenario(returns=TaskAnswer, enable_citations=True)
+        async def research(query: str):
+            answer: AgentAnswer[TaskAnswer] = yield f"Research: {query}"
+            answer.content.final_answer   # typed field from TaskAnswer
+            answer.citations              # list[Citation] from inference
+            yield EvaluationResult(reward=1.0)
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    content: T = Field(description="The parsed structured answer")
+    raw: str = Field(default="", description="Original answer string before parsing")
+    citations: list[Citation] = Field(default_factory=list)
 
 
 class ToolError(Exception):

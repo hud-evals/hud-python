@@ -11,7 +11,7 @@ from hud.agents import MCPAgent
 from hud.agents.base import BaseCreateParams
 from hud.environment.router import ToolRouter
 from hud.eval.context import EvalContext
-from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult
 
 
 class MockConfig(BaseAgentConfig):
@@ -37,12 +37,12 @@ class MockMCPAgent(MCPAgent):
     def __init__(self, **kwargs: Any) -> None:
         params = MockCreateParams(**kwargs)
         super().__init__(params)
-        self._response = AgentResponse(content="Test response", tool_calls=[], done=True)
+        self._response = InferenceResult(content="Test response", tool_calls=[], done=True)
 
-    def set_response(self, response: AgentResponse) -> None:
+    def set_response(self, response: InferenceResult) -> None:
         self._response = response
 
-    async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
+    async def get_response(self, messages: list[dict[str, Any]]) -> InferenceResult:
         return self._response
 
     async def format_tool_results(
@@ -64,7 +64,7 @@ class MockEvalContext(EvalContext):
         # Core attributes
         self.prompt = prompt
         self._tools = tools or [types.Tool(name="test_tool", description="Test", inputSchema={})]
-        self._submitted: str | None = None
+        self._submitted: str | dict[str, Any] | None = None
         self.reward: float | None = None
         self._initialized = True
 
@@ -81,7 +81,7 @@ class MockEvalContext(EvalContext):
         self.group_id: str | None = None
         self.index = 0
         self.variants: dict[str, Any] = {}
-        self.answer: str | None = None
+        self.answer: str | dict[str, Any] | None = None
         self.system_prompt: str | None = None
         self.error: BaseException | None = None
         self.metadata: dict[str, Any] = {}
@@ -111,7 +111,7 @@ class MockEvalContext(EvalContext):
             isError=False,
         )
 
-    async def submit(self, answer: str) -> None:
+    async def submit(self, answer: str | dict[str, Any]) -> None:
         self._submitted = answer
 
 
@@ -161,7 +161,7 @@ class TestRun:
         """Test run() doesn't submit when content is empty."""
         ctx = MockEvalContext(prompt="Do the task")
         agent = MockMCPAgent()
-        agent.set_response(AgentResponse(content="", tool_calls=[], done=True))
+        agent.set_response(InferenceResult(content="", tool_calls=[], done=True))
 
         await agent.run(ctx)
         assert ctx._submitted is None
@@ -182,3 +182,86 @@ class TestRun:
 
         assert agent._initialized
         # After cleanup, ctx is None but tools were discovered
+
+
+class TestRunCitations:
+    """Tests for citation flow through run() -> Trace -> submit()."""
+
+    @pytest.mark.asyncio
+    async def test_run_submits_plain_string_without_citations(self) -> None:
+        """When no citations, submit() receives a plain string."""
+        ctx = MockEvalContext(prompt="Do the task")
+        agent = MockMCPAgent()
+        agent.set_response(InferenceResult(content="answer", done=True))
+
+        await agent.run(ctx)
+
+        assert ctx._submitted == "answer"
+
+    @pytest.mark.asyncio
+    async def test_run_submits_dict_with_citations(self) -> None:
+        """When citations are present, submit() receives a dict."""
+        ctx = MockEvalContext(prompt="Do the task")
+        agent = MockMCPAgent()
+        agent.set_response(InferenceResult(
+            content="answer with sources",
+            done=True,
+            citations=[
+                {"type": "url_citation", "source": "https://example.com", "title": "Ex"},
+            ],
+        ))
+
+        await agent.run(ctx)
+
+        assert isinstance(ctx._submitted, dict)
+        assert ctx._submitted["content"] == "answer with sources"
+        assert len(ctx._submitted["citations"]) == 1
+        assert ctx._submitted["citations"][0]["source"] == "https://example.com"
+
+    @pytest.mark.asyncio
+    async def test_trace_carries_citations_from_inference(self) -> None:
+        """Trace.citations is populated from the final InferenceResult."""
+        ctx = MockEvalContext(prompt="Do the task")
+        agent = MockMCPAgent()
+        citations = [
+            {"type": "grounding", "source": "https://a.com", "text": "fact"},
+            {"type": "url_citation", "source": "https://b.com", "title": "B"},
+        ]
+        agent.set_response(InferenceResult(
+            content="sourced answer",
+            done=True,
+            citations=citations,
+        ))
+
+        trace = await agent.run(ctx)
+
+        assert len(trace.citations) == 2
+        assert trace.citations[0]["source"] == "https://a.com"
+        assert trace.citations[1]["source"] == "https://b.com"
+
+    @pytest.mark.asyncio
+    async def test_trace_empty_citations_on_no_citations(self) -> None:
+        """Trace.citations is empty when InferenceResult has no citations."""
+        ctx = MockEvalContext(prompt="Do the task")
+        agent = MockMCPAgent()
+        agent.set_response(InferenceResult(content="plain answer", done=True))
+
+        trace = await agent.run(ctx)
+
+        assert trace.citations == []
+
+    @pytest.mark.asyncio
+    async def test_trace_empty_citations_on_error(self) -> None:
+        """Trace.citations is empty when agent errors out."""
+
+        class FailingAgent(MockMCPAgent):
+            async def get_response(self, messages: list[dict[str, Any]]) -> InferenceResult:
+                raise RuntimeError("boom")
+
+        ctx = MockEvalContext(prompt="Do the task")
+        agent = FailingAgent()
+
+        trace = await agent.run(ctx)
+
+        assert trace.isError is True
+        assert trace.citations == []

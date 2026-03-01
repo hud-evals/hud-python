@@ -28,7 +28,7 @@ class MockEvalContext(EvalContext):
         # Core attributes
         self.prompt = prompt
         self._tools = tools or []
-        self._submitted: str | None = None
+        self._submitted: str | dict[str, Any] | None = None
         self.reward: float | None = None
         self._call_tool_handler = call_tool_handler
         self.tool_calls: list[tuple[str, dict[str, Any]]] = []
@@ -46,7 +46,7 @@ class MockEvalContext(EvalContext):
         self.group_id: str | None = None
         self.index = 0
         self.variants: dict[str, Any] = {}
-        self.answer: str | None = None
+        self.answer: str | dict[str, Any] | None = None
         self.system_prompt: str | None = None
         self.error: BaseException | None = None
         self.metadata: dict[str, Any] = {}
@@ -83,7 +83,7 @@ class MockEvalContext(EvalContext):
             isError=False,
         )
 
-    async def submit(self, answer: str) -> None:
+    async def submit(self, answer: str | dict[str, Any]) -> None:
         self._submitted = answer
 
 

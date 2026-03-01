@@ -31,7 +31,7 @@ from anthropic.types.beta import (
 from hud.settings import settings
 from hud.tools.computer.settings import computer_settings
 from hud.tools.native_types import NativeToolSpec
-from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
 
@@ -234,7 +234,7 @@ class ClaudeAgent(MCPAgent):
             content=[text_to_content_block(retry_text)],
         )
 
-    async def get_response(self, messages: list[BetaMessageParam]) -> AgentResponse:
+    async def get_response(self, messages: list[BetaMessageParam]) -> InferenceResult:
         """Get response from Claude including any tool calls."""
         messages_cached = self._add_prompt_caching(messages)
         # betas to use - collected during tool conversion based on native specs
@@ -315,11 +315,12 @@ class ClaudeAgent(MCPAgent):
                 raise ValueError("Claude response missing after stream retries")
 
         # Process response
-        result = AgentResponse(content="", tool_calls=[], done=True)
+        result = InferenceResult(content="", tool_calls=[], done=True)
 
-        # Extract text content and reasoning
+        # Extract text content, reasoning, and citations
         text_content = ""
         thinking_content = ""
+        citations: list[dict[str, Any]] = []
 
         for block in response.content:
             if block.type == "tool_use":
@@ -339,8 +340,16 @@ class ClaudeAgent(MCPAgent):
                 if thinking_content:
                     thinking_content += "\n"
                 thinking_content += block.thinking
+            elif hasattr(block, "type") and block.type == "cite":
+                citations.append({
+                    "type": "document_citation",
+                    "text": getattr(block, "cited_text", "") or "",
+                    "source": getattr(block, "document_title", "") or "",
+                    "title": getattr(block, "document_title", None),
+                })
 
         result.content = text_content
+        result.citations = citations
         if thinking_content:
             result.reasoning = thinking_content
 

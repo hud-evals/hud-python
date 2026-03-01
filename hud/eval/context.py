@@ -170,7 +170,7 @@ class EvalContext(Environment):
         self.prompt: str | None = None  # From scenario setup or task
         self.reward: float | None = None
         self.evaluation_result: EvaluationResult | None = None  # Full result with subscores
-        self.answer: str | None = None  # Agent's submitted answer
+        self.answer: str | dict[str, Any] | None = None  # Agent's submitted answer
         self.system_prompt: str | None = None  # From task.agent_config, passed to agent
 
         # Agent config overrides from task (applied by agent when running)
@@ -536,15 +536,17 @@ class EvalContext(Environment):
         except Exception as e:
             logger.warning("Failed to log metrics: %s", e)
 
-    async def submit(self, answer: str) -> None:
+    async def submit(self, answer: str | dict[str, Any]) -> None:
         """Submit the agent's answer for scenario evaluation.
 
         Delegates to Environment.submit() with the current scenario name.
         The answer will be passed to the scenario's evaluate phase via
-        `yield`, e.g.: `answer = yield "Do the task"`
+        ``yield``, e.g.: ``answer = yield "Do the task"``
 
         Args:
-            answer: The agent's final answer/result to submit
+            answer: The agent's final answer — either a plain string or a
+                dict with ``content`` (str) and optional ``citations``
+                (list of Citation dicts) for structured answer scenarios.
 
         Example:
             async with env("checkout", product="laptop") as ctx:
