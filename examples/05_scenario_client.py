@@ -34,6 +34,7 @@ def _stream_turn(client: OpenAI, *, model: str, session_id: str, prompt: str) ->
 def main() -> None:
     base_url = os.getenv("HUD_AGENT_URL", "http://localhost:8321")
     model = os.getenv("HUD_MODEL", "gpt-4o")
+    scenario_name = os.getenv("HUD_SCENARIO", "")
 
     print("Discovering scenarios...")
     response = httpx.get(f"{base_url}/scenarios", timeout=120.0)
@@ -47,9 +48,22 @@ def main() -> None:
         print(f"  {scenario['short_name']} - required: {required}")
     print()
 
-    selected = scenarios[0]
+    selected = next((s for s in scenarios if s["short_name"] == scenario_name), None)
+    if selected is None:
+        selected = scenarios[0]
+        print(
+            f"Scenario '{scenario_name}' not found; falling back to '{selected['short_name']}'"
+        )
+
+    default_args = {
+        "id": "example-id",
+        "task": "Investigate the issue and summarize findings.",
+        "question": "What are the root causes?",
+        "input_text": "Example input for scenario setup.",
+    }
     scenario_args = {
-        arg_name: f"example-{arg_name}" for arg_name in selected.get("required_args", [])
+        arg_name: default_args.get(arg_name, f"example-{arg_name}")
+        for arg_name in selected.get("required_args", [])
     }
     print(f"Using scenario: {selected['short_name']}")
 
@@ -61,7 +75,7 @@ def main() -> None:
 
     first = client.chat.completions.create(
         model=model,
-        messages=[{"role": "user", "content": "Begin the investigation and summarize context."}],
+        messages=[{"role": "user", "content": "Begin and summarize the initial context."}],
         extra_body={
             "scenario": selected["short_name"],
             "scenario_args": scenario_args,

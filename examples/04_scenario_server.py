@@ -28,10 +28,13 @@ def main() -> None:
     env.connect_hub(env_name)
 
     print(f"Serving {env_name} on http://localhost:{port}")
-    print("GET  /scenarios")
-    print("POST /v1/chat/completions (use X-HUD-Session-Id for follow-ups)")
-    print("POST /v1/sessions/<id>/finish")
-    print("GET  /v1/sessions")
+    for route in (
+        "GET  /scenarios",
+        "POST /v1/chat/completions (use X-HUD-Session-Id for follow-up turns)",
+        "POST /v1/sessions/<id>/finish",
+        "GET  /v1/sessions",
+    ):
+        print(route)
     print()
 
     env.serve_as_agent(client=client, model=model, port=port)

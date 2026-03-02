@@ -140,6 +140,48 @@ class TestConnector:
             # Client is now set
             assert connector.client is mock_client
 
+    def test_copy_preserves_environment_id_header(self) -> None:
+        """copy() does not rotate Environment-Id headers."""
+        transport = MagicMock()
+        transport.headers = {
+            "Environment-Name": "browser",
+            "Environment-Id": "fixed-id",
+        }
+        connector = Connector(
+            transport=transport,
+            config=ConnectionConfig(),
+            name="hub",
+            connection_type=ConnectionType.REMOTE,
+        )
+
+        copied = connector.copy()
+        assert copied._transport.headers["Environment-Id"] == "fixed-id"
+
+    @pytest.mark.asyncio
+    async def test_connect_rotates_environment_id_header(self) -> None:
+        """connect() rotates Environment-Id before creating the client."""
+        transport = MagicMock()
+        transport.headers = {
+            "Environment-Name": "browser",
+            "Environment-Id": "old-id",
+        }
+        connector = Connector(
+            transport=transport,
+            config=ConnectionConfig(),
+            name="hub",
+            connection_type=ConnectionType.REMOTE,
+        )
+
+        mock_client = MagicMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.is_connected = MagicMock(return_value=True)
+
+        with patch("fastmcp.client.Client", return_value=mock_client):
+            await connector.connect()
+
+        assert transport.headers["Environment-Id"] != "old-id"
+        assert connector.client is mock_client
+
     @pytest.mark.asyncio
     async def test_disconnect_clears_client(self) -> None:
         """disconnect() closes client and clears state."""

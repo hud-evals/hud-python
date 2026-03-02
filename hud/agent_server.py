@@ -321,15 +321,15 @@ def _build_app(
 
     @app.post("/v1/sessions/{session_id}/finish")
     async def finish_session(session_id: str) -> dict[str, Any]:
-        entry = sessions.pop(session_id, None)
+        entry = sessions.get(session_id)
         if entry is None:
             raise HTTPException(404, f"Session {session_id} not found")
 
-        result = await entry.chat.finish()
         try:
-            await entry.cm.__aexit__(None, None, None)
-        except Exception:
-            logger.debug("Error closing session cm %s", session_id, exc_info=True)
+            result = await entry.chat.finish()
+        finally:
+            # Always remove session from active registry; chat.finish handles cleanup.
+            sessions.pop(session_id, None)
 
         return {
             "session_id": session_id,

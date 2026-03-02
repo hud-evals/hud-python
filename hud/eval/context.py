@@ -13,12 +13,14 @@ import contextvars
 import logging
 import uuid
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Self
 
 from hud.environment import Environment
 from hud.settings import settings
 from hud.shared import make_request
 from hud.telemetry import flush, instrument
+from hud.telemetry.exporter import queue_span
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -83,6 +85,27 @@ def get_current_api_key() -> str | None:
     Used by telemetry exporter for uploads.
     """
     return _current_api_key.get()
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _normalize_trace_id(trace_id: str) -> str:
+    return trace_id.replace("-", "")[:32].ljust(32, "0")
+
+
+def _serialize_span_value(value: Any) -> Any:
+    if value is None or isinstance(value, dict | list | str | int | float | bool):
+        return value
+    if hasattr(value, "model_dump"):
+        try:
+            dumped = value.model_dump(mode="json", exclude_none=True)
+            if isinstance(dumped, dict | list | str | int | float | bool):
+                return dumped
+        except Exception:
+            pass
+    return str(value)
 
 
 # =============================================================================
@@ -700,12 +723,14 @@ class EvalContext(Environment):
         """Execute a tool with automatic telemetry recording.
 
         Overrides Environment._execute_tool to record MCP spans for the eval context.
-        Instrumentation is disabled when connected to a remote HUD server (telemetry is
-        recorded server-side in that case).
+        Hub-connected envs emit canonical spans here (remote server doesn't emit them).
+        Local envs use @instrument. V4 HUD server envs skip (server-side telemetry).
         """
-        # Skip instrumentation when connected to a remote hub - telemetry is handled server-side
-        if self._hub_config is not None:
-            return await super()._execute_tool(name, arguments)
+        # Hub-connected environments: optionally emit canonical mcp.tool_call spans
+        # (the remote MCP server doesn't emit these for the client's trace).
+        # Gated behind a feature flag for safe rollout.
+        if self._hub_config is not None and settings.canonical_hub_mcp_tool_spans_enabled:
+            return await self._execute_tool_hub(name, arguments)
 
         # Skip instrumentation for v4 tasks with HUD MCP config (remote server)
         if self._mcp_config is not None:
@@ -717,8 +742,55 @@ class EvalContext(Environment):
                     if url and _is_hud_server(url):
                         return await super()._execute_tool(name, arguments)
 
-        # For local environments, record MCP spans
+        # Local environments: existing @instrument decorator
         return await self._execute_tool_instrumented(name, arguments)
+
+    async def _execute_tool_hub(
+        self, name: str, arguments: dict[str, Any]
+    ) -> MCPToolResult:
+        """Hub-connected tool execution with canonical span emission."""
+        start_time = _now_iso()
+        result: MCPToolResult | None = None
+        error_message: str | None = None
+
+        try:
+            result = await super()._execute_tool(name, arguments)
+            return result
+        except Exception as e:
+            error_message = f"{type(e).__name__}: {e}"
+            raise
+        finally:
+            if self._trace_enabled and self.trace_id:
+                end_time = _now_iso()
+                span: dict[str, Any] = {
+                    "name": "mcp.tool_call",
+                    "trace_id": _normalize_trace_id(self.trace_id),
+                    "span_id": uuid.uuid4().hex[:16],
+                    "parent_span_id": None,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "status_code": "ERROR" if error_message else "OK",
+                    "status_message": error_message,
+                    "internal_type": "mcp-tool",
+                    "attributes": {
+                        "task_run_id": self.trace_id,
+                        "job_id": self.job_id,
+                        "category": "mcp",
+                        "type": "CLIENT",
+                        # Use tools/call envelope for compatibility with existing trace UI
+                        # while preserving canonical span name/internal_type.
+                        "request": {
+                            "method": "tools/call",
+                            "name": name,
+                            "params": {"name": name, "arguments": arguments},
+                        },
+                        "result": _serialize_span_value(result),
+                        "start_timestamp": start_time,
+                        "end_timestamp": end_time,
+                    },
+                    "exceptions": [{"message": error_message}] if error_message else None,
+                }
+                queue_span(span)
 
     @instrument(category="mcp")
     async def _execute_tool_instrumented(

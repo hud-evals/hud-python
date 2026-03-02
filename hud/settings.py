@@ -148,6 +148,15 @@ class Settings(BaseSettings):
         validation_alias="HUD_TELEMETRY_ENABLED",
     )
 
+    canonical_hub_mcp_tool_spans_enabled: bool = Field(
+        default=False,
+        description=(
+            "Emit canonical mcp.tool_call spans from EvalContext for hub-connected "
+            "environments."
+        ),
+        validation_alias="HUD_CANONICAL_HUB_MCP_TOOL_SPANS_ENABLED",
+    )
+
     hud_logging: bool = Field(
         default=True,
         description="Enable fancy logging for the HUD SDK",

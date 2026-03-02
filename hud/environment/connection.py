@@ -119,6 +119,16 @@ class Connector:
         2. httpx auto-instrumentation can inject trace headers
         """
         from fastmcp.client import Client as FastMCPClient
+        import uuid
+
+        # Hub transports carry an Environment-Id header that pins requests to a pod.
+        # Refresh it on each connect so sessions don't reconnect to cleaned-up pods.
+        if (
+            hasattr(self._transport, "headers")
+            and isinstance(self._transport.headers, dict)
+            and "Environment-Id" in self._transport.headers
+        ):
+            self._transport.headers["Environment-Id"] = str(uuid.uuid4())
 
         self.client = FastMCPClient(
             transport=self._transport,

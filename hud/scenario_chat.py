@@ -161,11 +161,17 @@ class ScenarioChatSession(AbstractAsyncContextManager["ScenarioChatSession"]):
         return self
 
     async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+        submit_error: Exception | None = None
         if self._entered and not self._finished:
-            await self._ctx.submit(self.last_answer or "")
-            self._finished = True
+            try:
+                await self._ctx.submit(self.last_answer or "")
+                self._finished = True
+            except Exception as e:
+                submit_error = e
         if self._eval_cm is not None:
             await self._eval_cm.__aexit__(exc_type, exc, tb)
+        if submit_error is not None:
+            raise submit_error
         return False
 
     async def send(self, message: str) -> ScenarioChatTurnResult:
@@ -195,12 +201,19 @@ class ScenarioChatSession(AbstractAsyncContextManager["ScenarioChatSession"]):
 
         final_answer = answer if answer is not None else self.last_answer
         self.last_answer = final_answer
-        await self._ctx.submit(final_answer)
-        self._finished = True
-        if self._eval_cm is not None:
-            # Suppress ContextVar token errors from different async contexts (server sessions)
-            with contextlib.suppress(ValueError):
-                await self._eval_cm.__aexit__(None, None, None)
+        submit_error: Exception | None = None
+        try:
+            await self._ctx.submit(final_answer)
+            self._finished = True
+        except Exception as e:
+            submit_error = e
+        finally:
+            if self._eval_cm is not None:
+                # Suppress ContextVar token errors from different async contexts (server sessions)
+                with contextlib.suppress(ValueError):
+                    await self._eval_cm.__aexit__(None, None, None)
+        if submit_error is not None:
+            raise submit_error
 
         return ScenarioChatResult(
             answer=final_answer,
