@@ -206,9 +206,13 @@ The server exposes:
 | Endpoint | Purpose |
 |---|---|
 | `GET /scenarios` | List available scenarios and their required args |
+| `GET /v1/lifecycle-tools` | List scenario lifecycle tool schemas |
+| `POST /v1/lifecycle-tools/call` | Call lifecycle tools (`scenario_list/start/send/finish`) |
 | `POST /v1/chat/completions` | Start or continue a session |
 | `POST /v1/sessions/{id}/finish` | Submit and evaluate |
 | `GET /v1/sessions` | List active sessions |
+| `GET /mcp/tools` | MCP-native lifecycle tool list |
+| `POST /mcp/tools/call` | MCP-native lifecycle tool execution |
 
 ### Client (`05_scenario_client.py`)
 
@@ -225,6 +229,7 @@ scenarios = httpx.get("http://localhost:8321/scenarios").json()["scenarios"]
 selected = scenarios[0]
 
 # 2. First turn — pass scenario name and args in the request body
+#    (both fields are required for session bootstrap)
 first = client.chat.completions.create(
     model="gpt-4o",
     messages=[{"role": "user", "content": "Begin."}],
@@ -242,6 +247,13 @@ follow_up = client.chat.completions.create(
     extra_headers={"X-HUD-Session-Id": session_id},
 )
 
+#    You can also pass `thread_id` / `conversation_id` in `extra_body`.
+follow_up_alt = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Any remaining risks?"}],
+    extra_body={"thread_id": session_id},
+)
+
 # 4. Finish — submits the answer and returns reward + trace URL
 result = httpx.post(f"http://localhost:8321/v1/sessions/{session_id}/finish").json()
 print(result["reward"], result["trace_url"])
@@ -250,6 +262,20 @@ print(result["reward"], result["trace_url"])
 Streaming works the same way — just pass `stream=True`. The server sends
 standard SSE chunks, with a final chunk carrying `hud.session_id` and
 `hud.trace_url`.
+
+### Lifecycle Tools (Agent-native Helpers)
+
+If your orchestrator prefers explicit lifecycle calls, use:
+
+- `GET /v1/lifecycle-tools` + `POST /v1/lifecycle-tools/call`
+- or the MCP-native aliases: `GET /mcp/tools` + `POST /mcp/tools/call`
+
+Available tool names:
+
+- `scenario_list`
+- `scenario_start` (requires `scenario` + `scenario_args`)
+- `scenario_send`
+- `scenario_finish`
 
 Requires: `pip install hud-python[server]` (installs `fastapi` and `uvicorn`)
 

@@ -30,9 +30,13 @@ def main() -> None:
     print(f"Serving {env_name} on http://localhost:{port}")
     for route in (
         "GET  /scenarios",
+        "GET  /v1/lifecycle-tools",
+        "POST /v1/lifecycle-tools/call",
         "POST /v1/chat/completions (use X-HUD-Session-Id for follow-up turns)",
         "POST /v1/sessions/<id>/finish",
         "GET  /v1/sessions",
+        "GET  /mcp/tools",
+        "POST /mcp/tools/call",
     ):
         print(route)
     print()

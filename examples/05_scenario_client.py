@@ -93,7 +93,13 @@ def main() -> None:
     print(f"Answer:  {first_answer[:200]}...\n")
 
     _stream_turn(client, model=model, session_id=session_id, prompt="What are the root causes?")
-    _stream_turn(client, model=model, session_id=session_id, prompt="Give your top 3 recommendations.")
+    # Follow-ups can also use thread_id/conversation_id in request body.
+    second = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": "Give your top 3 recommendations."}],
+        extra_body={"thread_id": session_id},
+    )
+    print(f"Answer:  {(second.choices[0].message.content or '')[:200]}...\n")
 
     finish = httpx.post(f"{base_url}/v1/sessions/{session_id}/finish", timeout=120.0)
     finish.raise_for_status()

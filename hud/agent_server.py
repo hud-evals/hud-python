@@ -41,11 +41,23 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_SESSION_TTL_SECONDS = 30 * 60  # 30 minutes
+SESSION_ID_HEADER = "x-hud-session-id"
+
+
+def _hud_meta(*, session_id: str, trace_id: str) -> dict[str, Any]:
+    return {
+        "session_id": session_id,
+        "thread_id": session_id,
+        "conversation_id": session_id,
+        "trace_id": trace_id,
+        "trace_url": f"https://hud.ai/trace/{trace_id}",
+    }
 
 
 class _SessionEntry:
@@ -138,7 +150,7 @@ def _build_app(
     sessions: dict[str, _SessionEntry] = {}
 
     @asynccontextmanager
-    async def _lifespan(a: Any) -> Any:
+    async def _lifespan(_app: Any) -> AsyncIterator[None]:
         async with env:
             cleanup_task = asyncio.create_task(_cleanup_loop(sessions))
             try:
@@ -167,8 +179,168 @@ def _build_app(
         messages: list[dict[str, Any]] = Field(default_factory=list)
         stream: bool = False
         scenario: str | None = None
-        scenario_args: dict[str, Any] = Field(default_factory=dict)
+        scenario_args: dict[str, Any] | None = None
+        thread_id: str | None = None
+        conversation_id: str | None = None
         max_steps: int = Field(default=20, ge=1, le=100)
+
+    class LifecycleToolCallRequest(BaseModel):
+        name: str
+        arguments: dict[str, Any] = Field(default_factory=dict)
+        session_id: str | None = None
+        thread_id: str | None = None
+        conversation_id: str | None = None
+
+    def _extract_session_id(
+        raw_request: Request,
+        *,
+        session_id: str | None = None,
+        thread_id: str | None = None,
+        conversation_id: str | None = None,
+    ) -> str | None:
+        return (
+            raw_request.headers.get(SESSION_ID_HEADER)
+            or session_id
+            or thread_id
+            or conversation_id
+        )
+
+    def _hud_meta(*, session_id: str, trace_id: str) -> dict[str, Any]:
+        return {
+            "session_id": session_id,
+            "thread_id": session_id,
+            "conversation_id": session_id,
+            "trace_id": trace_id,
+            "trace_url": f"https://hud.ai/trace/{trace_id}",
+        }
+
+    def _tool_schemas() -> list[dict[str, Any]]:
+        return [
+            {
+                "name": "scenario_list",
+                "description": "List available scenarios and required args.",
+                "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+            },
+            {
+                "name": "scenario_start",
+                "description": "Create a session by starting a scenario with args and an optional first message.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "scenario": {"type": "string"},
+                        "scenario_args": {"type": "object"},
+                        "message": {"type": "string"},
+                        "model": {"type": "string"},
+                        "max_steps": {"type": "integer", "minimum": 1, "maximum": 100},
+                    },
+                    "required": ["scenario", "scenario_args"],
+                    "additionalProperties": True,
+                },
+            },
+            {
+                "name": "scenario_send",
+                "description": "Send a follow-up user message to an existing scenario session.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "session_id": {"type": "string"},
+                        "thread_id": {"type": "string"},
+                        "conversation_id": {"type": "string"},
+                        "message": {"type": "string"},
+                    },
+                    "required": ["message"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "scenario_finish",
+                "description": "Finish an active session and return reward/trace metadata.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "session_id": {"type": "string"},
+                        "thread_id": {"type": "string"},
+                        "conversation_id": {"type": "string"},
+                        "answer": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+        ]
+
+    async def _start_session(
+        *,
+        scenario: str,
+        scenario_args: dict[str, Any],
+        model_name: str,
+        max_steps: int,
+    ) -> tuple[str, _SessionEntry]:
+        from hud.scenario_chat import run_scenario_chat_interactive
+
+        session_id = uuid.uuid4().hex[:16]
+        cm = run_scenario_chat_interactive(
+            client=client,
+            model=model_name,
+            env=env,
+            scenario=scenario,
+            args=scenario_args,
+            max_steps=max_steps,
+        )
+        try:
+            chat = await cm.__aenter__()
+        except Exception:
+            with contextlib.suppress(Exception):
+                await cm.__aexit__(None, None, None)
+            raise
+        entry = _SessionEntry(chat=chat, cm=cm, session_ttl=session_ttl)
+        sessions[session_id] = entry
+        logger.info("Session %s created for scenario %s", session_id, scenario)
+        return session_id, entry
+
+    async def _finish_session(
+        *,
+        session_id: str,
+        answer: str | None = None,
+    ) -> dict[str, Any]:
+        entry = sessions.get(session_id)
+        if entry is None:
+            raise HTTPException(404, f"Session {session_id} not found")
+
+        try:
+            result = await entry.chat.finish(answer=answer)
+        finally:
+            # Always remove session from active registry; chat.finish handles cleanup.
+            sessions.pop(session_id, None)
+
+        return {
+            "session_id": session_id,
+            "thread_id": session_id,
+            "conversation_id": session_id,
+            "answer": result.answer,
+            "reward": result.reward,
+            "trace_id": result.trace_id,
+            "trace_url": f"https://hud.ai/trace/{result.trace_id}",
+        }
+
+    async def _send_turn(
+        *,
+        session_id: str,
+        message: str,
+    ) -> dict[str, Any]:
+        entry = sessions.get(session_id)
+        if entry is None:
+            raise HTTPException(404, f"Session {session_id} not found")
+        entry.touch()
+        turn = await entry.chat.send(message)
+        return {
+            "session_id": session_id,
+            "thread_id": session_id,
+            "conversation_id": session_id,
+            "answer": turn.answer,
+            "trace_id": entry.chat.trace_id,
+            "trace_url": f"https://hud.ai/trace/{entry.chat.trace_id}",
+            "tool_calls": turn.tool_calls,
+        }
 
     @app.middleware("http")
     async def _check_auth(request: Request, call_next: Any) -> Any:
@@ -217,11 +389,93 @@ def _build_app(
             "data": [{"id": model, "object": "model", "owned_by": "hud"}],
         }
 
+    @app.get("/v1/lifecycle-tools")
+    async def lifecycle_tools() -> dict[str, Any]:
+        return {"tools": _tool_schemas()}
+
+    @app.post("/v1/lifecycle-tools/call")
+    async def lifecycle_tools_call(request: LifecycleToolCallRequest, raw: Request) -> dict[str, Any]:
+        tool_name = request.name
+        args = request.arguments
+
+        if tool_name == "scenario_list":
+            return await list_scenarios_route()
+
+        if tool_name == "scenario_start":
+            scenario = args.get("scenario")
+            scenario_args = args.get("scenario_args")
+            if not isinstance(scenario, str) or not scenario:
+                raise HTTPException(400, "scenario_start requires 'scenario' (string)")
+            if not isinstance(scenario_args, dict):
+                raise HTTPException(400, "scenario_start requires 'scenario_args' (object)")
+            message = str(args.get("message", "Begin."))
+            max_steps = int(args.get("max_steps", 20))
+            model_name = str(args.get("model", model))
+
+            new_session_id, entry = await _start_session(
+                scenario=scenario,
+                scenario_args=scenario_args,
+                model_name=model_name,
+                max_steps=max_steps,
+            )
+            turn = await entry.chat.send(message)
+            return {
+                "answer": turn.answer,
+                "tool_calls": turn.tool_calls,
+                "hud": _hud_meta(session_id=new_session_id, trace_id=entry.chat.trace_id),
+            }
+
+        if tool_name == "scenario_send":
+            session_id = _extract_session_id(
+                raw,
+                session_id=args.get("session_id"),
+                thread_id=args.get("thread_id"),
+                conversation_id=args.get("conversation_id"),
+            )
+            if not session_id:
+                raise HTTPException(400, "scenario_send requires session_id/thread_id/conversation_id")
+            message = str(args.get("message", ""))
+            if not message:
+                raise HTTPException(400, "scenario_send requires a non-empty 'message'")
+            result = await _send_turn(session_id=session_id, message=message)
+            return {
+                "answer": result["answer"],
+                "tool_calls": result["tool_calls"],
+                "hud": _hud_meta(session_id=session_id, trace_id=result["trace_id"]),
+            }
+
+        if tool_name == "scenario_finish":
+            session_id = _extract_session_id(
+                raw,
+                session_id=args.get("session_id"),
+                thread_id=args.get("thread_id"),
+                conversation_id=args.get("conversation_id"),
+            )
+            if not session_id:
+                raise HTTPException(400, "scenario_finish requires session_id/thread_id/conversation_id")
+            answer = args.get("answer")
+            if answer is not None and not isinstance(answer, str):
+                raise HTTPException(400, "scenario_finish 'answer' must be a string when provided")
+            return await _finish_session(session_id=session_id, answer=answer)
+
+        raise HTTPException(400, f"Unknown lifecycle tool: {tool_name}")
+
+    @app.get("/mcp/tools")
+    async def mcp_tools() -> dict[str, Any]:
+        return {"tools": _tool_schemas()}
+
+    @app.post("/mcp/tools/call")
+    async def mcp_tools_call(request: LifecycleToolCallRequest, raw: Request) -> dict[str, Any]:
+        # MCP-native surface maps to the same lifecycle tool handlers/runtime.
+        return await lifecycle_tools_call(request, raw)
+
     @app.post("/v1/chat/completions")
     async def chat_completions(request: ChatCompletionRequest, raw: Request) -> Any:
-        from hud.scenario_chat import run_scenario_chat_interactive
-
-        session_id = raw.headers.get("x-hud-session-id")
+        session_id = _extract_session_id(
+            raw,
+            thread_id=request.thread_id,
+            conversation_id=request.conversation_id,
+        )
 
         last_user_msg = ""
         for msg in reversed(request.messages):
@@ -252,6 +506,7 @@ def _build_app(
                     headers={
                         "Cache-Control": "no-cache",
                         "X-HUD-Session-Id": session_id,
+                        "X-HUD-Thread-Id": session_id,
                         "X-HUD-Trace-Id": entry.chat.trace_id,
                     },
                 )
@@ -270,26 +525,16 @@ def _build_app(
 
         if not request.scenario:
             raise HTTPException(400, "scenario is required for the first turn")
+        if request.scenario_args is None:
+            raise HTTPException(400, "scenario_args is required for the first turn")
 
-        session_id = uuid.uuid4().hex[:16]
-
-        cm = run_scenario_chat_interactive(
-            client=client,
-            model=request.model,
-            env=env,
+        session_id, entry = await _start_session(
             scenario=request.scenario,
-            args=request.scenario_args,
+            scenario_args=request.scenario_args,
+            model_name=request.model,
             max_steps=request.max_steps,
         )
-        try:
-            chat = await cm.__aenter__()
-        except Exception:
-            async with contextlib.suppress(Exception):
-                await cm.__aexit__(None, None, None)
-            raise
-        entry = _SessionEntry(chat=chat, cm=cm, session_ttl=session_ttl)
-        sessions[session_id] = entry
-        logger.info("Session %s created for scenario %s", session_id, request.scenario)
+        chat = entry.chat
 
         if request.stream:
             return StreamingResponse(
@@ -305,6 +550,7 @@ def _build_app(
                 headers={
                     "Cache-Control": "no-cache",
                     "X-HUD-Session-Id": session_id,
+                    "X-HUD-Thread-Id": session_id,
                     "X-HUD-Trace-Id": chat.trace_id,
                 },
             )
@@ -320,24 +566,8 @@ def _build_app(
         )
 
     @app.post("/v1/sessions/{session_id}/finish")
-    async def finish_session(session_id: str) -> dict[str, Any]:
-        entry = sessions.get(session_id)
-        if entry is None:
-            raise HTTPException(404, f"Session {session_id} not found")
-
-        try:
-            result = await entry.chat.finish()
-        finally:
-            # Always remove session from active registry; chat.finish handles cleanup.
-            sessions.pop(session_id, None)
-
-        return {
-            "session_id": session_id,
-            "answer": result.answer,
-            "reward": result.reward,
-            "trace_id": result.trace_id,
-            "trace_url": f"https://hud.ai/trace/{result.trace_id}",
-        }
+    async def finish_session_route(session_id: str) -> dict[str, Any]:
+        return await _finish_session(session_id=session_id)
 
     @app.get("/v1/sessions")
     async def list_sessions() -> dict[str, Any]:
@@ -345,6 +575,8 @@ def _build_app(
             "sessions": [
                 {
                     "session_id": sid,
+                    "thread_id": sid,
+                    "conversation_id": sid,
                     "trace_id": entry.chat.trace_id,
                     "idle_seconds": int(time.monotonic() - entry.last_active),
                 }
@@ -373,7 +605,7 @@ async def _stream_sse(
     created: int,
     model_name: str,
     session_id: str,
-) -> Any:
+) -> AsyncIterator[str]:
     """Yield OpenAI-format SSE chunks from a streaming scenario chat turn."""
 
     def _chunk(
@@ -439,8 +671,6 @@ def _completion_response(
         ],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         "hud": {
-            "session_id": session_id,
-            "trace_id": trace_id,
-            "trace_url": f"https://hud.ai/trace/{trace_id}",
+            **_hud_meta(session_id=session_id, trace_id=trace_id),
         },
     }
