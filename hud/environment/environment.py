@@ -14,6 +14,7 @@ from hud.environment.integrations import IntegrationsMixin
 from hud.environment.mock import MockMixin
 from hud.environment.router import ConflictResolution, ToolRouter
 from hud.environment.scenarios import ScenarioMixin
+from hud.environment.types import ScenarioArg, ScenarioInfo
 from hud.server.server import MCPServer
 from hud.types import MCPToolResult
 
@@ -697,6 +698,65 @@ class Environment(
                 raise ValueError(f"Connection '{conn_name}' not found for prompt '{name}'")
             return await conn.get_prompt(name, arguments)
 
+    async def list_scenarios(self) -> list[ScenarioInfo]:
+        """Return structured metadata for all available scenarios.
+
+        Each :class:`ScenarioInfo` includes the scenario name, description,
+        and typed argument schemas -- everything needed to build an A2A
+        Agent Card or OpenAI tool definition.
+
+        Requires a prior :meth:`connect_hub` or local ``@env.scenario``
+        registration so that prompts are discoverable.
+        """
+        prompts = await self.list_prompts()
+        scenarios: list[ScenarioInfo] = []
+        for prompt in prompts:
+            short_name = prompt.name.split(":", 1)[-1] if ":" in prompt.name else prompt.name
+            description = prompt.description or ""
+            if description.startswith("[Setup] "):
+                description = description[8:]
+
+            args: list[ScenarioArg] = []
+            meta = getattr(prompt, "meta", None)
+            meta_arguments = meta.get("arguments") if isinstance(meta, dict) else None
+
+            if isinstance(meta_arguments, list):
+                for arg_meta in meta_arguments:
+                    if not isinstance(arg_meta, dict):
+                        continue
+                    name = arg_meta.get("name")
+                    if not name:
+                        continue
+                    args.append(
+                        ScenarioArg(
+                            name=name,
+                            type=arg_meta.get("type", "string"),
+                            required=arg_meta.get("required", True),
+                            description=arg_meta.get("description"),
+                            default=arg_meta.get("default"),
+                        )
+                    )
+            elif prompt.arguments:
+                for prompt_arg in prompt.arguments:
+                    args.append(
+                        ScenarioArg(
+                            name=prompt_arg.name,
+                            type="string",
+                            required=prompt_arg.required if prompt_arg.required is not None else True,
+                            description=prompt_arg.description,
+                        )
+                    )
+
+            scenarios.append(
+                ScenarioInfo(
+                    name=prompt.name,
+                    short_name=short_name,
+                    description=description or None,
+                    arguments=args,
+                )
+            )
+        return scenarios
+
     # =========================================================================
     # Server Methods
     # =========================================================================
@@ -710,6 +770,44 @@ class Environment(
     ) -> None:
         """Start serving as an MCP server."""
         self.run(transport=transport, host=host, port=port, **kwargs)
+
+    def serve_as_agent(
+        self,
+        *,
+        client: Any,
+        model: str = "gpt-4o",
+        host: str = "0.0.0.0",  # noqa: S104
+        port: int = 8000,
+        api_key: str | None = None,
+    ) -> None:
+        """Start an OpenAI-compatible agent endpoint backed by this environment's scenarios.
+
+        External agents connect with a standard OpenAI client -- no HUD SDK
+        needed on the caller side::
+
+            # Server
+            env = Environment("my-env")
+            env.connect_hub("my-env")
+            env.serve_as_agent(client=AsyncOpenAI(...), port=8000)
+
+            # External agent (any language, any framework)
+            client = OpenAI(base_url="http://host:8000")
+            client.chat.completions.create(
+                model="gpt-4o",
+                messages=[...],
+                extra_body={"scenario": "investigate", "scenario_args": {...}},
+            )
+
+        Args:
+            client: ``AsyncOpenAI`` (or compatible) for LLM calls.
+            model: Default model identifier.
+            host: Bind address.
+            port: Bind port.
+            api_key: Optional bearer token to require from callers.
+        """
+        from hud.agent_server import serve_agent
+
+        serve_agent(self, client=client, model=model, host=host, port=port, api_key=api_key)
 
     # =========================================================================
     # Properties

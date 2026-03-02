@@ -21,10 +21,18 @@ class TestInitModule:
         import hud
 
         expected = [
+            "ChatEvent",
             "Environment",
             "EvalContext",
+            "ScenarioArg",
+            "ScenarioChatResult",
+            "ScenarioChatSession",
+            "ScenarioChatTurnResult",
+            "ScenarioInfo",
             "eval",
             "instrument",
+            "run_scenario_chat",
+            "run_scenario_chat_interactive",
             "trace",  # Deprecated alias for eval
         ]
 

@@ -1866,3 +1866,102 @@ class TestScenarioToolExclusion:
         assert prompt.meta is not None
         assert prompt.meta.get("exclude_tools") == ["browser_*"]
         assert prompt.meta.get("exclude_sources") == ["hub"]
+
+
+class TestListScenarios:
+    """Tests for Environment.list_scenarios()."""
+
+    @pytest.mark.asyncio
+    async def test_list_scenarios_basic(self) -> None:
+        """list_scenarios returns ScenarioInfo with name and args."""
+        env = Environment("test-env")
+
+        @env.scenario("analyze")
+        async def analyze(item_id: str, description: str = "unknown"):
+            yield f"Analyzing {item_id}"
+            yield 1.0
+
+        async with env:
+            scenarios = await env.list_scenarios()
+
+        assert len(scenarios) == 1
+        s = scenarios[0]
+        assert s.short_name == "analyze"
+        assert s.name == "test-env:analyze"
+        assert len(s.arguments) == 2
+
+        item_arg = next(a for a in s.arguments if a.name == "item_id")
+        assert item_arg.required is True
+        assert item_arg.type == "string"
+
+        desc_arg = next(a for a in s.arguments if a.name == "description")
+        assert desc_arg.required is False
+
+    @pytest.mark.asyncio
+    async def test_list_scenarios_required_args(self) -> None:
+        """required_args property returns only required argument names."""
+        env = Environment("test-env")
+
+        @env.scenario("checkout")
+        async def checkout(user_id: str, coupon: str = ""):
+            yield "Go"
+            yield 1.0
+
+        async with env:
+            scenarios = await env.list_scenarios()
+
+        assert scenarios[0].required_args == ["user_id"]
+
+    @pytest.mark.asyncio
+    async def test_list_scenarios_to_openai_tool(self) -> None:
+        """to_openai_tool produces valid OpenAI function tool definition."""
+        env = Environment("test-env")
+
+        @env.scenario("search")
+        async def search(query: str):
+            yield f"Searching {query}"
+            yield 1.0
+
+        async with env:
+            scenarios = await env.list_scenarios()
+
+        tool_def = scenarios[0].to_openai_tool()
+        assert tool_def["type"] == "function"
+        assert tool_def["function"]["name"] == "search"
+        params = tool_def["function"]["parameters"]
+        assert "query" in params["properties"]
+        assert "query" in params["required"]
+
+    @pytest.mark.asyncio
+    async def test_list_scenarios_empty(self) -> None:
+        """list_scenarios returns empty list when no scenarios registered."""
+        env = Environment("test-env")
+
+        async with env:
+            scenarios = await env.list_scenarios()
+
+        assert scenarios == []
+
+    @pytest.mark.asyncio
+    async def test_list_scenarios_skips_malformed_meta_arguments(self) -> None:
+        """list_scenarios should skip malformed metadata argument entries."""
+        env = Environment("test-env")
+
+        @env.scenario("demo")
+        async def demo_scenario(valid: str):
+            yield "Prompt"
+            yield 1.0
+
+        prompt = env._prompt_manager._prompts["test-env:demo"]
+        assert prompt.meta is not None
+        prompt.meta["arguments"] = [
+            {"name": "valid", "type": "string", "required": True},
+            {"type": "string", "required": True},
+            "bad-entry",
+        ]
+
+        async with env:
+            scenarios = await env.list_scenarios()
+
+        assert len(scenarios) == 1
+        assert [arg.name for arg in scenarios[0].arguments] == ["valid"]

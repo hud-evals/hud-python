@@ -73,6 +73,70 @@ async with hud.eval(eval) as ctx:
     await ctx.submit(msg.content or "")
 ```
 
+### Chat Completions (Single-Call Runner)
+
+If you want HUD to handle the chat tool loop for a scenario task, use
+`hud.run_scenario_chat(...)`:
+
+```python
+import os
+from openai import AsyncOpenAI
+import hud
+
+env = hud.Environment("trivia")
+task = env("initials", company="HUD")
+
+client = AsyncOpenAI(
+    base_url="https://inference.hud.ai",
+    api_key=os.environ["HUD_API_KEY"]
+)
+
+result = await hud.run_scenario_chat(
+    client=client,
+    model="gpt-4o",
+    task=task,
+    api="chat_completions",  # or "responses" / "auto"
+)
+
+print(result.answer)
+print(result.reward)
+print(result.trace_id)
+```
+
+### Interactive Scenario Chat (Turn-by-Turn)
+
+Use `hud.run_scenario_chat_interactive(...)` when you want to send multiple
+user turns before final evaluation:
+
+```python
+import os
+from openai import AsyncOpenAI
+import hud
+
+env = hud.Environment("trivia")
+
+client = AsyncOpenAI(
+    base_url="https://inference.hud.ai",
+    api_key=os.environ["HUD_API_KEY"]
+)
+
+async with hud.run_scenario_chat_interactive(
+    client=client,
+    model="gpt-4o",
+    env=env,
+    scenario="initials",
+    args={"company": "HUD"},
+) as chat:
+    first = await chat.send("Start with your initial investigation.")
+    follow_up = await chat.send("Now provide a concise final answer.")
+    result = await chat.finish()  # submits + evaluates
+
+print(first.answer)
+print(follow_up.answer)
+print(result.reward)
+print(result.trace_id)
+```
+
 ### Responses API
 
 ```python
@@ -108,6 +172,86 @@ async with hud.eval(eval) as ctx:
 ```
 
 Requires: `pip install openai-agents`
+
+---
+
+## Serve Scenarios as an HTTP Endpoint
+
+If you want external agents to run your scenarios without the HUD SDK, use
+`env.serve_as_agent()`. It starts a local OpenAI-compatible server — any
+OpenAI client in any language can connect.
+
+### Server (`04_scenario_server.py`)
+
+```python
+import os
+import hud
+from openai import AsyncOpenAI
+
+env = hud.Environment(os.environ["HUD_ENV_NAME"])
+env.connect_hub(os.environ["HUD_ENV_NAME"])
+
+env.serve_as_agent(
+    client=AsyncOpenAI(
+        base_url="https://inference.hud.ai",
+        api_key=os.environ["HUD_API_KEY"],
+    ),
+    model="gpt-4o",
+    port=8321,
+)
+```
+
+The server exposes:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /scenarios` | List available scenarios and their required args |
+| `POST /v1/chat/completions` | Start or continue a session |
+| `POST /v1/sessions/{id}/finish` | Submit and evaluate |
+| `GET /v1/sessions` | List active sessions |
+
+### Client (`05_scenario_client.py`)
+
+No HUD SDK needed. Use any standard OpenAI client:
+
+```python
+import httpx
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8321/v1", api_key="not-needed")
+
+# 1. Discover scenarios
+scenarios = httpx.get("http://localhost:8321/scenarios").json()["scenarios"]
+selected = scenarios[0]
+
+# 2. First turn — pass scenario name and args in the request body
+first = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Begin."}],
+    extra_body={
+        "scenario": selected["short_name"],
+        "scenario_args": {"arg": "value"},
+    },
+)
+session_id = first.hud["session_id"]  # returned in every response
+
+# 3. Follow-up turns — pass session ID in the header
+follow_up = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "What are the root causes?"}],
+    extra_headers={"X-HUD-Session-Id": session_id},
+)
+
+# 4. Finish — submits the answer and returns reward + trace URL
+result = httpx.post(f"http://localhost:8321/v1/sessions/{session_id}/finish").json()
+print(result["reward"], result["trace_url"])
+```
+
+Streaming works the same way — just pass `stream=True`. The server sends
+standard SSE chunks, with a final chunk carrying `hud.session_id` and
+`hud.trace_url`.
+
+Requires: `pip install hud-python[server]` (installs `fastapi` and `uvicorn`)
 
 ---
 
