@@ -375,24 +375,28 @@ class OpenAIAgent(MCPAgent):
                                 ann_type = getattr(ann, "type", "")
                                 if ann_type == "url_citation":
                                     cit_obj = getattr(ann, "url_citation", ann)
-                                    citations.append({
-                                        "type": "url_citation",
-                                        "text": getattr(cit_obj, "title", "") or "",
-                                        "source": getattr(cit_obj, "url", "") or "",
-                                        "title": getattr(cit_obj, "title", None),
-                                        "start_index": getattr(ann, "start_index", None),
-                                        "end_index": getattr(ann, "end_index", None),
-                                    })
+                                    citations.append(
+                                        {
+                                            "type": "url_citation",
+                                            "text": getattr(cit_obj, "title", "") or "",
+                                            "source": getattr(cit_obj, "url", "") or "",
+                                            "title": getattr(cit_obj, "title", None),
+                                            "start_index": getattr(ann, "start_index", None),
+                                            "end_index": getattr(ann, "end_index", None),
+                                        }
+                                    )
                                 elif ann_type == "file_citation":
                                     cit_obj = getattr(ann, "file_citation", ann)
-                                    citations.append({
-                                        "type": "file_citation",
-                                        "text": getattr(cit_obj, "filename", "") or "",
-                                        "source": getattr(cit_obj, "file_id", "") or "",
-                                        "title": getattr(cit_obj, "filename", None),
-                                        "start_index": getattr(ann, "start_index", None),
-                                        "end_index": getattr(ann, "end_index", None),
-                                    })
+                                    citations.append(
+                                        {
+                                            "type": "file_citation",
+                                            "text": getattr(cit_obj, "filename", "") or "",
+                                            "source": getattr(cit_obj, "file_id", "") or "",
+                                            "title": getattr(cit_obj, "filename", None),
+                                            "start_index": getattr(ann, "start_index", None),
+                                            "end_index": getattr(ann, "end_index", None),
+                                        }
+                                    )
             elif item.type == "reasoning":
                 reasoning_chunks.append("".join(summary.text for summary in item.summary))
             else:

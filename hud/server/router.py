@@ -103,7 +103,7 @@ class HiddenRouter(MCPRouter):
             # Call the internal tool
             return await self._tool_manager.call_tool(self._prefix_fn(name), arguments or {})  # type: ignore
 
-        from fastmcp.tools.tool import FunctionTool
+        from fastmcp.tools.function_tool import FunctionTool
 
         dispatcher_tool = FunctionTool.from_function(
             _dispatch,

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from fastmcp.client import Client as FastMCPClient
-    from fastmcp.tools.tool import Tool
+    from fastmcp.tools import Tool
 
 __all__ = ["ConnectionConfig", "ConnectionType", "Connector"]
 
@@ -61,10 +61,12 @@ class Connector:
         connection_type: ConnectionType,
         *,
         auth: str | None = None,
+        elicitation_handler: Any | None = None,
     ) -> None:
         # Store transport config - client created in connect()
         self._transport = transport
         self._auth = auth
+        self._elicitation_handler = elicitation_handler
         self.config = config
         self.name = name
         self.connection_type = connection_type
@@ -109,6 +111,7 @@ class Connector:
             name=self.name,
             connection_type=self.connection_type,
             auth=self._auth,
+            elicitation_handler=self._elicitation_handler,
         )
 
     @property
@@ -146,10 +149,14 @@ class Connector:
         """
         from fastmcp.client import Client as FastMCPClient
 
-        self.client = FastMCPClient(
-            transport=self._transport,
-            auth=self._auth,
-        )
+        client_kwargs: dict[str, Any] = {
+            "transport": self._transport,
+            "auth": self._auth,
+        }
+        if self._elicitation_handler is not None:
+            client_kwargs["elicitation_handler"] = self._elicitation_handler
+
+        self.client = FastMCPClient(**client_kwargs)
         await self.client.__aenter__()
 
     async def disconnect(self) -> None:
@@ -182,7 +189,7 @@ class Connector:
 
             # Apply transform
             if self.config.transform is not None:
-                from fastmcp.tools.tool import Tool as FastMCPTool
+                from fastmcp.tools import Tool as FastMCPTool
 
                 fastmcp_tool = FastMCPTool.model_construct(
                     name=tool.name,

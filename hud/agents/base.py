@@ -441,10 +441,12 @@ class MCPAgent(ABC):
             # Submit final answer to context (only if scenario is running)
             if result.content and ctx.has_scenario:
                 if result.citations:
-                    await ctx.submit({
-                        "content": result.content,
-                        "citations": result.citations,
-                    })
+                    await ctx.submit(
+                        {
+                            "content": result.content,
+                            "citations": result.citations,
+                        }
+                    )
                 else:
                     await ctx.submit(result.content)
 

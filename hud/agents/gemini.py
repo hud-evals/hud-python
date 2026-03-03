@@ -211,10 +211,12 @@ class GeminiAgent(MCPAgent):
             for chunk in chunks:
                 web = getattr(chunk, "web", None)
                 if web:
-                    chunk_sources.append({
-                        "source": getattr(web, "uri", "") or "",
-                        "title": getattr(web, "title", None),
-                    })
+                    chunk_sources.append(
+                        {
+                            "source": getattr(web, "uri", "") or "",
+                            "title": getattr(web, "title", None),
+                        }
+                    )
                 else:
                     chunk_sources.append({"source": "", "title": None})
 
@@ -223,9 +225,7 @@ class GeminiAgent(MCPAgent):
             seen_chunk_indices: set[int] = set()
             for support in supports:
                 segment = getattr(support, "segment", None)
-                support_chunk_indices = (
-                    getattr(support, "grounding_chunk_indices", None) or []
-                )
+                support_chunk_indices = getattr(support, "grounding_chunk_indices", None) or []
                 segment_text = getattr(segment, "text", "") or "" if segment else ""
                 start_idx = getattr(segment, "start_index", None) if segment else None
                 end_idx = getattr(segment, "end_index", None) if segment else None
@@ -233,24 +233,28 @@ class GeminiAgent(MCPAgent):
                 for idx in support_chunk_indices:
                     seen_chunk_indices.add(idx)
                     source_info = chunk_sources[idx] if idx < len(chunk_sources) else {}
-                    citations.append({
-                        "type": "grounding",
-                        "text": segment_text,
-                        "source": source_info.get("source", ""),
-                        "title": source_info.get("title"),
-                        "start_index": start_idx,
-                        "end_index": end_idx,
-                    })
+                    citations.append(
+                        {
+                            "type": "grounding",
+                            "text": segment_text,
+                            "source": source_info.get("source", ""),
+                            "title": source_info.get("title"),
+                            "start_index": start_idx,
+                            "end_index": end_idx,
+                        }
+                    )
 
             # Include any chunks not referenced by a support entry
             for idx, src in enumerate(chunk_sources):
                 if idx not in seen_chunk_indices and src.get("source"):
-                    citations.append({
-                        "type": "grounding",
-                        "text": "",
-                        "source": src["source"],
-                        "title": src.get("title"),
-                    })
+                    citations.append(
+                        {
+                            "type": "grounding",
+                            "text": "",
+                            "source": src["source"],
+                            "title": src.get("title"),
+                        }
+                    )
 
             result.citations = citations
 

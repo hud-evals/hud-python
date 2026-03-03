@@ -10,6 +10,7 @@ import warnings
 # Apply patches to third-party libraries early, before other imports
 from . import patches as _patches  # noqa: F401
 from .environment import Environment
+from .services import Chat
 from .eval import EvalContext
 from .eval import run_eval as eval
 from .telemetry.instrument import instrument
@@ -31,6 +32,7 @@ def trace(*args: object, **kwargs: object) -> EvalContext:
 
 __all__ = [
     "Environment",
+    "Chat",
     "EvalContext",
     "eval",
     "instrument",

@@ -203,13 +203,15 @@ class TestRunCitations:
         """When citations are present, submit() receives a dict."""
         ctx = MockEvalContext(prompt="Do the task")
         agent = MockMCPAgent()
-        agent.set_response(InferenceResult(
-            content="answer with sources",
-            done=True,
-            citations=[
-                {"type": "url_citation", "source": "https://example.com", "title": "Ex"},
-            ],
-        ))
+        agent.set_response(
+            InferenceResult(
+                content="answer with sources",
+                done=True,
+                citations=[
+                    {"type": "url_citation", "source": "https://example.com", "title": "Ex"},
+                ],
+            )
+        )
 
         await agent.run(ctx)
 
@@ -227,11 +229,13 @@ class TestRunCitations:
             {"type": "grounding", "source": "https://a.com", "text": "fact"},
             {"type": "url_citation", "source": "https://b.com", "title": "B"},
         ]
-        agent.set_response(InferenceResult(
-            content="sourced answer",
-            done=True,
-            citations=citations,
-        ))
+        agent.set_response(
+            InferenceResult(
+                content="sourced answer",
+                done=True,
+                citations=citations,
+            )
+        )
 
         trace = await agent.run(ctx)
 

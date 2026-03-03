@@ -471,7 +471,9 @@ class TestOpenAICitations:
         from openai.types.responses.response_output_text import AnnotationURLCitation
 
         agent = OpenAIAgent.create(
-            model_client=mock_openai, model="gpt-4o", validate_api_key=False,
+            model_client=mock_openai,
+            model="gpt-4o",
+            validate_api_key=False,
         )
         agent._openai_tools = []
         agent._initialized = True
@@ -485,14 +487,17 @@ class TestOpenAICitations:
         )
         text_block = ResponseOutputText(type="output_text", text="Hello world", annotations=[ann])
         msg_item = ResponseOutputMessage(
-            id="msg_1", type="message", role="assistant",
-            content=[text_block], status="completed",
+            id="msg_1",
+            type="message",
+            role="assistant",
+            content=[text_block],
+            status="completed",
         )
-        mock_openai.responses.create = AsyncMock(
-            return_value=self._make_response([msg_item])
-        )
+        mock_openai.responses.create = AsyncMock(return_value=self._make_response([msg_item]))
 
-        result = await agent.get_response([{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}])
+        result = await agent.get_response(
+            [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}]
+        )
 
         assert len(result.citations) == 1
         cit = result.citations[0]
@@ -508,7 +513,9 @@ class TestOpenAICitations:
         from openai.types.responses.response_output_text import AnnotationFileCitation
 
         agent = OpenAIAgent.create(
-            model_client=mock_openai, model="gpt-4o", validate_api_key=False,
+            model_client=mock_openai,
+            model="gpt-4o",
+            validate_api_key=False,
         )
         agent._openai_tools = []
         agent._initialized = True
@@ -521,14 +528,17 @@ class TestOpenAICitations:
         )
         text_block = ResponseOutputText(type="output_text", text="Facts", annotations=[ann])
         msg_item = ResponseOutputMessage(
-            id="msg_1", type="message", role="assistant",
-            content=[text_block], status="completed",
+            id="msg_1",
+            type="message",
+            role="assistant",
+            content=[text_block],
+            status="completed",
         )
-        mock_openai.responses.create = AsyncMock(
-            return_value=self._make_response([msg_item])
-        )
+        mock_openai.responses.create = AsyncMock(return_value=self._make_response([msg_item]))
 
-        result = await agent.get_response([{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}])
+        result = await agent.get_response(
+            [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}]
+        )
 
         assert len(result.citations) == 1
         cit = result.citations[0]
@@ -540,20 +550,25 @@ class TestOpenAICitations:
     async def test_no_annotations_no_citations(self, mock_openai: AsyncOpenAI) -> None:
         """No citations when annotations list is empty."""
         agent = OpenAIAgent.create(
-            model_client=mock_openai, model="gpt-4o", validate_api_key=False,
+            model_client=mock_openai,
+            model="gpt-4o",
+            validate_api_key=False,
         )
         agent._openai_tools = []
         agent._initialized = True
 
         text_block = ResponseOutputText(type="output_text", text="Plain answer", annotations=[])
         msg_item = ResponseOutputMessage(
-            id="msg_1", type="message", role="assistant",
-            content=[text_block], status="completed",
+            id="msg_1",
+            type="message",
+            role="assistant",
+            content=[text_block],
+            status="completed",
         )
-        mock_openai.responses.create = AsyncMock(
-            return_value=self._make_response([msg_item])
-        )
+        mock_openai.responses.create = AsyncMock(return_value=self._make_response([msg_item]))
 
-        result = await agent.get_response([{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}])
+        result = await agent.get_response(
+            [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}]
+        )
 
         assert result.citations == []

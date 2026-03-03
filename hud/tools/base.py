@@ -12,8 +12,7 @@ from hud.tools.types import ContentBlock, EvaluationResult
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from fastmcp.tools import FunctionTool
-    from fastmcp.tools.tool import Tool, ToolResult
+    from fastmcp.tools import FunctionTool, Tool, ToolResult
 
     from hud.types import AgentType
 
@@ -166,7 +165,7 @@ class BaseTool(ABC):
         if not hasattr(self, "_mcp_tool"):
             from functools import wraps
 
-            from fastmcp.tools import FunctionTool
+            from fastmcp.tools.function_tool import FunctionTool
 
             original_call = self.__call__
 
@@ -333,7 +332,7 @@ class BaseHub(FastMCP):
             # Use the tool manager to call internal tools
             return await self._tool_manager.call_tool(self._prefix_fn(name), arguments or {})  # type: ignore
 
-        from fastmcp.tools.tool import FunctionTool
+        from fastmcp.tools.function_tool import FunctionTool
 
         dispatcher_tool = FunctionTool.from_function(
             _dispatch,

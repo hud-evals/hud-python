@@ -341,12 +341,14 @@ class ClaudeAgent(MCPAgent):
                     thinking_content += "\n"
                 thinking_content += block.thinking
             elif hasattr(block, "type") and block.type == "cite":
-                citations.append({
-                    "type": "document_citation",
-                    "text": getattr(block, "cited_text", "") or "",
-                    "source": getattr(block, "document_title", "") or "",
-                    "title": getattr(block, "document_title", None),
-                })
+                citations.append(
+                    {
+                        "type": "document_citation",
+                        "text": getattr(block, "cited_text", "") or "",
+                        "source": getattr(block, "document_title", "") or "",
+                        "title": getattr(block, "document_title", None),
+                    }
+                )
 
         result.content = text_content
         result.citations = citations

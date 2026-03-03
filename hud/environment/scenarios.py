@@ -12,14 +12,10 @@ from typing import TYPE_CHECKING, Any, Generic, ParamSpec, get_type_hints
 from mcp.types import TextContent
 from pydantic import BaseModel, ConfigDict
 
-from hud.tools.types import EvaluationResult
+from hud.tools.types import EvaluationResult, ScenarioResult  # noqa: F401
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
-
-    from fastmcp.prompts import PromptManager
-    from fastmcp.resources import ResourceManager
-    from fastmcp.tools import ToolManager
 
     from hud.eval.task import Task
 
@@ -90,7 +86,6 @@ class ScenarioHandle(Generic[P]):
         )
 
 
-
 def _validate_scenario_params(fn_name: str, sig: inspect.Signature, hints: dict[str, Any]) -> None:
     """Validate that all scenario parameters have JSON-serializable types."""
     from pydantic import TypeAdapter
@@ -116,39 +111,49 @@ def _normalize_prompt_yield(value: Any) -> list[str]:
     - TextContent: MCP text content block
     - list[str]: Multiple string prompts
     - list[ContentBlock]: Multiple content blocks (text extracted)
+    - ImageContent / AudioContent / other ContentBlock types
 
     Returns:
-        List of strings that FastMCP will wrap as PromptMessages
+        List of strings that FastMCP will wrap as PromptMessages.
+        Non-text content blocks are serialized as descriptive strings
+        until full ContentBlock prompt support is added.
     """
-    # Simple string - most common case
+    from mcp.types import ContentBlock as ContentBlockType
+
     if isinstance(value, str):
         return [value]
 
-    # TextContent from mcp.types
     if isinstance(value, TextContent):
         return [value.text]
 
-    # List of items
     if isinstance(value, list):
-        results: list[str] = []
+        # Preserve ContentBlock lists natively when all items are ContentBlocks
+        if all(isinstance(v, ContentBlockType) for v in value):
+            results: list[str] = []
+            for item in value:
+                if isinstance(item, TextContent):
+                    results.append(item.text)
+                elif hasattr(item, "text"):
+                    results.append(str(item.text))
+                else:
+                    results.append(str(item))
+            return results
+        # Mixed list: extract text from each item
+        results = []
         for item in value:
             if isinstance(item, str):
                 results.append(item)
             elif isinstance(item, TextContent):
                 results.append(item.text)
             elif hasattr(item, "text"):
-                # Other content blocks with text attribute
                 results.append(str(item.text))
             else:
-                # Fall back to string conversion
                 results.append(str(item))
         return results
 
-    # ContentBlock with text attribute
     if hasattr(value, "text"):
         return [str(value.text)]
 
-    # Fallback - convert to string
     return [str(value)]
 
 
@@ -301,11 +306,11 @@ class ScenarioMixin:
             yield float(result > 0 or "found" in answer.lower())
     """
 
-    # These come from Environment/MCPServer (type hints for mixin)
+    # These come from Environment/FastMCP (type hints for mixin)
     name: str
-    _prompt_manager: PromptManager
-    _resource_manager: ResourceManager
-    _tool_manager: ToolManager
+    _prompt_manager: Any
+    _resource_manager: Any
+    _tool_manager: Any
 
     # Scenario function registry
     _scenarios: dict[str, Callable[..., AsyncGenerator[Any, Any]]]
@@ -316,52 +321,84 @@ class ScenarioMixin:
     # Per-scenario output config: scenario_name -> (returns_type, enable_citations)
     _scenario_output_config: dict[str, tuple[type | None, bool]]
 
-    # Single active scenario session - used for BOTH:
-    # - Client-side: when we run scenarios (local or remote)
-    # - Server-side: when external clients call our scenarios via MCP
-    # Only one scenario can be active at a time.
-    _active_session: ScenarioSession | None
+    # Scenario sessions keyed by session ID for multi-client support.
+    # Server-side: each MCP client gets its own session via ctx session ID.
+    # Client-side: uses _CLIENT_SESSION_KEY as fallback when no MCP context.
+    _scenario_sessions: dict[str, ScenarioSession]
+
+    _CLIENT_SESSION_KEY: str = "__client__"
+
+    @property
+    def _active_session(self) -> ScenarioSession | None:
+        """Backwards-compatible accessor -- returns the client-side session."""
+        return self._scenario_sessions.get(self._CLIENT_SESSION_KEY)
+
+    @_active_session.setter
+    def _active_session(self, value: ScenarioSession | None) -> None:
+        if value is None:
+            self._scenario_sessions.pop(self._CLIENT_SESSION_KEY, None)
+        else:
+            self._scenario_sessions[self._CLIENT_SESSION_KEY] = value
+
+    def _get_session(self, session_id: str | None = None) -> ScenarioSession | None:
+        key = session_id or self._CLIENT_SESSION_KEY
+        return self._scenario_sessions.get(key)
+
+    def _set_session(self, session: ScenarioSession, session_id: str | None = None) -> None:
+        key = session_id or self._CLIENT_SESSION_KEY
+        self._scenario_sessions[key] = session
+
+    def _pop_session(self, session_id: str | None = None) -> ScenarioSession | None:
+        key = session_id or self._CLIENT_SESSION_KEY
+        return self._scenario_sessions.pop(key, None)
 
     def _init_scenarios(self) -> None:
         """Initialize scenario state. Called from Environment.__init__."""
         self._scenarios = {}
         self._scenario_exclusions = {}
         self._scenario_output_config = {}
-        self._active_session = None
+        self._scenario_sessions = {}
 
         # Register _hud_submit tool (underscore = hidden from agent)
         self._register_hud_submit_tool()
 
-    async def submit(self, scenario: str, answer: str | dict[str, Any]) -> None:
+    async def submit(
+        self,
+        scenario: str,
+        answer: str | dict[str, Any],
+        session_id: str | None = None,
+    ) -> None:
         """Submit the agent's answer for a scenario's evaluate phase.
 
-        Uses _active_session to route to the correct connection (if remote)
+        Uses session to route to the correct connection (if remote)
         or store locally (if local scenario).
 
         Args:
             scenario: Name of the scenario (may include env prefix like "env:name")
             answer: The agent's answer — either a plain string or a dict with
                 ``content`` (str), ``citations``, ``annotations``, ``grounding``.
+            session_id: MCP session ID (None = client-side default)
         """
         local_name = scenario.split(":")[-1] if ":" in scenario else scenario
 
-        if not self._active_session:
+        session = self._get_session(session_id)
+        if not session:
             raise ValueError(
                 "No active scenario session. Call run_scenario_setup() before submit()."
             )
 
-        if self._active_session.local_name != local_name:
+        if session.local_name != local_name:
             raise ValueError(
-                f"Scenario mismatch: active session is '{self._active_session.local_name}', "
+                f"Scenario mismatch: active session is '{session.local_name}', "
                 f"but submit() called with '{local_name}'"
             )
 
-        self._active_session.answer = answer
+        session.answer = answer
         logger.debug("Stored answer in session for scenario '%s'", local_name)
 
-        if not self._active_session.is_local:
+        if not session.is_local:
             # Remote scenario - send to specific connection
-            conn_name = self._active_session.connection_name
+            conn_name = session.connection_name
             if not conn_name:
                 raise ValueError(f"Remote scenario '{local_name}' has no connection")
 
@@ -381,33 +418,38 @@ class ScenarioMixin:
         """Register the _hud_submit tool for receiving agent answers.
 
         Named with underscore prefix to hide from agent tool listings.
+        Uses FastMCP Context to resolve the MCP session ID for multi-client support.
         """
         from fastmcp.tools import Tool
 
         scenario_self = self
 
-        async def _hud_submit(scenario: str, answer: str) -> str:
+        async def _hud_submit(scenario: str, answer: str, ctx: Any = None) -> str:
             """Receive an agent's answer from an external client.
 
             Called when an external client's Environment.submit() sends an answer
-            to us via MCP. Stores in _active_session for resource_handler to use.
+            to us via MCP. Stores in the session for resource_handler to use.
 
             Args:
                 scenario: Name of the scenario (may include env prefix like "env:name")
                 answer: The agent's answer/result to submit
+                ctx: FastMCP Context (injected by DI for session ID resolution)
             """
             local_name = scenario.split(":")[-1] if ":" in scenario else scenario
 
-            if not scenario_self._active_session:
+            session_id = getattr(ctx, "session_id", None) if ctx else None
+            session = scenario_self._get_session(session_id)
+
+            if not session:
                 raise ValueError(f"No active scenario session for '{local_name}'")
 
-            if scenario_self._active_session.local_name != local_name:
+            if session.local_name != local_name:
                 raise ValueError(
-                    f"Scenario mismatch: active is '{scenario_self._active_session.local_name}', "
+                    f"Scenario mismatch: active is '{session.local_name}', "
                     f"but received answer for '{local_name}'"
                 )
 
-            scenario_self._active_session.answer = answer
+            session.answer = answer
             logger.debug(
                 "_hud_submit stored answer for scenario '%s': %s...",
                 local_name,
@@ -420,15 +462,21 @@ class ScenarioMixin:
         self._tool_manager.add_tool(tool)
         logger.debug("Registered _hud_submit tool")
 
-    async def run_scenario_setup(self, scenario_name: str, args: dict[str, Any]) -> str | None:
+    async def run_scenario_setup(
+        self,
+        scenario_name: str,
+        args: dict[str, Any],
+        session_id: str | None = None,
+    ) -> str | None:
         """Run a scenario's setup phase and return the prompt.
 
         Handles both local scenarios (registered via @env.scenario) and remote
-        scenarios (via MCP prompt). Creates _active_session for use by submit/evaluate.
+        scenarios (via MCP prompt). Creates session for use by submit/evaluate.
 
         Args:
             scenario_name: Name of the scenario to run (may include "env:" prefix)
             args: Arguments to pass to the scenario
+            session_id: MCP session ID for multi-client support (None = client-side default)
 
         Returns:
             The prompt string from the scenario's setup phase, or None if failed
@@ -470,7 +518,7 @@ class ScenarioMixin:
             # Create session for local scenario
             excl = self._scenario_exclusions.get(local_name)
             out_cfg = self._scenario_output_config.get(local_name)
-            self._active_session = ScenarioSession(
+            session = ScenarioSession(
                 local_name=local_name,
                 full_name=scenario_name,
                 is_local=True,
@@ -483,11 +531,12 @@ class ScenarioMixin:
                 returns_type=out_cfg[0] if out_cfg else None,
                 enable_citations=out_cfg[1] if out_cfg else False,
             )
+            self._set_session(session, session_id)
 
             logger.debug(
-                "Local scenario setup: %s (session=%s)",
+                "Local scenario setup: %s (session_id=%s)",
                 local_name,
-                self._active_session,
+                session_id or self._CLIENT_SESSION_KEY,
             )
             return prompt_text
         else:
@@ -569,7 +618,7 @@ class ScenarioMixin:
             allowed_tools_meta = remote_meta.get("allowed_tools")
 
             # Create session for remote scenario - use router's connection info
-            self._active_session = ScenarioSession(
+            session = ScenarioSession(
                 local_name=local_name,
                 full_name=scenario_name,
                 is_local=False,
@@ -580,23 +629,30 @@ class ScenarioMixin:
                 exclude_sources=exclude_sources_meta,
                 allowed_tools=allowed_tools_meta,
             )
+            self._set_session(session, session_id)
 
             logger.debug(
-                "Remote scenario setup: %s (connection=%s)",
+                "Remote scenario setup: %s (connection=%s, session_id=%s)",
                 prompt_id,
                 conn_name,
+                session_id or self._CLIENT_SESSION_KEY,
             )
             return prompt_text
 
-    async def run_scenario_evaluate(self, scenario_name: str) -> EvaluationResult:
+    async def run_scenario_evaluate(
+        self,
+        scenario_name: str,
+        session_id: str | None = None,
+    ) -> EvaluationResult:
         """Run a scenario's evaluate phase and return the evaluation result.
 
-        Uses _active_session created by run_scenario_setup():
+        Uses session created by run_scenario_setup():
         - Local: use stored generator with submitted answer
         - Remote: read resource from the connection that served setup
 
         Args:
             scenario_name: Name of the scenario to evaluate
+            session_id: MCP session ID (None = client-side default)
 
         Returns:
             EvaluationResult with reward, done, content, subscores, etc.
@@ -604,11 +660,9 @@ class ScenarioMixin:
         Raises:
             ValueError: If no active session or evaluation fails.
         """
-        if not self._active_session:
+        session = self._pop_session(session_id)
+        if not session:
             raise ValueError(f"No active session for scenario '{scenario_name}'. ")
-
-        session = self._active_session
-        self._active_session = None  # Clear after use
 
         if session.is_local:
             # Local scenario - use generator
@@ -899,7 +953,7 @@ class ScenarioMixin:
 
             # Register prompt using FastMCP - create FunctionPrompt directly
             # to bypass the **kwargs validation in from_function()
-            from fastmcp.prompts.prompt import FunctionPrompt, PromptArgument
+            from fastmcp.prompts import FunctionPrompt, PromptArgument
 
             # Build meta with source code and full arguments info (with types/defaults)
             scenario_meta: dict[str, Any] = {}
@@ -950,7 +1004,7 @@ class ScenarioMixin:
                 return json.dumps(result.model_dump(exclude_none=True))
 
             # Register as resource with same scenario: URI
-            from fastmcp.resources.resource import FunctionResource
+            from fastmcp.resources import FunctionResource
 
             resource = FunctionResource.from_function(
                 fn=resource_handler,

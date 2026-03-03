@@ -429,7 +429,7 @@ class MCPServer(FastMCP):
             except Exception:
                 BaseTool = tuple()  # type: ignore[assignment]
             try:
-                from fastmcp.tools.tool import Tool as _FastMcpTool
+                from fastmcp.tools import Tool as _FastMcpTool
             except Exception:
                 _FastMcpTool = tuple()  # type: ignore[assignment]
 

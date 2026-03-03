@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from fastmcp.tools.tool import Tool
+    from fastmcp.tools import Tool
 
     from hud.environment.connection import ConnectionType, Connector
 

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from mcp.types import ContentBlock, ImageContent, TextContent
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+if TYPE_CHECKING:
+    from hud.types import Trace
 
 T = TypeVar("T")
 
@@ -53,14 +56,15 @@ class SubScore(BaseModel):
         return self.value
 
 
-class EvaluationResult(BaseModel):
-    """Standard evaluation result format.
+class ScenarioResult(BaseModel):
+    """Result from a scenario's final phase.
 
-    Used as the second yield in scenarios to provide detailed evaluation results.
-    Can include subscores for debugging and transparency.
+    In eval mode, populate reward and subscores for scoring.
+    In production, use content and info for diagnostics and stats.
 
-    Example:
-        yield EvaluationResult(
+    Example::
+
+        yield ScenarioResult(
             reward=0.85,
             done=True,
             content="Found 17 of 20 items",
@@ -84,7 +88,7 @@ class EvaluationResult(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     @model_validator(mode="after")
-    def _check_subscores(self) -> EvaluationResult:
+    def _check_subscores(self) -> ScenarioResult:
         if not self.subscores:
             return self
         names = [s.name for s in self.subscores]
@@ -108,13 +112,16 @@ class EvaluationResult(BaseModel):
         return self
 
     @classmethod
-    def from_float(cls, value: float) -> EvaluationResult:
-        """Create an EvaluationResult from a simple float reward.
+    def from_float(cls, value: float) -> ScenarioResult:
+        """Create a ScenarioResult from a simple float reward.
 
         Convenience method for backward compatibility with float yields.
         Sets done=True since a float yield typically indicates completion.
         """
         return cls(reward=value, done=True)
+
+
+EvaluationResult = ScenarioResult
 
 
 class ContentResult(BaseModel):
@@ -252,8 +259,8 @@ class AgentAnswer(BaseModel, Generic[T]):
         @env.scenario(returns=TaskAnswer, enable_citations=True)
         async def research(query: str):
             answer: AgentAnswer[TaskAnswer] = yield f"Research: {query}"
-            answer.content.final_answer   # typed field from TaskAnswer
-            answer.citations              # list[Citation] from inference
+            answer.content.final_answer  # typed field from TaskAnswer
+            answer.citations  # list[Citation] from inference
             yield EvaluationResult(reward=1.0)
     """
 
@@ -262,6 +269,11 @@ class AgentAnswer(BaseModel, Generic[T]):
     content: T = Field(description="The parsed structured answer")
     raw: str = Field(default="", description="Original answer string before parsing")
     citations: list[Citation] = Field(default_factory=list)
+    trace: Trace | None = Field(
+        default=None,
+        description="Full conversation transcript (multi-turn). "
+        "Populated by AgentService for multi-turn sessions.",
+    )
 
 
 class ToolError(Exception):
