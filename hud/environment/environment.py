@@ -178,6 +178,12 @@ class Environment(
         self._agent_include: list[str] | None = None
         self._agent_exclude: list[str] | None = None
 
+        # Stable session identifier for multi-turn reuse (set by Chat).
+        # When set, Connector.copy() reuses this as Environment-Id instead
+        # of generating a fresh UUID, so the remote server treats all turns
+        # as one session.
+        self._stable_environment_id: str | None = None
+
         # Initialize mock state
         self._init_mock()
 

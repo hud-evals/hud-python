@@ -1,97 +1,46 @@
-"""MCP Router utilities for FastAPI-like composition patterns."""
+"""HiddenRouter -- wraps a FastMCP router with a dispatcher + hidden tools."""
 
 from __future__ import annotations
 
-import logging
+import asyncio
 from typing import TYPE_CHECKING, Any
 
-from hud.server.server import MCPServer
+from fastmcp import FastMCP
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from fastmcp import FastMCP
     from fastmcp.tools import Tool
 
-logger = logging.getLogger(__name__)
-
-# MCPRouter is just an alias to FastMCP for FastAPI-like patterns
-MCPRouter = MCPServer
-
-# Prefix for internal tool names
 _INTERNAL_PREFIX = "int_"
 
+__all__ = ["HiddenRouter", "MCPRouter"]
 
-class HiddenRouter(MCPRouter):
-    """Wraps a FastMCP router to provide a single dispatcher tool for its sub-tools.
 
-    Instead of exposing all tools at the top level, this creates a single tool
-    (named after the router) that dispatches to the router's tools internally.
+class HiddenRouter(FastMCP):
+    """A composition-friendly FastMCP server that hides internal tools behind a dispatcher.
 
-    Useful for setup/evaluate patterns where you want:
-    - A single 'setup' tool that can call setup_basic(), setup_advanced(), etc.
-    - A single 'evaluate' tool that can call evaluate_score(), evaluate_complete(), etc.
-
-    Example:
-        # Create a router with multiple setup functions
-        setup_router = MCPRouter(name="setup")
-
-        @setup_router.tool
-        async def reset():
-            return "Environment reset"
-
-        @setup_router.tool
-        async def seed_data():
-            return "Data seeded"
-
-        # Wrap in HiddenRouter
-        hidden_setup = HiddenRouter(setup_router)
-
-        # Now you have one 'setup' tool that dispatches to reset/seed_data
-        mcp.include_router(hidden_setup)
+    Internal tools are prefixed and only accessible through the dispatcher tool.
     """
 
     def __init__(
         self,
-        router: FastMCP,
+        name: str,
         *,
+        router: FastMCP | None = None,
         title: str | None = None,
         description: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> None:
-        """Wrap an existing router with a dispatcher pattern.
-
-        Args:
-            router: The FastMCP router to wrap
-            title: Optional title for the dispatcher tool (defaults to "{name} Dispatcher")
-            description: Optional description for the dispatcher tool
-            meta: Optional metadata for the dispatcher tool
-        """
-        name = router.name or "router"
-
-        # Naming scheme for hidden/internal tools
-        self._prefix_fn: Callable[[str], str] = lambda n: f"{_INTERNAL_PREFIX}{n}"
-
         super().__init__(name=name)
 
-        # Set up dispatcher tool
         dispatcher_title = title or f"{name.title()} Dispatcher"
         dispatcher_desc = description or f"Call internal '{name}' functions"
+        hidden_self = self
 
-        # Register dispatcher that routes to hidden tools
         async def _dispatch(
             name: str,
-            arguments: dict | str | None = None,
+            arguments: dict[str, Any] | str | None = None,
             ctx: Any | None = None,
         ) -> Any:
-            """Gateway to hidden tools.
-
-            Args:
-                name: Internal function name (without prefix)
-                arguments: Arguments to forward to the internal tool (dict or JSON string)
-                ctx: Request context injected by FastMCP
-            """
-            # Handle JSON string inputs
             if isinstance(arguments, str):
                 import json
 
@@ -100,8 +49,12 @@ class HiddenRouter(MCPRouter):
                 except json.JSONDecodeError:
                     arguments = {}
 
-            # Call the internal tool
-            return await self._tool_manager.call_tool(self._prefix_fn(name), arguments or {})  # type: ignore
+            prefixed = hidden_self._prefix_fn(name)
+            tool = await hidden_self._local_provider.get_tool(prefixed)
+            if tool is None:
+                raise ValueError(f"Internal tool '{name}' not found")
+            args = arguments if isinstance(arguments, dict) else {}
+            return await tool.run(args)
 
         from fastmcp.tools.function_tool import FunctionTool
 
@@ -113,20 +66,17 @@ class HiddenRouter(MCPRouter):
             tags=set(),
             meta=meta,
         )
-        self._tool_manager.add_tool(dispatcher_tool)
+        self._local_provider.add_tool(dispatcher_tool)
 
-        # Copy all tools from source router as hidden tools
-        for tool in router._tool_manager._tools.values():
-            tool._key = self._prefix_fn(tool.name)
-            self._tool_manager.add_tool(tool)
+        if router is not None:
+            self._copy_tools_from(router)
 
-        # Expose list of available functions via resource
         async def _functions_catalogue() -> list[str]:
-            """List all internal function names without prefix."""
+            tools = await hidden_self._local_provider.list_tools()
             return [
-                key.removeprefix(_INTERNAL_PREFIX)
-                for key in self._tool_manager._tools
-                if key.startswith(_INTERNAL_PREFIX)
+                t.name.removeprefix(_INTERNAL_PREFIX)
+                for t in tools
+                if t.name.startswith(_INTERNAL_PREFIX)
             ]
 
         from fastmcp.resources import Resource
@@ -137,28 +87,33 @@ class HiddenRouter(MCPRouter):
             name=f"{name.title()} Functions",
             description=f"List of available {name} functions",
         )
-        self._resource_manager.add_resource(catalogue_resource)
+        self._local_provider.add_resource(catalogue_resource)
 
-    # Override _list_tools to hide internal tools when mounted
+        self._prefix_fn = lambda n: f"{_INTERNAL_PREFIX}{n}"
+
+    def _copy_tools_from(self, router: FastMCP) -> None:
+        """Copy tools from a source router as hidden (prefixed) tools."""
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            return
+        tools = loop.run_until_complete(router._local_provider.list_tools())
+        for tool in tools:
+            tool._key = self._prefix_fn(tool.name)  # type: ignore[attr-defined]
+            self._local_provider.add_tool(tool)
+
     async def _list_tools(self, context: Any = None) -> list[Tool]:
-        """Override _list_tools to hide internal tools when mounted.
+        """Hide internal tools -- only show the dispatcher."""
+        tools = await self._local_provider.list_tools()
+        return [t for t in tools if not t.name.startswith(_INTERNAL_PREFIX)]
 
-        Args:
-            context: MiddlewareContext passed by FastMCP (optional for backwards compat)
-        """
-        return [
-            tool
-            for key, tool in self._tool_manager._tools.items()
-            if not key.startswith(_INTERNAL_PREFIX)
-        ]
-
-    def _sync_list_tools(self) -> dict[str, Tool]:
-        """Override _list_tools to hide internal tools when mounted."""
+    def _sync_list_tools(self) -> dict[str, Any]:
+        """Sync version of tool listing without internal tools."""
+        components = self._local_provider._components
         return {
-            key: tool
-            for key, tool in self._tool_manager._tools.items()
-            if not key.startswith(_INTERNAL_PREFIX)
+            k: v for k, v in components.items()
+            if k.startswith("tool:") and not v.name.startswith(_INTERNAL_PREFIX)
         }
 
 
-__all__ = ["HiddenRouter", "MCPRouter"]
+# Backwards compatibility
+MCPRouter = HiddenRouter

@@ -329,8 +329,12 @@ class BaseHub(FastMCP):
                     # If it's not valid JSON, treat as empty dict
                     arguments = {}
 
-            # Use the tool manager to call internal tools
-            return await self._tool_manager.call_tool(self._prefix_fn(name), arguments or {})  # type: ignore
+            prefixed = self._prefix_fn(name)
+            tool = await self._local_provider.get_tool(prefixed)
+            if tool is None:
+                raise ValueError(f"Internal tool '{name}' not found")
+            args = arguments if isinstance(arguments, dict) else {}
+            return await tool.run(args)
 
         from fastmcp.tools.function_tool import FunctionTool
 
@@ -342,15 +346,17 @@ class BaseHub(FastMCP):
             tags=set(),
             meta=meta,
         )
-        self._tool_manager.add_tool(dispatcher_tool)
+        self._local_provider.add_tool(dispatcher_tool)
 
         # Expose list of internal functions via read-only resource
+        hub_self = self
+
         async def _functions_catalogue() -> list[str]:
-            # List all internal function names without prefix
+            tools = await hub_self._local_provider.list_tools()
             return [
-                key.removeprefix(_INTERNAL_PREFIX)
-                for key in self._tool_manager._tools
-                if key.startswith(_INTERNAL_PREFIX)
+                t.name.removeprefix(_INTERNAL_PREFIX)
+                for t in tools
+                if t.name.startswith(_INTERNAL_PREFIX)
             ]
 
         from fastmcp.resources import Resource
@@ -363,7 +369,7 @@ class BaseHub(FastMCP):
             mime_type="application/json",
             tags=set(),
         )
-        self._resource_manager.add_resource(catalogue_resource)
+        self._local_provider.add_resource(catalogue_resource)
 
     def tool(self, name_or_fn: Any = None, /, **kwargs: Any) -> Callable[..., Any]:
         """Register an *internal* tool (hidden from clients)."""
@@ -400,18 +406,17 @@ class BaseHub(FastMCP):
 
     def _update_dispatcher_description(self) -> None:
         """Update the dispatcher tool's description and schema with available tools."""
-        # Get list of internal tools with their details
+        components = self._local_provider._components
         internal_tools = []
-        for key, tool in self._tool_manager._tools.items():
-            if key.startswith(_INTERNAL_PREFIX):
-                tool_name = key.removeprefix(_INTERNAL_PREFIX)
-                internal_tools.append((tool_name, tool))
+        for key, comp in components.items():
+            if key.startswith(f"tool:{_INTERNAL_PREFIX}"):
+                tool_name = comp.name.removeprefix(_INTERNAL_PREFIX)
+                internal_tools.append((tool_name, comp))
 
         if internal_tools:
-            # Update the dispatcher tool's description
-            dispatcher_name = self.name
-            if dispatcher_name in self._tool_manager._tools:
-                dispatcher_tool = self._tool_manager._tools[dispatcher_name]
+            dispatcher_key = f"tool:{self.name}@"
+            dispatcher_tool = components.get(dispatcher_key)
+            if dispatcher_tool:
 
                 # Build detailed description
                 desc_lines = [f"Call internal '{self.name}' functions. Available tools:"]
@@ -500,7 +505,7 @@ class BaseHub(FastMCP):
                         examples.append({"name": tool_name, "arguments": {}})
 
                 # Enhanced schema with better documentation
-                dispatcher_tool.parameters = {
+                new_params = {
                     "type": "object",
                     "properties": {
                         "name": {
@@ -525,19 +530,13 @@ class BaseHub(FastMCP):
                     "required": ["name", "arguments"],
                     "examples": examples if examples else None,
                 }
+                dispatcher_tool.parameters = new_params  # type: ignore[union-attr]
 
     # Override _list_tools to hide internal tools when mounted
     async def _list_tools(self, context: Any = None) -> list[Tool]:
-        """Override _list_tools to hide internal tools when mounted.
-
-        Args:
-            context: MiddlewareContext passed by FastMCP (optional for backwards compat)
-        """
-        return [
-            tool
-            for key, tool in self._tool_manager._tools.items()
-            if not key.startswith(_INTERNAL_PREFIX)
-        ]
+        """Override _list_tools to hide internal tools when mounted."""
+        tools = await self._local_provider.list_tools()
+        return [t for t in tools if not t.name.startswith(_INTERNAL_PREFIX)]
 
     resource = FastMCP.resource
     prompt = FastMCP.prompt

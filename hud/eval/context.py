@@ -244,8 +244,15 @@ class EvalContext(Environment):
         )
 
         # Copy connections from parent - each connector is copied so parallel
-        # execution gets fresh client instances
-        ctx._connections = {name: connector.copy() for name, connector in env._connections.items()}
+        # execution gets fresh client instances.
+        # If the parent env has a stable_environment_id (set by Chat for
+        # multi-turn sessions), pass it through so the remote server sees
+        # all turns as one session.
+        stable_id = getattr(env, "_stable_environment_id", None)
+        ctx._connections = {
+            name: connector.copy(environment_id=stable_id)
+            for name, connector in env._connections.items()
+        }
 
         # Note: Auth is injected at request time by httpx/aiohttp hooks in hud.eval.instrument
         # using the contextvar set in __aenter__ (supports api_key passed to hud.eval())
@@ -257,17 +264,15 @@ class EvalContext(Environment):
         # Copy scenarios (definitions) by reference - they don't change
         ctx._scenarios = getattr(env, "_scenarios", {})
         # Create fresh session state for this eval (parallel evals each need their own)
-        ctx._active_session = None
+        ctx._scenario_sessions = {}
 
         # Store source env name for remote scenario lookups
         ctx._source_env_name = env.name
 
-        # Copy managers by reference (they hold local tools, prompts, resources)
+        # Copy local provider by reference (holds local tools, prompts, resources)
         # This allows ctx.call_tool(), ctx.get_prompt(), ctx.read_resource() to work
         # for locally defined tools/scenarios
-        ctx._tool_manager = env._tool_manager
-        ctx._prompt_manager = env._prompt_manager
-        ctx._resource_manager = env._resource_manager
+        ctx._local_provider = env._local_provider
 
         # Copy prompt
         if env.prompt:

@@ -19,6 +19,30 @@ if TYPE_CHECKING:
 
     from hud.eval.task import Task
 
+
+def _serialize_for_mcp(value: Any) -> str:
+    """Serialize a value for MCP transport (strings only)."""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value)
+
+
+def _deserialize_from_mcp(value: str) -> str | dict[str, Any]:
+    """Deserialize a value received from MCP transport.
+
+    Attempts JSON decode to recover dicts/lists that were serialized
+    for MCP string-only transport. Falls back to raw string.
+    """
+    if not isinstance(value, str):
+        return value  # type: ignore[return-value]
+    stripped = value.strip()
+    if stripped and stripped[0] in "{[":
+        try:
+            return json.loads(value)  # type: ignore[return-value]
+        except json.JSONDecodeError:
+            pass
+    return value
+
 __all__ = ["ScenarioHandle", "ScenarioMixin", "ScenarioSession"]
 
 P = ParamSpec("P")
@@ -404,8 +428,7 @@ class ScenarioMixin:
             if not conn or not conn.client:
                 raise ValueError(f"Connection '{conn_name}' not available")
 
-            # Serialize structured answers to JSON string for MCP transport
-            transport_answer = json.dumps(answer) if isinstance(answer, dict) else answer
+            transport_answer = _serialize_for_mcp(answer)
 
             await conn.call_tool(
                 "_hud_submit", {"scenario": local_name, "answer": transport_answer}
@@ -448,7 +471,7 @@ class ScenarioMixin:
                     f"but received answer for '{local_name}'"
                 )
 
-            session.answer = answer
+            session.answer = _deserialize_from_mcp(answer)
             logger.debug(
                 "_hud_submit stored answer for scenario '%s': %s...",
                 local_name,
@@ -549,10 +572,9 @@ class ScenarioMixin:
                 env_name = getattr(self, "_source_env_name", None) or self.name
                 prompt_id = f"{env_name}:{scenario_name}"
 
-            # Serialize args for MCP prompt (only supports string values)
-            serialized_args: dict[str, str] = {}
-            for key, value in args.items():
-                serialized_args[key] = value if isinstance(value, str) else json.dumps(value)
+            serialized_args: dict[str, str] = {
+                k: _serialize_for_mcp(v) for k, v in args.items()
+            }
 
             try:
                 result = await self.get_prompt(prompt_id, serialized_args)  # type: ignore[attr-defined]

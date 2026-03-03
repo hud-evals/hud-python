@@ -75,11 +75,17 @@ class Connector:
         self._prompts_cache: list[mcp_types.Prompt] | None = None
         self._resources_cache: list[mcp_types.Resource] | None = None
 
-    def copy(self) -> Connector:
+    def copy(self, *, environment_id: str | None = None) -> Connector:
         """Create a copy of this connector with fresh (unconnected) state.
 
         The copy uses a fresh transport object and client instance so mutable
         transport/session state cannot leak across parallel traces.
+
+        Args:
+            environment_id: If provided, reuse this as the Environment-Id
+                header for HUD hub connections (enables session persistence
+                across multi-turn Chat interactions). When None, a fresh
+                UUID is generated per copy (default for parallel evals).
         """
         copied_transport = deepcopy(self._transport)
         copied_config = ConnectionConfig(
@@ -103,7 +109,7 @@ class Connector:
         ):
             env_name = headers.get("Environment-Name") or headers["environment-name"]
             headers["Environment-Name"] = env_name
-            headers["Environment-Id"] = str(uuid.uuid4())
+            headers["Environment-Id"] = environment_id or str(uuid.uuid4())
 
         return Connector(
             transport=copied_transport,

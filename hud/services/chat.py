@@ -124,6 +124,11 @@ class Chat(AgentExecutor):
         self._description = description or f"Chat agent for {task.scenario or 'tasks'}"
         self.messages: list[dict[str, Any]] = []
 
+        # Stable session identifier reused across all turns so the remote
+        # MCP server (or HUD hub) treats multi-turn Chat as one session.
+        # This flows to Connector.copy() as the Environment-Id header.
+        self._session_id: str = str(uuid.uuid4())
+
         # Elicitation bridge state
         self._pending_elicitations: dict[str, asyncio.Future[str]] = {}
 
@@ -164,6 +169,13 @@ class Chat(AgentExecutor):
             }
         )
 
+        # Pin the Environment-Id across turns so the remote server
+        # maintains session state (OAuth tokens, ctx.set_state, etc.).
+        from hud.environment import Environment
+
+        if isinstance(task.env, Environment):
+            task.env._stable_environment_id = self._session_id
+
         async with hud.eval(task) as ctx:
             agent = self._create_agent()
             result = await agent.run(ctx)
@@ -177,8 +189,14 @@ class Chat(AgentExecutor):
         return result
 
     def clear(self) -> None:
-        """Reset the conversation history."""
+        """Reset the conversation history and rotate the session.
+
+        Generates a fresh session_id so subsequent turns don't inherit
+        stale server-side state (tokens, set_state values) from the
+        previous conversation.
+        """
         self.messages = []
+        self._session_id = str(uuid.uuid4())
 
     # ------------------------------------------------------------------
     # MCP tool surface
