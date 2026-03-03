@@ -503,8 +503,8 @@ class Environment(
 
     async def _build_tool_routing(self) -> None:
         """Build tool routing from local tools and connection caches."""
-        local_tools_dict = await self._tool_manager.get_tools()
-        local_tools = list(local_tools_dict.values())
+        local_tools_list = await self._local_provider.list_tools()
+        local_tools = list(local_tools_list)
         self._router.build(
             local_tools=[t.to_mcp_tool() for t in local_tools],
             connections=self._connections,
@@ -516,15 +516,15 @@ class Environment(
 
     async def _build_prompt_routing(self) -> None:
         """Build prompt routing from local prompts and connections."""
-        local_prompts_dict = await self._prompt_manager.get_prompts()
-        local_prompts = [p.to_mcp_prompt() for p in local_prompts_dict.values()]
+        local_prompts_list = await self._local_provider.list_prompts()
+        local_prompts = [p.to_mcp_prompt() for p in local_prompts_list]
         self._router.build_prompts(local_prompts, self._connections)
         self._prompt_routing_built = True
 
     async def _build_resource_routing(self) -> None:
         """Build resource routing from local resources and connections."""
-        local_resources_dict = await self._resource_manager.get_resources()
-        local_resources = [r.to_mcp_resource() for r in local_resources_dict.values()]
+        local_resources_list = await self._local_provider.list_resources()
+        local_resources = [r.to_mcp_resource() for r in local_resources_list]
         self._router.build_resources(local_resources, self._connections)
         self._resource_routing_built = True
 
@@ -607,8 +607,11 @@ class Environment(
             await self._build_tool_routing()
 
         if self._router.is_local(name):
-            # Call tool manager directly to avoid FastMCP context requirement
-            result = await self._tool_manager.call_tool(name, arguments)
+            # Call via FastMCP's call_tool (parent class) which handles
+            # context injection for elicitation, set_state, etc.
+            from fastmcp import FastMCP
+
+            result = await FastMCP.call_tool(self, name, arguments)
             return MCPToolResult(
                 content=result.content, structuredContent=result.structured_content
             )
@@ -650,17 +653,24 @@ class Environment(
         conn_name = self._router.get_resource_connection(uri)
 
         if conn_name is None:
-            # Local resource
+            # Local resource -- read via FastMCP's read_resource (parent class)
             try:
-                result = await self._resource_manager.read_resource(uri)
+                from fastmcp import FastMCP
+
+                result = await FastMCP.read_resource(self, uri)  # type: ignore[arg-type]
                 resource_uri = AnyUrl(uri)
-                if isinstance(result, str):
-                    return [mcp_types.TextResourceContents(uri=resource_uri, text=result)]
+                # FastMCP 3.x returns ResourceResult; extract content
+                content = getattr(result, "content", result)
+                if isinstance(content, str):
+                    return [mcp_types.TextResourceContents(uri=resource_uri, text=content)]
+                if hasattr(content, "text"):
+                    return [mcp_types.TextResourceContents(uri=resource_uri, text=content.text)]  # type: ignore[union-attr]
                 import base64
 
+                raw = content if isinstance(content, bytes) else str(content).encode()
                 return [
                     mcp_types.BlobResourceContents(
-                        uri=resource_uri, blob=base64.b64encode(result).decode()
+                        uri=resource_uri, blob=base64.b64encode(raw).decode()
                     )
                 ]
             except Exception as e:
@@ -696,9 +706,11 @@ class Environment(
         conn_name = self._router.get_prompt_connection(name)
 
         if conn_name is None:
-            # Local prompt
+            # Local prompt -- render via FastMCP's render_prompt (parent class)
             try:
-                return await self._prompt_manager.render_prompt(name, arguments or {})
+                from fastmcp import FastMCP
+
+                return await FastMCP.render_prompt(self, name, arguments or {})  # type: ignore[return-value]
             except Exception as e:
                 raise ValueError(f"Prompt not found: {name}") from e
         else:

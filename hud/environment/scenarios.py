@@ -306,11 +306,9 @@ class ScenarioMixin:
             yield float(result > 0 or "found" in answer.lower())
     """
 
-    # These come from Environment/FastMCP (type hints for mixin)
+    # These come from Environment/FastMCP 3.x (type hints for mixin)
     name: str
-    _prompt_manager: Any
-    _resource_manager: Any
-    _tool_manager: Any
+    _local_provider: Any
 
     # Scenario function registry
     _scenarios: dict[str, Callable[..., AsyncGenerator[Any, Any]]]
@@ -437,6 +435,7 @@ class ScenarioMixin:
             """
             local_name = scenario.split(":")[-1] if ":" in scenario else scenario
 
+            # Try MCP session ID first, then try all sessions for matching scenario
             session_id = getattr(ctx, "session_id", None) if ctx else None
             session = scenario_self._get_session(session_id)
 
@@ -459,7 +458,7 @@ class ScenarioMixin:
 
         # Register the tool with underscore name
         tool = Tool.from_function(_hud_submit)
-        self._tool_manager.add_tool(tool)
+        self._local_provider.add_tool(tool)
         logger.debug("Registered _hud_submit tool")
 
     async def run_scenario_setup(
@@ -868,7 +867,7 @@ class ScenarioMixin:
 
             _validate_scenario_params(scenario_name, sig, param_annotations)
 
-            async def prompt_handler(**handler_args: Any) -> list[str]:
+            async def prompt_handler(ctx: Any = None, **handler_args: Any) -> list[str]:
                 from pydantic import TypeAdapter
 
                 # Deserialize JSON-encoded arguments using Pydantic TypeAdapter
@@ -941,8 +940,9 @@ class ScenarioMixin:
                     deserialized_args[arg_name] = arg_value
 
                 # Delegate to run_scenario_setup (consolidates client/server logic)
+                session_id = getattr(ctx, "session_id", None) if ctx else None
                 prompt_text = await scenario_self.run_scenario_setup(
-                    scenario_name_ref, deserialized_args
+                    scenario_name_ref, deserialized_args, session_id=session_id
                 )
 
                 if prompt_text is None:
@@ -992,12 +992,15 @@ class ScenarioMixin:
                 fn=prompt_handler,
                 meta=scenario_meta if scenario_meta else None,
             )
-            self._prompt_manager.add_prompt(prompt)
+            self._local_provider.add_prompt(prompt)
 
             # Register RESOURCE - runs evaluate, returns EvaluationResult
-            async def resource_handler() -> str:
+            async def resource_handler(ctx: Any = None) -> str:
                 # Delegate to run_scenario_evaluate (consolidates client/server logic)
-                result = await scenario_self.run_scenario_evaluate(scenario_name_ref)
+                session_id = getattr(ctx, "session_id", None) if ctx else None
+                result = await scenario_self.run_scenario_evaluate(
+                    scenario_name_ref, session_id=session_id
+                )
 
                 # Serialize full EvaluationResult (includes reward, done, content, subscores)
                 # Use model_dump to get all fields, excluding None values for cleaner output
@@ -1014,7 +1017,7 @@ class ScenarioMixin:
                 mime_type="application/json",
                 meta=scenario_meta,
             )
-            self._resource_manager.add_resource(resource)
+            self._local_provider.add_resource(resource)
 
             logger.debug(
                 "Registered scenario '%s' as prompt and resource: %s",
