@@ -53,7 +53,8 @@ def patch_stdio(monkeypatch: pytest.MonkeyPatch):
     """Patch stdio server to avoid stdin issues during tests."""
     monkeypatch.setenv("FASTMCP_DISABLE_BANNER", "1")
     monkeypatch.setattr("mcp.server.stdio.stdio_server", _fake_stdio_server)
-    monkeypatch.setattr("fastmcp.server.server.stdio_server", _fake_stdio_server)
+    monkeypatch.setattr("fastmcp.server.low_level.stdio_server", _fake_stdio_server)
+    monkeypatch.setattr("fastmcp.server.mixins.transport.stdio_server", _fake_stdio_server)
 
 
 @pytest.mark.asyncio

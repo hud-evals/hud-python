@@ -201,15 +201,22 @@ def patch_streamable_http_error_handling() -> None:
                         if self._is_initialized_notification(message):
                             start_get_stream()
 
-                        ctx = RequestContext(
-                            client=client,
-                            headers=self.request_headers,
-                            session_id=self.session_id,
-                            session_message=session_message,
-                            metadata=metadata,
-                            read_stream_writer=read_stream_writer,
-                            sse_read_timeout=self.sse_read_timeout,
-                        )
+                        # Build RequestContext with compatibility for MCP SDK changes
+                        if hasattr(self, "_prepare_headers"):
+                            headers = self._prepare_headers()
+                        else:
+                            headers = getattr(self, "request_headers", {})
+                        ctx_kwargs: dict[str, Any] = {
+                            "client": client,
+                            "headers": headers,
+                            "session_id": getattr(self, "session_id", None),
+                            "session_message": session_message,
+                            "metadata": metadata,
+                            "read_stream_writer": read_stream_writer,
+                        }
+                        if hasattr(self, "sse_read_timeout"):
+                            ctx_kwargs["sse_read_timeout"] = self.sse_read_timeout
+                        ctx = RequestContext(**ctx_kwargs)
 
                         if isinstance(message.root, JSONRPCRequest):
                             tg.start_soon(handle_request_async, ctx, is_resumption)

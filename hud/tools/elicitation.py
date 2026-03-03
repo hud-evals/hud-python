@@ -16,8 +16,9 @@ Code's ``AskUserQuestion``, and Spring AI's ``AskUserQuestionTool``.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from fastmcp.server.context import Context  # noqa: TC002 - runtime DI annotation
 from fastmcp.server.elicitation import (
     AcceptedElicitation,
     CancelledElicitation,
@@ -25,9 +26,6 @@ from fastmcp.server.elicitation import (
 )
 
 from hud.tools.base import BaseTool
-
-if TYPE_CHECKING:
-    from fastmcp.server.context import Context
 
 LOGGER = logging.getLogger(__name__)
 
@@ -63,7 +61,6 @@ class ElicitTool(BaseTool):
         options: list[str] | None = None,
         *,
         ctx: Context,
-        **kwargs: Any,
     ) -> list[Any]:
         """Execute the elicitation request.
 

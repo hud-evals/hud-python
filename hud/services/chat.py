@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio  # noqa: TC003 - used at runtime for Future
 import logging
 import uuid
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from a2a.server.agent_execution import AgentExecutor
@@ -58,7 +59,7 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-MessageContent = str | list[ContentBlock]
+MessageContent = str | Sequence[ContentBlock]
 
 
 def _content_to_str(content: MessageContent) -> str:
@@ -78,7 +79,9 @@ def _content_to_blocks(content: MessageContent) -> list[ContentBlock]:
     """Normalize message content to a list of ContentBlocks."""
     if isinstance(content, str):
         return [TextContent(type="text", text=content)]
-    return content
+    if isinstance(content, list):
+        return content  # type: ignore[return-value]
+    return list(content)
 
 
 class Chat(AgentExecutor):
@@ -347,11 +350,12 @@ class Chat(AgentExecutor):
             )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        """Cancel an ongoing task."""
+        """Cancel an ongoing task and clear conversation history."""
         context_id = context.context_id or ""
         task_id = context.task_id or ""
 
-        # Resolve any pending elicitation
+        self.clear()
+
         if task_id in self._pending_elicitations:
             self._pending_elicitations.pop(task_id).cancel()
 
