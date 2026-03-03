@@ -507,9 +507,13 @@ class ScenarioMixin:
             """
             local_name = scenario.split(":")[-1] if ":" in scenario else scenario
 
-            # Try MCP session ID first, then try all sessions for matching scenario
             session_id = _safe_session_id(ctx)
             session = scenario_self._get_session(session_id)
+
+            # Fallback to __client__ key when _env_get_prompt stored
+            # the session without a session_id
+            if not session and session_id is not None:
+                session = scenario_self._get_session(None)
 
             if not session:
                 raise ValueError(f"No active scenario session for '{local_name}'")
@@ -576,7 +580,26 @@ class ScenarioMixin:
         if not is_explicitly_remote and local_name in self._scenarios:
             # Local scenario - run setup via generator
             scenario_fn = self._scenarios[local_name]
-            gen = scenario_fn(**args)
+
+            # Deserialize string args using the scenario's type annotations.
+            # MCP prompts only support string values, so callers (including
+            # _env_get_prompt and tests) may pass {"count": "42"} instead of
+            # {"count": 42}.  This mirrors what prompt_handler does.
+            sig = inspect.signature(scenario_fn)
+            try:
+                param_annotations = get_type_hints(scenario_fn)
+            except Exception:
+                param_annotations = {
+                    p.name: p.annotation
+                    for p in sig.parameters.values()
+                    if p.annotation is not inspect.Parameter.empty
+                }
+            deserialized_args: dict[str, Any] = {
+                k: _deserialize_typed(v, param_annotations.get(k)) if isinstance(v, str) else v
+                for k, v in args.items()
+            }
+
+            gen = scenario_fn(**deserialized_args)
 
             # Run setup phase (code before first yield)
             raw_prompt = await gen.__anext__()
@@ -737,6 +760,11 @@ class ScenarioMixin:
             ValueError: If no active session or evaluation fails.
         """
         session = self._pop_session(session_id)
+
+        # Fallback to __client__ key when _env_get_prompt stored without session_id
+        if not session and session_id is not None:
+            session = self._pop_session(None)
+
         if not session:
             raise ValueError(f"No active session for scenario '{scenario_name}'. ")
 

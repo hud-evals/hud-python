@@ -603,7 +603,10 @@ class Environment(
             # Local scenario prompt — run setup directly
             scenario_name = name.split(":", 1)[1]
             str_args = {k: v for k, v in (arguments or {}).items()}
-            prompt_text = await self.run_scenario_setup(scenario_name, str_args)
+
+            prompt_text = await self.run_scenario_setup(
+                scenario_name, str_args
+            )
             if not prompt_text:
                 raise ValueError(f"Scenario '{name}' returned empty prompt")
             return mcp_types.GetPromptResult(
@@ -681,7 +684,7 @@ class Environment(
         return self._router.resources
 
     async def read_resource(
-        self, uri: str
+        self, uri: str, **kwargs: Any
     ) -> list[mcp_types.TextResourceContents | mcp_types.BlobResourceContents]:
         """Read a resource by URI using router for connection lookup."""
         from pydantic import AnyUrl

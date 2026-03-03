@@ -498,12 +498,15 @@ class TestScenarioJsonSerialization:
             yield "Processing..."
             yield 1.0
 
-        await env.run_scenario_setup("mixed", {
-            "name": "test",
-            "count": "5",
-            "items": '["a", "b", "c"]',
-            "options": '{"verbose": true, "dry_run": false}',
-        })
+        await env.run_scenario_setup(
+            "mixed",
+            {
+                "name": "test",
+                "count": "5",
+                "items": '["a", "b", "c"]',
+                "options": '{"verbose": true, "dry_run": false}',
+            },
+        )
 
         assert received_args["name"] == "test"
         assert received_args["count"] == 5
@@ -913,8 +916,8 @@ class TestLiteralDeserialization:
         assert isinstance(received, str)
 
     @pytest.mark.asyncio
-    async def test_no_annotation_numeric_becomes_int(self) -> None:
-        """Untyped arg with numeric-looking string falls through to json.loads."""
+    async def test_no_annotation_preserves_string(self) -> None:
+        """Untyped arg preserves string value (no implicit coercion)."""
         env = Environment("test-env")
         received: Any = None
 
@@ -926,8 +929,7 @@ class TestLiteralDeserialization:
             yield 1.0
 
         await env.run_scenario_setup("untyped_num", {"val": "42"})
-        # Without annotation, generic heuristic converts to int
-        assert received == 42
+        assert received == "42"
 
 
 class TestScenarioNameNormalization:

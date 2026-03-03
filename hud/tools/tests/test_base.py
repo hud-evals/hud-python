@@ -100,26 +100,18 @@ class TestBaseTool:
 
     def test_mcp_property_attributes(self):
         """Test mcp property creates FunctionTool with correct attributes."""
+        from fastmcp.tools.function_tool import FunctionTool
 
         tool = MockTool(
             name="mcp_test", title="MCP Test Tool", description="Testing MCP conversion"
         )
 
-        with patch("fastmcp.tools.FunctionTool") as MockFunctionTool:
-            mock_ft = MagicMock()
-            MockFunctionTool.from_function.return_value = mock_ft
+        result = tool.mcp
 
-            result = tool.mcp
-
-            # The wrapper function is passed, not the tool itself
-            MockFunctionTool.from_function.assert_called_once()
-            call_args = MockFunctionTool.from_function.call_args
-
-            # Check that the correct parameters were passed
-            assert call_args[1]["name"] == "mcp_test"
-            assert call_args[1]["title"] == "MCP Test Tool"
-            assert call_args[1]["description"] == "Testing MCP conversion"
-            assert result is mock_ft
+        assert isinstance(result, FunctionTool)
+        assert result.name == "mcp_test"
+        assert result.title == "MCP Test Tool"
+        assert result.description == "Testing MCP conversion"
 
 
 class TestBaseHub:
@@ -188,15 +180,10 @@ class TestBaseHub:
         assert resource is not None
         assert isinstance(resource, Resource)
 
-        # Call the resource
+        # Call the resource — FastMCP 3.x returns the Python object directly
         result = await resource.read()
-        content = result if isinstance(result, str) else str(result)
-        # The resource returns JSON content, parse it
-        import json
-
-        funcs = json.loads(content)
-
-        assert sorted(funcs) == ["func1", "func2"]
+        assert isinstance(result, list)
+        assert sorted(str(f) for f in result) == ["func1", "func2"]
 
     def test_tool_decorator_with_name(self):
         """Test tool decorator with explicit name."""
