@@ -148,11 +148,7 @@ class TestBaseHub:
         hub = BaseHub("dispatcher_test")
 
         # Check dispatcher tool exists
-        tool_names = [
-            c.name
-            for c in hub._local_provider._components.values()
-            if hasattr(c, "run")
-        ]
+        tool_names = [c.name for c in hub._local_provider._components.values() if hasattr(c, "run")]
         assert "dispatcher_test" in tool_names
 
         # Test calling dispatcher with internal tool
@@ -188,9 +184,7 @@ class TestBaseHub:
         # Get the catalogue resource via local provider
         from fastmcp.resources import Resource
 
-        resource = hub._local_provider._components.get(
-            "resource:file:///catalogue_test/functions@"
-        )
+        resource = hub._local_provider._components.get("resource:file:///catalogue_test/functions@")
         assert resource is not None
         assert isinstance(resource, Resource)
 

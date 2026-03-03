@@ -472,9 +472,7 @@ class MCPAgent(ABC):
             # Cleanup auto-created resources
             await self._cleanup()
 
-    async def _build_conversation_messages(
-        self, conversation: list[dict[str, str]]
-    ) -> list[Any]:
+    async def _build_conversation_messages(self, conversation: list[dict[str, str]]) -> list[Any]:
         """Build provider-formatted messages from a conversation history."""
         result: list[Any] = []
         for msg in conversation:
@@ -489,9 +487,7 @@ class MCPAgent(ABC):
             result.extend(formatted)
         return result
 
-    async def _run_context(
-        self, initial_messages: list[Any], *, max_steps: int = 10
-    ) -> Trace:
+    async def _run_context(self, initial_messages: list[Any], *, max_steps: int = 10) -> Trace:
         """
         Run the agent with pre-built messages. This is the core agent loop.
 

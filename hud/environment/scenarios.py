@@ -13,6 +13,8 @@ from fastmcp.server.context import Context as _FastMCPContext  # noqa: TC002 - r
 from mcp.types import PromptMessage, TextContent
 from pydantic import BaseModel, ConfigDict
 
+from hud.tools.types import EvaluationResult, ScenarioResult  # noqa: F401
+
 
 def _safe_session_id(ctx: Any) -> str | None:
     """Extract session_id from a FastMCP Context, returning None when unavailable.
@@ -29,7 +31,6 @@ def _safe_session_id(ctx: Any) -> str | None:
     except (RuntimeError, AttributeError):
         return None
 
-from hud.tools.types import EvaluationResult, ScenarioResult  # noqa: F401
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
