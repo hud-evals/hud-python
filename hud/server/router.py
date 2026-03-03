@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
@@ -31,6 +30,8 @@ class HiddenRouter(FastMCP):
         meta: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(name=name)
+
+        self._prefix_fn = lambda n: f"{_INTERNAL_PREFIX}{n}"
 
         dispatcher_title = title or f"{name.title()} Dispatcher"
         dispatcher_desc = description or f"Call internal '{name}' functions"
@@ -89,17 +90,16 @@ class HiddenRouter(FastMCP):
         )
         self._local_provider.add_resource(catalogue_resource)
 
-        self._prefix_fn = lambda n: f"{_INTERNAL_PREFIX}{n}"
-
     def _copy_tools_from(self, router: FastMCP) -> None:
         """Copy tools from a source router as hidden (prefixed) tools."""
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            return
-        tools = loop.run_until_complete(router._local_provider.list_tools())
-        for tool in tools:
-            tool._key = self._prefix_fn(tool.name)  # type: ignore[attr-defined]
-            self._local_provider.add_tool(tool)
+        src_components = router._local_provider._components
+        for key, comp in src_components.items():
+            if not key.startswith("tool:"):
+                continue
+            prefixed_name = self._prefix_fn(comp.name)
+            comp_copy = comp.model_copy(update={"name": prefixed_name})
+            comp_copy._key = f"tool:{prefixed_name}@"  # type: ignore[attr-defined]
+            self._local_provider.add_tool(comp_copy)  # type: ignore[arg-type]
 
     async def _list_tools(self, context: Any = None) -> list[Tool]:
         """Hide internal tools -- only show the dispatcher."""
@@ -110,7 +110,8 @@ class HiddenRouter(FastMCP):
         """Sync version of tool listing without internal tools."""
         components = self._local_provider._components
         return {
-            k: v for k, v in components.items()
+            k: v
+            for k, v in components.items()
             if k.startswith("tool:") and not v.name.startswith(_INTERNAL_PREFIX)
         }
 

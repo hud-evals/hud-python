@@ -9,6 +9,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any, Generic, ParamSpec, get_type_hints
 
+from fastmcp.server.context import Context as _FastMCPContext  # noqa: TC002 - runtime DI
 from mcp.types import TextContent
 from pydantic import BaseModel, ConfigDict
 
@@ -42,6 +43,44 @@ def _deserialize_from_mcp(value: str) -> str | dict[str, Any]:
         except json.JSONDecodeError:
             pass
     return value
+
+
+def _deserialize_typed(value: str, annotation: Any) -> Any:
+    """Deserialize a string MCP arg using its type annotation.
+
+    Tries Pydantic TypeAdapter first (handles models, enums, lists, etc.),
+    then falls back to generic JSON heuristics via ``_deserialize_from_mcp``.
+
+    Args:
+        value: The string value from MCP transport
+        annotation: The Python type annotation, or None if untyped
+    """
+    if not isinstance(value, str):
+        return value
+
+    if annotation is str:
+        return value
+
+    if annotation is not None:
+        from pydantic import TypeAdapter
+
+        try:
+            adapter = TypeAdapter(annotation)
+        except Exception:
+            adapter = None
+
+        if adapter is not None:
+            try:
+                return adapter.validate_json(value)
+            except Exception:  # noqa: S110
+                pass
+            try:
+                return adapter.validate_python(value)
+            except Exception:  # noqa: S110
+                pass
+
+    return _deserialize_from_mcp(value)
+
 
 __all__ = ["ScenarioHandle", "ScenarioMixin", "ScenarioSession"]
 
@@ -445,7 +484,7 @@ class ScenarioMixin:
 
         scenario_self = self
 
-        async def _hud_submit(scenario: str, answer: str, ctx: Any = None) -> str:
+        async def _hud_submit(scenario: str, answer: str, ctx: _FastMCPContext = None) -> str:  # type: ignore[assignment]
             """Receive an agent's answer from an external client.
 
             Called when an external client's Environment.submit() sends an answer
@@ -572,9 +611,7 @@ class ScenarioMixin:
                 env_name = getattr(self, "_source_env_name", None) or self.name
                 prompt_id = f"{env_name}:{scenario_name}"
 
-            serialized_args: dict[str, str] = {
-                k: _serialize_for_mcp(v) for k, v in args.items()
-            }
+            serialized_args: dict[str, str] = {k: _serialize_for_mcp(v) for k, v in args.items()}
 
             try:
                 result = await self.get_prompt(prompt_id, serialized_args)  # type: ignore[attr-defined]
@@ -889,77 +926,11 @@ class ScenarioMixin:
 
             _validate_scenario_params(scenario_name, sig, param_annotations)
 
-            async def prompt_handler(ctx: Any = None, **handler_args: Any) -> list[str]:
-                from pydantic import TypeAdapter
-
-                # Deserialize JSON-encoded arguments using Pydantic TypeAdapter
-                # MCP prompts only support string arguments, so complex types are
-                # JSON-serialized on the sending side and deserialized here
-                deserialized_args: dict[str, Any] = {}
-                for arg_name, arg_value in handler_args.items():
-                    annotation = param_annotations.get(arg_name)
-
-                    # Only attempt deserialization on string values
-                    if not isinstance(arg_value, str):
-                        deserialized_args[arg_name] = arg_value
-                        continue
-
-                    # If annotation is explicitly str, keep as string
-                    if annotation is str:
-                        deserialized_args[arg_name] = arg_value
-                        continue
-
-                    # If we have a non-str type annotation, use TypeAdapter
-                    if annotation is not None:
-                        try:
-                            adapter = TypeAdapter(annotation)
-                        except Exception:
-                            # Unresolvable annotation (e.g. raw string from
-                            # PEP 563 fallback) -- treat as untyped
-                            adapter = None
-
-                        if adapter is not None:
-                            # Try validate_json first (handles Pydantic models,
-                            # lists, enums, datetimes from JSON-encoded strings)
-                            try:
-                                deserialized_args[arg_name] = adapter.validate_json(arg_value)
-                                continue
-                            except Exception:  # noqa: S110
-                                pass
-
-                            # Fall back to validate_python (handles Literal[str]
-                            # where validate_json("0") would parse as int 0,
-                            # losing the string type)
-                            try:
-                                deserialized_args[arg_name] = adapter.validate_python(arg_value)
-                                continue
-                            except Exception:  # noqa: S110
-                                pass
-
-                            # TypeAdapter couldn't handle it -- skip generic
-                            # heuristics that would lose type information
-                            deserialized_args[arg_name] = arg_value
-                            continue
-
-                    # No annotation (or unresolvable): try generic JSON decode heuristics
-                    stripped = arg_value.strip()
-                    if (stripped and stripped[0] in "[{") or stripped in ("true", "false", "null"):
-                        try:
-                            deserialized_args[arg_name] = json.loads(arg_value)
-                            continue
-                        except json.JSONDecodeError:
-                            pass
-
-                    # Try to decode if it looks like a number
-                    if stripped.lstrip("-").replace(".", "", 1).isdigit():
-                        try:
-                            deserialized_args[arg_name] = json.loads(arg_value)
-                            continue
-                        except json.JSONDecodeError:
-                            pass
-
-                    # Keep as string
-                    deserialized_args[arg_name] = arg_value
+            async def prompt_handler(ctx: _FastMCPContext = None, **handler_args: Any) -> list[str]:  # type: ignore[assignment]
+                deserialized_args: dict[str, Any] = {
+                    k: _deserialize_typed(v, param_annotations.get(k))
+                    for k, v in handler_args.items()
+                }
 
                 # Delegate to run_scenario_setup (consolidates client/server logic)
                 session_id = getattr(ctx, "session_id", None) if ctx else None
@@ -1017,7 +988,7 @@ class ScenarioMixin:
             self._local_provider.add_prompt(prompt)
 
             # Register RESOURCE - runs evaluate, returns EvaluationResult
-            async def resource_handler(ctx: Any = None) -> str:
+            async def resource_handler(ctx: _FastMCPContext = None) -> str:  # type: ignore[assignment]
                 # Delegate to run_scenario_evaluate (consolidates client/server logic)
                 session_id = getattr(ctx, "session_id", None) if ctx else None
                 result = await scenario_self.run_scenario_evaluate(

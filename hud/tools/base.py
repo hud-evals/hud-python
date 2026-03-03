@@ -417,7 +417,6 @@ class BaseHub(FastMCP):
             dispatcher_key = f"tool:{self.name}@"
             dispatcher_tool = components.get(dispatcher_key)
             if dispatcher_tool:
-
                 # Build detailed description
                 desc_lines = [f"Call internal '{self.name}' functions. Available tools:"]
                 desc_lines.append("")  # Empty line for readability

@@ -19,7 +19,6 @@ from starlette.responses import JSONResponse, Response
 from hud.datasets import run_dataset
 from hud.eval.task import Task
 from hud.server.low_level import LowLevelServerWithInit
-from hud.tools.base import _INTERNAL_PREFIX
 from hud.types import LegacyTask
 
 if TYPE_CHECKING:
@@ -515,9 +514,6 @@ class MCPServer(FastMCP):
         dst = self._local_provider._components
 
         for key, comp in src.items():
-            if hidden and key.startswith("tool:") and not comp.name.startswith(_INTERNAL_PREFIX):
-                continue
-
             name = comp.name
             if key.startswith("tool:"):
                 if not re.match(r"^[a-zA-Z0-9_-]{1,128}$", name):
