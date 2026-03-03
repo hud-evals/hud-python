@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
 
+from hud.server.server import MCPServer
+
 if TYPE_CHECKING:
     from fastmcp.tools import Tool
 
@@ -116,5 +118,5 @@ class HiddenRouter(FastMCP):
         }
 
 
-# Backwards compatibility
-MCPRouter = HiddenRouter
+# MCPRouter is an alias for MCPServer for FastAPI-like patterns
+MCPRouter = MCPServer

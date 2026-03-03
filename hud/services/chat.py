@@ -45,7 +45,7 @@ from a2a.types import (
     TaskStatusUpdateEvent,
     TextPart,
 )
-from mcp.types import ContentBlock, TextContent
+from mcp.types import ContentBlock, PromptMessage, TextContent
 
 from hud.types import Trace  # noqa: TC001 - used as return type
 
@@ -155,13 +155,13 @@ class Chat(AgentExecutor):
 
         blocks = _content_to_blocks(message)
 
-        self.messages.append(
-            {
-                "role": "user",
-                "content": _content_to_str(message),
-                "blocks": [b.model_dump() for b in blocks],
-            }
-        )
+        # Build PromptMessage-compatible dict (role + content as ContentBlock)
+        if len(blocks) == 1:
+            content_data = blocks[0].model_dump()
+        else:
+            content_data = blocks[0].model_dump()
+
+        self.messages.append({"role": "user", "content": content_data})
 
         task = self._task.model_copy(
             update={
@@ -176,16 +176,14 @@ class Chat(AgentExecutor):
         if isinstance(task.env, Environment):
             task.env._stable_environment_id = self._session_id
 
-        async with hud.eval(task) as ctx:
+        async with hud.eval(task, trace_id=self._session_id) as ctx:
             agent = self._create_agent()
             result = await agent.run(ctx)
 
-        self.messages.append(
-            {
-                "role": "assistant",
-                "content": result.content or "",
-            }
-        )
+        self.messages.append({
+            "role": "assistant",
+            "content": {"type": "text", "text": result.content or ""},
+        })
         return result
 
     def clear(self) -> None:

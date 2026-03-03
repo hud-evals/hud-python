@@ -336,7 +336,7 @@ class OpenAIAgent(MCPAgent):
                 ]
             else:
                 self.console.debug("No new messages to send to OpenAI.")
-                return AgentResponse(content="", tool_calls=[], done=True)
+                return InferenceResult(content="", tool_calls=[], done=True)
 
         response = await self.openai_client.responses.create(
             model=self._model,

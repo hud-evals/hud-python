@@ -539,12 +539,13 @@ class Environment(
     # =========================================================================
 
     def _setup_handlers(self) -> None:
-        """Override FastMCP to register our custom handlers for tools."""
+        """Override FastMCP to register our custom handlers for tools and prompts."""
         # Call parent to set up all standard handlers
         super()._setup_handlers()
         # Re-register our custom handlers (overwrites parent's registrations)
         self._mcp_server.list_tools()(self._env_list_tools)
         self._mcp_server.call_tool()(self._env_call_tool)
+        self._mcp_server.get_prompt()(self._env_get_prompt)
 
     async def _env_list_tools(self) -> list[mcp_types.Tool]:
         """Return all tools including those from connectors."""
@@ -587,6 +588,36 @@ class Environment(
 
         return result.content or []
 
+    async def _env_get_prompt(
+        self, name: str, arguments: dict[str, str] | None = None, **kwargs: Any
+    ) -> mcp_types.GetPromptResult:
+        """Handle get_prompt requests, routing scenario prompts through run_scenario_setup.
+
+        FastMCP 3.x's FunctionPrompt.render() filters kwargs to only those
+        explicitly named in the handler's signature, which strips scenario
+        args (user_id, items, etc.) because our handler uses **kwargs.
+        Bypass that by calling run_scenario_setup directly for scenario
+        prompts (those containing ':').
+        """
+        if ":" in name and name.split(":")[0] in (self.name, getattr(self, "_source_env_name", "")):
+            # Local scenario prompt — run setup directly
+            scenario_name = name.split(":", 1)[1]
+            str_args = {k: v for k, v in (arguments or {}).items()}
+            prompt_text = await self.run_scenario_setup(scenario_name, str_args)
+            if not prompt_text:
+                raise ValueError(f"Scenario '{name}' returned empty prompt")
+            return mcp_types.GetPromptResult(
+                messages=[
+                    mcp_types.PromptMessage(
+                        role="user",
+                        content=mcp_types.TextContent(type="text", text=prompt_text),
+                    )
+                ]
+            )
+
+        # Non-scenario prompt or remote — delegate to parent
+        return await self.get_prompt(name, arguments)
+
     # =========================================================================
     # Tool Operations
     # =========================================================================
@@ -615,9 +646,13 @@ class Environment(
         if self._router.is_local(name):
             # Call via FastMCP's call_tool (parent class) which handles
             # context injection for elicitation, set_state, etc.
+            # run_middleware=False because this is an internal call, not an
+            # MCP protocol message.  The middleware chain's call_next lambda
+            # resolves to self.call_tool which has a different (multi-format)
+            # signature and would TypeError with positional (name, arguments).
             from fastmcp import FastMCP
 
-            result = await FastMCP.call_tool(self, name, arguments)
+            result = await FastMCP.call_tool(self, name, arguments, run_middleware=False)
             return MCPToolResult(
                 content=result.content, structuredContent=result.structured_content
             )

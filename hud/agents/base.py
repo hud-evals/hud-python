@@ -417,21 +417,25 @@ class MCPAgent(ABC):
             await self._initialize_from_ctx(ctx)
 
         try:
-            # Build initial context - optionally append setup tool output
-            # Check ctx first (task-level override), then fall back to agent config
-            append_setup = getattr(ctx, "append_setup_output", False) or getattr(
-                self.config, "append_setup_output", False
-            )
-            initial_prompt = ctx.prompt
-            if append_setup:
-                setup_output = getattr(ctx, "setup_output", None)
-                if setup_output:
-                    initial_prompt = f"{initial_prompt}\n\n{setup_output}"
+            # Build initial context
+            conversation: list[dict[str, str]] | None = getattr(ctx, "conversation", None)
 
-            # Build initial blocks (text prompt + optional screenshot)
-            initial_blocks = text_to_blocks(initial_prompt)
+            if conversation:
+                # Multi-turn: build alternating role messages
+                initial_messages = await self._build_conversation_messages(conversation)
+            else:
+                # Single-turn: single user message from prompt
+                append_setup = getattr(ctx, "append_setup_output", False) or getattr(
+                    self.config, "append_setup_output", False
+                )
+                initial_prompt = ctx.prompt
+                if append_setup:
+                    setup_output = getattr(ctx, "setup_output", None)
+                    if setup_output:
+                        initial_prompt = f"{initial_prompt}\n\n{setup_output}"
+                initial_messages = await self.format_message(initial_prompt)
 
-            result = await self._run_context(initial_blocks, max_steps=max_steps)
+            result = await self._run_context(initial_messages, max_steps=max_steps)
 
             # Propagate error state to context for platform visibility
             if result.isError and hasattr(ctx, "error"):
@@ -468,14 +472,31 @@ class MCPAgent(ABC):
             # Cleanup auto-created resources
             await self._cleanup()
 
+    async def _build_conversation_messages(
+        self, conversation: list[dict[str, str]]
+    ) -> list[Any]:
+        """Build provider-formatted messages from a conversation history."""
+        result: list[Any] = []
+        for msg in conversation:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            formatted = await self.format_message(content)
+            for fm in formatted:
+                if isinstance(fm, dict):
+                    fm["role"] = role
+                elif hasattr(fm, "role"):
+                    fm.role = role  # type: ignore[attr-defined]
+            result.extend(formatted)
+        return result
+
     async def _run_context(
-        self, context: list[types.ContentBlock], *, max_steps: int = 10
+        self, initial_messages: list[Any], *, max_steps: int = 10
     ) -> Trace:
         """
-        Run the agent with the given context messages. This is the core agent loop.
+        Run the agent with pre-built messages. This is the core agent loop.
 
         Args:
-            context: The context to complete
+            initial_messages: Provider-formatted messages (from format_message or conversation)
             max_steps: Maximum number of steps (-1 for infinite)
 
         Returns:
@@ -487,11 +508,8 @@ class MCPAgent(ABC):
         messages: list[Any] = []
 
         try:
-            # Start with system messages
             messages = await self.get_system_messages()
-
-            # Add initial context
-            messages.extend(await self.format_message(context))
+            messages.extend(initial_messages)
             self.console.debug(f"Messages: {messages}")
 
             step_count = 0

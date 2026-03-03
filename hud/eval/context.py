@@ -168,6 +168,7 @@ class EvalContext(Environment):
 
         # User-settable (per-run values, override Environment defaults)
         self.prompt: str | None = None  # From scenario setup or task
+        self.conversation: list[dict[str, str]] | None = None  # Multi-turn messages with roles
         self.reward: float | None = None
         self.evaluation_result: EvaluationResult | None = None  # Full result with subscores
         self.answer: str | dict[str, Any] | None = None  # Agent's submitted answer
@@ -401,6 +402,17 @@ class EvalContext(Environment):
         prompt = await self.run_scenario_setup(self._task.scenario, self._task.args or {})
         if prompt:
             self.prompt = prompt
+
+        # If scenario yielded multi-turn messages, store as conversation
+        session = self._get_session()
+        if session and session.prompt_messages and len(session.prompt_messages) > 1:
+            self.conversation = [
+                {
+                    "role": pm.role,
+                    "content": getattr(pm.content, "text", str(pm.content)),
+                }
+                for pm in session.prompt_messages
+            ]
 
     async def _run_task_scenario_evaluate(self) -> None:
         """Run the task's scenario evaluate phase (if scenario provided)."""

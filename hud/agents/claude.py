@@ -345,7 +345,9 @@ class ClaudeAgent(MCPAgent):
                     {
                         "type": "document_citation",
                         "text": getattr(block, "cited_text", "") or "",
-                        "source": getattr(block, "document_title", "") or "",
+                        "source": str(getattr(block, "document_index", ""))
+                        or getattr(block, "document_title", "")
+                        or "",
                         "title": getattr(block, "document_title", None),
                     }
                 )

@@ -515,12 +515,11 @@ class MCPServer(FastMCP):
 
         for key, comp in src.items():
             name = comp.name
-            if key.startswith("tool:"):
-                if not re.match(r"^[a-zA-Z0-9_-]{1,128}$", name):
-                    raise ValueError(
-                        f"Tool name '{name}' must match ^[a-zA-Z0-9_-]{{1,128}}$ "
-                        "(letters, numbers, underscore, hyphen only, 1-128 chars)"
-                    )
+            if key.startswith("tool:") and not re.match(r"^[a-zA-Z0-9_-]{1,128}$", name):
+                raise ValueError(
+                    f"Tool name '{name}' must match ^[a-zA-Z0-9_-]{{1,128}}$ "
+                    "(letters, numbers, underscore, hyphen only, 1-128 chars)"
+                )
 
             if prefix:
                 new_name = f"{prefix}_{name}"

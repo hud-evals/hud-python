@@ -131,8 +131,7 @@ class TestBaseHub:
         hub = BaseHub("test_hub")
 
         assert hub._prefix_fn("tool") == f"{_INTERNAL_PREFIX}tool"
-        assert hasattr(hub, "_tool_manager")
-        assert hasattr(hub, "_resource_manager")
+        assert hasattr(hub, "_local_provider")
 
     def test_init_with_env(self):
         """Test BaseHub initialization with environment."""
@@ -149,16 +148,20 @@ class TestBaseHub:
         hub = BaseHub("dispatcher_test")
 
         # Check dispatcher tool exists
-        tools = hub._tool_manager._tools
-        assert "dispatcher_test" in tools
+        tool_names = [
+            c.name
+            for c in hub._local_provider._components.values()
+            if hasattr(c, "run")
+        ]
+        assert "dispatcher_test" in tool_names
 
         # Test calling dispatcher with internal tool
         @hub.tool("internal_func")
         async def internal_func(value: int) -> Any:
             return [TextContent(type="text", text=f"Internal: {value}")]
 
-        # Call dispatcher
-        result = await hub._tool_manager.call_tool(
+        # Call dispatcher via FastMCP.call_tool
+        result = await hub.call_tool(
             "dispatcher_test", {"name": "internal_func", "arguments": {"value": 42}}
         )
 
@@ -182,14 +185,18 @@ class TestBaseHub:
         async def func2() -> Any:
             return []
 
-        # Get the catalogue resource
-        resources = hub._resource_manager._resources
-        catalogue_uri = "file:///catalogue_test/functions"
-        assert catalogue_uri in resources
+        # Get the catalogue resource via local provider
+        from fastmcp.resources import Resource
+
+        resource = hub._local_provider._components.get(
+            "resource:file:///catalogue_test/functions@"
+        )
+        assert resource is not None
+        assert isinstance(resource, Resource)
 
         # Call the resource
-        resource = resources[catalogue_uri]
-        content = await resource.read()
+        result = await resource.read()
+        content = result if isinstance(result, str) else str(result)
         # The resource returns JSON content, parse it
         import json
 

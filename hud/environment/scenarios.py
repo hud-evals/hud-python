@@ -10,8 +10,24 @@ import logging
 from typing import TYPE_CHECKING, Any, Generic, ParamSpec, get_type_hints
 
 from fastmcp.server.context import Context as _FastMCPContext  # noqa: TC002 - runtime DI
-from mcp.types import TextContent
+from mcp.types import PromptMessage, TextContent
 from pydantic import BaseModel, ConfigDict
+
+
+def _safe_session_id(ctx: Any) -> str | None:
+    """Extract session_id from a FastMCP Context, returning None when unavailable.
+
+    In FastMCP 3.x the ``session_id`` property raises ``RuntimeError``
+    instead of returning ``None`` when accessed outside a request context.
+    ``getattr(ctx, "session_id", None)`` only catches ``AttributeError``,
+    so we need an explicit try/except.
+    """
+    if ctx is None:
+        return None
+    try:
+        return ctx.session_id  # type: ignore[union-attr]
+    except (RuntimeError, AttributeError):
+        return None
 
 from hud.tools.types import EvaluationResult, ScenarioResult  # noqa: F401
 
@@ -166,58 +182,50 @@ def _validate_scenario_params(fn_name: str, sig: inspect.Signature, hints: dict[
             ) from None
 
 
-def _normalize_prompt_yield(value: Any) -> list[str]:
-    """Convert various first-yield types to list of strings for FastMCP.
+def _normalize_prompt_yield(value: Any) -> list[PromptMessage]:
+    """Convert a scenario's first yield into a list of PromptMessages.
 
     Accepts:
-    - str: Single string prompt
-    - TextContent: MCP text content block
-    - list[str]: Multiple string prompts
-    - list[ContentBlock]: Multiple content blocks (text extracted)
-    - ImageContent / AudioContent / other ContentBlock types
+    - str: Single string (becomes user-role PromptMessage)
+    - PromptMessage: Passed through (has role + rich content)
+    - Message: FastMCP Message (converted to PromptMessage)
+    - list of the above: Multiple messages with roles
 
     Returns:
-        List of strings that FastMCP will wrap as PromptMessages.
-        Non-text content blocks are serialized as descriptive strings
-        until full ContentBlock prompt support is added.
+        List of PromptMessages with proper roles and content types.
     """
-    from mcp.types import ContentBlock as ContentBlockType
+    from fastmcp.prompts import Message
 
-    if isinstance(value, str):
-        return [value]
-
-    if isinstance(value, TextContent):
-        return [value.text]
+    def _to_prompt_message(item: Any, default_role: str = "user") -> PromptMessage:
+        if isinstance(item, PromptMessage):
+            return item
+        if isinstance(item, Message):
+            return PromptMessage(
+                role=item.role,  # type: ignore[arg-type]
+                content=TextContent(type="text", text=str(item.content)),
+            )
+        if isinstance(item, str):
+            return PromptMessage(
+                role=default_role,  # type: ignore[arg-type]
+                content=TextContent(type="text", text=item),
+            )
+        if isinstance(item, TextContent):
+            return PromptMessage(
+                role=default_role,  # type: ignore[arg-type]
+                content=item,
+            )
+        # Other ContentBlock types (ImageContent, AudioContent, etc.)
+        if hasattr(item, "type"):
+            return PromptMessage(role=default_role, content=item)  # type: ignore[arg-type]
+        return PromptMessage(
+            role=default_role,  # type: ignore[arg-type]
+            content=TextContent(type="text", text=str(item)),
+        )
 
     if isinstance(value, list):
-        # Preserve ContentBlock lists natively when all items are ContentBlocks
-        if all(isinstance(v, ContentBlockType) for v in value):
-            results: list[str] = []
-            for item in value:
-                if isinstance(item, TextContent):
-                    results.append(item.text)
-                elif hasattr(item, "text"):
-                    results.append(str(item.text))
-                else:
-                    results.append(str(item))
-            return results
-        # Mixed list: extract text from each item
-        results = []
-        for item in value:
-            if isinstance(item, str):
-                results.append(item)
-            elif isinstance(item, TextContent):
-                results.append(item.text)
-            elif hasattr(item, "text"):
-                results.append(str(item.text))
-            else:
-                results.append(str(item))
-        return results
+        return [_to_prompt_message(v) for v in value]
 
-    if hasattr(value, "text"):
-        return [str(value.text)]
-
-    return [str(value)]
+    return [_to_prompt_message(value)]
 
 
 def _build_answer_for_generator(session: ScenarioSession) -> Any:
@@ -327,6 +335,7 @@ class ScenarioSession(BaseModel):
     returns_type: Any | None = None  # Pydantic model class for structured answers
     enable_citations: bool = False
     allowed_tools: list[str] | None = None  # fnmatch patterns to rescue from exclusions
+    prompt_messages: list[PromptMessage] | None = None  # Multi-turn prompt messages with roles
 
 
 class ScenarioMixin:
@@ -498,7 +507,7 @@ class ScenarioMixin:
             local_name = scenario.split(":")[-1] if ":" in scenario else scenario
 
             # Try MCP session ID first, then try all sessions for matching scenario
-            session_id = getattr(ctx, "session_id", None) if ctx else None
+            session_id = _safe_session_id(ctx)
             session = scenario_self._get_session(session_id)
 
             if not session:
@@ -571,10 +580,17 @@ class ScenarioMixin:
             # Run setup phase (code before first yield)
             raw_prompt = await gen.__anext__()
 
-            # Normalize the prompt yield to a list of strings
-            # Accepts: str, TextContent, list[str], list[ContentBlock]
-            prompt_parts = _normalize_prompt_yield(raw_prompt)
-            prompt_text = prompt_parts[0] if len(prompt_parts) == 1 else "\n".join(prompt_parts)
+            # Normalize to list of PromptMessages (with roles)
+            prompt_messages = _normalize_prompt_yield(raw_prompt)
+
+            # Extract text for backward-compatible prompt string
+            text_parts = []
+            for pm in prompt_messages:
+                if isinstance(pm.content, TextContent):
+                    text_parts.append(pm.content.text)
+                elif hasattr(pm.content, "text"):
+                    text_parts.append(str(pm.content.text))  # type: ignore[union-attr]
+            prompt_text = "\n".join(text_parts) if text_parts else ""
 
             # Create session for local scenario
             excl = self._scenario_exclusions.get(local_name)
@@ -591,6 +607,7 @@ class ScenarioMixin:
                 allowed_tools=excl[2] if excl else None,
                 returns_type=out_cfg[0] if out_cfg else None,
                 enable_citations=out_cfg[1] if out_cfg else False,
+                prompt_messages=prompt_messages,
             )
             self._set_session(session, session_id)
 
@@ -933,7 +950,7 @@ class ScenarioMixin:
                 }
 
                 # Delegate to run_scenario_setup (consolidates client/server logic)
-                session_id = getattr(ctx, "session_id", None) if ctx else None
+                session_id = _safe_session_id(ctx)
                 prompt_text = await scenario_self.run_scenario_setup(
                     scenario_name_ref, deserialized_args, session_id=session_id
                 )
@@ -990,7 +1007,7 @@ class ScenarioMixin:
             # Register RESOURCE - runs evaluate, returns EvaluationResult
             async def resource_handler(ctx: _FastMCPContext = None) -> str:  # type: ignore[assignment]
                 # Delegate to run_scenario_evaluate (consolidates client/server logic)
-                session_id = getattr(ctx, "session_id", None) if ctx else None
+                session_id = _safe_session_id(ctx)
                 result = await scenario_self.run_scenario_evaluate(
                     scenario_name_ref, session_id=session_id
                 )

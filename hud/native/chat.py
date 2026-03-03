@@ -1,28 +1,27 @@
 """Native chat environment with sample scenarios.
 
-Provides chat-compatible scenarios that accept ``messages`` as their
-sole required parameter (typed as ``list[ContentBlock]``).
+Provides chat-compatible scenarios that accept ``messages`` as
+``list[PromptMessage]`` -- each message has a role and typed content.
 
 Usage::
 
     from hud.native.chat import env, chat_simple, chat_full
     from hud.services import Chat
 
-    # Minimal -- no eval, just pass messages through
     chat = Chat(env("chat_simple"), model="claude-sonnet-4-5")
     r = await chat.send("What is the capital of France?")
 
-    # Full -- rich content blocks, system prompt, eval with trace info
     chat = Chat(env("chat_full"), model="claude-sonnet-4-5")
-    r = await chat.send("Analyze this data and show me a chart")
+    r = await chat.send("Analyze this data")
 
-    # Serve as A2A
     chat.serve(port=9999)
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+
+from mcp.types import PromptMessage, TextContent
 
 from hud.environment import Environment
 from hud.tools.types import ScenarioResult
@@ -34,39 +33,36 @@ env = Environment("chat")
 
 
 @env.scenario()
-async def chat_simple(messages: list[dict[str, Any]]) -> AsyncGenerator[Any, Any]:
-    """Minimal chat -- formats messages and passes as the prompt.
+async def chat_simple(messages: list[PromptMessage]) -> AsyncGenerator[Any, Any]:
+    """Minimal chat -- passes PromptMessages straight through.
 
-    No system prompt, no evaluation logic. The agent sees the
-    conversation and responds.
+    Each message keeps its role (user/assistant), so the agent's
+    LLM sees proper alternating turns.
     """
-    parts = [f"{m.get('role', 'user').title()}: {m.get('content', '')}" for m in messages]
-    yield "\n".join(parts)
+    yield messages
     yield 1.0
 
 
 @env.scenario()
-async def chat_full(messages: list[dict[str, Any]]) -> AsyncGenerator[Any, Any]:
+async def chat_full(messages: list[PromptMessage]) -> AsyncGenerator[Any, Any]:
     """Full-featured chat with system prompt and eval.
 
-    Demonstrates:
-    - System prompt prepended
-    - Answer used in ScenarioResult with trace metadata
+    Prepends a system instruction, then passes all conversation
+    messages with their original roles.
     """
-    system = (
-        "You are a helpful, accurate assistant. Use any available tools "
-        "to provide thorough answers. When presenting data, structure it "
-        "clearly. If you're unsure, say so."
+    system = PromptMessage(
+        role="user",  # type: ignore[arg-type]
+        content=TextContent(
+            type="text",
+            text=(
+                "You are a helpful, accurate assistant. Use any available tools "
+                "to provide thorough answers. When presenting data, structure it "
+                "clearly. If you're unsure, say so."
+            ),
+        ),
     )
 
-    parts = [f"System: {system}"]
-    for m in messages:
-        role = m.get("role", "user").title()
-        content = m.get("content", "")
-        parts.append(f"{role}: {content}")
-    parts.append("Assistant:")
-
-    answer = yield "\n".join(parts)
+    answer = yield [system, *messages]
 
     answer_str = answer if isinstance(answer, str) else str(answer)
     yield ScenarioResult(

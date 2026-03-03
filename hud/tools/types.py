@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from mcp.types import ContentBlock, ImageContent, TextContent
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-if TYPE_CHECKING:
-    from hud.types import Trace
+from hud.types import Trace
 
 T = TypeVar("T")
 
