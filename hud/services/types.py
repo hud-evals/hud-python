@@ -3,20 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from hud.eval.task import Task
-
-
-class SessionState(str, Enum):
-    """Lifecycle states for managed chat sessions."""
-
-    ACTIVE = "active"
-    FINISHING = "finishing"
-    FINISHED = "finished"
-    EXPIRED = "expired"
 
 
 @dataclass(slots=True)
