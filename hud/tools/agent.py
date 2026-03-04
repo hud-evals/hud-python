@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
 from fastmcp.tools import FunctionTool, ToolResult
@@ -59,6 +60,32 @@ def _is_eval_only(param: inspect.Parameter) -> bool:
     return False
 
 
+def _extract_result_content(result: Any, answer: Any) -> str:
+    """Extract a stable text payload from agent result/context answer."""
+    content = result.content if hasattr(result, "content") and result.content else ""
+    if content:
+        return content
+
+    if isinstance(answer, str) and answer.strip():
+        return answer
+
+    if isinstance(answer, dict) and answer:
+        answer_content = answer.get("content")
+        if isinstance(answer_content, str) and answer_content.strip():
+            return answer_content
+        return json.dumps(answer, ensure_ascii=True)
+
+    if getattr(result, "isError", False):
+        info = getattr(result, "info", None)
+        if isinstance(info, dict):
+            error_text = str(info.get("error") or "")
+            if error_text:
+                return error_text
+        return "Sub-agent execution failed with no details."
+
+    return "Sub-agent completed but returned empty content."
+
+
 class AgentTool(BaseTool):
     """Tool that runs a Task template with an agent.
 
@@ -88,17 +115,22 @@ class AgentTool(BaseTool):
         name: str | None = None,
         description: str | None = None,
         trace: bool = False,
+        parameters: dict[str, Any] | None = None,
+        max_steps: int = 10,
     ) -> None:
         if not model and agent is None:
             raise ValueError("Must provide either 'model' or 'agent'")
         if model and agent is not None:
             raise ValueError("Cannot provide both 'model' and 'agent'")
+        if max_steps == 0 or max_steps < -1:
+            raise ValueError("max_steps must be -1 or a positive integer")
 
         self._task = task
         self._model = model
         self._agent_cls = agent
         self._agent_params = agent_params or {}
         self._trace = trace
+        self._max_steps = max_steps
 
         # Get visible params from scenario function
         self._visible_params: set[str] = set()
@@ -108,7 +140,10 @@ class AgentTool(BaseTool):
             "required": [],
         }
 
-        if task.env and task.scenario:
+        if parameters is not None:
+            self._param_schema = parameters
+            self._visible_params = set(parameters.get("properties", {}).keys())
+        elif task.env and task.scenario:
             scenario_fn = task.env._scenarios.get(task.scenario)
             if scenario_fn:
                 sig = inspect.signature(scenario_fn)
@@ -216,8 +251,8 @@ class AgentTool(BaseTool):
                 else:
                     agent = self._agent_cls.create(**self._agent_params)  # type: ignore
 
-                result = await agent.run(ctx)
-                content = result.content if hasattr(result, "content") and result.content else ""
+                result = await agent.run(ctx, max_steps=self._max_steps)
+                content = _extract_result_content(result, getattr(ctx, "answer", None))
                 return ToolResult(content=[TextContent(type="text", text=content)])
 
         return await _run_subagent()

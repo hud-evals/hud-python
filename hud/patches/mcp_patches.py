@@ -201,14 +201,20 @@ def patch_streamable_http_error_handling() -> None:
                         if self._is_initialized_notification(message):
                             start_get_stream()
 
+                        request_headers = getattr(self, "request_headers", None)
+                        if request_headers is None and hasattr(self, "_prepare_headers"):
+                            request_headers = self._prepare_headers()
+                        if request_headers is None:
+                            request_headers = {}
+
                         ctx = RequestContext(
                             client=client,
-                            headers=self.request_headers,
+                            headers=request_headers,
                             session_id=self.session_id,
                             session_message=session_message,
                             metadata=metadata,
                             read_stream_writer=read_stream_writer,
-                            sse_read_timeout=self.sse_read_timeout,
+                            sse_read_timeout=getattr(self, "sse_read_timeout", None),
                         )
 
                         if isinstance(message.root, JSONRPCRequest):

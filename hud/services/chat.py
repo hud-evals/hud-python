@@ -61,19 +61,6 @@ LOGGER = logging.getLogger(__name__)
 MessageContent = str | list[ContentBlock]
 
 
-def _content_to_str(content: MessageContent) -> str:
-    """Extract plain text from a message for history storage."""
-    if isinstance(content, str):
-        return content
-    parts: list[str] = []
-    for block in content:
-        if isinstance(block, TextContent):
-            parts.append(block.text)
-        elif hasattr(block, "type"):
-            parts.append(f"[{block.type}]")
-    return " ".join(parts) if parts else ""
-
-
 def _content_to_blocks(content: MessageContent) -> list[ContentBlock]:
     """Normalize message content to a list of ContentBlocks."""
     if isinstance(content, str):
@@ -104,6 +91,7 @@ class Chat(AgentExecutor):
         agent_params: dict[str, Any] | None = None,
         name: str | None = None,
         description: str | None = None,
+        max_steps: int = 10,
     ) -> None:
         """Initialize Chat.
 
@@ -122,6 +110,7 @@ class Chat(AgentExecutor):
         self._agent_params = agent_params or {}
         self._name = name or task.scenario or "chat"
         self._description = description or f"Chat agent for {task.scenario or 'tasks'}"
+        self._max_steps = max_steps
         self.messages: list[dict[str, Any]] = []
 
         # Stable session identifier reused across all turns so the remote
@@ -175,7 +164,7 @@ class Chat(AgentExecutor):
 
         async with hud.eval(task, trace_id=self._session_id) as ctx:
             agent = self._create_agent()
-            result = await agent.run(ctx)
+            result = await agent.run(ctx, max_steps=self._max_steps)
 
         self.messages.append(
             {
@@ -194,6 +183,11 @@ class Chat(AgentExecutor):
         """
         self.messages = []
         self._session_id = str(uuid.uuid4())
+
+    @property
+    def session_id(self) -> str:
+        """Stable internal session id used for remote environment continuity."""
+        return self._session_id
 
     # ------------------------------------------------------------------
     # MCP tool surface
@@ -214,6 +208,7 @@ class Chat(AgentExecutor):
             agent_params=self._agent_params,
             name=name,
             description=description,
+            max_steps=self._max_steps,
         )
 
     # ------------------------------------------------------------------
