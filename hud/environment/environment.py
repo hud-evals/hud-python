@@ -654,8 +654,21 @@ class Environment(
             # resolves to self.call_tool which has a different (multi-format)
             # signature and would TypeError with positional (name, arguments).
             from fastmcp import FastMCP
+            from fastmcp.exceptions import NotFoundError
 
-            result = await FastMCP.call_tool(self, name, arguments, run_middleware=False)
+            try:
+                result = await FastMCP.call_tool(self, name, arguments, run_middleware=False)
+            except NotFoundError:
+                # EvalContext copies `_local_provider` by reference from the
+                # source Environment, but may not include the same internal
+                # FastMCP registry. Fallback to direct local provider lookup.
+                provider = getattr(self, "_local_provider", None)
+                if provider is None:
+                    raise
+                tool = await provider.get_tool(name)
+                if tool is None:
+                    raise
+                result = await tool.run(arguments)
             return MCPToolResult(
                 content=result.content, structuredContent=result.structured_content
             )
