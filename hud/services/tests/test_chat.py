@@ -43,6 +43,6 @@ async def test_send_surfaces_followup_user_messages(monkeypatch: Any) -> None:
     first = await chat.send("hello")
     second = await chat.send("follow-up")
 
-    assert [m["role"] for m in first.messages] == ["user", "assistant"]
-    assert [m["role"] for m in second.messages] == ["user", "assistant", "user", "assistant"]
-    assert second.messages[2]["content"]["text"] == "follow-up"
+    assert [m["role"] for m in chat.messages] == ["user", "assistant", "user", "assistant"]
+    assert chat.messages[0]["content"]["text"] == "hello"
+    assert chat.messages[2]["content"]["text"] == "follow-up"

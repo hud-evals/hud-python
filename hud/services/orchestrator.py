@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from a2a.server.agent_execution import AgentExecutor
@@ -62,7 +63,11 @@ def _status_event(
         context_id=context_id,
         task_id=task_id,
         final=final,
-        status=TaskStatus(state=state, message=message),
+        status=TaskStatus(
+            state=state,
+            message=message,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        ),
     )
 
 
@@ -520,7 +525,7 @@ class OrchestratorExecutor(AgentExecutor):
                     context_id=context_id,
                     task_id=task_id,
                     final=True,
-                    state=TaskState.completed,
+                    state=TaskState.input_required,
                     text=content,
                 )
             )

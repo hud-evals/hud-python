@@ -17,7 +17,6 @@ from typing import Iterable
 
 import httpx
 from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
-from a2a.client.errors import A2AClientJSONRPCError
 from a2a.types import (
     Message,
     Part,
@@ -109,87 +108,62 @@ async def main() -> None:
                 continue
 
             final_answer = ""
-            input_required_prompt = ""
             last_state: TaskState | None = None
 
-            retried_without_task = False
-            while True:
-                message = Message(
-                    message_id=uuid.uuid4().hex,
-                    role=Role.user,
-                    parts=[Part(root=TextPart(text=user_text))],
-                    context_id=context_id,
-                    task_id=None if retried_without_task else task_id,
+            message = Message(
+                message_id=uuid.uuid4().hex,
+                role=Role.user,
+                parts=[Part(root=TextPart(text=user_text))],
+                context_id=context_id,
+                task_id=task_id,
+            )
+
+            async for item in client.send_message(message):
+                if isinstance(item, Message):
+                    context_id = (
+                        _pick_str_attr(item, "context_id", "contextId")
+                        or context_id
+                    )
+                    task_id = _pick_str_attr(item, "task_id", "taskId") or task_id
+                    msg_text = _text_from_parts(item.parts)
+                    if msg_text:
+                        final_answer = msg_text
+                    continue
+
+                task, event = item
+                context_id = (
+                    _pick_str_attr(task, "context_id", "contextId") or context_id
                 )
-                try:
-                    async for item in client.send_message(message):
-                        if isinstance(item, Message):
-                            context_id = (
-                                _pick_str_attr(item, "context_id", "contextId")
-                                or context_id
-                            )
-                            task_id = _pick_str_attr(item, "task_id", "taskId") or task_id
-                            msg_text = _text_from_parts(item.parts)
-                            if msg_text:
-                                final_answer = msg_text
-                            continue
+                task_id = task.id or task_id
+                last_state = task.status.state
 
-                        task, event = item
-                        context_id = (
-                            _pick_str_attr(task, "context_id", "contextId") or context_id
-                        )
-                        task_id = task.id or task_id
-                        last_state = task.status.state
+                if isinstance(event, TaskStatusUpdateEvent):
+                    state = event.status.state
+                    if state == TaskState.working and event.status.message:
+                        progress = _text_from_parts(event.status.message.parts)
+                        if progress:
+                            print(f"  [working] {progress}")
+                    elif state == TaskState.failed:
+                        failure = _text_from_task(task)
+                        final_answer = failure or "Task failed."
 
-                        if isinstance(event, TaskStatusUpdateEvent):
-                            state = event.status.state
-                            if state == TaskState.working and event.status.message:
-                                progress = _text_from_parts(event.status.message.parts)
-                                if progress:
-                                    print(f"  [working] {progress}")
-                            elif state == TaskState.input_required:
-                                prompt = ""
-                                if event.status.message:
-                                    prompt = _text_from_parts(event.status.message.parts)
-                                if not prompt:
-                                    prompt = _text_from_task(task)
-                                input_required_prompt = (
-                                    prompt or "Additional input is required."
-                                )
-                            elif state == TaskState.failed:
-                                failure = _text_from_task(task)
-                                final_answer = failure or "Task failed."
+                elif isinstance(event, TaskArtifactUpdateEvent):
+                    artifact_text = _text_from_parts(event.artifact.parts or [])
+                    if artifact_text:
+                        final_answer = artifact_text
 
-                        elif isinstance(event, TaskArtifactUpdateEvent):
-                            artifact_text = _text_from_parts(event.artifact.parts or [])
-                            if artifact_text:
-                                final_answer = artifact_text
+                task_text = _text_from_task(task)
+                if task_text:
+                    final_answer = task_text
 
-                        task_text = _text_from_task(task)
-                        if task_text:
-                            final_answer = task_text
-                    break
-                except A2AClientJSONRPCError as exc:
-                    if (
-                        not retried_without_task
-                        and "terminal state" in str(exc).lower()
-                    ):
-                        print("  [info] previous task was terminal; starting new task")
-                        task_id = None
-                        retried_without_task = True
-                        continue
-                    raise
-
-            if input_required_prompt:
-                print(f"\nA2A needs more input: {input_required_prompt}\n")
-                continue
-
+            # Reset task_id on terminal states so the next message
+            # starts a fresh task.  input_required keeps the task alive.
             if last_state in TERMINAL_TASK_STATES:
                 task_id = None
 
             if final_answer:
                 print(f"\nAgent: {final_answer}\n")
-            elif last_state == TaskState.completed:
+            elif last_state in {TaskState.completed, TaskState.input_required}:
                 print("\nAgent: [completed with no text output]\n")
             else:
                 print("\nAgent: [no response]\n")
