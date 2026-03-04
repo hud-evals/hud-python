@@ -61,8 +61,8 @@ def _is_eval_only(param: inspect.Parameter) -> bool:
 
 
 def _extract_result_content(result: Any, answer: Any) -> str:
-    """Extract a stable text payload from agent result/context answer."""
-    content = result.content if hasattr(result, "content") and result.content else ""
+    """Best-effort text extraction from agent result or context answer."""
+    content = getattr(result, "content", "") or ""
     if content:
         return content
 
@@ -73,7 +73,7 @@ def _extract_result_content(result: Any, answer: Any) -> str:
         answer_content = answer.get("content")
         if isinstance(answer_content, str) and answer_content.strip():
             return answer_content
-        return json.dumps(answer, ensure_ascii=True)
+        return json.dumps(answer, ensure_ascii=False)
 
     if getattr(result, "isError", False):
         info = getattr(result, "info", None)
@@ -81,9 +81,8 @@ def _extract_result_content(result: Any, answer: Any) -> str:
             error_text = str(info.get("error") or "")
             if error_text:
                 return error_text
-        return "Sub-agent execution failed with no details."
 
-    return "Sub-agent completed but returned empty content."
+    return ""
 
 
 class AgentTool(BaseTool):

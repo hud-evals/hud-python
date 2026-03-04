@@ -8,6 +8,7 @@ about which sub-chat tool(s) to call and synthesises a final answer.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -174,8 +175,18 @@ async def _discover_scenarios(env_name: str) -> list[dict[str, Any]]:
         # Server may return SSE-wrapped JSON-RPC — extract the data line
         for line in body.splitlines():
             if line.startswith("data: "):
-                return json.loads(line[6:])  # type: ignore[no-any-return]
-        return json.loads(body)
+                try:
+                    return json.loads(line[6:])  # type: ignore[no-any-return]
+                except json.JSONDecodeError as e:
+                    raise ValueError(
+                        f"Platform MCP returned invalid JSON for {method}: {e}"
+                    ) from e
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Platform MCP returned unparseable response for {method}: {e}"
+            ) from e
 
     async with httpx.AsyncClient(timeout=30) as client:
         # 1. Resolve env name → ID
@@ -255,8 +266,7 @@ def _scenarios_to_definitions(
             or s.get("evaluate_description", "")
         )
         for prefix in ("[Setup] ", "[Evaluate] "):
-            if desc.startswith(prefix):
-                desc = desc[len(prefix):]
+            desc = desc.removeprefix(prefix)
 
         # Build JSON-Schema properties and required list from scenario arguments.
         raw_args = s.get("arguments") or []
@@ -288,8 +298,8 @@ def _scenarios_to_definitions(
                 task=Task(env={"name": env_name}, scenario=scenario_id),
                 model=model,
                 description=(desc or f"Run {short_name}") + req_hint,
-                tool_properties=tool_properties if tool_properties else None,
-                tool_required=tool_required if tool_required else None,
+                tool_properties=tool_properties or None,
+                tool_required=tool_required or None,
             )
         )
     return definitions
@@ -330,6 +340,9 @@ class OrchestratorExecutor(AgentExecutor):
         self._main_task = self._env("orchestrate")
 
         self._sessions: dict[str, Chat] = {}
+        self._session_locks: dict[str, asyncio.Lock] = {}
+        self._session_last_active: dict[str, float] = {}
+        self._session_ttl_seconds = 30 * 60  # 30 minutes
 
     @classmethod
     async def from_environment(
@@ -392,6 +405,7 @@ class OrchestratorExecutor(AgentExecutor):
 
     def _get_or_create_chat(self, context_id: str) -> Chat:
         """Return existing Chat for context_id or create a new one."""
+        self._cleanup_stale_sessions()
         if context_id not in self._sessions:
             self._sessions[context_id] = Chat(
                 self._main_task,
@@ -400,7 +414,29 @@ class OrchestratorExecutor(AgentExecutor):
                 description=self._description,
                 max_steps=self._main_max_steps,
             )
+        self._session_last_active[context_id] = asyncio.get_event_loop().time()
         return self._sessions[context_id]
+
+    def _get_lock(self, context_id: str) -> asyncio.Lock:
+        return self._session_locks.setdefault(context_id, asyncio.Lock())
+
+    def _remove_session(self, context_id: str) -> None:
+        session = self._sessions.pop(context_id, None)
+        if session is not None:
+            session.clear()
+        self._session_locks.pop(context_id, None)
+        self._session_last_active.pop(context_id, None)
+
+    def _cleanup_stale_sessions(self) -> None:
+        now = asyncio.get_event_loop().time()
+        stale = [
+            cid for cid, ts in self._session_last_active.items()
+            if now - ts > self._session_ttl_seconds
+        ]
+        for cid in stale:
+            self._remove_session(cid)
+        if stale:
+            LOGGER.info("Cleaned up %d stale sessions", len(stale))
 
     def agent_card(self, url: str = "http://localhost:9999/") -> AgentCard:
         skills = [
@@ -452,9 +488,8 @@ class OrchestratorExecutor(AgentExecutor):
         context_id = context.context_id or str(uuid.uuid4())
         task_id = context.task_id or str(uuid.uuid4())
         message = context.get_user_input()
-        message_id = (
-            getattr(getattr(context, "message", None), "message_id", "") or ""
-        )
+        msg = getattr(context, "message", None)
+        message_id = getattr(msg, "message_id", "") or ""
 
         await event_queue.enqueue_event(
             _status_event(
@@ -466,9 +501,10 @@ class OrchestratorExecutor(AgentExecutor):
         )
 
         try:
-            chat = self._get_or_create_chat(context_id)
-            result = await chat.send(message)
-            content = result.content or ""
+            async with self._get_lock(context_id):
+                chat = self._get_or_create_chat(context_id)
+                result = await chat.send(message)
+                content = result.content or ""
 
             LOGGER.info(
                 "a2a_turn_completed context_id=%s task_id=%s "
@@ -504,9 +540,7 @@ class OrchestratorExecutor(AgentExecutor):
         context_id = context.context_id or ""
         task_id = context.task_id or ""
 
-        session = self._sessions.pop(context_id, None)
-        if session is not None:
-            session.clear()
+        self._remove_session(context_id)
 
         await event_queue.enqueue_event(
             _status_event(

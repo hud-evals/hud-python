@@ -186,7 +186,6 @@ class Chat(AgentExecutor):
 
     @property
     def session_id(self) -> str:
-        """Stable internal session id used for remote environment continuity."""
         return self._session_id
 
     # ------------------------------------------------------------------
