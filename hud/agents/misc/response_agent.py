@@ -4,6 +4,7 @@ import logging
 from typing import Literal
 
 from openai import AsyncOpenAI
+from openai.types.responses import ResponseOutputText
 
 from hud.settings import settings
 from hud.telemetry import instrument
@@ -81,27 +82,37 @@ class ResponseAgent:
             ResponseType: Either "STOP" or "CONTINUE"
         """
         try:
-            response = await self.client.chat.completions.create(
+            response = await self.client.responses.create(
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
+                instructions=self.system_prompt,
+                input=[
                     {
                         "role": "user",
-                        "content": f"Agent message: {agent_message}\n\nWhat is the appropriate response?",  # noqa: E501
+                        "content": (
+                            f"Agent message: {agent_message}\n\nWhat is the appropriate response?"
+                        ),
                     },
                 ],
-                temperature=0.1,
-                max_tokens=5,
+                reasoning={"effort": "low"},
+                max_output_tokens=256,
                 extra_headers={"Trace-Id": ""},
             )
 
-            response_text = response.choices[0].message.content
+            text_parts: list[str] = []
+            for item in response.output:
+                if item.type == "message":
+                    text_parts.extend(
+                        content.text
+                        for content in item.content
+                        if isinstance(content, ResponseOutputText)
+                    )
+
+            response_text = "".join(text_parts)
             if not response_text:
                 return "CONTINUE"
 
             response_text = response_text.strip().upper()
 
-            # Validate the response
             if "STOP" in response_text:
                 return "STOP"
             else:
@@ -109,4 +120,4 @@ class ResponseAgent:
 
         except Exception as e:
             logger.warning("Auto-respond failed: %s", e)
-            return "CONTINUE"  # Default to continue on error
+            return "CONTINUE"
