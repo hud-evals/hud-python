@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio  # noqa: TC003 - used at runtime for Future
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from a2a.server.agent_execution import AgentExecutor
@@ -294,13 +295,15 @@ class Chat(AgentExecutor):
                 future.set_result(message_text)
                 return
 
-            # Emit WORKING status
             await event_queue.enqueue_event(
                 TaskStatusUpdateEvent(
                     context_id=context_id,
                     task_id=task_id,
                     final=False,
-                    status=TaskStatus(state=TaskState.working),
+                    status=TaskStatus(
+                        state=TaskState.working,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                    ),
                 )
             )
 
@@ -313,12 +316,13 @@ class Chat(AgentExecutor):
                     task_id=task_id,
                     final=True,
                     status=TaskStatus(
-                        state=TaskState.completed,
+                        state=TaskState.input_required,
                         message=Message(
                             message_id=str(uuid.uuid4()),
                             role=Role.agent,
                             parts=[Part(root=TextPart(text=content))],
                         ),
+                        timestamp=datetime.now(timezone.utc).isoformat(),
                     ),
                 )
             )
@@ -336,6 +340,7 @@ class Chat(AgentExecutor):
                             role=Role.agent,
                             parts=[Part(root=TextPart(text=str(e)))],
                         ),
+                        timestamp=datetime.now(timezone.utc).isoformat(),
                     ),
                 )
             )
