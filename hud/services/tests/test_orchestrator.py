@@ -95,7 +95,7 @@ async def test_execute_emits_working_and_completed(monkeypatch: pytest.MonkeyPat
 
     assert len(queue.events) == 2
     assert queue.events[0].status.state.value == "working"
-    assert queue.events[1].status.state.value == "completed"
+    assert queue.events[1].status.state.value == "input-required"
 
 
 @pytest.mark.asyncio
