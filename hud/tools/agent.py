@@ -132,6 +132,7 @@ class AgentTool(BaseTool):
             if scenario_fn:
                 sig = inspect.signature(scenario_fn)
                 visible = {name: p for name, p in sig.parameters.items() if not _is_eval_only(p)}
+                self._visible_params = set(visible.keys())
                 self._param_schema = self._build_schema(visible)
 
         tool_name = name or task.scenario or "agent_tool"
