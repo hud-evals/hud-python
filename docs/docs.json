@@ -163,6 +163,7 @@
           {
             "group": "Integrations",
             "pages": [
+              "platform/rest-api",
               "platform/slack"
             ]
           },

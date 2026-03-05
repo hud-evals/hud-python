@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 import mcp.types as types
 
 from hud.tools.native_types import NativeToolSpec
-from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
+from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult, Trace
 from hud.utils.hud_console import HUDConsole
 
 from .types import BaseCreateParams
@@ -417,21 +417,25 @@ class MCPAgent(ABC):
             await self._initialize_from_ctx(ctx)
 
         try:
-            # Build initial context - optionally append setup tool output
-            # Check ctx first (task-level override), then fall back to agent config
-            append_setup = getattr(ctx, "append_setup_output", False) or getattr(
-                self.config, "append_setup_output", False
-            )
-            initial_prompt = ctx.prompt
-            if append_setup:
-                setup_output = getattr(ctx, "setup_output", None)
-                if setup_output:
-                    initial_prompt = f"{initial_prompt}\n\n{setup_output}"
+            # Build initial context
+            conversation: list[dict[str, str]] | None = getattr(ctx, "conversation", None)
 
-            # Build initial blocks (text prompt + optional screenshot)
-            initial_blocks = text_to_blocks(initial_prompt)
+            if conversation:
+                # Multi-turn: build alternating role messages
+                initial_messages = await self._build_conversation_messages(conversation)
+            else:
+                # Single-turn: single user message from prompt
+                append_setup = getattr(ctx, "append_setup_output", False) or getattr(
+                    self.config, "append_setup_output", False
+                )
+                initial_prompt = ctx.prompt
+                if append_setup:
+                    setup_output = getattr(ctx, "setup_output", None)
+                    if setup_output:
+                        initial_prompt = f"{initial_prompt}\n\n{setup_output}"
+                initial_messages = await self.format_message(initial_prompt)
 
-            result = await self._run_context(initial_blocks, max_steps=max_steps)
+            result = await self._run_context(initial_messages, max_steps=max_steps)
 
             # Propagate error state to context for platform visibility
             if result.isError and hasattr(ctx, "error"):
@@ -440,7 +444,15 @@ class MCPAgent(ABC):
 
             # Submit final answer to context (only if scenario is running)
             if result.content and ctx.has_scenario:
-                await ctx.submit(result.content)
+                if result.citations:
+                    await ctx.submit(
+                        {
+                            "content": result.content,
+                            "citations": result.citations,
+                        }
+                    )
+                else:
+                    await ctx.submit(result.content)
 
             return result
 
@@ -460,30 +472,40 @@ class MCPAgent(ABC):
             # Cleanup auto-created resources
             await self._cleanup()
 
-    async def _run_context(
-        self, context: list[types.ContentBlock], *, max_steps: int = 10
-    ) -> Trace:
+    async def _build_conversation_messages(self, conversation: list[dict[str, str]]) -> list[Any]:
+        """Build provider-formatted messages from a conversation history."""
+        result: list[Any] = []
+        for msg in conversation:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            formatted = await self.format_message(content)
+            for fm in formatted:
+                if isinstance(fm, dict):
+                    fm["role"] = role
+                elif hasattr(fm, "role"):
+                    fm.role = role  # type: ignore[attr-defined]
+            result.extend(formatted)
+        return result
+
+    async def _run_context(self, initial_messages: list[Any], *, max_steps: int = 10) -> Trace:
         """
-        Run the agent with the given context messages. This is the core agent loop.
+        Run the agent with pre-built messages. This is the core agent loop.
 
         Args:
-            context: The context to complete
+            initial_messages: Provider-formatted messages (from format_message or conversation)
             max_steps: Maximum number of steps (-1 for infinite)
 
         Returns:
             Trace with reward, done, content fields and trace steps
         """
-        final_response = None
+        final_response: InferenceResult | None = None
         error = None
 
         messages: list[Any] = []
 
         try:
-            # Start with system messages
             messages = await self.get_system_messages()
-
-            # Add initial context
-            messages.extend(await self.format_message(context))
+            messages.extend(initial_messages)
             self.console.debug(f"Messages: {messages}")
 
             step_count = 0
@@ -564,7 +586,6 @@ class MCPAgent(ABC):
         else:
             is_error = False
 
-        # Ensure all parameters are the correct type
         # Use ctx.reward if already set (e.g., from scenario evaluate), otherwise 0.0
         # Note: For v4 tasks with evaluate_tool, reward is set in __aexit__ after this returns,
         # so callers should prefer ctx.reward over Trace.reward for the final result.
@@ -574,17 +595,15 @@ class MCPAgent(ABC):
             if ctx_reward is not None:
                 reward = ctx_reward
 
-        trace_params = {
-            "reward": reward,
-            "done": True,
-            "messages": messages,
-            "content": final_response.content if final_response else error,
-            "isError": is_error,
-            "info": {"error": error} if error else {},
-        }
-        trace_result = Trace(**trace_params)
-
-        return trace_result
+        return Trace(
+            reward=reward,
+            done=True,
+            messages=messages,
+            content=final_response.content if final_response else error,
+            isError=is_error,
+            citations=final_response.citations if final_response else [],
+            info={"error": error} if error else {},
+        )
 
     async def call_tools(
         self, tool_call: MCPToolCall | list[MCPToolCall] | None = None
@@ -629,7 +648,7 @@ class MCPAgent(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def get_response(self, messages: list[Any]) -> AgentResponse:
+    async def get_response(self, messages: list[Any]) -> InferenceResult:
         """
         Get response from the model including any tool calls.
 

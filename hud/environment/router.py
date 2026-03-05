@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 if TYPE_CHECKING:
     import mcp.types as mcp_types
@@ -260,4 +260,4 @@ class MCPRouter:
 
 
 # Backwards compatibility alias
-ToolRouter = MCPRouter
+ToolRouter: TypeAlias = MCPRouter

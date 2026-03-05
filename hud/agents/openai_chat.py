@@ -24,7 +24,7 @@ import mcp.types as types
 from openai import AsyncOpenAI
 
 from hud.settings import settings
-from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult
 from hud.utils.hud_console import HUDConsole
 from hud.utils.types import with_signature
 
@@ -238,7 +238,7 @@ class OpenAIChatAgent(MCPAgent):
             **extra,
         )  # type: ignore
 
-    async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
+    async def get_response(self, messages: list[dict[str, Any]]) -> InferenceResult:
         """Send chat request to OpenAI and convert the response."""
 
         # Convert MCP tool schemas to OpenAI format
@@ -266,7 +266,7 @@ class OpenAIChatAgent(MCPAgent):
                 error_content = "Invalid JSON, response was truncated"
             self.hud_console.warning_log(error_content)
 
-            return AgentResponse(
+            return InferenceResult(
                 content=error_content,
                 tool_calls=[],
                 done=True,
@@ -313,7 +313,7 @@ class OpenAIChatAgent(MCPAgent):
         if done:
             self.hud_console.info_log(f"Done decision: finish_reason={choice.finish_reason}")
 
-        return AgentResponse(
+        return InferenceResult(
             content=msg.content or "",
             reasoning=getattr(msg, "reasoning_content", None),
             tool_calls=tool_calls,

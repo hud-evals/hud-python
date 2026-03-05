@@ -429,7 +429,7 @@ class MCPServer(FastMCP):
             except Exception:
                 BaseTool = tuple()  # type: ignore[assignment]
             try:
-                from fastmcp.tools.tool import Tool as _FastMcpTool
+                from fastmcp.tools import Tool as _FastMcpTool
             except Exception:
                 _FastMcpTool = tuple()  # type: ignore[assignment]
 
@@ -491,7 +491,10 @@ class MCPServer(FastMCP):
         from .router import HiddenRouter
 
         # Import the hidden router (synchronous)
-        self._sync_import_router(HiddenRouter(router), hidden=True, prefix=prefix, **kwargs)
+        hidden_name = getattr(router, "name", "hidden")
+        self._sync_import_router(
+            HiddenRouter(hidden_name, router=router), hidden=True, prefix=prefix, **kwargs
+        )
 
     def _sync_import_router(
         self,
@@ -506,36 +509,28 @@ class MCPServer(FastMCP):
         """
         import re
 
-        # Import tools directly - use internal dict to preserve keys
-        tools = (
-            router._tool_manager._tools.items() if not hidden else router._sync_list_tools().items()  # type: ignore
-        )
-        for key, tool in tools:
-            # Validate tool name
-            if not re.match(r"^[a-zA-Z0-9_-]{1,128}$", key):
+        # Import components directly from the router's local provider
+        src = router._local_provider._components
+        dst = self._local_provider._components
+
+        for key, comp in src.items():
+            name = comp.name
+            if key.startswith("tool:") and not re.match(r"^[a-zA-Z0-9_-]{1,128}$", name):
                 raise ValueError(
-                    f"Tool name '{key}' must match ^[a-zA-Z0-9_-]{{1,128}}$ "
+                    f"Tool name '{name}' must match ^[a-zA-Z0-9_-]{{1,128}}$ "
                     "(letters, numbers, underscore, hyphen only, 1-128 chars)"
                 )
 
-            new_key = f"{prefix}_{key}" if prefix else key
             if prefix:
-                tool = tool.model_copy(update={"name": new_key})
-            self._tool_manager._tools[new_key] = tool
+                new_name = f"{prefix}_{name}"
+                comp = comp.model_copy(update={"name": new_name})
+                # Rebuild the key with new name
+                parts = key.split(":", 1)
+                new_key = f"{parts[0]}:{new_name}@" if len(parts) > 1 else key
+            else:
+                new_key = key
 
-        # Import resources directly
-        for key, resource in router._resource_manager._resources.items():
-            new_key = f"{prefix}_{key}" if prefix else key
-            if prefix:
-                resource = resource.model_copy(update={"name": new_key})
-            self._resource_manager._resources[new_key] = resource
-
-        # Import prompts directly
-        for key, prompt in router._prompt_manager._prompts.items():
-            new_key = f"{prefix}_{key}" if prefix else key
-            if prefix:
-                prompt = prompt.model_copy(update={"name": new_key})
-            self._prompt_manager._prompts[new_key] = prompt
+            dst[new_key] = comp
 
     def _get_docker_logs(
         self,
@@ -638,7 +633,10 @@ class MCPServer(FastMCP):
                     data = {}
 
                 try:
-                    result = await self._tool_manager.call_tool(key, data)
+                    tool = await self._local_provider.get_tool(key)
+                    if tool is None:
+                        raise ValueError(f"Tool '{key}' not found")
+                    result = await tool.run(data)
 
                     # Recursively serialize MCP objects
                     def serialize_obj(obj: Any) -> Any:
@@ -670,9 +668,12 @@ class MCPServer(FastMCP):
 
             return tool_endpoint
 
-        for tool_key in self._tool_manager._tools.keys():  # noqa: SIM118
-            endpoint = create_tool_endpoint(tool_key)
-            self.custom_route(f"/api/tools/{tool_key}", methods=["POST"])(endpoint)
+        for key, comp in self._local_provider._components.items():
+            if not key.startswith("tool:"):
+                continue
+            tool_name = comp.name
+            endpoint = create_tool_endpoint(tool_name)
+            self.custom_route(f"/api/tools/{tool_name}", methods=["POST"])(endpoint)
 
         # Development endpoints - only if dev runtime set a provider
         provider = os.environ.get("_HUD_DEV_LOGS_PROVIDER")
@@ -868,16 +869,19 @@ class MCPServer(FastMCP):
             }
 
             # Convert each MCP tool to an OpenAPI path
-            for tool_key, tool in self._tool_manager._tools.items():
+            for key, comp in self._local_provider._components.items():
+                if not key.startswith("tool:"):
+                    continue
+                tool_name = comp.name
                 try:
-                    mcp_tool = tool.to_mcp_tool()
+                    mcp_tool = comp.to_mcp_tool()  # type: ignore[union-attr]
                     input_schema = mcp_tool.inputSchema or {"type": "object"}
 
-                    spec["paths"][f"/api/tools/{tool_key}"] = {
+                    spec["paths"][f"/api/tools/{tool_name}"] = {
                         "post": {
-                            "summary": tool_key,
+                            "summary": tool_name,
                             "description": mcp_tool.description or "",
-                            "operationId": f"call_{tool_key}",
+                            "operationId": f"call_{tool_name}",
                             "requestBody": {
                                 "required": True,
                                 "content": {"application/json": {"schema": input_schema}},
@@ -901,7 +905,7 @@ class MCPServer(FastMCP):
                         }
                     }
                 except Exception as e:
-                    logger.warning("Failed to generate spec for %s: %s", tool_key, e)
+                    logger.warning("Failed to generate spec for %s: %s", tool_name, e)
 
             return JSONResponse(spec)
 
@@ -946,8 +950,9 @@ class MCPServer(FastMCP):
             import json
 
             base_url = str(request.base_url).rstrip("/")
-            tool_count = len(self._tool_manager._tools)
-            resource_count = len(self._resource_manager._resources)
+            components = self._local_provider._components
+            tool_count = sum(1 for k in components if k.startswith("tool:"))
+            resource_count = sum(1 for k in components if k.startswith("resource:"))
 
             # Generate Cursor deeplink
             server_config = {"url": f"{base_url}/mcp"}

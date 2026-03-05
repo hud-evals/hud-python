@@ -49,14 +49,15 @@ def test_prefixed_names_match_dict_keys() -> None:
     mcp = MCPServer(name="PrefixSync")
     mcp.include_router(_make_router(), prefix="ns")
 
-    tool = mcp._tool_manager._tools["ns_greet"]
+    components = mcp._local_provider._components
+
+    tool = components["tool:ns_greet@"]
     assert tool.name == "ns_greet"
-    assert tool.key == "ns_greet"
 
-    resource = mcp._resource_manager._resources["ns_res://info"]
-    assert resource.name == "ns_res://info"
+    resource = components["resource:ns_info@"]
+    assert resource.name == "ns_info"
 
-    prompt = mcp._prompt_manager._prompts["ns_ask"]
+    prompt = components["prompt:ns_ask@"]
     assert prompt.name == "ns_ask"
 
 

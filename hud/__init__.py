@@ -12,6 +12,7 @@ from . import patches as _patches  # noqa: F401
 from .environment import Environment
 from .eval import EvalContext
 from .eval import run_eval as eval
+from .services import Chat
 from .telemetry.instrument import instrument
 
 
@@ -30,6 +31,7 @@ def trace(*args: object, **kwargs: object) -> EvalContext:
 
 
 __all__ = [
+    "Chat",
     "Environment",
     "EvalContext",
     "eval",

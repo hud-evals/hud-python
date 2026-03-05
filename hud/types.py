@@ -339,8 +339,13 @@ class MCPToolResult(CallToolResult):
         return hud_console.format_tool_result(content_summary, self.isError)
 
 
-class AgentResponse(BaseModel):
-    """A model response in the conversation."""
+class InferenceResult(BaseModel):
+    """Result of a single LLM inference call.
+
+    Returned by provider agents' ``get_response()`` methods.  Carries the
+    model's text output, any tool calls it wants to make, and provider-
+    specific metadata like reasoning traces and citations.
+    """
 
     # --- FUNCTIONAL ---
     tool_calls: list[MCPToolCall] = Field(default_factory=list)
@@ -353,6 +358,12 @@ class AgentResponse(BaseModel):
     info: dict[str, Any] = Field(default_factory=dict)
     isError: bool = Field(default=False)
     raw: Any | None = Field(default=None)  # Include raw response for access to Choice objects
+
+    # --- RESPONSE METADATA ---
+    # Populated by provider agents when citations are available.
+    # Uses dict form of Citation (provider-normalized) so InferenceResult
+    # doesn't depend on hud.tools.types at import time.
+    citations: list[dict[str, Any]] = Field(default_factory=list)
 
     # Timestamps
     start_timestamp: str | None = None
@@ -371,6 +382,10 @@ class AgentResponse(BaseModel):
         if self.raw:
             response += f"Raw: {self.raw}"
         return response
+
+
+# Backwards-compatible alias (deprecated — use InferenceResult)
+AgentResponse = InferenceResult
 
 
 class TraceStep(BaseModel):
@@ -427,6 +442,7 @@ class Trace(BaseModel):
     - info: Additional metadata for the run
     - content: The final content/response from the agent
     - isError: Whether the execution resulted in an error
+    - citations: Provider-normalized citations from the final inference
     - trace: The steps taken in the run (empty if not tracing)
     """
 
@@ -435,6 +451,9 @@ class Trace(BaseModel):
     info: dict[str, Any] = Field(default_factory=dict)
     content: str | None = Field(default=None)
     isError: bool = Field(default=False)
+
+    # Response metadata carried from the final InferenceResult
+    citations: list[dict[str, Any]] = Field(default_factory=list)
 
     # Metadata
     task: LegacyTask | None = Field(default=None)
@@ -464,6 +483,7 @@ __all__ = [
     "AgentResponse",
     "AgentType",
     "HudSpan",
+    "InferenceResult",
     "LegacyTask",
     "MCPToolCall",
     "MCPToolResult",

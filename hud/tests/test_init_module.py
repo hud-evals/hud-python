@@ -21,6 +21,7 @@ class TestInitModule:
         import hud
 
         expected = [
+            "Chat",
             "Environment",
             "EvalContext",
             "eval",

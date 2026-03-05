@@ -16,6 +16,7 @@ def display_build_summary(
     registry_id: str,
     console: HUDConsole | None = None,
     platform_url: str = "https://hud.ai",
+    env_name: str | None = None,
 ) -> None:
     """Display a rich summary of a completed build.
 
@@ -24,6 +25,7 @@ def display_build_summary(
         registry_id: Registry/environment ID
         console: Optional HUDConsole for output
         platform_url: Base URL for HUD platform
+        env_name: Environment display name
     """
     if console is None:
         console = HUDConsole()
@@ -58,6 +60,9 @@ def display_build_summary(
         f"[bold]Version:[/bold]    {version}",
     ]
 
+    if env_name:
+        summary_lines.insert(0, f"[bold]Environment:[/bold] [cyan]{env_name}[/cyan]")
+
     if uri:
         summary_lines.append(f"[bold]Image:[/bold]      [dim]{uri}[/dim]")
     elif image_name:
@@ -90,6 +95,11 @@ def display_build_summary(
             padding=(0, 2),
         )
     )
+
+    # Show usage example for successful builds
+    if status == "SUCCEEDED" and env_name and lock_data:
+        _display_usage_example(rich_console, env_name, lock_data)
+
     rich_console.print()
 
 
@@ -180,6 +190,49 @@ def _display_lock_details(
                 padding=(0, 2),
             )
         )
+
+
+def _display_usage_example(
+    rich_console: Console,
+    env_name: str,
+    lock_data: dict[str, Any],
+) -> None:
+    """Display a task JSON usage example after a successful deploy."""
+    import json as json_mod
+
+    prompts = lock_data.get("prompts") or lock_data.get("scenarios", [])
+    if not prompts:
+        return
+
+    first = prompts[0]
+    scenario_name = first.get("name", "default")
+    # scenario_name is typically "env-name:scenario-name"
+    short_name = scenario_name.split(":")[-1] if ":" in scenario_name else scenario_name
+
+    args = first.get("arguments", [])
+    example_args: dict[str, str] = {}
+    for arg in args:
+        arg_name = arg.get("name", "")
+        if arg_name:
+            example_args[arg_name] = "..."
+
+    task_example: dict[str, Any] = {
+        "scenario": short_name,
+        "env": {"name": env_name},
+    }
+    if example_args:
+        task_example["args"] = example_args
+
+    example_json = json_mod.dumps(task_example, indent=2)
+    rich_console.print()
+    rich_console.print(
+        Panel(
+            f"[bold]Task JSON:[/bold]\n[dim]{example_json}[/dim]",
+            title="[bold]Quick Start[/bold]",
+            border_style="green",
+            padding=(1, 2),
+        )
+    )
 
 
 def _format_duration(seconds: float) -> str:

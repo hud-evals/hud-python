@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
-from fastmcp.tools.tool import FunctionTool, ToolResult
+from fastmcp.tools import FunctionTool, ToolResult
 from mcp.types import TextContent
 
 from hud.tools.base import BaseTool

@@ -9,7 +9,7 @@ from hud.environment.connectors.base import BaseConnectorMixin
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from fastmcp.tools.tool import Tool
+    from fastmcp.tools import Tool
 
 __all__ = ["MCPConfigConnectorMixin"]
 
