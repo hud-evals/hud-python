@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import types
 from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
 from fastmcp.tools import FunctionTool, ToolResult
@@ -18,6 +19,26 @@ if TYPE_CHECKING:
 __all__ = ["AgentTool"]
 
 
+def _annotation_includes_none(annotation: Any) -> bool:
+    """Return True when annotation allows None."""
+    if isinstance(annotation, str):
+        return (
+            "| None" in annotation
+            or "None |" in annotation
+            or "Optional[" in annotation
+            or ("Union[" in annotation and "None" in annotation)
+        )
+
+    origin = get_origin(annotation)
+    if origin is Union:
+        return type(None) in get_args(annotation)
+
+    if isinstance(annotation, types.UnionType):
+        return type(None) in get_args(annotation)
+
+    return False
+
+
 def _is_eval_only(param: inspect.Parameter) -> bool:
     """Check if param is eval-only: has None default AND None in type union.
 
@@ -29,58 +50,23 @@ def _is_eval_only(param: inspect.Parameter) -> bool:
     if param.annotation is inspect.Parameter.empty:
         return False
 
-    annotation = param.annotation
-
-    # Handle string annotations (from __future__ annotations or quoted)
-    if isinstance(annotation, str):
-        # Check if it looks like "X | None", "Union[X, None]", or "Optional[X]"
-        return (
-            "| None" in annotation
-            or "None |" in annotation
-            or "Optional[" in annotation
-            or ("Union[" in annotation and "None" in annotation)
-        )
-
-    # Handle runtime type annotations
-    origin = get_origin(annotation)
-
-    # Union types (X | None or Union[X, None])
-    if origin is Union:
-        return type(None) in get_args(annotation)
-
-    # For Python 3.10+ union syntax at runtime (types.UnionType)
-    try:
-        import types
-
-        if isinstance(annotation, types.UnionType):
-            return type(None) in get_args(annotation)
-    except (ImportError, AttributeError):
-        pass
-
-    return False
+    return _annotation_includes_none(param.annotation)
 
 
 def _extract_result_content(result: Any, answer: Any) -> str:
     """Best-effort text extraction from agent result or context answer."""
-    content = getattr(result, "content", "") or ""
-    if content:
+    if content := (getattr(result, "content", None) or ""):
         return content
 
     if isinstance(answer, str) and answer.strip():
         return answer
-
     if isinstance(answer, dict) and answer:
-        answer_content = answer.get("content")
-        if isinstance(answer_content, str) and answer_content.strip():
-            return answer_content
         return json.dumps(answer, ensure_ascii=False)
 
     if getattr(result, "isError", False):
-        info = getattr(result, "info", None)
-        if isinstance(info, dict):
-            error_text = str(info.get("error") or "")
-            if error_text:
-                return error_text
+        error = (getattr(result, "info", None) or {}).get("error")
+        if error:
+            return str(error)
 
     return ""
 
@@ -141,13 +127,11 @@ class AgentTool(BaseTool):
 
         if parameters is not None:
             self._param_schema = parameters
-            self._visible_params = set(parameters.get("properties", {}).keys())
         elif task.env and task.scenario:
             scenario_fn = task.env._scenarios.get(task.scenario)
             if scenario_fn:
                 sig = inspect.signature(scenario_fn)
                 visible = {name: p for name, p in sig.parameters.items() if not _is_eval_only(p)}
-                self._visible_params = set(visible.keys())
                 self._param_schema = self._build_schema(visible)
 
         tool_name = name or task.scenario or "agent_tool"
@@ -163,27 +147,21 @@ class AgentTool(BaseTool):
         required: list[str] = []
 
         for name, param in params.items():
+            schema: dict[str, Any] = {"type": "string"}
             if param.annotation is not inspect.Parameter.empty:
-                try:
-                    # Handle string annotations
-                    annotation = param.annotation
-                    if isinstance(annotation, str):
-                        # Try to evaluate the annotation
-                        try:
-                            annotation = eval(annotation)  # noqa: S307
-                        except Exception:
-                            # Fall back to string type but don't skip required handling
-                            annotation = None
+                annotation = param.annotation
+                if isinstance(annotation, str):
+                    try:
+                        annotation = eval(annotation)  # noqa: S307
+                    except Exception:
+                        annotation = None
 
-                    if annotation is not None:
-                        adapter = TypeAdapter(annotation)
-                        properties[name] = adapter.json_schema()
-                    else:
-                        properties[name] = {"type": "string"}
-                except Exception:
-                    properties[name] = {"type": "string"}
-            else:
-                properties[name] = {"type": "string"}
+                if annotation is not None:
+                    try:
+                        schema = TypeAdapter(annotation).json_schema()
+                    except Exception:
+                        schema = {"type": "string"}
+            properties[name] = schema
 
             if param.default is inspect.Parameter.empty:
                 required.append(name)
@@ -216,8 +194,8 @@ class AgentTool(BaseTool):
         from hud.eval.manager import run_eval
         from hud.telemetry.instrument import instrument
 
-        # Filter to visible params only
-        filtered = {k: v for k, v in kwargs.items() if k in self._visible_params}
+        visible = self._param_schema.get("properties", {})
+        filtered = {k: v for k, v in kwargs.items() if k in visible}
 
         # Merge with template args
         base_args = self._task.args or {}

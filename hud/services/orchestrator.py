@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from a2a.server.agent_execution import AgentExecutor
@@ -66,7 +65,6 @@ def _status_event(
         status=TaskStatus(
             state=state,
             message=message,
-            timestamp=datetime.now(timezone.utc).isoformat(),
         ),
     )
 
@@ -82,14 +80,15 @@ def _build_orchestrator_env(
     tool_descriptions: list[str] = []
 
     for defn in definitions:
-        params_override: dict[str, Any] | None = None
-        if defn.tool_properties is not None:
-            params_override = {
+        params_override: dict[str, Any] | None = (
+            {
                 "type": "object",
                 "properties": defn.tool_properties,
                 "required": defn.tool_required or [],
             }
-
+            if defn.tool_properties is not None
+            else None
+        )
         tool = AgentTool(
             defn.task,
             model=defn.model,
@@ -129,12 +128,7 @@ def _build_orchestrator_env(
         )
         answer = yield [system, *messages]
 
-        answer_str = answer if isinstance(answer, str) else str(answer)
-        yield ScenarioResult(
-            reward=1.0,
-            content=answer_str,
-            info={"num_messages": len(messages)},
-        )
+        yield ScenarioResult(content=answer if isinstance(answer, str) else str(answer))
 
     return env
 
@@ -250,17 +244,12 @@ def _scenarios_to_definitions(
     for s in scenarios:
         # Platform API: "name" is "env:scenario", e.g. "my-env:my_scenario"
         # Analyze format: "id" is the full key, "name" is the short scenario name
-        full_name = s.get("name", "") or s.get("id", "")
+        full_name = str(s.get("name") or s.get("id") or "")
         if not full_name:
             continue
 
-        # Derive short name and scenario id
-        if ":" in full_name:
-            _, short_name = full_name.split(":", 1)
-            scenario_id = full_name
-        else:
-            short_name = full_name
-            scenario_id = full_name
+        short_name = full_name.split(":", 1)[1] if ":" in full_name else full_name
+        scenario_id = full_name
 
         # Extract description from metadata or top-level fields
         meta = s.get("metadata", {}) or {}
@@ -385,9 +374,7 @@ class OrchestratorExecutor(AgentExecutor):
                 + (f" matching {scenarios}" if scenarios else "")
             )
 
-        definitions = _scenarios_to_definitions(
-            discovered, env_name=env_name, model=model,
-        )
+        definitions = _scenarios_to_definitions(discovered, env_name=env_name, model=model)
 
         LOGGER.info(
             "Discovered %d scenario(s) for %s: %s",
@@ -529,7 +516,7 @@ class OrchestratorExecutor(AgentExecutor):
                     text=content,
                 )
             )
-        except Exception as e:
+        except Exception as exc:
             LOGGER.exception("orchestrator execute failed")
             await event_queue.enqueue_event(
                 _status_event(
@@ -537,7 +524,7 @@ class OrchestratorExecutor(AgentExecutor):
                     task_id=task_id,
                     final=True,
                     state=TaskState.failed,
-                    text=str(e),
+                    text=str(exc),
                 )
             )
 
