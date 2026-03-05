@@ -51,7 +51,8 @@ def _patch_stdio(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("FASTMCP_DISABLE_BANNER", "1")
     # Patch both the source and the bound symbol FastMCP uses
     monkeypatch.setattr("mcp.server.stdio.stdio_server", _fake_stdio_server)
-    monkeypatch.setattr("fastmcp.server.server.stdio_server", _fake_stdio_server)
+    monkeypatch.setattr("fastmcp.server.low_level.stdio_server", _fake_stdio_server)
+    monkeypatch.setattr("fastmcp.server.mixins.transport.stdio_server", _fake_stdio_server)
 
 
 @pytest.mark.asyncio
@@ -203,7 +204,8 @@ async def test_run_async_defaults_to_stdio_and_uses_patched_stdio(monkeypatch: p
             yield streams
 
     # Override the autouse fixture for this test to track entry
-    monkeypatch.setattr("fastmcp.server.server.stdio_server", tracking_stdio)
+    monkeypatch.setattr("fastmcp.server.low_level.stdio_server", tracking_stdio)
+    monkeypatch.setattr("fastmcp.server.mixins.transport.stdio_server", tracking_stdio)
 
     mcp = MCPServer(name="DefaultStdio")
     task = asyncio.create_task(mcp.run_async(transport=None, show_banner=False))

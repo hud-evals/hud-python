@@ -510,11 +510,6 @@ class ScenarioMixin:
             session_id = _safe_session_id(ctx)
             session = scenario_self._get_session(session_id)
 
-            # Fallback to __client__ key when _env_get_prompt stored
-            # the session without a session_id
-            if not session and session_id is not None:
-                session = scenario_self._get_session(None)
-
             if not session:
                 raise ValueError(f"No active scenario session for '{local_name}'")
 
@@ -760,11 +755,6 @@ class ScenarioMixin:
             ValueError: If no active session or evaluation fails.
         """
         session = self._pop_session(session_id)
-
-        # Fallback to __client__ key when _env_get_prompt stored without session_id
-        if not session and session_id is not None:
-            session = self._pop_session(None)
-
         if not session:
             raise ValueError(f"No active session for scenario '{scenario_name}'. ")
 

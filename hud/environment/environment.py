@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 import mcp.types as mcp_types
+from pydantic import AnyUrl  # noqa: TC002 - used at runtime in handler
 
 from hud.environment.connectors import ConnectorsMixin
 from hud.environment.integrations import IntegrationsMixin
@@ -539,19 +540,55 @@ class Environment(
     # =========================================================================
 
     def _setup_handlers(self) -> None:
-        """Override FastMCP to register our custom handlers for tools and prompts."""
-        # Call parent to set up all standard handlers
+        """Override FastMCP to register our custom handlers for tools and prompts.
+
+        FastMCP 3.x handlers expect (self, request) -> Result signatures.
+        We wrap our handlers to match.
+        """
         super()._setup_handlers()
-        # Re-register our custom handlers (overwrites parent's registrations)
-        self._mcp_server.list_tools()(self._env_list_tools)
-        self._mcp_server.call_tool()(self._env_call_tool)
-        self._mcp_server.get_prompt()(self._env_get_prompt)
+
+        # Re-register with correct FastMCP 3.x signatures
+        @self._mcp_server.list_tools()
+        async def _list_tools_handler(
+            request: Any = None,
+        ) -> mcp_types.ListToolsResult:
+            tools = await self._env_list_tools()
+            return mcp_types.ListToolsResult(tools=tools)
+
+        @self._mcp_server.call_tool()
+        async def _call_tool_handler(
+            name: str, arguments: dict[str, Any] | None = None
+        ) -> list[Any]:
+            return await self._env_call_tool(name, arguments)
+
+        @self._mcp_server.get_prompt()
+        async def _get_prompt_handler(
+            name: str, arguments: dict[str, str] | None = None
+        ) -> mcp_types.GetPromptResult:
+            return await self._env_get_prompt(name, arguments)
+
+        @self._mcp_server.list_resources()
+        async def _list_resources_handler(
+            request: Any = None,
+        ) -> mcp_types.ListResourcesResult:
+            resources = await self._env_list_resources()
+            return mcp_types.ListResourcesResult(resources=resources)
+
+        @self._mcp_server.read_resource()
+        async def _read_resource_handler(uri: AnyUrl, **kwargs: Any) -> Any:
+            return await self.read_resource(str(uri), **kwargs)
 
     async def _env_list_tools(self) -> list[mcp_types.Tool]:
         """Return all tools including those from connectors."""
         if not self._tool_routing_built:
             await self._build_tool_routing()
         return self._router.tools
+
+    async def _env_list_resources(self) -> list[mcp_types.Resource]:
+        """Return all resources including those from connectors."""
+        if not self._resource_routing_built:
+            await self._build_resource_routing()
+        return self._router.resources
 
     async def _env_call_tool(
         self, name: str, arguments: dict[str, Any] | None = None, **kwargs: Any
@@ -604,8 +641,26 @@ class Environment(
             scenario_name = name.split(":", 1)[1]
             str_args = {k: v for k, v in (arguments or {}).items()}
 
+            # Extract MCP session ID for multi-client isolation.
+            # Replicates Context.session_id logic since we're outside FastMCP DI.
+            session_id: str | None = None
+            try:
+                import uuid as _uuid
+
+                from mcp.server.lowlevel.server import request_ctx as _req_ctx
+
+                req = _req_ctx.get()
+                if req and req.session:
+                    sid = getattr(req.session, "_fastmcp_state_prefix", None)
+                    if sid is None:
+                        sid = str(_uuid.uuid4())
+                        req.session._fastmcp_state_prefix = sid  # type: ignore[attr-defined]
+                    session_id = sid
+            except (LookupError, Exception):  # noqa: S110
+                pass
+
             prompt_text = await self.run_scenario_setup(
-                scenario_name, str_args
+                scenario_name, str_args, session_id=session_id
             )
             if not prompt_text:
                 raise ValueError(f"Scenario '{name}' returned empty prompt")
@@ -625,7 +680,7 @@ class Environment(
     # Tool Operations
     # =========================================================================
 
-    async def list_tools(self) -> list[mcp_types.Tool]:
+    async def list_tools(self, **kwargs: Any) -> list[mcp_types.Tool]:
         """Refresh tools from all connections and rebuild tool routing."""
         if self._connections:
             await asyncio.gather(*[c.list_tools() for c in self._connections.values()])
@@ -710,13 +765,14 @@ class Environment(
         conn_name = self._router.get_resource_connection(uri)
 
         if conn_name is None:
-            # Local resource -- read via FastMCP's read_resource (parent class)
+            # Local resource -- read via local provider
             try:
-                from fastmcp import FastMCP
-
-                result = await FastMCP.read_resource(self, uri)  # type: ignore[arg-type]
+                resource = await self._local_provider.get_resource(uri)
+                if resource is None:
+                    raise ValueError(f"Resource not found: {uri}")
+                result = await resource.read()
                 resource_uri = AnyUrl(uri)
-                # FastMCP 3.x returns ResourceResult; extract content
+
                 content = getattr(result, "content", result)
                 if isinstance(content, str):
                     return [mcp_types.TextResourceContents(uri=resource_uri, text=content)]

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from hud.eval.task import Task
 from hud.services.chat import Chat
 from hud.types import Trace
@@ -24,12 +26,13 @@ class _FakeAgent:
         return Trace(content=f"reply-{max_steps}")
 
 
-def _fake_eval(*_args: Any, **_kwargs: Any) -> _DummyEval:
-    return _DummyEval()
-
-
+@pytest.mark.asyncio()
 async def test_send_surfaces_followup_user_messages(monkeypatch: Any) -> None:
-    chat = Chat(Task(env={"name": "browser"}, scenario="assist"), model="gpt-4o", max_steps=3)
+    chat = Chat(
+        Task(env={"name": "browser"}, scenario="assist"),
+        model="gpt-4o",
+        max_steps=3,
+    )
     captured_task_args: list[dict[str, Any]] = []
 
     def _capturing_fake_eval(*args: Any, **_kwargs: Any) -> _DummyEval:
@@ -43,6 +46,12 @@ async def test_send_surfaces_followup_user_messages(monkeypatch: Any) -> None:
     first = await chat.send("hello")
     second = await chat.send("follow-up")
 
+    assert first.content == "reply-3"
+    assert second.content == "reply-3"
     assert [m["role"] for m in chat.messages] == ["user", "assistant", "user", "assistant"]
     assert chat.messages[0]["content"]["text"] == "hello"
     assert chat.messages[2]["content"]["text"] == "follow-up"
+
+    assert len(captured_task_args) == 2
+    assert captured_task_args[0]["messages"][0]["content"]["text"] == "hello"
+    assert captured_task_args[1]["messages"][2]["content"]["text"] == "follow-up"

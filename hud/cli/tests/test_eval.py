@@ -24,7 +24,7 @@ class MockEvalContext(EvalContext):
         # Core attributes
         self.prompt = prompt
         self._tools = tools or []
-        self._submitted: str | None = None
+        self._submitted: str | dict[str, Any] | None = None
         self.reward: float | None = None
         self.results: list[EvalContext] = []
 

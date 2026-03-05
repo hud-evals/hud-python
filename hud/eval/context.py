@@ -272,8 +272,12 @@ class EvalContext(Environment):
 
         # Copy local provider by reference (holds local tools, prompts, resources)
         # This allows ctx.call_tool(), ctx.get_prompt(), ctx.read_resource() to work
-        # for locally defined tools/scenarios
+        # for locally defined tools/scenarios.
+        # FastMCP 3.x stores _local_provider as providers[0] in the AggregateProvider;
+        # we must update both so get_tool/call_tool resolve through the provider chain.
         ctx._local_provider = env._local_provider
+        if ctx.providers and ctx.providers[0] is not env._local_provider:
+            ctx.providers[0] = env._local_provider
 
         # Copy prompt
         if env.prompt:

@@ -201,21 +201,21 @@ def patch_streamable_http_error_handling() -> None:
                         if self._is_initialized_notification(message):
                             start_get_stream()
 
-                        request_headers = getattr(self, "request_headers", None)
-                        if request_headers is None and hasattr(self, "_prepare_headers"):
-                            request_headers = self._prepare_headers()
-                        if request_headers is None:
-                            request_headers = {}
-
-                        ctx = RequestContext(
-                            client=client,
-                            headers=request_headers,
-                            session_id=self.session_id,
-                            session_message=session_message,
-                            metadata=metadata,
-                            read_stream_writer=read_stream_writer,
-                            sse_read_timeout=getattr(self, "sse_read_timeout", None),
-                        )
+                        # Build RequestContext with compatibility for MCP SDK changes
+                        request_headers = getattr(self, "request_headers", {}) or {}
+                        if hasattr(self, "_prepare_headers"):
+                            request_headers = self._prepare_headers() or request_headers
+                        ctx_kwargs: dict[str, Any] = {
+                            "client": client,
+                            "headers": request_headers,
+                            "session_id": getattr(self, "session_id", None),
+                            "session_message": session_message,
+                            "metadata": metadata,
+                            "read_stream_writer": read_stream_writer,
+                        }
+                        if hasattr(self, "sse_read_timeout"):
+                            ctx_kwargs["sse_read_timeout"] = self.sse_read_timeout
+                        ctx = RequestContext(**ctx_kwargs)
 
                         if isinstance(message.root, JSONRPCRequest):
                             tg.start_soon(handle_request_async, ctx, is_resumption)
