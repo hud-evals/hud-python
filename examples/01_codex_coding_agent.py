@@ -60,6 +60,8 @@ DEFAULT_HUB = "codex_environment_sandbox"
 CODEX_MODELS = {
     "gpt-5.1-codex",
     "gpt-5.1",
+    "gpt-5.3-codex",
+    "gpt-5.4",
 }
 
 
@@ -70,7 +72,7 @@ CODEX_MODELS = {
 
 async def run_coding_task_local(
     task: str,
-    model: str = "gpt-5.1",
+    model: str = "gpt-5.3-codex",
     max_steps: int = 20,
     verbose: bool = False,
     work_dir: str | None = None,
@@ -171,7 +173,7 @@ Work in the current directory. When done, verify your work runs correctly."""
 
 async def run_coding_task_hub(
     task: str,
-    model: str = "gpt-5.1",
+    model: str = "gpt-5.3-codex",
     max_steps: int = 20,
     hub_name: str = DEFAULT_HUB,
     verbose: bool = False,
@@ -302,8 +304,8 @@ Examples:
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-5.1",
-        help="Codex-capable OpenAI model (default: gpt-5.1)",
+        default="gpt-5.3-codex",
+        help="Codex-capable OpenAI model (default: gpt-5.3-codex)",
     )
     parser.add_argument(
         "--max-steps",

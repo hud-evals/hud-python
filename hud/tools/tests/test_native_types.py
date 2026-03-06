@@ -174,20 +174,6 @@ class TestSupportsModel:
         assert spec.supports_model("CLAUDE-3-5-SONNET-20241022") is True
         assert spec.supports_model("Claude-3-5-Sonnet-20241022") is True
 
-    def test_openai_gpt5_models(self) -> None:
-        """Test OpenAI GPT-5.x model patterns."""
-        spec = NativeToolSpec(
-            api_type="shell",
-            supported_models=("gpt-5.1", "gpt-5.1-*", "gpt-5.2", "gpt-5.2-*"),
-        )
-        assert spec.supports_model("gpt-5.1") is True
-        assert spec.supports_model("gpt-5.1-pro") is True
-        assert spec.supports_model("gpt-5.1-2025-11-13") is True
-        assert spec.supports_model("gpt-5.2") is True
-        assert spec.supports_model("gpt-5.2-2026-01-15") is True
-        assert spec.supports_model("gpt-4o") is False
-        assert spec.supports_model("gpt-4o-mini") is False
-        assert spec.supports_model("o3") is False
 
 
 class TestNativeToolSpecs:

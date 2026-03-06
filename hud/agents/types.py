@@ -97,7 +97,7 @@ class OpenAIConfig(BaseAgentConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str = "OpenAI"
-    model: str = Field(default="gpt-5.1", validation_alias=_model_alias)
+    model: str = Field(default="gpt-5.4", validation_alias=_model_alias)
     model_client: Any = None  # AsyncOpenAI
     max_output_tokens: int | None = None
     temperature: float | None = None
