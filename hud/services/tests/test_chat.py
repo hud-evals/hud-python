@@ -11,6 +11,14 @@ from hud.services.chat import Chat
 from hud.types import Trace
 
 
+class _FakeQueue:
+    def __init__(self) -> None:
+        self.events: list[Any] = []
+
+    async def enqueue_event(self, event: Any) -> None:
+        self.events.append(event)
+
+
 class _DummyEvalContext:
     pass
 
@@ -117,14 +125,7 @@ async def test_execute_resolves_pending_elicitation_without_send(monkeypatch: An
         def get_user_input() -> str:
             return "follow-up answer"
 
-    class _Queue:
-        def __init__(self) -> None:
-            self.events: list[Any] = []
-
-        async def enqueue_event(self, event: Any) -> None:
-            self.events.append(event)
-
-    queue = _Queue()
+    queue = _FakeQueue()
     await chat.execute(_Ctx(), queue)  # type: ignore[arg-type]
 
     assert future.done()
@@ -143,14 +144,7 @@ async def test_cancel_clears_pending_elicitation_and_history() -> None:
         context_id = "ctx-1"
         task_id = "task-1"
 
-    class _Queue:
-        def __init__(self) -> None:
-            self.events: list[Any] = []
-
-        async def enqueue_event(self, event: Any) -> None:
-            self.events.append(event)
-
-    queue = _Queue()
+    queue = _FakeQueue()
     await chat.cancel(_Ctx(), queue)  # type: ignore[arg-type]
 
     assert chat.messages == []

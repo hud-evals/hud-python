@@ -392,6 +392,9 @@ class ScenarioMixin:
     # Per-scenario output config: scenario_name -> (returns_type, enable_citations)
     _scenario_output_config: dict[str, tuple[type | None, bool]]
 
+    # Scenarios marked as chat-compatible (accept a ``messages`` parameter)
+    _scenario_chat_flags: dict[str, bool]
+
     # Scenario sessions keyed by session ID for multi-client support.
     # Server-side: each MCP client gets its own session via ctx session ID.
     # Client-side: uses _CLIENT_SESSION_KEY as fallback when no MCP context.
@@ -428,6 +431,7 @@ class ScenarioMixin:
         self._scenarios = {}
         self._scenario_exclusions = {}
         self._scenario_output_config = {}
+        self._scenario_chat_flags = {}
         self._scenario_sessions = {}
 
         # Register _hud_submit tool (underscore = hidden from agent)
@@ -809,6 +813,7 @@ class ScenarioMixin:
         self,
         name: str | None = None,
         description: str | None = None,
+        chat: bool = False,
         required_env_vars: list[str] | None = None,
         exclude_tools: list[str] | None = None,
         exclude_sources: list[str] | None = None,
@@ -829,6 +834,10 @@ class ScenarioMixin:
         Args:
             name: Optional name for the scenario (defaults to function name)
             description: Optional description of what the scenario does
+            chat: Mark this scenario as chat-compatible.  Chat scenarios
+                must accept a ``messages`` parameter (the conversation
+                history) and are used by ``Chat`` / ``OrchestratorExecutor``
+                for multi-turn A2A interactions.
             required_env_vars: Optional list of environment variable names this scenario requires.
                 These are used by the HUD platform to check if users have configured the
                 necessary API keys/credentials before running this specific scenario.
@@ -851,16 +860,15 @@ class ScenarioMixin:
                 delivered to the evaluate phase on ``AgentAnswer.citations``.
 
         Example:
-            @env.scenario(required_env_vars=["OPENAI_API_KEY"])
-            async def chat(query: str):
-                yield f"Answer this question: {query}"
-                # ... evaluate
+            @env.scenario(chat=True)
+            async def assist(messages: list | None = None):
+                yield ["You are a helpful assistant.", *(messages or [])]
                 yield 1.0
 
             # MCP client usage:
-            # 1. get_prompt("{env_name}:chat", {query: "..."}) -> prompt messages
+            # 1. get_prompt("{env_name}:assist", {messages: [...]}) -> prompt messages
             # 2. agent runs...
-            # 3. read_resource("{env_name}:chat") -> {"reward": 0.95}
+            # 3. read_resource("{env_name}:assist") -> {"reward": 1.0}
         """
 
         def decorator(
@@ -874,6 +882,15 @@ class ScenarioMixin:
                     f"Scenario name '{scenario_name}' cannot contain ':' "
                     "(reserved as separator between environment and scenario names)"
                 )
+
+            # Validate chat-compatible scenarios have a ``messages`` parameter
+            if chat:
+                sig_check = inspect.signature(fn)
+                if "messages" not in sig_check.parameters:
+                    raise TypeError(
+                        f"Chat scenario '{scenario_name}' must accept a 'messages' parameter "
+                        "for multi-turn conversation history"
+                    )
 
             # self.name is already normalized (lowercase, hyphens) by Environment.__init__
             scenario_id = f"{self.name}:{scenario_name}"
@@ -892,6 +909,9 @@ class ScenarioMixin:
 
             # Store the generator function
             self._scenarios[scenario_name] = fn
+
+            if chat:
+                self._scenario_chat_flags[scenario_name] = True
 
             if returns is not None or enable_citations:
                 self._scenario_output_config[scenario_name] = (returns, enable_citations)

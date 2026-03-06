@@ -1,13 +1,21 @@
-"""Run an A2A orchestrator that auto-discovers environment scenarios.
+"""Run an A2A server that forwards messages to a HUD environment.
+
+The environment defines its own tools, system prompt, and routing via a
+``chat=True`` scenario.  This script just wraps it with A2A session
+management and serves it.
 
 Usage:
-    HUD_ENV=my-hud-environment HUD_MODEL=claude-haiku-4-5 \
-      uv run python examples/03_a2a_environment_orchestrator.py
+    # Multi-scenario router mode
+    HUD_ENV=my-hud-environment HUD_SCENARIO=assist \
+        uv run python examples/03_a2a_environment_orchestrator.py
+
+    # Single-scenario direct mode
+    HUD_ENV=my-hud-environment HUD_SCENARIO=analysis_chat \
+        uv run python examples/03_a2a_environment_orchestrator.py
 """
 
 from __future__ import annotations
 
-import asyncio
 import os
 
 from hud.services import OrchestratorExecutor
@@ -19,17 +27,11 @@ def main() -> None:
         raise ValueError("Set HUD_ENV to the target environment name.")
 
     model = os.getenv("HUD_MODEL", "claude-haiku-4-5")
-    main_model = os.getenv("HUD_MAIN_MODEL", "gpt-4o")
+    scenario = os.getenv("HUD_SCENARIO", "assist").strip() or "assist"
     host = os.getenv("HUD_A2A_HOST", "0.0.0.0")
     port = int(os.getenv("HUD_A2A_PORT", "9999"))
 
-    orchestrator = asyncio.run(
-        OrchestratorExecutor.from_environment(
-            env_name,
-            model=model,
-            main_model=main_model,
-        )
-    )
+    orchestrator = OrchestratorExecutor(env_name, model=model, scenario=scenario)
     orchestrator.serve(host=host, port=port)
 
 
