@@ -40,7 +40,8 @@ class ToolSearchTool(HostedTool):
             ),
         ),
         AgentType.CLAUDE: NativeToolSpec(
-            api_type="tool_search_bm25",
+            api_type="tool_search_tool_bm25_20251119",
+            api_name="tool_search_tool_bm25",
             hosted=True,
             supported_models=(
                 "claude-sonnet-4-5*",
@@ -67,7 +68,8 @@ class ToolSearchTool(HostedTool):
                 supported_models=self._openai_models,
             ),
             AgentType.CLAUDE: NativeToolSpec(
-                api_type="tool_search_bm25",
+                api_type="tool_search_tool_bm25_20251119",
+                api_name="tool_search_tool_bm25",
                 hosted=True,
                 extra=extra,
                 supported_models=self._claude_models,

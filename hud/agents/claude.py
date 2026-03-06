@@ -442,12 +442,21 @@ class ClaudeAgent(MCPAgent):
 
         # Process hosted tools
         for tool, spec in categorized.hosted:
-            hosted_tool = self._build_hosted_tool(tool, spec)
-            if hosted_tool is not None:
-                self.claude_tools.append(hosted_tool)
-                logger.debug("Added hosted tool %s (%s) for Claude", tool.name, spec.api_type)
-            else:
-                logger.debug("Skipping hosted tool %s for Claude", tool.name)
+            if not spec.api_type:
+                logger.debug("Skipping hosted tool %s: no api_type", tool.name)
+                continue
+            tool_def: dict[str, Any] = {
+                "type": spec.api_type,
+                "name": spec.api_name or tool.name,
+            }
+            api_extra = {k: v for k, v in spec.extra.items() if k != "threshold"}
+            tool_def.update(api_extra)
+            if spec.beta:
+                self._required_betas.add(spec.beta)
+            if "threshold" in spec.extra:
+                self._tool_search_threshold = spec.extra["threshold"]
+            self.claude_tools.append(tool_def)  # type: ignore[arg-type]
+            logger.debug("Added hosted tool %s (%s) for Claude", tool.name, spec.api_type)
 
         # Process native tools
         for tool, spec in categorized.native:
@@ -487,24 +496,6 @@ class ClaudeAgent(MCPAgent):
         self.console.info(
             f"Agent initialized with {len(tool_names)} tools: {', '.join(tool_names)}"
         )
-
-    def _build_hosted_tool(
-        self, tool: types.Tool, spec: NativeToolSpec
-    ) -> BetaToolUnionParam | None:
-        """Build a Claude hosted tool from a NativeToolSpec.
-
-        Returns:
-            Claude-specific hosted tool parameter, or None if unsupported.
-        """
-        match spec.api_type:
-            case "tool_search_bm25":
-                self._tool_search_threshold = spec.extra.get("threshold", 10)
-                return {  # type: ignore[return-value]
-                    "type": "tool_search_tool_bm25_20251119",
-                    "name": "tool_search_tool_bm25",
-                }
-            case _:
-                return None
 
     def _get_native_api_name(self, spec: NativeToolSpec) -> str:
         """Get the literal API name for a native tool spec.

@@ -473,7 +473,8 @@ class TestHostedTools:
         assert "gpt-5.4" in openai_spec["supported_models"]
 
         claude_spec = tool.meta["native_tools"]["claude"]
-        assert claude_spec["api_type"] == "tool_search_bm25"
+        assert claude_spec["api_type"] == "tool_search_tool_bm25_20251119"
+        assert claude_spec["api_name"] == "tool_search_tool_bm25"
         assert claude_spec["hosted"] is True
         assert claude_spec["extra"]["threshold"] == 15
         assert "claude-opus-4-6*" in claude_spec["supported_models"]

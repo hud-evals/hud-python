@@ -170,37 +170,6 @@ class OpenAIAgent(MCPAgent):
                 )
                 return self._to_function_tool(tool)
 
-    def _build_hosted_tool(self, tool: types.Tool, spec: NativeToolSpec) -> ToolParam | None:
-        """Build an OpenAI hosted tool from a NativeToolSpec.
-
-        Args:
-            tool: The MCP tool
-            spec: The native spec with hosted=True
-
-        Returns:
-            OpenAI hosted tool parameter, or None if not supported
-        """
-        from openai.types.responses import WebSearchToolParam
-
-        match spec.api_type:
-            case "web_search":
-                # Web search is a simple hosted tool
-                return WebSearchToolParam(type="web_search")
-            case "tool_search":
-                self._tool_search_threshold = spec.extra.get("threshold", 10)
-                return {"type": "tool_search"}  # type: ignore[return-value]
-            case "code_interpreter":
-                # Code interpreter requires container config - skip for now
-                # as it requires additional setup
-                logger.debug(
-                    "Skipping code_interpreter tool %s - requires container configuration",
-                    tool.name,
-                )
-                return None
-            case _:
-                logger.warning("Unknown hosted tool type: %s", spec.api_type)
-                return None
-
     def _to_function_tool(self, tool: types.Tool) -> FunctionToolParam | None:
         """Convert an MCP tool to OpenAI function tool format.
 
@@ -245,10 +214,16 @@ class OpenAIAgent(MCPAgent):
 
         # Process hosted tools
         for tool, spec in categorized.hosted:
-            openai_tool = self._build_hosted_tool(tool, spec)
-            if openai_tool:
-                self._openai_tools.append(openai_tool)
-                logger.debug("Added hosted tool %s (%s) for OpenAI", tool.name, spec.api_type)
+            if not spec.api_type:
+                logger.debug("Skipping hosted tool %s: no api_type", tool.name)
+                continue
+            tool_def: dict[str, Any] = {"type": spec.api_type}
+            api_extra = {k: v for k, v in spec.extra.items() if k != "threshold"}
+            tool_def.update(api_extra)
+            if "threshold" in spec.extra:
+                self._tool_search_threshold = spec.extra["threshold"]
+            self._openai_tools.append(tool_def)  # type: ignore[arg-type]
+            logger.debug("Added hosted tool %s (%s) for OpenAI", tool.name, spec.api_type)
 
         # Process native tools
         for tool, spec in categorized.native:

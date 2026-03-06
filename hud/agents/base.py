@@ -756,8 +756,10 @@ def _parse_spec_dict(spec_dict: dict[str, Any]) -> NativeToolSpec | None:
     """Parse a dict (from MCP meta) into a NativeToolSpec."""
     if not spec_dict:
         return None
-    known_fields = {"api_type", "api_name", "beta", "hosted", "role", "supported_models"}
+    known_fields = {"api_type", "api_name", "beta", "hosted", "role", "supported_models", "extra"}
     extra = {k: v for k, v in spec_dict.items() if k not in known_fields}
+    if isinstance(spec_dict.get("extra"), dict):
+        extra.update(spec_dict["extra"])
     supported_models_raw = spec_dict.get("supported_models")
     supported_models: tuple[str, ...] | None = None
     if supported_models_raw:
