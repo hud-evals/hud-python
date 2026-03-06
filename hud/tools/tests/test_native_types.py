@@ -175,7 +175,6 @@ class TestSupportsModel:
         assert spec.supports_model("Claude-3-5-Sonnet-20241022") is True
 
 
-
 class TestNativeToolSpecs:
     """Tests for NativeToolSpecs type alias."""
 
