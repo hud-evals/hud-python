@@ -5,31 +5,25 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-import mcp.types as types
 from openai.types.responses import (
-    ComputerToolParam,
-    ResponseComputerToolCallOutputScreenshotParam,
+    ComputerUsePreviewToolParam,
     ToolParam,
-)
-from openai.types.responses.response_input_param import (
-    ComputerCallOutput,
-    FunctionCallOutput,
 )
 from openai.types.shared_params.reasoning import Reasoning
 
 from hud.tools.computer.settings import computer_settings
 from hud.tools.native_types import NativeToolSpec
-from hud.types import AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.types import AgentType, BaseAgentConfig, MCPToolCall
 from hud.utils.types import with_signature
 
 from .base import MCPAgent
 from .openai import OpenAIAgent
 from .types import OperatorConfig, OperatorCreateParams
 
-logger = logging.getLogger(__name__)
-
 if TYPE_CHECKING:
-    from openai.types.responses.response_computer_tool_call import PendingSafetyCheck
+    import mcp.types as types
+
+logger = logging.getLogger(__name__)
 
 OPERATOR_INSTRUCTIONS = """
 You are an autonomous computer-using agent. Follow these guidelines:
@@ -87,10 +81,6 @@ class OperatorAgent(OpenAIAgent):
         )
         self.environment = self.config.environment
 
-        # add pending call id and safety checks to the agent
-        self.pending_call_id: str | None = None
-        self.pending_safety_checks: list[PendingSafetyCheck] = []
-
         # override reasoning to "summary": "auto"
         if self.reasoning is None:
             self.reasoning = Reasoning(summary="auto")
@@ -105,16 +95,11 @@ class OperatorAgent(OpenAIAgent):
         else:
             self.system_prompt = OPERATOR_INSTRUCTIONS
 
-    def _reset_response_state(self) -> None:
-        super()._reset_response_state()
-        self.pending_call_id = None
-        self.pending_safety_checks = []
-
     def _build_native_tool(self, tool: types.Tool, spec: NativeToolSpec) -> ToolParam | None:
         """Override to handle computer tools specially for Operator API."""
         # Use Operator's computer_use_preview for the designated computer tool
         if tool.name == self._operator_computer_tool_name:
-            return ComputerToolParam(
+            return ComputerUsePreviewToolParam(
                 type="computer_use_preview",
                 display_width=self._operator_display_width,
                 display_height=self._operator_display_height,
@@ -136,74 +121,6 @@ class OperatorAgent(OpenAIAgent):
                 id=item.call_id,
             )
         return super()._extract_tool_call(item)
-
-    async def format_tool_results(
-        self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
-    ) -> list[ComputerCallOutput | FunctionCallOutput]:
-        remaining_calls: list[MCPToolCall] = []
-        remaining_results: list[MCPToolResult] = []
-        computer_outputs: list[ComputerCallOutput] = []
-        ordering: list[tuple[str, int]] = []
-
-        for call, result in zip(tool_calls, tool_results, strict=False):
-            if call.name == self._operator_computer_tool_name:
-                screenshot = self._extract_latest_screenshot(result)
-                if not screenshot:
-                    self.console.warning_log(
-                        "Computer tool result missing screenshot; skipping output."
-                    )
-                    continue
-                call_id = call.id or self.pending_call_id
-                if not call_id:
-                    self.console.warning_log("Computer tool call missing ID; skipping output.")
-                    continue
-                acknowledged_checks = []
-                for check in self.pending_safety_checks:
-                    if hasattr(check, "model_dump"):
-                        acknowledged_checks.append(check.model_dump())
-                    elif isinstance(check, dict):
-                        acknowledged_checks.append(check)
-                output_payload = ComputerCallOutput(
-                    type="computer_call_output",
-                    call_id=call_id,
-                    output=ResponseComputerToolCallOutputScreenshotParam(
-                        type="computer_screenshot",
-                        image_url=f"data:image/png;base64,{screenshot}",
-                    ),
-                    acknowledged_safety_checks=acknowledged_checks if acknowledged_checks else None,
-                )
-                computer_outputs.append(output_payload)
-                self.pending_call_id = None
-                self.pending_safety_checks = []
-                ordering.append(("computer", len(computer_outputs) - 1))
-            else:
-                remaining_calls.append(call)
-                remaining_results.append(result)
-                ordering.append(("function", len(remaining_calls) - 1))
-
-        formatted: list[ComputerCallOutput | FunctionCallOutput] = []
-        function_outputs: list[FunctionCallOutput] = []
-        if remaining_calls:
-            function_outputs = await super().format_tool_results(remaining_calls, remaining_results)
-
-        for kind, idx in ordering:
-            if kind == "computer":
-                if idx < len(computer_outputs):
-                    formatted.append(computer_outputs[idx])
-            else:
-                if idx < len(function_outputs):
-                    formatted.append(function_outputs[idx])
-        return formatted
-
-    def _extract_latest_screenshot(self, result: MCPToolResult) -> str | None:
-        if not result.content:
-            return None
-        for content in reversed(result.content):
-            if isinstance(content, types.ImageContent):
-                return content.data
-            if isinstance(content, types.TextContent) and result.isError:
-                self.console.error_log(f"Computer tool error: {content.text}")
-        return None
 
     _LEGACY_COMPUTER_NAMES = ("openai_computer",)
 
