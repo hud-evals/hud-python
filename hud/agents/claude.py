@@ -437,6 +437,7 @@ class ClaudeAgent(MCPAgent):
         self.tool_mapping: dict[str, str] = {}
         self.claude_tools: list[BetaToolUnionParam] = []
         self._required_betas: set[str] = set()
+        self._tool_search_threshold = None
 
         categorized = self._categorized_tools
 

@@ -216,6 +216,7 @@ class OpenAIAgent(MCPAgent):
         """
         self._openai_tools = []
         self._tool_name_map = {}
+        self._tool_search_threshold = None
 
         categorized = self._categorized_tools
 
