@@ -24,12 +24,31 @@ def _safe_session_id(ctx: Any) -> str | None:
     ``getattr(ctx, "session_id", None)`` only catches ``AttributeError``,
     so we need an explicit try/except.
     """
-    if ctx is None:
-        return None
+    if ctx is not None:
+        try:
+            sid = ctx.session_id  # type: ignore[union-attr]
+            if sid:
+                return sid
+        except (RuntimeError, AttributeError):
+            pass
+
+    # Fallback: read MCP request context directly. In some FastMCP call paths
+    # ctx.session_id may be unavailable even though request_ctx/session exists.
     try:
-        return ctx.session_id  # type: ignore[union-attr]
-    except (RuntimeError, AttributeError):
-        return None
+        import uuid as _uuid
+
+        from mcp.server.lowlevel.server import request_ctx as _req_ctx
+
+        req = _req_ctx.get()
+        if req and req.session:
+            sid = getattr(req.session, "_fastmcp_state_prefix", None)
+            if sid is None:
+                sid = str(_uuid.uuid4())
+                req.session._fastmcp_state_prefix = sid  # type: ignore[attr-defined]
+            return sid
+    except (ImportError, LookupError, Exception):  # noqa: S110
+        pass
+    return None
 
 
 if TYPE_CHECKING:
@@ -782,9 +801,31 @@ class ScenarioMixin:
                 # No second yield - default to success
                 return EvaluationResult(reward=1.0, done=True)
         else:
-            # Remote scenario - read resource via router
+            # Remote scenario - read resource via session's connection
+            # (resource routing may not include dynamic scenario resources,
+            #  so go directly to the connection that served setup)
             try:
-                contents = await self.read_resource(session.resource_uri)  # type: ignore[attr-defined]
+                conn_name = session.connection_name
+                logger.debug(
+                    "Evaluate remote scenario: resource_uri=%s, connection_name=%s",
+                    session.resource_uri,
+                    conn_name,
+                )
+                conn = self._connections.get(conn_name) if conn_name else None  # type: ignore[attr-defined]
+                if not conn and self._connections:  # type: ignore[attr-defined]
+                    # Fallback: try each connection directly (mirrors get_prompt fallback)
+                    for fallback_name, fallback_conn in self._connections.items():  # type: ignore[attr-defined]
+                        try:
+                            contents = await fallback_conn.read_resource(session.resource_uri)
+                            break
+                        except Exception:
+                            continue
+                    else:
+                        contents = await self.read_resource(session.resource_uri)  # type: ignore[attr-defined]
+                elif conn:
+                    contents = await conn.read_resource(session.resource_uri)
+                else:
+                    contents = await self.read_resource(session.resource_uri)  # type: ignore[attr-defined]
                 if contents:
                     first = contents[0]
                     if hasattr(first, "text") and isinstance(first.text, str):  # type: ignore[union-attr]

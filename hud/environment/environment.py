@@ -575,8 +575,11 @@ class Environment(
             return mcp_types.ListResourcesResult(resources=resources)
 
         @self._mcp_server.read_resource()
-        async def _read_resource_handler(uri: AnyUrl, **kwargs: Any) -> Any:
-            return await self.read_resource(str(uri), **kwargs)
+        async def _read_resource_handler(
+            uri: AnyUrl, **kwargs: Any
+        ) -> mcp_types.ReadResourceResult:
+            contents = await self.read_resource(str(uri), **kwargs)
+            return mcp_types.ReadResourceResult(contents=contents)
 
     async def _env_list_tools(self) -> list[mcp_types.Tool]:
         """Return all tools including those from connectors."""
@@ -819,6 +822,28 @@ class Environment(
         conn_name = self._router.get_prompt_connection(name)
 
         if conn_name is None:
+            # Prompt routing can be empty when a remote MCP server exposes
+            # prompts that fail list_prompts parsing (schema drift). In that
+            # case, try direct remote lookup before falling back to local.
+            if self._connections:
+                last_error: Exception | None = None
+                for fallback_conn_name, conn in self._connections.items():
+                    try:
+                        result = await conn.get_prompt(name, arguments)
+                        # Cache discovered routing so scenario sessions can
+                        # persist the owning remote connection for submit().
+                        self._router._prompt_routing[name] = fallback_conn_name
+                        return result
+                    except Exception as e:
+                        last_error = e
+
+                # If we only have remote connections and none resolved this
+                # prompt, surface a helpful not-found error with last context.
+                if ":" in name:
+                    if last_error is not None:
+                        raise ValueError(f"Prompt not found: {name}") from last_error
+                    raise ValueError(f"Prompt not found: {name}")
+
             # Local prompt -- render via FastMCP's render_prompt (parent class)
             try:
                 from fastmcp import FastMCP

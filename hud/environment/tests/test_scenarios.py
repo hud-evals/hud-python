@@ -1067,6 +1067,33 @@ class TestScenarioRemoteErrors:
         with pytest.raises(RuntimeError, match="Error rendering prompt coding:bug_fix"):
             await env.run_scenario_setup("coding:bug_fix", {})
 
+    @pytest.mark.asyncio
+    async def test_get_prompt_fallback_caches_remote_connection(self) -> None:
+        """Fallback remote get_prompt stores routing for downstream submit()."""
+        import mcp.types as mcp_types
+
+        env = Environment("test-env")
+        env._prompt_routing_built = True
+
+        class _RemoteConnector:
+            async def get_prompt(
+                self, _name: str, _arguments: dict[str, Any] | None = None
+            ) -> mcp_types.GetPromptResult:
+                return mcp_types.GetPromptResult(
+                    messages=[
+                        mcp_types.PromptMessage(
+                            role="user",
+                            content=mcp_types.TextContent(type="text", text="Remote prompt"),
+                        )
+                    ]
+                )
+
+        env._connections["hud"] = _RemoteConnector()  # type: ignore[assignment]
+
+        result = await env.get_prompt("remote-env:solve-task", {})
+        assert result.messages
+        assert env._router.get_prompt_connection("remote-env:solve-task") == "hud"
+
 
 class TestScenarioMalformedNames:
     """Test handling of malformed scenario names."""

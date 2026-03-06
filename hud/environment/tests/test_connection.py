@@ -302,6 +302,46 @@ class TestConnector:
         with pytest.raises(RuntimeError, match="Not connected"):
             await connector.call_tool("tool1", {})
 
+    @pytest.mark.asyncio
+    async def test_list_prompts_returns_empty_when_method_not_found(self) -> None:
+        """list_prompts() gracefully handles optional prompts/list."""
+        connector = Connector(
+            transport={},
+            config=ConnectionConfig(),
+            name="test",
+            connection_type=ConnectionType.REMOTE,
+        )
+        mock_client = MagicMock()
+        mock_client.list_prompts = AsyncMock(
+            side_effect=RuntimeError("Method not found: prompts/list")
+        )
+        connector.client = mock_client
+
+        prompts = await connector.list_prompts()
+
+        assert prompts == []
+        assert connector._prompts_cache == []
+
+    @pytest.mark.asyncio
+    async def test_list_prompts_returns_empty_when_prompt_version_incompatible(self) -> None:
+        """list_prompts() ignores older prompt schema incompatibility."""
+        connector = Connector(
+            transport={},
+            config=ConnectionConfig(),
+            name="test",
+            connection_type=ConnectionType.REMOTE,
+        )
+        mock_client = MagicMock()
+        mock_client.list_prompts = AsyncMock(
+            side_effect=RuntimeError("'Prompt' object has no attribute 'version'")
+        )
+        connector.client = mock_client
+
+        prompts = await connector.list_prompts()
+
+        assert prompts == []
+        assert connector._prompts_cache == []
+
     def test_copy_clones_transport_and_config(self) -> None:
         """copy() returns isolated transport/config objects."""
         transport = {
