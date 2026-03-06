@@ -103,6 +103,7 @@ class OpenAIConfig(BaseAgentConfig):
     temperature: float | None = None
     reasoning: Any = None  # openai Reasoning
     tool_choice: Any = None  # openai ToolChoice
+    text: Any = None  # {"verbosity": "low"|"medium"|"high"}
     truncation: Literal["auto", "disabled"] | None = None
     parallel_tool_calls: bool | None = None
     validate_api_key: bool = True

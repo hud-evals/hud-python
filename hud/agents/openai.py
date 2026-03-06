@@ -122,10 +122,12 @@ class OpenAIAgent(MCPAgent):
         self.reasoning: Reasoning | None = self.config.reasoning
         self.tool_choice: ToolChoice | None = self.config.tool_choice
         self.parallel_tool_calls = self.config.parallel_tool_calls
+        self.text = self.config.text
         self.truncation: Literal["auto", "disabled"] | None = self.config.truncation
 
         self._openai_tools: list[ToolParam] = []
         self._tool_name_map: dict[str, str] = {}
+        self._tool_search_threshold: int | None = None
 
         self.last_response_id: str | None = None
         self._message_cursor = 0
@@ -184,6 +186,9 @@ class OpenAIAgent(MCPAgent):
             case "web_search":
                 # Web search is a simple hosted tool
                 return WebSearchToolParam(type="web_search")
+            case "tool_search":
+                self._tool_search_threshold = spec.extra.get("threshold", 10)
+                return {"type": "tool_search"}  # type: ignore[return-value]
             case "code_interpreter":
                 # Code interpreter requires container config - skip for now
                 # as it requires additional setup
@@ -338,16 +343,35 @@ class OpenAIAgent(MCPAgent):
                 self.console.debug("No new messages to send to OpenAI.")
                 return AgentResponse(content="", tool_calls=[], done=True)
 
+        effective_tools: list[ToolParam] = list(self._openai_tools)
+        if self._tool_search_threshold is not None:
+            fn_count = sum(
+                1 for t in effective_tools if isinstance(t, dict) and t.get("type") == "function"
+            )
+            if fn_count > self._tool_search_threshold:
+                logger.debug(
+                    "tool_search: %d function tools > threshold %d, applying defer_loading",
+                    fn_count,
+                    self._tool_search_threshold,
+                )
+                effective_tools = [  # type: ignore[assignment]
+                    {**t, "defer_loading": True}
+                    if isinstance(t, dict) and t.get("type") == "function"
+                    else t
+                    for t in effective_tools
+                ]
+
         response = await self.openai_client.responses.create(
             model=self._model,
             input=new_items,
             instructions=self.system_prompt,
             max_output_tokens=self.max_output_tokens,
             temperature=self.temperature,
+            text=self.text if self.text is not None else Omit(),
             tool_choice=self.tool_choice if self.tool_choice is not None else Omit(),
             parallel_tool_calls=self.parallel_tool_calls,
             reasoning=self.reasoning if self.reasoning is not None else Omit(),
-            tools=self._openai_tools if self._openai_tools else Omit(),
+            tools=effective_tools if effective_tools else Omit(),
             previous_response_id=(
                 self.last_response_id if self.last_response_id is not None else Omit()
             ),

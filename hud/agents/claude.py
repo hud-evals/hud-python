@@ -155,9 +155,10 @@ class ClaudeAgent(MCPAgent):
 
         # these will be initialized in _convert_tools_for_claude
         self.has_computer_tool = False
-        self.tool_mapping = {}
-        self.claude_tools = []
-        self._required_betas = set()
+        self.tool_mapping: dict[str, str] = {}
+        self.claude_tools: list[BetaToolUnionParam] = []
+        self._required_betas: set[str] = set()
+        self._tool_search_threshold: int | None = None
 
     def _on_tools_ready(self) -> None:
         """Build Claude-specific tool mappings after tools are discovered."""
@@ -242,6 +243,24 @@ class ClaudeAgent(MCPAgent):
         # anthropic-beta header which the API rejects.
         betas: list[str] | Omit = list(self._required_betas) if self._required_betas else Omit()
 
+        effective_tools: list[BetaToolUnionParam] = list(self.claude_tools)
+        if self._tool_search_threshold is not None:
+            generic_count = sum(
+                1 for t in effective_tools if isinstance(t, dict) and "input_schema" in t
+            )
+            if generic_count > self._tool_search_threshold:
+                logger.debug(
+                    "tool_search: %d generic tools > threshold %d, applying defer_loading",
+                    generic_count,
+                    self._tool_search_threshold,
+                )
+                effective_tools = [
+                    {**t, "defer_loading": True}
+                    if isinstance(t, dict) and "input_schema" in t
+                    else t
+                    for t in effective_tools
+                ]
+
         # Bedrock doesn't support .stream() - use create(stream=True) instead
         if isinstance(self.anthropic_client, AsyncAnthropicBedrock):
             try:
@@ -250,7 +269,7 @@ class ClaudeAgent(MCPAgent):
                     system=self.system_prompt if self.system_prompt is not None else Omit(),
                     max_tokens=self.max_tokens,
                     messages=messages_cached,
-                    tools=self.claude_tools,
+                    tools=effective_tools,
                     tool_choice={"type": "auto", "disable_parallel_tool_use": True},
                     betas=betas,
                 )
@@ -271,7 +290,7 @@ class ClaudeAgent(MCPAgent):
                         system=self.system_prompt if self.system_prompt is not None else Omit(),
                         max_tokens=self.max_tokens,
                         messages=messages_cached,
-                        tools=self.claude_tools,
+                        tools=effective_tools,
                         tool_choice={"type": "auto", "disable_parallel_tool_use": True},
                         betas=betas,
                     ) as stream:
@@ -421,9 +440,14 @@ class ClaudeAgent(MCPAgent):
 
         categorized = self._categorized_tools
 
-        # Log skipped hosted tools (Claude doesn't support hosted tools currently)
-        for tool, _spec in categorized.hosted:
-            logger.debug("Skipping hosted tool %s for Claude", tool.name)
+        # Process hosted tools
+        for tool, spec in categorized.hosted:
+            hosted_tool = self._build_hosted_tool(tool, spec)
+            if hosted_tool is not None:
+                self.claude_tools.append(hosted_tool)
+                logger.debug("Added hosted tool %s (%s) for Claude", tool.name, spec.api_type)
+            else:
+                logger.debug("Skipping hosted tool %s for Claude", tool.name)
 
         # Process native tools
         for tool, spec in categorized.native:
@@ -463,6 +487,24 @@ class ClaudeAgent(MCPAgent):
         self.console.info(
             f"Agent initialized with {len(tool_names)} tools: {', '.join(tool_names)}"
         )
+
+    def _build_hosted_tool(
+        self, tool: types.Tool, spec: NativeToolSpec
+    ) -> BetaToolUnionParam | None:
+        """Build a Claude hosted tool from a NativeToolSpec.
+
+        Returns:
+            Claude-specific hosted tool parameter, or None if unsupported.
+        """
+        match spec.api_type:
+            case "tool_search_bm25":
+                self._tool_search_threshold = spec.extra.get("threshold", 10)
+                return {  # type: ignore[return-value]
+                    "type": "tool_search_tool_bm25_20251119",
+                    "name": "tool_search_tool_bm25",
+                }
+            case _:
+                return None
 
     def _get_native_api_name(self, spec: NativeToolSpec) -> str:
         """Get the literal API name for a native tool spec.

@@ -456,6 +456,54 @@ class TestHostedTools:
         assert tool.meta["native_tools"]["gemini"]["api_type"] == "code_execution"
         assert tool.meta["native_tools"]["openai"]["api_type"] == "code_interpreter"
 
+    def test_tool_search_tool(self) -> None:
+        """Test ToolSearchTool creation and specs."""
+        from hud.tools.hosted import ToolSearchTool
+
+        tool = ToolSearchTool(threshold=15)
+        assert tool.name == "tool_search"
+
+        assert "openai" in tool.meta["native_tools"]
+        assert "claude" in tool.meta["native_tools"]
+
+        openai_spec = tool.meta["native_tools"]["openai"]
+        assert openai_spec["api_type"] == "tool_search"
+        assert openai_spec["hosted"] is True
+        assert openai_spec["extra"]["threshold"] == 15
+        assert "gpt-5.4" in openai_spec["supported_models"]
+
+        claude_spec = tool.meta["native_tools"]["claude"]
+        assert claude_spec["api_type"] == "tool_search_bm25"
+        assert claude_spec["hosted"] is True
+        assert claude_spec["extra"]["threshold"] == 15
+        assert "claude-opus-4-6*" in claude_spec["supported_models"]
+
+    def test_tool_search_default_threshold(self) -> None:
+        """Test ToolSearchTool uses default threshold of 10."""
+        from hud.tools.hosted import ToolSearchTool
+
+        tool = ToolSearchTool()
+        assert tool.meta["native_tools"]["openai"]["extra"]["threshold"] == 10
+
+    def test_tool_search_supported_models(self) -> None:
+        """Test ToolSearchTool only matches supported models."""
+        from hud.tools.hosted import ToolSearchTool
+
+        tool = ToolSearchTool()
+        openai_spec = tool.get_native_spec(AgentType.OPENAI)
+        assert openai_spec is not None
+        assert openai_spec.supports_model("gpt-5.4")
+        assert openai_spec.supports_model("gpt-5.4-mini")
+        assert not openai_spec.supports_model("gpt-4o")
+        assert not openai_spec.supports_model("gpt-4.1")
+
+        claude_spec = tool.get_native_spec(AgentType.CLAUDE)
+        assert claude_spec is not None
+        assert claude_spec.supports_model("claude-opus-4-6-20260301")
+        assert claude_spec.supports_model("claude-sonnet-4-5-20250929")
+        assert not claude_spec.supports_model("claude-haiku-4-5-20251001")
+        assert not claude_spec.supports_model("claude-3-5-sonnet-20241022")
+
     @pytest.mark.asyncio
     async def test_hosted_tool_call_raises(self) -> None:
         """Test that calling a hosted tool raises NotImplementedError."""
