@@ -276,7 +276,9 @@ class AnthropicComputerTool(HudComputerTool):
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 logger.info("Scaled coordinates: %s, %s", scaled_x, scaled_y)
-                result = await self.executor.click(x=scaled_x, y=scaled_y, hold_keys=hold_keys, take_screenshot=False)
+                result = await self.executor.click(
+                    x=scaled_x, y=scaled_y, hold_keys=hold_keys, take_screenshot=False
+                )
             else:
                 result = await self.executor.click(hold_keys=hold_keys, take_screenshot=False)
 
@@ -285,40 +287,64 @@ class AnthropicComputerTool(HudComputerTool):
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 result = await self.executor.click(
-                    x=scaled_x, y=scaled_y, pattern=[100], hold_keys=hold_keys, take_screenshot=False
+                    x=scaled_x,
+                    y=scaled_y,
+                    pattern=[100],
+                    hold_keys=hold_keys,
+                    take_screenshot=False,
                 )
             else:
-                result = await self.executor.click(pattern=[100], hold_keys=hold_keys, take_screenshot=False)
+                result = await self.executor.click(
+                    pattern=[100], hold_keys=hold_keys, take_screenshot=False
+                )
 
         elif action == "triple_click":
             hold_keys = self._parse_hold_keys(text)
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 result = await self.executor.click(
-                    x=scaled_x, y=scaled_y, pattern=[100, 100], hold_keys=hold_keys, take_screenshot=False
+                    x=scaled_x,
+                    y=scaled_y,
+                    pattern=[100, 100],
+                    hold_keys=hold_keys,
+                    take_screenshot=False,
                 )
             else:
-                result = await self.executor.click(pattern=[100, 100], hold_keys=hold_keys, take_screenshot=False)
+                result = await self.executor.click(
+                    pattern=[100, 100], hold_keys=hold_keys, take_screenshot=False
+                )
 
         elif action == "right_click":
             hold_keys = self._parse_hold_keys(text)
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 result = await self.executor.click(
-                    x=scaled_x, y=scaled_y, button="right", hold_keys=hold_keys, take_screenshot=False
+                    x=scaled_x,
+                    y=scaled_y,
+                    button="right",
+                    hold_keys=hold_keys,
+                    take_screenshot=False,
                 )
             else:
-                result = await self.executor.click(button="right", hold_keys=hold_keys, take_screenshot=False)
+                result = await self.executor.click(
+                    button="right", hold_keys=hold_keys, take_screenshot=False
+                )
 
         elif action == "middle_click":
             hold_keys = self._parse_hold_keys(text)
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 result = await self.executor.click(
-                    x=scaled_x, y=scaled_y, button="middle", hold_keys=hold_keys, take_screenshot=False
+                    x=scaled_x,
+                    y=scaled_y,
+                    button="middle",
+                    hold_keys=hold_keys,
+                    take_screenshot=False,
                 )
             else:
-                result = await self.executor.click(button="middle", hold_keys=hold_keys, take_screenshot=False)
+                result = await self.executor.click(
+                    button="middle", hold_keys=hold_keys, take_screenshot=False
+                )
 
         elif action == "mouse_move" or action == "move":
             if coord_tuple and len(coord_tuple) >= 2:
@@ -354,8 +380,7 @@ class AnthropicComputerTool(HudComputerTool):
                 else:
                     keys_list = [mapped_key]
 
-                for i in range(repeat):
-                    is_last = i == repeat - 1
+                for _ in range(repeat):
                     result = await self.executor.press(keys=keys_list, take_screenshot=False)
             else:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="text is required for key"))
@@ -470,7 +495,9 @@ class AnthropicComputerTool(HudComputerTool):
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="duration is too long"))
 
             # Hold key action
-            result = await self.executor.hold_key(key=text, duration=duration, take_screenshot=False)
+            result = await self.executor.hold_key(
+                key=text, duration=duration, take_screenshot=False
+            )
 
         elif action == "left_mouse_down":
             # These don't accept coordinates in original spec
