@@ -108,7 +108,7 @@ model_client = AsyncOpenAI(
     api_key=settings.api_key,
 )
 agent = OpenAIAgent.create(
-    model="gpt-5.1",
+    model="gpt-5.3-codex",
     model_client=model_client,
     validate_api_key=False,
 )
@@ -225,7 +225,7 @@ def _to_openai_tool(self, tool):
 
 This means:
 
-1. **Same model behavior** - GPT-5.1 sees native `shell` and `apply_patch` tools, exactly like Codex CLI
+1. **Same model behavior** - GPT-5.3-codex sees native `shell` and `apply_patch` tools, exactly like Codex CLI
 2. **Same response format** - Responses include `shell_call` and `apply_patch_call` output types
 3. **Same tool execution** - Your tools receive the exact same parameters Codex would
 
@@ -325,7 +325,7 @@ uv run python examples/06_codex_coding_agent.py --local --verbose
 | ------------- | ------------------ | -------------------------------------------------- |
 | `--local`     | Off                | Run locally (tools on your machine, OpenAI direct) |
 | `--task`      | Hello World script | The coding task to complete                        |
-| `--model`     | `gpt-5.1`          | Codex-capable model (`gpt-5.1`, `gpt-5.1-codex`)   |
+| `--model`     | `gpt-5.3-codex`          | Codex-capable model (`gpt-5.4`, `gpt-5.3-codex`)   |
 | `--work-dir`  | Temp directory     | Working directory (local mode only)                |
 | `--max-steps` | `20`               | Maximum agent steps                                |
 | `--verbose`   | Off                | Enable verbose output                              |

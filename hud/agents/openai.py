@@ -13,8 +13,10 @@ from openai import AsyncOpenAI, Omit, OpenAI
 from openai.types.responses import (
     ApplyPatchToolParam,
     ComputerToolParam,
+    ComputerUsePreviewToolParam,
     FunctionShellToolParam,
     FunctionToolParam,
+    ResponseComputerToolCallOutputScreenshotParam,
     ResponseFunctionCallOutputItemListParam,
     ResponseInputFileContentParam,
     ResponseInputImageContentParam,
@@ -27,7 +29,12 @@ from openai.types.responses import (
     ToolParam,
 )
 from openai.types.responses.response_create_params import ToolChoice  # noqa: TC002
-from openai.types.responses.response_input_param import FunctionCallOutput, Message
+from openai.types.responses.response_input_param import (
+    ComputerCallOutput,
+    ComputerCallOutputAcknowledgedSafetyCheck,
+    FunctionCallOutput,
+    Message,
+)
 from openai.types.shared_params.reasoning import Reasoning  # noqa: TC002
 
 from hud.settings import settings
@@ -122,13 +129,17 @@ class OpenAIAgent(MCPAgent):
         self.reasoning: Reasoning | None = self.config.reasoning
         self.tool_choice: ToolChoice | None = self.config.tool_choice
         self.parallel_tool_calls = self.config.parallel_tool_calls
+        self.text = self.config.text
         self.truncation: Literal["auto", "disabled"] | None = self.config.truncation
 
         self._openai_tools: list[ToolParam] = []
         self._tool_name_map: dict[str, str] = {}
+        self._tool_search_threshold: int | None = None
 
         self.last_response_id: str | None = None
         self._message_cursor = 0
+        self.pending_call_id: str | None = None
+        self.pending_safety_checks: list[Any] = []
 
     def _on_tools_ready(self) -> None:
         """Build OpenAI-specific tool mappings after tools are discovered."""
@@ -149,16 +160,14 @@ class OpenAIAgent(MCPAgent):
                 return FunctionShellToolParam(type="shell")
             case "apply_patch":
                 return ApplyPatchToolParam(type="apply_patch")
+            case "computer":
+                return ComputerToolParam(type="computer")
             case "computer_use_preview":
-                # Computer use requires display dimensions
-                display_width = spec.extra.get("display_width", 1024)
-                display_height = spec.extra.get("display_height", 768)
-                environment = spec.extra.get("environment", "browser")
-                return ComputerToolParam(
+                return ComputerUsePreviewToolParam(
                     type="computer_use_preview",
-                    display_width=display_width,
-                    display_height=display_height,
-                    environment=environment,
+                    display_width=int(spec.extra.get("display_width", 1024)),
+                    display_height=int(spec.extra.get("display_height", 768)),
+                    environment=spec.extra.get("environment", "browser"),
                 )
             case _:
                 logger.warning(
@@ -167,34 +176,6 @@ class OpenAIAgent(MCPAgent):
                     tool.name,
                 )
                 return self._to_function_tool(tool)
-
-    def _build_hosted_tool(self, tool: types.Tool, spec: NativeToolSpec) -> ToolParam | None:
-        """Build an OpenAI hosted tool from a NativeToolSpec.
-
-        Args:
-            tool: The MCP tool
-            spec: The native spec with hosted=True
-
-        Returns:
-            OpenAI hosted tool parameter, or None if not supported
-        """
-        from openai.types.responses import WebSearchToolParam
-
-        match spec.api_type:
-            case "web_search":
-                # Web search is a simple hosted tool
-                return WebSearchToolParam(type="web_search")
-            case "code_interpreter":
-                # Code interpreter requires container config - skip for now
-                # as it requires additional setup
-                logger.debug(
-                    "Skipping code_interpreter tool %s - requires container configuration",
-                    tool.name,
-                )
-                return None
-            case _:
-                logger.warning("Unknown hosted tool type: %s", spec.api_type)
-                return None
 
     def _to_function_tool(self, tool: types.Tool) -> FunctionToolParam | None:
         """Convert an MCP tool to OpenAI function tool format.
@@ -235,15 +216,28 @@ class OpenAIAgent(MCPAgent):
         """
         self._openai_tools = []
         self._tool_name_map = {}
+        self._tool_search_threshold = None
 
         categorized = self._categorized_tools
 
         # Process hosted tools
         for tool, spec in categorized.hosted:
-            openai_tool = self._build_hosted_tool(tool, spec)
-            if openai_tool:
-                self._openai_tools.append(openai_tool)
-                logger.debug("Added hosted tool %s (%s) for OpenAI", tool.name, spec.api_type)
+            if not spec.api_type:
+                logger.debug("Skipping hosted tool %s: no api_type", tool.name)
+                continue
+            tool_def: dict[str, Any] = {"type": spec.api_type}
+            api_extra = {k: v for k, v in spec.extra.items() if k != "threshold"}
+            tool_def.update(api_extra)
+            if "threshold" in spec.extra:
+                self._tool_search_threshold = spec.extra["threshold"]
+            # Validate required config before sending to API
+            if spec.api_type == "code_interpreter" and "container" not in spec.extra:
+                raise ValueError(
+                    f"Tool '{tool.name}' requires container configuration for OpenAI. "
+                    "Use: CodeExecutionTool(container={'image': 'python:3.12'})"
+                )
+            self._openai_tools.append(tool_def)  # type: ignore[arg-type]
+            logger.debug("Added hosted tool %s (%s) for OpenAI", tool.name, spec.api_type)
 
         # Process native tools
         for tool, spec in categorized.native:
@@ -278,12 +272,18 @@ class OpenAIAgent(MCPAgent):
             target_name = self._tool_name_map.get(tool_name, tool_name)
             arguments = json.loads(item.arguments)
             return MCPToolCall(name=target_name, arguments=arguments, id=item.call_id)
+        elif item.type == "computer_call":
+            self.pending_safety_checks = item.pending_safety_checks or []
+            target_name = self._tool_name_map.get("computer", "openai_computer")
+            if hasattr(item, "actions") and item.actions:
+                arguments = {"actions": [a.to_dict() for a in item.actions]}
+            else:
+                arguments = item.action.to_dict()
+            return MCPToolCall(name=target_name, arguments=arguments, id=item.call_id)
         elif item.type == "shell_call":
-            # Use mapping to get actual MCP tool name (handles legacy suffix patterns)
             target_name = self._tool_name_map.get("shell", "shell")
             return MCPToolCall(name=target_name, arguments=item.action.to_dict(), id=item.call_id)
         elif item.type == "apply_patch_call":
-            # Use mapping to get actual MCP tool name (handles legacy suffix patterns)
             target_name = self._tool_name_map.get("apply_patch", "apply_patch")
             return MCPToolCall(
                 name=target_name, arguments=item.operation.to_dict(), id=item.call_id
@@ -300,6 +300,8 @@ class OpenAIAgent(MCPAgent):
     def _reset_response_state(self) -> None:
         self.last_response_id = None
         self._message_cursor = 0
+        self.pending_call_id = None
+        self.pending_safety_checks = []
 
     async def get_system_messages(self) -> list[types.ContentBlock]:
         """System messages are provided via the `instructions` field."""
@@ -338,16 +340,35 @@ class OpenAIAgent(MCPAgent):
                 self.console.debug("No new messages to send to OpenAI.")
                 return AgentResponse(content="", tool_calls=[], done=True)
 
+        effective_tools: list[ToolParam] = list(self._openai_tools)
+        if self._tool_search_threshold is not None:
+            fn_count = sum(
+                1 for t in effective_tools if isinstance(t, dict) and t.get("type") == "function"
+            )
+            if fn_count > self._tool_search_threshold:
+                logger.debug(
+                    "tool_search: %d function tools > threshold %d, applying defer_loading",
+                    fn_count,
+                    self._tool_search_threshold,
+                )
+                effective_tools = [  # type: ignore[assignment]
+                    {**t, "defer_loading": True}
+                    if isinstance(t, dict) and t.get("type") == "function"
+                    else t
+                    for t in effective_tools
+                ]
+
         response = await self.openai_client.responses.create(
             model=self._model,
             input=new_items,
             instructions=self.system_prompt,
             max_output_tokens=self.max_output_tokens,
             temperature=self.temperature,
+            text=self.text if self.text is not None else Omit(),
             tool_choice=self.tool_choice if self.tool_choice is not None else Omit(),
             parallel_tool_calls=self.parallel_tool_calls,
             reasoning=self.reasoning if self.reasoning is not None else Omit(),
-            tools=self._openai_tools if self._openai_tools else Omit(),
+            tools=effective_tools if effective_tools else Omit(),
             previous_response_id=(
                 self.last_response_id if self.last_response_id is not None else Omit()
             ),
@@ -387,8 +408,88 @@ class OpenAIAgent(MCPAgent):
 
     async def format_tool_results(
         self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
+    ) -> list[ComputerCallOutput | FunctionCallOutput]:
+        """Convert MCP tool outputs into Responses input items.
+
+        Detects computer tool results and formats them as ComputerCallOutput
+        with screenshots. Non-computer calls are formatted as FunctionCallOutput.
+        """
+        computer_tool_name = self._tool_name_map.get("computer")
+        if not computer_tool_name or not any(c.name == computer_tool_name for c in tool_calls):
+            return list(await self._format_function_results(tool_calls, tool_results))
+
+        remaining_calls: list[MCPToolCall] = []
+        remaining_results: list[MCPToolResult] = []
+        computer_outputs: list[ComputerCallOutput] = []
+        ordering: list[tuple[str, int]] = []
+
+        for call, result in zip(tool_calls, tool_results, strict=False):
+            if call.name == computer_tool_name:
+                screenshot = self._extract_latest_screenshot(result)
+                if not screenshot:
+                    raise ValueError(
+                        "Computer tool result missing screenshot. "
+                        "The tool must always return a screenshot for computer_call_output."
+                    )
+                call_id = call.id or self.pending_call_id
+                if not call_id:
+                    self.console.warning_log("Computer tool call missing ID; skipping output.")
+                    continue
+                acknowledged_checks: list[ComputerCallOutputAcknowledgedSafetyCheck] = []
+                for check in self.pending_safety_checks:
+                    if hasattr(check, "model_dump"):
+                        acknowledged_checks.append(check.model_dump())  # type: ignore[arg-type]
+                    elif isinstance(check, dict):
+                        acknowledged_checks.append(check)  # type: ignore[arg-type]
+                output_payload = ComputerCallOutput(
+                    type="computer_call_output",
+                    call_id=call_id,
+                    output=ResponseComputerToolCallOutputScreenshotParam(
+                        type="computer_screenshot",
+                        image_url=f"data:image/png;base64,{screenshot}",
+                    ),
+                    acknowledged_safety_checks=(
+                        acknowledged_checks if acknowledged_checks else None
+                    ),
+                )
+                computer_outputs.append(output_payload)
+                self.pending_call_id = None
+                self.pending_safety_checks = []
+                ordering.append(("computer", len(computer_outputs) - 1))
+            else:
+                remaining_calls.append(call)
+                remaining_results.append(result)
+                ordering.append(("function", len(remaining_calls) - 1))
+
+        formatted: list[ComputerCallOutput | FunctionCallOutput] = []
+        function_outputs: list[FunctionCallOutput] = []
+        if remaining_calls:
+            function_outputs = await self._format_function_results(
+                remaining_calls, remaining_results
+            )
+
+        for kind, idx in ordering:
+            if kind == "computer" and idx < len(computer_outputs):
+                formatted.append(computer_outputs[idx])
+            elif kind == "function" and idx < len(function_outputs):
+                formatted.append(function_outputs[idx])
+        return formatted
+
+    def _extract_latest_screenshot(self, result: MCPToolResult) -> str | None:
+        """Extract the latest screenshot from a tool result."""
+        if not result.content:
+            return None
+        for content in reversed(result.content):
+            if isinstance(content, types.ImageContent):
+                return content.data
+            if isinstance(content, types.TextContent) and result.isError:
+                self.console.error_log(f"Computer tool error: {content.text}")
+        return None
+
+    async def _format_function_results(
+        self, tool_calls: list[MCPToolCall], tool_results: list[MCPToolResult]
     ) -> list[FunctionCallOutput]:
-        """Convert MCP tool outputs into Responses input items."""
+        """Convert MCP tool outputs into function call output items."""
         formatted: list[FunctionCallOutput] = []
         for call, result in zip(tool_calls, tool_results, strict=False):
             if not call.id:
