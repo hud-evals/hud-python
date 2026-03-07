@@ -267,7 +267,7 @@ class OpenAIAgent(MCPAgent):
             arguments = json.loads(item.arguments)
             return MCPToolCall(name=target_name, arguments=arguments, id=item.call_id)
         elif item.type == "computer_call":
-            self.pending_safety_checks = item.pending_safety_checks
+            self.pending_safety_checks = item.pending_safety_checks or []
             target_name = self._tool_name_map.get("computer", "openai_computer")
             if hasattr(item, "actions") and item.actions:
                 arguments = {"actions": [a.to_dict() for a in item.actions]}

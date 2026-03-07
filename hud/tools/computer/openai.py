@@ -185,7 +185,7 @@ class OpenAIComputerTool(HudComputerTool):
             List of MCP content blocks
         """
         # Handle batched actions (GA computer tool)
-        if actions is not None:
+        if isinstance(actions, list):
             result_blocks: list[ContentBlock] = []
             for i, action_dict in enumerate(actions):
                 is_last = i == len(actions) - 1
