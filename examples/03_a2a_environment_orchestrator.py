@@ -5,11 +5,6 @@ The environment defines its own tools, system prompt, and routing via a
 management and serves it.
 
 Usage:
-    # Multi-scenario router mode
-    HUD_ENV=my-hud-environment HUD_SCENARIO=assist \
-        uv run python examples/03_a2a_environment_orchestrator.py
-
-    # Single-scenario direct mode
     HUD_ENV=my-hud-environment HUD_SCENARIO=analysis_chat \
         uv run python examples/03_a2a_environment_orchestrator.py
 """
@@ -27,7 +22,9 @@ def main() -> None:
         raise ValueError("Set HUD_ENV to the target environment name.")
 
     model = os.getenv("HUD_MODEL", "claude-haiku-4-5")
-    scenario = os.getenv("HUD_SCENARIO", "assist").strip() or "assist"
+    scenario = os.getenv("HUD_SCENARIO", "").strip()
+    if not scenario:
+        raise ValueError("Set HUD_SCENARIO to the target chat scenario name.")
     host = os.getenv("HUD_A2A_HOST", "0.0.0.0")
     port = int(os.getenv("HUD_A2A_PORT", "9999"))
 

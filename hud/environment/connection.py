@@ -310,13 +310,8 @@ class Connector:
         try:
             self._prompts_cache = await self.client.list_prompts()
         except Exception as e:
-            # Handle servers that don't implement prompts/list (optional in MCP spec)
-            # and older prompt schema incompatibilities from remote MCP servers.
-            error_text = str(e)
-            if (
-                "Method not found" in error_text
-                or "'Prompt' object has no attribute 'version'" in error_text
-            ):
+            # Handle servers that don't implement prompts/list (optional in MCP spec).
+            if "Method not found" in str(e):
                 logger.debug("Server %s does not support prompts/list", self.name)
                 self._prompts_cache = []
             else:

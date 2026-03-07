@@ -528,6 +528,43 @@ class Environment(
         self._router.build_prompts(local_prompts, self._connections)
         self._prompt_routing_built = True
 
+    # FastMCP server internals expect list_prompts() to return FastMCP prompt
+    # objects with a .version attribute. HUD's router, however, builds routing
+    # from mcp.types.Prompt definitions. If we return the router's MCP prompt
+    # objects directly from list_prompts(), FastMCP 3.x crashes while handling
+    # prompts/list with: "'Prompt' object has no attribute 'version'".
+    # Keep the router path and server path split so each layer gets the prompt
+    # shape it expects.
+    async def _list_mcp_prompts(self) -> list[mcp_types.Prompt]:
+        """Return MCP prompt definitions for HUD's internal routing logic."""
+        if self._connections:
+            await asyncio.gather(*[c.list_prompts() for c in self._connections.values()])
+        await self._build_prompt_routing()
+        return self._router.prompts
+
+    @staticmethod
+    def _to_fastmcp_prompt(prompt: mcp_types.Prompt) -> Any:
+        """Convert an MCP prompt definition into a FastMCP prompt component."""
+        from fastmcp.prompts.prompt import Prompt, PromptArgument
+
+        arguments = [
+            PromptArgument(
+                name=arg.name,
+                description=arg.description,
+                required=bool(arg.required),
+            )
+            for arg in (prompt.arguments or [])
+        ]
+        return Prompt(
+            name=prompt.name,
+            version=None,
+            title=prompt.title,
+            description=prompt.description,
+            icons=prompt.icons,
+            arguments=arguments or None,
+            meta=getattr(prompt, "meta", None),
+        )
+
     async def _build_resource_routing(self) -> None:
         """Build resource routing from local resources and connections."""
         local_resources_list = await self._local_provider.list_resources()
@@ -712,21 +749,7 @@ class Environment(
             # resolves to self.call_tool which has a different (multi-format)
             # signature and would TypeError with positional (name, arguments).
             from fastmcp import FastMCP
-            from fastmcp.exceptions import NotFoundError
-
-            try:
-                result = await FastMCP.call_tool(self, name, arguments, run_middleware=False)
-            except NotFoundError:
-                # EvalContext copies `_local_provider` by reference from the
-                # source Environment, but may not include the same internal
-                # FastMCP registry. Fallback to direct local provider lookup.
-                provider = getattr(self, "_local_provider", None)
-                if provider is None:
-                    raise
-                tool = await provider.get_tool(name)
-                if tool is None:
-                    raise
-                result = await tool.run(arguments)
+            result = await FastMCP.call_tool(self, name, arguments, run_middleware=False)
             return MCPToolResult(
                 content=result.content, structuredContent=result.structured_content
             )
@@ -803,12 +826,10 @@ class Environment(
     # Prompt Operations
     # =========================================================================
 
-    async def list_prompts(self) -> list[mcp_types.Prompt]:
-        """Refresh prompts from all connections and rebuild prompt routing."""
-        if self._connections:
-            await asyncio.gather(*[c.list_prompts() for c in self._connections.values()])
-        await self._build_prompt_routing()
-        return self._router.prompts
+    async def list_prompts(self) -> list[Any]:
+        """List prompts as FastMCP prompt components for server-side MCP operations."""
+        prompts = await self._list_mcp_prompts()
+        return [self._to_fastmcp_prompt(prompt) for prompt in prompts]
 
     async def get_prompt(
         self, name: str, arguments: dict[str, Any] | None = None
@@ -822,28 +843,6 @@ class Environment(
         conn_name = self._router.get_prompt_connection(name)
 
         if conn_name is None:
-            # Prompt routing can be empty when a remote MCP server exposes
-            # prompts that fail list_prompts parsing (schema drift). In that
-            # case, try direct remote lookup before falling back to local.
-            if self._connections:
-                last_error: Exception | None = None
-                for fallback_conn_name, conn in self._connections.items():
-                    try:
-                        result = await conn.get_prompt(name, arguments)
-                        # Cache discovered routing so scenario sessions can
-                        # persist the owning remote connection for submit().
-                        self._router._prompt_routing[name] = fallback_conn_name
-                        return result
-                    except Exception as e:
-                        last_error = e
-
-                # If we only have remote connections and none resolved this
-                # prompt, surface a helpful not-found error with last context.
-                if ":" in name:
-                    if last_error is not None:
-                        raise ValueError(f"Prompt not found: {name}") from last_error
-                    raise ValueError(f"Prompt not found: {name}")
-
             # Local prompt -- render via FastMCP's render_prompt (parent class)
             try:
                 from fastmcp import FastMCP

@@ -1,17 +1,12 @@
-"""A2A orchestrator executor backed by Chat with session management.
-
-Thin A2A wrapper around :class:`Chat`.  Each A2A context gets its own
-``Chat`` instance so concurrent conversations are isolated.  The
-environment defines its own tools, system prompt, and routing via a
-``chat=True`` scenario — the orchestrator just forwards messages.
-"""
+"""A2A orchestrator backed by per-session Chat instances."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from a2a.server.agent_execution import AgentExecutor
 from a2a.types import (
@@ -36,20 +31,14 @@ LOGGER = logging.getLogger(__name__)
 
 
 class OrchestratorExecutor(AgentExecutor):
-    """A2A executor backed by per-session Chat instances.
-
-    Takes an environment name and optional scenario target, creates one
-    ``Chat`` per A2A context for session isolation, and forwards turns.
-    All orchestration logic lives in the environment's scenario — this
-    class is pure A2A plumbing.
-    """
+    """Thin A2A wrapper around per-session ``Chat`` instances."""
 
     def __init__(
         self,
         env_name: str,
         *,
         model: str,
-        scenario: str | None = "assist",
+        scenario: str,
         max_steps: int = 50,
         name: str | None = None,
         description: str | None = None,
@@ -66,23 +55,16 @@ class OrchestratorExecutor(AgentExecutor):
         self._sessions: dict[str, Chat] = {}
         self._session_locks: dict[str, asyncio.Lock] = {}
         self._session_last_active: dict[str, float] = {}
-        self._session_ttl_seconds = 30 * 60  # 30 minutes
+        self._session_ttl_seconds = 30 * 60
 
     @staticmethod
-    def _resolve_scenario(env_name: str, scenario: str | None) -> str | None:
+    def _resolve_scenario(env_name: str, scenario: str) -> str:
         """Normalize scenario input to a fully qualified identifier."""
-        if scenario is None:
-            return None
         if ":" in scenario:
             return scenario
         return f"{env_name}:{scenario}"
 
-    # ------------------------------------------------------------------
-    # Session management
-    # ------------------------------------------------------------------
-
     def _get_or_create_chat(self, context_id: str) -> Chat:
-        """Return existing Chat for *context_id* or create a new one."""
         self._cleanup_stale_sessions()
         chat = self._sessions.get(context_id)
         if chat is None:
@@ -92,7 +74,7 @@ class OrchestratorExecutor(AgentExecutor):
                 max_steps=self._max_steps,
             )
             self._sessions[context_id] = chat
-        self._session_last_active[context_id] = asyncio.get_event_loop().time()
+        self._session_last_active[context_id] = time.monotonic()
         return chat
 
     def _get_lock(self, context_id: str) -> asyncio.Lock:
@@ -106,7 +88,7 @@ class OrchestratorExecutor(AgentExecutor):
         self._session_last_active.pop(context_id, None)
 
     def _cleanup_stale_sessions(self) -> None:
-        now = asyncio.get_event_loop().time()
+        now = time.monotonic()
         stale = [
             cid for cid, ts in self._session_last_active.items()
             if now - ts > self._session_ttl_seconds
@@ -134,22 +116,18 @@ class OrchestratorExecutor(AgentExecutor):
         final: bool,
         text: str | None = None,
     ) -> None:
-        status_kwargs: dict[str, Any] = {"state": state}
+        status = TaskStatus(state=state)
         if text is not None:
-            status_kwargs["message"] = self._new_message(text)
+            status = TaskStatus(state=state, message=self._new_message(text))
 
         await event_queue.enqueue_event(
             TaskStatusUpdateEvent(
                 context_id=context_id,
                 task_id=task_id,
                 final=final,
-                status=TaskStatus(**status_kwargs),
+                status=status,
             )
         )
-
-    # ------------------------------------------------------------------
-    # A2A agent card & serving
-    # ------------------------------------------------------------------
 
     def agent_card(self, url: str = "http://localhost:9999/") -> AgentCard:
         return AgentCard(
@@ -188,15 +166,12 @@ class OrchestratorExecutor(AgentExecutor):
         LOGGER.info("Serving A2A orchestrator at %s", public_url)
         uvicorn.run(app.build(), host=host, port=port)
 
-    # ------------------------------------------------------------------
-    # A2A AgentExecutor interface
-    # ------------------------------------------------------------------
-
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         context_id = context.context_id or str(uuid.uuid4())
         task_id = context.task_id or str(uuid.uuid4())
         message = context.get_user_input()
-        message_id = getattr(getattr(context, "message", None), "message_id", "") or ""
+        request_message = getattr(context, "message", None)
+        message_id = getattr(request_message, "message_id", "") or ""
 
         await self._enqueue_status(
             event_queue,

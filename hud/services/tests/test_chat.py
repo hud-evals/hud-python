@@ -1,153 +1,258 @@
+"""Tests for Chat -- multi-turn conversation wrapper and A2A executor."""
+
 from __future__ import annotations
 
 import asyncio
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from a2a.server.agent_execution import AgentExecutor
+from a2a.server.agent_execution.context import RequestContext
+from a2a.server.events.event_queue import EventQueue
+from a2a.types import TaskState, TaskStatusUpdateEvent
 from mcp.types import TextContent
 
-from hud.eval.task import Task
-from hud.services.chat import Chat
-from hud.types import Trace
+from hud.services.chat import Chat, _content_to_blocks, _content_to_str
+
+# ---------------------------------------------------------------------------
+# Helper fixtures
+# ---------------------------------------------------------------------------
 
 
-class _FakeQueue:
-    def __init__(self) -> None:
-        self.events: list[Any] = []
-
-    async def enqueue_event(self, event: Any) -> None:
-        self.events.append(event)
-
-
-class _DummyEvalContext:
-    pass
-
-
-class _DummyEval:
-    async def __aenter__(self) -> _DummyEvalContext:
-        return _DummyEvalContext()
-
-    async def __aexit__(self, *_args: Any) -> None:
-        return None
+@pytest.fixture()
+def dummy_task() -> Any:
+    """Minimal Task-like object for Chat construction."""
+    task = MagicMock()
+    task.scenario = "test_scenario"
+    task.args = {}
+    task.model_copy = MagicMock(return_value=task)
+    task.env = MagicMock()
+    return task
 
 
-class _FakeAgent:
-    async def run(self, _ctx: Any, *, max_steps: int) -> Trace:
-        return Trace(content=f"reply-{max_steps}")
+# ---------------------------------------------------------------------------
+# Unit tests: content helpers
+# ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio()
-async def test_send_surfaces_followup_user_messages(monkeypatch: Any) -> None:
-    chat = Chat(
-        Task(env={"name": "browser"}, scenario="assist"),
-        model="gpt-4o",
-        max_steps=3,
-    )
-    captured_task_args: list[dict[str, Any]] = []
+class TestContentHelpers:
+    def test_content_to_str_plain(self) -> None:
+        assert _content_to_str("hello") == "hello"
 
-    def _capturing_fake_eval(*args: Any, **_kwargs: Any) -> _DummyEval:
-        task = args[0]
-        captured_task_args.append(task.args or {})
-        return _DummyEval()
+    def test_content_to_str_blocks(self) -> None:
+        blocks = [
+            TextContent(type="text", text="hello"),
+            TextContent(type="text", text="world"),
+        ]
+        result = _content_to_str(blocks)
+        assert "hello" in result
+        assert "world" in result
 
-    monkeypatch.setattr("hud.eval", _capturing_fake_eval)
-    monkeypatch.setattr(chat, "_create_agent", lambda: _FakeAgent())
+    def test_content_to_blocks_string(self) -> None:
+        blocks = _content_to_blocks("hello")
+        assert len(blocks) == 1
+        assert isinstance(blocks[0], TextContent)
+        assert blocks[0].text == "hello"
 
-    first = await chat.send("hello")
-    second = await chat.send("follow-up")
-
-    assert first.content == "reply-3"
-    assert second.content == "reply-3"
-    assert [m["role"] for m in chat.messages] == ["user", "assistant", "user", "assistant"]
-    assert chat.messages[0]["content"]["text"] == "hello"
-    assert chat.messages[2]["content"]["text"] == "follow-up"
-
-    assert len(captured_task_args) == 2
-    assert captured_task_args[0]["messages"][0]["content"]["text"] == "hello"
-    assert captured_task_args[1]["messages"][2]["content"]["text"] == "follow-up"
+    def test_content_to_blocks_passthrough(self) -> None:
+        original = [TextContent(type="text", text="x")]
+        assert _content_to_blocks(original) is original
 
 
-@pytest.mark.asyncio()
-async def test_send_preserves_all_content_blocks(monkeypatch: Any) -> None:
-    chat = Chat(
-        Task(env={"name": "browser"}, scenario="assist"),
-        model="gpt-4o",
-        max_steps=3,
-    )
-    captured_task_args: list[dict[str, Any]] = []
-
-    def _capturing_fake_eval(*args: Any, **_kwargs: Any) -> _DummyEval:
-        task = args[0]
-        captured_task_args.append(task.args or {})
-        return _DummyEval()
-
-    monkeypatch.setattr("hud.eval", _capturing_fake_eval)
-    monkeypatch.setattr(chat, "_create_agent", lambda: _FakeAgent())
-
-    blocks = [
-        TextContent(type="text", text="part-1"),
-        TextContent(type="text", text="part-2"),
-    ]
-    await chat.send(blocks)
-
-    user_content = chat.messages[0]["content"]
-    assert isinstance(user_content, list)
-    assert user_content[0]["text"] == "part-1"
-    assert user_content[1]["text"] == "part-2"
-    sent_content = captured_task_args[0]["messages"][0]["content"]
-    assert isinstance(sent_content, list)
-    assert sent_content[1]["text"] == "part-2"
+# ---------------------------------------------------------------------------
+# Chat construction
+# ---------------------------------------------------------------------------
 
 
-def test_clear_rotates_session_id() -> None:
-    chat = Chat(Task(env={"name": "browser"}, scenario="assist"), model="gpt-4o")
-    before = chat.session_id
-    chat.clear()
-    assert chat.session_id != before
+class TestChatConstruction:
+    def test_requires_model(self, dummy_task: Any) -> None:
+        with pytest.raises(TypeError):
+            Chat(dummy_task)  # type: ignore[call-arg]
+
+    def test_positional_task(self, dummy_task: Any) -> None:
+        chat = Chat(dummy_task, model="test-model")
+        assert chat._task is dummy_task
+        assert chat._model == "test-model"
+
+    def test_messages_start_empty(self, dummy_task: Any) -> None:
+        chat = Chat(dummy_task, model="test-model")
+        assert chat.messages == []
+
+    def test_clear_resets_messages(self, dummy_task: Any) -> None:
+        chat = Chat(dummy_task, model="test-model")
+        chat.messages = [{"role": "user", "content": {"type": "text", "text": "hi"}}]
+        chat.clear()
+        assert chat.messages == []
+
+    def test_session_id_stable(self, dummy_task: Any) -> None:
+        chat = Chat(dummy_task, model="test-model")
+        assert chat._session_id  # not empty
+        sid = chat._session_id
+        assert chat._session_id == sid  # same across accesses
+
+    def test_name_from_scenario(self, dummy_task: Any) -> None:
+        chat = Chat(dummy_task, model="m", name="Custom Agent")
+        assert chat._name == "Custom Agent"
+
+    def test_name_default_from_task(self, dummy_task: Any) -> None:
+        chat = Chat(dummy_task, model="m")
+        assert chat._name == "test_scenario"
 
 
-@pytest.mark.asyncio()
-async def test_execute_resolves_pending_elicitation_without_send(monkeypatch: Any) -> None:
-    chat = Chat(Task(env={"name": "browser"}, scenario="assist"), model="gpt-4o")
-    future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-    chat._pending_elicitations["task-1"] = future
-
-    async def _unexpected_send(_message: Any) -> Any:
-        raise AssertionError("send() should not run for pending elicitation follow-up")
-
-    monkeypatch.setattr(chat, "send", _unexpected_send)
-
-    class _Ctx:
-        context_id = "ctx-1"
-        task_id = "task-1"
-
-        @staticmethod
-        def get_user_input() -> str:
-            return "follow-up answer"
-
-    queue = _FakeQueue()
-    await chat.execute(_Ctx(), queue)  # type: ignore[arg-type]
-
-    assert future.done()
-    assert future.result() == "follow-up answer"
-    assert queue.events == []
+# ---------------------------------------------------------------------------
+# Message format (PromptMessage-compatible)
+# ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio()
-async def test_cancel_clears_pending_elicitation_and_history() -> None:
-    chat = Chat(Task(env={"name": "browser"}, scenario="assist"), model="gpt-4o")
-    chat.messages = [{"role": "user", "content": {"type": "text", "text": "hi"}}]
-    future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-    chat._pending_elicitations["task-1"] = future
+class TestMessageFormat:
+    @pytest.mark.asyncio()
+    async def test_send_stores_prompt_message_format(self, dummy_task: Any) -> None:
+        chat = Chat(dummy_task, model="test-model")
 
-    class _Ctx:
-        context_id = "ctx-1"
-        task_id = "task-1"
+        mock_agent = MagicMock()
+        mock_result = MagicMock()
+        mock_result.content = "response text"
+        mock_result.citations = []
+        mock_agent.run = AsyncMock(return_value=mock_result)
 
-    queue = _FakeQueue()
-    await chat.cancel(_Ctx(), queue)  # type: ignore[arg-type]
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
 
-    assert chat.messages == []
-    assert future.cancelled()
-    assert "task-1" not in chat._pending_elicitations
-    assert len(queue.events) == 1
+        with (
+            patch.object(chat, "_create_agent", return_value=mock_agent),
+            patch("hud.eval.manager.run_eval") as mock_eval,
+        ):
+            mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
+            mock_eval.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            # Patch the import inside send()
+            import hud
+            original_eval = hud.eval
+            hud.eval = MagicMock(return_value=mock_ctx)
+            try:
+                await chat.send("hello")
+            finally:
+                hud.eval = original_eval
+
+        assert len(chat.messages) == 2
+
+        user_msg = chat.messages[0]
+        assert user_msg["role"] == "user"
+        assert user_msg["content"]["type"] == "text"
+        assert user_msg["content"]["text"] == "hello"
+
+        assistant_msg = chat.messages[1]
+        assert assistant_msg["role"] == "assistant"
+        assert assistant_msg["content"]["type"] == "text"
+        assert assistant_msg["content"]["text"] == "response text"
+
+
+# ---------------------------------------------------------------------------
+# A2A AgentExecutor interface
+# ---------------------------------------------------------------------------
+
+
+class TestA2AExecutor:
+    def test_is_agent_executor(self, dummy_task: Any) -> None:
+        chat = Chat(dummy_task, model="m")
+        assert isinstance(chat, AgentExecutor)
+
+    @pytest.mark.asyncio()
+    async def test_execute_enqueues_completed(self, dummy_task: Any) -> None:
+        chat = Chat(dummy_task, model="m")
+
+        with patch.object(chat, "send", new_callable=AsyncMock) as mock_send:
+            mock_result = MagicMock()
+            mock_result.content = "done"
+            mock_send.return_value = mock_result
+
+            context = MagicMock(spec=RequestContext)
+            context.context_id = "ctx-1"
+            context.task_id = "task-1"
+            context.get_user_input.return_value = "hello"
+
+            queue = EventQueue()
+
+            await chat.execute(context, queue)
+
+            event = await queue.dequeue_event(no_wait=True)
+            assert isinstance(event, TaskStatusUpdateEvent)
+            assert event.status.state == TaskState.working
+
+            event2 = await queue.dequeue_event(no_wait=True)
+            assert isinstance(event2, TaskStatusUpdateEvent)
+            assert event2.status.state == TaskState.completed
+            assert event2.final is True
+
+    @pytest.mark.asyncio()
+    async def test_execute_enqueues_failed_on_error(self, dummy_task: Any) -> None:
+        chat = Chat(dummy_task, model="m")
+
+        with patch.object(chat, "send", side_effect=ValueError("boom")):
+            context = MagicMock(spec=RequestContext)
+            context.context_id = "ctx-1"
+            context.task_id = "task-1"
+            context.get_user_input.return_value = "hello"
+
+            queue = EventQueue()
+
+            await chat.execute(context, queue)
+
+            # Should have working + failed events
+            events = []
+            while True:
+                try:
+                    events.append(await queue.dequeue_event(no_wait=True))
+                except asyncio.QueueEmpty:
+                    break
+
+            states = [e.status.state for e in events]
+            assert TaskState.failed in states
+
+    @pytest.mark.asyncio()
+    async def test_cancel_clears_messages(self, dummy_task: Any) -> None:
+        chat = Chat(dummy_task, model="m")
+        chat.messages = [{"role": "user", "content": {"type": "text", "text": "hi"}}]
+
+        context = MagicMock(spec=RequestContext)
+        context.context_id = "ctx-1"
+        context.task_id = "task-1"
+        queue = EventQueue()
+
+        await chat.cancel(context, queue)
+        assert chat.messages == []
+
+
+# ---------------------------------------------------------------------------
+# AgentCard generation
+# ---------------------------------------------------------------------------
+
+
+class TestAgentCard:
+    def test_agent_card_has_skill(self, dummy_task: Any) -> None:
+        chat = Chat(dummy_task, model="m", name="TestBot", description="A test bot")
+        card = chat.agent_card(url="http://localhost:8000/")
+        assert card.name == "TestBot"
+        assert card.description == "A test bot"
+        assert len(card.skills) == 1
+        assert card.skills[0].id == "test_scenario"
+
+    def test_agent_card_default_modes(self, dummy_task: Any) -> None:
+        chat = Chat(dummy_task, model="m")
+        card = chat.agent_card()
+        assert "text/plain" in card.default_input_modes
+        assert "text/plain" in card.default_output_modes
+
+
+# ---------------------------------------------------------------------------
+# as_tool
+# ---------------------------------------------------------------------------
+
+
+class TestAsToolIntegration:
+    def test_as_tool_returns_agent_tool(self, dummy_task: Any) -> None:
+        chat = Chat(dummy_task, model="m")
+        tool = chat.as_tool(name="my_tool")
+        assert tool.name == "my_tool"

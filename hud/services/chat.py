@@ -10,7 +10,7 @@ Example::
     from hud.eval import Task
 
     chat = Chat(
-        Task(env={"name": "my-env"}, scenario="assist"),
+        Task(env={"name": "my-env"}, scenario="analysis_chat"),
         model="claude-sonnet-4-20250514",
     )
 
@@ -133,8 +133,6 @@ class Chat(AgentExecutor):
         # This flows to Connector.copy() as the Environment-Id header.
         self._session_id: str = str(uuid.uuid4())
 
-        self._turn_count: int = 0
-
         # Elicitation bridge state
         self._pending_elicitations: dict[str, asyncio.Future[str]] = {}
 
@@ -170,38 +168,9 @@ class Chat(AgentExecutor):
         task_args["messages"] = self.messages
         task = self._task.model_copy(update={"args": task_args})
 
-        # Pin the Environment-Id across turns so the remote server
-        # maintains session state (OAuth tokens, ctx.set_state, etc.).
-        from hud.environment import Environment
-
-        if isinstance(task.env, Environment):
-            task.env._stable_environment_id = self._session_id
-
-        self._turn_count += 1
-        is_followup = self._turn_count > 1
-
-        # Follow-up turns skip the backend enter/exit lifecycle (trace=False)
-        # since the trace was already registered on the first turn.
-        # We manually inject trace headers so telemetry spans still associate
-        # with this session.
-        from hud.eval.context import _current_trace_headers
-
-        header_token = None
-        if is_followup:
-            header_token = _current_trace_headers.set({"Trace-Id": self._session_id})
-
-        try:
-            async with hud.eval(
-                task,
-                trace_id=self._session_id,
-                quiet=is_followup,
-                trace=not is_followup,
-            ) as ctx:
-                agent = self._create_agent()
-                result = await agent.run(ctx, max_steps=self._max_steps)
-        finally:
-            if header_token is not None:
-                _current_trace_headers.reset(header_token)
+        async with hud.eval(task) as ctx:
+            agent = self._create_agent()
+            result = await agent.run(ctx, max_steps=self._max_steps)
 
         self.messages.append(
             {
@@ -220,7 +189,6 @@ class Chat(AgentExecutor):
         """
         self.messages = []
         self._session_id = str(uuid.uuid4())
-        self._turn_count = 0
 
     @property
     def session_id(self) -> str:

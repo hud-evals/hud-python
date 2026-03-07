@@ -202,12 +202,13 @@ def patch_streamable_http_error_handling() -> None:
                             start_get_stream()
 
                         # Build RequestContext with compatibility for MCP SDK changes
-                        request_headers = getattr(self, "request_headers", {}) or {}
                         if hasattr(self, "_prepare_headers"):
-                            request_headers = self._prepare_headers() or request_headers
+                            headers = self._prepare_headers()
+                        else:
+                            headers = getattr(self, "request_headers", {})
                         ctx_kwargs: dict[str, Any] = {
                             "client": client,
-                            "headers": request_headers,
+                            "headers": headers,
                             "session_id": getattr(self, "session_id", None),
                             "session_message": session_message,
                             "metadata": metadata,

@@ -35,8 +35,8 @@ class FakeContext:
 
 
 def test_init_stores_task_and_model() -> None:
-    orch = OrchestratorExecutor("test-env", model="gpt-4o")
-    assert orch._task.scenario == "test-env:assist"
+    orch = OrchestratorExecutor("test-env", model="gpt-4o", scenario="analysis_chat")
+    assert orch._task.scenario == "test-env:analysis_chat"
     assert orch._model == "gpt-4o"
     assert orch._name == "hud-test-env"
 
@@ -55,14 +55,10 @@ def test_init_allows_qualified_scenario_override() -> None:
     assert orch._task.scenario == "other-env:analysis_chat"
 
 
-def test_init_allows_none_scenario_override() -> None:
-    orch = OrchestratorExecutor("test-env", model="gpt-4o", scenario=None)
-    assert orch._task.scenario is None
-
-
-
 def test_agent_card_basic_fields() -> None:
-    orch = OrchestratorExecutor("test-env", model="gpt-4o", name="test", description="desc")
+    orch = OrchestratorExecutor(
+        "test-env", model="gpt-4o", scenario="analysis_chat", name="test", description="desc"
+    )
     card = orch.agent_card()
     assert card.name == "test"
     assert card.description == "desc"
@@ -71,7 +67,7 @@ def test_agent_card_basic_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_execute_emits_working_and_input_required(monkeypatch: pytest.MonkeyPatch) -> None:
-    orch = OrchestratorExecutor("test-env", model="gpt-4o")
+    orch = OrchestratorExecutor("test-env", model="gpt-4o", scenario="analysis_chat")
     queue = FakeQueue()
     context = FakeContext("hello")
 
@@ -91,7 +87,7 @@ async def test_execute_emits_working_and_input_required(monkeypatch: pytest.Monk
 
 @pytest.mark.asyncio
 async def test_execute_maps_errors_to_failed(monkeypatch: pytest.MonkeyPatch) -> None:
-    orch = OrchestratorExecutor("test-env", model="gpt-4o")
+    orch = OrchestratorExecutor("test-env", model="gpt-4o", scenario="analysis_chat")
     queue = FakeQueue()
     context = FakeContext("hello")
 
@@ -111,7 +107,7 @@ async def test_execute_maps_errors_to_failed(monkeypatch: pytest.MonkeyPatch) ->
 
 @pytest.mark.asyncio
 async def test_cancel_clears_session() -> None:
-    orch = OrchestratorExecutor("test-env", model="gpt-4o")
+    orch = OrchestratorExecutor("test-env", model="gpt-4o", scenario="analysis_chat")
     orch._get_or_create_chat("ctx-1")
     assert "ctx-1" in orch._sessions
 
@@ -124,7 +120,7 @@ async def test_cancel_clears_session() -> None:
 
 
 def test_get_or_create_reuses_session() -> None:
-    orch = OrchestratorExecutor("test-env", model="gpt-4o")
+    orch = OrchestratorExecutor("test-env", model="gpt-4o", scenario="analysis_chat")
     c1 = orch._get_or_create_chat("ctx-1")
     c2 = orch._get_or_create_chat("ctx-1")
     assert c1 is c2

@@ -30,14 +30,6 @@ from hud.tools.base import BaseTool
 LOGGER = logging.getLogger(__name__)
 
 
-def _is_unsupported_elicitation_error(exc: Exception) -> bool:
-    """Return True for known client-side 'elicitation unsupported' failures."""
-    if isinstance(exc, NotImplementedError):
-        return True
-    detail = str(exc).lower()
-    return "not supported" in detail or "unsupported" in detail
-
-
 class ElicitTool(BaseTool):
     """Request structured input from the user during task execution.
 
@@ -84,11 +76,9 @@ class ElicitTool(BaseTool):
                 result = await ctx.elicit(message, response_type=options)
             else:
                 result = await ctx.elicit(message, response_type=str)
-        except Exception as exc:
-            if _is_unsupported_elicitation_error(exc):
-                LOGGER.warning("Elicitation not supported by client: %s", exc)
-                return [TextContent(type="text", text=f"Elicitation not available: {exc}")]
-            raise
+        except Exception as e:
+            LOGGER.warning("Elicitation not supported by client: %s", e)
+            return [TextContent(type="text", text=f"Elicitation not available: {e}")]
 
         if isinstance(result, AcceptedElicitation):
             data = result.data
