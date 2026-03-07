@@ -186,13 +186,17 @@ class OpenAIComputerTool(HudComputerTool):
         """
         # Handle batched actions (GA computer tool)
         if isinstance(actions, list):
-            result_blocks: list[ContentBlock] = []
-            for i, action_dict in enumerate(actions):
-                is_last = i == len(actions) - 1
-                self._suppress_screenshot = not is_last
-                result_blocks = await self(**action_dict)
-            self._suppress_screenshot = False
-            return result_blocks
+            if not actions:
+                raise McpError(ErrorData(code=INVALID_PARAMS, message="actions list is empty"))
+            try:
+                result_blocks: list[ContentBlock] = []
+                for i, action_dict in enumerate(actions):
+                    is_last = i == len(actions) - 1
+                    self._suppress_screenshot = not is_last
+                    result_blocks = await self(**action_dict)
+                return result_blocks
+            finally:
+                self._suppress_screenshot = False
 
         if type is None:
             raise McpError(ErrorData(code=INVALID_PARAMS, message="type is required"))

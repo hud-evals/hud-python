@@ -447,13 +447,15 @@ class TestHostedTools:
 
         tool = CodeExecutionTool()
         assert tool.name == "code_execution"
-
-        # Should have specs for both Gemini and OpenAI
         assert "gemini" in tool.meta["native_tools"]
         assert "openai" in tool.meta["native_tools"]
-
         assert tool.meta["native_tools"]["gemini"]["api_type"] == "code_execution"
         assert tool.meta["native_tools"]["openai"]["api_type"] == "code_interpreter"
+
+        # With container, OpenAI spec includes container config
+        tool_configured = CodeExecutionTool(container={"image": "python:3"})
+        openai_spec = tool_configured.meta["native_tools"]["openai"]
+        assert openai_spec["extra"]["container"] == {"image": "python:3"}
 
     def test_tool_search_tool(self) -> None:
         """Test ToolSearchTool creation and specs."""

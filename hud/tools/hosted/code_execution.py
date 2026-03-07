@@ -13,10 +13,12 @@ class CodeExecutionTool(HostedTool):
     """Provider-executed code execution tool.
 
     When enabled, the model can generate and execute code in a sandboxed environment.
-    Supported by Gemini (code_execution) and OpenAI (code_interpreter).
 
-    Note: OpenAI's code_interpreter requires additional configuration and may have
-    usage costs. Gemini's code_execution is included in standard API access.
+    Gemini: Works out of the box.
+        env.add_tool(CodeExecutionTool())
+
+    OpenAI: Requires container configuration.
+        env.add_tool(CodeExecutionTool(container={"image": "python:3.12"}))
     """
 
     native_specs: ClassVar[NativeToolSpecs] = {
@@ -25,12 +27,25 @@ class CodeExecutionTool(HostedTool):
         AgentType.OPENAI: NativeToolSpec(api_type="code_interpreter", hosted=True),
     }
 
-    def __init__(self) -> None:
-        """Initialize CodeExecutionTool."""
+    def __init__(self, container: dict[str, Any] | None = None) -> None:
+        """Initialize CodeExecutionTool.
+
+        Args:
+            container: OpenAI container config for code_interpreter.
+                       When provided, enables the tool for OpenAI agents.
+        """
+        instance_specs: NativeToolSpecs | None = None
+        if container is not None:
+            instance_specs = {
+                AgentType.OPENAI: NativeToolSpec(
+                    api_type="code_interpreter", hosted=True, extra={"container": container}
+                ),
+            }
         super().__init__(
             name="code_execution",
             title="Code Execution",
             description="Execute code in a sandboxed environment",
+            native_specs=instance_specs,
         )
 
     @staticmethod

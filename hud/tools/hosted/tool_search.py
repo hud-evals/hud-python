@@ -59,19 +59,18 @@ class ToolSearchTool(HostedTool):
             threshold: Minimum number of function tools before tool search activates.
                        Below this count, the tool is a no-op.
         """
-        extra = {"threshold": threshold}
         instance_specs: NativeToolSpecs = {
             AgentType.OPENAI: NativeToolSpec(
                 api_type="tool_search",
                 hosted=True,
-                extra=extra,
+                extra={"threshold": threshold},
                 supported_models=self._openai_models,
             ),
             AgentType.CLAUDE: NativeToolSpec(
                 api_type="tool_search_tool_bm25_20251119",
                 api_name="tool_search_tool_bm25",
                 hosted=True,
-                extra=extra,
+                extra={"threshold": threshold},
                 supported_models=self._claude_models,
             ),
         }

@@ -114,7 +114,7 @@ class OperatorAgent(OpenAIAgent):
     def _extract_tool_call(self, item: Any) -> MCPToolCall | None:
         """Route computer_call to the OpenAI-specific computer tool."""
         if item.type == "computer_call":
-            self.pending_safety_checks = item.pending_safety_checks
+            self.pending_safety_checks = item.pending_safety_checks or []
             return MCPToolCall(
                 name=self._operator_computer_tool_name,
                 arguments=item.action.to_dict(),
