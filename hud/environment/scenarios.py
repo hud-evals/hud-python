@@ -16,20 +16,61 @@ from pydantic import BaseModel, ConfigDict
 from hud.tools.types import EvaluationResult, ScenarioResult  # noqa: F401
 
 
+def _request_context_session_id() -> str | None:
+    """Best-effort FastMCP session ID from raw request context.
+
+    Mirrors FastMCP's ``Context.session_id`` logic so fallback call paths stay in
+    the same ID space as the primary ``ctx.session_id`` path.
+    """
+    try:
+        import uuid as _uuid
+
+        from mcp.server.lowlevel.server import request_ctx as _req_ctx
+
+        req = _req_ctx.get()
+        if not req:
+            return None
+
+        session = getattr(req, "session", None)
+        if session is None:
+            return None
+
+        sid = getattr(session, "_fastmcp_state_prefix", None)
+        if sid:
+            return sid
+
+        request = getattr(req, "request", None)
+        headers = getattr(request, "headers", None)
+        if headers:
+            sid = headers.get("mcp-session-id")
+
+        if sid is None:
+            sid = str(_uuid.uuid4())
+
+        session._fastmcp_state_prefix = sid  # type: ignore[attr-defined]
+        return sid
+    except (ImportError, LookupError, Exception):  # noqa: S110
+        return None
+
+
 def _safe_session_id(ctx: Any) -> str | None:
     """Extract session_id from a FastMCP Context, returning None when unavailable.
 
     In FastMCP 3.x the ``session_id`` property raises ``RuntimeError``
     instead of returning ``None`` when accessed outside a request context.
     ``getattr(ctx, "session_id", None)`` only catches ``AttributeError``,
-    so we need an explicit try/except.
+    so we need an explicit try/except. When that happens, fall back to the raw
+    request context using the same resolution order as FastMCP itself.
     """
-    if ctx is None:
-        return None
-    try:
-        return ctx.session_id  # type: ignore[union-attr]
-    except (RuntimeError, AttributeError):
-        return None
+    if ctx is not None:
+        try:
+            sid = ctx.session_id  # type: ignore[union-attr]
+            if sid:
+                return sid
+        except (RuntimeError, AttributeError):
+            pass
+
+    return _request_context_session_id()
 
 
 if TYPE_CHECKING:
@@ -392,6 +433,9 @@ class ScenarioMixin:
     # Per-scenario output config: scenario_name -> (returns_type, enable_citations)
     _scenario_output_config: dict[str, tuple[type | None, bool]]
 
+    # Scenarios marked as chat-compatible (accept a ``messages`` parameter)
+    _scenario_chat_flags: dict[str, bool]
+
     # Scenario sessions keyed by session ID for multi-client support.
     # Server-side: each MCP client gets its own session via ctx session ID.
     # Client-side: uses _CLIENT_SESSION_KEY as fallback when no MCP context.
@@ -428,6 +472,7 @@ class ScenarioMixin:
         self._scenarios = {}
         self._scenario_exclusions = {}
         self._scenario_output_config = {}
+        self._scenario_chat_flags = {}
         self._scenario_sessions = {}
 
         # Register _hud_submit tool (underscore = hidden from agent)
@@ -778,9 +823,31 @@ class ScenarioMixin:
                 # No second yield - default to success
                 return EvaluationResult(reward=1.0, done=True)
         else:
-            # Remote scenario - read resource via router
+            # Remote scenario - read resource via session's connection
+            # (resource routing may not include dynamic scenario resources,
+            #  so go directly to the connection that served setup)
             try:
-                contents = await self.read_resource(session.resource_uri)  # type: ignore[attr-defined]
+                conn_name = session.connection_name
+                logger.debug(
+                    "Evaluate remote scenario: resource_uri=%s, connection_name=%s",
+                    session.resource_uri,
+                    conn_name,
+                )
+                conn = self._connections.get(conn_name) if conn_name else None  # type: ignore[attr-defined]
+                if not conn and self._connections:  # type: ignore[attr-defined]
+                    # Fallback: try each connection directly (mirrors get_prompt fallback)
+                    for fallback_name, fallback_conn in self._connections.items():  # type: ignore[attr-defined]
+                        try:
+                            contents = await fallback_conn.read_resource(session.resource_uri)
+                            break
+                        except Exception:
+                            continue
+                    else:
+                        contents = await self.read_resource(session.resource_uri)  # type: ignore[attr-defined]
+                elif conn:
+                    contents = await conn.read_resource(session.resource_uri)
+                else:
+                    contents = await self.read_resource(session.resource_uri)  # type: ignore[attr-defined]
                 if contents:
                     first = contents[0]
                     if hasattr(first, "text") and isinstance(first.text, str):  # type: ignore[union-attr]
@@ -809,6 +876,7 @@ class ScenarioMixin:
         self,
         name: str | None = None,
         description: str | None = None,
+        chat: bool = False,
         required_env_vars: list[str] | None = None,
         exclude_tools: list[str] | None = None,
         exclude_sources: list[str] | None = None,
@@ -829,6 +897,10 @@ class ScenarioMixin:
         Args:
             name: Optional name for the scenario (defaults to function name)
             description: Optional description of what the scenario does
+            chat: Mark this scenario as chat-compatible.  Chat scenarios
+                must accept a ``messages`` parameter (the conversation
+                history) and are used by ``Chat`` / ``OrchestratorExecutor``
+                for multi-turn A2A interactions.
             required_env_vars: Optional list of environment variable names this scenario requires.
                 These are used by the HUD platform to check if users have configured the
                 necessary API keys/credentials before running this specific scenario.
@@ -851,16 +923,15 @@ class ScenarioMixin:
                 delivered to the evaluate phase on ``AgentAnswer.citations``.
 
         Example:
-            @env.scenario(required_env_vars=["OPENAI_API_KEY"])
-            async def chat(query: str):
-                yield f"Answer this question: {query}"
-                # ... evaluate
+            @env.scenario(chat=True)
+            async def assist(messages: list | None = None):
+                yield ["You are a helpful assistant.", *(messages or [])]
                 yield 1.0
 
             # MCP client usage:
-            # 1. get_prompt("{env_name}:chat", {query: "..."}) -> prompt messages
+            # 1. get_prompt("{env_name}:assist", {messages: [...]}) -> prompt messages
             # 2. agent runs...
-            # 3. read_resource("{env_name}:chat") -> {"reward": 0.95}
+            # 3. read_resource("{env_name}:assist") -> {"reward": 1.0}
         """
 
         def decorator(
@@ -874,6 +945,15 @@ class ScenarioMixin:
                     f"Scenario name '{scenario_name}' cannot contain ':' "
                     "(reserved as separator between environment and scenario names)"
                 )
+
+            # Validate chat-compatible scenarios have a ``messages`` parameter
+            if chat:
+                sig_check = inspect.signature(fn)
+                if "messages" not in sig_check.parameters:
+                    raise TypeError(
+                        f"Chat scenario '{scenario_name}' must accept a 'messages' parameter "
+                        "for multi-turn conversation history"
+                    )
 
             # self.name is already normalized (lowercase, hyphens) by Environment.__init__
             scenario_id = f"{self.name}:{scenario_name}"
@@ -892,6 +972,9 @@ class ScenarioMixin:
 
             # Store the generator function
             self._scenarios[scenario_name] = fn
+
+            if chat:
+                self._scenario_chat_flags[scenario_name] = True
 
             if returns is not None or enable_citations:
                 self._scenario_output_config[scenario_name] = (returns, enable_citations)

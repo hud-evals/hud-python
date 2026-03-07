@@ -96,6 +96,39 @@ class TestEnvironmentPrompts:
         assert prompts == []
 
     @pytest.mark.asyncio
+    async def test_list_prompts_returns_fastmcp_prompt_components(self) -> None:
+        """list_prompts returns FastMCP prompt objects with version attr."""
+        import mcp.types as mcp_types
+
+        from hud.environment import Environment
+
+        env = Environment("test")
+
+        async def fake_list_mcp_prompts() -> list[mcp_types.Prompt]:
+            return [
+                mcp_types.Prompt(
+                    name="test:prompt",
+                    description="Prompt description",
+                    arguments=[
+                        mcp_types.PromptArgument(
+                            name="foo",
+                            description="Foo arg",
+                            required=True,
+                        )
+                    ],
+                )
+            ]
+
+        env._list_mcp_prompts = fake_list_mcp_prompts  # type: ignore[method-assign]
+
+        prompts = await env.list_prompts()
+
+        assert len(prompts) == 1
+        assert prompts[0].name == "test:prompt"
+        assert hasattr(prompts[0], "version")
+        assert prompts[0].version is None
+
+    @pytest.mark.asyncio
     async def test_get_prompt_not_found(self) -> None:
         """get_prompt raises when prompt not found."""
         from hud.environment import Environment
@@ -393,6 +426,38 @@ class TestEnvironmentMCPProtocol:
         assert hasattr(env, "_env_call_tool")
         assert callable(env._env_list_tools)
         assert callable(env._env_call_tool)
+
+    @pytest.mark.asyncio
+    async def test_read_resource_handler_returns_read_resource_result(self) -> None:
+        """read_resource handler should wrap contents in ReadResourceResult."""
+        from typing import Any
+
+        import mcp.types as mcp_types
+        from pydantic import AnyUrl
+
+        from hud.environment import Environment
+
+        env = Environment("test")
+
+        async def fake_read_resource(_uri: str, **_kwargs: Any) -> list[mcp_types.TextResourceContents]:
+            return [
+                mcp_types.TextResourceContents(
+                    uri=AnyUrl("test://resource"),
+                    text='{"reward": 1.0, "done": true}',
+                )
+            ]
+
+        env.read_resource = fake_read_resource  # type: ignore[method-assign]
+        handler = env._mcp_server.request_handlers[mcp_types.ReadResourceRequest]
+        request = mcp_types.ReadResourceRequest(
+            method="resources/read",
+            params=mcp_types.ReadResourceRequestParams(uri=AnyUrl("test://resource")),
+        )
+
+        result = await handler(request)
+
+        assert isinstance(result.root, mcp_types.ReadResourceResult)
+        assert len(result.root.contents) == 1
 
 
 class TestEnvironmentToolFiltering:

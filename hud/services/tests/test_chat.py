@@ -13,7 +13,7 @@ from a2a.server.events.event_queue import EventQueue
 from a2a.types import TaskState, TaskStatusUpdateEvent
 from mcp.types import TextContent
 
-from hud.services.chat import Chat, _content_to_blocks, _content_to_str
+from hud.services.chat import Chat, _content_to_blocks
 
 # ---------------------------------------------------------------------------
 # Helper fixtures
@@ -37,18 +37,6 @@ def dummy_task() -> Any:
 
 
 class TestContentHelpers:
-    def test_content_to_str_plain(self) -> None:
-        assert _content_to_str("hello") == "hello"
-
-    def test_content_to_str_blocks(self) -> None:
-        blocks = [
-            TextContent(type="text", text="hello"),
-            TextContent(type="text", text="world"),
-        ]
-        result = _content_to_str(blocks)
-        assert "hello" in result
-        assert "world" in result
-
     def test_content_to_blocks_string(self) -> None:
         blocks = _content_to_blocks("hello")
         assert len(blocks) == 1
@@ -183,7 +171,7 @@ class TestA2AExecutor:
 
             event2 = await queue.dequeue_event(no_wait=True)
             assert isinstance(event2, TaskStatusUpdateEvent)
-            assert event2.status.state == TaskState.completed
+            assert event2.status.state == TaskState.input_required
             assert event2.final is True
 
     @pytest.mark.asyncio()

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from types import SimpleNamespace
 from typing import Any, Literal
 
 import pytest
 from pydantic import BaseModel
 
 from hud.environment import Environment
+from hud.environment.scenarios import _safe_session_id
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +78,14 @@ class _Item(BaseModel):
 
     id: int
     name: str
+
+
+class _BrokenFastMCPContext:
+    """Context whose session_id access fails outside FastMCP DI."""
+
+    @property
+    def session_id(self) -> str:
+        raise RuntimeError("session_id unavailable")
 
 
 class TestScenarioDecorator:
@@ -1067,7 +1077,6 @@ class TestScenarioRemoteErrors:
         with pytest.raises(RuntimeError, match="Error rendering prompt coding:bug_fix"):
             await env.run_scenario_setup("coding:bug_fix", {})
 
-
 class TestScenarioMalformedNames:
     """Test handling of malformed scenario names."""
 
@@ -1201,6 +1210,61 @@ class TestScenarioRegistration:
 
 class TestScenarioSessionState:
     """Test session state management edge cases."""
+
+    def test_safe_session_id_uses_request_header_when_ctx_fails(self) -> None:
+        """Fallback path should stay in FastMCP's session ID space."""
+        from mcp.server.lowlevel.server import request_ctx
+
+        req = SimpleNamespace(
+            session=SimpleNamespace(),
+            request=SimpleNamespace(headers={"mcp-session-id": "session-from-header"}),
+        )
+        token = request_ctx.set(req)  # type: ignore[arg-type]
+        try:
+            assert _safe_session_id(_BrokenFastMCPContext()) == "session-from-header"
+            assert req.session._fastmcp_state_prefix == "session-from-header"
+        finally:
+            request_ctx.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_env_get_prompt_and_evaluate_share_header_session_id(self) -> None:
+        """Setup/evaluate should agree on the same HTTP session ID."""
+        from mcp.server.lowlevel.server import request_ctx
+
+        env = Environment("test-env")
+
+        @env.scenario("test")
+        async def test_scenario():
+            answer = yield "Prompt"
+            yield 1.0 if answer == "answer" else 0.0
+
+        setup_req = SimpleNamespace(
+            session=SimpleNamespace(),
+            request=SimpleNamespace(headers={"mcp-session-id": "session-123"}),
+        )
+        setup_token = request_ctx.set(setup_req)  # type: ignore[arg-type]
+        try:
+            prompt = await env._env_get_prompt("test-env:test", {})
+        finally:
+            request_ctx.reset(setup_token)
+
+        assert getattr(prompt.messages[0].content, "text", None) == "Prompt"
+        session = env._get_session("session-123")
+        assert session is not None
+        session.answer = "answer"
+
+        evaluate_req = SimpleNamespace(
+            session=SimpleNamespace(),
+            request=SimpleNamespace(headers={"mcp-session-id": "session-123"}),
+        )
+        evaluate_token = request_ctx.set(evaluate_req)  # type: ignore[arg-type]
+        try:
+            session_id = _safe_session_id(_BrokenFastMCPContext())
+            result = await env.run_scenario_evaluate("test", session_id=session_id)
+        finally:
+            request_ctx.reset(evaluate_token)
+
+        assert result.reward == 1.0
 
     @pytest.mark.asyncio
     async def test_submit_before_setup_raises(self) -> None:

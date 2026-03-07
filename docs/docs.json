@@ -64,6 +64,7 @@
           {
             "group": "Guides",
             "pages": [
+              "guides/chat",
               "guides/integrations",
               "guides/sandboxing",
               "guides/best-practices",

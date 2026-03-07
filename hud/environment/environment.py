@@ -14,7 +14,7 @@ from hud.environment.connectors import ConnectorsMixin
 from hud.environment.integrations import IntegrationsMixin
 from hud.environment.mock import MockMixin
 from hud.environment.router import ConflictResolution, ToolRouter
-from hud.environment.scenarios import ScenarioMixin
+from hud.environment.scenarios import ScenarioMixin, _safe_session_id
 from hud.server.server import MCPServer
 from hud.types import MCPToolResult
 
@@ -528,6 +528,43 @@ class Environment(
         self._router.build_prompts(local_prompts, self._connections)
         self._prompt_routing_built = True
 
+    # FastMCP server internals expect list_prompts() to return FastMCP prompt
+    # objects with a .version attribute. HUD's router, however, builds routing
+    # from mcp.types.Prompt definitions. If we return the router's MCP prompt
+    # objects directly from list_prompts(), FastMCP 3.x crashes while handling
+    # prompts/list with: "'Prompt' object has no attribute 'version'".
+    # Keep the router path and server path split so each layer gets the prompt
+    # shape it expects.
+    async def _list_mcp_prompts(self) -> list[mcp_types.Prompt]:
+        """Return MCP prompt definitions for HUD's internal routing logic."""
+        if self._connections:
+            await asyncio.gather(*[c.list_prompts() for c in self._connections.values()])
+        await self._build_prompt_routing()
+        return self._router.prompts
+
+    @staticmethod
+    def _to_fastmcp_prompt(prompt: mcp_types.Prompt) -> Any:
+        """Convert an MCP prompt definition into a FastMCP prompt component."""
+        from fastmcp.prompts.prompt import Prompt, PromptArgument
+
+        arguments = [
+            PromptArgument(
+                name=arg.name,
+                description=arg.description,
+                required=bool(arg.required),
+            )
+            for arg in (prompt.arguments or [])
+        ]
+        return Prompt(
+            name=prompt.name,
+            version=None,
+            title=prompt.title,
+            description=prompt.description,
+            icons=prompt.icons,
+            arguments=arguments or None,
+            meta=getattr(prompt, "meta", None),
+        )
+
     async def _build_resource_routing(self) -> None:
         """Build resource routing from local resources and connections."""
         local_resources_list = await self._local_provider.list_resources()
@@ -575,8 +612,11 @@ class Environment(
             return mcp_types.ListResourcesResult(resources=resources)
 
         @self._mcp_server.read_resource()
-        async def _read_resource_handler(uri: AnyUrl, **kwargs: Any) -> Any:
-            return await self.read_resource(str(uri), **kwargs)
+        async def _read_resource_handler(
+            uri: AnyUrl, **kwargs: Any
+        ) -> mcp_types.ReadResourceResult:
+            contents = await self.read_resource(str(uri), **kwargs)
+            return mcp_types.ReadResourceResult(contents=contents)
 
     async def _env_list_tools(self) -> list[mcp_types.Tool]:
         """Return all tools including those from connectors."""
@@ -641,23 +681,9 @@ class Environment(
             scenario_name = name.split(":", 1)[1]
             str_args = {k: v for k, v in (arguments or {}).items()}
 
-            # Extract MCP session ID for multi-client isolation.
-            # Replicates Context.session_id logic since we're outside FastMCP DI.
-            session_id: str | None = None
-            try:
-                import uuid as _uuid
-
-                from mcp.server.lowlevel.server import request_ctx as _req_ctx
-
-                req = _req_ctx.get()
-                if req and req.session:
-                    sid = getattr(req.session, "_fastmcp_state_prefix", None)
-                    if sid is None:
-                        sid = str(_uuid.uuid4())
-                        req.session._fastmcp_state_prefix = sid  # type: ignore[attr-defined]
-                    session_id = sid
-            except (LookupError, Exception):  # noqa: S110
-                pass
+            # Extract MCP session ID for multi-client isolation using the same
+            # helper as scenario prompt/resource handlers.
+            session_id = _safe_session_id(None)
 
             prompt_text = await self.run_scenario_setup(
                 scenario_name, str_args, session_id=session_id
@@ -709,7 +735,6 @@ class Environment(
             # resolves to self.call_tool which has a different (multi-format)
             # signature and would TypeError with positional (name, arguments).
             from fastmcp import FastMCP
-
             result = await FastMCP.call_tool(self, name, arguments, run_middleware=False)
             return MCPToolResult(
                 content=result.content, structuredContent=result.structured_content
@@ -787,12 +812,10 @@ class Environment(
     # Prompt Operations
     # =========================================================================
 
-    async def list_prompts(self) -> list[mcp_types.Prompt]:
-        """Refresh prompts from all connections and rebuild prompt routing."""
-        if self._connections:
-            await asyncio.gather(*[c.list_prompts() for c in self._connections.values()])
-        await self._build_prompt_routing()
-        return self._router.prompts
+    async def list_prompts(self) -> list[Any]:
+        """List prompts as FastMCP prompt components for server-side MCP operations."""
+        prompts = await self._list_mcp_prompts()
+        return [self._to_fastmcp_prompt(prompt) for prompt in prompts]
 
     async def get_prompt(
         self, name: str, arguments: dict[str, Any] | None = None

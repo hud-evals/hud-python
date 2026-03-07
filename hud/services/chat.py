@@ -10,7 +10,7 @@ Example::
     from hud.eval import Task
 
     chat = Chat(
-        Task(env={"name": "my-env"}, scenario="assist"),
+        Task(env={"name": "my-env"}, scenario="analysis_chat"),
         model="claude-sonnet-4-20250514",
     )
 
@@ -62,19 +62,6 @@ LOGGER = logging.getLogger(__name__)
 MessageContent = str | Sequence[ContentBlock]
 
 
-def _content_to_str(content: MessageContent) -> str:
-    """Extract plain text from a message for history storage."""
-    if isinstance(content, str):
-        return content
-    parts: list[str] = []
-    for block in content:
-        if isinstance(block, TextContent):
-            parts.append(block.text)
-        elif hasattr(block, "type"):
-            parts.append(f"[{block.type}]")
-    return " ".join(parts) if parts else ""
-
-
 def _content_to_blocks(content: MessageContent) -> list[ContentBlock]:
     """Normalize message content to a list of ContentBlocks."""
     if isinstance(content, str):
@@ -82,6 +69,18 @@ def _content_to_blocks(content: MessageContent) -> list[ContentBlock]:
     if isinstance(content, list):
         return content  # type: ignore[return-value]
     return list(content)
+
+
+def _blocks_to_message_content(
+    blocks: Sequence[ContentBlock],
+) -> dict[str, Any] | list[dict[str, Any]]:
+    """Serialize blocks for PromptMessage-compatible `content`.
+
+    Preserve multi-block inputs instead of silently dropping blocks.
+    """
+    if len(blocks) == 1:
+        return blocks[0].model_dump()
+    return [block.model_dump() for block in blocks]
 
 
 class Chat(AgentExecutor):
@@ -107,6 +106,7 @@ class Chat(AgentExecutor):
         agent_params: dict[str, Any] | None = None,
         name: str | None = None,
         description: str | None = None,
+        max_steps: int = 10,
     ) -> None:
         """Initialize Chat.
 
@@ -125,6 +125,7 @@ class Chat(AgentExecutor):
         self._agent_params = agent_params or {}
         self._name = name or task.scenario or "chat"
         self._description = description or f"Chat agent for {task.scenario or 'tasks'}"
+        self._max_steps = max_steps
         self.messages: list[dict[str, Any]] = []
 
         # Stable session identifier reused across all turns so the remote
@@ -158,27 +159,18 @@ class Chat(AgentExecutor):
 
         blocks = _content_to_blocks(message)
 
-        # Build PromptMessage-compatible dict (role + content as ContentBlock)
-        content_data = blocks[0].model_dump()
+        # Build PromptMessage-compatible content (single block dict or block list)
+        content_data = _blocks_to_message_content(blocks)
 
         self.messages.append({"role": "user", "content": content_data})
 
-        task = self._task.model_copy(
-            update={
-                "args": {**(self._task.args or {}), "messages": self.messages},
-            }
-        )
+        task_args = dict(self._task.args or {})
+        task_args["messages"] = self.messages
+        task = self._task.model_copy(update={"args": task_args})
 
-        # Pin the Environment-Id across turns so the remote server
-        # maintains session state (OAuth tokens, ctx.set_state, etc.).
-        from hud.environment import Environment
-
-        if isinstance(task.env, Environment):
-            task.env._stable_environment_id = self._session_id
-
-        async with hud.eval(task, trace_id=self._session_id) as ctx:
+        async with hud.eval(task) as ctx:
             agent = self._create_agent()
-            result = await agent.run(ctx)
+            result = await agent.run(ctx, max_steps=self._max_steps)
 
         self.messages.append(
             {
@@ -197,6 +189,10 @@ class Chat(AgentExecutor):
         """
         self.messages = []
         self._session_id = str(uuid.uuid4())
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
 
     # ------------------------------------------------------------------
     # MCP tool surface
@@ -298,18 +294,19 @@ class Chat(AgentExecutor):
             message_text = context.get_user_input()
 
             # Check if this is a follow-up to a pending elicitation
-            if task_id in self._pending_elicitations:
-                future = self._pending_elicitations.pop(task_id)
+            future = self._pending_elicitations.pop(task_id, None)
+            if future is not None:
                 future.set_result(message_text)
                 return
 
-            # Emit WORKING status
             await event_queue.enqueue_event(
                 TaskStatusUpdateEvent(
                     context_id=context_id,
                     task_id=task_id,
                     final=False,
-                    status=TaskStatus(state=TaskState.working),
+                    status=TaskStatus(
+                        state=TaskState.working,
+                    ),
                 )
             )
 
@@ -322,7 +319,7 @@ class Chat(AgentExecutor):
                     task_id=task_id,
                     final=True,
                     status=TaskStatus(
-                        state=TaskState.completed,
+                        state=TaskState.input_required,
                         message=Message(
                             message_id=str(uuid.uuid4()),
                             role=Role.agent,
@@ -331,7 +328,7 @@ class Chat(AgentExecutor):
                     ),
                 )
             )
-        except Exception as e:
+        except Exception as exc:
             LOGGER.exception("Chat A2A execute failed")
             await event_queue.enqueue_event(
                 TaskStatusUpdateEvent(
@@ -343,7 +340,7 @@ class Chat(AgentExecutor):
                         message=Message(
                             message_id=str(uuid.uuid4()),
                             role=Role.agent,
-                            parts=[Part(root=TextPart(text=str(e)))],
+                            parts=[Part(root=TextPart(text=str(exc)))],
                         ),
                     ),
                 )
@@ -356,8 +353,9 @@ class Chat(AgentExecutor):
 
         self.clear()
 
-        if task_id in self._pending_elicitations:
-            self._pending_elicitations.pop(task_id).cancel()
+        pending = self._pending_elicitations.pop(task_id, None)
+        if pending is not None:
+            pending.cancel()
 
         await event_queue.enqueue_event(
             TaskStatusUpdateEvent(

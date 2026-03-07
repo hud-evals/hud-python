@@ -99,7 +99,6 @@ class AgentTool(BaseTool):
         self._agent_cls = agent
         self._agent_params = agent_params or {}
         self._trace = trace
-
         # Get visible params from scenario function
         self._visible_params: set[str] = set()
         self._param_schema: dict[str, Any] = {
