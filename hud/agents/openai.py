@@ -230,6 +230,12 @@ class OpenAIAgent(MCPAgent):
             tool_def.update(api_extra)
             if "threshold" in spec.extra:
                 self._tool_search_threshold = spec.extra["threshold"]
+            # Validate required config before sending to API
+            if spec.api_type == "code_interpreter" and "container" not in spec.extra:
+                raise ValueError(
+                    f"Tool '{tool.name}' requires container configuration for OpenAI. "
+                    "Use: CodeExecutionTool(container={'image': 'python:3.12'})"
+                )
             self._openai_tools.append(tool_def)  # type: ignore[arg-type]
             logger.debug("Added hosted tool %s (%s) for OpenAI", tool.name, spec.api_type)
 
@@ -421,10 +427,10 @@ class OpenAIAgent(MCPAgent):
             if call.name == computer_tool_name:
                 screenshot = self._extract_latest_screenshot(result)
                 if not screenshot:
-                    self.console.warning_log(
-                        "Computer tool result missing screenshot; skipping output."
+                    raise ValueError(
+                        "Computer tool result missing screenshot. "
+                        "The tool must always return a screenshot for computer_call_output."
                     )
-                    continue
                 call_id = call.id or self.pending_call_id
                 if not call_id:
                     self.console.warning_log("Computer tool call missing ID; skipping output.")
