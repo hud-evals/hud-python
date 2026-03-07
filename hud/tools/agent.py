@@ -88,6 +88,7 @@ class AgentTool(BaseTool):
         name: str | None = None,
         description: str | None = None,
         trace: bool = False,
+        max_steps: int = 10,
     ) -> None:
         if not model and agent is None:
             raise ValueError("Must provide either 'model' or 'agent'")
@@ -99,6 +100,7 @@ class AgentTool(BaseTool):
         self._agent_cls = agent
         self._agent_params = agent_params or {}
         self._trace = trace
+        self._max_steps = max_steps
 
         # Get visible params from scenario function
         self._visible_params: set[str] = set()
@@ -216,7 +218,7 @@ class AgentTool(BaseTool):
                 else:
                     agent = self._agent_cls.create(**self._agent_params)  # type: ignore
 
-                result = await agent.run(ctx)
+                result = await agent.run(ctx, max_steps=self._max_steps)
                 content = result.content if hasattr(result, "content") and result.content else ""
                 return ToolResult(content=[TextContent(type="text", text=content)])
 

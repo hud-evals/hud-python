@@ -183,7 +183,7 @@ class TestA2AExecutor:
 
             event2 = await queue.dequeue_event(no_wait=True)
             assert isinstance(event2, TaskStatusUpdateEvent)
-            assert event2.status.state == TaskState.completed
+            assert event2.status.state == TaskState.input_required
             assert event2.final is True
 
     @pytest.mark.asyncio()
