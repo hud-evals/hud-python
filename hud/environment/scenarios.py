@@ -16,13 +16,51 @@ from pydantic import BaseModel, ConfigDict
 from hud.tools.types import EvaluationResult, ScenarioResult  # noqa: F401
 
 
+def _request_context_session_id() -> str | None:
+    """Best-effort FastMCP session ID from raw request context.
+
+    Mirrors FastMCP's ``Context.session_id`` logic so fallback call paths stay in
+    the same ID space as the primary ``ctx.session_id`` path.
+    """
+    try:
+        import uuid as _uuid
+
+        from mcp.server.lowlevel.server import request_ctx as _req_ctx
+
+        req = _req_ctx.get()
+        if not req:
+            return None
+
+        session = getattr(req, "session", None)
+        if session is None:
+            return None
+
+        sid = getattr(session, "_fastmcp_state_prefix", None)
+        if sid:
+            return sid
+
+        request = getattr(req, "request", None)
+        headers = getattr(request, "headers", None)
+        if headers:
+            sid = headers.get("mcp-session-id")
+
+        if sid is None:
+            sid = str(_uuid.uuid4())
+
+        session._fastmcp_state_prefix = sid  # type: ignore[attr-defined]
+        return sid
+    except (ImportError, LookupError, Exception):  # noqa: S110
+        return None
+
+
 def _safe_session_id(ctx: Any) -> str | None:
     """Extract session_id from a FastMCP Context, returning None when unavailable.
 
     In FastMCP 3.x the ``session_id`` property raises ``RuntimeError``
     instead of returning ``None`` when accessed outside a request context.
     ``getattr(ctx, "session_id", None)`` only catches ``AttributeError``,
-    so we need an explicit try/except.
+    so we need an explicit try/except. When that happens, fall back to the raw
+    request context using the same resolution order as FastMCP itself.
     """
     if ctx is not None:
         try:
@@ -32,23 +70,7 @@ def _safe_session_id(ctx: Any) -> str | None:
         except (RuntimeError, AttributeError):
             pass
 
-    # Fallback: read MCP request context directly. In some FastMCP call paths
-    # ctx.session_id may be unavailable even though request_ctx/session exists.
-    try:
-        import uuid as _uuid
-
-        from mcp.server.lowlevel.server import request_ctx as _req_ctx
-
-        req = _req_ctx.get()
-        if req and req.session:
-            sid = getattr(req.session, "_fastmcp_state_prefix", None)
-            if sid is None:
-                sid = str(_uuid.uuid4())
-                req.session._fastmcp_state_prefix = sid  # type: ignore[attr-defined]
-            return sid
-    except (ImportError, LookupError, Exception):  # noqa: S110
-        pass
-    return None
+    return _request_context_session_id()
 
 
 if TYPE_CHECKING:

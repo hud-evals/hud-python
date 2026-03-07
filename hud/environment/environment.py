@@ -14,7 +14,7 @@ from hud.environment.connectors import ConnectorsMixin
 from hud.environment.integrations import IntegrationsMixin
 from hud.environment.mock import MockMixin
 from hud.environment.router import ConflictResolution, ToolRouter
-from hud.environment.scenarios import ScenarioMixin
+from hud.environment.scenarios import ScenarioMixin, _safe_session_id
 from hud.server.server import MCPServer
 from hud.types import MCPToolResult
 
@@ -681,23 +681,9 @@ class Environment(
             scenario_name = name.split(":", 1)[1]
             str_args = {k: v for k, v in (arguments or {}).items()}
 
-            # Extract MCP session ID for multi-client isolation.
-            # Replicates Context.session_id logic since we're outside FastMCP DI.
-            session_id: str | None = None
-            try:
-                import uuid as _uuid
-
-                from mcp.server.lowlevel.server import request_ctx as _req_ctx
-
-                req = _req_ctx.get()
-                if req and req.session:
-                    sid = getattr(req.session, "_fastmcp_state_prefix", None)
-                    if sid is None:
-                        sid = str(_uuid.uuid4())
-                        req.session._fastmcp_state_prefix = sid  # type: ignore[attr-defined]
-                    session_id = sid
-            except (LookupError, Exception):  # noqa: S110
-                pass
+            # Extract MCP session ID for multi-client isolation using the same
+            # helper as scenario prompt/resource handlers.
+            session_id = _safe_session_id(None)
 
             prompt_text = await self.run_scenario_setup(
                 scenario_name, str_args, session_id=session_id

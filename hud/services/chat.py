@@ -71,22 +71,6 @@ def _content_to_blocks(content: MessageContent) -> list[ContentBlock]:
     return list(content)
 
 
-def _content_to_str(content: MessageContent) -> str:
-    """Convert message content to a plain string.
-
-    Extracts text from TextContent blocks and joins with newlines.
-    """
-    if isinstance(content, str):
-        return content
-    parts = []
-    for block in content:
-        if isinstance(block, TextContent):
-            parts.append(block.text)
-        elif hasattr(block, "text"):
-            parts.append(block.text)
-    return "\n".join(parts)
-
-
 def _blocks_to_message_content(
     blocks: Sequence[ContentBlock],
 ) -> dict[str, Any] | list[dict[str, Any]]:
