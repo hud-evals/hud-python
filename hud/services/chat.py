@@ -229,7 +229,6 @@ class Chat(AgentExecutor):
             agent_params=self._agent_params,
             name=name,
             description=description,
-            max_steps=self._max_steps,
         )
 
     # ------------------------------------------------------------------
