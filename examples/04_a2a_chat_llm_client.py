@@ -3,10 +3,10 @@
 Usage:
     # Terminal 1: run A2A server
     HUD_ENV=my-hud-environment HUD_SCENARIO=analysis_chat \
-        uv run python examples/03_a2a_environment_orchestrator.py
+        uv run python examples/03_a2a_chat_server.py
 
     # Terminal 2: run this client
-    uv run python examples/04_a2a_python_sdk_client.py
+    uv run python examples/04_a2a_chat_llm_client.py
 
 This example is intentionally more advanced than `03`: an LLM sits in front
 of the A2A server and decides when to call it as a tool.

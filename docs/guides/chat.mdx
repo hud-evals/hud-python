@@ -55,7 +55,7 @@ Or with environment variables for flexibility:
 
 ```bash
 HUD_ENV=support HUD_SCENARIO=help \
-    uv run python examples/03_a2a_environment_orchestrator.py
+    uv run python examples/03_a2a_chat_server.py
 ```
 
 The orchestrator publishes an agent card at `/.well-known/agent-card.json` and accepts A2A messages at the root endpoint.
@@ -88,7 +88,7 @@ print(r2.content)
 
 ## Connecting a Client
 
-Any A2A-compatible client can talk to your orchestrator. See [`examples/04_a2a_python_sdk_client.py`](https://github.com/hud-evals/hud-python/blob/main/examples/04_a2a_python_sdk_client.py) for a full example that puts an LLM in front and calls the orchestrator as a tool.
+Any A2A-compatible client can talk to your orchestrator. See [`examples/04_a2a_chat_llm_client.py`](https://github.com/hud-evals/hud-python/blob/main/examples/04_a2a_chat_llm_client.py) for a full example that puts an LLM in front and calls the orchestrator as a tool.
 
 The pattern is: resolve the agent card, create a client, and stream messages back.
 
@@ -102,5 +102,5 @@ The pattern is: resolve the agent card, create a client, and stream messages bac
 
 ## Examples
 
-- [`examples/03_a2a_environment_orchestrator.py`](https://github.com/hud-evals/hud-python/blob/main/examples/03_a2a_environment_orchestrator.py) — A2A server that forwards turns to one chat scenario
-- [`examples/04_a2a_python_sdk_client.py`](https://github.com/hud-evals/hud-python/blob/main/examples/04_a2a_python_sdk_client.py) — LLM-fronted Python client that talks to the A2A server
+- [`examples/03_a2a_chat_server.py`](https://github.com/hud-evals/hud-python/blob/main/examples/03_a2a_chat_server.py) — A2A server that forwards turns to one chat scenario
+- [`examples/04_a2a_chat_llm_client.py`](https://github.com/hud-evals/hud-python/blob/main/examples/04_a2a_chat_llm_client.py) — LLM-fronted Python client that talks to the A2A server

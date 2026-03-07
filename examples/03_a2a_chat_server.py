@@ -6,7 +6,7 @@ management and serves it.
 
 Usage:
     HUD_ENV=my-hud-environment HUD_SCENARIO=analysis_chat \
-        uv run python examples/03_a2a_environment_orchestrator.py
+        uv run python examples/03_a2a_chat_server.py
 
 The configured scenario should be ``chat=True`` and accept a ``messages``
 argument for multi-turn history.
