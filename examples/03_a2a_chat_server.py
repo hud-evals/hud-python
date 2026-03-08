@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 
-from hud.services import OrchestratorExecutor
+from hud.services import ChatService
 
 
 def main() -> None:
@@ -31,8 +31,8 @@ def main() -> None:
     host = os.getenv("HUD_A2A_HOST", "0.0.0.0")
     port = int(os.getenv("HUD_A2A_PORT", "9999"))
 
-    orchestrator = OrchestratorExecutor(env_name, model=model, scenario=scenario)
-    orchestrator.serve(host=host, port=port)
+    service = ChatService(env_name, model=model, scenario=scenario)
+    service.serve(host=host, port=port)
 
 
 if __name__ == "__main__":

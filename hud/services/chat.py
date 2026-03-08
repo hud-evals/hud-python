@@ -48,6 +48,7 @@ from a2a.types import (
 )
 from mcp.types import ContentBlock, TextContent
 
+from hud.services.reply_metadata import build_reply_metadata_event
 from hud.types import Trace  # noqa: TC001 - used as return type
 
 if TYPE_CHECKING:
@@ -312,6 +313,13 @@ class Chat(AgentExecutor):
 
             result = await self.send(message_text)
             content = result.content or ""
+            metadata_event = build_reply_metadata_event(
+                context_id=context_id,
+                task_id=task_id,
+                trace=result,
+            )
+            if metadata_event is not None:
+                await event_queue.enqueue_event(metadata_event)
 
             await event_queue.enqueue_event(
                 TaskStatusUpdateEvent(

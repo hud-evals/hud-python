@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from typing import Any
+import json
+from typing import Any, cast
 
 import pytest
+from a2a.types import TaskArtifactUpdateEvent
 
-from hud.services.orchestrator import OrchestratorExecutor
+from hud.services.chat_service import ChatService
 from hud.types import Trace
 
 
@@ -35,19 +37,19 @@ class FakeContext:
 
 
 def test_init_stores_task_and_model() -> None:
-    orch = OrchestratorExecutor("test-env", model="gpt-4o", scenario="analysis_chat")
+    orch = ChatService("test-env", model="gpt-4o", scenario="analysis_chat")
     assert orch._task.scenario == "test-env:analysis_chat"
     assert orch._model == "gpt-4o"
     assert orch._name == "hud-test-env"
 
 
 def test_init_allows_short_scenario_override() -> None:
-    orch = OrchestratorExecutor("test-env", model="gpt-4o", scenario="analysis_chat")
+    orch = ChatService("test-env", model="gpt-4o", scenario="analysis_chat")
     assert orch._task.scenario == "test-env:analysis_chat"
 
 
 def test_init_allows_qualified_scenario_override() -> None:
-    orch = OrchestratorExecutor(
+    orch = ChatService(
         "test-env",
         model="gpt-4o",
         scenario="other-env:analysis_chat",
@@ -56,7 +58,7 @@ def test_init_allows_qualified_scenario_override() -> None:
 
 
 def test_agent_card_basic_fields() -> None:
-    orch = OrchestratorExecutor(
+    orch = ChatService(
         "test-env", model="gpt-4o", scenario="analysis_chat", name="test", description="desc"
     )
     card = orch.agent_card()
@@ -67,7 +69,7 @@ def test_agent_card_basic_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_execute_emits_working_and_input_required(monkeypatch: pytest.MonkeyPatch) -> None:
-    orch = OrchestratorExecutor("test-env", model="gpt-4o", scenario="analysis_chat")
+    orch = ChatService("test-env", model="gpt-4o", scenario="analysis_chat")
     queue = FakeQueue()
     context = FakeContext("hello")
 
@@ -86,8 +88,40 @@ async def test_execute_emits_working_and_input_required(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
+async def test_execute_emits_metadata_artifact_before_input_required(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    orch = ChatService("test-env", model="gpt-4o", scenario="analysis_chat")
+    queue = FakeQueue()
+    context = FakeContext("hello")
+
+    async def _fake_send(msg: Any) -> Trace:
+        return Trace(
+            content="done",
+            citations=[
+                {"type": "url_citation", "source": "https://example.com", "title": "Example"}
+            ],
+        )
+
+    chat = orch._get_or_create_chat("ctx-1")
+    monkeypatch.setattr(chat, "send", _fake_send)
+    orch._sessions["ctx-1"] = chat
+
+    await orch.execute(context, queue)  # type: ignore[arg-type]
+
+    assert len(queue.events) == 3
+    assert queue.events[0].status.state.value == "working"
+    assert isinstance(queue.events[1], TaskArtifactUpdateEvent)
+    payload = json.loads(cast(Any, queue.events[1].artifact.parts[0].root).text)
+    assert payload["type"] == "hud_reply_metadata"
+    assert payload["citations"][0]["source"] == "https://example.com"
+    assert payload["data"] is None
+    assert queue.events[2].status.state.value == "input-required"
+
+
+@pytest.mark.asyncio
 async def test_execute_maps_errors_to_failed(monkeypatch: pytest.MonkeyPatch) -> None:
-    orch = OrchestratorExecutor("test-env", model="gpt-4o", scenario="analysis_chat")
+    orch = ChatService("test-env", model="gpt-4o", scenario="analysis_chat")
     queue = FakeQueue()
     context = FakeContext("hello")
 
@@ -107,7 +141,7 @@ async def test_execute_maps_errors_to_failed(monkeypatch: pytest.MonkeyPatch) ->
 
 @pytest.mark.asyncio
 async def test_cancel_clears_session() -> None:
-    orch = OrchestratorExecutor("test-env", model="gpt-4o", scenario="analysis_chat")
+    orch = ChatService("test-env", model="gpt-4o", scenario="analysis_chat")
     orch._get_or_create_chat("ctx-1")
     assert "ctx-1" in orch._sessions
 
@@ -120,7 +154,7 @@ async def test_cancel_clears_session() -> None:
 
 
 def test_get_or_create_reuses_session() -> None:
-    orch = OrchestratorExecutor("test-env", model="gpt-4o", scenario="analysis_chat")
+    orch = ChatService("test-env", model="gpt-4o", scenario="analysis_chat")
     c1 = orch._get_or_create_chat("ctx-1")
     c2 = orch._get_or_create_chat("ctx-1")
     assert c1 is c2

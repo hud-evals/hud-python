@@ -35,6 +35,7 @@ from a2a.types import (
 from openai import AsyncOpenAI
 
 from hud.settings import settings
+from hud.services.reply_metadata import REPLY_METADATA_TYPE
 
 A2A_BASE_URL = os.getenv("A2A_URL", "http://localhost:9999")
 A2A_CARD_PATH = os.getenv("A2A_CARD_PATH", "/.well-known/agent-card.json")
@@ -49,6 +50,7 @@ TERMINAL_TASK_STATES = {
 }
 ConversationState = dict[str, str | None]
 ChatMessage = dict[str, Any]
+ReplyMetadata = dict[str, Any]
 SYSTEM_PROMPT = """You are a chat assistant with access to a backend A2A orchestrator.
 Use the talk_to_orchestrator tool when you need backend workflow knowledge or actions.
 If the orchestrator asks follow-up questions or requests missing details, relay them clearly to the user.
@@ -84,9 +86,31 @@ def _text_from_task(task: Task) -> str:
     if task.artifacts:
         for artifact in task.artifacts:
             artifact_text = _text_from_parts(artifact.parts or [])
-            if artifact_text:
+            if artifact_text and _parse_reply_metadata(artifact_text) is None:
                 texts.append(artifact_text)
     return "\n\n".join(texts).strip()
+
+
+def _parse_reply_metadata(text: str) -> ReplyMetadata | None:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+    if isinstance(payload, dict) and payload.get("type") == REPLY_METADATA_TYPE:
+        return payload
+    return None
+
+
+def _metadata_from_task(task: Task) -> ReplyMetadata | None:
+    for artifact in task.artifacts or []:
+        artifact_text = _text_from_parts(artifact.parts or [])
+        if not artifact_text:
+            continue
+        payload = _parse_reply_metadata(artifact_text)
+        if payload is not None:
+            return payload
+    return None
 
 
 def new_conversation_state() -> ConversationState:
@@ -118,8 +142,9 @@ async def send_to_orchestrator(
     client: Any,
     state: ConversationState,
     user_text: str,
-) -> tuple[str, ConversationState, TaskState | None]:
+) -> tuple[str, ReplyMetadata | None, ConversationState, TaskState | None]:
     final_answer = ""
+    reply_metadata: ReplyMetadata | None = None
     last_state: TaskState | None = None
 
     message = Message(
@@ -157,9 +182,15 @@ async def send_to_orchestrator(
 
         elif isinstance(event, TaskArtifactUpdateEvent):
             artifact_text = _text_from_parts(event.artifact.parts or [])
-            if artifact_text:
+            metadata = _parse_reply_metadata(artifact_text)
+            if metadata is not None:
+                reply_metadata = metadata
+            elif artifact_text:
                 final_answer = artifact_text
 
+        task_metadata = _metadata_from_task(task)
+        if task_metadata is not None:
+            reply_metadata = task_metadata
         task_text = _text_from_task(task)
         if task_text:
             final_answer = task_text
@@ -167,7 +198,7 @@ async def send_to_orchestrator(
     if last_state in TERMINAL_TASK_STATES:
         state["task_id"] = None
 
-    return final_answer, state, last_state
+    return final_answer, reply_metadata, state, last_state
 
 
 def _tool_schema() -> list[dict[str, Any]]:
@@ -197,7 +228,8 @@ async def run_llm_turn(
     a2a_client: Any,
     orchestrator_state: ConversationState,
     llm_messages: list[ChatMessage],
-) -> tuple[str, ConversationState]:
+) -> tuple[str, ReplyMetadata | None, ConversationState]:
+    latest_metadata: ReplyMetadata | None = None
     for _ in range(MAX_LLM_TOOL_ROUNDS):
         response = await llm.chat.completions.create(
             model=LLM_MODEL,
@@ -220,9 +252,10 @@ async def run_llm_turn(
                 args = json.loads(tool_call.function.arguments or "{}")
                 tool_input = str(args.get("message", ""))
                 print("  [llm] calling A2A orchestrator...")
-                tool_output, orchestrator_state, _ = await send_to_orchestrator(
+                tool_output, tool_metadata, orchestrator_state, _ = await send_to_orchestrator(
                     a2a_client, orchestrator_state, tool_input
                 )
+                latest_metadata = tool_metadata or latest_metadata
                 llm_messages.append(
                     {
                         "role": "tool",
@@ -234,11 +267,11 @@ async def run_llm_turn(
 
         final_answer = (message.content or "").strip()
         llm_messages.append({"role": "assistant", "content": final_answer})
-        return final_answer, orchestrator_state
+        return final_answer, latest_metadata, orchestrator_state
 
     fallback = "I hit the maximum number of backend tool calls for this turn."
     llm_messages.append({"role": "assistant", "content": fallback})
-    return fallback, orchestrator_state
+    return fallback, latest_metadata, orchestrator_state
 
 
 async def main() -> None:
@@ -269,7 +302,7 @@ async def main() -> None:
                 continue
 
             llm_messages.append({"role": "user", "content": user_text})
-            final_answer, orchestrator_state = await run_llm_turn(
+            final_answer, reply_metadata, orchestrator_state = await run_llm_turn(
                 llm,
                 a2a_client,
                 orchestrator_state,
@@ -278,6 +311,13 @@ async def main() -> None:
 
             if final_answer:
                 print(f"\nAgent: {final_answer}\n")
+                citations = reply_metadata.get("citations", []) if reply_metadata else []
+                if citations:
+                    print("Sources:")
+                    for citation in citations:
+                        source = citation.get("source") or citation.get("title") or str(citation)
+                        print(f"- {source}")
+                    print()
             else:
                 print("\nAgent: [no response]\n")
 

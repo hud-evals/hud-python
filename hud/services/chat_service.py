@@ -1,4 +1,4 @@
-"""A2A orchestrator backed by per-session Chat instances."""
+"""A2A chat service backed by per-session Chat instances."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from a2a.types import (
 )
 
 from hud.services.chat import Chat
+from hud.services.reply_metadata import build_reply_metadata_event
 
 if TYPE_CHECKING:
     from a2a.server.agent_execution.context import RequestContext
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class OrchestratorExecutor(AgentExecutor):
+class ChatService(AgentExecutor):
     """Thin A2A wrapper around per-session ``Chat`` instances."""
 
     def __init__(
@@ -90,7 +91,8 @@ class OrchestratorExecutor(AgentExecutor):
     def _cleanup_stale_sessions(self) -> None:
         now = time.monotonic()
         stale = [
-            cid for cid, ts in self._session_last_active.items()
+            cid
+            for cid, ts in self._session_last_active.items()
             if now - ts > self._session_ttl_seconds
         ]
         for cid in stale:
@@ -148,7 +150,7 @@ class OrchestratorExecutor(AgentExecutor):
         port: int = 9999,
         url: str | None = None,
     ) -> None:
-        """Serve the orchestrator via the A2A Starlette app."""
+        """Serve the chat service via the A2A Starlette app."""
         import uvicorn
         from a2a.server.apps import A2AStarletteApplication
         from a2a.server.request_handlers import DefaultRequestHandler
@@ -163,7 +165,7 @@ class OrchestratorExecutor(AgentExecutor):
             agent_card=self.agent_card(public_url),
             http_handler=handler,
         )
-        LOGGER.info("Serving A2A orchestrator at %s", public_url)
+        LOGGER.info("Serving A2A chat service at %s", public_url)
         uvicorn.run(app.build(), host=host, port=port)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
@@ -196,6 +198,14 @@ class OrchestratorExecutor(AgentExecutor):
                 chat.session_id,
             )
 
+            metadata_event = build_reply_metadata_event(
+                context_id=context_id,
+                task_id=task_id,
+                trace=result,
+            )
+            if metadata_event is not None:
+                await event_queue.enqueue_event(metadata_event)
+
             await self._enqueue_status(
                 event_queue,
                 context_id=context_id,
@@ -205,7 +215,7 @@ class OrchestratorExecutor(AgentExecutor):
                 text=content,
             )
         except Exception as exc:
-            LOGGER.exception("orchestrator execute failed")
+            LOGGER.exception("chat service execute failed")
             await self._enqueue_status(
                 event_queue,
                 context_id=context_id,
