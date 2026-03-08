@@ -336,21 +336,23 @@ class ClaudeAgent(MCPAgent):
                 result.done = False
             elif block.type == "text":
                 text_content += block.text
+                for cit in getattr(block, "citations", None) or []:
+                    citations.append(
+                        {
+                            "type": "document_citation",
+                            "text": getattr(cit, "cited_text", "") or "",
+                            "source": str(idx)
+                            if (idx := getattr(cit, "document_index", None)) is not None
+                            else getattr(cit, "document_title", "") or "",
+                            "title": getattr(cit, "document_title", None),
+                            "start_index": getattr(cit, "start_char_index", None),
+                            "end_index": getattr(cit, "end_char_index", None),
+                        }
+                    )
             elif hasattr(block, "type") and block.type == "thinking":
                 if thinking_content:
                     thinking_content += "\n"
                 thinking_content += block.thinking
-            elif hasattr(block, "type") and block.type == "cite":
-                citations.append(
-                    {
-                        "type": "document_citation",
-                        "text": getattr(block, "cited_text", "") or "",
-                        "source": str(idx)
-                        if (idx := getattr(block, "document_index", None)) is not None
-                        else getattr(block, "document_title", "") or "",
-                        "title": getattr(block, "document_title", None),
-                    }
-                )
 
         result.content = text_content
         result.citations = citations
@@ -366,6 +368,10 @@ class ClaudeAgent(MCPAgent):
 
         Handles EmbeddedResource (PDFs), images, and text content.
         """
+        citations_enabled = bool(
+            getattr(self.ctx, "scenario_enable_citations", False) if self.ctx else False
+        )
+
         # Process each tool result
         user_content = []
 
@@ -404,7 +410,10 @@ class ClaudeAgent(MCPAgent):
                             and resource.mimeType == "application/pdf"
                         ):
                             claude_blocks.append(
-                                document_to_content_block(base64_data=resource.blob)
+                                document_to_content_block(
+                                    base64_data=resource.blob,
+                                    enable_citations=citations_enabled,
+                                )
                             )
 
             # Add tool result
@@ -624,9 +633,11 @@ def text_to_content_block(text: str) -> BetaTextBlockParam:
     return {"type": "text", "text": text}
 
 
-def document_to_content_block(base64_data: str) -> BetaRequestDocumentBlockParam:
+def document_to_content_block(
+    base64_data: str, *, enable_citations: bool = False
+) -> BetaRequestDocumentBlockParam:
     """Convert base64 PDF to Claude document content block."""
-    return BetaRequestDocumentBlockParam(
+    block = BetaRequestDocumentBlockParam(
         type="document",
         source=BetaBase64PDFSourceParam(
             type="base64",
@@ -634,6 +645,9 @@ def document_to_content_block(base64_data: str) -> BetaRequestDocumentBlockParam
             data=base64_data,
         ),
     )
+    if enable_citations:
+        block["citations"] = {"enabled": True}
+    return block
 
 
 def tool_use_content_block(

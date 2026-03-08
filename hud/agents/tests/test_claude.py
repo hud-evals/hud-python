@@ -50,6 +50,8 @@ class MockEvalContext(EvalContext):
         self.variants: dict[str, Any] = {}
         self.answer: str | dict[str, Any] | None = None
         self.system_prompt: str | None = None
+        self.scenario_enable_citations: bool = False
+        self.scenario_returns_schema: dict[str, Any] | None = None
         self.error: BaseException | None = None
         self.metadata: dict[str, Any] = {}
         self.results: list[Any] = []
@@ -871,3 +873,141 @@ class TestClaudeAgentBetaHeader:
 
             _, kwargs = mock_anthropic.beta.messages.stream.call_args
             assert isinstance(kwargs["betas"], Omit)
+
+
+class TestCitationExtraction:
+    """Test citation extraction from BetaTextBlock.citations (modern SDK path)."""
+
+    @pytest.fixture
+    def mock_anthropic(self) -> AsyncAnthropic:
+        client = MagicMock(spec=AsyncAnthropic)
+        client.beta = MagicMock()
+        client.beta.messages = MagicMock()
+        return client
+
+    @pytest.mark.asyncio
+    async def test_inline_citations_extracted_from_text_block(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Text blocks with inline citations should populate result.citations."""
+        cit1 = MagicMock()
+        cit1.cited_text = "Revenue was $1M"
+        cit1.document_index = 0
+        cit1.document_title = "financials.pdf"
+        cit1.start_char_index = 0
+        cit1.end_char_index = 15
+
+        text_block = MagicMock()
+        text_block.type = "text"
+        text_block.text = "Revenue was $1M last quarter."
+        text_block.citations = [cit1]
+
+        mock_response = MagicMock()
+        mock_response.content = [text_block]
+
+        mock_stream = MockStreamContextManager(mock_response)
+        mock_anthropic.beta.messages.stream = MagicMock(return_value=mock_stream)
+
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            validate_api_key=False,
+        )
+        agent.claude_tools = []
+        agent.tool_mapping = {}
+        agent.has_computer_tool = False
+        agent._initialized = True
+
+        result = await agent.get_response([])
+
+        assert result.content == "Revenue was $1M last quarter."
+        assert len(result.citations) == 1
+        assert result.citations[0]["text"] == "Revenue was $1M"
+        assert result.citations[0]["source"] == "0"
+        assert result.citations[0]["title"] == "financials.pdf"
+        assert result.citations[0]["start_index"] == 0
+        assert result.citations[0]["end_index"] == 15
+
+    @pytest.mark.asyncio
+    async def test_no_citations_when_field_is_none(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
+        """Text blocks without citations should not populate result.citations."""
+        text_block = MagicMock()
+        text_block.type = "text"
+        text_block.text = "No citations here."
+        text_block.citations = None
+
+        mock_response = MagicMock()
+        mock_response.content = [text_block]
+
+        mock_stream = MockStreamContextManager(mock_response)
+        mock_anthropic.beta.messages.stream = MagicMock(return_value=mock_stream)
+
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            validate_api_key=False,
+        )
+        agent.claude_tools = []
+        agent.tool_mapping = {}
+        agent.has_computer_tool = False
+        agent._initialized = True
+
+        result = await agent.get_response([])
+        assert result.citations == []
+
+
+class TestDocumentBlockCitations:
+    """Test that document_to_content_block threads enable_citations."""
+
+    def test_citations_disabled_by_default(self) -> None:
+        from hud.agents.claude import document_to_content_block
+
+        block = document_to_content_block(base64_data="AAAA")
+        assert "citations" not in block
+
+    def test_citations_enabled(self) -> None:
+        from hud.agents.claude import document_to_content_block
+
+        block = document_to_content_block(base64_data="AAAA", enable_citations=True)
+        assert block["citations"] == {"enabled": True}
+
+    @pytest.mark.asyncio
+    async def test_format_tool_results_threads_citations_to_documents(self) -> None:
+        """When scenario_enable_citations is True, document blocks should get citations enabled."""
+        ctx = MockEvalContext()
+        ctx.scenario_enable_citations = True
+
+        client = MagicMock(spec=AsyncAnthropic)
+        client.beta = MagicMock()
+        client.beta.messages = MagicMock()
+        agent = ClaudeAgent.create(
+            model_client=client,
+            validate_api_key=False,
+        )
+        agent.ctx = ctx
+        agent._initialized = True
+        agent.claude_tools = []
+        agent.tool_mapping = {}
+
+        pdf_blob = "JVBERi0xLjQ="
+        tool_calls = [MCPToolCall(id="call_1", name="get_doc", arguments={})]
+        tool_results = [
+            MCPToolResult(
+                content=[
+                    types.EmbeddedResource(
+                        type="resource",
+                        resource=types.BlobResourceContents(
+                            uri="file:///doc.pdf",
+                            mimeType="application/pdf",
+                            blob=pdf_blob,
+                        ),
+                    )
+                ],
+                isError=False,
+            )
+        ]
+
+        messages = await agent.format_tool_results(tool_calls, tool_results)
+        tool_result_block = messages[0]["content"][0]
+        doc_block = tool_result_block["content"][0]
+        assert doc_block["citations"] == {"enabled": True}

@@ -43,6 +43,8 @@ class MockEvalContext(EvalContext):
         self.answer: str | dict[str, Any] | None = None
         self.system_prompt: str | None = None
         self.error: BaseException | None = None
+        self.scenario_enable_citations: bool = False
+        self.scenario_returns_schema: dict[str, Any] | None = None
         self.metadata: dict[str, Any] = {}
         self.results: list[Any] = []
         self._is_summary = False
@@ -516,3 +518,109 @@ class TestGeminiCitations:
         assert result.citations[0]["text"] == "fact one"
         assert result.citations[1]["source"] == "https://b.com"
         assert result.citations[1]["text"] == "fact two"
+
+
+class TestGeminiCitationInjection:
+    """Test that enable_citations injects google_search when missing."""
+
+    @pytest.fixture
+    def mock_gemini_client(self) -> MagicMock:
+        client = MagicMock(spec=genai.Client)
+        client.aio = MagicMock()
+        client.aio.models = MagicMock()
+        client.aio.models.generate_content = AsyncMock()
+        return client
+
+    def _make_agent(self, client: MagicMock) -> GeminiAgent:
+        agent = GeminiAgent.create(model_client=client, validate_api_key=False)
+        agent.gemini_tools = []
+        agent._gemini_to_mcp_tool_map = {}
+        agent._initialized = True
+        return agent
+
+    @pytest.mark.asyncio
+    async def test_google_search_injected_when_citations_enabled(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """When scenario_enable_citations=True and no google_search tool, inject one."""
+        agent = self._make_agent(mock_gemini_client)
+        ctx = MockEvalContext()
+        ctx.scenario_enable_citations = True
+        agent.ctx = ctx
+
+        candidate = MagicMock()
+        candidate.content = MagicMock()
+        candidate.content.parts = [MagicMock(function_call=None, thought=False, text="Hi")]
+        candidate.grounding_metadata = None
+        resp = MagicMock()
+        resp.candidates = [candidate]
+        mock_gemini_client.aio.models.generate_content = AsyncMock(return_value=resp)
+
+        await agent.get_response([])
+
+        call_kwargs = mock_gemini_client.aio.models.generate_content.call_args
+        config = call_kwargs.kwargs["config"]
+        tools_passed = config.tools
+        assert any(
+            isinstance(t, genai_types.Tool) and t.google_search is not None
+            for t in tools_passed
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_google_search_when_already_present(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """When google_search tool already exists, don't add a second one."""
+        agent = self._make_agent(mock_gemini_client)
+        existing_search_tool = genai_types.Tool(google_search=genai_types.GoogleSearch())
+        agent.gemini_tools = [existing_search_tool]
+        ctx = MockEvalContext()
+        ctx.scenario_enable_citations = True
+        agent.ctx = ctx
+
+        candidate = MagicMock()
+        candidate.content = MagicMock()
+        candidate.content.parts = [MagicMock(function_call=None, thought=False, text="Hi")]
+        candidate.grounding_metadata = None
+        resp = MagicMock()
+        resp.candidates = [candidate]
+        mock_gemini_client.aio.models.generate_content = AsyncMock(return_value=resp)
+
+        await agent.get_response([])
+
+        call_kwargs = mock_gemini_client.aio.models.generate_content.call_args
+        config = call_kwargs.kwargs["config"]
+        tools_passed = config.tools
+        search_count = sum(
+            1 for t in tools_passed
+            if isinstance(t, genai_types.Tool) and t.google_search is not None
+        )
+        assert search_count == 1
+
+    @pytest.mark.asyncio
+    async def test_no_injection_when_citations_disabled(
+        self, mock_gemini_client: MagicMock
+    ) -> None:
+        """When scenario_enable_citations=False, no google_search is injected."""
+        agent = self._make_agent(mock_gemini_client)
+        ctx = MockEvalContext()
+        ctx.scenario_enable_citations = False
+        agent.ctx = ctx
+
+        candidate = MagicMock()
+        candidate.content = MagicMock()
+        candidate.content.parts = [MagicMock(function_call=None, thought=False, text="Hi")]
+        candidate.grounding_metadata = None
+        resp = MagicMock()
+        resp.candidates = [candidate]
+        mock_gemini_client.aio.models.generate_content = AsyncMock(return_value=resp)
+
+        await agent.get_response([])
+
+        call_kwargs = mock_gemini_client.aio.models.generate_content.call_args
+        config = call_kwargs.kwargs["config"]
+        tools_passed = config.tools
+        assert not any(
+            isinstance(t, genai_types.Tool) and t.google_search is not None
+            for t in tools_passed
+        )

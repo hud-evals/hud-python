@@ -375,6 +375,7 @@ class ScenarioSession(BaseModel):
     exclude_tools: list[str] | None = None  # fnmatch patterns to hide from agent
     exclude_sources: list[str] | None = None  # Connection names to hide from agent
     returns_type: Any | None = None  # Pydantic model class for structured answers
+    returns_schema: dict[str, Any] | None = None  # JSON schema from prompt metadata
     enable_citations: bool = False
     allowed_tools: list[str] | None = None  # fnmatch patterns to rescue from exclusions
     prompt_messages: list[PromptMessage] | None = None  # Multi-turn prompt messages with roles
@@ -659,6 +660,12 @@ class ScenarioMixin:
             # Create session for local scenario
             excl = self._scenario_exclusions.get(local_name)
             out_cfg = self._scenario_output_config.get(local_name)
+            returns_schema: dict[str, Any] | None = None
+            if out_cfg and out_cfg[0] is not None:
+                from pydantic import TypeAdapter
+
+                returns_schema = TypeAdapter(out_cfg[0]).json_schema()
+
             session = ScenarioSession(
                 local_name=local_name,
                 full_name=scenario_name,
@@ -670,6 +677,7 @@ class ScenarioMixin:
                 exclude_sources=excl[1] if excl else None,
                 allowed_tools=excl[2] if excl else None,
                 returns_type=out_cfg[0] if out_cfg else None,
+                returns_schema=returns_schema,
                 enable_citations=out_cfg[1] if out_cfg else False,
                 prompt_messages=prompt_messages,
             )
@@ -755,6 +763,10 @@ class ScenarioMixin:
             exclude_tools_meta = remote_meta.get("exclude_tools")
             exclude_sources_meta = remote_meta.get("exclude_sources")
             allowed_tools_meta = remote_meta.get("allowed_tools")
+            returns_schema_meta = remote_meta.get("returns_schema")
+            if not isinstance(returns_schema_meta, dict):
+                returns_schema_meta = None
+            enable_citations_meta = bool(remote_meta.get("enable_citations", False))
 
             # Create session for remote scenario - use router's connection info
             session = ScenarioSession(
@@ -767,6 +779,8 @@ class ScenarioMixin:
                 exclude_tools=exclude_tools_meta,
                 exclude_sources=exclude_sources_meta,
                 allowed_tools=allowed_tools_meta,
+                returns_schema=returns_schema_meta,
+                enable_citations=enable_citations_meta,
             )
             self._set_session(session, session_id)
 

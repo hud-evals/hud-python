@@ -1013,6 +1013,35 @@ class TestScenarioRemoteErrors:
     """Test remote scenario error mapping."""
 
     @pytest.mark.asyncio
+    async def test_remote_setup_propagates_output_metadata(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Remote prompt meta should populate session output config."""
+        env = Environment("test-env")
+
+        async def successful_get_prompt(_name: str, _arguments: dict[str, str] | None = None) -> Any:
+            return SimpleNamespace(
+                messages=[SimpleNamespace(content=SimpleNamespace(text="Prompt"))],
+                meta={
+                    "enable_citations": True,
+                    "returns_schema": {"type": "object", "properties": {"summary": {"type": "string"}}},
+                },
+            )
+
+        monkeypatch.setattr(env, "get_prompt", successful_get_prompt)
+        monkeypatch.setattr(env._router, "get_prompt_connection", lambda _name: "remote")
+
+        prompt = await env.run_scenario_setup("remote-env:solve-task", {})
+        assert prompt == "Prompt"
+
+        session = env._get_session()
+        assert session is not None
+        assert session.is_local is False
+        assert session.enable_citations is True
+        assert isinstance(session.returns_schema, dict)
+        assert session.returns_schema.get("type") == "object"
+
+    @pytest.mark.asyncio
     async def test_remote_setup_error_when_scenarios_unavailable_reraises_original(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1939,3 +1968,24 @@ class TestScenarioToolExclusion:
         assert prompt.meta is not None
         assert prompt.meta.get("exclude_sources") == ["hub"]
         assert prompt.meta.get("allowed_tools") == ["hub_read"]
+
+    @pytest.mark.asyncio
+    async def test_meta_propagates_output_config(self) -> None:
+        """Scenario prompt meta includes returns_schema and enable_citations."""
+        env = Environment("test-env")
+
+        class _Answer(BaseModel):
+            summary: str
+
+        @env.scenario("typed", returns=_Answer, enable_citations=True)
+        async def typed():
+            yield "Prompt"
+            yield 1.0
+
+        prompt = _get_prompt(env, "test-env:typed")
+        assert prompt is not None
+        assert prompt.meta is not None
+        assert prompt.meta.get("enable_citations") is True
+        returns_schema = prompt.meta.get("returns_schema")
+        assert isinstance(returns_schema, dict)
+        assert returns_schema.get("type") == "object"
