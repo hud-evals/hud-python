@@ -423,9 +423,41 @@ class TestEnvironmentMCPProtocol:
 
         # Verify the custom handlers exist
         assert hasattr(env, "_env_list_tools")
+        assert hasattr(env, "_env_list_prompts")
         assert hasattr(env, "_env_call_tool")
         assert callable(env._env_list_tools)
+        assert callable(env._env_list_prompts)
         assert callable(env._env_call_tool)
+
+    @pytest.mark.asyncio
+    async def test_list_prompts_handler_returns_list_prompts_result(self) -> None:
+        """list_prompts handler should wrap prompts in ListPromptsResult."""
+        import mcp.types as mcp_types
+
+        from hud.environment import Environment
+
+        env = Environment("test")
+
+        async def fake_list_mcp_prompts() -> list[mcp_types.Prompt]:
+            return [
+                mcp_types.Prompt(
+                    name="test:prompt",
+                    description="Prompt description",
+                    arguments=[],
+                )
+            ]
+
+        env._list_mcp_prompts = fake_list_mcp_prompts  # type: ignore[method-assign]
+        handler = env._mcp_server.request_handlers[mcp_types.ListPromptsRequest]
+        request = mcp_types.ListPromptsRequest(method="prompts/list")
+
+        result = await handler(request)
+
+        assert isinstance(result.root, mcp_types.ListPromptsResult)
+        assert len(result.root.prompts) == 1
+        assert result.root.prompts[0].name == "test:prompt"
+        assert isinstance(result.root.prompts[0], mcp_types.Prompt)
+        assert not hasattr(result.root.prompts[0], "version")
 
     @pytest.mark.asyncio
     async def test_read_resource_handler_returns_read_resource_result(self) -> None:

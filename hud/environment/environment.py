@@ -604,6 +604,15 @@ class Environment(
         ) -> mcp_types.GetPromptResult:
             return await self._env_get_prompt(name, arguments)
 
+        @self._mcp_server.list_prompts()
+        async def _list_prompts_handler(
+            request: Any = None,
+        ) -> mcp_types.ListPromptsResult:
+            # This handler must return MCP prompt definitions. Returning FastMCP
+            # prompt components here causes ListPromptsResult validation errors.
+            prompts = await self._env_list_prompts()
+            return mcp_types.ListPromptsResult(prompts=prompts)
+
         @self._mcp_server.list_resources()
         async def _list_resources_handler(
             request: Any = None,
@@ -623,6 +632,10 @@ class Environment(
         if not self._tool_routing_built:
             await self._build_tool_routing()
         return self._router.tools
+
+    async def _env_list_prompts(self) -> list[mcp_types.Prompt]:
+        """Return all prompts including those from connectors."""
+        return await self._list_mcp_prompts()
 
     async def _env_list_resources(self) -> list[mcp_types.Resource]:
         """Return all resources including those from connectors."""
