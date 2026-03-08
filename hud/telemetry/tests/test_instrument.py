@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
+from mcp import types
 
 from hud.telemetry.instrument import _serialize_value, instrument
+from hud.types import MCPToolResult
 
 
 def test_serialize_value_simple_types():
@@ -83,6 +85,26 @@ def test_serialize_value_fallback():
     # The result is a string representation of the object
     assert isinstance(result, str)
     assert "WeirdObj" in result
+
+
+def test_serialize_value_empty_tool_result_gets_success_fallback():
+    """Silent successful MCP tool results should be trace-readable."""
+    result = _serialize_value(MCPToolResult(content=[], isError=False))
+    assert isinstance(result, dict)
+    assert result["isError"] is False
+    assert result["content"] == [{"type": "text", "text": "Tool executed successfully"}]
+
+
+def test_serialize_value_tool_result_preserves_real_content():
+    """Tool results with text content should keep that content."""
+    result = _serialize_value(
+        MCPToolResult(
+            content=[types.TextContent(type="text", text="real output")],
+            isError=False,
+        )
+    )
+    assert isinstance(result, dict)
+    assert result["content"][0]["text"] == "real output"
 
 
 @pytest.mark.asyncio
