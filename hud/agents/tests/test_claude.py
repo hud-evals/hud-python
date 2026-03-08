@@ -1011,3 +1011,70 @@ class TestDocumentBlockCitations:
         tool_result_block = messages[0]["content"][0]
         doc_block = tool_result_block["content"][0]
         assert doc_block["citations"] == {"enabled": True}
+
+    @pytest.mark.asyncio
+    async def test_format_tool_results_wraps_text_as_document_when_citations_enabled(self) -> None:
+        """Text tool results become plain-text document blocks when citations are on."""
+        ctx = MockEvalContext()
+        ctx.scenario_enable_citations = True
+
+        client = MagicMock(spec=AsyncAnthropic)
+        client.beta = MagicMock()
+        client.beta.messages = MagicMock()
+        agent = ClaudeAgent.create(
+            model_client=client,
+            validate_api_key=False,
+        )
+        agent.ctx = ctx
+        agent._initialized = True
+        agent.claude_tools = []
+        agent.tool_mapping = {}
+
+        tool_calls = [MCPToolCall(id="call_1", name="get_sales", arguments={})]
+        tool_results = [
+            MCPToolResult(
+                content=[types.TextContent(type="text", text="Revenue was $1M last quarter.")],
+                isError=False,
+            )
+        ]
+
+        messages = await agent.format_tool_results(tool_calls, tool_results)
+        tool_result_block = messages[0]["content"][0]
+        doc_block = tool_result_block["content"][0]
+        assert doc_block["type"] == "document"
+        assert doc_block["source"]["type"] == "text"
+        assert doc_block["source"]["data"] == "Revenue was $1M last quarter."
+        assert doc_block["citations"] == {"enabled": True}
+        assert doc_block["title"] == "get_sales"
+
+    @pytest.mark.asyncio
+    async def test_format_tool_results_keeps_text_block_when_citations_disabled(self) -> None:
+        """Text tool results stay as plain text blocks when citations are off."""
+        ctx = MockEvalContext()
+        ctx.scenario_enable_citations = False
+
+        client = MagicMock(spec=AsyncAnthropic)
+        client.beta = MagicMock()
+        client.beta.messages = MagicMock()
+        agent = ClaudeAgent.create(
+            model_client=client,
+            validate_api_key=False,
+        )
+        agent.ctx = ctx
+        agent._initialized = True
+        agent.claude_tools = []
+        agent.tool_mapping = {}
+
+        tool_calls = [MCPToolCall(id="call_1", name="get_sales", arguments={})]
+        tool_results = [
+            MCPToolResult(
+                content=[types.TextContent(type="text", text="Revenue was $1M.")],
+                isError=False,
+            )
+        ]
+
+        messages = await agent.format_tool_results(tool_calls, tool_results)
+        tool_result_block = messages[0]["content"][0]
+        text_block = tool_result_block["content"][0]
+        assert text_block["type"] == "text"
+        assert text_block["text"] == "Revenue was $1M."

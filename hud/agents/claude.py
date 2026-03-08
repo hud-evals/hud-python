@@ -17,6 +17,7 @@ from anthropic.types.beta import (
     BetaContentBlockParam,
     BetaImageBlockParam,
     BetaMessageParam,
+    BetaPlainTextSourceParam,
     BetaRequestDocumentBlockParam,
     BetaTextBlockParam,
     BetaToolBash20250124Param,
@@ -399,11 +400,17 @@ class ClaudeAgent(MCPAgent):
                 # Process success content
                 for content in result.content:
                     if isinstance(content, types.TextContent):
-                        claude_blocks.append(text_to_content_block(content.text))
+                        if citations_enabled:
+                            claude_blocks.append(
+                                text_document_block(
+                                    content.text, title=tool_call.name
+                                )
+                            )
+                        else:
+                            claude_blocks.append(text_to_content_block(content.text))
                     elif isinstance(content, types.ImageContent):
                         claude_blocks.append(base64_to_content_block(content.data))
                     elif isinstance(content, types.EmbeddedResource):
-                        # Handle embedded resources (PDFs)
                         resource = content.resource
                         if (
                             isinstance(resource, types.BlobResourceContents)
@@ -631,6 +638,24 @@ def base64_to_content_block(base64: str) -> BetaImageBlockParam:
 def text_to_content_block(text: str) -> BetaTextBlockParam:
     """Convert text to Claude content block."""
     return {"type": "text", "text": text}
+
+
+def text_document_block(
+    text: str, *, title: str | None = None
+) -> BetaRequestDocumentBlockParam:
+    """Wrap plain text as a citable document block."""
+    block = BetaRequestDocumentBlockParam(
+        type="document",
+        source=BetaPlainTextSourceParam(
+            type="text",
+            media_type="text/plain",
+            data=text,
+        ),
+        citations={"enabled": True},
+    )
+    if title:
+        block["title"] = title
+    return block
 
 
 def document_to_content_block(
