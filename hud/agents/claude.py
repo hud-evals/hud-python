@@ -479,9 +479,7 @@ class ClaudeAgent(MCPAgent):
                 self.has_computer_tool = True
             if spec.api_type == "computer_20251124":
                 self._gated_screenshot_tools.add(tool.name)
-                logger.debug(
-                    "Screenshot gating enabled for tool %s (computer_20251124)", tool.name
-                )
+                logger.debug("Screenshot gating enabled for tool %s (computer_20251124)", tool.name)
 
         # Process generic tools
         for tool in categorized.generic:
