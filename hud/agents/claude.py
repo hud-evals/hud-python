@@ -159,6 +159,7 @@ class ClaudeAgent(MCPAgent):
         self.claude_tools: list[BetaToolUnionParam] = []
         self._required_betas: set[str] = set()
         self._tool_search_threshold: int | None = None
+        self._gated_screenshot_tools: set[str] = set()
 
     def _on_tools_ready(self) -> None:
         """Build Claude-specific tool mappings after tools are discovered."""

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -426,6 +426,7 @@ class TestClaudeAgent:
         agent.claude_tools = []
         agent.tool_mapping = {"my_tool": "my_tool"}
         agent.has_computer_tool = False
+        agent._gated_screenshot_tools = set()
         agent._initialized = True
 
         response = await agent.get_response([])
@@ -754,6 +755,201 @@ class TestClaudeAgentComputerTool20251124:
             validate_api_key=False,
         )
         assert "fine-grained-tool-streaming-2025-05-14" not in agent._required_betas
+
+
+class TestGatedScreenshotTools:
+    """Test that screenshot gating is configured and injected correctly."""
+
+    COMPUTER_NATIVE_TOOLS_META: ClassVar[dict[str, Any]] = {
+        "native_tools": {
+            "claude": [
+                {
+                    "api_type": "computer_20251124",
+                    "api_name": "computer",
+                    "beta": "computer-use-2025-11-24",
+                    "role": "computer",
+                    "supported_models": [
+                        "claude-opus-4-5*",
+                        "claude-opus-4-6*",
+                        "claude-sonnet-4-6*",
+                    ],
+                    "extra": {"display_width": 1400, "display_height": 850},
+                },
+                {
+                    "api_type": "computer_20250124",
+                    "api_name": "computer",
+                    "beta": "computer-use-2025-01-24",
+                    "role": "computer",
+                    "extra": {"display_width": 1400, "display_height": 850},
+                },
+            ]
+        }
+    }
+
+    @pytest.fixture
+    def mock_anthropic(self) -> Any:
+        return MagicMock(spec=["messages", "beta"])
+
+    def _make_computer_tool(self) -> types.Tool:
+        return types.Tool(
+            name="anthropic_computer",
+            description="Computer tool",
+            inputSchema={"type": "object", "properties": {"action": {"type": "string"}}},
+            _meta=self.COMPUTER_NATIVE_TOOLS_META,
+        )
+
+    def test_gated_set_populated_for_opus_46(self, mock_anthropic: Any) -> None:
+        """Opus 4.6 matches computer_20251124 -- tool should be in _gated_screenshot_tools."""
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            model="claude-opus-4-6-20260101",
+            validate_api_key=False,
+        )
+        ctx = MockEvalContext(tools=[self._make_computer_tool()])
+        agent.ctx = ctx
+        agent._available_tools = ctx.as_tools()
+        agent._categorized_tools = agent.categorize_tools()
+        agent._convert_tools_for_claude()
+
+        assert "anthropic_computer" in agent._gated_screenshot_tools
+
+    def test_gated_set_populated_for_opus_45(self, mock_anthropic: Any) -> None:
+        """Opus 4.5 matches computer_20251124 -- tool should be in _gated_screenshot_tools."""
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            model="claude-opus-4-5-20250731",
+            validate_api_key=False,
+        )
+        ctx = MockEvalContext(tools=[self._make_computer_tool()])
+        agent.ctx = ctx
+        agent._available_tools = ctx.as_tools()
+        agent._categorized_tools = agent.categorize_tools()
+        agent._convert_tools_for_claude()
+
+        assert "anthropic_computer" in agent._gated_screenshot_tools
+
+    def test_gated_set_populated_for_sonnet_46(self, mock_anthropic: Any) -> None:
+        """Sonnet 4.6 matches computer_20251124 -- tool should be in _gated_screenshot_tools."""
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            model="claude-sonnet-4-6-20260201",
+            validate_api_key=False,
+        )
+        ctx = MockEvalContext(tools=[self._make_computer_tool()])
+        agent.ctx = ctx
+        agent._available_tools = ctx.as_tools()
+        agent._categorized_tools = agent.categorize_tools()
+        agent._convert_tools_for_claude()
+
+        assert "anthropic_computer" in agent._gated_screenshot_tools
+
+    def test_gated_set_empty_for_sonnet_4(self, mock_anthropic: Any) -> None:
+        """Sonnet 4 does NOT match computer_20251124 -- _gated_screenshot_tools should be empty."""
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            model="claude-sonnet-4-20250514",
+            validate_api_key=False,
+        )
+        ctx = MockEvalContext(tools=[self._make_computer_tool()])
+        agent.ctx = ctx
+        agent._available_tools = ctx.as_tools()
+        agent._categorized_tools = agent.categorize_tools()
+        agent._convert_tools_for_claude()
+
+        assert len(agent._gated_screenshot_tools) == 0
+
+    def test_gated_set_empty_for_sonnet_45(self, mock_anthropic: Any) -> None:
+        """Sonnet 4.5 NOT matching computer_20251124 -- gated set should be empty."""
+        agent = ClaudeAgent.create(
+            model_client=mock_anthropic,
+            model="claude-sonnet-4-5-20250929",
+            validate_api_key=False,
+        )
+        ctx = MockEvalContext(tools=[self._make_computer_tool()])
+        agent.ctx = ctx
+        agent._available_tools = ctx.as_tools()
+        agent._categorized_tools = agent.categorize_tools()
+        agent._convert_tools_for_claude()
+
+        assert len(agent._gated_screenshot_tools) == 0
+
+    @pytest.mark.asyncio
+    async def test_injection_for_gated_model(self, mock_anthropic: Any) -> None:
+        """Gated model tool calls should include take_screenshot_on_click=False."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = ClaudeAgent.create(
+                model_client=mock_anthropic,
+                model="claude-opus-4-6-20260101",
+                validate_api_key=False,
+            )
+            agent.tool_mapping = {"computer": "anthropic_computer"}
+            agent.claude_tools = []
+            agent.has_computer_tool = True
+            agent._required_betas = {"computer-use-2025-11-24"}
+            agent._gated_screenshot_tools = {"anthropic_computer"}
+            agent._initialized = True
+
+            mock_response = MagicMock()
+            tool_block = MagicMock()
+            tool_block.type = "tool_use"
+            tool_block.id = "tool_1"
+            tool_block.name = "computer"
+            tool_block.input = {"action": "left_click", "coordinate": [500, 300]}
+            mock_response.content = [tool_block]
+
+            mock_stream = MockStreamContextManager(mock_response)
+            mock_anthropic.beta.messages.stream = MagicMock(return_value=mock_stream)
+
+            messages = [
+                cast(
+                    "BetaMessageParam",
+                    {"role": "user", "content": [{"type": "text", "text": "Click"}]},
+                )
+            ]
+            result = await agent.get_response(messages)
+
+            assert len(result.tool_calls) == 1
+            assert result.tool_calls[0].arguments["take_screenshot_on_click"] is False
+            assert result.tool_calls[0].arguments["action"] == "left_click"
+
+    @pytest.mark.asyncio
+    async def test_no_injection_for_non_gated_model(self, mock_anthropic: Any) -> None:
+        """Non-gated model tool calls should NOT include take_screenshot_on_click."""
+        with patch("hud.settings.settings.telemetry_enabled", False):
+            agent = ClaudeAgent.create(
+                model_client=mock_anthropic,
+                model="claude-sonnet-4-20250514",
+                validate_api_key=False,
+            )
+            agent.tool_mapping = {"computer": "anthropic_computer"}
+            agent.claude_tools = []
+            agent.has_computer_tool = True
+            agent._required_betas = {"computer-use-2025-01-24"}
+            agent._gated_screenshot_tools = set()
+            agent._initialized = True
+
+            mock_response = MagicMock()
+            tool_block = MagicMock()
+            tool_block.type = "tool_use"
+            tool_block.id = "tool_1"
+            tool_block.name = "computer"
+            tool_block.input = {"action": "left_click", "coordinate": [500, 300]}
+            mock_response.content = [tool_block]
+
+            mock_stream = MockStreamContextManager(mock_response)
+            mock_anthropic.beta.messages.stream = MagicMock(return_value=mock_stream)
+
+            messages = [
+                cast(
+                    "BetaMessageParam",
+                    {"role": "user", "content": [{"type": "text", "text": "Click"}]},
+                )
+            ]
+            result = await agent.get_response(messages)
+
+            assert len(result.tool_calls) == 1
+            assert "take_screenshot_on_click" not in result.tool_calls[0].arguments
+            assert result.tool_calls[0].arguments["action"] == "left_click"
 
 
 class TestClaudeAgentBetaHeader:
