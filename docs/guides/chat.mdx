@@ -33,7 +33,7 @@ Key points:
 
 ## Serving Over A2A
 
-Once you have a chat scenario, you can serve it as an [A2A (Agent-to-Agent)](https://google.github.io/A2A/) endpoint using `OrchestratorExecutor`. This is a thin transport layer that:
+Once you have a chat scenario, you can serve it as an [A2A (Agent-to-Agent)](https://google.github.io/A2A/) endpoint using `ChatService`. This is a thin transport layer that:
 
 - Receives user messages from A2A clients
 - Maps each conversation to a `Chat` session
@@ -41,14 +41,14 @@ Once you have a chat scenario, you can serve it as an [A2A (Agent-to-Agent)](htt
 - Returns the response
 
 ```python
-from hud.services import OrchestratorExecutor
+from hud.services import ChatService
+from hud.eval.task import Task
 
-orchestrator = OrchestratorExecutor(
-    "support",
+service = ChatService(
+    Task(env={"name": "support"}, scenario="support:help"),
     model="claude-haiku-4-5",
-    scenario="help",
 )
-orchestrator.serve(host="0.0.0.0", port=9999)
+service.serve(host="0.0.0.0", port=9999)
 ```
 
 Or with environment variables for flexibility:
@@ -58,10 +58,10 @@ HUD_ENV=support HUD_SCENARIO=help \
     uv run python examples/03_a2a_chat_server.py
 ```
 
-The orchestrator publishes an agent card at `/.well-known/agent-card.json` and accepts A2A messages at the root endpoint.
+The chat service publishes an agent card at `/.well-known/agent-card.json` and accepts A2A messages at the root endpoint.
 
 <Note>
-Each `OrchestratorExecutor` targets exactly one scenario. If your environment has multiple chat-compatible scenarios, run one orchestrator per scenario or build client-side routing to pick which orchestrator to call.
+Each `ChatService` targets exactly one scenario. If your environment has multiple chat-compatible scenarios, run one chat service per scenario or build client-side routing to pick which one to call.
 </Note>
 
 ## Using Chat Directly (No A2A)
@@ -88,7 +88,7 @@ print(r2.content)
 
 ## Connecting a Client
 
-Any A2A-compatible client can talk to your orchestrator. See [`examples/04_a2a_chat_llm_client.py`](https://github.com/hud-evals/hud-python/blob/main/examples/04_a2a_chat_llm_client.py) for a full example that puts an LLM in front and calls the orchestrator as a tool.
+Any A2A-compatible client can talk to your chat service. See [`examples/04_a2a_chat_llm_client.py`](https://github.com/hud-evals/hud-python/blob/main/examples/04_a2a_chat_llm_client.py) for a full example that puts an LLM in front and calls the service as a tool.
 
 The pattern is: resolve the agent card, create a client, and stream messages back.
 
@@ -97,7 +97,7 @@ The pattern is: resolve the agent card, create a client, and stream messages bac
 | Approach | When |
 |----------|------|
 | **`Chat` directly** | Python scripts, notebooks, tests — no network layer needed |
-| **`OrchestratorExecutor`** | Serve over HTTP for web UIs, other agents, or cross-language clients |
+| **`ChatService`** | Serve over HTTP for web UIs, other agents, or cross-language clients |
 | **LLM + A2A client** | When you want a conversational AI layer in front that decides when to call the environment |
 
 ## Examples

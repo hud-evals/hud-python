@@ -1,4 +1,4 @@
-"""A2A orchestrator backed by per-session Chat instances."""
+"""A2A chat service backed by per-session Chat instances."""
 
 from __future__ import annotations
 
@@ -26,43 +26,34 @@ from hud.services.chat import Chat
 if TYPE_CHECKING:
     from a2a.server.agent_execution.context import RequestContext
     from a2a.server.events.event_queue import EventQueue
+    from hud.eval.task import Task
 
 LOGGER = logging.getLogger(__name__)
 
 
-class OrchestratorExecutor(AgentExecutor):
+class ChatService(AgentExecutor):
     """Thin A2A wrapper around per-session ``Chat`` instances."""
 
     def __init__(
         self,
-        env_name: str,
+        task: Task,
+        /,
         *,
         model: str,
-        scenario: str,
         max_steps: int = 50,
         name: str | None = None,
         description: str | None = None,
     ) -> None:
-        from hud.eval.task import Task
-
-        resolved_scenario = self._resolve_scenario(env_name, scenario)
-        self._task = Task(env={"name": env_name}, scenario=resolved_scenario)
+        self._task = task
         self._model = model
         self._max_steps = max_steps
-        self._name = name or f"hud-{env_name}"
-        self._description = description or f"A2A agent for {env_name}"
+        self._name = name or task.scenario or "chat-service"
+        self._description = description or f"A2A service for {task.scenario or 'tasks'}"
 
         self._sessions: dict[str, Chat] = {}
         self._session_locks: dict[str, asyncio.Lock] = {}
         self._session_last_active: dict[str, float] = {}
         self._session_ttl_seconds = 30 * 60
-
-    @staticmethod
-    def _resolve_scenario(env_name: str, scenario: str) -> str:
-        """Normalize scenario input to a fully qualified identifier."""
-        if ":" in scenario:
-            return scenario
-        return f"{env_name}:{scenario}"
 
     def _get_or_create_chat(self, context_id: str) -> Chat:
         self._cleanup_stale_sessions()
@@ -98,14 +89,6 @@ class OrchestratorExecutor(AgentExecutor):
         if stale:
             LOGGER.info("Cleaned up %d stale sessions", len(stale))
 
-    @staticmethod
-    def _new_message(text: str) -> Message:
-        return Message(
-            message_id=str(uuid.uuid4()),
-            role=Role.agent,
-            parts=[Part(root=TextPart(text=text))],
-        )
-
     async def _enqueue_status(
         self,
         event_queue: EventQueue,
@@ -118,7 +101,14 @@ class OrchestratorExecutor(AgentExecutor):
     ) -> None:
         status = TaskStatus(state=state)
         if text is not None:
-            status = TaskStatus(state=state, message=self._new_message(text))
+            status = TaskStatus(
+                state=state,
+                message=Message(
+                    message_id=str(uuid.uuid4()),
+                    role=Role.agent,
+                    parts=[Part(root=TextPart(text=text))],
+                ),
+            )
 
         await event_queue.enqueue_event(
             TaskStatusUpdateEvent(
@@ -148,7 +138,7 @@ class OrchestratorExecutor(AgentExecutor):
         port: int = 9999,
         url: str | None = None,
     ) -> None:
-        """Serve the orchestrator via the A2A Starlette app."""
+        """Serve the chat service via the A2A Starlette app."""
         import uvicorn
         from a2a.server.apps import A2AStarletteApplication
         from a2a.server.request_handlers import DefaultRequestHandler
@@ -163,7 +153,7 @@ class OrchestratorExecutor(AgentExecutor):
             agent_card=self.agent_card(public_url),
             http_handler=handler,
         )
-        LOGGER.info("Serving A2A orchestrator at %s", public_url)
+        LOGGER.info("Serving A2A chat service at %s", public_url)
         uvicorn.run(app.build(), host=host, port=port)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
@@ -205,7 +195,7 @@ class OrchestratorExecutor(AgentExecutor):
                 text=content,
             )
         except Exception as exc:
-            LOGGER.exception("orchestrator execute failed")
+            LOGGER.exception("chat service execute failed")
             await self._enqueue_status(
                 event_queue,
                 context_id=context_id,

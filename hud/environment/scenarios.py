@@ -899,7 +899,7 @@ class ScenarioMixin:
             description: Optional description of what the scenario does
             chat: Mark this scenario as chat-compatible.  Chat scenarios
                 must accept a ``messages`` parameter (the conversation
-                history) and are used by ``Chat`` / ``OrchestratorExecutor``
+                history) and are used by ``Chat`` / ``ChatService``
                 for multi-turn A2A interactions.
             required_env_vars: Optional list of environment variable names this scenario requires.
                 These are used by the HUD platform to check if users have configured the
