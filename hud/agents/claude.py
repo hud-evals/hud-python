@@ -406,7 +406,9 @@ class ClaudeAgent(MCPAgent):
                     if isinstance(content, types.TextContent):
                         claude_blocks.append(text_to_content_block(content.text))
                     elif isinstance(content, types.ImageContent):
-                        claude_blocks.append(base64_to_content_block(content.data))
+                        claude_blocks.append(
+                            base64_to_content_block(content.data, content.mimeType)
+                        )
                     elif isinstance(content, types.EmbeddedResource):
                         # Handle embedded resources (PDFs)
                         resource = content.resource
@@ -637,13 +639,19 @@ class ClaudeAgent(MCPAgent):
         return messages_cached
 
 
-def base64_to_content_block(base64: str) -> BetaImageBlockParam:
+def base64_to_content_block(
+    base64: str,
+    media_type: str = "image/png",
+) -> BetaImageBlockParam:
     """Convert base64 image to Claude content block."""
     return BetaImageBlockParam(
         type="image",
         source=BetaBase64ImageSourceParam(
             type="base64",
-            media_type="image/png",
+            media_type=cast(
+                "Literal['image/jpeg', 'image/png', 'image/gif', 'image/webp']",
+                media_type,
+            ),
             data=base64,
         ),
     )
