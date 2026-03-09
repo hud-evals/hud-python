@@ -374,22 +374,26 @@ class ClaudeAgent(MCPAgent):
         )
 
         # Process each tool result
-        user_content = []
+        user_content: list[
+            BetaToolResultBlockParam
+            | BetaRequestDocumentBlockParam
+        ] = []
 
         for tool_call, result in zip(tool_calls, tool_results, strict=True):
-            # Extract Claude-specific metadata from extra fields
             tool_use_id = tool_call.id
             if not tool_use_id:
                 self.hud_console.warning(f"No tool_use_id found for {tool_call.name}")
                 continue
 
-            # Convert MCP tool results to Claude format
+            # Blocks placed inside the tool_result (text, images)
             claude_blocks: list[
                 BetaTextBlockParam | BetaImageBlockParam | BetaRequestDocumentBlockParam
             ] = []
+            # Citable document blocks placed as siblings after the tool_result
+            # so Claude's citation system indexes them properly.
+            sibling_docs: list[BetaRequestDocumentBlockParam] = []
 
             if result.isError:
-                # Extract error message from content
                 error_msg = "Tool execution failed"
                 for content in result.content:
                     if isinstance(content, types.TextContent):
@@ -397,17 +401,15 @@ class ClaudeAgent(MCPAgent):
                         break
                 claude_blocks.append(text_to_content_block(f"Error: {error_msg}"))
             else:
-                # Process success content
                 for content in result.content:
                     if isinstance(content, types.TextContent):
+                        claude_blocks.append(text_to_content_block(content.text))
                         if citations_enabled:
-                            claude_blocks.append(
+                            sibling_docs.append(
                                 text_document_block(
                                     content.text, title=tool_call.name
                                 )
                             )
-                        else:
-                            claude_blocks.append(text_to_content_block(content.text))
                     elif isinstance(content, types.ImageContent):
                         claude_blocks.append(base64_to_content_block(content.data))
                     elif isinstance(content, types.EmbeddedResource):
@@ -416,17 +418,23 @@ class ClaudeAgent(MCPAgent):
                             isinstance(resource, types.BlobResourceContents)
                             and resource.mimeType == "application/pdf"
                         ):
-                            claude_blocks.append(
-                                document_to_content_block(
-                                    base64_data=resource.blob,
-                                    enable_citations=citations_enabled,
+                            if citations_enabled:
+                                sibling_docs.append(
+                                    document_to_content_block(
+                                        base64_data=resource.blob,
+                                        enable_citations=True,
+                                    )
                                 )
-                            )
+                            else:
+                                claude_blocks.append(
+                                    document_to_content_block(
+                                        base64_data=resource.blob,
+                                    )
+                                )
 
-            # Add tool result
             user_content.append(tool_use_content_block(tool_use_id, claude_blocks))
+            user_content.extend(sibling_docs)
 
-        # Return as a user message containing all tool results
         return [
             BetaMessageParam(
                 role="user",

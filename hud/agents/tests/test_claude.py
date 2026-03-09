@@ -973,7 +973,7 @@ class TestDocumentBlockCitations:
 
     @pytest.mark.asyncio
     async def test_format_tool_results_threads_citations_to_documents(self) -> None:
-        """When scenario_enable_citations is True, document blocks should get citations enabled."""
+        """When scenario_enable_citations is True, PDF document blocks become siblings with citations."""
         ctx = MockEvalContext()
         ctx.scenario_enable_citations = True
 
@@ -1008,13 +1008,18 @@ class TestDocumentBlockCitations:
         ]
 
         messages = await agent.format_tool_results(tool_calls, tool_results)
-        tool_result_block = messages[0]["content"][0]
-        doc_block = tool_result_block["content"][0]
+        content_blocks = messages[0]["content"]
+        # tool_result has no content (PDF moved to sibling)
+        tool_result_block = content_blocks[0]
+        assert tool_result_block["type"] == "tool_result"
+        # Sibling document block with citations enabled
+        doc_block = content_blocks[1]
+        assert doc_block["type"] == "document"
         assert doc_block["citations"] == {"enabled": True}
 
     @pytest.mark.asyncio
     async def test_format_tool_results_wraps_text_as_document_when_citations_enabled(self) -> None:
-        """Text tool results become plain-text document blocks when citations are on."""
+        """Text tool results produce a sibling document block for citations."""
         ctx = MockEvalContext()
         ctx.scenario_enable_citations = True
 
@@ -1039,8 +1044,15 @@ class TestDocumentBlockCitations:
         ]
 
         messages = await agent.format_tool_results(tool_calls, tool_results)
-        tool_result_block = messages[0]["content"][0]
-        doc_block = tool_result_block["content"][0]
+        content_blocks = messages[0]["content"]
+        # First block: tool_result with plain text
+        tool_result_block = content_blocks[0]
+        assert tool_result_block["type"] == "tool_result"
+        text_block = tool_result_block["content"][0]
+        assert text_block["type"] == "text"
+        assert text_block["text"] == "Revenue was $1M last quarter."
+        # Second block: sibling document block for citations
+        doc_block = content_blocks[1]
         assert doc_block["type"] == "document"
         assert doc_block["source"]["type"] == "text"
         assert doc_block["source"]["data"] == "Revenue was $1M last quarter."
