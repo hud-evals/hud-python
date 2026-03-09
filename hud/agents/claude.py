@@ -328,6 +328,28 @@ class ClaudeAgent(MCPAgent):
             if response is None:
                 raise ValueError("Claude response missing after stream retries")
 
+        response_blocks = list(response.content)
+        block_summaries: list[str] = []
+        for i, block in enumerate(response_blocks):
+            block_type = getattr(block, "type", type(block).__name__)
+            if block_type == "text":
+                citation_count = len(getattr(block, "citations", None) or [])
+                text_len = len(getattr(block, "text", "") or "")
+                block_summaries.append(
+                    f"{i}:text(len={text_len}, citations={citation_count})"
+                )
+            elif block_type == "tool_use":
+                block_summaries.append(
+                    f"{i}:tool_use(name={getattr(block, 'name', '?')})"
+                )
+            elif block_type == "thinking":
+                thinking_len = len(getattr(block, "thinking", "") or "")
+                block_summaries.append(f"{i}:thinking(len={thinking_len})")
+            else:
+                block_summaries.append(f"{i}:{block_type}")
+
+        logger.info("Claude response blocks: %s", ", ".join(block_summaries))
+
         # Process response
         result = InferenceResult(content="", tool_calls=[], done=True)
 
@@ -336,7 +358,7 @@ class ClaudeAgent(MCPAgent):
         thinking_content = ""
         citations: list[dict[str, Any]] = []
 
-        for block in response.content:
+        for block in response_blocks:
             if block.type == "tool_use":
                 tool_call = MCPToolCall(
                     id=block.id,
@@ -350,7 +372,14 @@ class ClaudeAgent(MCPAgent):
                 result.done = False
             elif block.type == "text":
                 text_content += block.text
-                for cit in getattr(block, "citations", None) or []:
+                block_citations = getattr(block, "citations", None) or []
+                if block_citations:
+                    logger.info(
+                        "Claude text block citations: count=%d preview=%r",
+                        len(block_citations),
+                        block.text[:160],
+                    )
+                for cit in block_citations:
                     citations.append(
                         {
                             "type": "document_citation",
@@ -367,6 +396,14 @@ class ClaudeAgent(MCPAgent):
                 if thinking_content:
                     thinking_content += "\n"
                 thinking_content += block.thinking
+
+        logger.info(
+            "Claude extracted final response: text_len=%d tool_calls=%d citations=%d done=%s",
+            len(text_content),
+            len(result.tool_calls),
+            len(citations),
+            result.done,
+        )
 
         result.content = text_content
         result.citations = citations
