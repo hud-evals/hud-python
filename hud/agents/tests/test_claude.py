@@ -1060,6 +1060,43 @@ class TestDocumentBlockCitations:
         assert doc_block["title"] == "get_sales"
 
     @pytest.mark.asyncio
+    async def test_format_tool_results_uses_session_citations_fallback(self) -> None:
+        """Use ScenarioSession.enable_citations when ctx field is not set."""
+        ctx = MockEvalContext()
+        ctx.scenario_enable_citations = False
+        session = MagicMock()
+        session.enable_citations = True
+        ctx._get_session = MagicMock(return_value=session)  # type: ignore[method-assign]
+
+        client = MagicMock(spec=AsyncAnthropic)
+        client.beta = MagicMock()
+        client.beta.messages = MagicMock()
+        agent = ClaudeAgent.create(
+            model_client=client,
+            validate_api_key=False,
+        )
+        agent.ctx = ctx
+        agent._initialized = True
+        agent.claude_tools = []
+        agent.tool_mapping = {}
+
+        tool_calls = [MCPToolCall(id="call_1", name="get_sales", arguments={})]
+        tool_results = [
+            MCPToolResult(
+                content=[types.TextContent(type="text", text="Revenue was $1M last quarter.")],
+                isError=False,
+            )
+        ]
+
+        messages = await agent.format_tool_results(tool_calls, tool_results)
+        content_blocks = messages[0]["content"]
+
+        assert ctx._get_session.called  # type: ignore[attr-defined]
+        doc_block = content_blocks[1]
+        assert doc_block["type"] == "document"
+        assert doc_block["citations"] == {"enabled": True}
+
+    @pytest.mark.asyncio
     async def test_format_tool_results_keeps_text_block_when_citations_disabled(self) -> None:
         """Text tool results stay as plain text blocks when citations are off."""
         ctx = MockEvalContext()

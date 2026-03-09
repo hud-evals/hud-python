@@ -758,8 +758,30 @@ class ScenarioMixin:
                     f"Check that the scenario returns a valid prompt string."
                 )
 
-            # Extract tool exclusion from remote prompt metadata if present
-            remote_meta = getattr(result, "meta", None) or {}
+            # Extract prompt metadata; tolerate non-canonical wire shapes where
+            # metadata arrives as "meta" extra instead of the "_meta" alias.
+            remote_meta = getattr(result, "meta", None)
+            if not isinstance(remote_meta, dict):
+                direct_meta = getattr(result, "_meta", None)
+                if isinstance(direct_meta, dict):
+                    remote_meta = direct_meta
+            if not isinstance(remote_meta, dict):
+                remote_meta = None
+            if not remote_meta:
+                extra = getattr(result, "__pydantic_extra__", None)
+                if isinstance(extra, dict):
+                    extra_meta = extra.get("meta") or extra.get("_meta")
+                    if isinstance(extra_meta, dict):
+                        remote_meta = extra_meta
+            if not remote_meta:
+                with contextlib.suppress(Exception):
+                    dumped = result.model_dump(exclude_none=True, by_alias=True)
+                    if isinstance(dumped, dict):
+                        dumped_meta = dumped.get("_meta") or dumped.get("meta")
+                        if isinstance(dumped_meta, dict):
+                            remote_meta = dumped_meta
+            if not isinstance(remote_meta, dict):
+                remote_meta = {}
             exclude_tools_meta = remote_meta.get("exclude_tools")
             exclude_sources_meta = remote_meta.get("exclude_sources")
             allowed_tools_meta = remote_meta.get("allowed_tools")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, Literal, Self
@@ -703,13 +704,35 @@ class Environment(
             )
             if not prompt_text:
                 raise ValueError(f"Scenario '{name}' returned empty prompt")
+
+            # Preserve scenario metadata in prompts/get responses so remote callers
+            # (including orchestrators) can recover returns_schema and citation flags.
+            prompt_meta: dict[str, Any] = {}
+            excl = getattr(self, "_scenario_exclusions", {}).get(scenario_name)
+            if excl:
+                prompt_meta["exclude_tools"] = excl[0]
+                prompt_meta["exclude_sources"] = excl[1]
+                prompt_meta["allowed_tools"] = excl[2]
+
+            out_cfg = getattr(self, "_scenario_output_config", {}).get(scenario_name)
+            if out_cfg:
+                returns_type, enable_citations = out_cfg
+                if returns_type is not None:
+                    from pydantic import TypeAdapter
+
+                    with contextlib.suppress(Exception):
+                        prompt_meta["returns_schema"] = TypeAdapter(returns_type).json_schema()
+                if enable_citations:
+                    prompt_meta["enable_citations"] = True
+
             return mcp_types.GetPromptResult(
                 messages=[
                     mcp_types.PromptMessage(
                         role="user",
                         content=mcp_types.TextContent(type="text", text=prompt_text),
                     )
-                ]
+                ],
+                _meta=prompt_meta or None,
             )
 
         # Non-scenario prompt or remote — delegate to parent

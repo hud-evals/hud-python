@@ -1042,6 +1042,35 @@ class TestScenarioRemoteErrors:
         assert session.returns_schema.get("type") == "object"
 
     @pytest.mark.asyncio
+    async def test_remote_setup_reads__meta_attribute(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Remote setup should accept providers that expose `_meta` directly."""
+        env = Environment("test-env")
+
+        async def successful_get_prompt(_name: str, _arguments: dict[str, str] | None = None) -> Any:
+            return SimpleNamespace(
+                messages=[SimpleNamespace(content=SimpleNamespace(text="Prompt"))],
+                _meta={
+                    "enable_citations": True,
+                    "returns_schema": {"type": "object", "properties": {"summary": {"type": "string"}}},
+                },
+            )
+
+        monkeypatch.setattr(env, "get_prompt", successful_get_prompt)
+        monkeypatch.setattr(env._router, "get_prompt_connection", lambda _name: "remote")
+
+        prompt = await env.run_scenario_setup("remote-env:solve-task", {})
+        assert prompt == "Prompt"
+
+        session = env._get_session()
+        assert session is not None
+        assert session.is_local is False
+        assert session.enable_citations is True
+        assert isinstance(session.returns_schema, dict)
+        assert session.returns_schema.get("type") == "object"
+
+    @pytest.mark.asyncio
     async def test_remote_setup_error_when_scenarios_unavailable_reraises_original(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1294,6 +1323,35 @@ class TestScenarioSessionState:
             request_ctx.reset(evaluate_token)
 
         assert result.reward == 1.0
+
+    @pytest.mark.asyncio
+    async def test_env_get_prompt_includes_scenario_output_metadata(self) -> None:
+        """Scenario prompts served via _env_get_prompt should include output metadata."""
+        from mcp.server.lowlevel.server import request_ctx
+
+        env = Environment("test-env")
+
+        @env.scenario("typed", returns=str, enable_citations=True)
+        async def typed_scenario():
+            yield "Prompt"
+            yield 1.0
+
+        req = SimpleNamespace(
+            session=SimpleNamespace(),
+            request=SimpleNamespace(headers={"mcp-session-id": "session-typed"}),
+        )
+        token = request_ctx.set(req)  # type: ignore[arg-type]
+        try:
+            prompt = await env._env_get_prompt("test-env:typed", {})
+        finally:
+            request_ctx.reset(token)
+
+        assert getattr(prompt.messages[0].content, "text", None) == "Prompt"
+        assert isinstance(prompt.meta, dict)
+        assert prompt.meta.get("enable_citations") is True
+        returns_schema = prompt.meta.get("returns_schema")
+        assert isinstance(returns_schema, dict)
+        assert returns_schema.get("type") == "string"
 
     @pytest.mark.asyncio
     async def test_submit_before_setup_raises(self) -> None:

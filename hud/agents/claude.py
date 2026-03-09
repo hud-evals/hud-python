@@ -372,6 +372,16 @@ class ClaudeAgent(MCPAgent):
         citations_enabled = bool(
             getattr(self.ctx, "scenario_enable_citations", False) if self.ctx else False
         )
+        # Fallback to active scenario session metadata when EvalContext did not
+        # copy scenario_enable_citations onto the context object.
+        if not citations_enabled and self.ctx is not None:
+            get_session = getattr(self.ctx, "_get_session", None)
+            if callable(get_session):
+                try:
+                    session = get_session()
+                except Exception:
+                    session = None
+                citations_enabled = bool(getattr(session, "enable_citations", False))
 
         # Process each tool result
         user_content: list[
