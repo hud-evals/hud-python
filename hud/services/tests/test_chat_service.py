@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -129,3 +130,23 @@ def test_get_or_create_reuses_session() -> None:
     c1 = svc._get_or_create_chat("ctx-1")
     c2 = svc._get_or_create_chat("ctx-1")
     assert c1 is c2
+
+
+def test_remove_session_drops_unlocked_lock() -> None:
+    svc = ChatService(_task(), model="gpt-4o")
+    svc._session_locks["ctx-1"] = asyncio.Lock()
+    svc._remove_session("ctx-1")
+    assert "ctx-1" not in svc._session_locks
+
+
+@pytest.mark.asyncio
+async def test_remove_session_preserves_locked_lock() -> None:
+    svc = ChatService(_task(), model="gpt-4o")
+    svc._get_or_create_chat("ctx-1")
+    lock = svc._session_locks.setdefault("ctx-1", asyncio.Lock())
+    await lock.acquire()
+    try:
+        svc._remove_session("ctx-1")
+        assert "ctx-1" in svc._session_locks
+    finally:
+        lock.release()

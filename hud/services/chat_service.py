@@ -72,7 +72,11 @@ class ChatService(AgentExecutor):
         session = self._sessions.pop(context_id, None)
         if session is not None:
             session.clear()
-        self._session_locks.pop(context_id, None)
+        lock = self._session_locks.get(context_id)
+        # Preserve an in-flight lock so concurrent requests for the same
+        # context cannot create a second lock and run in parallel.
+        if lock is None or not lock.locked():
+            self._session_locks.pop(context_id, None)
         self._session_last_active.pop(context_id, None)
 
     def _cleanup_stale_sessions(self) -> None:
