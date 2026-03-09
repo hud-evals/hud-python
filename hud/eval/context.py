@@ -266,6 +266,9 @@ class EvalContext(Environment):
 
         # Copy scenarios (definitions) by reference - they don't change
         ctx._scenarios = getattr(env, "_scenarios", {})
+        ctx._scenario_output_config = getattr(env, "_scenario_output_config", {})
+        ctx._scenario_exclusions = getattr(env, "_scenario_exclusions", {})
+        ctx._scenario_chat_flags = getattr(env, "_scenario_chat_flags", {})
         # Create fresh session state for this eval (parallel evals each need their own)
         ctx._scenario_sessions = {}
 
