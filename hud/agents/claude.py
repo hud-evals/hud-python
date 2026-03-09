@@ -57,6 +57,8 @@ class ClaudeAgent(MCPAgent):
         "display_width": computer_settings.ANTHROPIC_COMPUTER_WIDTH,
         "display_height": computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
     }
+    _GROUNDING_DOC_LIMIT: ClassVar[int] = 32
+    _GROUNDING_DRAFT_CHAR_LIMIT: ClassVar[int] = 12000
     config_cls: ClassVar[type[BaseAgentConfig]] = ClaudeConfig
 
     @classmethod
@@ -168,6 +170,189 @@ class ClaudeAgent(MCPAgent):
     async def get_system_messages(self) -> list[types.ContentBlock]:
         """No system messages for Claude because applied in get_response"""
         return []
+
+    def _citations_enabled(self) -> bool:
+        """Return whether citation-aware document formatting is enabled for this run."""
+        citations_enabled = bool(
+            getattr(self.ctx, "scenario_enable_citations", False) if self.ctx else False
+        )
+        # Fallback to active scenario session metadata when EvalContext did not
+        # copy scenario_enable_citations onto the context object.
+        if not citations_enabled and self.ctx is not None:
+            get_session = getattr(self.ctx, "_get_session", None)
+            if callable(get_session):
+                try:
+                    session = get_session()
+                except Exception:
+                    session = None
+                citations_enabled = bool(getattr(session, "enable_citations", False))
+        return citations_enabled
+
+    def _extract_citation_documents(
+        self, messages: list[BetaMessageParam], *, limit: int
+    ) -> list[BetaRequestDocumentBlockParam]:
+        """Collect recent document blocks to use in a citation recovery call."""
+        documents: list[BetaRequestDocumentBlockParam] = []
+
+        for message in messages:
+            if not isinstance(message, dict) or message.get("role") != "user":
+                continue
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "document":
+                    continue
+                doc_block = cast("BetaRequestDocumentBlockParam", copy.deepcopy(block))
+                # Ensure recovered pass is always citation-aware.
+                doc_block["citations"] = {"enabled": True}
+                documents.append(doc_block)
+
+        if len(documents) > limit:
+            documents = documents[-limit:]
+
+        return documents
+
+    def _build_grounding_prompt(self, draft_answer: str) -> str:
+        """Instruction prompt for a final citation grounding pass."""
+        normalized = draft_answer.strip()
+        if len(normalized) > self._GROUNDING_DRAFT_CHAR_LIMIT:
+            normalized = (
+                normalized[: self._GROUNDING_DRAFT_CHAR_LIMIT]
+                + "\n...[truncated draft answer for grounding pass]"
+            )
+
+        return (
+            "You are running a final evidence-grounding and citation pass.\n"
+            "Use ONLY the provided evidence documents.\n"
+            "Do not invent or alter facts that are not supported by the documents.\n"
+            "First, write a short evidence summary (2-4 sentences) with concrete numbers.\n"
+            "Then reproduce the draft answer with the same meaning and structure.\n"
+            "If the draft answer is JSON, keep the same JSON keys.\n\n"
+            "Draft answer:\n"
+            f"{normalized}"
+        )
+
+    def _summarize_response_blocks(self, response_blocks: list[Any]) -> str:
+        """Build concise block summaries for logging."""
+        block_summaries: list[str] = []
+        for i, block in enumerate(response_blocks):
+            block_type = getattr(block, "type", type(block).__name__)
+            if block_type == "text":
+                citation_count = len(getattr(block, "citations", None) or [])
+                text_len = len(getattr(block, "text", "") or "")
+                block_summaries.append(f"{i}:text(len={text_len}, citations={citation_count})")
+            elif block_type == "tool_use":
+                block_summaries.append(f"{i}:tool_use(name={getattr(block, 'name', '?')})")
+            elif block_type == "thinking":
+                thinking_len = len(getattr(block, "thinking", "") or "")
+                block_summaries.append(f"{i}:thinking(len={thinking_len})")
+            else:
+                block_summaries.append(f"{i}:{block_type}")
+        return ", ".join(block_summaries)
+
+    def _result_from_response_blocks(self, response_blocks: list[Any]) -> InferenceResult:
+        """Extract text/tool calls/citations from Anthropic response blocks."""
+        result = InferenceResult(content="", tool_calls=[], done=True)
+        text_content = ""
+        thinking_content = ""
+        citations: list[dict[str, Any]] = []
+
+        for block in response_blocks:
+            block_type = getattr(block, "type", None)
+            if block_type == "tool_use":
+                block_input = getattr(block, "input", {})
+                tool_call = MCPToolCall(
+                    id=getattr(block, "id", ""),
+                    # look up name in tool_mapping if available, otherwise use block name
+                    name=self.tool_mapping.get(
+                        getattr(block, "name", ""),
+                        getattr(block, "name", ""),
+                    ),
+                    arguments=(
+                        block_input if isinstance(block_input, dict) else block_input.__dict__
+                    ),
+                )
+                result.tool_calls.append(tool_call)
+                result.done = False
+            elif block_type == "text":
+                text = getattr(block, "text", "") or ""
+                text_content += text
+                block_citations = getattr(block, "citations", None) or []
+                if block_citations:
+                    logger.info(
+                        "Claude text block citations: count=%d preview=%r",
+                        len(block_citations),
+                        text[:160],
+                    )
+                citations.extend(
+                    {
+                        "type": "document_citation",
+                        "text": getattr(cit, "cited_text", "") or "",
+                        "source": str(idx)
+                        if (idx := getattr(cit, "document_index", None)) is not None
+                        else getattr(cit, "document_title", "") or "",
+                        "title": getattr(cit, "document_title", None),
+                        "start_index": getattr(cit, "start_char_index", None),
+                        "end_index": getattr(cit, "end_char_index", None),
+                    }
+                    for cit in block_citations
+                )
+            elif block_type == "thinking":
+                thinking = getattr(block, "thinking", "") or ""
+                if thinking:
+                    if thinking_content:
+                        thinking_content += "\n"
+                    thinking_content += thinking
+
+        result.content = text_content
+        result.citations = citations
+        if thinking_content:
+            result.reasoning = thinking_content
+        return result
+
+    async def _run_citation_grounding_pass(
+        self,
+        *,
+        messages: list[BetaMessageParam],
+        draft_answer: str,
+        betas: list[str] | Omit,
+    ) -> InferenceResult | None:
+        """Run one extra model call to recover citations when final response has none."""
+        documents = self._extract_citation_documents(messages, limit=self._GROUNDING_DOC_LIMIT)
+        if not documents:
+            logger.info("Skipping citation grounding pass: no evidence documents in conversation")
+            return None
+
+        grounding_messages = [
+            BetaMessageParam(
+                role="user",
+                content=[
+                    text_to_content_block(self._build_grounding_prompt(draft_answer)),
+                    *documents,
+                ],
+            )
+        ]
+        grounding_messages_cached = self._add_prompt_caching(grounding_messages)
+
+        try:
+            grounding_response = await self.anthropic_client.beta.messages.create(
+                model=self.config.model,
+                max_tokens=min(self.max_tokens, 4096),
+                messages=grounding_messages_cached,
+                betas=betas,
+            )
+        except Exception:
+            logger.exception("Citation grounding pass failed")
+            return None
+
+        grounding_blocks = list(grounding_response.content)
+        logger.info(
+            "Claude grounding response blocks: %s",
+            self._summarize_response_blocks(grounding_blocks),
+        )
+        return self._result_from_response_blocks(grounding_blocks)
 
     async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[BetaMessageParam]:
         """Format messages for Claude."""
@@ -329,86 +514,42 @@ class ClaudeAgent(MCPAgent):
                 raise ValueError("Claude response missing after stream retries")
 
         response_blocks = list(response.content)
-        block_summaries: list[str] = []
-        for i, block in enumerate(response_blocks):
-            block_type = getattr(block, "type", type(block).__name__)
-            if block_type == "text":
-                citation_count = len(getattr(block, "citations", None) or [])
-                text_len = len(getattr(block, "text", "") or "")
-                block_summaries.append(
-                    f"{i}:text(len={text_len}, citations={citation_count})"
-                )
-            elif block_type == "tool_use":
-                block_summaries.append(
-                    f"{i}:tool_use(name={getattr(block, 'name', '?')})"
-                )
-            elif block_type == "thinking":
-                thinking_len = len(getattr(block, "thinking", "") or "")
-                block_summaries.append(f"{i}:thinking(len={thinking_len})")
-            else:
-                block_summaries.append(f"{i}:{block_type}")
-
-        logger.info("Claude response blocks: %s", ", ".join(block_summaries))
+        logger.info("Claude response blocks: %s", self._summarize_response_blocks(response_blocks))
 
         # Process response
-        result = InferenceResult(content="", tool_calls=[], done=True)
+        result = self._result_from_response_blocks(response_blocks)
 
-        # Extract text content, reasoning, and citations
-        text_content = ""
-        thinking_content = ""
-        citations: list[dict[str, Any]] = []
-
-        for block in response_blocks:
-            if block.type == "tool_use":
-                tool_call = MCPToolCall(
-                    id=block.id,
-                    # look up name in tool_mapping if available, otherwise use block name
-                    name=self.tool_mapping.get(block.name, block.name),
-                    arguments=block.input
-                    if isinstance(block.input, dict)
-                    else block.input.__dict__,
+        # One best-effort grounding pass for citation recovery.
+        # Keep the original draft answer to avoid changing downstream scoring semantics.
+        if (
+            self._citations_enabled()
+            and result.done
+            and not result.tool_calls
+            and not result.citations
+            and bool(result.content and result.content.strip())
+        ):
+            logger.info("No citations in final Claude response; attempting grounding pass")
+            grounded_result = await self._run_citation_grounding_pass(
+                messages=messages,
+                draft_answer=result.content or "",
+                betas=betas,
+            )
+            if grounded_result and grounded_result.citations:
+                logger.info(
+                    "Citation grounding pass recovered %d citation(s)",
+                    len(grounded_result.citations),
                 )
-                result.tool_calls.append(tool_call)
-                result.done = False
-            elif block.type == "text":
-                text_content += block.text
-                block_citations = getattr(block, "citations", None) or []
-                if block_citations:
-                    logger.info(
-                        "Claude text block citations: count=%d preview=%r",
-                        len(block_citations),
-                        block.text[:160],
-                    )
-                for cit in block_citations:
-                    citations.append(
-                        {
-                            "type": "document_citation",
-                            "text": getattr(cit, "cited_text", "") or "",
-                            "source": str(idx)
-                            if (idx := getattr(cit, "document_index", None)) is not None
-                            else getattr(cit, "document_title", "") or "",
-                            "title": getattr(cit, "document_title", None),
-                            "start_index": getattr(cit, "start_char_index", None),
-                            "end_index": getattr(cit, "end_char_index", None),
-                        }
-                    )
-            elif hasattr(block, "type") and block.type == "thinking":
-                if thinking_content:
-                    thinking_content += "\n"
-                thinking_content += block.thinking
+                result.citations = grounded_result.citations
+            else:
+                logger.info("Citation grounding pass produced no recoverable citations")
 
         logger.info(
             "Claude extracted final response: text_len=%d tool_calls=%d citations=%d done=%s",
-            len(text_content),
+            len(result.content or ""),
             len(result.tool_calls),
-            len(citations),
+            len(result.citations),
             result.done,
         )
-
-        result.content = text_content
-        result.citations = citations
-        if thinking_content:
-            result.reasoning = thinking_content
 
         return result
 
@@ -419,19 +560,7 @@ class ClaudeAgent(MCPAgent):
 
         Handles EmbeddedResource (PDFs), images, and text content.
         """
-        citations_enabled = bool(
-            getattr(self.ctx, "scenario_enable_citations", False) if self.ctx else False
-        )
-        # Fallback to active scenario session metadata when EvalContext did not
-        # copy scenario_enable_citations onto the context object.
-        if not citations_enabled and self.ctx is not None:
-            get_session = getattr(self.ctx, "_get_session", None)
-            if callable(get_session):
-                try:
-                    session = get_session()
-                except Exception:
-                    session = None
-                citations_enabled = bool(getattr(session, "enable_citations", False))
+        citations_enabled = self._citations_enabled()
 
         logger.debug(
             "format_tool_results: citations_enabled=%s (ctx=%s, attr=%s)",
