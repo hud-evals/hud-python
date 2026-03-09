@@ -68,9 +68,6 @@ class ChatService(AgentExecutor):
         self._session_last_active[context_id] = time.monotonic()
         return chat
 
-    def _get_lock(self, context_id: str) -> asyncio.Lock:
-        return self._session_locks.setdefault(context_id, asyncio.Lock())
-
     def _remove_session(self, context_id: str) -> None:
         session = self._sessions.pop(context_id, None)
         if session is not None:
@@ -160,8 +157,6 @@ class ChatService(AgentExecutor):
         context_id = context.context_id or str(uuid.uuid4())
         task_id = context.task_id or str(uuid.uuid4())
         message = context.get_user_input()
-        request_message = getattr(context, "message", None)
-        message_id = getattr(request_message, "message_id", "") or ""
 
         await self._enqueue_status(
             event_queue,
@@ -172,19 +167,11 @@ class ChatService(AgentExecutor):
         )
 
         try:
-            async with self._get_lock(context_id):
+            async with self._session_locks.setdefault(context_id, asyncio.Lock()):
                 chat = self._get_or_create_chat(context_id)
                 result = await chat.send(message)
                 content = result.content or ""
 
-            LOGGER.info(
-                "a2a_turn_completed context_id=%s task_id=%s "
-                "message_id=%s trace_id=%s",
-                context_id,
-                task_id,
-                message_id,
-                chat.session_id,
-            )
 
             await self._enqueue_status(
                 event_queue,
