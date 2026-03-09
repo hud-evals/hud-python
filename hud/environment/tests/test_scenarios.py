@@ -11,7 +11,7 @@ import pytest
 from pydantic import BaseModel
 
 from hud.environment import Environment
-from hud.environment.scenarios import _safe_session_id
+from hud.environment.scenarios import ScenarioSession, _build_answer_for_generator, _safe_session_id
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +78,12 @@ class _Item(BaseModel):
 
     id: int
     name: str
+
+
+class _AnswerModel(BaseModel):
+    """Typed answer model for parser fallback tests."""
+
+    summary: str
 
 
 class _BrokenFastMCPContext:
@@ -2047,3 +2053,53 @@ class TestScenarioToolExclusion:
         returns_schema = prompt.meta.get("returns_schema")
         assert isinstance(returns_schema, dict)
         assert returns_schema.get("type") == "object"
+
+    def test_build_answer_for_generator_extracts_json_from_prose(self) -> None:
+        """Typed answers should parse even when Claude adds leading prose."""
+        session = ScenarioSession(
+            local_name="typed",
+            full_name="test-env:typed",
+            is_local=True,
+            connection_name=None,
+            resource_uri="resource://typed",
+            answer={
+                "content": 'I investigated the issue.\n\n{"summary":"parsed from prose"}',
+                "citations": [
+                    {
+                        "type": "document_citation",
+                        "text": "Merchant GMV fell 12%",
+                        "source": "0",
+                        "title": "sales tool",
+                        "start_index": 0,
+                        "end_index": 17,
+                    }
+                ],
+            },
+            returns_type=_AnswerModel,
+        )
+
+        answer = _build_answer_for_generator(session)
+
+        assert isinstance(answer.content, _AnswerModel)
+        assert answer.content.summary == "parsed from prose"
+        assert answer.raw == 'I investigated the issue.\n\n{"summary":"parsed from prose"}'
+        assert len(answer.citations) == 1
+        assert answer.citations[0].title == "sales tool"
+
+    def test_build_answer_for_generator_extracts_json_from_code_fence(self) -> None:
+        """Typed answers should parse JSON wrapped in code fences."""
+        session = ScenarioSession(
+            local_name="typed",
+            full_name="test-env:typed",
+            is_local=True,
+            connection_name=None,
+            resource_uri="resource://typed",
+            answer={"content": '```json\n{"summary":"parsed from fence"}\n```'},
+            returns_type=_AnswerModel,
+        )
+
+        answer = _build_answer_for_generator(session)
+
+        assert isinstance(answer.content, _AnswerModel)
+        assert answer.content.summary == "parsed from fence"
+        assert answer.raw == '```json\n{"summary":"parsed from fence"}\n```'

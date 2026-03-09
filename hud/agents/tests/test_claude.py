@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -15,8 +16,10 @@ from hud.agents.claude import (
     text_to_content_block,
     tool_use_content_block,
 )
+from hud.environment import Environment
 from hud.environment.router import ToolRouter
 from hud.eval.context import EvalContext
+from hud.eval.task import Task
 from hud.types import MCPToolCall, MCPToolResult
 
 if TYPE_CHECKING:
@@ -1094,6 +1097,74 @@ class TestDocumentBlockCitations:
         assert ctx._get_session.called  # type: ignore[attr-defined]
         doc_block = content_blocks[1]
         assert doc_block["type"] == "document"
+        assert doc_block["citations"] == {"enabled": True}
+
+    @pytest.mark.asyncio
+    async def test_remote_task_setup_preserves_citations_for_tool_results(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Remote task setup should propagate enable_citations into Claude formatting."""
+        env = Environment("test-env")
+        task = Task(env=env, scenario="remote-env:solve-task", args={})
+        ctx = EvalContext.from_task(task)
+
+        async def successful_get_prompt(
+            _name: str, _arguments: dict[str, str] | None = None
+        ) -> Any:
+            return SimpleNamespace(
+                messages=[
+                    SimpleNamespace(
+                        role="user",
+                        content=SimpleNamespace(text="Prompt"),
+                    )
+                ],
+                meta={
+                    "enable_citations": True,
+                    "returns_schema": {
+                        "type": "object",
+                        "properties": {"summary": {"type": "string"}},
+                    },
+                },
+            )
+
+        monkeypatch.setattr(ctx, "get_prompt", successful_get_prompt)
+        monkeypatch.setattr(ctx._router, "get_prompt_connection", lambda _name: "remote")
+
+        await ctx._run_task_scenario_setup()
+
+        assert ctx.scenario_enable_citations is True
+        assert isinstance(ctx.scenario_returns_schema, dict)
+        session = ctx._get_session()
+        assert session is not None
+        assert session.enable_citations is True
+
+        client = MagicMock(spec=AsyncAnthropic)
+        client.beta = MagicMock()
+        client.beta.messages = MagicMock()
+        agent = ClaudeAgent.create(
+            model_client=client,
+            validate_api_key=False,
+        )
+        agent.ctx = ctx
+        agent._initialized = True
+        agent.claude_tools = []
+        agent.tool_mapping = {}
+
+        tool_calls = [MCPToolCall(id="call_1", name="get_sales", arguments={})]
+        tool_results = [
+            MCPToolResult(
+                content=[types.TextContent(type="text", text="Revenue was $1M last quarter.")],
+                isError=False,
+            )
+        ]
+
+        messages = await agent.format_tool_results(tool_calls, tool_results)
+        content_blocks = messages[0]["content"]
+        doc_block = content_blocks[1]
+
+        assert doc_block["type"] == "document"
+        assert doc_block["source"]["type"] == "text"
+        assert doc_block["source"]["data"] == "Revenue was $1M last quarter."
         assert doc_block["citations"] == {"enabled": True}
 
     @pytest.mark.asyncio

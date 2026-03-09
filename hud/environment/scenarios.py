@@ -270,6 +270,89 @@ def _normalize_prompt_yield(value: Any) -> list[PromptMessage]:
     return [_to_prompt_message(value)]
 
 
+def _strip_json_code_fence(text: str) -> str:
+    """Remove a surrounding fenced code block when present."""
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+
+    lines = stripped.splitlines()
+    if len(lines) < 3 or lines[-1].strip() != "```":
+        return stripped
+
+    return "\n".join(lines[1:-1]).strip()
+
+
+def _extract_balanced_json_value(text: str, start: int) -> str | None:
+    """Return the first balanced JSON object/array starting at ``start``."""
+    opening = text[start]
+    if opening not in "{[":
+        return None
+
+    closing_for = {"{": "}", "[": "]"}
+    stack = [opening]
+    in_string = False
+    escape = False
+
+    for idx in range(start + 1, len(text)):
+        char = text[idx]
+
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            continue
+
+        if char in "{[":
+            stack.append(char)
+            continue
+
+        if char in "}]":
+            if not stack:
+                return None
+            expected = closing_for[stack[-1]]
+            if char != expected:
+                return None
+            stack.pop()
+            if not stack:
+                return text[start : idx + 1]
+
+    return None
+
+
+def _candidate_json_strings(raw_text: str) -> list[str]:
+    """Return likely JSON candidates extracted from a model response."""
+    candidates: list[str] = []
+
+    def _add(candidate: str) -> None:
+        candidate = candidate.strip()
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+
+    stripped = raw_text.strip()
+    _add(stripped)
+
+    fenced = _strip_json_code_fence(stripped)
+    _add(fenced)
+
+    for source in [stripped, fenced]:
+        for idx, char in enumerate(source):
+            if char not in "{[":
+                continue
+            extracted = _extract_balanced_json_value(source, idx)
+            if extracted is not None:
+                _add(extracted)
+
+    return candidates
+
+
 def _build_answer_for_generator(session: ScenarioSession) -> Any:
     """Build the value to send into the scenario generator via ``asend()``.
 
@@ -300,15 +383,21 @@ def _build_answer_for_generator(session: ScenarioSession) -> Any:
 
     # Parse content with the returns Pydantic model
     returns_cls = session.returns_type
-    try:
-        from pydantic import TypeAdapter
+    from pydantic import TypeAdapter
 
-        adapter = TypeAdapter(returns_cls)
-        parsed_content = adapter.validate_json(raw_text)
-    except Exception:
+    adapter = TypeAdapter(returns_cls)
+    parsed_content = None
+
+    for candidate in _candidate_json_strings(raw_text):
+        try:
+            parsed_content = adapter.validate_json(candidate)
+            break
+        except Exception:
+            continue
+
+    if parsed_content is None:
         # JSON parsing failed — try validating as-is (e.g. plain string type)
         try:
-            adapter = TypeAdapter(returns_cls)
             parsed_content = adapter.validate_python(raw_text)
         except Exception:
             logger.warning(
