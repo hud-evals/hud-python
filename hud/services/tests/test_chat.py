@@ -74,12 +74,6 @@ class TestChatConstruction:
         chat.clear()
         assert chat.messages == []
 
-    def test_session_id_stable(self, dummy_task: Any) -> None:
-        chat = Chat(dummy_task, model="test-model")
-        assert chat._session_id  # not empty
-        sid = chat._session_id
-        assert chat._session_id == sid  # same across accesses
-
     def test_name_from_scenario(self, dummy_task: Any) -> None:
         chat = Chat(dummy_task, model="m", name="Custom Agent")
         assert chat._name == "Custom Agent"

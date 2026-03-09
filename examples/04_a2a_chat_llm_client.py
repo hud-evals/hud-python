@@ -1,4 +1,4 @@
-"""Direct A2A Python SDK client for HUD orchestrator servers.
+"""Direct A2A Python SDK client for HUD chat service servers.
 
 Usage:
     # Terminal 1: run A2A server
@@ -35,7 +35,6 @@ from a2a.types import (
 from openai import AsyncOpenAI
 
 from hud.settings import settings
-from hud.services.reply_metadata import REPLY_METADATA_TYPE
 
 A2A_BASE_URL = os.getenv("A2A_URL", "http://localhost:9999")
 A2A_CARD_PATH = os.getenv("A2A_CARD_PATH", "/.well-known/agent-card.json")
@@ -50,10 +49,9 @@ TERMINAL_TASK_STATES = {
 }
 ConversationState = dict[str, str | None]
 ChatMessage = dict[str, Any]
-ReplyMetadata = dict[str, Any]
-SYSTEM_PROMPT = """You are a chat assistant with access to a backend A2A orchestrator.
-Use the talk_to_orchestrator tool when you need backend workflow knowledge or actions.
-If the orchestrator asks follow-up questions or requests missing details, relay them clearly to the user.
+SYSTEM_PROMPT = """You are a chat assistant with access to a backend A2A chat service.
+Use the talk_to_chat_service tool when you need backend workflow knowledge or actions.
+If the chat service asks follow-up questions or requests missing details, relay them clearly to the user.
 Keep your final answers concise and helpful."""
 
 
@@ -86,31 +84,9 @@ def _text_from_task(task: Task) -> str:
     if task.artifacts:
         for artifact in task.artifacts:
             artifact_text = _text_from_parts(artifact.parts or [])
-            if artifact_text and _parse_reply_metadata(artifact_text) is None:
+            if artifact_text:
                 texts.append(artifact_text)
     return "\n\n".join(texts).strip()
-
-
-def _parse_reply_metadata(text: str) -> ReplyMetadata | None:
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-
-    if isinstance(payload, dict) and payload.get("type") == REPLY_METADATA_TYPE:
-        return payload
-    return None
-
-
-def _metadata_from_task(task: Task) -> ReplyMetadata | None:
-    for artifact in task.artifacts or []:
-        artifact_text = _text_from_parts(artifact.parts or [])
-        if not artifact_text:
-            continue
-        payload = _parse_reply_metadata(artifact_text)
-        if payload is not None:
-            return payload
-    return None
 
 
 def new_conversation_state() -> ConversationState:
@@ -138,13 +114,12 @@ def create_llm_client() -> AsyncOpenAI:
     )
 
 
-async def send_to_orchestrator(
+async def send_to_chat_service(
     client: Any,
     state: ConversationState,
     user_text: str,
-) -> tuple[str, ReplyMetadata | None, ConversationState, TaskState | None]:
+) -> tuple[str, ConversationState, TaskState | None]:
     final_answer = ""
-    reply_metadata: ReplyMetadata | None = None
     last_state: TaskState | None = None
 
     message = Message(
@@ -182,15 +157,9 @@ async def send_to_orchestrator(
 
         elif isinstance(event, TaskArtifactUpdateEvent):
             artifact_text = _text_from_parts(event.artifact.parts or [])
-            metadata = _parse_reply_metadata(artifact_text)
-            if metadata is not None:
-                reply_metadata = metadata
-            elif artifact_text:
+            if artifact_text:
                 final_answer = artifact_text
 
-        task_metadata = _metadata_from_task(task)
-        if task_metadata is not None:
-            reply_metadata = task_metadata
         task_text = _text_from_task(task)
         if task_text:
             final_answer = task_text
@@ -198,7 +167,7 @@ async def send_to_orchestrator(
     if last_state in TERMINAL_TASK_STATES:
         state["task_id"] = None
 
-    return final_answer, reply_metadata, state, last_state
+    return final_answer, state, last_state
 
 
 def _tool_schema() -> list[dict[str, Any]]:
@@ -206,14 +175,14 @@ def _tool_schema() -> list[dict[str, Any]]:
         {
             "type": "function",
             "function": {
-                "name": "talk_to_orchestrator",
-                "description": "Send a message to the backend A2A orchestrator and return its reply.",
+                "name": "talk_to_chat_service",
+                "description": "Send a message to the backend A2A chat service and return its reply.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "message": {
                             "type": "string",
-                            "description": "The message to send to the orchestrator.",
+                            "description": "The message to send to the chat service.",
                         }
                     },
                     "required": ["message"],
@@ -226,10 +195,9 @@ def _tool_schema() -> list[dict[str, Any]]:
 async def run_llm_turn(
     llm: AsyncOpenAI,
     a2a_client: Any,
-    orchestrator_state: ConversationState,
+    chat_service_state: ConversationState,
     llm_messages: list[ChatMessage],
-) -> tuple[str, ReplyMetadata | None, ConversationState]:
-    latest_metadata: ReplyMetadata | None = None
+) -> tuple[str, ConversationState]:
     for _ in range(MAX_LLM_TOOL_ROUNDS):
         response = await llm.chat.completions.create(
             model=LLM_MODEL,
@@ -251,27 +219,26 @@ async def run_llm_turn(
             for tool_call in tool_calls:
                 args = json.loads(tool_call.function.arguments or "{}")
                 tool_input = str(args.get("message", ""))
-                print("  [llm] calling A2A orchestrator...")
-                tool_output, tool_metadata, orchestrator_state, _ = await send_to_orchestrator(
-                    a2a_client, orchestrator_state, tool_input
+                print("  [llm] calling A2A chat service...")
+                tool_output, chat_service_state, _ = await send_to_chat_service(
+                    a2a_client, chat_service_state, tool_input
                 )
-                latest_metadata = tool_metadata or latest_metadata
                 llm_messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
-                        "content": tool_output or "[orchestrator returned no text]",
+                        "content": tool_output or "[chat service returned no text]",
                     }
                 )
             continue
 
         final_answer = (message.content or "").strip()
         llm_messages.append({"role": "assistant", "content": final_answer})
-        return final_answer, latest_metadata, orchestrator_state
+        return final_answer, chat_service_state
 
     fallback = "I hit the maximum number of backend tool calls for this turn."
     llm_messages.append({"role": "assistant", "content": fallback})
-    return fallback, latest_metadata, orchestrator_state
+    return fallback, chat_service_state
 
 
 async def main() -> None:
@@ -288,7 +255,7 @@ async def main() -> None:
         print(f"LLM + A2A client ready (server={A2A_BASE_URL}, model={LLM_MODEL})")
         print("Type your messages below. Ctrl+C to quit.\n")
 
-        orchestrator_state = new_conversation_state()
+        chat_service_state = new_conversation_state()
         llm_messages: list[ChatMessage] = [{"role": "system", "content": SYSTEM_PROMPT}]
 
         while True:
@@ -302,22 +269,15 @@ async def main() -> None:
                 continue
 
             llm_messages.append({"role": "user", "content": user_text})
-            final_answer, reply_metadata, orchestrator_state = await run_llm_turn(
+            final_answer, chat_service_state = await run_llm_turn(
                 llm,
                 a2a_client,
-                orchestrator_state,
+                chat_service_state,
                 llm_messages,
             )
 
             if final_answer:
                 print(f"\nAgent: {final_answer}\n")
-                citations = reply_metadata.get("citations", []) if reply_metadata else []
-                if citations:
-                    print("Sources:")
-                    for citation in citations:
-                        source = citation.get("source") or citation.get("title") or str(citation)
-                        print(f"- {source}")
-                    print()
             else:
                 print("\nAgent: [no response]\n")
 

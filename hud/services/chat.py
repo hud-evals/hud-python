@@ -27,7 +27,6 @@ Example::
 
 from __future__ import annotations
 
-import asyncio  # noqa: TC003 - used at runtime for Future
 import logging
 import uuid
 from collections.abc import Sequence
@@ -129,14 +128,6 @@ class Chat(AgentExecutor):
         self._max_steps = max_steps
         self.messages: list[dict[str, Any]] = []
 
-        # Stable session identifier reused across all turns so the remote
-        # MCP server (or HUD hub) treats multi-turn Chat as one session.
-        # This flows to Connector.copy() as the Environment-Id header.
-        self._session_id: str = str(uuid.uuid4())
-
-        # Elicitation bridge state
-        self._pending_elicitations: dict[str, asyncio.Future[str]] = {}
-
     def _create_agent(self) -> Any:
         """Create an agent instance from the configured model name."""
         from hud.agents import create_agent
@@ -182,18 +173,8 @@ class Chat(AgentExecutor):
         return result
 
     def clear(self) -> None:
-        """Reset the conversation history and rotate the session.
-
-        Generates a fresh session_id so subsequent turns don't inherit
-        stale server-side state (tokens, set_state values) from the
-        previous conversation.
-        """
+        """Reset the conversation history."""
         self.messages = []
-        self._session_id = str(uuid.uuid4())
-
-    @property
-    def session_id(self) -> str:
-        return self._session_id
 
     # ------------------------------------------------------------------
     # MCP tool surface
@@ -284,21 +265,12 @@ class Chat(AgentExecutor):
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Process an A2A message via send().
-
-        Handles both fresh messages and follow-ups to pending
-        elicitations (input_required responses).
         """
         context_id = context.context_id or str(uuid.uuid4())
         task_id = context.task_id or str(uuid.uuid4())
 
         try:
             message_text = context.get_user_input()
-
-            # Check if this is a follow-up to a pending elicitation
-            future = self._pending_elicitations.pop(task_id, None)
-            if future is not None:
-                future.set_result(message_text)
-                return
 
             await event_queue.enqueue_event(
                 TaskStatusUpdateEvent(
@@ -360,10 +332,6 @@ class Chat(AgentExecutor):
         task_id = context.task_id or ""
 
         self.clear()
-
-        pending = self._pending_elicitations.pop(task_id, None)
-        if pending is not None:
-            pending.cancel()
 
         await event_queue.enqueue_event(
             TaskStatusUpdateEvent(

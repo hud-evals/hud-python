@@ -27,6 +27,7 @@ from hud.services.reply_metadata import build_reply_metadata_event
 if TYPE_CHECKING:
     from a2a.server.agent_execution.context import RequestContext
     from a2a.server.events.event_queue import EventQueue
+    from hud.eval.task import Task
 
 LOGGER = logging.getLogger(__name__)
 
@@ -36,34 +37,24 @@ class ChatService(AgentExecutor):
 
     def __init__(
         self,
-        env_name: str,
+        task: Task,
+        /,
         *,
         model: str,
-        scenario: str,
         max_steps: int = 50,
         name: str | None = None,
         description: str | None = None,
     ) -> None:
-        from hud.eval.task import Task
-
-        resolved_scenario = self._resolve_scenario(env_name, scenario)
-        self._task = Task(env={"name": env_name}, scenario=resolved_scenario)
+        self._task = task
         self._model = model
         self._max_steps = max_steps
-        self._name = name or f"hud-{env_name}"
-        self._description = description or f"A2A agent for {env_name}"
+        self._name = name or task.scenario or "chat-service"
+        self._description = description or f"A2A service for {task.scenario or 'tasks'}"
 
         self._sessions: dict[str, Chat] = {}
         self._session_locks: dict[str, asyncio.Lock] = {}
         self._session_last_active: dict[str, float] = {}
         self._session_ttl_seconds = 30 * 60
-
-    @staticmethod
-    def _resolve_scenario(env_name: str, scenario: str) -> str:
-        """Normalize scenario input to a fully qualified identifier."""
-        if ":" in scenario:
-            return scenario
-        return f"{env_name}:{scenario}"
 
     def _get_or_create_chat(self, context_id: str) -> Chat:
         self._cleanup_stale_sessions()
@@ -78,14 +69,15 @@ class ChatService(AgentExecutor):
         self._session_last_active[context_id] = time.monotonic()
         return chat
 
-    def _get_lock(self, context_id: str) -> asyncio.Lock:
-        return self._session_locks.setdefault(context_id, asyncio.Lock())
-
     def _remove_session(self, context_id: str) -> None:
         session = self._sessions.pop(context_id, None)
         if session is not None:
             session.clear()
-        self._session_locks.pop(context_id, None)
+        lock = self._session_locks.get(context_id)
+        # Preserve an in-flight lock so concurrent requests for the same
+        # context cannot create a second lock and run in parallel.
+        if lock is None or not lock.locked():
+            self._session_locks.pop(context_id, None)
         self._session_last_active.pop(context_id, None)
 
     def _cleanup_stale_sessions(self) -> None:
@@ -100,14 +92,6 @@ class ChatService(AgentExecutor):
         if stale:
             LOGGER.info("Cleaned up %d stale sessions", len(stale))
 
-    @staticmethod
-    def _new_message(text: str) -> Message:
-        return Message(
-            message_id=str(uuid.uuid4()),
-            role=Role.agent,
-            parts=[Part(root=TextPart(text=text))],
-        )
-
     async def _enqueue_status(
         self,
         event_queue: EventQueue,
@@ -120,7 +104,14 @@ class ChatService(AgentExecutor):
     ) -> None:
         status = TaskStatus(state=state)
         if text is not None:
-            status = TaskStatus(state=state, message=self._new_message(text))
+            status = TaskStatus(
+                state=state,
+                message=Message(
+                    message_id=str(uuid.uuid4()),
+                    role=Role.agent,
+                    parts=[Part(root=TextPart(text=text))],
+                ),
+            )
 
         await event_queue.enqueue_event(
             TaskStatusUpdateEvent(
@@ -172,8 +163,6 @@ class ChatService(AgentExecutor):
         context_id = context.context_id or str(uuid.uuid4())
         task_id = context.task_id or str(uuid.uuid4())
         message = context.get_user_input()
-        request_message = getattr(context, "message", None)
-        message_id = getattr(request_message, "message_id", "") or ""
 
         await self._enqueue_status(
             event_queue,
@@ -184,19 +173,11 @@ class ChatService(AgentExecutor):
         )
 
         try:
-            async with self._get_lock(context_id):
+            async with self._session_locks.setdefault(context_id, asyncio.Lock()):
                 chat = self._get_or_create_chat(context_id)
                 result = await chat.send(message)
                 content = result.content or ""
 
-            LOGGER.info(
-                "a2a_turn_completed context_id=%s task_id=%s "
-                "message_id=%s trace_id=%s",
-                context_id,
-                task_id,
-                message_id,
-                chat.session_id,
-            )
 
             metadata_event = build_reply_metadata_event(
                 context_id=context_id,

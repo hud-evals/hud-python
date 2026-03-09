@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 
+from hud.eval.task import Task
 from hud.services import ChatService
 
 
@@ -31,7 +32,11 @@ def main() -> None:
     host = os.getenv("HUD_A2A_HOST", "0.0.0.0")
     port = int(os.getenv("HUD_A2A_PORT", "9999"))
 
-    service = ChatService(env_name, model=model, scenario=scenario)
+    resolved_scenario = scenario if ":" in scenario else f"{env_name}:{scenario}"
+    service = ChatService(
+        Task(env={"name": env_name}, scenario=resolved_scenario),
+        model=model,
+    )
     service.serve(host=host, port=port)
 
 
