@@ -159,6 +159,7 @@ class ClaudeAgent(MCPAgent):
         self.claude_tools: list[BetaToolUnionParam] = []
         self._required_betas: set[str] = set()
         self._tool_search_threshold: int | None = None
+        self._gated_screenshot_tools: set[str] = set()
 
     def _on_tools_ready(self) -> None:
         """Build Claude-specific tool mappings after tools are discovered."""
@@ -342,13 +343,17 @@ class ClaudeAgent(MCPAgent):
 
         for block in response.content:
             if block.type == "tool_use":
+                mcp_name = self.tool_mapping.get(block.name, block.name)
+                arguments = block.input if isinstance(block.input, dict) else block.input.__dict__
+                if mcp_name in self._gated_screenshot_tools:
+                    arguments = {**arguments, "take_screenshot_on_click": False}
+                    logger.debug(
+                        "Injected take_screenshot_on_click=False for gated tool %s", mcp_name
+                    )
                 tool_call = MCPToolCall(
                     id=block.id,
-                    # look up name in tool_mapping if available, otherwise use block name
-                    name=self.tool_mapping.get(block.name, block.name),
-                    arguments=block.input
-                    if isinstance(block.input, dict)
-                    else block.input.__dict__,
+                    name=mcp_name,
+                    arguments=arguments,
                 )
                 result.tool_calls.append(tool_call)
                 result.done = False
@@ -438,6 +443,7 @@ class ClaudeAgent(MCPAgent):
         self.claude_tools: list[BetaToolUnionParam] = []
         self._required_betas: set[str] = set()
         self._tool_search_threshold = None
+        self._gated_screenshot_tools: set[str] = set()
 
         categorized = self._categorized_tools
 
@@ -471,6 +477,9 @@ class ClaudeAgent(MCPAgent):
 
             if spec.api_type and spec.api_type.startswith("computer"):
                 self.has_computer_tool = True
+            if spec.api_type == "computer_20251124":
+                self._gated_screenshot_tools.add(tool.name)
+                logger.debug("Screenshot gating enabled for tool %s (computer_20251124)", tool.name)
 
         # Process generic tools
         for tool in categorized.generic:

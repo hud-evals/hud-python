@@ -67,8 +67,17 @@ ANTHROPIC_TO_CLA_KEYS = {
 class AnthropicComputerTool(HudComputerTool):
     """Anthropic Computer Use tool for interacting with the computer.
 
-    Supports computer_20251124 (Opus 4.5/4.6 with zoom) and
-    computer_20250124 (Sonnet 4.5, Haiku 4.5, Sonnet 4, Opus 4).
+    The Claude agent injects take_screenshot_on_click based on the selected spec.
+
+    Model       Spec                 Auto-screenshot
+    Opus 4.5    computer_20251124    OFF
+    Opus 4.6    computer_20251124    OFF
+    Sonnet 4.6  computer_20251124    OFF
+    Sonnet 4.5  computer_20250124    ON
+    Sonnet 4    computer_20250124    ON
+    Sonnet 3.7  computer_20250124    ON
+    Haiku 4.5   computer_20250124    ON
+    Opus 4.1    computer_20250124    ON
     """
 
     name: str = "computer"
@@ -240,8 +249,10 @@ class AnthropicComputerTool(HudComputerTool):
             None, description="The region for zoom action [x0, y0, x1, y1]"
         ),
         repeat: int = Field(1, description="Number of times to repeat the key action (1-100)"),
-        take_screenshot_on_click: bool = Field(
-            True, description="Whether to take a screenshot after clicking"
+        take_screenshot_on_click: bool | None = Field(
+            None,
+            description="Whether to take a screenshot after actions. "
+            "Defaults to False for computer_20251124, True for older specs.",
         ),
     ) -> list[ContentBlock]:
         """
@@ -252,7 +263,16 @@ class AnthropicComputerTool(HudComputerTool):
         Returns:
             List of MCP content blocks
         """
-        logger.info("AnthropicComputerTool received action: %s", action)
+        # Default to auto-screenshot unless the agent explicitly disables it.
+        # The Claude agent injects take_screenshot_on_click=False for
+        # computer_20251124 models (Opus 4.5/4.6, Sonnet 4.6).
+        auto_screenshot = take_screenshot_on_click if take_screenshot_on_click is not None else True
+        logger.info(
+            "AnthropicComputerTool action=%s take_screenshot_on_click=%s auto_screenshot=%s",
+            action,
+            take_screenshot_on_click,
+            auto_screenshot,
+        )
 
         # Convert lists to tuples if needed
         coord_tuple = None
@@ -279,9 +299,16 @@ class AnthropicComputerTool(HudComputerTool):
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 logger.info("Scaled coordinates: %s, %s", scaled_x, scaled_y)
-                result = await self.executor.click(x=scaled_x, y=scaled_y, hold_keys=hold_keys)
+                result = await self.executor.click(
+                    x=scaled_x,
+                    y=scaled_y,
+                    hold_keys=hold_keys,
+                    take_screenshot=auto_screenshot,
+                )
             else:
-                result = await self.executor.click(hold_keys=hold_keys)
+                result = await self.executor.click(
+                    hold_keys=hold_keys, take_screenshot=auto_screenshot
+                )
 
         elif action == "double_click":
             hold_keys = self._parse_hold_keys(text)
@@ -289,10 +316,18 @@ class AnthropicComputerTool(HudComputerTool):
                 # Use pattern for double-click
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 result = await self.executor.click(
-                    x=scaled_x, y=scaled_y, pattern=[100], hold_keys=hold_keys
+                    x=scaled_x,
+                    y=scaled_y,
+                    pattern=[100],
+                    hold_keys=hold_keys,
+                    take_screenshot=auto_screenshot,
                 )
             else:
-                result = await self.executor.click(pattern=[100], hold_keys=hold_keys)
+                result = await self.executor.click(
+                    pattern=[100],
+                    hold_keys=hold_keys,
+                    take_screenshot=auto_screenshot,
+                )
 
         elif action == "triple_click":
             hold_keys = self._parse_hold_keys(text)
@@ -300,35 +335,61 @@ class AnthropicComputerTool(HudComputerTool):
                 # Use pattern for triple-click
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 result = await self.executor.click(
-                    x=scaled_x, y=scaled_y, pattern=[100, 100], hold_keys=hold_keys
+                    x=scaled_x,
+                    y=scaled_y,
+                    pattern=[100, 100],
+                    hold_keys=hold_keys,
+                    take_screenshot=auto_screenshot,
                 )
             else:
-                result = await self.executor.click(pattern=[100, 100], hold_keys=hold_keys)
+                result = await self.executor.click(
+                    pattern=[100, 100],
+                    hold_keys=hold_keys,
+                    take_screenshot=auto_screenshot,
+                )
 
         elif action == "right_click":
             hold_keys = self._parse_hold_keys(text)
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 result = await self.executor.click(
-                    x=scaled_x, y=scaled_y, button="right", hold_keys=hold_keys
+                    x=scaled_x,
+                    y=scaled_y,
+                    button="right",
+                    hold_keys=hold_keys,
+                    take_screenshot=auto_screenshot,
                 )
             else:
-                result = await self.executor.click(button="right", hold_keys=hold_keys)
+                result = await self.executor.click(
+                    button="right",
+                    hold_keys=hold_keys,
+                    take_screenshot=auto_screenshot,
+                )
 
         elif action == "middle_click":
             hold_keys = self._parse_hold_keys(text)
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
                 result = await self.executor.click(
-                    x=scaled_x, y=scaled_y, button="middle", hold_keys=hold_keys
+                    x=scaled_x,
+                    y=scaled_y,
+                    button="middle",
+                    hold_keys=hold_keys,
+                    take_screenshot=auto_screenshot,
                 )
             else:
-                result = await self.executor.click(button="middle", hold_keys=hold_keys)
+                result = await self.executor.click(
+                    button="middle",
+                    hold_keys=hold_keys,
+                    take_screenshot=auto_screenshot,
+                )
 
         elif action == "mouse_move" or action == "move":
             if coord_tuple and len(coord_tuple) >= 2:
                 scaled_x, scaled_y = self._scale_coordinates(coord_tuple[0], coord_tuple[1])
-                result = await self.executor.move(x=scaled_x, y=scaled_y)
+                result = await self.executor.move(
+                    x=scaled_x, y=scaled_y, take_screenshot=auto_screenshot
+                )
             else:
                 raise McpError(
                     ErrorData(code=INVALID_PARAMS, message="coordinate is required for mouse_move")
@@ -336,7 +397,7 @@ class AnthropicComputerTool(HudComputerTool):
 
         elif action == "type":
             if text:
-                result = await self.executor.write(text=text)
+                result = await self.executor.write(text=text, take_screenshot=auto_screenshot)
             else:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="text is required for type"))
 
@@ -361,7 +422,10 @@ class AnthropicComputerTool(HudComputerTool):
 
                 for i in range(repeat):
                     is_last = i == repeat - 1
-                    result = await self.executor.press(keys=keys_list, take_screenshot=is_last)
+                    result = await self.executor.press(
+                        keys=keys_list,
+                        take_screenshot=auto_screenshot and is_last,
+                    )
             else:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="text is required for key"))
 
@@ -410,10 +474,14 @@ class AnthropicComputerTool(HudComputerTool):
                     scroll_x=scroll_x,
                     scroll_y=scroll_y,
                     hold_keys=hold_keys,
+                    take_screenshot=auto_screenshot,
                 )
             else:
                 result = await self.executor.scroll(
-                    scroll_x=scroll_x, scroll_y=scroll_y, hold_keys=hold_keys
+                    scroll_x=scroll_x,
+                    scroll_y=scroll_y,
+                    hold_keys=hold_keys,
+                    take_screenshot=auto_screenshot,
                 )
 
         elif action == "left_click_drag" or action == "drag":
@@ -426,13 +494,17 @@ class AnthropicComputerTool(HudComputerTool):
                         (coord_tuple[0], coord_tuple[1]),
                     ]
                     scaled_path = self._scale_path(path)
-                    result = await self.executor.drag(path=scaled_path)
+                    result = await self.executor.drag(
+                        path=scaled_path, take_screenshot=auto_screenshot
+                    )
                 else:
                     # Just end coordinate, drag from current position
                     # Original spec allows this
                     current_pos = [(0, 0), (coord_tuple[0], coord_tuple[1])]  # Simplified
                     scaled_path = self._scale_path(current_pos)
-                    result = await self.executor.drag(path=scaled_path)
+                    result = await self.executor.drag(
+                        path=scaled_path, take_screenshot=auto_screenshot
+                    )
             else:
                 raise McpError(
                     ErrorData(
@@ -454,7 +526,9 @@ class AnthropicComputerTool(HudComputerTool):
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="duration is too long"))
 
             # Convert seconds to milliseconds for HudComputerTool
-            result = await self.executor.wait(time=int(duration * 1000))
+            result = await self.executor.wait(
+                time=int(duration * 1000), take_screenshot=auto_screenshot
+            )
 
         elif action == "hold_key":
             # Original spec has hold_key action
@@ -474,7 +548,9 @@ class AnthropicComputerTool(HudComputerTool):
                 raise McpError(ErrorData(code=INVALID_PARAMS, message="duration is too long"))
 
             # Hold key action
-            result = await self.executor.hold_key(key=text, duration=duration)
+            result = await self.executor.hold_key(
+                key=text, duration=duration, take_screenshot=auto_screenshot
+            )
 
         elif action == "left_mouse_down":
             # These don't accept coordinates in original spec
@@ -486,7 +562,7 @@ class AnthropicComputerTool(HudComputerTool):
                     )
                 )
             # Use generic mouse_down method
-            result = await self.executor.mouse_down(button="left")
+            result = await self.executor.mouse_down(button="left", take_screenshot=auto_screenshot)
 
         elif action == "left_mouse_up":
             # These don't accept coordinates in original spec
@@ -497,7 +573,7 @@ class AnthropicComputerTool(HudComputerTool):
                     )
                 )
             # Use generic mouse_up method
-            result = await self.executor.mouse_up(button="left")
+            result = await self.executor.mouse_up(button="left", take_screenshot=auto_screenshot)
 
         elif action == "cursor_position":
             result = await self.executor.position()
@@ -593,7 +669,7 @@ class AnthropicComputerTool(HudComputerTool):
         if (
             action in screenshot_actions
             and action != "screenshot"
-            and take_screenshot_on_click
+            and auto_screenshot
             and isinstance(result, ContentResult)
             and not result.base64_image
         ):
