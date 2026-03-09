@@ -136,17 +136,18 @@ class ClaudeAgent(MCPAgent):
 
         model_client = self.config.model_client
         if model_client is None:
-            # Default to HUD gateway when HUD_API_KEY is available
-            if settings.api_key:
+            # Prefer direct Anthropic access (BYOK) when key is available;
+            # fall back to HUD gateway.  Use --gateway to force gateway mode.
+            if settings.anthropic_api_key:
+                model_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+            elif settings.api_key:
                 from hud.agents.gateway import build_gateway_client
 
                 model_client = build_gateway_client("anthropic")
-            elif settings.anthropic_api_key:
-                model_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
             else:
                 raise ValueError(
-                    "No API key found. Set HUD_API_KEY for HUD gateway, "
-                    "or ANTHROPIC_API_KEY for direct Anthropic access."
+                    "No API key found. Set ANTHROPIC_API_KEY for direct access, "
+                    "or HUD_API_KEY for HUD gateway."
                 )
 
         self.anthropic_client: AsyncAnthropic | AsyncAnthropicBedrock = model_client
@@ -266,6 +267,18 @@ class ClaudeAgent(MCPAgent):
             invalid_json_failures = 0
             for _ in range(3):
                 messages_cached = self._add_prompt_caching(messages)
+                doc_count = sum(
+                    1
+                    for m in messages_cached
+                    if isinstance(m, dict) and isinstance(m.get("content"), list)
+                    for b in m["content"]
+                    if isinstance(b, dict) and b.get("type") == "document"
+                )
+                if doc_count:
+                    logger.info(
+                        "Sending %d document block(s) to Anthropic (citations should fire)",
+                        doc_count,
+                    )
                 try:
                     async with self.anthropic_client.beta.messages.stream(
                         model=self.config.model,
@@ -382,6 +395,13 @@ class ClaudeAgent(MCPAgent):
                 except Exception:
                     session = None
                 citations_enabled = bool(getattr(session, "enable_citations", False))
+
+        logger.debug(
+            "format_tool_results: citations_enabled=%s (ctx=%s, attr=%s)",
+            citations_enabled,
+            type(self.ctx).__name__ if self.ctx else None,
+            getattr(self.ctx, "scenario_enable_citations", "MISSING") if self.ctx else "NO_CTX",
+        )
 
         # Process each tool result
         user_content: list[
