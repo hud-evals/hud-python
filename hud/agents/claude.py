@@ -346,6 +346,9 @@ class ClaudeAgent(MCPAgent):
                 arguments = block.input if isinstance(block.input, dict) else block.input.__dict__
                 if mcp_name in self._gated_screenshot_tools:
                     arguments = {**arguments, "take_screenshot_on_click": False}
+                    logger.debug(
+                        "Injected take_screenshot_on_click=False for gated tool %s", mcp_name
+                    )
                 tool_call = MCPToolCall(
                     id=block.id,
                     name=mcp_name,
@@ -475,6 +478,9 @@ class ClaudeAgent(MCPAgent):
                 self.has_computer_tool = True
             if spec.api_type == "computer_20251124":
                 self._gated_screenshot_tools.add(tool.name)
+                logger.debug(
+                    "Screenshot gating enabled for tool %s (computer_20251124)", tool.name
+                )
 
         # Process generic tools
         for tool in categorized.generic:

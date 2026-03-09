@@ -263,12 +263,16 @@ class AnthropicComputerTool(HudComputerTool):
         Returns:
             List of MCP content blocks
         """
-        logger.info("AnthropicComputerTool received action: %s", action)
-
         # Default to auto-screenshot unless the agent explicitly disables it.
         # The Claude agent injects take_screenshot_on_click=False for
         # computer_20251124 models (Opus 4.5/4.6, Sonnet 4.6).
         auto_screenshot = take_screenshot_on_click if take_screenshot_on_click is not None else True
+        logger.info(
+            "AnthropicComputerTool action=%s take_screenshot_on_click=%s auto_screenshot=%s",
+            action,
+            take_screenshot_on_click,
+            auto_screenshot,
+        )
 
         # Convert lists to tuples if needed
         coord_tuple = None
