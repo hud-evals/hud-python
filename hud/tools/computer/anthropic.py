@@ -111,6 +111,7 @@ class AnthropicComputerTool(HudComputerTool):
         width: int = computer_settings.ANTHROPIC_COMPUTER_WIDTH,
         height: int = computer_settings.ANTHROPIC_COMPUTER_HEIGHT,
         rescale_images: bool = computer_settings.ANTHROPIC_RESCALE_IMAGES,
+        screenshot_quality: int | None = computer_settings.ANTHROPIC_SCREENSHOT_QUALITY,
         # What the agent sees as the tool's name, title, and description
         name: str | None = None,
         title: str | None = None,
@@ -124,6 +125,8 @@ class AnthropicComputerTool(HudComputerTool):
             width: Width for agent coordinate system (default: 1400)
             height: Height for agent coordinate system (default: 850)
             rescale_images: If True, rescale screenshots. If False, only rescale action coordinates
+            screenshot_quality: JPEG quality (1-95) for screenshots. None keeps lossless PNG.
+                Set via env var ANTHROPIC_SCREENSHOT_QUALITY. Lower values = smaller images.
             name: Tool name for MCP registration (auto-generated from class name if not provided)
             title: Human-readable display name for the tool (auto-generated from class name)
             description: Tool description (auto-generated from docstring if not provided)
@@ -168,6 +171,46 @@ class AnthropicComputerTool(HudComputerTool):
             native_specs=instance_native_specs,
             **kwargs,
         )
+        self.screenshot_quality = screenshot_quality
+
+    async def _rescale_screenshot(self, screenshot_base64: str) -> str:
+        """Rescale and/or compress a screenshot.
+
+        Resizes when rescale_images=True and dimensions differ (base class behaviour).
+        Additionally compresses to JPEG when screenshot_quality is set, even when
+        no resize is needed, to reduce context window usage.
+        """
+        if self.screenshot_quality is None:
+            return await super()._rescale_screenshot(screenshot_base64)
+
+        try:
+            import base64
+            from io import BytesIO
+
+            from PIL import Image  # type: ignore[import-not-found]
+
+            image_data = base64.b64decode(screenshot_base64)
+            image = Image.open(BytesIO(image_data))
+
+            if self.rescale_images and self.needs_scaling:
+                logger.debug(
+                    "Resizing screenshot from %s x %s to %s x %s",
+                    image.width,
+                    image.height,
+                    self.width,
+                    self.height,
+                )
+                image = image.resize((self.width, self.height), Image.Resampling.LANCZOS)
+
+            if image.mode in ("RGBA", "P", "LA"):
+                image = image.convert("RGB")
+            buffer = BytesIO()
+            image.save(buffer, format="JPEG", quality=self.screenshot_quality, optimize=True)
+            logger.debug("Compressed screenshot to JPEG quality=%s", self.screenshot_quality)
+            return base64.b64encode(buffer.getvalue()).decode("utf-8")
+        except Exception as e:
+            logger.warning("Failed to compress screenshot: %s", e)
+            return await super()._rescale_screenshot(screenshot_base64)
 
     def to_params(
         self, api_type: str | None = None

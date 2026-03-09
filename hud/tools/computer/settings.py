@@ -83,6 +83,11 @@ class ComputerSettings(BaseSettings):
         description="Whether to rescale images to the agent width and height",
         validation_alias="ANTHROPIC_RESCALE_IMAGES",
     )
+    ANTHROPIC_SCREENSHOT_QUALITY: int | None = Field(
+        default=None,
+        description="JPEG quality for screenshots (1-95). None keeps lossless PNG.",
+        validation_alias="ANTHROPIC_SCREENSHOT_QUALITY",
+    )
     OPENAI_RESCALE_IMAGES: bool = Field(
         default=True,
         description="Whether to rescale images to the agent width and height",
