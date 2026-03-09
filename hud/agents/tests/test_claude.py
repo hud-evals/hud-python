@@ -426,7 +426,6 @@ class TestClaudeAgent:
         agent.claude_tools = []
         agent.tool_mapping = {"my_tool": "my_tool"}
         agent.has_computer_tool = False
-        agent._gated_screenshot_tools = set()
         agent._initialized = True
 
         response = await agent.get_response([])
