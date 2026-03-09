@@ -175,7 +175,8 @@ class ContentResult(BaseModel):
         blocks: list[ContentBlock] = list(self.to_text_blocks())
 
         if self.base64_image:
-            blocks.append(ImageContent(data=self.base64_image, mimeType="image/png", type="image"))
+            mime = "image/jpeg" if self.base64_image.startswith("/9j/") else "image/png"
+            blocks.append(ImageContent(data=self.base64_image, mimeType=mime, type="image"))
 
         return blocks
 
