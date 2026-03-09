@@ -67,8 +67,17 @@ ANTHROPIC_TO_CLA_KEYS = {
 class AnthropicComputerTool(HudComputerTool):
     """Anthropic Computer Use tool for interacting with the computer.
 
-    Supports computer_20251124 (Opus 4.5/4.6 with zoom) and
-    computer_20250124 (Sonnet 4.5, Haiku 4.5, Sonnet 4, Opus 4).
+    The Claude agent injects take_screenshot_on_click based on the selected spec.
+
+    Model       Spec                 Auto-screenshot
+    Opus 4.5    computer_20251124    OFF
+    Opus 4.6    computer_20251124    OFF
+    Sonnet 4.6  computer_20251124    OFF
+    Sonnet 4.5  computer_20250124    ON
+    Sonnet 4    computer_20250124    ON
+    Sonnet 3.7  computer_20250124    ON
+    Haiku 4.5   computer_20250124    ON
+    Opus 4.1    computer_20250124    ON
     """
 
     name: str = "computer"
@@ -256,11 +265,10 @@ class AnthropicComputerTool(HudComputerTool):
         """
         logger.info("AnthropicComputerTool received action: %s", action)
 
-        # Resolve screenshot behavior based on api_type if not explicitly set
-        if take_screenshot_on_click is None:
-            auto_screenshot = self.api_type != "computer_20251124"
-        else:
-            auto_screenshot = take_screenshot_on_click
+        # Default to auto-screenshot unless the agent explicitly disables it.
+        # The Claude agent injects take_screenshot_on_click=False for
+        # computer_20251124 models (Opus 4.5/4.6, Sonnet 4.6).
+        auto_screenshot = take_screenshot_on_click if take_screenshot_on_click is not None else True
 
         # Convert lists to tuples if needed
         coord_tuple = None
