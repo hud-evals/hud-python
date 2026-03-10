@@ -602,6 +602,7 @@ async def build_proxy(backend: Any, name: str = "HUD Docker Dev Proxy") -> Any:
     """
     from fastmcp import FastMCP
     from fastmcp.exceptions import NotFoundError as FastMCPNotFoundError
+    from fastmcp.exceptions import ToolError as FastMCPToolError
 
     from hud.server import MCPServer
 
@@ -614,11 +615,11 @@ async def build_proxy(backend: Any, name: str = "HUD Docker Dev Proxy") -> Any:
     async def _passthrough_call_tool(key: str, arguments: dict[str, Any]) -> Any:
         try:
             return await _original_call_tool_mcp(key, arguments)
-        except FastMCPNotFoundError:
+        except (FastMCPNotFoundError, FastMCPToolError):
             # Hidden tools (underscore-prefixed like _hud_submit) are not
             # copied by import_server. Forward directly to the backend
             # which relays to the actual Environment server.
-            return await backend.call_tool(key, arguments)
+            return (await backend.call_tool_mcp(key, arguments)).content
 
     proxy._call_tool_mcp = _passthrough_call_tool  # type: ignore[assignment]
     return proxy
