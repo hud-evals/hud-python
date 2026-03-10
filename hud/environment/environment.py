@@ -998,6 +998,60 @@ class Environment(
         return f"Environment({self.name!r}, connections={list(self._connections.keys())})"
 
     # =========================================================================
+    # Chat
+    # =========================================================================
+
+    def chat(
+        self,
+        scenario: str,
+        *,
+        model: str,
+        agent_params: dict[str, Any] | None = None,
+        max_steps: int = 10,
+        trace: bool = False,
+        quiet: bool = True,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> Any:
+        """Create a Chat instance for a chat scenario on this environment.
+
+        Convenience wrapper that avoids importing Task and Chat separately.
+        Defaults to ``trace=False, quiet=True`` for server/app usage.
+
+        Args:
+            scenario: Scenario name (must be ``chat=True``).
+            model: Model name string (e.g. "claude-sonnet-4-20250514").
+            agent_params: Extra kwargs forwarded to agent creation.
+            max_steps: Max agent steps per turn.
+            trace: Whether to record traces on the HUD platform.
+            quiet: Suppress banner/link output.
+            name: Human-readable name for AgentCard.
+            description: Description for AgentCard.
+
+        Returns:
+            A Chat instance ready for ``await chat.send("...")``.
+
+        Example::
+
+            chat = env.chat("ask", model="claude-haiku-4-5")
+            r = await chat.send("What is everyone working on?")
+            print(r.content)
+        """
+        from hud.eval.task import Task
+        from hud.services.chat import Chat
+
+        return Chat(
+            Task(env=self, scenario=scenario),
+            model=model,
+            agent_params=agent_params,
+            max_steps=max_steps,
+            trace=trace,
+            quiet=quiet,
+            name=name,
+            description=description,
+        )
+
+    # =========================================================================
     # Task Creation
     # =========================================================================
 

@@ -107,6 +107,8 @@ class Chat(AgentExecutor):
         name: str | None = None,
         description: str | None = None,
         max_steps: int = 10,
+        trace: bool = True,
+        quiet: bool = True,
     ) -> None:
         """Initialize Chat.
 
@@ -119,6 +121,8 @@ class Chat(AgentExecutor):
             agent_params: Extra kwargs forwarded to agent creation
             name: Human-readable name for AgentCard generation
             description: Description for AgentCard generation
+            trace: Whether to record traces on the HUD platform
+            quiet: When True, suppress banner/link output (default for chat)
         """
         self._task = task
         self._model = model
@@ -126,6 +130,8 @@ class Chat(AgentExecutor):
         self._name = name or task.scenario or "chat"
         self._description = description or f"Chat agent for {task.scenario or 'tasks'}"
         self._max_steps = max_steps
+        self._trace = trace
+        self._quiet = quiet
         self.messages: list[dict[str, Any]] = []
 
     def _create_agent(self) -> Any:
@@ -160,7 +166,7 @@ class Chat(AgentExecutor):
         task_args["messages"] = self.messages
         task = self._task.model_copy(update={"args": task_args})
 
-        async with hud.eval(task) as ctx:
+        async with hud.eval(task, trace=self._trace, quiet=self._quiet) as ctx:
             agent = self._create_agent()
             result = await agent.run(ctx, max_steps=self._max_steps)
 
@@ -175,6 +181,22 @@ class Chat(AgentExecutor):
     def clear(self) -> None:
         """Reset the conversation history."""
         self.messages = []
+
+    def export_history(self) -> list[dict[str, Any]]:
+        """Export the conversation history for persistence.
+
+        Returns a JSON-serializable list of message dicts that can be
+        saved and later restored with ``load_history()``.
+        """
+        return [dict(m) for m in self.messages]
+
+    def load_history(self, messages: list[dict[str, Any]]) -> None:
+        """Restore conversation history from a previous export.
+
+        Replaces the current history. Use after ``export_history()`` to
+        resume a conversation across server restarts or sessions.
+        """
+        self.messages = [dict(m) for m in messages]
 
     # ------------------------------------------------------------------
     # MCP tool surface

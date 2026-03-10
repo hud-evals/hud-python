@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from a2a.server.agent_execution import AgentExecutor
 from a2a.types import (
@@ -27,6 +27,7 @@ from hud.services.reply_metadata import build_reply_metadata_event
 if TYPE_CHECKING:
     from a2a.server.agent_execution.context import RequestContext
     from a2a.server.events.event_queue import EventQueue
+
     from hud.eval.task import Task
 
 LOGGER = logging.getLogger(__name__)
@@ -44,12 +45,16 @@ class ChatService(AgentExecutor):
         max_steps: int = 50,
         name: str | None = None,
         description: str | None = None,
+        trace: bool = True,
+        quiet: bool = True,
     ) -> None:
         self._task = task
         self._model = model
         self._max_steps = max_steps
         self._name = name or task.scenario or "chat-service"
         self._description = description or f"A2A service for {task.scenario or 'tasks'}"
+        self._trace = trace
+        self._quiet = quiet
 
         self._sessions: dict[str, Chat] = {}
         self._session_locks: dict[str, asyncio.Lock] = {}
@@ -64,6 +69,8 @@ class ChatService(AgentExecutor):
                 self._task,
                 model=self._model,
                 max_steps=self._max_steps,
+                trace=self._trace,
+                quiet=self._quiet,
             )
             self._sessions[context_id] = chat
         self._session_last_active[context_id] = time.monotonic()
@@ -91,6 +98,55 @@ class ChatService(AgentExecutor):
             self._remove_session(cid)
         if stale:
             LOGGER.info("Cleaned up %d stale sessions", len(stale))
+
+    # ------------------------------------------------------------------
+    # Direct Python usage (session-based)
+    # ------------------------------------------------------------------
+
+    async def send(
+        self,
+        message: str,
+        *,
+        session_id: str = "default",
+    ) -> Any:
+        """Send a message to a session and get the agent's response.
+
+        Each session_id gets an independent conversation with its own history.
+        Use this for multi-user scenarios (e.g. a web app with per-user chats).
+
+        Args:
+            message: The user message text.
+            session_id: Identifies the conversation. Different IDs get
+                independent Chat instances with separate history.
+
+        Returns:
+            Trace with the agent's response in ``trace.content``.
+        """
+        async with self._session_locks.setdefault(session_id, asyncio.Lock()):
+            chat = self._get_or_create_chat(session_id)
+            return await chat.send(message)
+
+    def clear(self, session_id: str = "default") -> None:
+        """Clear a session's conversation history."""
+        self._remove_session(session_id)
+
+    def export_history(self, session_id: str = "default") -> list[dict[str, Any]]:
+        """Export a session's conversation history for persistence."""
+        chat = self._sessions.get(session_id)
+        if chat is None:
+            return []
+        return chat.export_history()
+
+    def load_history(
+        self, messages: list[dict[str, Any]], session_id: str = "default"
+    ) -> None:
+        """Restore conversation history into a session."""
+        chat = self._get_or_create_chat(session_id)
+        chat.load_history(messages)
+
+    # ------------------------------------------------------------------
+    # A2A internals
+    # ------------------------------------------------------------------
 
     async def _enqueue_status(
         self,

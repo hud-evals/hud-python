@@ -79,6 +79,62 @@ async with hud.eval(task) as ctx:
     await ctx.submit(agent.response)
 ```
 
+### @env.scenario() Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str \| None` | function name | Scenario identifier |
+| `description` | `str \| None` | docstring | Description of the scenario |
+| `chat` | `bool` | `False` | Mark as chat-compatible (requires `messages` param) |
+| `exclude_tools` | `list[str] \| None` | `None` | fnmatch patterns for tools to hide from agent |
+| `exclude_sources` | `list[str] \| None` | `None` | Connection names to hide from agent |
+| `allowed_tools` | `list[str] \| None` | `None` | fnmatch patterns to rescue from exclusions |
+| `returns` | `type \| None` | `None` | Pydantic model for structured agent answers |
+| `enable_citations` | `bool` | `False` | Request citation extraction from provider |
+| `required_env_vars` | `list[str] \| None` | `None` | Env vars this scenario needs (for platform UI) |
+
+**Chat scenarios** must accept a `messages` parameter:
+
+```python
+@env.scenario("assist", chat=True)
+async def assist(messages: list[dict] | None = None):
+    messages = messages or []
+    yield "You are a helpful assistant."
+    yield 1.0
+```
+
+**Tool filtering** lets the environment use tools internally while hiding them from the agent:
+
+```python
+@env.scenario("search", exclude_sources=["admin"], allowed_tools=["admin_read_*"])
+async def search(query: str):
+    # Environment can call admin tools in setup, but agent only sees admin_read_*
+    await env.call_tool("admin_setup", query=query)
+    yield f"Search for: {query}"
+    yield 1.0
+```
+
+## Chat
+
+Create a Chat instance for multi-turn conversations:
+
+```python
+chat = env.chat("assist", model="claude-haiku-4-5")
+
+r1 = await chat.send("Hello")
+r2 = await chat.send("Follow up")
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `scenario` | `str` | Required | Chat scenario name |
+| `model` | `str` | Required | Model name |
+| `max_steps` | `int` | `10` | Max agent steps per turn |
+| `trace` | `bool` | `False` | Record traces on HUD platform |
+| `quiet` | `bool` | `True` | Suppress output |
+
+See [Chat with Environments](/guides/chat) for full details.
+
 ## Connectors
 
 Connect to external services as tool sources.

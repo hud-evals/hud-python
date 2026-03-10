@@ -97,13 +97,16 @@ The orchestrator calls `investigate(issue_id="SEC-123")`. The eval harness can p
 
 ## Orchestrator Setup
 
+### Separate Environments
+
+Each specialist has its own environment with isolated tools:
+
 ```python
 from hud import Environment
 from hud.tools import AgentTool, BashTool, EditTool
 from hud.agents import create_agent
 import hud
 
-# Specialist environments
 researcher_env = Environment("researcher")
 # ... setup researcher tools and scenario
 
@@ -116,17 +119,12 @@ async def fix_bug(description: str):
     yield f"Fix the bug: {description}"
     yield 1.0
 
-# Orchestrator with sub-agent tools
 orchestrator = Environment("orchestrator")
 orchestrator.add_tool(AgentTool(
-    researcher_env("investigate"),
-    model="gpt-4o",
-    name="research",
+    researcher_env("investigate"), model="gpt-4o", name="research",
 ))
 orchestrator.add_tool(AgentTool(
-    coder_env("fix_bug"),
-    model="claude-sonnet-4-5",
-    name="fix_code",
+    coder_env("fix_bug"), model="claude-sonnet-4-5", name="fix_code",
 ))
 
 @orchestrator.scenario()
@@ -134,13 +132,52 @@ async def handle_ticket(ticket_id: str):
     yield f"Handle support ticket {ticket_id}"
     yield 1.0
 
-# Run orchestrator
-task = orchestrator("handle_ticket", ticket_id="TICKET-456")
-agent = create_agent("gpt-4o")
-
-async with hud.eval(task) as ctx:
-    await agent.run(ctx)
+async with hud.eval(orchestrator("handle_ticket", ticket_id="TICKET-456")) as ctx:
+    await create_agent("gpt-4o").run(ctx)
 ```
+
+### Shared Environment (Same Tools)
+
+When specialists need access to the same tools (e.g. APIs, data sources), define
+everything on one environment. The orchestrator scenario delegates to specialist
+scenarios via `AgentTool`:
+
+```python
+from hud import Environment
+from hud.tools import AgentTool
+
+env = Environment("team-intel")
+
+# Shared tools available to ALL scenarios
+@env.tool()
+async def search_issues(query: str) -> str: ...
+
+@env.tool()
+async def read_channel(channel: str) -> str: ...
+
+# Specialist scenario (called as subagent)
+@env.scenario("write_section")
+async def write_section(title: str, focus: str):
+    yield f"You are a journalist. Write about: {focus}"
+    yield 1.0
+
+# Register specialist as a tool
+env.add_tool(AgentTool(
+    env("write_section"),
+    model="claude-haiku-4-5",
+    name="write_article",
+    description="Write one article section",
+))
+
+# Orchestrator scenario calls the specialist tool
+@env.scenario("digest")
+async def digest():
+    yield "Survey all sources, then call write_article for each section."
+    yield 1.0
+```
+
+The specialist subagent gets the same tools as the orchestrator (search_issues,
+read_channel, etc.) so it can independently gather data for its article.
 
 ## Tracing
 
