@@ -332,6 +332,12 @@ class GeminiAgent(MCPAgent):
             )
         ]
 
+    def _map_role(self, role: str) -> str:
+        """Gemini uses 'model' instead of 'assistant' for non-user turns."""
+        if role == "assistant":
+            return "model"
+        return role
+
     async def create_user_message(self, text: str) -> genai_types.Content:
         """Create a user message in Gemini's format."""
         return genai_types.Content(role="user", parts=[genai_types.Part(text=text)])

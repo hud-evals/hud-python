@@ -472,11 +472,19 @@ class MCPAgent(ABC):
             # Cleanup auto-created resources
             await self._cleanup()
 
+    def _map_role(self, role: str) -> str:
+        """Map a canonical role name to the provider-specific role.
+
+        Override in subclasses where the provider uses different role names.
+        Default passes through (works for OpenAI and Claude which use "assistant").
+        """
+        return role
+
     async def _build_conversation_messages(self, conversation: list[dict[str, str]]) -> list[Any]:
         """Build provider-formatted messages from a conversation history."""
         result: list[Any] = []
         for msg in conversation:
-            role = msg.get("role", "user")
+            role = self._map_role(msg.get("role", "user"))
             content = msg.get("content", "")
             formatted = await self.format_message(content)
             for fm in formatted:
