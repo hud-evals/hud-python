@@ -5,13 +5,12 @@ Provides chat-compatible scenarios that accept ``messages`` as
 
 Usage::
 
-    from hud.native.chat import env, chat_simple, chat_full
-    from hud.services import Chat
+    from hud.native.chat import env
 
-    chat = Chat(env("chat_simple"), model="claude-sonnet-4-5")
+    chat = env.chat("chat_simple", model="claude-sonnet-4-5")
     r = await chat.send("What is the capital of France?")
 
-    chat = Chat(env("chat_full"), model="claude-sonnet-4-5")
+    chat = env.chat("chat_full", model="claude-sonnet-4-5")
     r = await chat.send("Analyze this data")
 
     chat.serve(port=9999)
