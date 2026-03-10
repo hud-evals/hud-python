@@ -196,7 +196,7 @@ Provide findings, root cause analysis, and recommended fixes."""
 A key pattern: **only register subagents for which credentials are present**. This lets you run the same orchestrator code with different configurations—maybe you only have Sentry and Supabase credentials locally, but the full set in production.
 
 ```python
-# chat_service.py
+# orchestrator.py
 from hud import Environment
 from hud.tools import AgentTool
 import os
@@ -298,7 +298,7 @@ Every prompt includes: **"This is a READ-ONLY investigation."**
 Running against a real production issue:
 
 ```bash
-python chat_service.py --model claude-sonnet-4-5 \
+python orchestrator.py --model claude-sonnet-4-5 \
   "Failed to delete pod: 429 Too Many Requests. 7451 events, escalating."
 ```
 
