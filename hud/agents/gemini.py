@@ -338,7 +338,7 @@ class GeminiAgent(MCPAgent):
 
     def _has_google_search_tool(self) -> bool:
         """Check if google_search is already in the tool list."""
-        return any(tool.google_search is not None for tool in self.gemini_tools)
+        return any(getattr(tool, "google_search", None) is not None for tool in self.gemini_tools)
 
     def _convert_tools_for_gemini(self) -> None:
         """Convert MCP tools to Gemini tool format using native specs.

@@ -6,13 +6,13 @@ conversations and can produce MCP tools.
 
 Example::
 
+    from hud import Environment
     from hud.services import Chat
-    from hud.eval import Task
 
-    chat = Chat(
-        Task(env={"name": "my-env"}, scenario="analysis_chat"),
-        model="claude-sonnet-4-20250514",
-    )
+    env = Environment("my-env")
+
+    # Quick way via env.chat()
+    chat = env.chat("analysis_chat", model="claude-sonnet-4-20250514")
 
     # Multi-turn conversation
     r1 = await chat.send("Book me a flight")

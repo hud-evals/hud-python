@@ -51,14 +51,13 @@ print(r2.content)
 
 ### Chat Directly (Full Control)
 
-For more control, use `Chat` with a `Task`:
+For more control, use `Chat` with an environment task:
 
 ```python
 from hud.services import Chat
-from hud.eval.task import Task
 
 chat = Chat(
-    Task(env=env, scenario="support:help"),
+    env("help"),
     model="claude-sonnet-4-20250514",
     max_steps=10,
     trace=True,      # record traces on HUD platform
@@ -104,10 +103,9 @@ chat.clear()
 
 ```python
 from hud.services import ChatService
-from hud.eval.task import Task
 
 service = ChatService(
-    Task(env=env, scenario="support:help"),
+    env("help"),
     model="claude-haiku-4-5",
 )
 

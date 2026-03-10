@@ -280,9 +280,10 @@ class TestDockerProxyPassthrough:
             proxy = await build_proxy(proxy_client, name="test-proxy")
 
             # _hud_submit should be hidden from listings but still callable
-            proxy_tools = await proxy.get_tools()
-            assert "_hud_submit" not in proxy_tools
-            assert "public_tool" in proxy_tools
+            proxy_tool_list = await proxy.list_tools()
+            proxy_tool_names = {t.name for t in proxy_tool_list}
+            assert "_hud_submit" not in proxy_tool_names
+            assert "public_tool" in proxy_tool_names
 
             proxy_port = _free_port()
             proxy_task = asyncio.create_task(

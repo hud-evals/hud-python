@@ -419,7 +419,7 @@ class TestOpenAIAgent:
 
         await agent.get_response([])
 
-        call_kwargs = mock_openai.responses.create.await_args.kwargs
+        call_kwargs = mock_openai.responses.create.await_args.kwargs  # type: ignore[union-attr]
         assert call_kwargs.get("include") == ["web_search_call.action.sources"]
 
 

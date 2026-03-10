@@ -967,7 +967,7 @@ class TestDocumentBlockCitations:
         from hud.agents.claude import document_to_content_block
 
         block = document_to_content_block(base64_data="AAAA", enable_citations=True)
-        assert block["citations"] == {"enabled": True}
+        assert block["citations"] == {"enabled": True}  # type: ignore[typeddict-item]
 
     @pytest.mark.asyncio
     async def test_format_tool_results_threads_citations_to_documents(self) -> None:
@@ -995,7 +995,7 @@ class TestDocumentBlockCitations:
                     types.EmbeddedResource(
                         type="resource",
                         resource=types.BlobResourceContents(
-                            uri="file:///doc.pdf",
+                            uri="file:///doc.pdf",  # type: ignore[arg-type]
                             mimeType="application/pdf",
                             blob=pdf_blob,
                         ),
@@ -1006,11 +1006,9 @@ class TestDocumentBlockCitations:
         ]
 
         messages = await agent.format_tool_results(tool_calls, tool_results)
-        content_blocks = messages[0]["content"]
-        # tool_result has no content (PDF moved to sibling)
+        content_blocks = cast("list[dict[str, Any]]", messages[0]["content"])
         tool_result_block = content_blocks[0]
         assert tool_result_block["type"] == "tool_result"
-        # Sibling document block with citations enabled
         doc_block = content_blocks[1]
         assert doc_block["type"] == "document"
         assert doc_block["citations"] == {"enabled": True}
@@ -1042,14 +1040,12 @@ class TestDocumentBlockCitations:
         ]
 
         messages = await agent.format_tool_results(tool_calls, tool_results)
-        content_blocks = messages[0]["content"]
-        # First block: tool_result with plain text
+        content_blocks = cast("list[dict[str, Any]]", messages[0]["content"])
         tool_result_block = content_blocks[0]
         assert tool_result_block["type"] == "tool_result"
         text_block = tool_result_block["content"][0]
         assert text_block["type"] == "text"
         assert text_block["text"] == "Revenue was $1M last quarter."
-        # Second block: sibling document block for citations
         doc_block = content_blocks[1]
         assert doc_block["type"] == "document"
         assert doc_block["source"]["type"] == "text"
@@ -1084,7 +1080,8 @@ class TestDocumentBlockCitations:
         ]
 
         messages = await agent.format_tool_results(tool_calls, tool_results)
-        tool_result_block = messages[0]["content"][0]
+        content_blocks = cast("list[dict[str, Any]]", messages[0]["content"])
+        tool_result_block = content_blocks[0]
         text_block = tool_result_block["content"][0]
         assert text_block["type"] == "text"
         assert text_block["text"] == "Revenue was $1M."
