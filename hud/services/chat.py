@@ -286,8 +286,7 @@ class Chat(AgentExecutor):
     # ------------------------------------------------------------------
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        """Process an A2A message via send().
-        """
+        """Process an A2A message via send()."""
         context_id = context.context_id or str(uuid.uuid4())
         task_id = context.task_id or str(uuid.uuid4())
 

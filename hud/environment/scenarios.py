@@ -49,7 +49,7 @@ def _request_context_session_id() -> str | None:
 
         session._fastmcp_state_prefix = sid  # type: ignore[attr-defined]
         return sid
-    except (ImportError, LookupError, Exception):  # noqa: S110
+    except (ImportError, LookupError, Exception):
         return None
 
 
@@ -850,11 +850,11 @@ class ScenarioMixin:
                 conn = self._connections.get(conn_name) if conn_name else None  # type: ignore[attr-defined]
                 if not conn and self._connections:  # type: ignore[attr-defined]
                     # Fallback: try each connection directly (mirrors get_prompt fallback)
-                    for fallback_name, fallback_conn in self._connections.items():  # type: ignore[attr-defined]
+                    for fallback_conn in self._connections.values():  # type: ignore[attr-defined]
                         try:
                             contents = await fallback_conn.read_resource(session.resource_uri)
                             break
-                        except Exception:
+                        except Exception:  # noqa: S112
                             continue
                     else:
                         contents = await self.read_resource(session.resource_uri)  # type: ignore[attr-defined]

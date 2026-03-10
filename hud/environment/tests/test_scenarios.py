@@ -1019,12 +1019,17 @@ class TestScenarioRemoteErrors:
         """Remote prompt meta should populate session output config."""
         env = Environment("test-env")
 
-        async def successful_get_prompt(_name: str, _arguments: dict[str, str] | None = None) -> Any:
+        async def successful_get_prompt(
+            _name: str, _arguments: dict[str, str] | None = None
+        ) -> Any:
             return SimpleNamespace(
                 messages=[SimpleNamespace(content=SimpleNamespace(text="Prompt"))],
                 meta={
                     "enable_citations": True,
-                    "returns_schema": {"type": "object", "properties": {"summary": {"type": "string"}}},
+                    "returns_schema": {
+                        "type": "object",
+                        "properties": {"summary": {"type": "string"}},
+                    },
                 },
             )
 
@@ -1105,6 +1110,7 @@ class TestScenarioRemoteErrors:
 
         with pytest.raises(RuntimeError, match="Error rendering prompt coding:bug_fix"):
             await env.run_scenario_setup("coding:bug_fix", {})
+
 
 class TestScenarioMalformedNames:
     """Test handling of malformed scenario names."""

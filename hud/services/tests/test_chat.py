@@ -112,6 +112,7 @@ class TestMessageFormat:
 
             # Patch the import inside send()
             import hud
+
             original_eval = hud.eval
             hud.eval = MagicMock(return_value=mock_ctx)
             try:
@@ -199,7 +200,7 @@ class TestA2AExecutor:
 
             event2 = await queue.dequeue_event(no_wait=True)
             assert isinstance(event2, TaskArtifactUpdateEvent)
-            payload = json.loads(cast(Any, event2.artifact.parts[0].root).text)
+            payload = json.loads(cast("Any", event2.artifact.parts[0].root).text)
             assert payload["type"] == "hud_reply_metadata"
             assert payload["citations"][0]["source"] == "https://example.com"
             assert payload["data"] is None

@@ -132,20 +132,18 @@ async def send_to_chat_service(
 
     async for item in client.send_message(message):
         if isinstance(item, Message):
-            state["context_id"] = (
-                _pick_str_attr(item, "context_id", "contextId") or state.get("context_id")
+            state["context_id"] = _pick_str_attr(item, "context_id", "contextId") or state.get(
+                "context_id"
             )
-            state["task_id"] = _pick_str_attr(item, "task_id", "taskId") or state.get(
-                "task_id"
-            )
+            state["task_id"] = _pick_str_attr(item, "task_id", "taskId") or state.get("task_id")
             msg_text = _text_from_parts(item.parts)
             if msg_text:
                 final_answer = msg_text
             continue
 
         task, event = item
-        state["context_id"] = (
-            _pick_str_attr(task, "context_id", "contextId") or state.get("context_id")
+        state["context_id"] = _pick_str_attr(task, "context_id", "contextId") or state.get(
+            "context_id"
         )
         state["task_id"] = task.id or state.get("task_id")
         last_state = task.status.state

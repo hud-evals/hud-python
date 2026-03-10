@@ -337,19 +337,19 @@ class ClaudeAgent(MCPAgent):
                 result.done = False
             elif block.type == "text":
                 text_content += block.text
-                for cit in getattr(block, "citations", None) or []:
-                    citations.append(
-                        {
-                            "type": "document_citation",
-                            "text": getattr(cit, "cited_text", "") or "",
-                            "source": str(idx)
-                            if (idx := getattr(cit, "document_index", None)) is not None
-                            else getattr(cit, "document_title", "") or "",
-                            "title": getattr(cit, "document_title", None),
-                            "start_index": getattr(cit, "start_char_index", None),
-                            "end_index": getattr(cit, "end_char_index", None),
-                        }
-                    )
+                citations.extend(
+                    {
+                        "type": "document_citation",
+                        "text": getattr(cit, "cited_text", "") or "",
+                        "source": str(idx)
+                        if (idx := getattr(cit, "document_index", None)) is not None
+                        else getattr(cit, "document_title", "") or "",
+                        "title": getattr(cit, "document_title", None),
+                        "start_index": getattr(cit, "start_char_index", None),
+                        "end_index": getattr(cit, "end_char_index", None),
+                    }
+                    for cit in getattr(block, "citations", None) or []
+                )
             elif hasattr(block, "type") and block.type == "thinking":
                 if thinking_content:
                     thinking_content += "\n"
@@ -374,10 +374,7 @@ class ClaudeAgent(MCPAgent):
         )
 
         # Process each tool result
-        user_content: list[
-            BetaToolResultBlockParam
-            | BetaRequestDocumentBlockParam
-        ] = []
+        user_content: list[BetaToolResultBlockParam | BetaRequestDocumentBlockParam] = []
 
         for tool_call, result in zip(tool_calls, tool_results, strict=True):
             tool_use_id = tool_call.id
@@ -406,9 +403,7 @@ class ClaudeAgent(MCPAgent):
                         claude_blocks.append(text_to_content_block(content.text))
                         if citations_enabled:
                             sibling_docs.append(
-                                text_document_block(
-                                    content.text, title=tool_call.name
-                                )
+                                text_document_block(content.text, title=tool_call.name)
                             )
                     elif isinstance(content, types.ImageContent):
                         claude_blocks.append(base64_to_content_block(content.data))
@@ -648,9 +643,7 @@ def text_to_content_block(text: str) -> BetaTextBlockParam:
     return {"type": "text", "text": text}
 
 
-def text_document_block(
-    text: str, *, title: str | None = None
-) -> BetaRequestDocumentBlockParam:
+def text_document_block(text: str, *, title: str | None = None) -> BetaRequestDocumentBlockParam:
     """Wrap plain text as a citable document block."""
     block = BetaRequestDocumentBlockParam(
         type="document",

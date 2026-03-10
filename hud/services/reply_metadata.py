@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from a2a.types import Artifact, Part, TaskArtifactUpdateEvent, TextPart
 
-from hud.types import Trace
+if TYPE_CHECKING:
+    from hud.types import Trace
 
 REPLY_METADATA_TYPE = "hud_reply_metadata"
 

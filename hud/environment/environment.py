@@ -748,6 +748,7 @@ class Environment(
             # resolves to self.call_tool which has a different (multi-format)
             # signature and would TypeError with positional (name, arguments).
             from fastmcp import FastMCP
+
             result = await FastMCP.call_tool(self, name, arguments, run_middleware=False)
             return MCPToolResult(
                 content=result.content, structuredContent=result.structured_content

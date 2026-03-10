@@ -16,6 +16,7 @@ from openai.types.responses import (
     FunctionShellToolParam,
     FunctionToolParam,
     ResponseFunctionCallOutputItemListParam,
+    ResponseIncludable,
     ResponseInputFileContentParam,
     ResponseInputImageContentParam,
     ResponseInputImageParam,
@@ -23,7 +24,6 @@ from openai.types.responses import (
     ResponseInputParam,
     ResponseInputTextContentParam,
     ResponseInputTextParam,
-    ResponseIncludable,
     ResponseOutputText,
     ToolParam,
 )

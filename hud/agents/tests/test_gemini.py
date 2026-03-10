@@ -562,8 +562,7 @@ class TestGeminiCitationInjection:
         config = call_kwargs.kwargs["config"]
         tools_passed = config.tools
         assert any(
-            isinstance(t, genai_types.Tool) and t.google_search is not None
-            for t in tools_passed
+            isinstance(t, genai_types.Tool) and t.google_search is not None for t in tools_passed
         )
 
     @pytest.mark.asyncio
@@ -592,7 +591,8 @@ class TestGeminiCitationInjection:
         config = call_kwargs.kwargs["config"]
         tools_passed = config.tools
         search_count = sum(
-            1 for t in tools_passed
+            1
+            for t in tools_passed
             if isinstance(t, genai_types.Tool) and t.google_search is not None
         )
         assert search_count == 1
@@ -621,6 +621,5 @@ class TestGeminiCitationInjection:
         config = call_kwargs.kwargs["config"]
         tools_passed = config.tools
         assert not any(
-            isinstance(t, genai_types.Tool) and t.google_search is not None
-            for t in tools_passed
+            isinstance(t, genai_types.Tool) and t.google_search is not None for t in tools_passed
         )

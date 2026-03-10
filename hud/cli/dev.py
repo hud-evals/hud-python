@@ -615,9 +615,7 @@ async def build_proxy(backend: Any, name: str = "HUD Docker Dev Proxy") -> Any:
         try:
             return await _original_call_tool_mcp(key, arguments)
         except FastMCPNotFoundError:
-            return await fastmcp_proxy.call_tool(
-                key, arguments, run_middleware=False
-            )
+            return await fastmcp_proxy.call_tool(key, arguments, run_middleware=False)
 
     proxy._call_tool_mcp = _passthrough_call_tool  # type: ignore[assignment]
     return proxy

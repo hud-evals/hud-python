@@ -137,9 +137,7 @@ class ChatService(AgentExecutor):
             return []
         return chat.export_history()
 
-    def load_history(
-        self, messages: list[dict[str, Any]], session_id: str = "default"
-    ) -> None:
+    def load_history(self, messages: list[dict[str, Any]], session_id: str = "default") -> None:
         """Restore conversation history into a session."""
         chat = self._get_or_create_chat(session_id)
         chat.load_history(messages)
@@ -233,7 +231,6 @@ class ChatService(AgentExecutor):
                 chat = self._get_or_create_chat(context_id)
                 result = await chat.send(message)
                 content = result.content or ""
-
 
             metadata_event = build_reply_metadata_event(
                 context_id=context_id,

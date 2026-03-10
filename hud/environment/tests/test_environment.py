@@ -471,7 +471,9 @@ class TestEnvironmentMCPProtocol:
 
         env = Environment("test")
 
-        async def fake_read_resource(_uri: str, **_kwargs: Any) -> list[mcp_types.TextResourceContents]:
+        async def fake_read_resource(
+            _uri: str, **_kwargs: Any
+        ) -> list[mcp_types.TextResourceContents]:
             return [
                 mcp_types.TextResourceContents(
                     uri=AnyUrl("test://resource"),

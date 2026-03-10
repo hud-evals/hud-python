@@ -148,7 +148,7 @@ class GeminiAgent(MCPAgent):
             getattr(self.ctx, "scenario_enable_citations", False) if self.ctx else False
         )
         if citations_enabled and not self._has_google_search_tool():
-            tools = list(tools) + [genai_types.Tool(google_search=genai_types.GoogleSearch())]
+            tools = [*list(tools), genai_types.Tool(google_search=genai_types.GoogleSearch())]
 
         # Build generate content config
         generate_config = genai_types.GenerateContentConfig(
@@ -338,10 +338,7 @@ class GeminiAgent(MCPAgent):
 
     def _has_google_search_tool(self) -> bool:
         """Check if google_search is already in the tool list."""
-        for tool in self.gemini_tools:
-            if tool.google_search is not None:
-                return True
-        return False
+        return any(tool.google_search is not None for tool in self.gemini_tools)
 
     def _convert_tools_for_gemini(self) -> None:
         """Convert MCP tools to Gemini tool format using native specs.

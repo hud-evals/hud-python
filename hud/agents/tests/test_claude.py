@@ -928,9 +928,7 @@ class TestCitationExtraction:
         assert result.citations[0]["end_index"] == 15
 
     @pytest.mark.asyncio
-    async def test_no_citations_when_field_is_none(
-        self, mock_anthropic: AsyncAnthropic
-    ) -> None:
+    async def test_no_citations_when_field_is_none(self, mock_anthropic: AsyncAnthropic) -> None:
         """Text blocks without citations should not populate result.citations."""
         text_block = MagicMock()
         text_block.type = "text"
@@ -973,7 +971,7 @@ class TestDocumentBlockCitations:
 
     @pytest.mark.asyncio
     async def test_format_tool_results_threads_citations_to_documents(self) -> None:
-        """When scenario_enable_citations is True, PDF document blocks become siblings with citations."""
+        """When scenario_enable_citations is True, PDF blocks become siblings with citations."""
         ctx = MockEvalContext()
         ctx.scenario_enable_citations = True
 

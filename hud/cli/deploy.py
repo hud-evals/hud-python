@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
 from pathlib import Path
+from typing import Any
 
 import httpx
 import typer
@@ -26,41 +28,82 @@ from hud.utils.hud_console import HUDConsole
 LOGGER = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# .hud/deploy.json helpers
+# ---------------------------------------------------------------------------
+
+
+def _load_deploy_link(env_dir: Path) -> dict[str, Any]:
+    """Load .hud/deploy.json, returning empty dict if missing or invalid."""
+    path = env_dir / ".hud" / "deploy.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _update_deploy_link(env_dir: Path, **fields: Any) -> None:
+    """Merge fields into .hud/deploy.json, preserving existing data."""
+    hud_dir = env_dir / ".hud"
+    hud_dir.mkdir(parents=True, exist_ok=True)
+    data = {**_load_deploy_link(env_dir), **fields}
+    (hud_dir / "deploy.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def _peek_env_keys(env_path: Path) -> list[str]:
+    """Return the variable names from a .env file without loading values."""
+    try:
+        contents = env_path.read_text(encoding="utf-8")
+        parsed = parse_env_file(contents)
+        return sorted(parsed.keys())
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Environment variable collection
+# ---------------------------------------------------------------------------
+
+
 def collect_environment_variables(
     directory: Path,
     env_flags: list[str] | None,
     env_file: str | None,
     console: HUDConsole,
+    *,
+    skip_dotenv: bool = False,
 ) -> dict[str, str]:
     """Collect environment variables from various sources.
 
     Priority (highest to lowest):
     1. --env KEY=VALUE flags
     2. --env-file specified file
-    3. .env file in directory (if exists)
+    3. .env file in directory (if exists and not skipped)
 
     Args:
         directory: Environment directory
         env_flags: List of KEY=VALUE strings from --env flags
         env_file: Path to env file (overrides .env)
         console: HUDConsole for output
+        skip_dotenv: When True, skip auto-loading .env (--no-env or syncEnv=false)
 
     Returns:
         Combined environment variables dict
     """
     env_vars: dict[str, str] = {}
 
-    # 1. Read from .env file (or specified env_file) using existing helper
-    env_path = Path(env_file) if env_file else directory / ".env"
-    if env_path.exists():
-        console.info(f"Loading environment variables from {env_path}")
-        try:
-            contents = env_path.read_text(encoding="utf-8")
-            env_vars = parse_env_file(contents)
-        except Exception as e:
-            console.warning(f"Failed to parse env file: {e}")
+    if not skip_dotenv:
+        env_path = Path(env_file) if env_file else directory / ".env"
+        if env_path.exists():
+            console.info(f"Loading environment variables from {env_path}")
+            try:
+                contents = env_path.read_text(encoding="utf-8")
+                env_vars = parse_env_file(contents)
+            except Exception as e:
+                console.warning(f"Failed to parse env file: {e}")
 
-    # 2. Override with --env flags
     if env_flags:
         for flag in env_flags:
             if "=" in flag:
@@ -77,6 +120,7 @@ def deploy_environment(
     name: str | None = None,
     env: list[str] | None = None,
     env_file: str | None = None,
+    no_env: bool = False,
     no_cache: bool = False,
     verbose: bool = False,
     registry_id: str | None = None,
@@ -97,6 +141,7 @@ def deploy_environment(
         name: Environment display name (defaults to directory name)
         env: List of KEY=VALUE environment variables
         env_file: Path to .env file (default: .env in directory)
+        no_env: Skip .env file loading for this deploy
         no_cache: Disable build cache
         verbose: Show detailed output
         registry_id: Existing registry ID for rebuilds
@@ -153,19 +198,12 @@ def deploy_environment(
     if not validation_issues:
         hud_console.success("Validation passed")
 
-    # Check for existing registry_id from .hud/deploy.json (enables rebuilds)
-    deploy_link_path = env_dir / ".hud" / "deploy.json"
-    if deploy_link_path.exists() and not registry_id:
-        try:
-            import json
-
-            with open(deploy_link_path) as f:
-                deploy_link = json.load(f)
-            registry_id = deploy_link.get("registryId")
-            if registry_id:
-                hud_console.info(f"Rebuilding existing environment: {registry_id[:8]}...")
-        except Exception:  # noqa: S110
-            pass
+    # Load existing deploy link for registry_id and syncEnv preference
+    deploy_link = _load_deploy_link(env_dir)
+    if not registry_id:
+        registry_id = deploy_link.get("registryId")
+        if registry_id:
+            hud_console.info(f"Rebuilding existing environment: {registry_id[:8]}...")
 
     # Determine environment name from pyproject.toml or directory
     if not name:
@@ -175,8 +213,44 @@ def deploy_environment(
 
     hud_console.info(f"Environment name: {name}")
 
-    # Collect environment variables
-    env_vars = collect_environment_variables(env_dir, env, env_file, hud_console)
+    # Resolve whether to include .env vars
+    # Priority: --no-env flag > explicit --env/--env-file > saved preference > prompt
+    has_explicit_env = bool(env) or bool(env_file)
+    skip_dotenv = no_env
+
+    if not skip_dotenv and not has_explicit_env:
+        dotenv_path = env_dir / ".env"
+        if dotenv_path.exists():
+            sync_pref = deploy_link.get("syncEnv")
+
+            if sync_pref is None:
+                # First time: show keys and prompt
+                keys = _peek_env_keys(dotenv_path)
+                if keys:
+                    hud_console.info(f"Found .env with {len(keys)} variable(s): {', '.join(keys)}")
+                    try:
+                        answer = (
+                            input("Include in deploy? (encrypted at rest) [Y/n]: ").strip().lower()
+                        )
+                    except (EOFError, KeyboardInterrupt):
+                        answer = "n"
+                    sync_pref = answer in ("", "y", "yes")
+                    _update_deploy_link(env_dir, syncEnv=sync_pref)
+                    hud_console.dim_info("Preference saved to:", ".hud/deploy.json")
+                else:
+                    sync_pref = False
+
+            if sync_pref:
+                keys = _peek_env_keys(dotenv_path)
+                hud_console.info(
+                    f"Syncing {len(keys)} env var(s) from .env (saved, use --no-env to skip)"
+                )
+            else:
+                skip_dotenv = True
+
+    env_vars = collect_environment_variables(
+        env_dir, env, env_file, hud_console, skip_dotenv=skip_dotenv
+    )
     if env_vars and verbose:
         hud_console.info(f"Environment variables: {', '.join(env_vars.keys())}")
 
@@ -446,37 +520,20 @@ async def _deploy_async(
 
 def _save_deploy_link(
     env_dir: Path,
-    result: dict,
+    result: dict[str, Any],
     console: HUDConsole,
 ) -> None:
     """Save deploy linking info to .hud/deploy.json.
 
-    Similar to Vercel's .vercel/project.json - stores just the IDs
-    needed to link this directory to the remote environment.
-
-    Args:
-        env_dir: Environment directory
-        result: Deploy result dict
-        console: HUDConsole for output
+    Uses _update_deploy_link to merge with existing data (preserves syncEnv, etc.).
     """
-    import json
-
-    hud_dir = env_dir / ".hud"
-    deploy_link_path = hud_dir / "deploy.json"
-
-    # Create .hud directory if needed
-    hud_dir.mkdir(parents=True, exist_ok=True)
-
-    # Minimal linking data (like Vercel's projectId/orgId)
-    deploy_link = {
-        "registryId": result.get("registry_id"),
-        "version": result.get("version"),  # Last deployed version
-    }
-
     try:
-        with open(deploy_link_path, "w") as f:
-            json.dump(deploy_link, f, indent=2)
-        reg_id = deploy_link["registryId"]
+        _update_deploy_link(
+            env_dir,
+            registryId=result.get("registry_id"),
+            version=result.get("version"),
+        )
+        reg_id = result.get("registry_id")
         if reg_id:
             console.success(f"Linked to environment: {reg_id[:8]}...")
             console.dim_info("Link stored in:", ".hud/deploy.json")
@@ -505,6 +562,7 @@ def deploy_all(
     directory: str,
     env: list[str] | None = None,
     env_file: str | None = None,
+    no_env: bool = False,
     no_cache: bool = False,
     verbose: bool = False,
     build_args: list[str] | None = None,
@@ -546,6 +604,7 @@ def deploy_all(
                 name=None,
                 env=env,
                 env_file=env_file,
+                no_env=no_env,
                 no_cache=no_cache,
                 verbose=verbose,
                 registry_id=None,
@@ -599,6 +658,11 @@ def deploy_command(
         "--env-file",
         help="Path to .env file (default: .env in directory)",
     ),
+    no_env: bool = typer.Option(
+        False,
+        "--no-env",
+        help="Skip .env file loading for this deploy (does not change saved preference)",
+    ),
     build_args: list[str] | None = typer.Option(  # noqa: B008
         None,
         "--build-arg",
@@ -647,13 +711,15 @@ def deploy_command(
         hud deploy . --build-arg NODE_ENV=production  # With build args
         hud deploy . --secret id=MY_KEY,env=MY_KEY  # With build secrets (will be encrypted at rest)
         hud deploy . --secret id=MY_KEY,src=./my_key.txt  # Secret from file
-        hud deploy . --no-cache        # Force rebuild[/not dim]
+        hud deploy . --no-cache        # Force rebuild
+        hud deploy . --no-env          # Skip .env for this deploy[/not dim]
     """
     if all_envs:
         deploy_all(
             directory=directory,
             env=env,
             env_file=env_file,
+            no_env=no_env,
             no_cache=no_cache,
             verbose=verbose,
             build_args=build_args,
@@ -666,6 +732,7 @@ def deploy_command(
         name=name,
         env=env,
         env_file=env_file,
+        no_env=no_env,
         no_cache=no_cache,
         verbose=verbose,
         registry_id=registry_id,
