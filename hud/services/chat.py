@@ -163,7 +163,7 @@ class Chat(AgentExecutor):
         self.messages.append({"role": "user", "content": content_data})
 
         task_args = dict(self._task.args or {})
-        task_args["messages"] = self.messages
+        task_args["messages"] = list(self.messages)
         task = self._task.model_copy(update={"args": task_args})
 
         async with hud.eval(task, trace=self._trace, quiet=self._quiet) as ctx:
