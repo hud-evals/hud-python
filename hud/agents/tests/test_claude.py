@@ -1009,6 +1009,8 @@ class TestDocumentBlockCitations:
         content_blocks = cast("list[dict[str, Any]]", messages[0]["content"])
         tool_result_block = content_blocks[0]
         assert tool_result_block["type"] == "tool_result"
+        assert tool_result_block["content"], "tool_result should contain the PDF block"
+        assert tool_result_block["content"][0]["type"] == "document"
         doc_block = content_blocks[1]
         assert doc_block["type"] == "document"
         assert doc_block["citations"] == {"enabled": True}

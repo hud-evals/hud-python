@@ -413,17 +413,16 @@ class ClaudeAgent(MCPAgent):
                             isinstance(resource, types.BlobResourceContents)
                             and resource.mimeType == "application/pdf"
                         ):
+                            claude_blocks.append(
+                                document_to_content_block(
+                                    base64_data=resource.blob,
+                                )
+                            )
                             if citations_enabled:
                                 sibling_docs.append(
                                     document_to_content_block(
                                         base64_data=resource.blob,
                                         enable_citations=True,
-                                    )
-                                )
-                            else:
-                                claude_blocks.append(
-                                    document_to_content_block(
-                                        base64_data=resource.blob,
                                     )
                                 )
 

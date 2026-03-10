@@ -601,8 +601,6 @@ async def build_proxy(backend: Any, name: str = "HUD Docker Dev Proxy") -> Any:
     manager.
     """
     from fastmcp import FastMCP
-    from fastmcp.exceptions import NotFoundError as FastMCPNotFoundError
-    from fastmcp.exceptions import ToolError as FastMCPToolError
 
     from hud.server import MCPServer
 
@@ -610,18 +608,23 @@ async def build_proxy(backend: Any, name: str = "HUD Docker Dev Proxy") -> Any:
     proxy = MCPServer(name=name)
     await proxy.import_server(fastmcp_proxy)
 
-    _original_call_tool_mcp = proxy._call_tool_mcp
-
-    async def _passthrough_call_tool(key: str, arguments: dict[str, Any]) -> Any:
+    # Override the MCP call_tool handler so hidden tools (underscore-prefixed
+    # like _hud_submit) are forwarded to the backend.  import_server() only
+    # copies tools visible in list_tools, so hidden tools are missing from
+    # the proxy's registry.  FastMCP 3.x's default handler raises ToolError
+    # for unknown tools before _call_tool_mcp is reached, so we must patch
+    # at the protocol handler level.
+    @proxy._mcp_server.call_tool()
+    async def _call_tool_handler(
+        name: str, arguments: dict[str, Any] | None = None
+    ) -> list[Any]:
         try:
-            return await _original_call_tool_mcp(key, arguments)
-        except (FastMCPNotFoundError, FastMCPToolError):
-            # Hidden tools (underscore-prefixed like _hud_submit) are not
-            # copied by import_server. Forward directly to the backend
-            # which relays to the actual Environment server.
-            return (await backend.call_tool_mcp(key, arguments)).content
+            result = await FastMCP.call_tool(proxy, name, arguments or {})
+            return result.content
+        except Exception:
+            raw = await backend.call_tool_mcp(name, arguments or {})
+            return raw.content
 
-    proxy._call_tool_mcp = _passthrough_call_tool  # type: ignore[assignment]
     return proxy
 
 
