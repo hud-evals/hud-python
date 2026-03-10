@@ -53,15 +53,11 @@ class TestMCPSessionLifecycle:
     ) -> None:
         """get_prompt → _hud_submit works via MCP client."""
         async with FastMCPClient(env_with_scenarios) as client:
-            prompt = await client.get_prompt(
-                "session-test:greet", {"name": "world"}
-            )
+            prompt = await client.get_prompt("session-test:greet", {"name": "world"})
             assert prompt.messages
             assert "Hello world" in prompt.messages[0].content.text  # type: ignore[union-attr]
 
-            await client.call_tool(
-                "_hud_submit", {"scenario": "greet", "answer": "correct"}
-            )
+            await client.call_tool("_hud_submit", {"scenario": "greet", "answer": "correct"})
 
             # Session should exist under a real session_id (not __client__)
             # and the answer should be stored
@@ -81,9 +77,7 @@ class TestMCPSessionLifecycle:
             "greet", {"name": "alice"}, session_id="client-1"
         )
         # Client 2 sets up same scenario
-        await env_with_scenarios.run_scenario_setup(
-            "greet", {"name": "bob"}, session_id="client-2"
-        )
+        await env_with_scenarios.run_scenario_setup("greet", {"name": "bob"}, session_id="client-2")
 
         # Submit different answers
         await env_with_scenarios.submit("greet", "correct", session_id="client-1")
@@ -111,9 +105,7 @@ class TestSessionEdgeCases:
         self, env_with_scenarios: Environment
     ) -> None:
         """Evaluating without submitting should still work (answer is None)."""
-        await env_with_scenarios.run_scenario_setup(
-            "echo", {"message": "test"}, session_id="s1"
-        )
+        await env_with_scenarios.run_scenario_setup("echo", {"message": "test"}, session_id="s1")
         # Don't submit -- answer stays None
         result = await env_with_scenarios.run_scenario_evaluate("echo", session_id="s1")
         assert result.reward == 1.0
@@ -121,9 +113,7 @@ class TestSessionEdgeCases:
     @pytest.mark.asyncio()
     async def test_double_evaluate_raises(self, env_with_scenarios: Environment) -> None:
         """Evaluating the same session twice should fail (session is consumed)."""
-        await env_with_scenarios.run_scenario_setup(
-            "greet", {"name": "x"}, session_id="s1"
-        )
+        await env_with_scenarios.run_scenario_setup("greet", {"name": "x"}, session_id="s1")
         env_with_scenarios._get_session("s1").answer = "correct"  # type: ignore[union-attr]
 
         await env_with_scenarios.run_scenario_evaluate("greet", session_id="s1")
@@ -134,9 +124,7 @@ class TestSessionEdgeCases:
     @pytest.mark.asyncio()
     async def test_session_cleanup_on_disconnect(self, env_with_scenarios: Environment) -> None:
         """Sessions should be cleaned up when env disconnects."""
-        await env_with_scenarios.run_scenario_setup(
-            "greet", {"name": "x"}, session_id="s1"
-        )
+        await env_with_scenarios.run_scenario_setup("greet", {"name": "x"}, session_id="s1")
         assert env_with_scenarios._get_session("s1") is not None
 
         # Simulate disconnect cleanup
@@ -146,9 +134,7 @@ class TestSessionEdgeCases:
     @pytest.mark.asyncio()
     async def test_scenario_mismatch_raises(self, env_with_scenarios: Environment) -> None:
         """Submitting to wrong scenario name raises."""
-        await env_with_scenarios.run_scenario_setup(
-            "greet", {"name": "x"}, session_id="s1"
-        )
+        await env_with_scenarios.run_scenario_setup("greet", {"name": "x"}, session_id="s1")
         with pytest.raises(ValueError, match="Scenario mismatch"):
             await env_with_scenarios.submit("echo", "answer", session_id="s1")
 
@@ -157,21 +143,15 @@ class TestBackwardCompat:
     """Ensure the __client__ default key still works for non-MCP usage."""
 
     @pytest.mark.asyncio()
-    async def test_no_session_id_uses_default_key(
-        self, env_with_scenarios: Environment
-    ) -> None:
+    async def test_no_session_id_uses_default_key(self, env_with_scenarios: Environment) -> None:
         """When no session_id is passed, uses __client__ default."""
-        prompt = await env_with_scenarios.run_scenario_setup(
-            "greet", {"name": "world"}
-        )
+        prompt = await env_with_scenarios.run_scenario_setup("greet", {"name": "world"})
         assert prompt == "Hello world"
         assert env_with_scenarios._active_session is not None
         assert env_with_scenarios._active_session.local_name == "greet"
 
     @pytest.mark.asyncio()
-    async def test_full_lifecycle_without_session_id(
-        self, env_with_scenarios: Environment
-    ) -> None:
+    async def test_full_lifecycle_without_session_id(self, env_with_scenarios: Environment) -> None:
         """Complete lifecycle without session_id (backward compat path)."""
         await env_with_scenarios.run_scenario_setup("greet", {"name": "x"})
         await env_with_scenarios.submit("greet", "correct")

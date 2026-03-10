@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+import json
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from a2a.server.agent_execution import AgentExecutor
 from a2a.server.agent_execution.context import RequestContext
 from a2a.server.events.event_queue import EventQueue
-from a2a.types import TaskState, TaskStatusUpdateEvent
+from a2a.types import TaskArtifactUpdateEvent, TaskState, TaskStatusUpdateEvent
 from mcp.types import TextContent
 
-from hud.services.chat import Chat, _content_to_blocks, _content_to_str
+from hud.services.chat import Chat, _content_to_blocks
 
 # ---------------------------------------------------------------------------
 # Helper fixtures
@@ -37,18 +38,6 @@ def dummy_task() -> Any:
 
 
 class TestContentHelpers:
-    def test_content_to_str_plain(self) -> None:
-        assert _content_to_str("hello") == "hello"
-
-    def test_content_to_str_blocks(self) -> None:
-        blocks = [
-            TextContent(type="text", text="hello"),
-            TextContent(type="text", text="world"),
-        ]
-        result = _content_to_str(blocks)
-        assert "hello" in result
-        assert "world" in result
-
     def test_content_to_blocks_string(self) -> None:
         blocks = _content_to_blocks("hello")
         assert len(blocks) == 1
@@ -84,12 +73,6 @@ class TestChatConstruction:
         chat.messages = [{"role": "user", "content": {"type": "text", "text": "hi"}}]
         chat.clear()
         assert chat.messages == []
-
-    def test_session_id_stable(self, dummy_task: Any) -> None:
-        chat = Chat(dummy_task, model="test-model")
-        assert chat._session_id  # not empty
-        sid = chat._session_id
-        assert chat._session_id == sid  # same across accesses
 
     def test_name_from_scenario(self, dummy_task: Any) -> None:
         chat = Chat(dummy_task, model="m", name="Custom Agent")
@@ -129,6 +112,7 @@ class TestMessageFormat:
 
             # Patch the import inside send()
             import hud
+
             original_eval = hud.eval
             hud.eval = MagicMock(return_value=mock_ctx)
             try:
@@ -166,6 +150,7 @@ class TestA2AExecutor:
         with patch.object(chat, "send", new_callable=AsyncMock) as mock_send:
             mock_result = MagicMock()
             mock_result.content = "done"
+            mock_result.citations = []
             mock_send.return_value = mock_result
 
             context = MagicMock(spec=RequestContext)
@@ -183,8 +168,47 @@ class TestA2AExecutor:
 
             event2 = await queue.dequeue_event(no_wait=True)
             assert isinstance(event2, TaskStatusUpdateEvent)
-            assert event2.status.state == TaskState.completed
+            assert event2.status.state == TaskState.input_required
             assert event2.final is True
+
+    @pytest.mark.asyncio()
+    async def test_execute_enqueues_metadata_artifact_before_final_status(
+        self, dummy_task: Any
+    ) -> None:
+        chat = Chat(dummy_task, model="m")
+
+        with patch.object(chat, "send", new_callable=AsyncMock) as mock_send:
+            mock_result = MagicMock()
+            mock_result.content = "done"
+            mock_result.citations = [
+                {"type": "url_citation", "source": "https://example.com", "title": "Example"}
+            ]
+            mock_send.return_value = mock_result
+
+            context = MagicMock(spec=RequestContext)
+            context.context_id = "ctx-1"
+            context.task_id = "task-1"
+            context.get_user_input.return_value = "hello"
+
+            queue = EventQueue()
+
+            await chat.execute(context, queue)
+
+            event = await queue.dequeue_event(no_wait=True)
+            assert isinstance(event, TaskStatusUpdateEvent)
+            assert event.status.state == TaskState.working
+
+            event2 = await queue.dequeue_event(no_wait=True)
+            assert isinstance(event2, TaskArtifactUpdateEvent)
+            payload = json.loads(cast("Any", event2.artifact.parts[0].root).text)
+            assert payload["type"] == "hud_reply_metadata"
+            assert payload["citations"][0]["source"] == "https://example.com"
+            assert payload["data"] is None
+
+            event3 = await queue.dequeue_event(no_wait=True)
+            assert isinstance(event3, TaskStatusUpdateEvent)
+            assert event3.status.state == TaskState.input_required
+            assert event3.final is True
 
     @pytest.mark.asyncio()
     async def test_execute_enqueues_failed_on_error(self, dummy_task: Any) -> None:

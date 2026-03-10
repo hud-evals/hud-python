@@ -173,6 +173,8 @@ class EvalContext(Environment):
         self.evaluation_result: EvaluationResult | None = None  # Full result with subscores
         self.answer: str | dict[str, Any] | None = None  # Agent's submitted answer
         self.system_prompt: str | None = None  # From task.agent_config, passed to agent
+        self.scenario_returns_schema: dict[str, Any] | None = None
+        self.scenario_enable_citations: bool = False
 
         # Agent config overrides from task (applied by agent when running)
         self.append_setup_output: bool = False  # Whether to append setup tool output to prompt
@@ -264,6 +266,9 @@ class EvalContext(Environment):
 
         # Copy scenarios (definitions) by reference - they don't change
         ctx._scenarios = getattr(env, "_scenarios", {})
+        ctx._scenario_output_config = getattr(env, "_scenario_output_config", {})
+        ctx._scenario_exclusions = getattr(env, "_scenario_exclusions", {})
+        ctx._scenario_chat_flags = getattr(env, "_scenario_chat_flags", {})
         # Create fresh session state for this eval (parallel evals each need their own)
         ctx._scenario_sessions = {}
 
@@ -409,6 +414,8 @@ class EvalContext(Environment):
 
         # If scenario yielded multi-turn messages, store as conversation
         session = self._get_session()
+        self.scenario_returns_schema = session.returns_schema if session else None
+        self.scenario_enable_citations = bool(session.enable_citations) if session else False
         if session and session.prompt_messages and len(session.prompt_messages) > 1:
             self.conversation = [
                 {

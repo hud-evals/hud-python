@@ -10,7 +10,7 @@ Example::
     from hud.eval import Task
 
     chat = Chat(
-        Task(env={"name": "my-env"}, scenario="assist"),
+        Task(env={"name": "my-env"}, scenario="analysis_chat"),
         model="claude-sonnet-4-20250514",
     )
 
@@ -27,7 +27,6 @@ Example::
 
 from __future__ import annotations
 
-import asyncio  # noqa: TC003 - used at runtime for Future
 import logging
 import uuid
 from collections.abc import Sequence
@@ -48,6 +47,7 @@ from a2a.types import (
 )
 from mcp.types import ContentBlock, TextContent
 
+from hud.services.reply_metadata import build_reply_metadata_event
 from hud.types import Trace  # noqa: TC001 - used as return type
 
 if TYPE_CHECKING:
@@ -62,19 +62,6 @@ LOGGER = logging.getLogger(__name__)
 MessageContent = str | Sequence[ContentBlock]
 
 
-def _content_to_str(content: MessageContent) -> str:
-    """Extract plain text from a message for history storage."""
-    if isinstance(content, str):
-        return content
-    parts: list[str] = []
-    for block in content:
-        if isinstance(block, TextContent):
-            parts.append(block.text)
-        elif hasattr(block, "type"):
-            parts.append(f"[{block.type}]")
-    return " ".join(parts) if parts else ""
-
-
 def _content_to_blocks(content: MessageContent) -> list[ContentBlock]:
     """Normalize message content to a list of ContentBlocks."""
     if isinstance(content, str):
@@ -82,6 +69,18 @@ def _content_to_blocks(content: MessageContent) -> list[ContentBlock]:
     if isinstance(content, list):
         return content  # type: ignore[return-value]
     return list(content)
+
+
+def _blocks_to_message_content(
+    blocks: Sequence[ContentBlock],
+) -> dict[str, Any] | list[dict[str, Any]]:
+    """Serialize blocks for PromptMessage-compatible `content`.
+
+    Preserve multi-block inputs instead of silently dropping blocks.
+    """
+    if len(blocks) == 1:
+        return blocks[0].model_dump()
+    return [block.model_dump() for block in blocks]
 
 
 class Chat(AgentExecutor):
@@ -107,6 +106,9 @@ class Chat(AgentExecutor):
         agent_params: dict[str, Any] | None = None,
         name: str | None = None,
         description: str | None = None,
+        max_steps: int = 10,
+        trace: bool = True,
+        quiet: bool = True,
     ) -> None:
         """Initialize Chat.
 
@@ -119,21 +121,18 @@ class Chat(AgentExecutor):
             agent_params: Extra kwargs forwarded to agent creation
             name: Human-readable name for AgentCard generation
             description: Description for AgentCard generation
+            trace: Whether to record traces on the HUD platform
+            quiet: When True, suppress banner/link output (default for chat)
         """
         self._task = task
         self._model = model
         self._agent_params = agent_params or {}
         self._name = name or task.scenario or "chat"
         self._description = description or f"Chat agent for {task.scenario or 'tasks'}"
+        self._max_steps = max_steps
+        self._trace = trace
+        self._quiet = quiet
         self.messages: list[dict[str, Any]] = []
-
-        # Stable session identifier reused across all turns so the remote
-        # MCP server (or HUD hub) treats multi-turn Chat as one session.
-        # This flows to Connector.copy() as the Environment-Id header.
-        self._session_id: str = str(uuid.uuid4())
-
-        # Elicitation bridge state
-        self._pending_elicitations: dict[str, asyncio.Future[str]] = {}
 
     def _create_agent(self) -> Any:
         """Create an agent instance from the configured model name."""
@@ -158,27 +157,18 @@ class Chat(AgentExecutor):
 
         blocks = _content_to_blocks(message)
 
-        # Build PromptMessage-compatible dict (role + content as ContentBlock)
-        content_data = blocks[0].model_dump()
+        # Build PromptMessage-compatible content (single block dict or block list)
+        content_data = _blocks_to_message_content(blocks)
 
         self.messages.append({"role": "user", "content": content_data})
 
-        task = self._task.model_copy(
-            update={
-                "args": {**(self._task.args or {}), "messages": self.messages},
-            }
-        )
+        task_args = dict(self._task.args or {})
+        task_args["messages"] = list(self.messages)
+        task = self._task.model_copy(update={"args": task_args})
 
-        # Pin the Environment-Id across turns so the remote server
-        # maintains session state (OAuth tokens, ctx.set_state, etc.).
-        from hud.environment import Environment
-
-        if isinstance(task.env, Environment):
-            task.env._stable_environment_id = self._session_id
-
-        async with hud.eval(task, trace_id=self._session_id) as ctx:
+        async with hud.eval(task, trace=self._trace, quiet=self._quiet) as ctx:
             agent = self._create_agent()
-            result = await agent.run(ctx)
+            result = await agent.run(ctx, max_steps=self._max_steps)
 
         self.messages.append(
             {
@@ -189,14 +179,24 @@ class Chat(AgentExecutor):
         return result
 
     def clear(self) -> None:
-        """Reset the conversation history and rotate the session.
-
-        Generates a fresh session_id so subsequent turns don't inherit
-        stale server-side state (tokens, set_state values) from the
-        previous conversation.
-        """
+        """Reset the conversation history."""
         self.messages = []
-        self._session_id = str(uuid.uuid4())
+
+    def export_history(self) -> list[dict[str, Any]]:
+        """Export the conversation history for persistence.
+
+        Returns a JSON-serializable list of message dicts that can be
+        saved and later restored with ``load_history()``.
+        """
+        return [dict(m) for m in self.messages]
+
+    def load_history(self, messages: list[dict[str, Any]]) -> None:
+        """Restore conversation history from a previous export.
+
+        Replaces the current history. Use after ``export_history()`` to
+        resume a conversation across server restarts or sessions.
+        """
+        self.messages = [dict(m) for m in messages]
 
     # ------------------------------------------------------------------
     # MCP tool surface
@@ -286,35 +286,33 @@ class Chat(AgentExecutor):
     # ------------------------------------------------------------------
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        """Process an A2A message via send().
-
-        Handles both fresh messages and follow-ups to pending
-        elicitations (input_required responses).
-        """
+        """Process an A2A message via send()."""
         context_id = context.context_id or str(uuid.uuid4())
         task_id = context.task_id or str(uuid.uuid4())
 
         try:
             message_text = context.get_user_input()
 
-            # Check if this is a follow-up to a pending elicitation
-            if task_id in self._pending_elicitations:
-                future = self._pending_elicitations.pop(task_id)
-                future.set_result(message_text)
-                return
-
-            # Emit WORKING status
             await event_queue.enqueue_event(
                 TaskStatusUpdateEvent(
                     context_id=context_id,
                     task_id=task_id,
                     final=False,
-                    status=TaskStatus(state=TaskState.working),
+                    status=TaskStatus(
+                        state=TaskState.working,
+                    ),
                 )
             )
 
             result = await self.send(message_text)
             content = result.content or ""
+            metadata_event = build_reply_metadata_event(
+                context_id=context_id,
+                task_id=task_id,
+                trace=result,
+            )
+            if metadata_event is not None:
+                await event_queue.enqueue_event(metadata_event)
 
             await event_queue.enqueue_event(
                 TaskStatusUpdateEvent(
@@ -322,7 +320,7 @@ class Chat(AgentExecutor):
                     task_id=task_id,
                     final=True,
                     status=TaskStatus(
-                        state=TaskState.completed,
+                        state=TaskState.input_required,
                         message=Message(
                             message_id=str(uuid.uuid4()),
                             role=Role.agent,
@@ -331,7 +329,7 @@ class Chat(AgentExecutor):
                     ),
                 )
             )
-        except Exception as e:
+        except Exception as exc:
             LOGGER.exception("Chat A2A execute failed")
             await event_queue.enqueue_event(
                 TaskStatusUpdateEvent(
@@ -343,7 +341,7 @@ class Chat(AgentExecutor):
                         message=Message(
                             message_id=str(uuid.uuid4()),
                             role=Role.agent,
-                            parts=[Part(root=TextPart(text=str(e)))],
+                            parts=[Part(root=TextPart(text=str(exc)))],
                         ),
                     ),
                 )
@@ -355,9 +353,6 @@ class Chat(AgentExecutor):
         task_id = context.task_id or ""
 
         self.clear()
-
-        if task_id in self._pending_elicitations:
-            self._pending_elicitations.pop(task_id).cancel()
 
         await event_queue.enqueue_event(
             TaskStatusUpdateEvent(

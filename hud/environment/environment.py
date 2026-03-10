@@ -14,7 +14,7 @@ from hud.environment.connectors import ConnectorsMixin
 from hud.environment.integrations import IntegrationsMixin
 from hud.environment.mock import MockMixin
 from hud.environment.router import ConflictResolution, ToolRouter
-from hud.environment.scenarios import ScenarioMixin
+from hud.environment.scenarios import ScenarioMixin, _safe_session_id
 from hud.server.server import MCPServer
 from hud.types import MCPToolResult
 
@@ -528,6 +528,43 @@ class Environment(
         self._router.build_prompts(local_prompts, self._connections)
         self._prompt_routing_built = True
 
+    # FastMCP server internals expect list_prompts() to return FastMCP prompt
+    # objects with a .version attribute. HUD's router, however, builds routing
+    # from mcp.types.Prompt definitions. If we return the router's MCP prompt
+    # objects directly from list_prompts(), FastMCP 3.x crashes while handling
+    # prompts/list with: "'Prompt' object has no attribute 'version'".
+    # Keep the router path and server path split so each layer gets the prompt
+    # shape it expects.
+    async def _list_mcp_prompts(self) -> list[mcp_types.Prompt]:
+        """Return MCP prompt definitions for HUD's internal routing logic."""
+        if self._connections:
+            await asyncio.gather(*[c.list_prompts() for c in self._connections.values()])
+        await self._build_prompt_routing()
+        return self._router.prompts
+
+    @staticmethod
+    def _to_fastmcp_prompt(prompt: mcp_types.Prompt) -> Any:
+        """Convert an MCP prompt definition into a FastMCP prompt component."""
+        from fastmcp.prompts.prompt import Prompt, PromptArgument
+
+        arguments = [
+            PromptArgument(
+                name=arg.name,
+                description=arg.description,
+                required=bool(arg.required),
+            )
+            for arg in (prompt.arguments or [])
+        ]
+        return Prompt(
+            name=prompt.name,
+            version=None,
+            title=prompt.title,
+            description=prompt.description,
+            icons=prompt.icons,
+            arguments=arguments or None,
+            meta=getattr(prompt, "meta", None),
+        )
+
     async def _build_resource_routing(self) -> None:
         """Build resource routing from local resources and connections."""
         local_resources_list = await self._local_provider.list_resources()
@@ -567,6 +604,15 @@ class Environment(
         ) -> mcp_types.GetPromptResult:
             return await self._env_get_prompt(name, arguments)
 
+        @self._mcp_server.list_prompts()
+        async def _list_prompts_handler(
+            request: Any = None,
+        ) -> mcp_types.ListPromptsResult:
+            # This handler must return MCP prompt definitions. Returning FastMCP
+            # prompt components here causes ListPromptsResult validation errors.
+            prompts = await self._env_list_prompts()
+            return mcp_types.ListPromptsResult(prompts=prompts)
+
         @self._mcp_server.list_resources()
         async def _list_resources_handler(
             request: Any = None,
@@ -575,14 +621,21 @@ class Environment(
             return mcp_types.ListResourcesResult(resources=resources)
 
         @self._mcp_server.read_resource()
-        async def _read_resource_handler(uri: AnyUrl, **kwargs: Any) -> Any:
-            return await self.read_resource(str(uri), **kwargs)
+        async def _read_resource_handler(
+            uri: AnyUrl, **kwargs: Any
+        ) -> mcp_types.ReadResourceResult:
+            contents = await self.read_resource(str(uri), **kwargs)
+            return mcp_types.ReadResourceResult(contents=contents)
 
     async def _env_list_tools(self) -> list[mcp_types.Tool]:
         """Return all tools including those from connectors."""
         if not self._tool_routing_built:
             await self._build_tool_routing()
         return self._router.tools
+
+    async def _env_list_prompts(self) -> list[mcp_types.Prompt]:
+        """Return all prompts including those from connectors."""
+        return await self._list_mcp_prompts()
 
     async def _env_list_resources(self) -> list[mcp_types.Resource]:
         """Return all resources including those from connectors."""
@@ -641,23 +694,9 @@ class Environment(
             scenario_name = name.split(":", 1)[1]
             str_args = {k: v for k, v in (arguments or {}).items()}
 
-            # Extract MCP session ID for multi-client isolation.
-            # Replicates Context.session_id logic since we're outside FastMCP DI.
-            session_id: str | None = None
-            try:
-                import uuid as _uuid
-
-                from mcp.server.lowlevel.server import request_ctx as _req_ctx
-
-                req = _req_ctx.get()
-                if req and req.session:
-                    sid = getattr(req.session, "_fastmcp_state_prefix", None)
-                    if sid is None:
-                        sid = str(_uuid.uuid4())
-                        req.session._fastmcp_state_prefix = sid  # type: ignore[attr-defined]
-                    session_id = sid
-            except (LookupError, Exception):  # noqa: S110
-                pass
+            # Extract MCP session ID for multi-client isolation using the same
+            # helper as scenario prompt/resource handlers.
+            session_id = _safe_session_id(None)
 
             prompt_text = await self.run_scenario_setup(
                 scenario_name, str_args, session_id=session_id
@@ -787,12 +826,10 @@ class Environment(
     # Prompt Operations
     # =========================================================================
 
-    async def list_prompts(self) -> list[mcp_types.Prompt]:
-        """Refresh prompts from all connections and rebuild prompt routing."""
-        if self._connections:
-            await asyncio.gather(*[c.list_prompts() for c in self._connections.values()])
-        await self._build_prompt_routing()
-        return self._router.prompts
+    async def list_prompts(self) -> list[Any]:
+        """List prompts as FastMCP prompt components for server-side MCP operations."""
+        prompts = await self._list_mcp_prompts()
+        return [self._to_fastmcp_prompt(prompt) for prompt in prompts]
 
     async def get_prompt(
         self, name: str, arguments: dict[str, Any] | None = None
@@ -960,6 +997,60 @@ class Environment(
 
     def __repr__(self) -> str:
         return f"Environment({self.name!r}, connections={list(self._connections.keys())})"
+
+    # =========================================================================
+    # Chat
+    # =========================================================================
+
+    def chat(
+        self,
+        scenario: str,
+        *,
+        model: str,
+        agent_params: dict[str, Any] | None = None,
+        max_steps: int = 10,
+        trace: bool = False,
+        quiet: bool = True,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> Any:
+        """Create a Chat instance for a chat scenario on this environment.
+
+        Convenience wrapper that avoids importing Task and Chat separately.
+        Defaults to ``trace=False, quiet=True`` for server/app usage.
+
+        Args:
+            scenario: Scenario name (must be ``chat=True``).
+            model: Model name string (e.g. "claude-sonnet-4-20250514").
+            agent_params: Extra kwargs forwarded to agent creation.
+            max_steps: Max agent steps per turn.
+            trace: Whether to record traces on the HUD platform.
+            quiet: Suppress banner/link output.
+            name: Human-readable name for AgentCard.
+            description: Description for AgentCard.
+
+        Returns:
+            A Chat instance ready for ``await chat.send("...")``.
+
+        Example::
+
+            chat = env.chat("ask", model="claude-haiku-4-5")
+            r = await chat.send("What is everyone working on?")
+            print(r.content)
+        """
+        from hud.eval.task import Task
+        from hud.services.chat import Chat
+
+        return Chat(
+            Task(env=self, scenario=scenario),
+            model=model,
+            agent_params=agent_params,
+            max_steps=max_steps,
+            trace=trace,
+            quiet=quiet,
+            name=name,
+            description=description,
+        )
 
     # =========================================================================
     # Task Creation

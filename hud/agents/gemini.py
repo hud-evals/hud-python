@@ -142,13 +142,21 @@ class GeminiAgent(MCPAgent):
 
     async def get_response(self, messages: list[genai_types.Content]) -> InferenceResult:
         """Get response from Gemini including any tool calls."""
+        tools = self.gemini_tools
+
+        citations_enabled = bool(
+            getattr(self.ctx, "scenario_enable_citations", False) if self.ctx else False
+        )
+        if citations_enabled and not self._has_google_search_tool():
+            tools = [*list(tools), genai_types.Tool(google_search=genai_types.GoogleSearch())]
+
         # Build generate content config
         generate_config = genai_types.GenerateContentConfig(
             temperature=self.temperature,
             top_p=self.top_p,
             top_k=self.top_k,
             max_output_tokens=self.max_output_tokens,
-            tools=self.gemini_tools,
+            tools=tools,
             system_instruction=self.system_prompt,
         )
 
@@ -327,6 +335,10 @@ class GeminiAgent(MCPAgent):
     async def create_user_message(self, text: str) -> genai_types.Content:
         """Create a user message in Gemini's format."""
         return genai_types.Content(role="user", parts=[genai_types.Part(text=text)])
+
+    def _has_google_search_tool(self) -> bool:
+        """Check if google_search is already in the tool list."""
+        return any(tool.google_search is not None for tool in self.gemini_tools)
 
     def _convert_tools_for_gemini(self) -> None:
         """Convert MCP tools to Gemini tool format using native specs.

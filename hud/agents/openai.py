@@ -16,6 +16,7 @@ from openai.types.responses import (
     FunctionShellToolParam,
     FunctionToolParam,
     ResponseFunctionCallOutputItemListParam,
+    ResponseIncludable,
     ResponseInputFileContentParam,
     ResponseInputImageContentParam,
     ResponseInputImageParam,
@@ -338,6 +339,13 @@ class OpenAIAgent(MCPAgent):
                 self.console.debug("No new messages to send to OpenAI.")
                 return InferenceResult(content="", tool_calls=[], done=True)
 
+        scenario_enable_citations = bool(
+            getattr(self.ctx, "scenario_enable_citations", False) if self.ctx is not None else False
+        )
+        include_param: list[ResponseIncludable] | Omit = Omit()
+        if scenario_enable_citations:
+            include_param = ["web_search_call.action.sources"]
+
         response = await self.openai_client.responses.create(
             model=self._model,
             input=new_items,
@@ -352,6 +360,7 @@ class OpenAIAgent(MCPAgent):
                 self.last_response_id if self.last_response_id is not None else Omit()
             ),
             truncation=self.truncation if self.truncation is not None else Omit(),
+            include=include_param,
         )
 
         self.last_response_id = response.id

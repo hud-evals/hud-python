@@ -17,6 +17,7 @@ from anthropic.types.beta import (
     BetaContentBlockParam,
     BetaImageBlockParam,
     BetaMessageParam,
+    BetaPlainTextSourceParam,
     BetaRequestDocumentBlockParam,
     BetaTextBlockParam,
     BetaToolBash20250124Param,
@@ -336,21 +337,23 @@ class ClaudeAgent(MCPAgent):
                 result.done = False
             elif block.type == "text":
                 text_content += block.text
+                citations.extend(
+                    {
+                        "type": "document_citation",
+                        "text": getattr(cit, "cited_text", "") or "",
+                        "source": str(idx)
+                        if (idx := getattr(cit, "document_index", None)) is not None
+                        else getattr(cit, "document_title", "") or "",
+                        "title": getattr(cit, "document_title", None),
+                        "start_index": getattr(cit, "start_char_index", None),
+                        "end_index": getattr(cit, "end_char_index", None),
+                    }
+                    for cit in getattr(block, "citations", None) or []
+                )
             elif hasattr(block, "type") and block.type == "thinking":
                 if thinking_content:
                     thinking_content += "\n"
                 thinking_content += block.thinking
-            elif hasattr(block, "type") and block.type == "cite":
-                citations.append(
-                    {
-                        "type": "document_citation",
-                        "text": getattr(block, "cited_text", "") or "",
-                        "source": str(idx)
-                        if (idx := getattr(block, "document_index", None)) is not None
-                        else getattr(block, "document_title", "") or "",
-                        "title": getattr(block, "document_title", None),
-                    }
-                )
 
         result.content = text_content
         result.citations = citations
@@ -366,23 +369,28 @@ class ClaudeAgent(MCPAgent):
 
         Handles EmbeddedResource (PDFs), images, and text content.
         """
+        citations_enabled = bool(
+            getattr(self.ctx, "scenario_enable_citations", False) if self.ctx else False
+        )
+
         # Process each tool result
-        user_content = []
+        user_content: list[BetaToolResultBlockParam | BetaRequestDocumentBlockParam] = []
 
         for tool_call, result in zip(tool_calls, tool_results, strict=True):
-            # Extract Claude-specific metadata from extra fields
             tool_use_id = tool_call.id
             if not tool_use_id:
                 self.hud_console.warning(f"No tool_use_id found for {tool_call.name}")
                 continue
 
-            # Convert MCP tool results to Claude format
+            # Blocks placed inside the tool_result (text, images)
             claude_blocks: list[
                 BetaTextBlockParam | BetaImageBlockParam | BetaRequestDocumentBlockParam
             ] = []
+            # Citable document blocks placed as siblings after the tool_result
+            # so Claude's citation system indexes them properly.
+            sibling_docs: list[BetaRequestDocumentBlockParam] = []
 
             if result.isError:
-                # Extract error message from content
                 error_msg = "Tool execution failed"
                 for content in result.content:
                     if isinstance(content, types.TextContent):
@@ -390,27 +398,38 @@ class ClaudeAgent(MCPAgent):
                         break
                 claude_blocks.append(text_to_content_block(f"Error: {error_msg}"))
             else:
-                # Process success content
                 for content in result.content:
                     if isinstance(content, types.TextContent):
                         claude_blocks.append(text_to_content_block(content.text))
+                        if citations_enabled:
+                            sibling_docs.append(
+                                text_document_block(content.text, title=tool_call.name)
+                            )
                     elif isinstance(content, types.ImageContent):
                         claude_blocks.append(base64_to_content_block(content.data))
                     elif isinstance(content, types.EmbeddedResource):
-                        # Handle embedded resources (PDFs)
                         resource = content.resource
                         if (
                             isinstance(resource, types.BlobResourceContents)
                             and resource.mimeType == "application/pdf"
                         ):
-                            claude_blocks.append(
-                                document_to_content_block(base64_data=resource.blob)
-                            )
+                            if citations_enabled:
+                                sibling_docs.append(
+                                    document_to_content_block(
+                                        base64_data=resource.blob,
+                                        enable_citations=True,
+                                    )
+                                )
+                            else:
+                                claude_blocks.append(
+                                    document_to_content_block(
+                                        base64_data=resource.blob,
+                                    )
+                                )
 
-            # Add tool result
             user_content.append(tool_use_content_block(tool_use_id, claude_blocks))
+            user_content.extend(sibling_docs)
 
-        # Return as a user message containing all tool results
         return [
             BetaMessageParam(
                 role="user",
@@ -624,9 +643,27 @@ def text_to_content_block(text: str) -> BetaTextBlockParam:
     return {"type": "text", "text": text}
 
 
-def document_to_content_block(base64_data: str) -> BetaRequestDocumentBlockParam:
+def text_document_block(text: str, *, title: str | None = None) -> BetaRequestDocumentBlockParam:
+    """Wrap plain text as a citable document block."""
+    block = BetaRequestDocumentBlockParam(
+        type="document",
+        source=BetaPlainTextSourceParam(
+            type="text",
+            media_type="text/plain",
+            data=text,
+        ),
+        citations={"enabled": True},
+    )
+    if title:
+        block["title"] = title
+    return block
+
+
+def document_to_content_block(
+    base64_data: str, *, enable_citations: bool = False
+) -> BetaRequestDocumentBlockParam:
     """Convert base64 PDF to Claude document content block."""
-    return BetaRequestDocumentBlockParam(
+    block = BetaRequestDocumentBlockParam(
         type="document",
         source=BetaBase64PDFSourceParam(
             type="base64",
@@ -634,6 +671,9 @@ def document_to_content_block(base64_data: str) -> BetaRequestDocumentBlockParam
             data=base64_data,
         ),
     )
+    if enable_citations:
+        block["citations"] = {"enabled": True}
+    return block
 
 
 def tool_use_content_block(

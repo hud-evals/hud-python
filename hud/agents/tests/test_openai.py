@@ -50,6 +50,8 @@ class MockEvalContext(EvalContext):
         self.variants: dict[str, Any] = {}
         self.answer: str | dict[str, Any] | None = None
         self.system_prompt: str | None = None
+        self.scenario_enable_citations: bool = False
+        self.scenario_returns_schema: dict[str, Any] | None = None
         self.error: BaseException | None = None
         self.metadata: dict[str, Any] = {}
         self.results: list[Any] = []
@@ -385,6 +387,40 @@ class TestOpenAIAgent:
         # Reasoning is stored separately from content
         assert response.reasoning == "Thinking about it..."
         assert response.content == "Answer!"
+
+    @pytest.mark.asyncio
+    async def test_get_response_requests_sources_when_citations_enabled(
+        self, mock_openai: AsyncOpenAI
+    ) -> None:
+        """Scenario citation mode should request source payloads from Responses API."""
+        mock_response = AsyncMock()
+        mock_response.id = "resp_123"
+        mock_response.output = [
+            ResponseOutputMessage(
+                id="msg_123",
+                type="message",
+                role="assistant",
+                status="completed",
+                content=[ResponseOutputText(type="output_text", text="Hello!", annotations=[])],
+            )
+        ]
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+        agent = OpenAIAgent.create(
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+        agent._openai_tools = []
+        agent._initialized = True
+
+        ctx = MockEvalContext()
+        ctx.scenario_enable_citations = True
+        agent.ctx = ctx
+
+        await agent.get_response([])
+
+        call_kwargs = mock_openai.responses.create.await_args.kwargs
+        assert call_kwargs.get("include") == ["web_search_call.action.sources"]
 
 
 class TestOpenAIToolConversion:
