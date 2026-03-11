@@ -170,12 +170,13 @@ class Chat(AgentExecutor):
             agent = self._create_agent()
             result = await agent.run(ctx, max_steps=self._max_steps)
 
-        self.messages.append(
-            {
-                "role": "assistant",
-                "content": {"type": "text", "text": result.content or ""},
-            }
-        )
+        assistant_msg: dict[str, Any] = {
+            "role": "assistant",
+            "content": {"type": "text", "text": result.content or ""},
+        }
+        if result.citations:
+            assistant_msg["citations"] = result.citations
+        self.messages.append(assistant_msg)
         return result
 
     def clear(self) -> None:

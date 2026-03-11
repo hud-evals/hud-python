@@ -673,14 +673,12 @@ class MCPAgent(ABC):
 
     @staticmethod
     def _normalize_citation(cit: dict[str, Any]) -> Citation | None:
-        """Normalize a model-authored citation dict to canonical Citation shape.
+        """Normalize a citation dict to canonical Citation shape.
 
         Maps common key aliases to canonical names and validates via Citation.
-        Returns None if invalid or missing source.
+        Returns None only if construction fails (e.g. extra-forbid violation).
         """
         source = cit.get("source") or cit.get("document") or ""
-        if not source:
-            return None
         try:
             return Citation(
                 type=cit.get("type", "document_citation"),
