@@ -84,6 +84,8 @@ def make_snippet(
 async def read_file_async(path: Path) -> str:
     """Read file content asynchronously using subprocess (for sandboxed environments).
 
+    On Windows, falls back to direct file I/O since Unix commands aren't available.
+
     Args:
         path: Path to the file to read
 
@@ -93,6 +95,9 @@ async def read_file_async(path: Path) -> str:
     Raises:
         ToolError: If file cannot be read
     """
+    if sys.platform == "win32":
+        return read_file_sync(path)
+
     try:
         safe_path = shlex.quote(str(path))
         process = await asyncio.create_subprocess_shell(
@@ -112,6 +117,8 @@ async def read_file_async(path: Path) -> str:
 async def write_file_async(path: Path, content: str) -> None:
     """Write file content asynchronously using subprocess (for sandboxed environments).
 
+    On Windows, falls back to direct file I/O since heredoc syntax isn't available.
+
     Args:
         path: Path to the file to write
         content: Content to write
@@ -119,6 +126,10 @@ async def write_file_async(path: Path, content: str) -> None:
     Raises:
         ToolError: If file cannot be written
     """
+    if sys.platform == "win32":
+        write_file_sync(path, content)
+        return
+
     try:
         safe_path = shlex.quote(str(path))
         process = await asyncio.create_subprocess_shell(
