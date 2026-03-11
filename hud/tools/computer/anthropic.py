@@ -206,8 +206,14 @@ class AnthropicComputerTool(HudComputerTool):
                 image = image.convert("RGB")
             buffer = BytesIO()
             image.save(buffer, format="JPEG", quality=self.screenshot_quality, optimize=True)
-            logger.debug("Compressed screenshot to JPEG quality=%s", self.screenshot_quality)
-            return base64.b64encode(buffer.getvalue()).decode("utf-8")
+            original_kb = len(screenshot_base64) * 3 / 4 / 1024
+            compressed = base64.b64encode(buffer.getvalue()).decode("utf-8")
+            compressed_kb = len(compressed) * 3 / 4 / 1024
+            logger.info(
+                "Screenshot compression: %.0fKB → %.0fKB (%.1fx reduction, quality=%s)",
+                original_kb, compressed_kb, original_kb / max(compressed_kb, 1), self.screenshot_quality,
+            )
+            return compressed
         except Exception as e:
             logger.warning("Failed to compress screenshot: %s", e)
             return await super()._rescale_screenshot(screenshot_base64)
