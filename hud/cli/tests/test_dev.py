@@ -304,11 +304,15 @@ class TestDockerProxyPassthrough:
                 async with Client(proxy_url) as client:
                     await client.get_prompt("test-env:greet", {"name": "world"})
 
+                    # _hud_submit is hidden from list_tools but must be
+                    # callable through the proxy.  The call reaches the
+                    # backend Environment (verified by the scenario-level
+                    # error — a routing failure would raise ToolError).
                     result = await client.call_tool(
                         "_hud_submit", {"scenario": "greet", "answer": "42"}
                     )
                     text = str(result)
-                    assert "submitted" in text.lower() or "answer" in text.lower()
+                    assert "submitted" in text.lower() or "scenario" in text.lower()
 
                     result = await client.call_tool("public_tool", {})
                     assert "public" in str(result).lower()
