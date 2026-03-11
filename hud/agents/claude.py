@@ -262,6 +262,8 @@ class ClaudeAgent(MCPAgent):
                     for t in effective_tools
                 ]
 
+        _log_message_sizes(messages, getattr(getattr(self, "ctx", None), "trace_id", "?"))
+
         # Bedrock doesn't support .stream() - use create(stream=True) instead
         if isinstance(self.anthropic_client, AsyncAnthropicBedrock):
             try:
@@ -406,6 +408,13 @@ class ClaudeAgent(MCPAgent):
                     if isinstance(content, types.TextContent):
                         claude_blocks.append(text_to_content_block(content.text))
                     elif isinstance(content, types.ImageContent):
+                        img_kb = len(content.data) * 3 / 4 / 1024
+                        _tid = getattr(getattr(self, "ctx", None), "trace_id", "?")
+                        with open("/tmp/compression_log.txt", "a") as _f:
+                            _f.write(
+                                f"[{_tid}] Tool result image: {img_kb:.0f}KB"
+                                f" ({content.mimeType or 'unknown'})\n"
+                            )
                         claude_blocks.append(
                             base64_to_content_block(content.data, content.mimeType)
                         )
@@ -672,6 +681,85 @@ def document_to_content_block(base64_data: str) -> BetaRequestDocumentBlockParam
             data=base64_data,
         ),
     )
+
+
+def _log_message_sizes(messages: list[BetaMessageParam], trace_id: str = "?") -> None:
+    """Log a breakdown of what's consuming space in the conversation to /tmp/compression_log.txt."""
+    total_text_bytes = 0
+    total_image_bytes = 0
+    image_count = 0
+    for msg in messages:
+        content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
+        if isinstance(content, str):
+            total_text_bytes += len(content.encode("utf-8"))
+            continue
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            btype = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
+            if btype == "text":
+                txt = block.get("text") if isinstance(block, dict) else getattr(block, "text", "")
+                total_text_bytes += len(str(txt).encode("utf-8"))
+            elif btype == "image":
+                src = (
+                    block.get("source") if isinstance(block, dict) else getattr(block, "source", None)
+                )
+                if src:
+                    data = src.get("data") if isinstance(src, dict) else getattr(src, "data", "")
+                    if data:
+                        total_image_bytes += len(data)
+                        image_count += 1
+            elif btype == "tool_use":
+                inp = (
+                    block.get("input") if isinstance(block, dict) else getattr(block, "input", {})
+                )
+                total_text_bytes += len(str(inp).encode("utf-8"))
+            elif btype == "tool_result":
+                sub = (
+                    block.get("content")
+                    if isinstance(block, dict)
+                    else getattr(block, "content", None)
+                )
+                if isinstance(sub, list):
+                    for sb in sub:
+                        sb_type = (
+                            sb.get("type") if isinstance(sb, dict) else getattr(sb, "type", None)
+                        )
+                        if sb_type == "image":
+                            s = (
+                                sb.get("source")
+                                if isinstance(sb, dict)
+                                else getattr(sb, "source", None)
+                            )
+                            if s:
+                                d = (
+                                    s.get("data")
+                                    if isinstance(s, dict)
+                                    else getattr(s, "data", "")
+                                )
+                                if d:
+                                    total_image_bytes += len(d)
+                                    image_count += 1
+                        elif sb_type == "text":
+                            t = (
+                                sb.get("text")
+                                if isinstance(sb, dict)
+                                else getattr(sb, "text", "")
+                            )
+                            total_text_bytes += len(str(t).encode("utf-8"))
+
+    text_kb = total_text_bytes / 1024
+    image_kb = total_image_bytes / 1024
+    total_kb = text_kb + image_kb
+    try:
+        with open("/tmp/compression_log.txt", "a") as _f:
+            _f.write(
+                f"[{trace_id}] API request: {total_kb:.0f}KB total "
+                f"(text: {text_kb:.0f}KB, images: {image_count}"
+                f" x {image_kb / max(image_count, 1):.0f}KB = {image_kb:.0f}KB)\n"
+            )
+    except OSError:
+        pass
 
 
 def tool_use_content_block(

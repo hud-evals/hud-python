@@ -173,10 +173,13 @@ class AnthropicComputerTool(HudComputerTool):
         )
         self.screenshot_quality = screenshot_quality
 
-    async def _rescale_screenshot(self, screenshot_base64: str) -> str:
+    async def _rescale_screenshot(
+        self, screenshot_base64: str, *, skip_resize: bool = False
+    ) -> str:
         """Rescale and/or compress a screenshot.
 
-        Resizes when rescale_images=True and dimensions differ (base class behaviour).
+        Resizes when rescale_images=True and dimensions differ (base class behaviour),
+        unless *skip_resize* is True (used for zoom crops that are already sized).
         Additionally compresses to JPEG when screenshot_quality is set, even when
         no resize is needed, to reduce context window usage.
         """
@@ -192,7 +195,7 @@ class AnthropicComputerTool(HudComputerTool):
             image_data = base64.b64decode(screenshot_base64)
             image = Image.open(BytesIO(image_data))
 
-            if self.rescale_images and self.needs_scaling:
+            if not skip_resize and self.rescale_images and self.needs_scaling:
                 logger.debug(
                     "Resizing screenshot from %s x %s to %s x %s",
                     image.width,
@@ -683,15 +686,17 @@ class AnthropicComputerTool(HudComputerTool):
             # Unknown action
             raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Invalid action: {action}"))
 
-        # Zoom returns full-resolution crops -- skip rescaling for zoom
-        if (
-            isinstance(result, ContentResult)
-            and result.base64_image
-            and self.rescale_images
-            and action != "zoom"
-        ):
-            rescaled_image = await self._rescale_screenshot(result.base64_image)
-            result.base64_image = rescaled_image
+        # Rescale / compress the screenshot.
+        # Zoom crops are already sized by the executor, so skip resizing but
+        # still compress to JPEG when screenshot_quality is set.
+        if isinstance(result, ContentResult) and result.base64_image:
+            if action == "zoom":
+                if self.screenshot_quality is not None:
+                    result.base64_image = await self._rescale_screenshot(
+                        result.base64_image, skip_resize=True
+                    )
+            elif self.rescale_images:
+                result.base64_image = await self._rescale_screenshot(result.base64_image)
 
         # Handle screenshot for actions that need it
         screenshot_actions = {
