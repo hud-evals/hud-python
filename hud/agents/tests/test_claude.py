@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -15,8 +16,10 @@ from hud.agents.claude import (
     text_to_content_block,
     tool_use_content_block,
 )
+from hud.environment import Environment
 from hud.environment.router import ToolRouter
 from hud.eval.context import EvalContext
+from hud.eval.task import Task
 from hud.types import MCPToolCall, MCPToolResult
 
 if TYPE_CHECKING:
@@ -928,7 +931,9 @@ class TestCitationExtraction:
         assert result.citations[0]["end_index"] == 15
 
     @pytest.mark.asyncio
-    async def test_no_citations_when_field_is_none(self, mock_anthropic: AsyncAnthropic) -> None:
+    async def test_no_citations_when_field_is_none(
+        self, mock_anthropic: AsyncAnthropic
+    ) -> None:
         """Text blocks without citations should not populate result.citations."""
         text_block = MagicMock()
         text_block.type = "text"
@@ -967,11 +972,11 @@ class TestDocumentBlockCitations:
         from hud.agents.claude import document_to_content_block
 
         block = document_to_content_block(base64_data="AAAA", enable_citations=True)
-        assert block["citations"] == {"enabled": True}  # type: ignore[typeddict-item]
+        assert block["citations"] == {"enabled": True}
 
     @pytest.mark.asyncio
     async def test_format_tool_results_threads_citations_to_documents(self) -> None:
-        """When scenario_enable_citations is True, PDF blocks become siblings with citations."""
+        """When scenario_enable_citations is True, PDF document blocks become siblings with citations."""
         ctx = MockEvalContext()
         ctx.scenario_enable_citations = True
 
@@ -995,7 +1000,7 @@ class TestDocumentBlockCitations:
                     types.EmbeddedResource(
                         type="resource",
                         resource=types.BlobResourceContents(
-                            uri="file:///doc.pdf",  # type: ignore[arg-type]
+                            uri="file:///doc.pdf",
                             mimeType="application/pdf",
                             blob=pdf_blob,
                         ),
@@ -1006,11 +1011,9 @@ class TestDocumentBlockCitations:
         ]
 
         messages = await agent.format_tool_results(tool_calls, tool_results)
-        content_blocks = cast("list[dict[str, Any]]", messages[0]["content"])
+        content_blocks = messages[0]["content"]
         tool_result_block = content_blocks[0]
         assert tool_result_block["type"] == "tool_result"
-        assert tool_result_block["content"], "tool_result should contain the PDF block"
-        assert tool_result_block["content"][0]["type"] == "document"
         doc_block = content_blocks[1]
         assert doc_block["type"] == "document"
         assert doc_block["citations"] == {"enabled": True}
@@ -1042,7 +1045,7 @@ class TestDocumentBlockCitations:
         ]
 
         messages = await agent.format_tool_results(tool_calls, tool_results)
-        content_blocks = cast("list[dict[str, Any]]", messages[0]["content"])
+        content_blocks = messages[0]["content"]
         tool_result_block = content_blocks[0]
         assert tool_result_block["type"] == "tool_result"
         text_block = tool_result_block["content"][0]
@@ -1054,6 +1057,73 @@ class TestDocumentBlockCitations:
         assert doc_block["source"]["data"] == "Revenue was $1M last quarter."
         assert doc_block["citations"] == {"enabled": True}
         assert doc_block["title"] == "get_sales"
+
+    @pytest.mark.asyncio
+    async def test_remote_task_setup_preserves_citations_for_tool_results(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Remote task setup should propagate enable_citations into Claude formatting."""
+        env = Environment("test-env")
+        task = Task(env=env, scenario="remote-env:solve-task", args={})
+        ctx = EvalContext.from_task(task)
+
+        async def successful_get_prompt(
+            _name: str, _arguments: dict[str, str] | None = None
+        ) -> Any:
+            return SimpleNamespace(
+                messages=[
+                    SimpleNamespace(
+                        role="user",
+                        content=SimpleNamespace(text="Prompt"),
+                    )
+                ],
+                meta={
+                    "enable_citations": True,
+                    "returns_schema": {
+                        "type": "object",
+                        "properties": {"summary": {"type": "string"}},
+                    },
+                },
+            )
+
+        monkeypatch.setattr(ctx, "get_prompt", successful_get_prompt)
+        monkeypatch.setattr(ctx._router, "get_prompt_connection", lambda _name: "remote")
+
+        await ctx._run_task_scenario_setup()
+
+        assert ctx.scenario_enable_citations is True
+        session = ctx._get_session()
+        assert session is not None
+        assert session.enable_citations is True
+
+        client = MagicMock(spec=AsyncAnthropic)
+        client.beta = MagicMock()
+        client.beta.messages = MagicMock()
+        agent = ClaudeAgent.create(
+            model_client=client,
+            validate_api_key=False,
+        )
+        agent.ctx = ctx
+        agent._initialized = True
+        agent.claude_tools = []
+        agent.tool_mapping = {}
+
+        tool_calls = [MCPToolCall(id="call_1", name="get_sales", arguments={})]
+        tool_results = [
+            MCPToolResult(
+                content=[types.TextContent(type="text", text="Revenue was $1M last quarter.")],
+                isError=False,
+            )
+        ]
+
+        messages = await agent.format_tool_results(tool_calls, tool_results)
+        content_blocks = messages[0]["content"]
+        doc_block = content_blocks[1]
+
+        assert doc_block["type"] == "document"
+        assert doc_block["source"]["type"] == "text"
+        assert doc_block["source"]["data"] == "Revenue was $1M last quarter."
+        assert doc_block["citations"] == {"enabled": True}
 
     @pytest.mark.asyncio
     async def test_format_tool_results_keeps_text_block_when_citations_disabled(self) -> None:
@@ -1082,8 +1152,7 @@ class TestDocumentBlockCitations:
         ]
 
         messages = await agent.format_tool_results(tool_calls, tool_results)
-        content_blocks = cast("list[dict[str, Any]]", messages[0]["content"])
-        tool_result_block = content_blocks[0]
+        tool_result_block = messages[0]["content"][0]
         text_block = tool_result_block["content"][0]
         assert text_block["type"] == "text"
         assert text_block["text"] == "Revenue was $1M."
