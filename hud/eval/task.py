@@ -44,6 +44,7 @@ from hud.types import MCPToolCall
 if TYPE_CHECKING:
     from hud.environment import Environment
     from hud.environment.types import EnvConfig
+    from hud.types import Trace
 
 __all__ = ["Task", "TaskAgentConfig", "build_eval_name"]
 
@@ -369,6 +370,35 @@ class Task(BaseModel):
 
         # Model validator handles v4 detection and conversion
         return cls(**source)
+
+    async def run(
+        self,
+        agent: Any,
+        *,
+        max_steps: int = 10,
+        trace: bool = True,
+        quiet: bool = False,
+    ) -> Trace:
+        """Run this task with an agent and return the Trace.
+
+        Shorthand for creating an EvalContext, running the agent, and
+        returning the result. Accepts a model name string or an MCPAgent
+        instance.
+
+            result = await env("code", task=task).run("claude-sonnet-4-5")
+            result = await fix_bug.task(report=report).run(my_agent, max_steps=20)
+        """
+        from hud.eval.manager import run_eval
+
+        if isinstance(agent, str):
+            from hud.agents import create_agent
+
+            agent = create_agent(agent)
+
+        async with run_eval(self, trace=trace, quiet=quiet) as ctx:
+            result = await agent.run(ctx, max_steps=max_steps)
+
+        return result
 
     def copy(
         self,

@@ -115,14 +115,11 @@ Use the available tools to explore the codebase first, then make changes."""
         yield 1.0
 
     # Run the agent
-    eval_task = env("coding_task", task_description=task)
-
-    async with hud.eval(eval_task, name="opencode-build") as ctx:
-        await agent.run(ctx, max_steps=max_steps)
+    result = await coding_task_scenario.task(task_description=task).run(agent, max_steps=max_steps)
 
     print("=" * 60)
     print("✅ Task completed!")
-    print(f"📊 Reward: {ctx.reward}")
+    print(f"📊 Reward: {result.reward}")
 
 
 # =============================================================================
@@ -194,14 +191,11 @@ Use these read-only tools to explore. Do NOT suggest code changes."""
         yield 1.0
 
     # Run the agent
-    eval_task = env("analyze", query=question)
-
-    async with hud.eval(eval_task, name="opencode-plan") as ctx:
-        await agent.run(ctx, max_steps=max_steps)
+    result = await env("analyze", query=question).run(agent, max_steps=max_steps)
 
     print("=" * 60)
     print("✅ Analysis complete!")
-    print(f"📊 Reward: {ctx.reward}")
+    print(f"📊 Reward: {result.reward}")
 
 
 # =============================================================================

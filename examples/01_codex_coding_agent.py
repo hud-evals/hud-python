@@ -156,14 +156,11 @@ Work in the current directory. When done, verify your work runs correctly."""
         yield 1.0
 
     # Run the agent
-    eval_task = env("coding_task", task_description=task)
-
-    async with hud.eval(eval_task, name="codex-coding-local") as ctx:
-        await agent.run(ctx, max_steps=max_steps)
+    result = await env("coding_task", task_description=task).run(agent, max_steps=max_steps)
 
     print("=" * 60)
     print("✅ Task completed!")
-    print(f"📊 Reward: {ctx.reward}")
+    print(f"📊 Reward: {result.reward}")
 
 
 # =============================================================================
@@ -249,14 +246,11 @@ Work in the current directory. When done, verify your work runs correctly."""
         yield 1.0
 
     # Run the agent
-    eval_task = env("coding_task", task_description=task)
-
-    async with hud.eval(eval_task, name="codex-coding") as ctx:
-        await agent.run(ctx, max_steps=max_steps)
+    result = await env("coding_task", task_description=task).run(agent, max_steps=max_steps)
 
     print("=" * 60)
     print("✅ Task completed!")
-    print(f"📊 Reward: {ctx.reward}")
+    print(f"📊 Reward: {result.reward}")
 
 
 # =============================================================================
