@@ -69,13 +69,8 @@ Training turns your evaluation traces into better models:
 Set any checkpoint as HEAD to use it for inference. Your model ID works through the same gateway:
 
 ```python
-from hud.agents import create_agent
-
 # Your forked model - evaluate at any time
-agent = create_agent("your-model-id")
-
-async with hud.eval(task) as ctx:
-    result = await agent.run(ctx)
+result = await task.run("your-model-id")
 ```
 
 See [Platform Models](/platform/models) for training details.

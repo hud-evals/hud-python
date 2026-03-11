@@ -177,6 +177,36 @@ async with env("count", sentence="Strawberry", letter="r", variants={"model": ["
     await ctx.submit(response.choices[0].message.content or "")
 ```
 
+## Task.run()
+
+For simple single-task execution, `Task.run()` collapses the eval + agent pattern into one line:
+
+```python
+from hud.agents import create_agent
+
+# One-liner: create task, run agent, get result
+result = await env("count", sentence="Strawberry", letter="r").run("claude-sonnet-4-5")
+print(result.reward)
+
+# Works with scenario handles too
+result = await count_scenario.task(sentence="Strawberry", letter="r").run("claude-sonnet-4-5")
+
+# Pass agent instances, max_steps, and eval options
+agent = create_agent("gpt-4o")
+result = await env("count", sentence="Hello", letter="l").run(
+    agent, max_steps=5, trace=False, quiet=True,
+)
+```
+
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `agent` | `str \| MCPAgent` | Model name or agent instance | (required) |
+| `max_steps` | `int` | Maximum agent steps | `10` |
+| `trace` | `bool` | Send telemetry to backend | `True` |
+| `quiet` | `bool` | Suppress console output | `False` |
+
+Use `hud.eval()` directly when you need access to the `EvalContext` (for variants, parallel runs, manual tool calls, or custom reward logic).
+
 ## Results
 
 After parallel runs complete, access results on the context:
