@@ -398,6 +398,9 @@ class Task(BaseModel):
         async with run_eval(self, trace=trace, quiet=quiet) as ctx:
             result = await agent.run(ctx, max_steps=max_steps)
 
+        if ctx.reward is not None:
+            result.reward = ctx.reward
+
         return result
 
     def copy(
