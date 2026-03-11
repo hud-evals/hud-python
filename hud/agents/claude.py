@@ -410,10 +410,12 @@ class ClaudeAgent(MCPAgent):
                     elif isinstance(content, types.ImageContent):
                         img_kb = len(content.data) * 3 / 4 / 1024
                         _tid = getattr(getattr(self, "ctx", None), "trace_id", "?")
+                        _action = (tool_call.arguments or {}).get("action", "?")
                         with open("/tmp/compression_log.txt", "a") as _f:
                             _f.write(
                                 f"[{_tid}] Tool result image: {img_kb:.0f}KB"
-                                f" ({content.mimeType or 'unknown'})\n"
+                                f" ({content.mimeType or 'unknown'})"
+                                f" action={_action}\n"
                             )
                         claude_blocks.append(
                             base64_to_content_block(content.data, content.mimeType)
