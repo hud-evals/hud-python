@@ -703,13 +703,23 @@ class Environment(
             )
             if not prompt_text:
                 raise ValueError(f"Scenario '{name}' returned empty prompt")
+
+            # Propagate enable_citations flag so remote callers can recover it.
+            prompt_meta: dict[str, Any] = {}
+            out_cfg = self._scenario_output_config.get(scenario_name)
+            if out_cfg:
+                _, enable_citations = out_cfg
+                if enable_citations:
+                    prompt_meta["enable_citations"] = True
+
             return mcp_types.GetPromptResult(
                 messages=[
                     mcp_types.PromptMessage(
                         role="user",
                         content=mcp_types.TextContent(type="text", text=prompt_text),
                     )
-                ]
+                ],
+                _meta=prompt_meta or None,
             )
 
         # Non-scenario prompt or remote — delegate to parent

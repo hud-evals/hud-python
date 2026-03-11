@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
@@ -12,6 +13,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 import mcp.types as types
 
 from hud.tools.native_types import NativeToolSpec
+from hud.tools.types import Citation
 from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult, Trace
 from hud.utils.hud_console import HUDConsole
 
@@ -543,6 +545,16 @@ class MCPAgent(ABC):
                             except Exception as e:
                                 self.console.warning_log(f"Auto-respond failed: {e}")
                         if decision == "STOP":
+                            if getattr(self.ctx, "scenario_enable_citations", False) and not response.citations:
+                                recovered = self._recover_citations_from_content(response)
+                                if recovered:
+                                    self.console.info_log(
+                                        "Recovered citations from JSON answer payload"
+                                    )
+                                else:
+                                    self.console.warning_log(
+                                        "Citations required by scenario but missing in final response"
+                                    )
                             self.console.debug("Stopping execution")
                             final_response = response
                             break
@@ -612,6 +624,72 @@ class MCPAgent(ABC):
             citations=final_response.citations if final_response else [],
             info={"error": error} if error else {},
         )
+
+    def _recover_citations_from_content(self, response: InferenceResult) -> bool:
+        """Try to extract citations from model content when native citations are missing.
+
+        Handles two cases: raw JSON content and fenced ```json blocks.
+        """
+        raw = response.content or ""
+        if not raw:
+            return False
+
+        # Try raw content first, then try extracting from fenced block.
+        for text in dict.fromkeys([raw, self._extract_fenced_json(raw) or ""]):
+            if not text:
+                continue
+            try:
+                parsed = json.loads(text)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(parsed, dict):
+                continue
+
+            raw_citations = parsed.get("citations")
+            if not isinstance(raw_citations, list) or not raw_citations:
+                continue
+
+            normalized: list[Citation] = [
+                c for cit in raw_citations
+                if isinstance(cit, dict)
+                and (c := self._normalize_citation(cit)) is not None
+            ]
+            if not normalized:
+                continue
+
+            content = parsed.get("content")
+            if isinstance(content, str) and content.strip():
+                response.content = content
+            response.citations = [c.model_dump(exclude={"provider_data"}) for c in normalized]
+            return True
+
+        return False
+
+    @staticmethod
+    def _extract_fenced_json(value: str) -> str | None:
+        """Extract JSON content from a fenced code block."""
+        match = re.search(r"```(?:json)?\s*\n(.*?)```", value, re.DOTALL)
+        return match.group(1).strip() if match else None
+
+    @staticmethod
+    def _normalize_citation(cit: dict[str, Any]) -> Citation | None:
+        """Normalize a citation dict to canonical Citation shape.
+
+        Maps common key aliases to canonical names and validates via Citation.
+        Returns None only if construction fails (e.g. extra-forbid violation).
+        """
+        source = cit.get("source") or cit.get("document") or ""
+        try:
+            return Citation(
+                type=cit.get("type", "document_citation"),
+                text=cit.get("text") or cit.get("cited_text", ""),
+                source=str(source),
+                title=cit.get("title") or cit.get("document_title"),
+                start_index=cit.get("start_index", cit.get("start_char_index")),
+                end_index=cit.get("end_index", cit.get("end_char_index")),
+            )
+        except Exception:
+            return None
 
     async def call_tools(
         self, tool_call: MCPToolCall | list[MCPToolCall] | None = None

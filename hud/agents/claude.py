@@ -168,6 +168,65 @@ class ClaudeAgent(MCPAgent):
         """No system messages for Claude because applied in get_response"""
         return []
 
+    def _result_from_response_blocks(self, response_blocks: list[Any]) -> InferenceResult:
+        """Extract text/tool calls/citations from Anthropic response blocks."""
+        result = InferenceResult(content="", tool_calls=[], done=True)
+        text_content = ""
+        thinking_content = ""
+        citations: list[dict[str, Any]] = []
+
+        for block in response_blocks:
+            block_type = getattr(block, "type", None)
+            if block_type == "tool_use":
+                block_input = getattr(block, "input", {})
+                tool_call = MCPToolCall(
+                    id=getattr(block, "id", ""),
+                    # look up name in tool_mapping if available, otherwise use block name
+                    name=self.tool_mapping.get(
+                        getattr(block, "name", ""),
+                        getattr(block, "name", ""),
+                    ),
+                    arguments=(
+                        block_input if isinstance(block_input, dict) else block_input.__dict__
+                    ),
+                )
+                result.tool_calls.append(tool_call)
+                result.done = False
+            elif block_type == "text":
+                text = getattr(block, "text", "") or ""
+                text_content += text
+                block_citations = getattr(block, "citations", None) or []
+                for cit in block_citations:
+                    cit_dict = {
+                        "type": "document_citation",
+                        "text": getattr(cit, "cited_text", "") or "",
+                        "source": (
+                            str(idx)
+                            if (idx := getattr(cit, "document_index", None)) is not None
+                            else getattr(cit, "document_title", "") or ""
+                        ),
+                        "title": getattr(cit, "document_title", None),
+                        "start_index": getattr(cit, "start_char_index", None),
+                        "end_index": getattr(cit, "end_char_index", None),
+                    }
+                    normalized = self._normalize_citation(cit_dict)
+                    if normalized is not None:
+                        citations.append(
+                            normalized.model_dump(exclude={"provider_data"})
+                        )
+            elif block_type == "thinking":
+                thinking = getattr(block, "thinking", "") or ""
+                if thinking:
+                    if thinking_content:
+                        thinking_content += "\n"
+                    thinking_content += thinking
+
+        result.content = text_content
+        result.citations = citations
+        if thinking_content:
+            result.reasoning = thinking_content
+        return result
+
     async def format_blocks(self, blocks: list[types.ContentBlock]) -> list[BetaMessageParam]:
         """Format messages for Claude."""
         # Convert MCP content types to Anthropic content types
@@ -316,49 +375,7 @@ class ClaudeAgent(MCPAgent):
                 raise ValueError("Claude response missing after stream retries")
 
         # Process response
-        result = InferenceResult(content="", tool_calls=[], done=True)
-
-        # Extract text content, reasoning, and citations
-        text_content = ""
-        thinking_content = ""
-        citations: list[dict[str, Any]] = []
-
-        for block in response.content:
-            if block.type == "tool_use":
-                tool_call = MCPToolCall(
-                    id=block.id,
-                    # look up name in tool_mapping if available, otherwise use block name
-                    name=self.tool_mapping.get(block.name, block.name),
-                    arguments=block.input
-                    if isinstance(block.input, dict)
-                    else block.input.__dict__,
-                )
-                result.tool_calls.append(tool_call)
-                result.done = False
-            elif block.type == "text":
-                text_content += block.text
-                citations.extend(
-                    {
-                        "type": "document_citation",
-                        "text": getattr(cit, "cited_text", "") or "",
-                        "source": str(idx)
-                        if (idx := getattr(cit, "document_index", None)) is not None
-                        else getattr(cit, "document_title", "") or "",
-                        "title": getattr(cit, "document_title", None),
-                        "start_index": getattr(cit, "start_char_index", None),
-                        "end_index": getattr(cit, "end_char_index", None),
-                    }
-                    for cit in getattr(block, "citations", None) or []
-                )
-            elif hasattr(block, "type") and block.type == "thinking":
-                if thinking_content:
-                    thinking_content += "\n"
-                thinking_content += block.thinking
-
-        result.content = text_content
-        result.citations = citations
-        if thinking_content:
-            result.reasoning = thinking_content
+        result = self._result_from_response_blocks(list(response.content))
 
         return result
 
@@ -374,7 +391,10 @@ class ClaudeAgent(MCPAgent):
         )
 
         # Process each tool result
-        user_content: list[BetaToolResultBlockParam | BetaRequestDocumentBlockParam] = []
+        user_content: list[
+            BetaToolResultBlockParam
+            | BetaRequestDocumentBlockParam
+        ] = []
 
         for tool_call, result in zip(tool_calls, tool_results, strict=True):
             tool_use_id = tool_call.id
@@ -403,7 +423,9 @@ class ClaudeAgent(MCPAgent):
                         claude_blocks.append(text_to_content_block(content.text))
                         if citations_enabled:
                             sibling_docs.append(
-                                text_document_block(content.text, title=tool_call.name)
+                                text_document_block(
+                                    content.text, title=tool_call.name
+                                )
                             )
                     elif isinstance(content, types.ImageContent):
                         claude_blocks.append(base64_to_content_block(content.data))
@@ -413,18 +435,13 @@ class ClaudeAgent(MCPAgent):
                             isinstance(resource, types.BlobResourceContents)
                             and resource.mimeType == "application/pdf"
                         ):
-                            claude_blocks.append(
+                            target = sibling_docs if citations_enabled else claude_blocks
+                            target.append(
                                 document_to_content_block(
                                     base64_data=resource.blob,
+                                    enable_citations=citations_enabled,
                                 )
                             )
-                            if citations_enabled:
-                                sibling_docs.append(
-                                    document_to_content_block(
-                                        base64_data=resource.blob,
-                                        enable_citations=True,
-                                    )
-                                )
 
             user_content.append(tool_use_content_block(tool_use_id, claude_blocks))
             user_content.extend(sibling_docs)
@@ -642,7 +659,9 @@ def text_to_content_block(text: str) -> BetaTextBlockParam:
     return {"type": "text", "text": text}
 
 
-def text_document_block(text: str, *, title: str | None = None) -> BetaRequestDocumentBlockParam:
+def text_document_block(
+    text: str, *, title: str | None = None
+) -> BetaRequestDocumentBlockParam:
     """Wrap plain text as a citable document block."""
     block = BetaRequestDocumentBlockParam(
         type="document",
