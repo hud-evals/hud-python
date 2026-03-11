@@ -2,9 +2,23 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from hud.environment import Environment
+
+
+def _get_tool_names(env: Environment) -> list[str]:
+    """Get all tool names registered on the environment."""
+    from fastmcp.tools import Tool
+
+    return [c.name for c in env._local_provider._components.values() if isinstance(c, Tool)]
+
+
+def _get_tool(env: Environment, name: str) -> Any:
+    """Get a tool by name from the local provider."""
+    return env._local_provider._components.get(f"tool:{name}@")
 
 
 class TestToolDecorator:
@@ -20,7 +34,7 @@ class TestToolDecorator:
             return a + b
 
         # Check tool was registered
-        tool_names = list(env._tool_manager._tools.keys())
+        tool_names = _get_tool_names(env)
         assert "add" in tool_names
 
     def test_tool_with_custom_name(self) -> None:
@@ -31,7 +45,7 @@ class TestToolDecorator:
         def add(a: int, b: int) -> int:
             return a + b
 
-        tool_names = list(env._tool_manager._tools.keys())
+        tool_names = _get_tool_names(env)
         assert "custom_add" in tool_names
         assert "add" not in tool_names
 
@@ -44,7 +58,7 @@ class TestToolDecorator:
             """Greet someone by name."""
             return f"Hello, {name}!"
 
-        tool = env._tool_manager._tools.get("greet")
+        tool = _get_tool(env, "greet")
         assert tool is not None
         assert "Greet someone by name" in (tool.description or "")
 
@@ -57,7 +71,7 @@ class TestToolDecorator:
             """Fetch data from URL."""
             return f"Data from {url}"
 
-        tool_names = list(env._tool_manager._tools.keys())
+        tool_names = _get_tool_names(env)
         assert "fetch_data" in tool_names
 
     def test_tool_returns_function(self) -> None:

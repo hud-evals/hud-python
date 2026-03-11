@@ -100,26 +100,18 @@ class TestBaseTool:
 
     def test_mcp_property_attributes(self):
         """Test mcp property creates FunctionTool with correct attributes."""
+        from fastmcp.tools.function_tool import FunctionTool
 
         tool = MockTool(
             name="mcp_test", title="MCP Test Tool", description="Testing MCP conversion"
         )
 
-        with patch("fastmcp.tools.FunctionTool") as MockFunctionTool:
-            mock_ft = MagicMock()
-            MockFunctionTool.from_function.return_value = mock_ft
+        result = tool.mcp
 
-            result = tool.mcp
-
-            # The wrapper function is passed, not the tool itself
-            MockFunctionTool.from_function.assert_called_once()
-            call_args = MockFunctionTool.from_function.call_args
-
-            # Check that the correct parameters were passed
-            assert call_args[1]["name"] == "mcp_test"
-            assert call_args[1]["title"] == "MCP Test Tool"
-            assert call_args[1]["description"] == "Testing MCP conversion"
-            assert result is mock_ft
+        assert isinstance(result, FunctionTool)
+        assert result.name == "mcp_test"
+        assert result.title == "MCP Test Tool"
+        assert result.description == "Testing MCP conversion"
 
 
 class TestBaseHub:
@@ -131,8 +123,7 @@ class TestBaseHub:
         hub = BaseHub("test_hub")
 
         assert hub._prefix_fn("tool") == f"{_INTERNAL_PREFIX}tool"
-        assert hasattr(hub, "_tool_manager")
-        assert hasattr(hub, "_resource_manager")
+        assert hasattr(hub, "_local_provider")
 
     def test_init_with_env(self):
         """Test BaseHub initialization with environment."""
@@ -149,16 +140,16 @@ class TestBaseHub:
         hub = BaseHub("dispatcher_test")
 
         # Check dispatcher tool exists
-        tools = hub._tool_manager._tools
-        assert "dispatcher_test" in tools
+        tool_names = [c.name for c in hub._local_provider._components.values() if hasattr(c, "run")]
+        assert "dispatcher_test" in tool_names
 
         # Test calling dispatcher with internal tool
         @hub.tool("internal_func")
         async def internal_func(value: int) -> Any:
             return [TextContent(type="text", text=f"Internal: {value}")]
 
-        # Call dispatcher
-        result = await hub._tool_manager.call_tool(
+        # Call dispatcher via FastMCP.call_tool
+        result = await hub.call_tool(
             "dispatcher_test", {"name": "internal_func", "arguments": {"value": 42}}
         )
 
@@ -182,20 +173,17 @@ class TestBaseHub:
         async def func2() -> Any:
             return []
 
-        # Get the catalogue resource
-        resources = hub._resource_manager._resources
-        catalogue_uri = "file:///catalogue_test/functions"
-        assert catalogue_uri in resources
+        # Get the catalogue resource via local provider
+        from fastmcp.resources import Resource
 
-        # Call the resource
-        resource = resources[catalogue_uri]
-        content = await resource.read()
-        # The resource returns JSON content, parse it
-        import json
+        resource = hub._local_provider._components.get("resource:file:///catalogue_test/functions@")
+        assert resource is not None
+        assert isinstance(resource, Resource)
 
-        funcs = json.loads(content)
-
-        assert sorted(funcs) == ["func1", "func2"]
+        # Call the resource — FastMCP 3.x returns the Python object directly
+        result = await resource.read()
+        assert isinstance(result, list)
+        assert sorted(str(f) for f in result) == ["func1", "func2"]
 
     def test_tool_decorator_with_name(self):
         """Test tool decorator with explicit name."""

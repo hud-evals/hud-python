@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp import types
@@ -32,7 +32,7 @@ class MockEvalContext(EvalContext):
         # Core attributes
         self.prompt = "Test prompt"
         self._tools = tools or []
-        self._submitted: str | None = None
+        self._submitted: str | dict[str, Any] | None = None
         self.reward: float | None = None
 
         # Environment attributes
@@ -48,8 +48,10 @@ class MockEvalContext(EvalContext):
         self.group_id: str | None = None
         self.index = 0
         self.variants: dict[str, Any] = {}
-        self.answer: str | None = None
+        self.answer: str | dict[str, Any] | None = None
         self.system_prompt: str | None = None
+        self.scenario_enable_citations: bool = False
+        self.scenario_returns_schema: dict[str, Any] | None = None
         self.error: BaseException | None = None
         self.metadata: dict[str, Any] = {}
         self.results: list[Any] = []
@@ -71,7 +73,7 @@ class MockEvalContext(EvalContext):
             isError=False,
         )
 
-    async def submit(self, answer: str) -> None:
+    async def submit(self, answer: str | dict[str, Any]) -> None:
         self._submitted = answer
 
 
@@ -386,6 +388,40 @@ class TestOpenAIAgent:
         assert response.reasoning == "Thinking about it..."
         assert response.content == "Answer!"
 
+    @pytest.mark.asyncio
+    async def test_get_response_requests_sources_when_citations_enabled(
+        self, mock_openai: AsyncOpenAI
+    ) -> None:
+        """Scenario citation mode should request source payloads from Responses API."""
+        mock_response = AsyncMock()
+        mock_response.id = "resp_123"
+        mock_response.output = [
+            ResponseOutputMessage(
+                id="msg_123",
+                type="message",
+                role="assistant",
+                status="completed",
+                content=[ResponseOutputText(type="output_text", text="Hello!", annotations=[])],
+            )
+        ]
+        mock_openai.responses.create = AsyncMock(return_value=mock_response)
+
+        agent = OpenAIAgent.create(
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+        agent._openai_tools = []
+        agent._initialized = True
+
+        ctx = MockEvalContext()
+        ctx.scenario_enable_citations = True
+        agent.ctx = ctx
+
+        await agent.get_response([])
+
+        call_kwargs = mock_openai.responses.create.await_args.kwargs  # type: ignore[union-attr]
+        assert call_kwargs.get("include") == ["web_search_call.action.sources"]
+
 
 class TestOpenAIToolConversion:
     """Tests for tool conversion to OpenAI format."""
@@ -448,3 +484,127 @@ class TestOpenAIToolConversion:
         )
         assert computer_tool is not None
         assert computer_tool.get("type") == "function"
+
+
+class TestOpenAICitations:
+    """Tests for OpenAI annotation citation extraction."""
+
+    @pytest.fixture
+    def mock_openai(self) -> AsyncOpenAI:
+        client = AsyncOpenAI(api_key="test", base_url="http://localhost")
+        client.responses.create = AsyncMock()
+        return client
+
+    def _make_response(self, output: list[Any]) -> MagicMock:
+        response = MagicMock()
+        response.id = "resp_1"
+        response.output = output
+        return response
+
+    @pytest.mark.asyncio
+    async def test_url_citation_extracted(self, mock_openai: AsyncOpenAI) -> None:
+        """url_citation annotations are extracted as citations."""
+        from openai.types.responses.response_output_text import AnnotationURLCitation
+
+        agent = OpenAIAgent.create(
+            model_client=mock_openai,
+            model="gpt-4o",
+            validate_api_key=False,
+        )
+        agent._openai_tools = []
+        agent._initialized = True
+
+        ann = AnnotationURLCitation(
+            type="url_citation",
+            url="https://example.com/article",
+            title="Article",
+            start_index=10,
+            end_index=25,
+        )
+        text_block = ResponseOutputText(type="output_text", text="Hello world", annotations=[ann])
+        msg_item = ResponseOutputMessage(
+            id="msg_1",
+            type="message",
+            role="assistant",
+            content=[text_block],
+            status="completed",
+        )
+        mock_openai.responses.create = AsyncMock(return_value=self._make_response([msg_item]))
+
+        result = await agent.get_response(
+            [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}]
+        )
+
+        assert len(result.citations) == 1
+        cit = result.citations[0]
+        assert cit["type"] == "url_citation"
+        assert cit["source"] == "https://example.com/article"
+        assert cit["title"] == "Article"
+        assert cit["start_index"] == 10
+        assert cit["end_index"] == 25
+
+    @pytest.mark.asyncio
+    async def test_file_citation_extracted(self, mock_openai: AsyncOpenAI) -> None:
+        """file_citation annotations are extracted as citations."""
+        from openai.types.responses.response_output_text import AnnotationFileCitation
+
+        agent = OpenAIAgent.create(
+            model_client=mock_openai,
+            model="gpt-4o",
+            validate_api_key=False,
+        )
+        agent._openai_tools = []
+        agent._initialized = True
+
+        ann = AnnotationFileCitation(
+            type="file_citation",
+            file_id="file-abc123",
+            filename="report.pdf",
+            index=0,
+        )
+        text_block = ResponseOutputText(type="output_text", text="Facts", annotations=[ann])
+        msg_item = ResponseOutputMessage(
+            id="msg_1",
+            type="message",
+            role="assistant",
+            content=[text_block],
+            status="completed",
+        )
+        mock_openai.responses.create = AsyncMock(return_value=self._make_response([msg_item]))
+
+        result = await agent.get_response(
+            [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}]
+        )
+
+        assert len(result.citations) == 1
+        cit = result.citations[0]
+        assert cit["type"] == "file_citation"
+        assert cit["source"] == "file-abc123"
+        assert cit["title"] == "report.pdf"
+
+    @pytest.mark.asyncio
+    async def test_no_annotations_no_citations(self, mock_openai: AsyncOpenAI) -> None:
+        """No citations when annotations list is empty."""
+        agent = OpenAIAgent.create(
+            model_client=mock_openai,
+            model="gpt-4o",
+            validate_api_key=False,
+        )
+        agent._openai_tools = []
+        agent._initialized = True
+
+        text_block = ResponseOutputText(type="output_text", text="Plain answer", annotations=[])
+        msg_item = ResponseOutputMessage(
+            id="msg_1",
+            type="message",
+            role="assistant",
+            content=[text_block],
+            status="completed",
+        )
+        mock_openai.responses.create = AsyncMock(return_value=self._make_response([msg_item]))
+
+        result = await agent.get_response(
+            [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}]
+        )
+
+        assert result.citations == []

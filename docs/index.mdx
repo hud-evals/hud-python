@@ -75,9 +75,23 @@ Once deployed, your environment is live—agents can run against it in parallel,
 
 → [More on Environments](/quick-links/environments) · [Hosted Running](/quick-links/deploy)
 
+Environments also power multi-turn chat agents. Add `chat=True` to a scenario and use `env.chat()` to talk to it:
+
+```python
+@env.scenario("assist", chat=True)
+async def assist(messages: list[dict] | None = None):
+    yield "You are a helpful assistant with access to tools."
+    yield 1.0
+
+chat = env.chat("assist", model="claude-sonnet-4-5")
+r = await chat.send("What's the status of project X?")
+```
+
+→ [Chat Guide](/guides/chat)
+
 ## 3. Tasks & Training: Test and Train
 
-Create tasks from your scenarios on [hud.ai](https://hud.ai). Run evaluations across models. Train on successful completions. The same model string works before and after training—just better at your tasks.
+Create tasks from your scenarios on [hud.ai](https://hud.ai). Run evaluations across models and train them through our integrations with Tinker, OpenAI and Coreweave. The same model string works before and after training—just better at your tasks.
 
 → [More on Tasks & Training](/quick-links/evals)
 

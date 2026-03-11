@@ -144,6 +144,43 @@ async with hud.eval(task) as ctx:
     await ctx.submit(response.choices[0].message.content)
 ```
 
+## Chat: Multi-Turn Conversations
+
+Scenarios can also power multi-turn chat agents. Add `chat=True` and the scenario receives the full conversation history on every turn:
+
+```python
+@env.scenario("assist", chat=True)
+async def assist(messages: list[dict] | None = None):
+    messages = messages or []
+    yield "You are a helpful assistant. Use tools to answer questions."
+    yield 1.0
+```
+
+Create a chat in one line:
+
+```python
+chat = env.chat("assist", model="claude-sonnet-4-5")
+
+r1 = await chat.send("What's the latest?")
+r2 = await chat.send("Tell me more about that")
+```
+
+For web apps and multi-user services, `ChatService` gives each user an independent session:
+
+```python
+from hud.services import ChatService
+
+service = ChatService(env("assist"), model="claude-haiku-4-5")
+
+# Per-user conversations
+await service.send("Hello", session_id="alice")
+await service.send("Different question", session_id="bob")
+```
+
+Chat agents serve over A2A too — any A2A-compatible client can connect.
+
+→ [Full Chat Guide](/guides/chat) · [AgentTool for subagents](/tools/agents)
+
 ## Connecting Your Stack
 
 HUD wraps your existing infrastructure:
@@ -172,5 +209,9 @@ env.connect_image("my-service:v1")                          # Docker images
 
 <Card title="Integrations" icon="robot" href="/guides/integrations">
   Connect any agent framework
+</Card>
+
+<Card title="Chat" icon="comments" href="/guides/chat">
+  Multi-turn agents and A2A serving
 </Card>
 </CardGroup>

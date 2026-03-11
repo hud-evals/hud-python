@@ -20,6 +20,37 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hud.datasets")
 
 
+def _inject_env_model_header(task: Task, agent_params: dict[str, Any] | None) -> None:
+    """Inject ``Env-Model-Name`` into the task's MCP connection headers.
+
+    The orchestrator forwards ``Env-*`` headers to the inner environment
+    container so scenarios can adapt their behaviour based on which model
+    the outer loop is using.
+
+    Creates a shallow copy of the headers dict so the shared Environment
+    object is not mutated.
+    """
+    model_name = (agent_params or {}).get("model")
+    if not model_name:
+        return
+
+    from hud.utils.mcp import _is_hud_server
+
+    env = task.env
+    if env is None or not hasattr(env, "_connections"):
+        return
+
+    for connector in env._connections.values():
+        transport = connector._transport
+        if not isinstance(transport, dict):
+            continue
+        url = transport.get("url", "")
+        headers = transport.get("headers")
+        if isinstance(url, str) and _is_hud_server(url) and isinstance(headers, dict):
+            new_headers = {**headers, "Env-Hud-Model-Name": str(model_name)}
+            transport["headers"] = new_headers
+
+
 async def run_dataset(
     tasks: str | TaskInput | Sequence[TaskInput],
     agent_type: str | AgentType,
@@ -95,6 +126,9 @@ async def run_dataset(
 
     if not task_list:
         raise ValueError("No tasks to run")
+
+    for t in task_list:
+        _inject_env_model_header(t, agent_params)
 
     # Use hud.eval() for both single and parallel execution
     async with hud.eval(
@@ -194,6 +228,8 @@ async def run_single_task(
     """
     # Determine trace name
     effective_trace_name = trace_name or task_id or task.slug or "single_task"
+
+    _inject_env_model_header(task, agent_params)
 
     # Run with explicit eval context parameters
     async with hud.eval(

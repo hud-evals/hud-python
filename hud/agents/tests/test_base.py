@@ -11,7 +11,7 @@ from hud.agents import MCPAgent
 from hud.agents.base import BaseCreateParams
 from hud.environment.router import ToolRouter
 from hud.eval.context import EvalContext
-from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult
+from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult
 
 
 class MockConfig(BaseAgentConfig):
@@ -37,7 +37,7 @@ class MockEvalContext(EvalContext):
             types.Tool(name="test_tool", description="A test tool", inputSchema={}),
             types.Tool(name="another_tool", description="Another tool", inputSchema={}),
         ]
-        self._submitted: str | None = None
+        self._submitted: str | dict[str, Any] | None = None
         self.reward: float | None = None
         self._tool_calls: list[tuple[str, dict[str, Any]]] = []
 
@@ -54,7 +54,7 @@ class MockEvalContext(EvalContext):
         self.group_id: str | None = None
         self.index = 0
         self.variants: dict[str, Any] = {}
-        self.answer: str | None = None
+        self.answer: str | dict[str, Any] | None = None
         self.system_prompt: str | None = None
         self.error: BaseException | None = None
         self.metadata: dict[str, Any] = {}
@@ -85,7 +85,7 @@ class MockEvalContext(EvalContext):
             isError=False,
         )
 
-    async def submit(self, answer: str) -> None:
+    async def submit(self, answer: str | dict[str, Any]) -> None:
         self._submitted = answer
 
 
@@ -103,12 +103,12 @@ class MockMCPAgent(MCPAgent):
     def __init__(self, **kwargs: Any) -> None:
         params = MockCreateParams(**kwargs)
         super().__init__(params)
-        self._response = AgentResponse(content="Mock response", tool_calls=[], done=True)
+        self._response = InferenceResult(content="Mock response", tool_calls=[], done=True)
 
-    def set_response(self, response: AgentResponse) -> None:
+    def set_response(self, response: InferenceResult) -> None:
         self._response = response
 
-    async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
+    async def get_response(self, messages: list[dict[str, Any]]) -> InferenceResult:
         return self._response
 
     async def format_tool_results(
@@ -225,7 +225,7 @@ class TestMCPAgentRun:
         """Test run() doesn't submit when content is empty."""
         ctx = MockEvalContext(prompt="Do something")
         agent = MockMCPAgent()
-        agent.set_response(AgentResponse(content="", tool_calls=[], done=True))
+        agent.set_response(InferenceResult(content="", tool_calls=[], done=True))
 
         await agent.run(ctx)
         assert ctx._submitted is None
@@ -365,7 +365,7 @@ class TestMCPAgentErrorPropagation:
         """Test that exceptions during run() set ctx.error for platform visibility."""
 
         class FailingAgent(MockMCPAgent):
-            async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
+            async def get_response(self, messages: list[dict[str, Any]]) -> InferenceResult:
                 raise RuntimeError("Agent crashed")
 
         ctx = MockEvalContext(prompt="Do something")
@@ -388,10 +388,10 @@ class TestMCPAgentErrorPropagation:
         step_count = [0]
 
         class FailOnSecondStepAgent(MockMCPAgent):
-            async def get_response(self, messages: list[dict[str, Any]]) -> AgentResponse:
+            async def get_response(self, messages: list[dict[str, Any]]) -> InferenceResult:
                 step_count[0] += 1
                 if step_count[0] == 1:
-                    return AgentResponse(
+                    return InferenceResult(
                         content="",
                         tool_calls=[MCPToolCall(name="test_tool", arguments={})],
                         done=False,

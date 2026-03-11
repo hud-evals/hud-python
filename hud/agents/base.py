@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
@@ -12,7 +13,8 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 import mcp.types as types
 
 from hud.tools.native_types import NativeToolSpec
-from hud.types import AgentResponse, AgentType, BaseAgentConfig, MCPToolCall, MCPToolResult, Trace
+from hud.tools.types import Citation
+from hud.types import AgentType, BaseAgentConfig, InferenceResult, MCPToolCall, MCPToolResult, Trace
 from hud.utils.hud_console import HUDConsole
 
 from .types import BaseCreateParams
@@ -417,21 +419,25 @@ class MCPAgent(ABC):
             await self._initialize_from_ctx(ctx)
 
         try:
-            # Build initial context - optionally append setup tool output
-            # Check ctx first (task-level override), then fall back to agent config
-            append_setup = getattr(ctx, "append_setup_output", False) or getattr(
-                self.config, "append_setup_output", False
-            )
-            initial_prompt = ctx.prompt
-            if append_setup:
-                setup_output = getattr(ctx, "setup_output", None)
-                if setup_output:
-                    initial_prompt = f"{initial_prompt}\n\n{setup_output}"
+            # Build initial context
+            conversation: list[dict[str, str]] | None = getattr(ctx, "conversation", None)
 
-            # Build initial blocks (text prompt + optional screenshot)
-            initial_blocks = text_to_blocks(initial_prompt)
+            if conversation:
+                # Multi-turn: build alternating role messages
+                initial_messages = await self._build_conversation_messages(conversation)
+            else:
+                # Single-turn: single user message from prompt
+                append_setup = getattr(ctx, "append_setup_output", False) or getattr(
+                    self.config, "append_setup_output", False
+                )
+                initial_prompt = ctx.prompt
+                if append_setup:
+                    setup_output = getattr(ctx, "setup_output", None)
+                    if setup_output:
+                        initial_prompt = f"{initial_prompt}\n\n{setup_output}"
+                initial_messages = await self.format_message(initial_prompt)
 
-            result = await self._run_context(initial_blocks, max_steps=max_steps)
+            result = await self._run_context(initial_messages, max_steps=max_steps)
 
             # Propagate error state to context for platform visibility
             if result.isError and hasattr(ctx, "error"):
@@ -440,7 +446,15 @@ class MCPAgent(ABC):
 
             # Submit final answer to context (only if scenario is running)
             if result.content and ctx.has_scenario:
-                await ctx.submit(result.content)
+                if result.citations:
+                    await ctx.submit(
+                        {
+                            "content": result.content,
+                            "citations": result.citations,
+                        }
+                    )
+                else:
+                    await ctx.submit(result.content)
 
             return result
 
@@ -460,30 +474,48 @@ class MCPAgent(ABC):
             # Cleanup auto-created resources
             await self._cleanup()
 
-    async def _run_context(
-        self, context: list[types.ContentBlock], *, max_steps: int = 10
-    ) -> Trace:
+    def _map_role(self, role: str) -> str:
+        """Map a canonical role name to the provider-specific role.
+
+        Override in subclasses where the provider uses different role names.
+        Default passes through (works for OpenAI and Claude which use "assistant").
         """
-        Run the agent with the given context messages. This is the core agent loop.
+        return role
+
+    async def _build_conversation_messages(self, conversation: list[dict[str, str]]) -> list[Any]:
+        """Build provider-formatted messages from a conversation history."""
+        result: list[Any] = []
+        for msg in conversation:
+            role = self._map_role(msg.get("role", "user"))
+            content = msg.get("content", "")
+            formatted = await self.format_message(content)
+            for fm in formatted:
+                if isinstance(fm, dict):
+                    fm["role"] = role
+                elif hasattr(fm, "role"):
+                    fm.role = role  # type: ignore[attr-defined]
+            result.extend(formatted)
+        return result
+
+    async def _run_context(self, initial_messages: list[Any], *, max_steps: int = 10) -> Trace:
+        """
+        Run the agent with pre-built messages. This is the core agent loop.
 
         Args:
-            context: The context to complete
+            initial_messages: Provider-formatted messages (from format_message or conversation)
             max_steps: Maximum number of steps (-1 for infinite)
 
         Returns:
             Trace with reward, done, content fields and trace steps
         """
-        final_response = None
+        final_response: InferenceResult | None = None
         error = None
 
         messages: list[Any] = []
 
         try:
-            # Start with system messages
             messages = await self.get_system_messages()
-
-            # Add initial context
-            messages.extend(await self.format_message(context))
+            messages.extend(initial_messages)
             self.console.debug(f"Messages: {messages}")
 
             step_count = 0
@@ -513,6 +545,19 @@ class MCPAgent(ABC):
                             except Exception as e:
                                 self.console.warning_log(f"Auto-respond failed: {e}")
                         if decision == "STOP":
+                            if (
+                                getattr(self.ctx, "scenario_enable_citations", False)
+                                and not response.citations
+                            ):
+                                recovered = self._recover_citations_from_content(response)
+                                if recovered:
+                                    self.console.info_log(
+                                        "Recovered citations from JSON answer payload"
+                                    )
+                                else:
+                                    self.console.warning_log(
+                                        "Citations required by scenario but missing in final response"  # noqa: E501
+                                    )
                             self.console.debug("Stopping execution")
                             final_response = response
                             break
@@ -564,7 +609,6 @@ class MCPAgent(ABC):
         else:
             is_error = False
 
-        # Ensure all parameters are the correct type
         # Use ctx.reward if already set (e.g., from scenario evaluate), otherwise 0.0
         # Note: For v4 tasks with evaluate_tool, reward is set in __aexit__ after this returns,
         # so callers should prefer ctx.reward over Trace.reward for the final result.
@@ -574,17 +618,81 @@ class MCPAgent(ABC):
             if ctx_reward is not None:
                 reward = ctx_reward
 
-        trace_params = {
-            "reward": reward,
-            "done": True,
-            "messages": messages,
-            "content": final_response.content if final_response else error,
-            "isError": is_error,
-            "info": {"error": error} if error else {},
-        }
-        trace_result = Trace(**trace_params)
+        return Trace(
+            reward=reward,
+            done=True,
+            messages=messages,
+            content=final_response.content if final_response else error,
+            isError=is_error,
+            citations=final_response.citations if final_response else [],
+            info={"error": error} if error else {},
+        )
 
-        return trace_result
+    def _recover_citations_from_content(self, response: InferenceResult) -> bool:
+        """Try to extract citations from model content when native citations are missing.
+
+        Handles two cases: raw JSON content and fenced ```json blocks.
+        """
+        raw = response.content or ""
+        if not raw:
+            return False
+
+        # Try raw content first, then try extracting from fenced block.
+        for text in dict.fromkeys([raw, self._extract_fenced_json(raw) or ""]):
+            if not text:
+                continue
+            try:
+                parsed = json.loads(text)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(parsed, dict):
+                continue
+
+            raw_citations = parsed.get("citations")
+            if not isinstance(raw_citations, list) or not raw_citations:
+                continue
+
+            normalized: list[Citation] = [
+                c
+                for cit in raw_citations
+                if isinstance(cit, dict) and (c := self._normalize_citation(cit)) is not None
+            ]
+            if not normalized:
+                continue
+
+            content = parsed.get("content")
+            if isinstance(content, str) and content.strip():
+                response.content = content
+            response.citations = [c.model_dump(exclude={"provider_data"}) for c in normalized]
+            return True
+
+        return False
+
+    @staticmethod
+    def _extract_fenced_json(value: str) -> str | None:
+        """Extract JSON content from a fenced code block."""
+        match = re.search(r"```(?:json)?\s*\n(.*?)```", value, re.DOTALL)
+        return match.group(1).strip() if match else None
+
+    @staticmethod
+    def _normalize_citation(cit: dict[str, Any]) -> Citation | None:
+        """Normalize a citation dict to canonical Citation shape.
+
+        Maps common key aliases to canonical names and validates via Citation.
+        Returns None only if construction fails (e.g. extra-forbid violation).
+        """
+        source = cit.get("source") or cit.get("document") or ""
+        try:
+            return Citation(
+                type=cit.get("type", "document_citation"),
+                text=cit.get("text") or cit.get("cited_text", ""),
+                source=str(source),
+                title=cit.get("title") or cit.get("document_title"),
+                start_index=cit.get("start_index", cit.get("start_char_index")),
+                end_index=cit.get("end_index", cit.get("end_char_index")),
+            )
+        except Exception:
+            return None
 
     async def call_tools(
         self, tool_call: MCPToolCall | list[MCPToolCall] | None = None
@@ -629,7 +737,7 @@ class MCPAgent(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def get_response(self, messages: list[Any]) -> AgentResponse:
+    async def get_response(self, messages: list[Any]) -> InferenceResult:
         """
         Get response from the model including any tool calls.
 

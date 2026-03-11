@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from enum import Enum, auto
 from typing import Any
 
@@ -47,10 +46,10 @@ def _parse_json_args(args: Any) -> dict[str, Any]:
     if not args:
         return {}
     if isinstance(args, str):
-        try:
-            return json.loads(args)
-        except json.JSONDecodeError:
-            return {}
+        from hud.environment.scenarios import _deserialize_from_mcp
+
+        result = _deserialize_from_mcp(args)
+        return result if isinstance(result, dict) else {}
     return args
 
 

@@ -1,0 +1,180 @@
+---
+title: "Chat with Environments"
+description: "Build multi-turn conversational agents on top of HUD environments"
+icon: "comments"
+---
+
+HUD environments aren't limited to single-turn evals. You can build multi-turn chat experiences where users talk to your environment over multiple turns, and the environment owns the conversation flow.
+
+This guide walks through the full setup: defining a chat scenario, using `Chat` directly, serving over A2A, and building web apps on top.
+
+## Defining a Chat Scenario
+
+A chat scenario is a regular `@env.scenario()` with `chat=True`. This tells HUD to pass prior conversation history into the scenario on every turn.
+
+```python
+from typing import Any
+from hud import Environment
+
+env = Environment("support")
+
+@env.scenario("help", chat=True)
+async def help_chat(messages: list[dict[str, Any]] | None = None):
+    messages = messages or []
+    yield f"You said: {messages[-1]['content'] if messages else 'nothing yet'}"
+    yield 1.0
+```
+
+Key points:
+
+- **`chat=True`** — HUD enforces that the scenario accepts a `messages` parameter.
+- **`messages`** — Prior turns are passed in automatically. The scenario can read history to maintain context.
+- **The environment owns the flow** — The scenario decides what to ask, when to ask it, and how to use the tools. No SDK-side routing needed.
+
+## Using Chat
+
+### Quick Start with env.chat()
+
+The simplest way to create a chat instance:
+
+```python
+chat = env.chat("help", model="claude-haiku-4-5")
+
+r1 = await chat.send("Look into account ABC-123")
+print(r1.content)
+
+r2 = await chat.send("What's their current plan?")
+print(r2.content)
+```
+
+`env.chat()` defaults to `trace=False, quiet=True` — no platform traces, no browser popups. Ideal for server and app usage.
+
+### Chat Directly (Full Control)
+
+For more control, use `Chat` with an environment task:
+
+```python
+from hud.services import Chat
+
+chat = Chat(
+    env("help"),
+    model="claude-sonnet-4-20250514",
+    max_steps=10,
+    trace=True,      # record traces on HUD platform
+    quiet=False,      # show trace links
+)
+
+r1 = await chat.send("Look into account ABC-123")
+print(r1.content)
+```
+
+### Chat Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model` | `str` | Required | Model name (auto-resolves to agent class) |
+| `max_steps` | `int` | `10` | Max agent tool-call steps per turn |
+| `trace` | `bool` | `True` | Record traces on the HUD platform |
+| `quiet` | `bool` | `True` | Suppress banner/link output |
+| `agent_params` | `dict` | `None` | Extra kwargs forwarded to agent creation |
+| `name` | `str` | scenario name | Human-readable name for AgentCard |
+| `description` | `str` | auto | Description for AgentCard |
+
+### History Management
+
+`Chat` manages history internally. Each `send()` appends the user message, runs the agent, and appends the response.
+
+```python
+# Export history for persistence (e.g., save to database)
+history = chat.export_history()
+
+# Later, restore it
+chat.load_history(history)
+
+# Or reset completely
+chat.clear()
+```
+
+## Multi-User Sessions with ChatService
+
+`ChatService` manages multiple independent conversations, each identified by a `session_id`. Use it for web apps with per-user chats.
+
+### Direct Python Usage
+
+```python
+from hud.services import ChatService
+
+service = ChatService(
+    env("help"),
+    model="claude-haiku-4-5",
+)
+
+# Each session_id gets independent history
+r1 = await service.send("Hello", session_id="user-alice")
+r2 = await service.send("Different question", session_id="user-bob")
+
+# Manage sessions
+service.clear(session_id="user-alice")
+history = service.export_history(session_id="user-bob")
+service.load_history(saved_messages, session_id="user-bob")
+```
+
+Sessions auto-expire after 30 minutes of inactivity.
+
+### Serving Over A2A
+
+`ChatService` also implements the A2A protocol for cross-language/cross-network clients:
+
+```python
+service.serve(host="0.0.0.0", port=9999)
+```
+
+Or with environment variables:
+
+```bash
+HUD_ENV=support HUD_SCENARIO=help \
+    uv run python examples/03_a2a_chat_server.py
+```
+
+The service publishes an agent card at `/.well-known/agent-card.json` and accepts A2A messages at the root endpoint.
+
+<Note>
+Each `ChatService` targets exactly one scenario. If your environment has multiple chat-compatible scenarios, run one service per scenario or build client-side routing.
+</Note>
+
+## Building a Web App
+
+A common pattern: FastAPI backend wraps `Chat`, Next.js frontend provides the UI.
+
+```python
+from fastapi import FastAPI
+
+app = FastAPI()
+chat = env.chat("help", model="claude-haiku-4-5")
+
+@app.post("/api/chat")
+async def chat_endpoint(message: str):
+    result = await chat.send(message)
+    return {"response": result.content}
+
+@app.post("/api/chat/clear")
+async def clear():
+    chat.clear()
+    return {"status": "cleared"}
+```
+
+For multi-user support, use `ChatService` with `session_id` derived from the user's auth token.
+
+## When to Use What
+
+| Approach | When |
+|----------|------|
+| **`env.chat()`** | Quick setup, scripts, notebooks, single-user apps |
+| **`Chat` directly** | Full control over trace/quiet/agent params |
+| **`ChatService.send()`** | Multi-user apps (per-user sessions in Python) |
+| **`ChatService.serve()`** | A2A protocol for cross-language/network clients |
+
+## Examples
+
+- [`examples/03_a2a_chat_server.py`](https://github.com/hud-evals/hud-python/blob/main/examples/03_a2a_chat_server.py) — A2A server
+- [`examples/04_a2a_chat_llm_client.py`](https://github.com/hud-evals/hud-python/blob/main/examples/04_a2a_chat_llm_client.py) — LLM-fronted client

@@ -600,8 +600,10 @@ async def build_proxy(backend: Any, name: str = "HUD Docker Dev Proxy") -> Any:
     unlisted tools are still callable by forwarding to the backend's tool
     manager.
     """
+    from fastmcp import Client as FastMCPClient
     from fastmcp import FastMCP
     from fastmcp.exceptions import NotFoundError as FastMCPNotFoundError
+    from fastmcp.exceptions import ToolError as FastMCPToolError
 
     from hud.server import MCPServer
 
@@ -609,17 +611,22 @@ async def build_proxy(backend: Any, name: str = "HUD Docker Dev Proxy") -> Any:
     proxy = MCPServer(name=name)
     await proxy.import_server(fastmcp_proxy)
 
-    _original_call_tool = proxy._call_tool
+    # Hidden tools (underscore-prefixed like _hud_submit) aren't in
+    # list_tools so import_server doesn't copy them.  We keep a separate
+    # Client connection to the backend for forwarding these calls.
+    fallback = FastMCPClient(backend.transport)
+    await fallback.__aenter__()
+    proxy._fallback_client = fallback  # type: ignore[attr-defined]
 
-    async def _passthrough_call_tool(context: Any) -> Any:
+    @proxy._mcp_server.call_tool()
+    async def _call_tool_handler(name: str, arguments: dict[str, Any] | None = None) -> list[Any]:
         try:
-            return await _original_call_tool(context)
-        except FastMCPNotFoundError:
-            return await fastmcp_proxy._tool_manager.call_tool(
-                context.message.name, context.message.arguments or {}
-            )
+            result = await FastMCP.call_tool(proxy, name, arguments or {})
+            return result.content
+        except (FastMCPNotFoundError, FastMCPToolError):
+            raw = await fallback.call_tool_mcp(name, arguments or {})
+            return raw.content
 
-    proxy._call_tool = _passthrough_call_tool  # type: ignore[assignment]
     return proxy
 
 
@@ -920,14 +927,19 @@ def run_docker_dev_server(
             launch_interactive_thread(port, verbose)
 
         # Run proxy with HTTP transport
-        await proxy.run_async(
-            transport="http",
-            host="0.0.0.0",  # noqa: S104
-            port=port,
-            path="/mcp",
-            log_level="error" if not verbose else "info",
-            show_banner=False,
-        )
+        try:
+            await proxy.run_async(
+                transport="http",
+                host="0.0.0.0",  # noqa: S104
+                port=port,
+                path="/mcp",
+                log_level="error" if not verbose else "info",
+                show_banner=False,
+            )
+        finally:
+            fallback_client = getattr(proxy, "_fallback_client", None)
+            if fallback_client is not None:
+                await fallback_client.__aexit__(None, None, None)
 
     try:
         asyncio.run(run_proxy())

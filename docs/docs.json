@@ -64,6 +64,7 @@
           {
             "group": "Guides",
             "pages": [
+              "guides/chat",
               "guides/integrations",
               "guides/sandboxing",
               "guides/best-practices",
@@ -163,6 +164,7 @@
           {
             "group": "Integrations",
             "pages": [
+              "platform/rest-api",
               "platform/slack"
             ]
           },

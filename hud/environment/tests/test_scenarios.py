@@ -4,12 +4,41 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from types import SimpleNamespace
 from typing import Any, Literal
 
 import pytest
 from pydantic import BaseModel
 
 from hud.environment import Environment
+from hud.environment.scenarios import _safe_session_id
+
+
+# ---------------------------------------------------------------------------
+# Helpers for accessing FastMCP components (post-3.x migration)
+# ---------------------------------------------------------------------------
+def _get_prompt_names(env: Environment) -> list[str]:
+    """Get all prompt names registered on the environment."""
+    from fastmcp.prompts import Prompt
+
+    return [c.name for c in env._local_provider._components.values() if isinstance(c, Prompt)]
+
+
+def _get_resource_uris(env: Environment) -> list[str]:
+    """Get all resource URIs registered on the environment."""
+    from fastmcp.resources import Resource
+
+    return [str(c.uri) for c in env._local_provider._components.values() if isinstance(c, Resource)]
+
+
+def _get_prompt(env: Environment, name: str) -> Any:
+    """Get a prompt by scenario ID (e.g. 'test-env:greet')."""
+    return env._local_provider._components.get(f"prompt:{name}@")
+
+
+def _get_resource(env: Environment, name: str) -> Any:
+    """Get a resource by scenario ID / URI (e.g. 'test-env:greet')."""
+    return env._local_provider._components.get(f"resource:{name}@")
 
 
 # Module-level models for Pydantic/Enum/datetime deserialization tests
@@ -51,6 +80,14 @@ class _Item(BaseModel):
     name: str
 
 
+class _BrokenFastMCPContext:
+    """Context whose session_id access fails outside FastMCP DI."""
+
+    @property
+    def session_id(self) -> str:
+        raise RuntimeError("session_id unavailable")
+
+
 class TestScenarioDecorator:
     """Tests for @env.scenario decorator."""
 
@@ -75,7 +112,7 @@ class TestScenarioDecorator:
             yield 1.0
 
         # Check that prompt was registered via prompt manager
-        prompt_names = list(env._prompt_manager._prompts.keys())
+        prompt_names = _get_prompt_names(env)
         assert "test-env:greet" in prompt_names
 
     def test_scenario_creates_mcp_resource(self) -> None:
@@ -88,7 +125,7 @@ class TestScenarioDecorator:
             yield 1.0
 
         # Check that resource was registered via resource manager
-        resource_uris = list(env._resource_manager._resources.keys())
+        resource_uris = _get_resource_uris(env)
         assert "test-env:greet" in resource_uris
 
     def test_scenario_extracts_arguments(self) -> None:
@@ -101,7 +138,7 @@ class TestScenarioDecorator:
             yield 1.0
 
         # Find the prompt
-        prompt = env._prompt_manager._prompts.get("test-env:checkout")
+        prompt = _get_prompt(env, "test-env:checkout")
         assert prompt is not None
         assert prompt.arguments is not None
 
@@ -127,17 +164,13 @@ class TestScenarioExecution:
             yield "Test prompt"
             yield 1.0
 
-        # Get the prompt handler
-        prompt = env._prompt_manager._prompts.get("test-env:test")
-        assert prompt is not None
+        assert _get_prompt(env, "test-env:test") is not None
 
-        # Run setup via prompt render (which calls fn) - no need for context
-        result = await prompt.render({})
+        result = await env.run_scenario_setup("test", {})
 
         assert setup_ran
-        # Result is list of PromptMessage
-        assert len(result) > 0
-        assert "Test prompt" in str(result[0].content)
+        assert result is not None
+        assert "Test prompt" in result
 
     @pytest.mark.asyncio
     async def test_scenario_stores_session(self) -> None:
@@ -149,12 +182,9 @@ class TestScenarioExecution:
             yield "Test prompt"
             yield 1.0
 
-        # Run setup via prompt - no need for context
-        prompt = env._prompt_manager._prompts.get("test-env:test")
-        assert prompt is not None
-        await prompt.render({})
+        assert _get_prompt(env, "test-env:test") is not None
+        await env.run_scenario_setup("test", {})
 
-        # Check session was stored in _active_session
         assert env._active_session is not None
         assert env._active_session.local_name == "test"
 
@@ -171,17 +201,13 @@ class TestScenarioExecution:
             phases.append("evaluate")
             yield 0.95
 
-        # Setup phase - no context needed for prompt/resource
-        prompt = env._prompt_manager._prompts.get("test-env:test")
-        assert prompt is not None
-        await prompt.render({})
+        assert _get_prompt(env, "test-env:test") is not None
+        await env.run_scenario_setup("test", {})
         assert "setup" in phases
         assert "evaluate" not in phases
 
-        # Evaluate phase
-        resource = env._resource_manager._resources.get("test-env:test")
-        assert resource is not None
-        await resource.read()
+        assert _get_resource(env, "test-env:test") is not None
+        await env.run_scenario_evaluate("test")
         assert "evaluate" in phases
 
 
@@ -201,10 +227,8 @@ class TestScenarioWithArgs:
             yield f"Checkout {user_id}: ${amount}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:checkout")
-        assert prompt is not None
-        # No context needed for prompt render
-        await prompt.render({"user_id": "alice", "amount": 50})
+        assert _get_prompt(env, "test-env:checkout") is not None
+        await env.run_scenario_setup("checkout", {"user_id": "alice", "amount": 50})
 
         assert received_args["user_id"] == "alice"
         assert received_args["amount"] == 50
@@ -247,18 +271,14 @@ class TestScenarioSubmit:
             yield 1.0 if answer == "4" else 0.0
 
         # Run setup (creates _active_session)
-        prompt = env._prompt_manager._prompts.get("test-env:qa")
-        assert prompt is not None
-        await prompt.render({})
+        await env.run_scenario_setup("qa", {})
 
         # Submit answer via _active_session
         assert env._active_session is not None
         env._active_session.answer = "4"
 
         # Run evaluate
-        resource = env._resource_manager._resources.get("test-env:qa")
-        assert resource is not None
-        await resource.read()
+        await env.run_scenario_evaluate("qa")
 
         assert received_answer == "4"
 
@@ -273,23 +293,16 @@ class TestScenarioSubmit:
             yield 1.0 if "paris" in answer.lower() else 0.0
 
         # Run setup (creates _active_session)
-        prompt = env._prompt_manager._prompts.get("test-env:grading")
-        assert prompt is not None
-        await prompt.render({})
+        await env.run_scenario_setup("grading", {})
 
         # Submit correct answer via _active_session
         assert env._active_session is not None
         env._active_session.answer = "Paris"
 
         # Run evaluate
-        resource = env._resource_manager._resources.get("test-env:grading")
-        assert resource is not None
-        result = await resource.read()
+        result = await env.run_scenario_evaluate("grading")
 
-        import json
-
-        data = json.loads(result)
-        assert data["reward"] == 1.0
+        assert result.reward == 1.0
 
     @pytest.mark.asyncio
     async def test_hud_submit_normalizes_prefixed_scenario_name(self) -> None:
@@ -305,31 +318,22 @@ class TestScenarioSubmit:
             answer = yield "Say hello"
             yield 1.0 if answer == "hello" else 0.0
 
-        # Run setup via prompt (creates _active_session)
-        prompt = env._prompt_manager._prompts.get("my-env:greet")
-        assert prompt is not None
-        await prompt.render({})
+        # Run setup (creates _active_session)
+        await env.run_scenario_setup("greet", {})
 
-        # Verify session exists before _hud_submit
+        # Verify session exists before submit
         assert env._active_session is not None
         assert env._active_session.local_name == "greet"
 
-        # Simulate _hud_submit with PREFIXED scenario name (as happens in remote calls)
-        # This should normalize to "greet" and match the active session
-        await env.call_tool("_hud_submit", scenario="my-env:greet", answer="hello")
+        # Submit answer via Environment.submit (handles prefix normalization)
+        await env.submit("my-env:greet", "hello")
 
         # Verify answer was stored in _active_session
         assert env._active_session.answer == "hello"
 
         # Verify evaluation works
-        resource = env._resource_manager._resources.get("my-env:greet")
-        assert resource is not None
-        result = await resource.read()
-
-        import json
-
-        data = json.loads(result)
-        assert data["reward"] == 1.0
+        result = await env.run_scenario_evaluate("greet")
+        assert result.reward == 1.0
 
 
 class TestScenarioMeta:
@@ -344,7 +348,7 @@ class TestScenarioMeta:
             yield f"Process {x}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:example")
+        prompt = _get_prompt(env, "test-env:example")
         assert prompt is not None
         assert prompt.meta is not None
         assert "code" in prompt.meta
@@ -360,7 +364,7 @@ class TestScenarioMeta:
             yield "Test"
             yield 1.0
 
-        resource = env._resource_manager._resources.get("test-env:example")
+        resource = _get_resource(env, "test-env:example")
         assert resource is not None
         assert resource.meta is not None
         assert "code" in resource.meta
@@ -387,11 +391,8 @@ class TestScenarioJsonSerialization:
             yield f"Processing {len(items)} items"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:process_items")
-        assert prompt is not None
-
         # Simulate MCP sending JSON-encoded list as string
-        await prompt.render({"items": '["apple", "banana", "cherry"]'})
+        await env.run_scenario_setup("process_items", {"items": '["apple", "banana", "cherry"]'})
 
         assert received_items == ["apple", "banana", "cherry"]
 
@@ -407,11 +408,8 @@ class TestScenarioJsonSerialization:
             yield "Configuring..."
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:configure")
-        assert prompt is not None
-
         # Simulate MCP sending JSON-encoded dict as string
-        await prompt.render({"config": '{"timeout": 30, "retries": 3}'})
+        await env.run_scenario_setup("configure", {"config": '{"timeout": 30, "retries": 3}'})
 
         assert received_config == {"timeout": 30, "retries": 3}
 
@@ -428,11 +426,8 @@ class TestScenarioJsonSerialization:
             yield f"Counting to {count}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:count")
-        assert prompt is not None
-
         # Simulate MCP sending JSON-encoded int as string
-        await prompt.render({"count": "42"})
+        await env.run_scenario_setup("count", {"count": "42"})
 
         assert received_count == 42
         assert isinstance(received_count, int)
@@ -450,11 +445,8 @@ class TestScenarioJsonSerialization:
             yield f"Value is {value}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:precision")
-        assert prompt is not None
-
         # Simulate MCP sending JSON-encoded float as string
-        await prompt.render({"value": "3.14159"})
+        await env.run_scenario_setup("precision", {"value": "3.14159"})
 
         assert received_value == 3.14159
         assert isinstance(received_value, float)
@@ -472,11 +464,8 @@ class TestScenarioJsonSerialization:
             yield f"Enabled: {enabled}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:toggle")
-        assert prompt is not None
-
         # Simulate MCP sending JSON-encoded bool as string
-        await prompt.render({"enabled": "true"})
+        await env.run_scenario_setup("toggle", {"enabled": "true"})
 
         assert received_flag is True
         assert isinstance(received_flag, bool)
@@ -494,11 +483,8 @@ class TestScenarioJsonSerialization:
             yield f"Hello, {name}!"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:greet")
-        assert prompt is not None
-
         # String should pass through as-is (not double-encoded)
-        await prompt.render({"name": "Alice"})
+        await env.run_scenario_setup("greet", {"name": "Alice"})
 
         assert received_name == "Alice"
 
@@ -522,16 +508,14 @@ class TestScenarioJsonSerialization:
             yield "Processing..."
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:mixed")
-        assert prompt is not None
-
-        await prompt.render(
+        await env.run_scenario_setup(
+            "mixed",
             {
                 "name": "test",
                 "count": "5",
                 "items": '["a", "b", "c"]',
                 "options": '{"verbose": true, "dry_run": false}',
-            }
+            },
         )
 
         assert received_args["name"] == "test"
@@ -552,11 +536,8 @@ class TestScenarioJsonSerialization:
             yield "Processing..."
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:fallback")
-        assert prompt is not None
-
         # Invalid JSON - should fall back to string
-        await prompt.render({"items": "not valid json ["})
+        await env.run_scenario_setup("fallback", {"items": "not valid json ["})
 
         # Falls back to raw string
         assert received_items == ["not valid json ["]
@@ -573,14 +554,11 @@ class TestScenarioJsonSerialization:
             yield "Processing nested data..."
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:nested")
-        assert prompt is not None
-
         nested_json = (
             '{"users": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}], '
             '"metadata": {"version": 1}}'
         )
-        await prompt.render({"data": nested_json})
+        await env.run_scenario_setup("nested", {"data": nested_json})
 
         assert received_data == {
             "users": [
@@ -603,10 +581,7 @@ class TestScenarioJsonSerialization:
             yield f"Got {items}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:optional_list")
-        assert prompt is not None
-
-        await prompt.render({"items": '["x", "y", "z"]'})
+        await env.run_scenario_setup("optional_list", {"items": '["x", "y", "z"]'})
 
         assert received_items == ["x", "y", "z"]
 
@@ -623,10 +598,7 @@ class TestScenarioJsonSerialization:
             yield f"Got {items}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:optional_list_null")
-        assert prompt is not None
-
-        await prompt.render({"items": "null"})
+        await env.run_scenario_setup("optional_list_null", {"items": "null"})
 
         assert received_items is None
 
@@ -643,10 +615,7 @@ class TestScenarioJsonSerialization:
             yield f"Got {name}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:optional_str")
-        assert prompt is not None
-
-        await prompt.render({"name": "Alice"})
+        await env.run_scenario_setup("optional_str", {"name": "Alice"})
 
         assert received_name == "Alice"
 
@@ -663,10 +632,7 @@ class TestScenarioJsonSerialization:
             yield f"Got {name}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:optional_str_null")
-        assert prompt is not None
-
-        await prompt.render({"name": "null"})
+        await env.run_scenario_setup("optional_str_null", {"name": "null"})
 
         assert received_name is None
 
@@ -683,10 +649,7 @@ class TestScenarioJsonSerialization:
             yield f"Got config for {config.name}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:pydantic_model")
-        assert prompt is not None
-
-        await prompt.render({"config": '{"name": "Alice", "age": 30}'})
+        await env.run_scenario_setup("pydantic_model", {"config": '{"name": "Alice", "age": 30}'})
 
         assert received_config is not None
         assert isinstance(received_config, _UserConfig)
@@ -707,10 +670,7 @@ class TestScenarioJsonSerialization:
             yield f"Status is {status.value}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:enum_status")
-        assert prompt is not None
-
-        await prompt.render({"status": '"active"'})
+        await env.run_scenario_setup("enum_status", {"status": '"active"'})
 
         assert received_status is not None
         assert isinstance(received_status, _Status)
@@ -729,10 +689,7 @@ class TestScenarioJsonSerialization:
             yield f"Created at {created_at}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:datetime_scenario")
-        assert prompt is not None
-
-        await prompt.render({"created_at": '"2024-06-15T10:30:00"'})
+        await env.run_scenario_setup("datetime_scenario", {"created_at": '"2024-06-15T10:30:00"'})
 
         assert received_dt is not None
         assert isinstance(received_dt, datetime)
@@ -755,11 +712,8 @@ class TestScenarioJsonSerialization:
             yield f"Person {person.name} from {person.address.city}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:nested_pydantic")
-        assert prompt is not None
-
         json_data = '{"name": "Bob", "address": {"street": "123 Main St", "city": "NYC"}}'
-        await prompt.render({"person": json_data})
+        await env.run_scenario_setup("nested_pydantic", {"person": json_data})
 
         assert received_person is not None
         assert isinstance(received_person, _Person)
@@ -780,11 +734,8 @@ class TestScenarioJsonSerialization:
             yield f"Got {len(items)} items"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:list_pydantic")
-        assert prompt is not None
-
         json_data = '[{"id": 1, "name": "Apple"}, {"id": 2, "name": "Banana"}]'
-        await prompt.render({"items": json_data})
+        await env.run_scenario_setup("list_pydantic", {"items": json_data})
 
         assert len(received_items) == 2
         assert all(isinstance(item, _Item) for item in received_items)
@@ -813,10 +764,7 @@ class TestLiteralDeserialization:
             yield f"Got {choice}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:literal_str")
-        assert prompt is not None
-
-        await prompt.render({"choice": "a"})
+        await env.run_scenario_setup("literal_str", {"choice": "a"})
         assert received == "a"
         assert isinstance(received, str)
 
@@ -837,10 +785,7 @@ class TestLiteralDeserialization:
             yield f"Task {task_id}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:literal_numeric")
-        assert prompt is not None
-
-        await prompt.render({"task_id": "0"})
+        await env.run_scenario_setup("literal_numeric", {"task_id": "0"})
         assert received == "0"
         assert isinstance(received, str)
 
@@ -857,11 +802,8 @@ class TestLiteralDeserialization:
             yield f"Index {idx}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:literal_nums")
-        assert prompt is not None
-
         for val in ("0", "42", "197"):
-            await prompt.render({"idx": val})
+            await env.run_scenario_setup("literal_nums", {"idx": val})
             assert received == val, f"Expected {val!r}, got {received!r}"
             assert isinstance(received, str), f"Expected str, got {type(received)}"
 
@@ -878,10 +820,7 @@ class TestLiteralDeserialization:
             yield f"Level {level}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:literal_int")
-        assert prompt is not None
-
-        await prompt.render({"level": "2"})
+        await env.run_scenario_setup("literal_int", {"level": "2"})
         assert received == 2
         assert isinstance(received, int)
 
@@ -898,10 +837,7 @@ class TestLiteralDeserialization:
             yield f"Mode {mode}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:literal_mixed")
-        assert prompt is not None
-
-        await prompt.render({"mode": "auto"})
+        await env.run_scenario_setup("literal_mixed", {"mode": "auto"})
         assert received == "auto"
 
     @pytest.mark.asyncio
@@ -919,10 +855,7 @@ class TestLiteralDeserialization:
             yield f"Task {task_id}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:literal_default")
-        assert prompt is not None
-
-        await prompt.render({"task_id": "build-pmars"})
+        await env.run_scenario_setup("literal_default", {"task_id": "build-pmars"})
         assert received == "build-pmars"
 
     @pytest.mark.asyncio
@@ -938,10 +871,7 @@ class TestLiteralDeserialization:
             yield f"Count {count}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:int_arg")
-        assert prompt is not None
-
-        await prompt.render({"count": "42"})
+        await env.run_scenario_setup("int_arg", {"count": "42"})
         assert received == 42
         assert isinstance(received, int)
 
@@ -958,10 +888,7 @@ class TestLiteralDeserialization:
             yield f"Rate {rate}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:float_arg")
-        assert prompt is not None
-
-        await prompt.render({"rate": "3.14"})
+        await env.run_scenario_setup("float_arg", {"rate": "3.14"})
         assert received == pytest.approx(3.14)
         assert isinstance(received, float)
 
@@ -978,10 +905,7 @@ class TestLiteralDeserialization:
             yield f"Verbose {verbose}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:bool_arg")
-        assert prompt is not None
-
-        await prompt.render({"verbose": "true"})
+        await env.run_scenario_setup("bool_arg", {"verbose": "true"})
         assert received is True
 
     @pytest.mark.asyncio
@@ -997,16 +921,13 @@ class TestLiteralDeserialization:
             yield f"Name {name}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:str_numeric")
-        assert prompt is not None
-
-        await prompt.render({"name": "42"})
+        await env.run_scenario_setup("str_numeric", {"name": "42"})
         assert received == "42"
         assert isinstance(received, str)
 
     @pytest.mark.asyncio
-    async def test_no_annotation_numeric_becomes_int(self) -> None:
-        """Untyped arg with numeric-looking string falls through to json.loads."""
+    async def test_no_annotation_preserves_string(self) -> None:
+        """Untyped arg preserves string value (no implicit coercion)."""
         env = Environment("test-env")
         received: Any = None
 
@@ -1017,12 +938,8 @@ class TestLiteralDeserialization:
             yield f"Val {val}"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:untyped_num")
-        assert prompt is not None
-
-        await prompt.render({"val": "42"})
-        # Without annotation, generic heuristic converts to int
-        assert received == 42
+        await env.run_scenario_setup("untyped_num", {"val": "42"})
+        assert received == "42"
 
 
 class TestScenarioNameNormalization:
@@ -1040,7 +957,7 @@ class TestScenarioNameNormalization:
             yield 1.0
 
         # Scenario should be registered with normalized name
-        assert "my-test-env:greet" in [p.name for p in env._prompt_manager._prompts.values()]
+        assert "my-test-env:greet" in _get_prompt_names(env)
 
     @pytest.mark.asyncio
     async def test_env_name_with_spaces_normalizes(self) -> None:
@@ -1094,6 +1011,68 @@ class TestScenarioNameNormalization:
 
 class TestScenarioRemoteErrors:
     """Test remote scenario error mapping."""
+
+    @pytest.mark.asyncio
+    async def test_remote_setup_propagates_output_metadata(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Remote prompt meta should populate session output config."""
+        env = Environment("test-env")
+
+        async def successful_get_prompt(
+            _name: str, _arguments: dict[str, str] | None = None
+        ) -> Any:
+            return SimpleNamespace(
+                messages=[SimpleNamespace(content=SimpleNamespace(text="Prompt"))],
+                meta={
+                    "enable_citations": True,
+                    "returns_schema": {
+                        "type": "object",
+                        "properties": {"summary": {"type": "string"}},
+                    },
+                },
+            )
+
+        monkeypatch.setattr(env, "get_prompt", successful_get_prompt)
+        monkeypatch.setattr(env._router, "get_prompt_connection", lambda _name: "remote")
+
+        prompt = await env.run_scenario_setup("remote-env:solve-task", {})
+        assert prompt == "Prompt"
+
+        session = env._get_session()
+        assert session is not None
+        assert session.is_local is False
+        assert session.enable_citations is True
+        assert isinstance(session.returns_schema, dict)
+        assert session.returns_schema.get("type") == "object"
+
+    @pytest.mark.asyncio
+    async def test_remote_setup_reads_meta_from_pydantic_extra(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Some transports deliver 'meta' without underscore, landing in __pydantic_extra__."""
+        env = Environment("test-env")
+
+        async def successful_get_prompt(
+            _name: str, _arguments: dict[str, str] | None = None
+        ) -> Any:
+            obj = SimpleNamespace(
+                messages=[SimpleNamespace(content=SimpleNamespace(text="Prompt"))],
+                meta=None,
+                __pydantic_extra__={"meta": {"enable_citations": True}},
+            )
+            return obj
+
+        monkeypatch.setattr(env, "get_prompt", successful_get_prompt)
+        monkeypatch.setattr(env._router, "get_prompt_connection", lambda _name: "remote")
+
+        prompt = await env.run_scenario_setup("remote-env:solve-task", {})
+        assert prompt == "Prompt"
+
+        session = env._get_session()
+        assert session is not None
+        assert session.is_local is False
+        assert session.enable_citations is True
 
     @pytest.mark.asyncio
     async def test_remote_setup_error_when_scenarios_unavailable_reraises_original(
@@ -1294,6 +1273,87 @@ class TestScenarioRegistration:
 
 class TestScenarioSessionState:
     """Test session state management edge cases."""
+
+    def test_safe_session_id_uses_request_header_when_ctx_fails(self) -> None:
+        """Fallback path should stay in FastMCP's session ID space."""
+        from mcp.server.lowlevel.server import request_ctx
+
+        req = SimpleNamespace(
+            session=SimpleNamespace(),
+            request=SimpleNamespace(headers={"mcp-session-id": "session-from-header"}),
+        )
+        token = request_ctx.set(req)  # type: ignore[arg-type]
+        try:
+            assert _safe_session_id(_BrokenFastMCPContext()) == "session-from-header"
+            assert req.session._fastmcp_state_prefix == "session-from-header"
+        finally:
+            request_ctx.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_env_get_prompt_and_evaluate_share_header_session_id(self) -> None:
+        """Setup/evaluate should agree on the same HTTP session ID."""
+        from mcp.server.lowlevel.server import request_ctx
+
+        env = Environment("test-env")
+
+        @env.scenario("test")
+        async def test_scenario():
+            answer = yield "Prompt"
+            yield 1.0 if answer == "answer" else 0.0
+
+        setup_req = SimpleNamespace(
+            session=SimpleNamespace(),
+            request=SimpleNamespace(headers={"mcp-session-id": "session-123"}),
+        )
+        setup_token = request_ctx.set(setup_req)  # type: ignore[arg-type]
+        try:
+            prompt = await env._env_get_prompt("test-env:test", {})
+        finally:
+            request_ctx.reset(setup_token)
+
+        assert getattr(prompt.messages[0].content, "text", None) == "Prompt"
+        session = env._get_session("session-123")
+        assert session is not None
+        session.answer = "answer"
+
+        evaluate_req = SimpleNamespace(
+            session=SimpleNamespace(),
+            request=SimpleNamespace(headers={"mcp-session-id": "session-123"}),
+        )
+        evaluate_token = request_ctx.set(evaluate_req)  # type: ignore[arg-type]
+        try:
+            session_id = _safe_session_id(_BrokenFastMCPContext())
+            result = await env.run_scenario_evaluate("test", session_id=session_id)
+        finally:
+            request_ctx.reset(evaluate_token)
+
+        assert result.reward == 1.0
+
+    @pytest.mark.asyncio
+    async def test_env_get_prompt_includes_scenario_output_metadata(self) -> None:
+        """Scenario prompts served via _env_get_prompt should include output metadata."""
+        from mcp.server.lowlevel.server import request_ctx
+
+        env = Environment("test-env")
+
+        @env.scenario("typed", returns=str, enable_citations=True)
+        async def typed_scenario():
+            yield "Prompt"
+            yield 1.0
+
+        req = SimpleNamespace(
+            session=SimpleNamespace(),
+            request=SimpleNamespace(headers={"mcp-session-id": "session-typed"}),
+        )
+        token = request_ctx.set(req)  # type: ignore[arg-type]
+        try:
+            prompt = await env._env_get_prompt("test-env:typed", {})
+        finally:
+            request_ctx.reset(token)
+
+        assert getattr(prompt.messages[0].content, "text", None) == "Prompt"
+        assert isinstance(prompt.meta, dict)
+        assert prompt.meta.get("enable_citations") is True
 
     @pytest.mark.asyncio
     async def test_submit_before_setup_raises(self) -> None:
@@ -1861,7 +1921,7 @@ class TestScenarioToolExclusion:
             yield "Prompt"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:headless")
+        prompt = _get_prompt(env, "test-env:headless")
         assert prompt is not None
         assert prompt.meta is not None
         assert prompt.meta.get("exclude_tools") == ["browser_*"]
@@ -1963,8 +2023,29 @@ class TestScenarioToolExclusion:
             yield "Prompt"
             yield 1.0
 
-        prompt = env._prompt_manager._prompts.get("test-env:selective")
+        prompt = _get_prompt(env, "test-env:selective")
         assert prompt is not None
         assert prompt.meta is not None
         assert prompt.meta.get("exclude_sources") == ["hub"]
         assert prompt.meta.get("allowed_tools") == ["hub_read"]
+
+    @pytest.mark.asyncio
+    async def test_meta_propagates_output_config(self) -> None:
+        """Scenario prompt meta includes returns_schema and enable_citations."""
+        env = Environment("test-env")
+
+        class _Answer(BaseModel):
+            summary: str
+
+        @env.scenario("typed", returns=_Answer, enable_citations=True)
+        async def typed():
+            yield "Prompt"
+            yield 1.0
+
+        prompt = _get_prompt(env, "test-env:typed")
+        assert prompt is not None
+        assert prompt.meta is not None
+        assert prompt.meta.get("enable_citations") is True
+        returns_schema = prompt.meta.get("returns_schema")
+        assert isinstance(returns_schema, dict)
+        assert returns_schema.get("type") == "object"

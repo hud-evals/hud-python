@@ -12,7 +12,7 @@ class OpenAIConnectorMixin:
     """Mixin providing OpenAI Agents SDK connector methods."""
 
     # These are defined on Environment/MCPServer
-    _tool_manager: Any
+    _local_provider: Any
 
     def connect_function_tools(
         self,
@@ -98,4 +98,4 @@ class OpenAIConnectorMixin:
         # Override the schema with OpenAI's (more accurate)
         fastmcp_tool.parameters = tool.params_json_schema
 
-        self._tool_manager.add_tool(fastmcp_tool)
+        self._local_provider.add_tool(fastmcp_tool)

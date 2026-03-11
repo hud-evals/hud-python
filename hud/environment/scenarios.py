@@ -9,19 +9,136 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any, Generic, ParamSpec, get_type_hints
 
-from mcp.types import TextContent
+from fastmcp.server.context import Context as _FastMCPContext  # noqa: TC002 - runtime DI
+from mcp.types import PromptMessage, TextContent
 from pydantic import BaseModel, ConfigDict
 
-from hud.tools.types import EvaluationResult
+from hud.tools.types import EvaluationResult, ScenarioResult  # noqa: F401
+
+
+def _request_context_session_id() -> str | None:
+    """Best-effort FastMCP session ID from raw request context.
+
+    Mirrors FastMCP's ``Context.session_id`` logic so fallback call paths stay in
+    the same ID space as the primary ``ctx.session_id`` path.
+    """
+    try:
+        import uuid as _uuid
+
+        from mcp.server.lowlevel.server import request_ctx as _req_ctx
+
+        req = _req_ctx.get()
+        if not req:
+            return None
+
+        session = getattr(req, "session", None)
+        if session is None:
+            return None
+
+        sid = getattr(session, "_fastmcp_state_prefix", None)
+        if sid:
+            return sid
+
+        request = getattr(req, "request", None)
+        headers = getattr(request, "headers", None)
+        if headers:
+            sid = headers.get("mcp-session-id")
+
+        if sid is None:
+            sid = str(_uuid.uuid4())
+
+        session._fastmcp_state_prefix = sid  # type: ignore[attr-defined]
+        return sid
+    except (ImportError, LookupError, Exception):
+        return None
+
+
+def _safe_session_id(ctx: Any) -> str | None:
+    """Extract session_id from a FastMCP Context, returning None when unavailable.
+
+    In FastMCP 3.x the ``session_id`` property raises ``RuntimeError``
+    instead of returning ``None`` when accessed outside a request context.
+    ``getattr(ctx, "session_id", None)`` only catches ``AttributeError``,
+    so we need an explicit try/except. When that happens, fall back to the raw
+    request context using the same resolution order as FastMCP itself.
+    """
+    if ctx is not None:
+        try:
+            sid = ctx.session_id  # type: ignore[union-attr]
+            if sid:
+                return sid
+        except (RuntimeError, AttributeError):
+            pass
+
+    return _request_context_session_id()
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
-    from fastmcp.prompts import PromptManager
-    from fastmcp.resources import ResourceManager
-    from fastmcp.tools import ToolManager
-
     from hud.eval.task import Task
+
+
+def _serialize_for_mcp(value: Any) -> str:
+    """Serialize a value for MCP transport (strings only)."""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value)
+
+
+def _deserialize_from_mcp(value: str) -> str | dict[str, Any]:
+    """Deserialize a value received from MCP transport.
+
+    Attempts JSON decode to recover dicts/lists that were serialized
+    for MCP string-only transport. Falls back to raw string.
+    """
+    if not isinstance(value, str):
+        return value  # type: ignore[return-value]
+    stripped = value.strip()
+    if stripped and stripped[0] in "{[":
+        try:
+            return json.loads(value)  # type: ignore[return-value]
+        except json.JSONDecodeError:
+            pass
+    return value
+
+
+def _deserialize_typed(value: str, annotation: Any) -> Any:
+    """Deserialize a string MCP arg using its type annotation.
+
+    Tries Pydantic TypeAdapter first (handles models, enums, lists, etc.),
+    then falls back to generic JSON heuristics via ``_deserialize_from_mcp``.
+
+    Args:
+        value: The string value from MCP transport
+        annotation: The Python type annotation, or None if untyped
+    """
+    if not isinstance(value, str):
+        return value
+
+    if annotation is str:
+        return value
+
+    if annotation is not None:
+        from pydantic import TypeAdapter
+
+        try:
+            adapter = TypeAdapter(annotation)
+        except Exception:
+            adapter = None
+
+        if adapter is not None:
+            try:
+                return adapter.validate_json(value)
+            except Exception:  # noqa: S110
+                pass
+            try:
+                return adapter.validate_python(value)
+            except Exception:  # noqa: S110
+                pass
+
+    return _deserialize_from_mcp(value)
+
 
 __all__ = ["ScenarioHandle", "ScenarioMixin", "ScenarioSession"]
 
@@ -107,48 +224,107 @@ def _validate_scenario_params(fn_name: str, sig: inspect.Signature, hints: dict[
             ) from None
 
 
-def _normalize_prompt_yield(value: Any) -> list[str]:
-    """Convert various first-yield types to list of strings for FastMCP.
+def _normalize_prompt_yield(value: Any) -> list[PromptMessage]:
+    """Convert a scenario's first yield into a list of PromptMessages.
 
     Accepts:
-    - str: Single string prompt
-    - TextContent: MCP text content block
-    - list[str]: Multiple string prompts
-    - list[ContentBlock]: Multiple content blocks (text extracted)
+    - str: Single string (becomes user-role PromptMessage)
+    - PromptMessage: Passed through (has role + rich content)
+    - Message: FastMCP Message (converted to PromptMessage)
+    - list of the above: Multiple messages with roles
 
     Returns:
-        List of strings that FastMCP will wrap as PromptMessages
+        List of PromptMessages with proper roles and content types.
     """
-    # Simple string - most common case
-    if isinstance(value, str):
-        return [value]
+    from fastmcp.prompts import Message
 
-    # TextContent from mcp.types
-    if isinstance(value, TextContent):
-        return [value.text]
+    def _to_prompt_message(item: Any, default_role: str = "user") -> PromptMessage:
+        if isinstance(item, PromptMessage):
+            return item
+        if isinstance(item, Message):
+            return PromptMessage(
+                role=item.role,  # type: ignore[arg-type]
+                content=TextContent(type="text", text=str(item.content)),
+            )
+        if isinstance(item, str):
+            return PromptMessage(
+                role=default_role,  # type: ignore[arg-type]
+                content=TextContent(type="text", text=item),
+            )
+        if isinstance(item, TextContent):
+            return PromptMessage(
+                role=default_role,  # type: ignore[arg-type]
+                content=item,
+            )
+        # Other ContentBlock types (ImageContent, AudioContent, etc.)
+        if hasattr(item, "type"):
+            return PromptMessage(role=default_role, content=item)  # type: ignore[arg-type]
+        return PromptMessage(
+            role=default_role,  # type: ignore[arg-type]
+            content=TextContent(type="text", text=str(item)),
+        )
 
-    # List of items
     if isinstance(value, list):
-        results: list[str] = []
-        for item in value:
-            if isinstance(item, str):
-                results.append(item)
-            elif isinstance(item, TextContent):
-                results.append(item.text)
-            elif hasattr(item, "text"):
-                # Other content blocks with text attribute
-                results.append(str(item.text))
-            else:
-                # Fall back to string conversion
-                results.append(str(item))
-        return results
+        return [_to_prompt_message(v) for v in value]
 
-    # ContentBlock with text attribute
-    if hasattr(value, "text"):
-        return [str(value.text)]
+    return [_to_prompt_message(value)]
 
-    # Fallback - convert to string
-    return [str(value)]
+
+def _build_answer_for_generator(session: ScenarioSession) -> Any:
+    """Build the value to send into the scenario generator via ``asend()``.
+
+    When ``session.returns_type`` is set the raw answer (str or dict) is
+    deserialized into an ``AgentAnswer[T]``.  Otherwise the raw answer
+    (a plain str) is forwarded directly for backwards compatibility.
+    """
+    from hud.tools.types import AgentAnswer, Citation
+
+    raw_answer = session.answer
+
+    if session.returns_type is None:
+        # No structured return type — pass the raw string (backwards compat)
+        if isinstance(raw_answer, dict):
+            return raw_answer.get("content", "")
+        return raw_answer
+
+    # Extract text content and citations from the answer payload
+    if isinstance(raw_answer, dict):
+        raw_text: str = raw_answer.get("content", "")
+        raw_citations: list[dict[str, Any]] = raw_answer.get("citations", [])
+    elif isinstance(raw_answer, str):
+        raw_text = raw_answer
+        raw_citations = []
+    else:
+        raw_text = str(raw_answer) if raw_answer is not None else ""
+        raw_citations = []
+
+    # Parse content with the returns Pydantic model
+    returns_cls = session.returns_type
+    try:
+        from pydantic import TypeAdapter
+
+        adapter = TypeAdapter(returns_cls)
+        parsed_content = adapter.validate_json(raw_text)
+    except Exception:
+        # JSON parsing failed — try validating as-is (e.g. plain string type)
+        try:
+            adapter = TypeAdapter(returns_cls)
+            parsed_content = adapter.validate_python(raw_text)
+        except Exception:
+            logger.warning(
+                "Could not parse answer into %s for scenario '%s', passing raw string",
+                returns_cls.__name__ if hasattr(returns_cls, "__name__") else str(returns_cls),
+                session.local_name,
+            )
+            parsed_content = raw_text
+
+    citations = [Citation(**c) for c in raw_citations]
+
+    return AgentAnswer(
+        content=parsed_content,
+        raw=raw_text,
+        citations=citations,
+    )
 
 
 def _normalize_eval_yield(value: Any) -> EvaluationResult:
@@ -195,10 +371,14 @@ class ScenarioSession(BaseModel):
     connection_name: str | None  # Which connection served it (if remote)
     resource_uri: str  # Full URI for reading evaluation result
     generator: Any | None = None  # AsyncGenerator (if local) - Any to avoid validation issues
-    answer: str | None = None  # Submitted answer
+    answer: str | dict[str, Any] | None = None  # Submitted answer (str or structured)
     exclude_tools: list[str] | None = None  # fnmatch patterns to hide from agent
     exclude_sources: list[str] | None = None  # Connection names to hide from agent
+    returns_type: Any | None = None  # Pydantic model class for structured answers
+    returns_schema: dict[str, Any] | None = None  # JSON schema from prompt metadata
+    enable_citations: bool = False
     allowed_tools: list[str] | None = None  # fnmatch patterns to rescue from exclusions
+    prompt_messages: list[PromptMessage] | None = None  # Multi-turn prompt messages with roles
 
 
 class ScenarioMixin:
@@ -241,11 +421,9 @@ class ScenarioMixin:
             yield float(result > 0 or "found" in answer.lower())
     """
 
-    # These come from Environment/MCPServer (type hints for mixin)
+    # These come from Environment/FastMCP 3.x (type hints for mixin)
     name: str
-    _prompt_manager: PromptManager
-    _resource_manager: ResourceManager
-    _tool_manager: ToolManager
+    _local_provider: Any
 
     # Scenario function registry
     _scenarios: dict[str, Callable[..., AsyncGenerator[Any, Any]]]
@@ -253,50 +431,91 @@ class ScenarioMixin:
     # Per-scenario tool exclusions: scenario_name -> (exclude_tools, exclude_sources, allowed_tools)
     _scenario_exclusions: dict[str, tuple[list[str], list[str], list[str]]]
 
-    # Single active scenario session - used for BOTH:
-    # - Client-side: when we run scenarios (local or remote)
-    # - Server-side: when external clients call our scenarios via MCP
-    # Only one scenario can be active at a time.
-    _active_session: ScenarioSession | None
+    # Per-scenario output config: scenario_name -> (returns_type, enable_citations)
+    _scenario_output_config: dict[str, tuple[type | None, bool]]
+
+    # Scenarios marked as chat-compatible (accept a ``messages`` parameter)
+    _scenario_chat_flags: dict[str, bool]
+
+    # Scenario sessions keyed by session ID for multi-client support.
+    # Server-side: each MCP client gets its own session via ctx session ID.
+    # Client-side: uses _CLIENT_SESSION_KEY as fallback when no MCP context.
+    _scenario_sessions: dict[str, ScenarioSession]
+
+    _CLIENT_SESSION_KEY: str = "__client__"
+
+    @property
+    def _active_session(self) -> ScenarioSession | None:
+        """Backwards-compatible accessor -- returns the client-side session."""
+        return self._scenario_sessions.get(self._CLIENT_SESSION_KEY)
+
+    @_active_session.setter
+    def _active_session(self, value: ScenarioSession | None) -> None:
+        if value is None:
+            self._scenario_sessions.pop(self._CLIENT_SESSION_KEY, None)
+        else:
+            self._scenario_sessions[self._CLIENT_SESSION_KEY] = value
+
+    def _get_session(self, session_id: str | None = None) -> ScenarioSession | None:
+        key = session_id or self._CLIENT_SESSION_KEY
+        return self._scenario_sessions.get(key)
+
+    def _set_session(self, session: ScenarioSession, session_id: str | None = None) -> None:
+        key = session_id or self._CLIENT_SESSION_KEY
+        self._scenario_sessions[key] = session
+
+    def _pop_session(self, session_id: str | None = None) -> ScenarioSession | None:
+        key = session_id or self._CLIENT_SESSION_KEY
+        return self._scenario_sessions.pop(key, None)
 
     def _init_scenarios(self) -> None:
         """Initialize scenario state. Called from Environment.__init__."""
         self._scenarios = {}
         self._scenario_exclusions = {}
-        self._active_session = None
+        self._scenario_output_config = {}
+        self._scenario_chat_flags = {}
+        self._scenario_sessions = {}
 
         # Register _hud_submit tool (underscore = hidden from agent)
         self._register_hud_submit_tool()
 
-    async def submit(self, scenario: str, answer: str) -> None:
+    async def submit(
+        self,
+        scenario: str,
+        answer: str | dict[str, Any],
+        session_id: str | None = None,
+    ) -> None:
         """Submit the agent's answer for a scenario's evaluate phase.
 
-        Uses _active_session to route to the correct connection (if remote)
+        Uses session to route to the correct connection (if remote)
         or store locally (if local scenario).
 
         Args:
             scenario: Name of the scenario (may include env prefix like "env:name")
-            answer: The agent's answer/result to submit
+            answer: The agent's answer — either a plain string or a dict with
+                ``content`` (str), ``citations``, ``annotations``, ``grounding``.
+            session_id: MCP session ID (None = client-side default)
         """
         local_name = scenario.split(":")[-1] if ":" in scenario else scenario
 
-        if not self._active_session:
+        session = self._get_session(session_id)
+        if not session:
             raise ValueError(
                 "No active scenario session. Call run_scenario_setup() before submit()."
             )
 
-        if self._active_session.local_name != local_name:
+        if session.local_name != local_name:
             raise ValueError(
-                f"Scenario mismatch: active session is '{self._active_session.local_name}', "
+                f"Scenario mismatch: active session is '{session.local_name}', "
                 f"but submit() called with '{local_name}'"
             )
 
-        self._active_session.answer = answer
+        session.answer = answer
         logger.debug("Stored answer in session for scenario '%s'", local_name)
 
-        if not self._active_session.is_local:
+        if not session.is_local:
             # Remote scenario - send to specific connection
-            conn_name = self._active_session.connection_name
+            conn_name = session.connection_name
             if not conn_name:
                 raise ValueError(f"Remote scenario '{local_name}' has no connection")
 
@@ -304,40 +523,49 @@ class ScenarioMixin:
             if not conn or not conn.client:
                 raise ValueError(f"Connection '{conn_name}' not available")
 
-            await conn.call_tool("_hud_submit", {"scenario": local_name, "answer": answer})
+            transport_answer = _serialize_for_mcp(answer)
+
+            await conn.call_tool(
+                "_hud_submit", {"scenario": local_name, "answer": transport_answer}
+            )
             logger.debug("Sent answer to connection '%s' for scenario '%s'", conn_name, local_name)
 
     def _register_hud_submit_tool(self) -> None:
         """Register the _hud_submit tool for receiving agent answers.
 
         Named with underscore prefix to hide from agent tool listings.
+        Uses FastMCP Context to resolve the MCP session ID for multi-client support.
         """
         from fastmcp.tools import Tool
 
         scenario_self = self
 
-        async def _hud_submit(scenario: str, answer: str) -> str:
+        async def _hud_submit(scenario: str, answer: str, ctx: _FastMCPContext = None) -> str:  # type: ignore[assignment]
             """Receive an agent's answer from an external client.
 
             Called when an external client's Environment.submit() sends an answer
-            to us via MCP. Stores in _active_session for resource_handler to use.
+            to us via MCP. Stores in the session for resource_handler to use.
 
             Args:
                 scenario: Name of the scenario (may include env prefix like "env:name")
                 answer: The agent's answer/result to submit
+                ctx: FastMCP Context (injected by DI for session ID resolution)
             """
             local_name = scenario.split(":")[-1] if ":" in scenario else scenario
 
-            if not scenario_self._active_session:
+            session_id = _safe_session_id(ctx)
+            session = scenario_self._get_session(session_id)
+
+            if not session:
                 raise ValueError(f"No active scenario session for '{local_name}'")
 
-            if scenario_self._active_session.local_name != local_name:
+            if session.local_name != local_name:
                 raise ValueError(
-                    f"Scenario mismatch: active is '{scenario_self._active_session.local_name}', "
+                    f"Scenario mismatch: active is '{session.local_name}', "
                     f"but received answer for '{local_name}'"
                 )
 
-            scenario_self._active_session.answer = answer
+            session.answer = _deserialize_from_mcp(answer)
             logger.debug(
                 "_hud_submit stored answer for scenario '%s': %s...",
                 local_name,
@@ -347,18 +575,24 @@ class ScenarioMixin:
 
         # Register the tool with underscore name
         tool = Tool.from_function(_hud_submit)
-        self._tool_manager.add_tool(tool)
+        self._local_provider.add_tool(tool)
         logger.debug("Registered _hud_submit tool")
 
-    async def run_scenario_setup(self, scenario_name: str, args: dict[str, Any]) -> str | None:
+    async def run_scenario_setup(
+        self,
+        scenario_name: str,
+        args: dict[str, Any],
+        session_id: str | None = None,
+    ) -> str | None:
         """Run a scenario's setup phase and return the prompt.
 
         Handles both local scenarios (registered via @env.scenario) and remote
-        scenarios (via MCP prompt). Creates _active_session for use by submit/evaluate.
+        scenarios (via MCP prompt). Creates session for use by submit/evaluate.
 
         Args:
             scenario_name: Name of the scenario to run (may include "env:" prefix)
             args: Arguments to pass to the scenario
+            session_id: MCP session ID for multi-client support (None = client-side default)
 
         Returns:
             The prompt string from the scenario's setup phase, or None if failed
@@ -387,19 +621,52 @@ class ScenarioMixin:
         if not is_explicitly_remote and local_name in self._scenarios:
             # Local scenario - run setup via generator
             scenario_fn = self._scenarios[local_name]
-            gen = scenario_fn(**args)
+
+            # Deserialize string args using the scenario's type annotations.
+            # MCP prompts only support string values, so callers (including
+            # _env_get_prompt and tests) may pass {"count": "42"} instead of
+            # {"count": 42}.  This mirrors what prompt_handler does.
+            sig = inspect.signature(scenario_fn)
+            try:
+                param_annotations = get_type_hints(scenario_fn)
+            except Exception:
+                param_annotations = {
+                    p.name: p.annotation
+                    for p in sig.parameters.values()
+                    if p.annotation is not inspect.Parameter.empty
+                }
+            deserialized_args: dict[str, Any] = {
+                k: _deserialize_typed(v, param_annotations.get(k)) if isinstance(v, str) else v
+                for k, v in args.items()
+            }
+
+            gen = scenario_fn(**deserialized_args)
 
             # Run setup phase (code before first yield)
             raw_prompt = await gen.__anext__()
 
-            # Normalize the prompt yield to a list of strings
-            # Accepts: str, TextContent, list[str], list[ContentBlock]
-            prompt_parts = _normalize_prompt_yield(raw_prompt)
-            prompt_text = prompt_parts[0] if len(prompt_parts) == 1 else "\n".join(prompt_parts)
+            # Normalize to list of PromptMessages (with roles)
+            prompt_messages = _normalize_prompt_yield(raw_prompt)
+
+            # Extract text for backward-compatible prompt string
+            text_parts = []
+            for pm in prompt_messages:
+                if isinstance(pm.content, TextContent):
+                    text_parts.append(pm.content.text)
+                elif hasattr(pm.content, "text"):
+                    text_parts.append(str(pm.content.text))  # type: ignore[union-attr]
+            prompt_text = "\n".join(text_parts) if text_parts else ""
 
             # Create session for local scenario
             excl = self._scenario_exclusions.get(local_name)
-            self._active_session = ScenarioSession(
+            out_cfg = self._scenario_output_config.get(local_name)
+            returns_schema: dict[str, Any] | None = None
+            if out_cfg and out_cfg[0] is not None:
+                from pydantic import TypeAdapter
+
+                returns_schema = TypeAdapter(out_cfg[0]).json_schema()
+
+            session = ScenarioSession(
                 local_name=local_name,
                 full_name=scenario_name,
                 is_local=True,
@@ -409,12 +676,17 @@ class ScenarioMixin:
                 exclude_tools=excl[0] if excl else None,
                 exclude_sources=excl[1] if excl else None,
                 allowed_tools=excl[2] if excl else None,
+                returns_type=out_cfg[0] if out_cfg else None,
+                returns_schema=returns_schema,
+                enable_citations=out_cfg[1] if out_cfg else False,
+                prompt_messages=prompt_messages,
             )
+            self._set_session(session, session_id)
 
             logger.debug(
-                "Local scenario setup: %s (session=%s)",
+                "Local scenario setup: %s (session_id=%s)",
                 local_name,
-                self._active_session,
+                session_id or self._CLIENT_SESSION_KEY,
             )
             return prompt_text
         else:
@@ -428,10 +700,7 @@ class ScenarioMixin:
                 env_name = getattr(self, "_source_env_name", None) or self.name
                 prompt_id = f"{env_name}:{scenario_name}"
 
-            # Serialize args for MCP prompt (only supports string values)
-            serialized_args: dict[str, str] = {}
-            for key, value in args.items():
-                serialized_args[key] = value if isinstance(value, str) else json.dumps(value)
+            serialized_args: dict[str, str] = {k: _serialize_for_mcp(v) for k, v in args.items()}
 
             try:
                 result = await self.get_prompt(prompt_id, serialized_args)  # type: ignore[attr-defined]
@@ -489,14 +758,30 @@ class ScenarioMixin:
                     f"Check that the scenario returns a valid prompt string."
                 )
 
-            # Extract tool exclusion from remote prompt metadata if present
-            remote_meta = getattr(result, "meta", None) or {}
+            # Extract metadata from remote prompt result.
+            # Depending on transport/model parsing, metadata may surface as:
+            # 1) .meta (canonical field), 2) ._meta attribute, or
+            # 3) extras under __pydantic_extra__.
+            remote_meta = getattr(result, "meta", None)
+            if not isinstance(remote_meta, dict):
+                direct_meta = getattr(result, "_meta", None)
+                if isinstance(direct_meta, dict):
+                    remote_meta = direct_meta
+            if not isinstance(remote_meta, dict):
+                extra = getattr(result, "__pydantic_extra__", None) or {}
+                remote_meta = extra.get("meta") or extra.get("_meta") or {}
+            if not isinstance(remote_meta, dict):
+                remote_meta = {}
             exclude_tools_meta = remote_meta.get("exclude_tools")
             exclude_sources_meta = remote_meta.get("exclude_sources")
             allowed_tools_meta = remote_meta.get("allowed_tools")
+            returns_schema_meta = remote_meta.get("returns_schema")
+            if not isinstance(returns_schema_meta, dict):
+                returns_schema_meta = None
+            enable_citations_meta = bool(remote_meta.get("enable_citations", False))
 
             # Create session for remote scenario - use router's connection info
-            self._active_session = ScenarioSession(
+            session = ScenarioSession(
                 local_name=local_name,
                 full_name=scenario_name,
                 is_local=False,
@@ -506,24 +791,33 @@ class ScenarioMixin:
                 exclude_tools=exclude_tools_meta,
                 exclude_sources=exclude_sources_meta,
                 allowed_tools=allowed_tools_meta,
+                returns_schema=returns_schema_meta,
+                enable_citations=enable_citations_meta,
             )
+            self._set_session(session, session_id)
 
             logger.debug(
-                "Remote scenario setup: %s (connection=%s)",
+                "Remote scenario setup: %s (connection=%s, session_id=%s)",
                 prompt_id,
                 conn_name,
+                session_id or self._CLIENT_SESSION_KEY,
             )
             return prompt_text
 
-    async def run_scenario_evaluate(self, scenario_name: str) -> EvaluationResult:
+    async def run_scenario_evaluate(
+        self,
+        scenario_name: str,
+        session_id: str | None = None,
+    ) -> EvaluationResult:
         """Run a scenario's evaluate phase and return the evaluation result.
 
-        Uses _active_session created by run_scenario_setup():
+        Uses session created by run_scenario_setup():
         - Local: use stored generator with submitted answer
         - Remote: read resource from the connection that served setup
 
         Args:
             scenario_name: Name of the scenario to evaluate
+            session_id: MCP session ID (None = client-side default)
 
         Returns:
             EvaluationResult with reward, done, content, subscores, etc.
@@ -531,26 +825,23 @@ class ScenarioMixin:
         Raises:
             ValueError: If no active session or evaluation fails.
         """
-        if not self._active_session:
+        session = self._pop_session(session_id)
+        if not session:
             raise ValueError(f"No active session for scenario '{scenario_name}'. ")
-
-        session = self._active_session
-        self._active_session = None  # Clear after use
 
         if session.is_local:
             # Local scenario - use generator
             if not session.generator:
                 raise ValueError(f"Local scenario '{session.local_name}' has no generator")
 
-            answer = session.answer
+            answer_to_send = _build_answer_for_generator(session)
             try:
-                raw_result = await session.generator.asend(answer)
+                raw_result = await session.generator.asend(answer_to_send)
                 # Normalize to EvaluationResult (handles float, EvaluationResult, dict)
                 result = _normalize_eval_yield(raw_result)
                 logger.debug(
-                    "Local scenario %s evaluate: answer=%s, result=%s",
+                    "Local scenario %s evaluate: result=%s",
                     session.local_name,
-                    answer[:50] if answer and len(answer) > 50 else answer,
                     result,
                 )
                 return result
@@ -558,9 +849,31 @@ class ScenarioMixin:
                 # No second yield - default to success
                 return EvaluationResult(reward=1.0, done=True)
         else:
-            # Remote scenario - read resource via router
+            # Remote scenario - read resource via session's connection
+            # (resource routing may not include dynamic scenario resources,
+            #  so go directly to the connection that served setup)
             try:
-                contents = await self.read_resource(session.resource_uri)  # type: ignore[attr-defined]
+                conn_name = session.connection_name
+                logger.debug(
+                    "Evaluate remote scenario: resource_uri=%s, connection_name=%s",
+                    session.resource_uri,
+                    conn_name,
+                )
+                conn = self._connections.get(conn_name) if conn_name else None  # type: ignore[attr-defined]
+                if not conn and self._connections:  # type: ignore[attr-defined]
+                    # Fallback: try each connection directly (mirrors get_prompt fallback)
+                    for fallback_conn in self._connections.values():  # type: ignore[attr-defined]
+                        try:
+                            contents = await fallback_conn.read_resource(session.resource_uri)
+                            break
+                        except Exception:  # noqa: S112
+                            continue
+                    else:
+                        contents = await self.read_resource(session.resource_uri)  # type: ignore[attr-defined]
+                elif conn:
+                    contents = await conn.read_resource(session.resource_uri)
+                else:
+                    contents = await self.read_resource(session.resource_uri)  # type: ignore[attr-defined]
                 if contents:
                     first = contents[0]
                     if hasattr(first, "text") and isinstance(first.text, str):  # type: ignore[union-attr]
@@ -589,10 +902,13 @@ class ScenarioMixin:
         self,
         name: str | None = None,
         description: str | None = None,
+        chat: bool = False,
         required_env_vars: list[str] | None = None,
         exclude_tools: list[str] | None = None,
         exclude_sources: list[str] | None = None,
         allowed_tools: list[str] | None = None,
+        returns: type | None = None,
+        enable_citations: bool = False,
     ) -> Callable[
         [Callable[P, AsyncGenerator[Any, None]]],
         ScenarioHandle[P],
@@ -607,6 +923,10 @@ class ScenarioMixin:
         Args:
             name: Optional name for the scenario (defaults to function name)
             description: Optional description of what the scenario does
+            chat: Mark this scenario as chat-compatible.  Chat scenarios
+                must accept a ``messages`` parameter (the conversation
+                history) and are used by ``Chat`` / ``ChatService``
+                for multi-turn A2A interactions.
             required_env_vars: Optional list of environment variable names this scenario requires.
                 These are used by the HUD platform to check if users have configured the
                 necessary API keys/credentials before running this specific scenario.
@@ -618,18 +938,26 @@ class ScenarioMixin:
             allowed_tools: Optional fnmatch patterns for tool names to rescue back
                 after exclusions (e.g. exclude all sentry tools via exclude_sources
                 but allow ``["sentry_get_issue"]``).
+            returns: Optional Pydantic model class defining the expected answer
+                schema.  When set, the agent's answer is parsed into this type
+                and delivered to the evaluate phase as
+                ``AgentAnswer[returns]``.  The JSON schema is embedded in the
+                scenario's MCP prompt metadata so agents and the platform can
+                request structured output from the provider.
+            enable_citations: When True, the agent is requested to extract
+                source citations from the provider response.  Citations are
+                delivered to the evaluate phase on ``AgentAnswer.citations``.
 
         Example:
-            @env.scenario(required_env_vars=["OPENAI_API_KEY"])
-            async def chat(query: str):
-                yield f"Answer this question: {query}"
-                # ... evaluate
+            @env.scenario(chat=True)
+            async def assist(messages: list | None = None):
+                yield ["You are a helpful assistant.", *(messages or [])]
                 yield 1.0
 
             # MCP client usage:
-            # 1. get_prompt("{env_name}:chat", {query: "..."}) -> prompt messages
+            # 1. get_prompt("{env_name}:assist", {messages: [...]}) -> prompt messages
             # 2. agent runs...
-            # 3. read_resource("{env_name}:chat") -> {"reward": 0.95}
+            # 3. read_resource("{env_name}:assist") -> {"reward": 1.0}
         """
 
         def decorator(
@@ -643,6 +971,15 @@ class ScenarioMixin:
                     f"Scenario name '{scenario_name}' cannot contain ':' "
                     "(reserved as separator between environment and scenario names)"
                 )
+
+            # Validate chat-compatible scenarios have a ``messages`` parameter
+            if chat:
+                sig_check = inspect.signature(fn)
+                if "messages" not in sig_check.parameters:
+                    raise TypeError(
+                        f"Chat scenario '{scenario_name}' must accept a 'messages' parameter "
+                        "for multi-turn conversation history"
+                    )
 
             # self.name is already normalized (lowercase, hyphens) by Environment.__init__
             scenario_id = f"{self.name}:{scenario_name}"
@@ -661,6 +998,12 @@ class ScenarioMixin:
 
             # Store the generator function
             self._scenarios[scenario_name] = fn
+
+            if chat:
+                self._scenario_chat_flags[scenario_name] = True
+
+            if returns is not None or enable_citations:
+                self._scenario_output_config[scenario_name] = (returns, enable_citations)
 
             if exclude_tools or exclude_sources or allowed_tools:
                 self._scenario_exclusions[scenario_name] = (
@@ -728,81 +1071,16 @@ class ScenarioMixin:
 
             _validate_scenario_params(scenario_name, sig, param_annotations)
 
-            async def prompt_handler(**handler_args: Any) -> list[str]:
-                from pydantic import TypeAdapter
-
-                # Deserialize JSON-encoded arguments using Pydantic TypeAdapter
-                # MCP prompts only support string arguments, so complex types are
-                # JSON-serialized on the sending side and deserialized here
-                deserialized_args: dict[str, Any] = {}
-                for arg_name, arg_value in handler_args.items():
-                    annotation = param_annotations.get(arg_name)
-
-                    # Only attempt deserialization on string values
-                    if not isinstance(arg_value, str):
-                        deserialized_args[arg_name] = arg_value
-                        continue
-
-                    # If annotation is explicitly str, keep as string
-                    if annotation is str:
-                        deserialized_args[arg_name] = arg_value
-                        continue
-
-                    # If we have a non-str type annotation, use TypeAdapter
-                    if annotation is not None:
-                        try:
-                            adapter = TypeAdapter(annotation)
-                        except Exception:
-                            # Unresolvable annotation (e.g. raw string from
-                            # PEP 563 fallback) -- treat as untyped
-                            adapter = None
-
-                        if adapter is not None:
-                            # Try validate_json first (handles Pydantic models,
-                            # lists, enums, datetimes from JSON-encoded strings)
-                            try:
-                                deserialized_args[arg_name] = adapter.validate_json(arg_value)
-                                continue
-                            except Exception:  # noqa: S110
-                                pass
-
-                            # Fall back to validate_python (handles Literal[str]
-                            # where validate_json("0") would parse as int 0,
-                            # losing the string type)
-                            try:
-                                deserialized_args[arg_name] = adapter.validate_python(arg_value)
-                                continue
-                            except Exception:  # noqa: S110
-                                pass
-
-                            # TypeAdapter couldn't handle it -- skip generic
-                            # heuristics that would lose type information
-                            deserialized_args[arg_name] = arg_value
-                            continue
-
-                    # No annotation (or unresolvable): try generic JSON decode heuristics
-                    stripped = arg_value.strip()
-                    if (stripped and stripped[0] in "[{") or stripped in ("true", "false", "null"):
-                        try:
-                            deserialized_args[arg_name] = json.loads(arg_value)
-                            continue
-                        except json.JSONDecodeError:
-                            pass
-
-                    # Try to decode if it looks like a number
-                    if stripped.lstrip("-").replace(".", "", 1).isdigit():
-                        try:
-                            deserialized_args[arg_name] = json.loads(arg_value)
-                            continue
-                        except json.JSONDecodeError:
-                            pass
-
-                    # Keep as string
-                    deserialized_args[arg_name] = arg_value
+            async def prompt_handler(ctx: _FastMCPContext = None, **handler_args: Any) -> list[str]:  # type: ignore[assignment]
+                deserialized_args: dict[str, Any] = {
+                    k: _deserialize_typed(v, param_annotations.get(k))
+                    for k, v in handler_args.items()
+                }
 
                 # Delegate to run_scenario_setup (consolidates client/server logic)
+                session_id = _safe_session_id(ctx)
                 prompt_text = await scenario_self.run_scenario_setup(
-                    scenario_name_ref, deserialized_args
+                    scenario_name_ref, deserialized_args, session_id=session_id
                 )
 
                 if prompt_text is None:
@@ -813,7 +1091,7 @@ class ScenarioMixin:
 
             # Register prompt using FastMCP - create FunctionPrompt directly
             # to bypass the **kwargs validation in from_function()
-            from fastmcp.prompts.prompt import FunctionPrompt, PromptArgument
+            from fastmcp.prompts import FunctionPrompt, PromptArgument
 
             # Build meta with source code and full arguments info (with types/defaults)
             scenario_meta: dict[str, Any] = {}
@@ -829,6 +1107,18 @@ class ScenarioMixin:
                 scenario_meta["exclude_sources"] = exclude_sources
             if allowed_tools:
                 scenario_meta["allowed_tools"] = allowed_tools
+            if returns is not None:
+                from pydantic import TypeAdapter
+
+                try:
+                    scenario_meta["returns_schema"] = TypeAdapter(returns).json_schema()
+                except Exception:
+                    logger.warning(
+                        "Could not generate JSON schema for returns type on scenario '%s'",
+                        scenario_name,
+                    )
+            if enable_citations:
+                scenario_meta["enable_citations"] = True
 
             prompt = FunctionPrompt(
                 name=scenario_id,
@@ -840,19 +1130,22 @@ class ScenarioMixin:
                 fn=prompt_handler,
                 meta=scenario_meta if scenario_meta else None,
             )
-            self._prompt_manager.add_prompt(prompt)
+            self._local_provider.add_prompt(prompt)
 
             # Register RESOURCE - runs evaluate, returns EvaluationResult
-            async def resource_handler() -> str:
+            async def resource_handler(ctx: _FastMCPContext = None) -> str:  # type: ignore[assignment]
                 # Delegate to run_scenario_evaluate (consolidates client/server logic)
-                result = await scenario_self.run_scenario_evaluate(scenario_name_ref)
+                session_id = _safe_session_id(ctx)
+                result = await scenario_self.run_scenario_evaluate(
+                    scenario_name_ref, session_id=session_id
+                )
 
                 # Serialize full EvaluationResult (includes reward, done, content, subscores)
                 # Use model_dump to get all fields, excluding None values for cleaner output
                 return json.dumps(result.model_dump(exclude_none=True))
 
             # Register as resource with same scenario: URI
-            from fastmcp.resources.resource import FunctionResource
+            from fastmcp.resources import FunctionResource
 
             resource = FunctionResource.from_function(
                 fn=resource_handler,
@@ -862,7 +1155,7 @@ class ScenarioMixin:
                 mime_type="application/json",
                 meta=scenario_meta,
             )
-            self._resource_manager.add_resource(resource)
+            self._local_provider.add_resource(resource)
 
             logger.debug(
                 "Registered scenario '%s' as prompt and resource: %s",
