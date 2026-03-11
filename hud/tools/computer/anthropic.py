@@ -218,14 +218,7 @@ class AnthropicComputerTool(HudComputerTool):
             )
             return compressed
         except Exception as e:
-            import traceback
-            err_msg = f"Failed to compress screenshot: {e}\n{traceback.format_exc()}"
-            logger.warning(err_msg)
-            try:
-                with open("/tmp/compression_errors.txt", "a") as ef:
-                    ef.write(err_msg + "\n")
-            except OSError:
-                pass
+            logger.warning("Failed to compress screenshot: %s", e)
             return await super()._rescale_screenshot(screenshot_base64)
 
     def to_params(
