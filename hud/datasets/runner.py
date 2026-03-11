@@ -26,6 +26,9 @@ def _inject_env_model_header(task: Task, agent_params: dict[str, Any] | None) ->
     The orchestrator forwards ``Env-*`` headers to the inner environment
     container so scenarios can adapt their behaviour based on which model
     the outer loop is using.
+
+    Creates a shallow copy of the headers dict so the shared Environment
+    object is not mutated.
     """
     model_name = (agent_params or {}).get("model")
     if not model_name:
@@ -44,7 +47,8 @@ def _inject_env_model_header(task: Task, agent_params: dict[str, Any] | None) ->
         url = transport.get("url", "")
         headers = transport.get("headers")
         if isinstance(url, str) and _is_hud_server(url) and isinstance(headers, dict):
-            headers["Env-Hud-Model-Name"] = str(model_name)
+            new_headers = {**headers, "Env-Hud-Model-Name": str(model_name)}
+            transport["headers"] = new_headers
 
 
 async def run_dataset(

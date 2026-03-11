@@ -545,7 +545,10 @@ class MCPAgent(ABC):
                             except Exception as e:
                                 self.console.warning_log(f"Auto-respond failed: {e}")
                         if decision == "STOP":
-                            if getattr(self.ctx, "scenario_enable_citations", False) and not response.citations:
+                            if (
+                                getattr(self.ctx, "scenario_enable_citations", False)
+                                and not response.citations
+                            ):
                                 recovered = self._recover_citations_from_content(response)
                                 if recovered:
                                     self.console.info_log(
@@ -553,7 +556,7 @@ class MCPAgent(ABC):
                                     )
                                 else:
                                     self.console.warning_log(
-                                        "Citations required by scenario but missing in final response"
+                                        "Citations required by scenario but missing in final response"  # noqa: E501
                                     )
                             self.console.debug("Stopping execution")
                             final_response = response
@@ -650,9 +653,9 @@ class MCPAgent(ABC):
                 continue
 
             normalized: list[Citation] = [
-                c for cit in raw_citations
-                if isinstance(cit, dict)
-                and (c := self._normalize_citation(cit)) is not None
+                c
+                for cit in raw_citations
+                if isinstance(cit, dict) and (c := self._normalize_citation(cit)) is not None
             ]
             if not normalized:
                 continue

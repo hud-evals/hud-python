@@ -616,6 +616,7 @@ async def build_proxy(backend: Any, name: str = "HUD Docker Dev Proxy") -> Any:
     # Client connection to the backend for forwarding these calls.
     fallback = FastMCPClient(backend.transport)
     await fallback.__aenter__()
+    proxy._fallback_client = fallback  # type: ignore[attr-defined]
 
     @proxy._mcp_server.call_tool()
     async def _call_tool_handler(name: str, arguments: dict[str, Any] | None = None) -> list[Any]:
@@ -926,14 +927,19 @@ def run_docker_dev_server(
             launch_interactive_thread(port, verbose)
 
         # Run proxy with HTTP transport
-        await proxy.run_async(
-            transport="http",
-            host="0.0.0.0",  # noqa: S104
-            port=port,
-            path="/mcp",
-            log_level="error" if not verbose else "info",
-            show_banner=False,
-        )
+        try:
+            await proxy.run_async(
+                transport="http",
+                host="0.0.0.0",  # noqa: S104
+                port=port,
+                path="/mcp",
+                log_level="error" if not verbose else "info",
+                show_banner=False,
+            )
+        finally:
+            fallback_client = getattr(proxy, "_fallback_client", None)
+            if fallback_client is not None:
+                await fallback_client.__aexit__(None, None, None)
 
     try:
         asyncio.run(run_proxy())

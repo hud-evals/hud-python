@@ -185,9 +185,7 @@ class ClaudeAgent(MCPAgent):
                     getattr(block, "name", ""),
                     getattr(block, "name", ""),
                 )
-                arguments = (
-                    block_input if isinstance(block_input, dict) else block_input.__dict__
-                )
+                arguments = block_input if isinstance(block_input, dict) else block_input.__dict__
                 if mcp_name in self._gated_screenshot_tools:
                     arguments = {**arguments, "take_screenshot_on_click": False}
                     logger.debug(
@@ -219,9 +217,7 @@ class ClaudeAgent(MCPAgent):
                     }
                     normalized = self._normalize_citation(cit_dict)
                     if normalized is not None:
-                        citations.append(
-                            normalized.model_dump(exclude={"provider_data"})
-                        )
+                        citations.append(normalized.model_dump(exclude={"provider_data"}))
             elif block_type == "thinking":
                 thinking = getattr(block, "thinking", "") or ""
                 if thinking:
@@ -417,10 +413,7 @@ class ClaudeAgent(MCPAgent):
         )
 
         # Process each tool result
-        user_content: list[
-            BetaToolResultBlockParam
-            | BetaRequestDocumentBlockParam
-        ] = []
+        user_content: list[BetaToolResultBlockParam | BetaRequestDocumentBlockParam] = []
 
         for tool_call, result in zip(tool_calls, tool_results, strict=True):
             tool_use_id = tool_call.id
@@ -449,9 +442,7 @@ class ClaudeAgent(MCPAgent):
                         claude_blocks.append(text_to_content_block(content.text))
                         if citations_enabled:
                             sibling_docs.append(
-                                text_document_block(
-                                    content.text, title=tool_call.name
-                                )
+                                text_document_block(content.text, title=tool_call.name)
                             )
                     elif isinstance(content, types.ImageContent):
                         claude_blocks.append(base64_to_content_block(content.data))
@@ -704,9 +695,7 @@ def text_to_content_block(text: str) -> BetaTextBlockParam:
     return {"type": "text", "text": text}
 
 
-def text_document_block(
-    text: str, *, title: str | None = None
-) -> BetaRequestDocumentBlockParam:
+def text_document_block(text: str, *, title: str | None = None) -> BetaRequestDocumentBlockParam:
     """Wrap plain text as a citable document block."""
     block = BetaRequestDocumentBlockParam(
         type="document",
