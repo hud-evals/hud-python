@@ -360,3 +360,70 @@ class TestOperatorAgent:
         assert tool_call.name == "mcp_test_tool"
         assert tool_call.id == "call_456"
         assert tool_call.arguments == {"arg": "value"}
+
+    @pytest.mark.asyncio
+    async def test_format_computer_tool_results(self, mock_openai: AsyncOpenAI) -> None:
+        """Test inherited format_tool_results creates ComputerCallOutput for computer tools."""
+        agent = OperatorAgent.create(
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+
+        # Simulate the tool name mapping set during initialization
+        agent._tool_name_map = {"computer": "openai_computer"}
+
+        tool_calls = [
+            MCPToolCall(name="openai_computer", arguments={"type": "click"}, id="call_comp"),
+        ]
+        tool_results = [
+            MCPToolResult(
+                content=[
+                    types.ImageContent(type="image", data="screenshot_b64", mimeType="image/png")
+                ],
+                isError=False,
+            ),
+        ]
+
+        messages = await agent.format_tool_results(tool_calls, tool_results)
+
+        assert len(messages) == 1
+        msg = cast("dict[str, Any]", messages[0])
+        assert msg["type"] == "computer_call_output"
+        assert msg["call_id"] == "call_comp"
+        assert msg["output"]["type"] == "computer_screenshot"
+        assert "screenshot_b64" in msg["output"]["image_url"]
+
+    @pytest.mark.asyncio
+    async def test_format_mixed_computer_and_function_results(
+        self, mock_openai: AsyncOpenAI
+    ) -> None:
+        """Test inherited format_tool_results handles mixed computer + function calls."""
+        agent = OperatorAgent.create(
+            model_client=mock_openai,
+            validate_api_key=False,
+        )
+
+        agent._tool_name_map = {"computer": "openai_computer", "some_tool": "some_tool"}
+
+        tool_calls = [
+            MCPToolCall(name="openai_computer", arguments={"type": "click"}, id="call_comp"),
+            MCPToolCall(name="some_tool", arguments={}, id="call_fn"),
+        ]
+        tool_results = [
+            MCPToolResult(
+                content=[types.ImageContent(type="image", data="ss_data", mimeType="image/png")],
+                isError=False,
+            ),
+            MCPToolResult(
+                content=[types.TextContent(type="text", text="fn result")],
+                isError=False,
+            ),
+        ]
+
+        messages = await agent.format_tool_results(tool_calls, tool_results)
+
+        assert len(messages) == 2
+        msg0 = cast("dict[str, Any]", messages[0])
+        msg1 = cast("dict[str, Any]", messages[1])
+        assert msg0["type"] == "computer_call_output"
+        assert msg1["type"] == "function_call_output"

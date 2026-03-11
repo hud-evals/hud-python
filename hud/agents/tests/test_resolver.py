@@ -29,8 +29,8 @@ MOCK_MODELS = [
     },
     {
         "id": "uuid-2",
-        "name": "GPT 5.1",
-        "model_name": "gpt-5.1",
+        "name": "GPT 5.4",
+        "model_name": "gpt-5.4",
         "sdk_agent_type": None,
         "provider": {"name": "OpenAI", "default_sdk_agent_type": "openai"},
     },
@@ -113,7 +113,7 @@ class TestResolveCls:
         from hud.agents import OpenAIAgent
 
         with patch("hud.agents.resolver._fetch_gateway_models", return_value=MOCK_MODELS):
-            cls, info = resolve_cls("gpt-5.1")
+            cls, info = resolve_cls("gpt-5.4")
             assert cls == OpenAIAgent
             assert info is not None
 
@@ -185,10 +185,10 @@ class TestCreateAgent:
             mock_agent = MagicMock()
             mock_create.return_value = mock_agent
 
-            agent = create_agent("gpt-5.1")
+            agent = create_agent("gpt-5.4")
 
             call_kwargs = mock_create.call_args.kwargs
-            assert call_kwargs["model"] == "gpt-5.1"
+            assert call_kwargs["model"] == "gpt-5.4"
             assert "model_client" in call_kwargs
             assert agent == mock_agent
 
@@ -203,7 +203,7 @@ class TestCreateAgent:
         ):
             mock_create.return_value = MagicMock()
 
-            create_agent("gpt-5.1", temperature=0.5, max_tokens=1000)
+            create_agent("gpt-5.4", temperature=0.5, max_tokens=1000)
 
             call_kwargs = mock_create.call_args.kwargs
             assert call_kwargs["temperature"] == 0.5

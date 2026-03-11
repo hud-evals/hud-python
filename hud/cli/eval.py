@@ -57,10 +57,9 @@ class AgentPreset:
 # Built-in presets for the interactive picker
 _AGENT_PRESETS: list[AgentPreset] = [
     # Native agents (use provider SDKs directly)
-    AgentPreset("Claude Sonnet 4.5", AgentType.CLAUDE, "claude-sonnet-4-5"),
-    AgentPreset("GPT-5", AgentType.OPENAI, "gpt-5"),
-    AgentPreset("Operator (OpenAI Computer Use)", AgentType.OPERATOR, "computer-use-preview"),
-    AgentPreset("Gemini 3 Pro Preview", AgentType.GEMINI, "gemini-3-pro-preview"),
+    AgentPreset("Claude Sonnet 4.6", AgentType.CLAUDE, "claude-sonnet-4-6"),
+    AgentPreset("GPT-5.4", AgentType.OPENAI, "gpt-5.4"),
+    AgentPreset("Gemini 3.1 Pro (Preview)", AgentType.GEMINI, "gemini-3-1-pro"),
     AgentPreset(
         "Gemini CUA (Gemini Computer Use)",
         AgentType.GEMINI_CUA,
@@ -79,10 +78,10 @@ _AGENT_PRESETS: list[AgentPreset] = [
         },
     ),
     AgentPreset(
-        "GLM-4.5V (Z-AI)",
+        "GLM-4.6V (Z-AI)",
         AgentType.OPENAI_COMPATIBLE,
-        "z-ai/glm-4.5v",
-        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "GLM-4.5V"}},
+        "z-ai/glm-4.6v",
+        {"openai_compatible": {"base_url": settings.hud_gateway_url, "model_name": "GLM-4.6V"}},
     ),
 ]
 

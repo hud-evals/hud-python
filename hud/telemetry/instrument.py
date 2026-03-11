@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, overload
 import pydantic_core
 
 from hud.telemetry.exporter import queue_span
-from hud.types import TraceStep
+from hud.types import MCPToolResult, TraceStep
 
 
 def _get_trace_id() -> str | None:
@@ -52,6 +52,23 @@ def _serialize_value(value: Any, max_items: int = 10) -> Any:
     """Serialize a value for recording."""
     if isinstance(value, str | int | float | bool | type(None)):
         return value
+
+    if isinstance(value, MCPToolResult):
+        try:
+            serialized = json.loads(pydantic_core.to_json(value, fallback=str))
+        except Exception:
+            return {
+                "isError": value.isError,
+                "content": [{"type": "text", "text": "Tool executed successfully"}]
+                if not value.isError
+                else [],
+            }
+
+        has_content = bool(serialized.get("content"))
+        has_structured = serialized.get("structuredContent") is not None
+        if not value.isError and not has_content and not has_structured:
+            serialized["content"] = [{"type": "text", "text": "Tool executed successfully"}]
+        return serialized
 
     if isinstance(value, list | tuple):
         value = value[:max_items] if len(value) > max_items else value

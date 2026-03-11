@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from hud.tools.base import BaseTool
-
-if TYPE_CHECKING:
-    from mcp.types import ContentBlock
 
 
 class HostedTool(BaseTool):
@@ -28,12 +25,8 @@ class HostedTool(BaseTool):
             }
     """
 
-    async def __call__(self, **kwargs: Any) -> list[ContentBlock]:
-        """Hosted tools cannot be called directly - they are executed by the provider.
-
-        Raises:
-            NotImplementedError: Always, as hosted tools are provider-executed
-        """
+    async def __call__(self) -> None:
+        """Hosted tools cannot be called directly - they are executed by the provider."""
         raise NotImplementedError(
             f"{self.__class__.__name__} is executed by the provider. "
             "Results are returned in the response metadata, not via tool calls."
