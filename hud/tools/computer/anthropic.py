@@ -214,7 +214,10 @@ class AnthropicComputerTool(HudComputerTool):
             compressed_kb = len(compressed) * 3 / 4 / 1024
             logger.info(
                 "Screenshot compression: %.0fKB → %.0fKB (%.1fx reduction, quality=%s)",
-                original_kb, compressed_kb, original_kb / max(compressed_kb, 1), self.screenshot_quality,
+                original_kb,
+                compressed_kb,
+                original_kb / max(compressed_kb, 1),
+                self.screenshot_quality,
             )
             return compressed
         except Exception as e:
