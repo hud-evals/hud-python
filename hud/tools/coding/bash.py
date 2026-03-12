@@ -26,7 +26,7 @@ class ClaudeBashSession:
     """A persistent bash shell session for Claude's bash tool.
 
     Uses readuntil-based output capture, which is simpler than ShellTool's
-    polling approach but doesn't support dynamic timeouts.
+    polling approach.
     """
 
     _started: bool
@@ -34,12 +34,14 @@ class ClaudeBashSession:
     _timed_out: bool
 
     command: str = "/bin/bash"
-    _timeout: float = 120.0  # seconds
     _sentinel: str = "<<exit>>"
 
-    def __init__(self) -> None:
+    DEFAULT_TIMEOUT: float = 120.0  # seconds
+
+    def __init__(self, timeout: float = DEFAULT_TIMEOUT) -> None:
         self._started = False
         self._timed_out = False
+        self._timeout = timeout
 
     async def start(self) -> None:
         """Start the bash session."""
@@ -77,7 +79,9 @@ class ClaudeBashSession:
             )
         if self._timed_out:
             raise ToolError(
-                f"timed out: bash did not return in {self._timeout} seconds and must be restarted",
+                f"Bash session timed out waiting for output after {self._timeout}s. "
+                "Background processes may still be running. "
+                "Use restart=true to get a new session.",
             ) from None
 
         if self._process.stdin is None:
@@ -113,7 +117,9 @@ class ClaudeBashSession:
         except (TimeoutError, asyncio.LimitOverrunError):
             self._timed_out = True
             raise ToolError(
-                f"timed out: bash did not return in {self._timeout} seconds and must be restarted",
+                f"Bash session timed out waiting for output after {self._timeout}s. "
+                "Background processes may still be running. "
+                "Use restart=true to get a new session.",
             ) from None
 
         # Attempt non-blocking stderr fetch (may return empty)
@@ -158,12 +164,19 @@ class BashTool(BaseTool):
         ),
     }
 
-    def __init__(self, session: ClaudeBashSession | None = None) -> None:
+    def __init__(
+        self,
+        session: ClaudeBashSession | None = None,
+        timeout: float = ClaudeBashSession.DEFAULT_TIMEOUT,
+    ) -> None:
         """Initialize BashTool with an optional session.
 
         Args:
             session: Optional pre-configured bash session. If not provided,
                      a new session will be created on first use.
+            timeout: Timeout in seconds for command execution. Defaults to 120s.
+                     If a pre-configured session is provided, the timeout is
+                     derived from that session instead.
         """
         super().__init__(
             env=session,
@@ -171,6 +184,7 @@ class BashTool(BaseTool):
             title="Bash Shell",
             description="Execute bash commands in a persistent shell session",
         )
+        self._timeout = session._timeout if session is not None else timeout
 
     @property
     def session(self) -> ClaudeBashSession | None:
@@ -195,15 +209,14 @@ class BashTool(BaseTool):
             List of MCP ContentBlocks with the result
         """
         if restart:
-            session_cls = type(self.session) if self.session else ClaudeBashSession
             if self.session:
                 self.session.stop()
-            self.session = session_cls()
+            self.session = ClaudeBashSession(timeout=self._timeout)
             await self.session.start()
             return ContentResult(output="Bash session restarted.").to_content_blocks()
 
         if self.session is None:
-            self.session = ClaudeBashSession()
+            self.session = ClaudeBashSession(timeout=self._timeout)
 
         if not self.session._started:
             await self.session.start()
