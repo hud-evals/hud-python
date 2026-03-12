@@ -175,7 +175,8 @@ class BashTool(BaseTool):
             session: Optional pre-configured bash session. If not provided,
                      a new session will be created on first use.
             timeout: Timeout in seconds for command execution. Defaults to 120s.
-                     Ignored if a pre-configured session is provided.
+                     If a pre-configured session is provided, the timeout is
+                     derived from that session instead.
         """
         super().__init__(
             env=session,
@@ -183,7 +184,7 @@ class BashTool(BaseTool):
             title="Bash Shell",
             description="Execute bash commands in a persistent shell session",
         )
-        self._timeout = timeout
+        self._timeout = session._timeout if session is not None else timeout
 
     @property
     def session(self) -> ClaudeBashSession | None:
