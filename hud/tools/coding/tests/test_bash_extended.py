@@ -136,8 +136,34 @@ class TestBashSessionExtended:
         with pytest.raises(ToolError) as exc_info:
             await session.run("slow command")
 
-        assert "timed out" in str(exc_info.value)
-        assert "120.0 seconds" in str(exc_info.value)
+        assert "timed out waiting for output" in str(exc_info.value)
+        assert "120.0s" in str(exc_info.value)
+        assert "Background processes may still be running" in str(exc_info.value)
+        assert "restart=true" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_session_run_with_custom_timeout(self):
+        """Test that a custom timeout value is used and reported in the error."""
+        session = _BashSession(timeout=1.0)
+        assert session._timeout == 1.0
+
+        session._started = True
+
+        mock_process = MagicMock()
+        mock_process.returncode = None
+        mock_process.stdin = MagicMock()
+        mock_process.stdin.write = MagicMock()
+        mock_process.stdin.drain = AsyncMock()
+        mock_process.stdout = MagicMock()
+        mock_process.stdout.readuntil = AsyncMock(side_effect=TimeoutError())
+
+        session._process = mock_process
+
+        with pytest.raises(ToolError) as exc_info:
+            await session.run("sleep 5")
+
+        assert "1.0s" in str(exc_info.value)
+        assert "120" not in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_session_run_with_stdout_exception(self):
