@@ -159,6 +159,9 @@ class Connector:
             "transport": self._transport,
             "auth": self._auth,
         }
+        client_timeout = getattr(self._transport, "_hud_client_timeout", None)
+        if client_timeout is not None:
+            client_kwargs["timeout"] = client_timeout
         if self._elicitation_handler is not None:
             client_kwargs["elicitation_handler"] = self._elicitation_handler
 
