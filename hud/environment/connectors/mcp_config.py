@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from hud.environment.connectors.base import BaseConnectorMixin
 
@@ -66,8 +66,7 @@ class MCPConfigConnectorMixin(BaseConnectorMixin):
                 if settings.client_timeout > 0
                 else min(request_timeout, settings.__class__.model_fields["client_timeout"].default)
             )
-            server_config.setdefault("sse_read_timeout", timeout)
-            transport = _build_transport(server_config)
+            transport = _build_transport(server_config, timeout=timeout)
 
         return self._add_connection(
             name,
@@ -121,17 +120,29 @@ class MCPConfigConnectorMixin(BaseConnectorMixin):
         return self
 
 
-def _build_transport(server_config: dict[str, Any]) -> Any:
+def _build_transport(server_config: dict[str, Any], *, timeout: float | None = None) -> Any:
     from fastmcp.client.transports import SSETransport, StreamableHttpTransport
     from fastmcp.mcp_config import infer_transport_type_from_url
 
     url = server_config["url"]
     transport_type = server_config.get("transport") or infer_transport_type_from_url(url)
-    transport_cls = SSETransport if transport_type == "sse" else StreamableHttpTransport
+    transport_timeout = timeout if timeout is not None else server_config.get("sse_read_timeout")
+    transport_kwargs = {
+        "url": url,
+        "headers": server_config.get("headers"),
+        "auth": server_config.get("auth"),
+        "httpx_client_factory": server_config.get("httpx_client_factory"),
+    }
 
-    return transport_cls(
-        url=url,
-        headers=server_config.get("headers"),
-        auth=server_config.get("auth"),
-        sse_read_timeout=server_config.get("sse_read_timeout"),
-    )
+    if transport_type == "sse":
+        return SSETransport(
+            **transport_kwargs,
+            sse_read_timeout=transport_timeout,
+        )
+
+    transport = StreamableHttpTransport(**transport_kwargs)
+    if transport_timeout is not None:
+        # FastMCP 3.x wants streamable HTTP timeouts on the client/session,
+        # not on the transport constructor.
+        cast("Any", transport)._hud_client_timeout = transport_timeout
+    return transport

@@ -197,7 +197,7 @@ class TestRemoteConnectorMixin:
         env = TestEnv()
         with patch("hud.settings.settings", spec=Settings) as mock_settings:
             mock_settings.hud_mcp_url = "https://mcp.hud.ai"
-            mock_settings.client_timeout = 300  # Used in connect_mcp for sse_read_timeout
+            mock_settings.client_timeout = 300  # Used in connect_mcp transport timeout logic
 
             env.connect_hub("browser")
 
@@ -205,3 +205,45 @@ class TestRemoteConnectorMixin:
         assert "hud" in env._connections
         # Verify hub config is stored for serialization
         assert env._hub_config == {"name": "browser"}
+
+    def test_connect_mcp_streamable_transport_uses_client_timeout(self) -> None:
+        """Streamable HTTP uses FastMCP client timeout instead of deprecated transport arg."""
+        from fastmcp.client.transports import StreamableHttpTransport
+
+        from hud.environment.connectors.mcp_config import MCPConfigConnectorMixin
+        from hud.settings import Settings
+
+        class TestEnv(MCPConfigConnectorMixin):
+            def __init__(self) -> None:
+                self._connections: dict[str, Connector] = {}
+
+        env = TestEnv()
+        with patch("hud.settings.settings", spec=Settings) as mock_settings:
+            mock_settings.client_timeout = 300
+            env.connect_mcp({"browser": {"url": "https://mcp.hud.ai/browser"}})
+
+        transport = env._connections["browser"]._transport
+        assert isinstance(transport, StreamableHttpTransport)
+        assert transport.sse_read_timeout is None
+        assert getattr(transport, "_hud_client_timeout", None) == 300
+
+    def test_connect_mcp_sse_transport_keeps_sse_timeout(self) -> None:
+        """SSE transports should continue to receive sse_read_timeout directly."""
+        from fastmcp.client.transports import SSETransport
+
+        from hud.environment.connectors.mcp_config import MCPConfigConnectorMixin
+        from hud.settings import Settings
+
+        class TestEnv(MCPConfigConnectorMixin):
+            def __init__(self) -> None:
+                self._connections: dict[str, Connector] = {}
+
+        env = TestEnv()
+        with patch("hud.settings.settings", spec=Settings) as mock_settings:
+            mock_settings.client_timeout = 300
+            env.connect_mcp({"browser": {"url": "https://mcp.hud.ai/browser", "transport": "sse"}})
+
+        transport = env._connections["browser"]._transport
+        assert isinstance(transport, SSETransport)
+        assert transport.sse_read_timeout is not None
+        assert transport.sse_read_timeout.total_seconds() == 300
