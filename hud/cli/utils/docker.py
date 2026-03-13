@@ -88,11 +88,9 @@ def _normalize_cmd(raw: list[str]) -> list[str]:
     import shlex
 
     tokens: list[str] = []
-    skip_shell_prefix = False
 
     for arg in raw:
         if arg in ("sh", "bash", "/bin/sh", "/bin/bash", "-c"):
-            skip_shell_prefix = True
             continue
         if " " in arg:
             try:
