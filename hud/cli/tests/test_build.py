@@ -20,6 +20,7 @@ from hud.cli.build import (
     increment_version,
     parse_version,
 )
+from hud.cli.utils.docker import detect_transport, stop_container
 
 
 class TestParseVersion:
@@ -60,12 +61,12 @@ class TestIncrementVersion:
     def test_increment_minor(self):
         """Test incrementing minor version."""
         assert increment_version("1.2.3", "minor") == "1.3.0"
-        assert increment_version("0.5.30", "minor") == "0.6.0"
+        assert increment_version("0.5.31", "minor") == "0.6.0"
 
     def test_increment_major(self):
         """Test incrementing major version."""
         assert increment_version("1.2.3", "major") == "2.0.0"
-        assert increment_version("0.5.30", "major") == "1.0.0"
+        assert increment_version("0.5.31", "major") == "1.0.0"
 
     def test_increment_with_v_prefix(self):
         """Test incrementing version with v prefix."""
@@ -206,9 +207,10 @@ RUN pip install fastmcp
 class TestAnalyzeMcpEnvironment:
     """Test analyzing MCP environment."""
 
+    @mock.patch("hud.cli.utils.docker.detect_transport", return_value=("stdio", None))
     @mock.patch("hud.cli.utils.mcp.analyze_environment")
     @mock.patch("fastmcp.Client")
-    async def test_analyze_success(self, mock_client_class, mock_mcp_analyze):
+    async def test_analyze_success(self, mock_client_class, mock_mcp_analyze, _mock_detect):
         """Test successful environment analysis."""
         # Setup mock client
         mock_client = mock.MagicMock()
@@ -234,8 +236,9 @@ class TestAnalyzeMcpEnvironment:
         assert result["tools"][0]["name"] == "test_tool"
         assert "initializeMs" in result
 
+    @mock.patch("hud.cli.utils.docker.detect_transport", return_value=("stdio", None))
     @mock.patch("fastmcp.Client")
-    async def test_analyze_failure(self, mock_client_class):
+    async def test_analyze_failure(self, mock_client_class, _mock_detect):
         """Test failed environment analysis."""
         # Setup mock client to fail on __aenter__
         mock_client = mock.MagicMock()
@@ -249,9 +252,10 @@ class TestAnalyzeMcpEnvironment:
         with pytest.raises(HudException, match="Connection failed"):
             await analyze_mcp_environment("test:latest")
 
+    @mock.patch("hud.cli.utils.docker.detect_transport", return_value=("stdio", None))
     @mock.patch("hud.cli.utils.mcp.analyze_environment")
     @mock.patch("fastmcp.Client")
-    async def test_analyze_verbose_mode(self, mock_client_class, mock_mcp_analyze):
+    async def test_analyze_verbose_mode(self, mock_client_class, mock_mcp_analyze, _mock_detect):
         """Test analysis in verbose mode."""
         mock_client = mock.MagicMock()
         mock_client.__aenter__ = mock.AsyncMock(return_value=mock_client)
@@ -271,6 +275,278 @@ class TestAnalyzeMcpEnvironment:
 
         assert result["success"] is True
         assert "initializeMs" in result
+
+
+class TestDetectTransport:
+    """Test detect_transport auto-detection across all CMD shapes."""
+
+    # --- proper exec form ---
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_exec_form_http(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["hud", "dev", "env:env", "--port", "8080"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8080
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_exec_form_http_default_port(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["hud", "dev", "env:env"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8765
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_exec_form_stdio(self, mock_get_cmd):
+        mock_get_cmd.return_value = [
+            "uv",
+            "run",
+            "python",
+            "-m",
+            "hud",
+            "dev",
+            "env:env",
+            "--stdio",
+        ]
+        mode, port = detect_transport("img:latest")
+        assert mode == "stdio"
+        assert port is None
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_exec_form_short_port_flag(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["hud", "dev", "env:env", "-p", "3000"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 3000
+
+    # --- uv run python -m prefix ---
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_uv_run_python_m_http(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["uv", "run", "python", "-m", "hud", "dev", "env:env"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8765
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_uv_run_python_m_with_port(self, mock_get_cmd):
+        mock_get_cmd.return_value = [
+            "uv",
+            "run",
+            "python",
+            "-m",
+            "hud",
+            "dev",
+            "env:env",
+            "--port",
+            "9000",
+        ]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 9000
+
+    # --- sh -c shell wrapper ---
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_sh_c_http(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["sh", "-c", "hud dev env:env --port 8080"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8080
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_sh_c_stdio(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["sh", "-c", "hud dev env:env --stdio"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "stdio"
+        assert port is None
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_sh_c_default_port(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["sh", "-c", "hud dev env:env"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8765
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_bash_c_variant(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["/bin/bash", "-c", "hud dev env:env --port 4000"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 4000
+
+    # --- single-string exec form (Docker misuse but common) ---
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_single_string_http(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["hud dev env:env --port 8080"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8080
+
+    # --- chained / multi-command shell ---
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_chained_and_operator(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["sh", "-c", "cd /app && hud dev env:env --port 8080"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8080
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_chained_semicolon(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["sh", "-c", "setup.sh; hud dev env:env"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8765
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_backgrounded_backend(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["sh", "-c", "python backend.py & hud dev env:env --port 8080"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8080
+
+    # --- fallback to stdio ---
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_stdio_when_no_cmd(self, mock_get_cmd):
+        mock_get_cmd.return_value = None
+        mode, port = detect_transport("img:latest")
+        assert mode == "stdio"
+        assert port is None
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_stdio_for_custom_entrypoint(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["python", "server.py"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "stdio"
+        assert port is None
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_stdio_for_empty_cmd(self, mock_get_cmd):
+        mock_get_cmd.return_value = []
+        mode, port = detect_transport("img:latest")
+        assert mode == "stdio"
+        assert port is None
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_stdio_dev_alone_without_hud(self, mock_get_cmd):
+        """Bare 'dev' without preceding 'hud' should not trigger HTTP."""
+        mock_get_cmd.return_value = ["python", "dev", "server.py"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "stdio"
+        assert port is None
+
+
+@pytest.mark.asyncio
+class TestAnalyzeMcpHttp:
+    """Test HTTP-mode analysis in analyze_mcp_environment."""
+
+    @mock.patch("hud.cli.utils.docker.stop_container")
+    @mock.patch("hud.cli.utils.mcp.wait_for_http_server", new_callable=mock.AsyncMock)
+    @mock.patch("subprocess.run")
+    @mock.patch("hud.cli.utils.docker.detect_transport", return_value=("http", 8765))
+    @mock.patch("hud.cli.utils.mcp.analyze_environment")
+    @mock.patch("fastmcp.Client")
+    async def test_http_analysis_success(
+        self,
+        mock_client_class,
+        mock_mcp_analyze,
+        _mock_detect,
+        mock_subprocess,
+        _mock_wait,
+        _mock_stop,
+    ):
+        """HTTP path: runs detached container, connects via URL, cleans up."""
+        mock_client = mock.MagicMock()
+        mock_client.__aenter__ = mock.AsyncMock(return_value=mock_client)
+        mock_client.is_connected = mock.MagicMock(return_value=True)
+        mock_client.close = mock.AsyncMock()
+        mock_client_class.return_value = mock_client
+
+        mock_proc = mock.MagicMock()
+        mock_proc.stdout = "abc123def456\n"
+        mock_subprocess.return_value = mock_proc
+
+        mock_mcp_analyze.return_value = {
+            "tools": [{"name": "tool1", "description": "A tool"}],
+            "hub_tools": {},
+            "resources": [],
+        }
+
+        result = await analyze_mcp_environment("http-img:latest")
+
+        assert result["success"] is True
+        assert result["toolCount"] == 1
+
+        # Verify docker run was called with -d and port mapping
+        docker_call = mock_subprocess.call_args
+        cmd = docker_call.args[0] if docker_call.args else docker_call[0][0]
+        assert "-d" in cmd
+        assert "--rm" in cmd
+
+        # Verify client was constructed with an HTTP URL transport
+        transport_arg = (
+            mock_client_class.call_args.kwargs.get("transport")
+            or mock_client_class.call_args.args[0]
+        )
+        assert "hud" in transport_arg
+        assert "localhost" in transport_arg["hud"]["url"]
+        assert transport_arg["hud"]["auth"] is None
+
+        # Cleanup was called
+        _mock_stop.assert_called_once()
+
+    @mock.patch("hud.cli.utils.docker.stop_container")
+    @mock.patch("subprocess.run")
+    @mock.patch("hud.cli.utils.docker.detect_transport", return_value=("http", 8765))
+    async def test_http_container_start_failure(self, _mock_detect, mock_subprocess, _mock_stop):
+        """HTTP path: failing to start the container raises HudException."""
+        mock_subprocess.side_effect = subprocess.CalledProcessError(
+            1, "docker run", stderr="image not found"
+        )
+
+        from hud.shared.exceptions import HudException
+
+        with pytest.raises(HudException, match="Failed to start Docker container"):
+            await analyze_mcp_environment("bad-img:latest")
+
+        _mock_stop.assert_called_once()
+
+    @mock.patch("hud.cli.utils.docker.stop_container")
+    @mock.patch("hud.cli.utils.mcp.wait_for_http_server", new_callable=mock.AsyncMock)
+    @mock.patch("subprocess.run")
+    @mock.patch("hud.cli.utils.docker.detect_transport", return_value=("http", 8765))
+    async def test_http_server_timeout(self, _mock_detect, mock_subprocess, mock_wait, _mock_stop):
+        """HTTP path: server not becoming ready raises HudException."""
+        mock_proc = mock.MagicMock()
+        mock_proc.stdout = "abc123\n"
+        mock_subprocess.return_value = mock_proc
+        mock_wait.side_effect = TimeoutError("not ready")
+
+        from hud.shared.exceptions import HudException
+
+        with pytest.raises(HudException, match="readiness timeout"):
+            await analyze_mcp_environment("slow-img:latest")
+
+        _mock_stop.assert_called_once()
+
+
+class TestStopContainer:
+    """Test stop_container helper."""
+
+    @mock.patch("hud.cli.utils.docker.subprocess.run")
+    def test_calls_stop_then_rm(self, mock_run):
+        stop_container("my-container")
+        assert mock_run.call_count == 2
+        calls = [c.args[0] for c in mock_run.call_args_list]
+        assert calls[0] == ["docker", "stop", "my-container"]
+        assert calls[1] == ["docker", "rm", "-f", "my-container"]
+
+    @mock.patch("hud.cli.utils.docker.subprocess.run", side_effect=Exception("docker not found"))
+    def test_suppresses_errors(self, mock_run):
+        stop_container("my-container")
 
 
 class TestBuildDockerImage:

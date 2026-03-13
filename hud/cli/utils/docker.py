@@ -11,6 +11,7 @@ import json
 import platform
 import shutil
 import subprocess
+from contextlib import suppress
 from pathlib import Path
 
 from .config import parse_env_file
@@ -66,8 +67,85 @@ def get_docker_cmd(image: str) -> list[str] | None:
             cmd = config.get("Cmd", [])
             return cmd if cmd else None
 
-    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError):
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, FileNotFoundError):
         return None
+
+
+DEFAULT_HTTP_PORT = 8765
+
+
+def _normalize_cmd(raw: list[str]) -> list[str]:
+    """Flatten a Docker CMD into a flat token list for scanning.
+
+    Handles all common CMD shapes:
+    - Proper exec form:  ``["hud", "dev", "env:env", "--port", "8080"]``
+    - Shell wrapper:     ``["sh", "-c", "hud dev env:env --port 8080"]``
+    - Single string:     ``["hud dev env:env --port 8080"]``
+    - Chained commands:  ``["sh", "-c", "setup.sh && hud dev env:env"]``
+
+    For shell-form strings we use :func:`shlex.split` so that quoted
+    arguments are kept together.
+    """
+    import shlex
+
+    tokens: list[str] = []
+
+    for arg in raw:
+        if arg in ("sh", "bash", "/bin/sh", "/bin/bash", "-c"):
+            continue
+        if " " in arg:
+            try:
+                tokens.extend(shlex.split(arg))
+            except ValueError:
+                tokens.extend(arg.split())
+        else:
+            tokens.append(arg)
+
+    return tokens
+
+
+def detect_transport(image: str) -> tuple[str, int | None]:
+    """Detect whether a Docker image's CMD runs in stdio or HTTP mode.
+
+    Returns ``("stdio", None)`` for stdio images, ``("http", port)`` for HTTP.
+
+    Detection scans the image's CMD for the pattern ``hud dev`` (with or
+    without ``python -m`` prefix).  If found without ``--stdio``, the
+    image is assumed to start an HTTP server.  The port is extracted from
+    ``--port N`` / ``-p N`` if present, otherwise defaults to 8765.
+
+    All other CMD patterns default to stdio (matching ``MCPServer.run()``).
+    """
+    cmd = get_docker_cmd(image)
+    if not cmd:
+        return ("stdio", None)
+
+    tokens = _normalize_cmd(cmd)
+
+    has_hud_dev = False
+    has_stdio = False
+    port: int | None = None
+
+    for i, tok in enumerate(tokens):
+        if tok == "hud" and i + 1 < len(tokens) and tokens[i + 1] == "dev":
+            has_hud_dev = True
+        if tok == "--stdio":
+            has_stdio = True
+        if tok in ("--port", "-p") and i + 1 < len(tokens):
+            with suppress(ValueError):
+                port = int(tokens[i + 1])
+
+    if has_hud_dev and not has_stdio:
+        return ("http", port or DEFAULT_HTTP_PORT)
+
+    return ("stdio", None)
+
+
+def stop_container(name: str) -> None:
+    """Best-effort stop and remove a Docker container."""
+    for action in (["docker", "stop", name], ["docker", "rm", "-f", name]):
+        with suppress(Exception):
+            subprocess.run(action, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
 
 
 def image_exists(image_name: str) -> bool:

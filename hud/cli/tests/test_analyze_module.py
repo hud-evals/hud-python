@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from hud.cli.analyze import (
+    _prepare_mcp_config,
     analyze_environment,
     analyze_environment_from_config,
     analyze_environment_from_mcp_config,
@@ -125,3 +126,42 @@ async def test_analyze_environment_from_mcp_config(MockClient, mock_mcp_analyze)
     mcp_config = {"local": {"command": "docker", "args": ["run", "img"]}}
     await analyze_environment_from_mcp_config(mcp_config, output_format="json", verbose=False)
     assert client.__aenter__.awaited and client.close.awaited
+
+
+@patch("hud.cli.utils.mcp.analyze_environment")
+@patch("fastmcp.Client")
+async def test_analyze_environment_from_mcp_config_http(MockClient, mock_mcp_analyze):
+    """HTTP transport (hud dev) should inject auth=None to skip OAuth discovery."""
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.is_connected = MagicMock(return_value=True)
+    client.close = AsyncMock()
+    MockClient.return_value = client
+    mock_mcp_analyze.return_value = {"tools": [], "resources": []}
+
+    mcp_config = {"hud": {"url": "http://localhost:8000/mcp"}}
+    await analyze_environment_from_mcp_config(mcp_config, output_format="json", verbose=False)
+    assert client.__aenter__.awaited and client.close.awaited
+    # Verify that _prepare_mcp_config injected auth=None
+    call_kwargs = MockClient.call_args
+    transport_arg = call_kwargs.kwargs.get("transport") or call_kwargs.args[0]
+    assert transport_arg["hud"]["auth"] is None
+
+
+def test_prepare_mcp_config_injects_auth_for_url():
+    """URL-based entries get auth=None; stdio entries are left alone."""
+    cfg = {
+        "hud": {"url": "http://localhost:8000/mcp"},
+        "local": {"command": "docker", "args": ["run", "img"]},
+    }
+    result = _prepare_mcp_config(cfg)
+    assert result["hud"]["auth"] is None
+    assert result["hud"]["url"] == "http://localhost:8000/mcp"
+    assert "auth" not in result["local"]
+
+
+def test_prepare_mcp_config_preserves_explicit_auth():
+    """If auth is already set, don't overwrite it."""
+    cfg = {"hud": {"url": "http://localhost:8000/mcp", "auth": "bearer-token"}}
+    result = _prepare_mcp_config(cfg)
+    assert result["hud"]["auth"] == "bearer-token"
