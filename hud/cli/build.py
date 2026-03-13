@@ -514,7 +514,8 @@ async def analyze_mcp_environment(
             hud_console.info(f"HTTP transport detected — mapping port {host_port}:{port}")
 
             try:
-                proc = subprocess.run(  # noqa: S603
+                proc = await asyncio.to_thread(
+                    subprocess.run,
                     docker_cmd,
                     capture_output=True,
                     text=True,
@@ -553,7 +554,9 @@ async def analyze_mcp_environment(
             hud_console.info("Initializing MCP client...")
 
         if is_http:
-            await wait_for_http_server(server_url, timeout=60.0)  # type: ignore[possibly-undefined]
+            await wait_for_http_server(  # type: ignore[possibly-undefined]
+                server_url, timeout_seconds=60.0
+            )
             await client.__aenter__()
         else:
             await asyncio.wait_for(client.__aenter__(), timeout=60.0)

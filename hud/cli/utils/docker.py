@@ -11,6 +11,7 @@ import json
 import platform
 import shutil
 import subprocess
+from contextlib import suppress
 from pathlib import Path
 
 from .config import parse_env_file
@@ -131,10 +132,8 @@ def detect_transport(image: str) -> tuple[str, int | None]:
         if tok == "--stdio":
             has_stdio = True
         if tok in ("--port", "-p") and i + 1 < len(tokens):
-            try:
+            with suppress(ValueError):
                 port = int(tokens[i + 1])
-            except ValueError:
-                pass
 
     if has_hud_dev and not has_stdio:
         return ("http", port or DEFAULT_HTTP_PORT)
@@ -145,12 +144,10 @@ def detect_transport(image: str) -> tuple[str, int | None]:
 def stop_container(name: str) -> None:
     """Best-effort stop and remove a Docker container."""
     for action in (["docker", "stop", name], ["docker", "rm", "-f", name]):
-        try:
-            subprocess.run(  # noqa: S603
+        with suppress(Exception):
+            subprocess.run(
                 action, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10
             )
-        except Exception:  # noqa: BLE001
-            pass
 
 
 def image_exists(image_name: str) -> bool:
