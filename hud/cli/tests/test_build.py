@@ -298,7 +298,16 @@ class TestDetectTransport:
 
     @mock.patch("hud.cli.utils.docker.get_docker_cmd")
     def test_exec_form_stdio(self, mock_get_cmd):
-        mock_get_cmd.return_value = ["uv", "run", "python", "-m", "hud", "dev", "env:env", "--stdio"]
+        mock_get_cmd.return_value = [
+            "uv",
+            "run",
+            "python",
+            "-m",
+            "hud",
+            "dev",
+            "env:env",
+            "--stdio",
+        ]
         mode, port = detect_transport("img:latest")
         assert mode == "stdio"
         assert port is None
@@ -322,7 +331,15 @@ class TestDetectTransport:
     @mock.patch("hud.cli.utils.docker.get_docker_cmd")
     def test_uv_run_python_m_with_port(self, mock_get_cmd):
         mock_get_cmd.return_value = [
-            "uv", "run", "python", "-m", "hud", "dev", "env:env", "--port", "9000",
+            "uv",
+            "run",
+            "python",
+            "-m",
+            "hud",
+            "dev",
+            "env:env",
+            "--port",
+            "9000",
         ]
         mode, port = detect_transport("img:latest")
         assert mode == "http"
@@ -470,7 +487,10 @@ class TestAnalyzeMcpHttp:
         assert "--rm" in cmd
 
         # Verify client was constructed with an HTTP URL transport
-        transport_arg = mock_client_class.call_args.kwargs.get("transport") or mock_client_class.call_args.args[0]
+        transport_arg = (
+            mock_client_class.call_args.kwargs.get("transport")
+            or mock_client_class.call_args.args[0]
+        )
         assert "hud" in transport_arg
         assert "localhost" in transport_arg["hud"]["url"]
         assert transport_arg["hud"]["auth"] is None
@@ -481,9 +501,7 @@ class TestAnalyzeMcpHttp:
     @mock.patch("hud.cli.utils.docker.stop_container")
     @mock.patch("subprocess.run")
     @mock.patch("hud.cli.utils.docker.detect_transport", return_value=("http", 8765))
-    async def test_http_container_start_failure(
-        self, _mock_detect, mock_subprocess, _mock_stop
-    ):
+    async def test_http_container_start_failure(self, _mock_detect, mock_subprocess, _mock_stop):
         """HTTP path: failing to start the container raises HudException."""
         mock_subprocess.side_effect = subprocess.CalledProcessError(
             1, "docker run", stderr="image not found"
@@ -500,9 +518,7 @@ class TestAnalyzeMcpHttp:
     @mock.patch("hud.cli.utils.mcp.wait_for_http_server", new_callable=mock.AsyncMock)
     @mock.patch("subprocess.run")
     @mock.patch("hud.cli.utils.docker.detect_transport", return_value=("http", 8765))
-    async def test_http_server_timeout(
-        self, _mock_detect, mock_subprocess, mock_wait, _mock_stop
-    ):
+    async def test_http_server_timeout(self, _mock_detect, mock_subprocess, mock_wait, _mock_stop):
         """HTTP path: server not becoming ready raises HudException."""
         mock_proc = mock.MagicMock()
         mock_proc.stdout = "abc123\n"

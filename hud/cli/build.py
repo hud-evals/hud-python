@@ -499,9 +499,14 @@ async def analyze_mcp_environment(
 
             container_name = f"hud-build-analyze-{os.getpid()}"
             docker_cmd = [
-                "docker", "run", "-d", "--rm",
-                "--name", container_name,
-                "-p", f"{host_port}:{port}",
+                "docker",
+                "run",
+                "-d",
+                "--rm",
+                "--name",
+                container_name,
+                "-p",
+                f"{host_port}:{port}",
                 *build_env_flags(env_vars),
                 image,
             ]
@@ -510,7 +515,11 @@ async def analyze_mcp_environment(
 
             try:
                 proc = subprocess.run(  # noqa: S603
-                    docker_cmd, capture_output=True, text=True, check=True, timeout=30,
+                    docker_cmd,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=30,
                 )
             except subprocess.CalledProcessError as e:
                 from hud.shared.exceptions import HudException
@@ -581,9 +590,7 @@ async def analyze_mcp_environment(
             stop_container(container_name)
 
 
-def _build_analysis_result(
-    full_analysis: dict[str, Any], initialize_ms: int
-) -> dict[str, Any]:
+def _build_analysis_result(full_analysis: dict[str, Any], initialize_ms: int) -> dict[str, Any]:
     """Normalize the raw analysis dict into the build-lock result format."""
     tools_list = full_analysis.get("tools", [])
     hub_map = full_analysis.get("hub_tools", {}) or full_analysis.get("hubTools", {})
