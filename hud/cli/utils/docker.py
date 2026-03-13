@@ -73,29 +73,68 @@ def get_docker_cmd(image: str) -> list[str] | None:
 DEFAULT_HTTP_PORT = 8765
 
 
+def _normalize_cmd(raw: list[str]) -> list[str]:
+    """Flatten a Docker CMD into a flat token list for scanning.
+
+    Handles all common CMD shapes:
+    - Proper exec form:  ``["hud", "dev", "env:env", "--port", "8080"]``
+    - Shell wrapper:     ``["sh", "-c", "hud dev env:env --port 8080"]``
+    - Single string:     ``["hud dev env:env --port 8080"]``
+    - Chained commands:  ``["sh", "-c", "setup.sh && hud dev env:env"]``
+
+    For shell-form strings we use :func:`shlex.split` so that quoted
+    arguments are kept together.
+    """
+    import shlex
+
+    tokens: list[str] = []
+    skip_shell_prefix = False
+
+    for arg in raw:
+        if arg in ("sh", "bash", "/bin/sh", "/bin/bash", "-c"):
+            skip_shell_prefix = True
+            continue
+        if " " in arg:
+            try:
+                tokens.extend(shlex.split(arg))
+            except ValueError:
+                tokens.extend(arg.split())
+        else:
+            tokens.append(arg)
+
+    return tokens
+
+
 def detect_transport(image: str) -> tuple[str, int | None]:
     """Detect whether a Docker image's CMD runs in stdio or HTTP mode.
 
     Returns ``("stdio", None)`` for stdio images, ``("http", port)`` for HTTP.
-    Images whose CMD invokes ``hud dev`` without ``--stdio`` are treated as HTTP;
-    everything else is assumed stdio (the ``MCPServer.run()`` default).
+
+    Detection scans the image's CMD for the pattern ``hud dev`` (with or
+    without ``python -m`` prefix).  If found without ``--stdio``, the
+    image is assumed to start an HTTP server.  The port is extracted from
+    ``--port N`` / ``-p N`` if present, otherwise defaults to 8765.
+
+    All other CMD patterns default to stdio (matching ``MCPServer.run()``).
     """
     cmd = get_docker_cmd(image)
     if not cmd:
         return ("stdio", None)
 
+    tokens = _normalize_cmd(cmd)
+
     has_hud_dev = False
     has_stdio = False
     port: int | None = None
 
-    for i, arg in enumerate(cmd):
-        if arg == "dev":
+    for i, tok in enumerate(tokens):
+        if tok == "hud" and i + 1 < len(tokens) and tokens[i + 1] == "dev":
             has_hud_dev = True
-        if arg == "--stdio":
+        if tok == "--stdio":
             has_stdio = True
-        if arg in ("--port", "-p") and i + 1 < len(cmd):
+        if tok in ("--port", "-p") and i + 1 < len(tokens):
             try:
-                port = int(cmd[i + 1])
+                port = int(tokens[i + 1])
             except ValueError:
                 pass
 

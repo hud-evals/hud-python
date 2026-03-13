@@ -278,24 +278,49 @@ class TestAnalyzeMcpEnvironment:
 
 
 class TestDetectTransport:
-    """Test detect_transport auto-detection logic."""
+    """Test detect_transport auto-detection across all CMD shapes."""
+
+    # --- proper exec form ---
 
     @mock.patch("hud.cli.utils.docker.get_docker_cmd")
-    def test_stdio_when_cmd_has_stdio_flag(self, mock_get_cmd):
+    def test_exec_form_http(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["hud", "dev", "env:env", "--port", "8080"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8080
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_exec_form_http_default_port(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["hud", "dev", "env:env"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8765
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_exec_form_stdio(self, mock_get_cmd):
         mock_get_cmd.return_value = ["uv", "run", "python", "-m", "hud", "dev", "env:env", "--stdio"]
         mode, port = detect_transport("img:latest")
         assert mode == "stdio"
         assert port is None
 
     @mock.patch("hud.cli.utils.docker.get_docker_cmd")
-    def test_http_when_hud_dev_without_stdio(self, mock_get_cmd):
+    def test_exec_form_short_port_flag(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["hud", "dev", "env:env", "-p", "3000"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 3000
+
+    # --- uv run python -m prefix ---
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_uv_run_python_m_http(self, mock_get_cmd):
         mock_get_cmd.return_value = ["uv", "run", "python", "-m", "hud", "dev", "env:env"]
         mode, port = detect_transport("img:latest")
         assert mode == "http"
-        assert port == 8765  # default
+        assert port == 8765
 
     @mock.patch("hud.cli.utils.docker.get_docker_cmd")
-    def test_http_extracts_custom_port(self, mock_get_cmd):
+    def test_uv_run_python_m_with_port(self, mock_get_cmd):
         mock_get_cmd.return_value = [
             "uv", "run", "python", "-m", "hud", "dev", "env:env", "--port", "9000",
         ]
@@ -303,14 +328,69 @@ class TestDetectTransport:
         assert mode == "http"
         assert port == 9000
 
+    # --- sh -c shell wrapper ---
+
     @mock.patch("hud.cli.utils.docker.get_docker_cmd")
-    def test_http_extracts_short_port_flag(self, mock_get_cmd):
-        mock_get_cmd.return_value = [
-            "uv", "run", "python", "-m", "hud", "dev", "env:env", "-p", "3000",
-        ]
+    def test_sh_c_http(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["sh", "-c", "hud dev env:env --port 8080"]
         mode, port = detect_transport("img:latest")
         assert mode == "http"
-        assert port == 3000
+        assert port == 8080
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_sh_c_stdio(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["sh", "-c", "hud dev env:env --stdio"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "stdio"
+        assert port is None
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_sh_c_default_port(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["sh", "-c", "hud dev env:env"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8765
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_bash_c_variant(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["/bin/bash", "-c", "hud dev env:env --port 4000"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 4000
+
+    # --- single-string exec form (Docker misuse but common) ---
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_single_string_http(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["hud dev env:env --port 8080"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8080
+
+    # --- chained / multi-command shell ---
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_chained_and_operator(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["sh", "-c", "cd /app && hud dev env:env --port 8080"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8080
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_chained_semicolon(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["sh", "-c", "setup.sh; hud dev env:env"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8765
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_backgrounded_backend(self, mock_get_cmd):
+        mock_get_cmd.return_value = ["sh", "-c", "python backend.py & hud dev env:env --port 8080"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "http"
+        assert port == 8080
+
+    # --- fallback to stdio ---
 
     @mock.patch("hud.cli.utils.docker.get_docker_cmd")
     def test_stdio_when_no_cmd(self, mock_get_cmd):
@@ -321,8 +401,22 @@ class TestDetectTransport:
 
     @mock.patch("hud.cli.utils.docker.get_docker_cmd")
     def test_stdio_for_custom_entrypoint(self, mock_get_cmd):
-        """Non-hud-dev CMD defaults to stdio (MCPServer.run() default)."""
         mock_get_cmd.return_value = ["python", "server.py"]
+        mode, port = detect_transport("img:latest")
+        assert mode == "stdio"
+        assert port is None
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_stdio_for_empty_cmd(self, mock_get_cmd):
+        mock_get_cmd.return_value = []
+        mode, port = detect_transport("img:latest")
+        assert mode == "stdio"
+        assert port is None
+
+    @mock.patch("hud.cli.utils.docker.get_docker_cmd")
+    def test_stdio_dev_alone_without_hud(self, mock_get_cmd):
+        """Bare 'dev' without preceding 'hud' should not trigger HTTP."""
+        mock_get_cmd.return_value = ["python", "dev", "server.py"]
         mode, port = detect_transport("img:latest")
         assert mode == "stdio"
         assert port is None
