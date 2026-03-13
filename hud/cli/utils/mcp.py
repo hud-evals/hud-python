@@ -2,14 +2,34 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from fastmcp import Client
 
 logger = logging.getLogger(__name__)
+
+
+async def wait_for_http_server(url: str, timeout: float = 60.0, interval: float = 1.0) -> None:
+    """Poll *url* until it responds (status < 500) or *timeout* seconds elapse."""
+    import httpx
+
+    deadline = time.time() + timeout
+    last_err: Exception | None = None
+    while time.time() < deadline:
+        try:
+            async with httpx.AsyncClient() as http:
+                resp = await http.get(url, timeout=5.0)
+                if resp.status_code < 500:
+                    return
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+        await asyncio.sleep(interval)
+    raise TimeoutError(f"Server at {url} not ready after {timeout}s: {last_err}")
 
 
 async def analyze_environment(

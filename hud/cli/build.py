@@ -461,107 +461,107 @@ def collect_runtime_metadata(image: str, *, verbose: bool = False) -> dict[str, 
 async def analyze_mcp_environment(
     image: str, verbose: bool = False, env_vars: dict[str, str] | None = None
 ) -> dict[str, Any]:
-    """Analyze an MCP environment to extract metadata."""
-    hud_console = HUDConsole()
-    env_vars = env_vars or {}
+    """Analyze an MCP environment to extract metadata.
 
-    # Build Docker command to run the image, injecting any provided env vars
-    from hud.cli.utils.docker import build_env_flags
-
-    docker_cmd = ["docker", "run", "--rm", "-i", *build_env_flags(env_vars), image]
-
-    # Show full docker command being used for analysis
-    hud_console.dim_info("Command:", " ".join(docker_cmd))
-
-    # Create MCP config consistently with analyze helpers
-    from hud.cli.analyze import parse_docker_command
-
-    mcp_config = parse_docker_command(docker_cmd)
-    # Extract server name for display (first key in mcp_config)
-    server_name = next(iter(mcp_config.keys()), None)
-
-    # Initialize client and measure timing
+    Supports both stdio (default) and HTTP transport.  The transport is
+    auto-detected from the image's CMD directive.
+    """
     from fastmcp import Client as FastMCPClient
 
+    from hud.cli.utils.docker import (
+        DEFAULT_HTTP_PORT,
+        build_env_flags,
+        detect_transport,
+        stop_container,
+    )
     from hud.cli.utils.mcp import analyze_environment
 
-    start_time = time.time()
-    client = FastMCPClient(transport=mcp_config)
+    hud_console = HUDConsole()
+    env_vars = env_vars or {}
+    transport_mode, container_port = detect_transport(image)
+    is_http = transport_mode == "http"
+    container_name: str | None = None
     initialized = False
+    client: Any = None
 
     try:
+        # --- transport-specific setup ---
+        if is_http:
+            from hud.cli.utils.logging import find_free_port
+            from hud.cli.utils.mcp import wait_for_http_server
+
+            port = container_port or DEFAULT_HTTP_PORT
+            host_port = find_free_port(port)
+            if host_port is None:
+                from hud.shared.exceptions import HudException
+
+                raise HudException(f"No free port found starting from {port}")
+
+            container_name = f"hud-build-analyze-{os.getpid()}"
+            docker_cmd = [
+                "docker", "run", "-d", "--rm",
+                "--name", container_name,
+                "-p", f"{host_port}:{port}",
+                *build_env_flags(env_vars),
+                image,
+            ]
+            hud_console.dim_info("Command:", " ".join(docker_cmd))
+            hud_console.info(f"HTTP transport detected — mapping port {host_port}:{port}")
+
+            try:
+                proc = subprocess.run(  # noqa: S603
+                    docker_cmd, capture_output=True, text=True, check=True, timeout=30,
+                )
+            except subprocess.CalledProcessError as e:
+                from hud.shared.exceptions import HudException
+
+                hud_console.error(f"Failed to start container: {e.stderr.strip()}")
+                raise HudException("Failed to start Docker container for HTTP analysis") from e
+
+            if verbose:
+                hud_console.info(f"Container started: {proc.stdout.strip()[:12]}")
+
+            server_url = f"http://localhost:{host_port}/mcp"
+            if verbose:
+                hud_console.info(f"Waiting for server at {server_url} ...")
+
+            mcp_config: dict[str, Any] = {"hud": {"url": server_url, "auth": None}}
+            server_name = "hud"
+        else:
+            docker_cmd = ["docker", "run", "--rm", "-i", *build_env_flags(env_vars), image]
+            hud_console.dim_info("Command:", " ".join(docker_cmd))
+
+            from hud.cli.analyze import parse_docker_command
+
+            mcp_config = parse_docker_command(docker_cmd)
+            server_name = next(iter(mcp_config.keys()), None)
+
+        # --- shared: connect, analyze, build result ---
+        start_time = time.time()
+        client = FastMCPClient(transport=mcp_config)
+
         if verbose:
             hud_console.info("Initializing MCP client...")
 
-        # Add timeout to fail fast instead of hanging (60 seconds)
-        await asyncio.wait_for(client.__aenter__(), timeout=60.0)
+        if is_http:
+            await wait_for_http_server(server_url, timeout=60.0)  # type: ignore[possibly-undefined]
+            await client.__aenter__()
+        else:
+            await asyncio.wait_for(client.__aenter__(), timeout=60.0)
+
         initialized = True
         initialize_ms = int((time.time() - start_time) * 1000)
 
-        # Delegate to standard analysis helper
         full_analysis = await analyze_environment(client, verbose, server_name=server_name)
-
-        # Normalize and enrich with internalTools if a hub map is present
-        tools_list = full_analysis.get("tools", [])
-        hub_map = full_analysis.get("hub_tools", {}) or full_analysis.get("hubTools", {})
-
-        normalized_tools: list[dict[str, Any]] = []
-        internal_total = 0
-        for t in tools_list:
-            # Extract core fields (support object or dict forms)
-            if hasattr(t, "name"):
-                name = getattr(t, "name", None)
-                description = getattr(t, "description", None)
-                input_schema = getattr(t, "inputSchema", None)
-                existing_internal = getattr(t, "internalTools", None)
-            else:
-                name = t.get("name")
-                description = t.get("description")
-                # accept either inputSchema or input_schema
-                input_schema = t.get("inputSchema") or t.get("input_schema")
-                # accept either internalTools or internal_tools
-                existing_internal = t.get("internalTools") or t.get("internal_tools")
-
-            tool_entry: dict[str, Any] = {"name": name}
-            if description:
-                tool_entry["description"] = description
-            if input_schema:
-                tool_entry["inputSchema"] = input_schema
-
-            # Merge internal tools: preserve any existing declaration and add hub_map[name]
-            merged_internal: list[str] = []
-            if isinstance(existing_internal, list):
-                merged_internal.extend([str(x) for x in existing_internal])
-            if isinstance(hub_map, dict) and name in hub_map and isinstance(hub_map[name], list):
-                merged_internal.extend([str(x) for x in hub_map[name]])
-            if merged_internal:
-                # Deduplicate while preserving order
-                merged_internal = list(dict.fromkeys(merged_internal))
-                tool_entry["internalTools"] = merged_internal
-                internal_total += len(merged_internal)
-
-            normalized_tools.append(tool_entry)
-
-        result = {
-            "initializeMs": initialize_ms,
-            "toolCount": len(tools_list),
-            "internalToolCount": internal_total,
-            "tools": normalized_tools,
-            "success": True,
-        }
-        if hub_map:
-            result["hub_tools"] = hub_map
-        # Include prompts and resources from analysis
-        if full_analysis.get("prompts"):
-            result["prompts"] = full_analysis["prompts"]
-        if full_analysis.get("resources"):
-            result["resources"] = full_analysis["resources"]
-        if "scenarios" in full_analysis:
-            result["scenarios"] = full_analysis["scenarios"]
-        return result
+        return _build_analysis_result(full_analysis, initialize_ms)
     except TimeoutError:
         from hud.shared.exceptions import HudException
 
+        if is_http:
+            hud_console.error("MCP server did not become ready within 60 seconds")
+            if container_name:
+                hud_console.info("Check container logs: docker logs " + container_name)
+            raise HudException("MCP server HTTP readiness timeout") from None
         hud_console.error("MCP server initialization timed out after 60 seconds")
         hud_console.info(
             "The server likely crashed during startup - check stderr logs with 'hud debug'"
@@ -570,16 +570,72 @@ async def analyze_mcp_environment(
     except Exception as e:
         from hud.shared.exceptions import HudException
 
-        # Convert to HudException for better error messages and hints
+        if isinstance(e, HudException):
+            raise
         raise HudException from e
     finally:
-        # Only shutdown if we successfully initialized
-        if initialized and client.is_connected():
-            try:
+        if initialized and client is not None:
+            with contextlib.suppress(Exception):
                 await client.close()
-            except Exception:
-                # Ignore shutdown errors
-                hud_console.warning("Failed to shutdown MCP client")
+        if container_name:
+            stop_container(container_name)
+
+
+def _build_analysis_result(
+    full_analysis: dict[str, Any], initialize_ms: int
+) -> dict[str, Any]:
+    """Normalize the raw analysis dict into the build-lock result format."""
+    tools_list = full_analysis.get("tools", [])
+    hub_map = full_analysis.get("hub_tools", {}) or full_analysis.get("hubTools", {})
+
+    normalized_tools: list[dict[str, Any]] = []
+    internal_total = 0
+    for t in tools_list:
+        if hasattr(t, "name"):
+            name = getattr(t, "name", None)
+            description = getattr(t, "description", None)
+            input_schema = getattr(t, "inputSchema", None)
+            existing_internal = getattr(t, "internalTools", None)
+        else:
+            name = t.get("name")
+            description = t.get("description")
+            input_schema = t.get("inputSchema") or t.get("input_schema")
+            existing_internal = t.get("internalTools") or t.get("internal_tools")
+
+        tool_entry: dict[str, Any] = {"name": name}
+        if description:
+            tool_entry["description"] = description
+        if input_schema:
+            tool_entry["inputSchema"] = input_schema
+
+        merged_internal: list[str] = []
+        if isinstance(existing_internal, list):
+            merged_internal.extend([str(x) for x in existing_internal])
+        if isinstance(hub_map, dict) and name in hub_map and isinstance(hub_map[name], list):
+            merged_internal.extend([str(x) for x in hub_map[name]])
+        if merged_internal:
+            merged_internal = list(dict.fromkeys(merged_internal))
+            tool_entry["internalTools"] = merged_internal
+            internal_total += len(merged_internal)
+
+        normalized_tools.append(tool_entry)
+
+    result: dict[str, Any] = {
+        "initializeMs": initialize_ms,
+        "toolCount": len(tools_list),
+        "internalToolCount": internal_total,
+        "tools": normalized_tools,
+        "success": True,
+    }
+    if hub_map:
+        result["hub_tools"] = hub_map
+    if full_analysis.get("prompts"):
+        result["prompts"] = full_analysis["prompts"]
+    if full_analysis.get("resources"):
+        result["resources"] = full_analysis["resources"]
+    if "scenarios" in full_analysis:
+        result["scenarios"] = full_analysis["scenarios"]
+    return result
 
 
 def build_docker_image(

@@ -66,8 +66,54 @@ def get_docker_cmd(image: str) -> list[str] | None:
             cmd = config.get("Cmd", [])
             return cmd if cmd else None
 
-    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError):
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, FileNotFoundError):
         return None
+
+
+DEFAULT_HTTP_PORT = 8765
+
+
+def detect_transport(image: str) -> tuple[str, int | None]:
+    """Detect whether a Docker image's CMD runs in stdio or HTTP mode.
+
+    Returns ``("stdio", None)`` for stdio images, ``("http", port)`` for HTTP.
+    Images whose CMD invokes ``hud dev`` without ``--stdio`` are treated as HTTP;
+    everything else is assumed stdio (the ``MCPServer.run()`` default).
+    """
+    cmd = get_docker_cmd(image)
+    if not cmd:
+        return ("stdio", None)
+
+    has_hud_dev = False
+    has_stdio = False
+    port: int | None = None
+
+    for i, arg in enumerate(cmd):
+        if arg == "dev":
+            has_hud_dev = True
+        if arg == "--stdio":
+            has_stdio = True
+        if arg in ("--port", "-p") and i + 1 < len(cmd):
+            try:
+                port = int(cmd[i + 1])
+            except ValueError:
+                pass
+
+    if has_hud_dev and not has_stdio:
+        return ("http", port or DEFAULT_HTTP_PORT)
+
+    return ("stdio", None)
+
+
+def stop_container(name: str) -> None:
+    """Best-effort stop and remove a Docker container."""
+    for action in (["docker", "stop", name], ["docker", "rm", "-f", name]):
+        try:
+            subprocess.run(  # noqa: S603
+                action, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def image_exists(image_name: str) -> bool:
