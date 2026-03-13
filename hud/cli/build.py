@@ -557,7 +557,7 @@ async def analyze_mcp_environment(
             await wait_for_http_server(  # type: ignore[possibly-undefined]
                 server_url, timeout_seconds=60.0
             )
-            await client.__aenter__()
+            await asyncio.wait_for(client.__aenter__(), timeout=60.0)
         else:
             await asyncio.wait_for(client.__aenter__(), timeout=60.0)
 
@@ -570,7 +570,7 @@ async def analyze_mcp_environment(
         from hud.shared.exceptions import HudException
 
         if is_http:
-            hud_console.error("MCP server did not become ready within 60 seconds")
+            hud_console.error("MCP server did not become ready/initialize within 60 seconds")
             if container_name:
                 hud_console.info("Check container logs: docker logs " + container_name)
             raise HudException("MCP server HTTP readiness timeout") from None
