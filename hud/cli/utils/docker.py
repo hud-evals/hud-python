@@ -145,9 +145,7 @@ def stop_container(name: str) -> None:
     """Best-effort stop and remove a Docker container."""
     for action in (["docker", "stop", name], ["docker", "rm", "-f", name]):
         with suppress(Exception):
-            subprocess.run(
-                action, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10
-            )
+            subprocess.run(action, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
 
 
 def image_exists(image_name: str) -> bool:
