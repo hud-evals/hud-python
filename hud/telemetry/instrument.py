@@ -100,6 +100,7 @@ def instrument(
     name: str | None = None,
     category: str = "function",
     span_type: str | None = None,
+    method: str | None = None,
     internal_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
@@ -113,6 +114,7 @@ def instrument(
     name: str | None = None,
     category: str = "function",
     span_type: str | None = None,
+    method: str | None = None,
     internal_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
@@ -126,6 +128,7 @@ def instrument(
     name: str | None = None,
     category: str = "function",
     span_type: str | None = None,
+    method: str | None = None,
     internal_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
@@ -138,6 +141,7 @@ def instrument(
     name: str | None = None,
     category: str = "function",
     span_type: str | None = None,
+    method: str | None = None,
     internal_type: str | None = None,
     record_args: bool = True,
     record_result: bool = True,
@@ -151,6 +155,10 @@ def instrument(
         name: Custom span name (defaults to module.function)
         category: Span category (e.g., "agent", "tool", "function", "mcp")
         span_type: Alias for category (deprecated, use category instead)
+        method: MCP method name (e.g., "tools/call", "resources/read").
+            When set, produces MCP spans: name becomes "{method}.mcp",
+            type becomes "SERVER", and request is structured as
+            {"method": ..., "params": ...}.
         internal_type: Internal span type (e.g., "user-message")
         record_args: Whether to record function arguments
         record_result: Whether to record function result
@@ -168,6 +176,7 @@ def instrument(
             return await model.generate(messages)
     """
     effective_category = span_type if span_type is not None else category
+    effective_method = method
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         if hasattr(func, "_hud_instrumented"):
@@ -193,13 +202,19 @@ def instrument(
             error: str | None = None,
         ) -> dict[str, Any]:
             """Build a HudSpan-compatible span record."""
-            # Build attributes using TraceStep
+            is_mcp = effective_method is not None
+
+            extra_attrs: dict[str, Any] = {}
+            if is_mcp:
+                extra_attrs["method_name"] = effective_method
+
             attributes = TraceStep(
                 task_run_id=task_run_id,
-                category=effective_category,
-                type="CLIENT",
+                category="mcp" if is_mcp else effective_category,
+                type="SERVER" if is_mcp else "CLIENT",
                 start_timestamp=start_time,
                 end_timestamp=end_time,
+                **extra_attrs,
             )
 
             # Record arguments as request
@@ -213,21 +228,36 @@ def instrument(
                         if k not in ("self", "cls")
                     }
                     if args_dict:
-                        attributes.request = args_dict
+                        if is_mcp:
+                            attributes.request = {
+                                "method": effective_method,
+                                "params": args_dict,
+                            }
+                        else:
+                            attributes.request = args_dict
                 except Exception as e:
                     logger.debug("Failed to serialize args: %s", e)
 
             # Record result
             if record_result and result is not None and error is None:
                 try:
-                    attributes.result = _serialize_value(result)
+                    serialized = _serialize_value(result)
+                    # Wrap raw contents list in ReadResourceResult envelope.
+                    if (
+                        is_mcp
+                        and effective_method == "resources/read"
+                        and isinstance(serialized, list)
+                    ):
+                        serialized = {"contents": serialized}
+                    attributes.result = serialized
                 except Exception as e:
                     logger.debug("Failed to serialize result: %s", e)
 
             # Build span
             span_id = uuid.uuid4().hex[:16]
+            effective_name = f"{effective_method}.mcp" if is_mcp else span_name
             span: dict[str, Any] = {
-                "name": span_name,
+                "name": effective_name,
                 "trace_id": _normalize_trace_id(task_run_id),
                 "span_id": span_id,
                 "parent_span_id": None,

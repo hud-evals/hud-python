@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from types import TracebackType
 
+    import mcp.types as mcp_types
+
     from hud.eval.task import Task
     from hud.tools.types import EvaluationResult
     from hud.types import MCPToolResult
@@ -723,8 +725,27 @@ class EvalContext(Environment):
         return False
 
     # =========================================================================
-    # Tool Call Instrumentation
+    # MCP Telemetry Instrumentation
     # =========================================================================
+
+    def _should_instrument(self) -> bool:
+        """Whether local MCP instrumentation should be applied.
+
+        Returns False when telemetry is handled server-side (remote hub or HUD MCP).
+        """
+        if not self._trace_enabled:
+            return False
+        if self._hub_config is not None:
+            return False
+        if self._mcp_config is not None:
+            from hud.utils.mcp import _is_hud_server
+
+            for server_cfg in self._mcp_config.values():
+                if isinstance(server_cfg, dict):
+                    url = server_cfg.get("url", "")
+                    if url and _is_hud_server(url):
+                        return False
+        return True
 
     async def _execute_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
         """Execute a tool with automatic telemetry recording.
@@ -733,29 +754,46 @@ class EvalContext(Environment):
         Instrumentation is disabled when connected to a remote HUD server (telemetry is
         recorded server-side in that case).
         """
-        # Skip instrumentation when connected to a remote hub - telemetry is handled server-side
-        if self._hub_config is not None:
+        if not self._should_instrument():
             return await super()._execute_tool(name, arguments)
-
-        # Skip instrumentation for v4 tasks with HUD MCP config (remote server)
-        if self._mcp_config is not None:
-            from hud.utils.mcp import _is_hud_server
-
-            for server_cfg in self._mcp_config.values():
-                if isinstance(server_cfg, dict):
-                    url = server_cfg.get("url", "")
-                    if url and _is_hud_server(url):
-                        return await super()._execute_tool(name, arguments)
-
-        # For local environments, record MCP spans
         return await self._execute_tool_instrumented(name, arguments)
 
-    @instrument(category="mcp")
+    @instrument(method="tools/call")
     async def _execute_tool_instrumented(
         self, name: str, arguments: dict[str, Any]
     ) -> MCPToolResult:
-        """Instrumented version of _execute_tool for local environments."""
+        """Instrumented wrapper."""
         return await super()._execute_tool(name, arguments)
+
+    async def read_resource(
+        self, uri: str, **kwargs: Any
+    ) -> list[mcp_types.TextResourceContents | mcp_types.BlobResourceContents]:
+        """Read a resource with automatic telemetry recording."""
+        if not self._should_instrument():
+            return await super().read_resource(uri, **kwargs)
+        return await self._read_resource_instrumented(uri, **kwargs)
+
+    @instrument(method="resources/read")
+    async def _read_resource_instrumented(
+        self, uri: str, **kwargs: Any
+    ) -> list[mcp_types.TextResourceContents | mcp_types.BlobResourceContents]:
+        """Instrumented wrapper for MCP telemetry."""
+        return await super().read_resource(uri, **kwargs)
+
+    async def get_prompt(
+        self, name: str, arguments: dict[str, Any] | None = None
+    ) -> mcp_types.GetPromptResult:
+        """Get a prompt with automatic telemetry recording."""
+        if not self._should_instrument():
+            return await super().get_prompt(name, arguments)
+        return await self._get_prompt_instrumented(name, arguments)
+
+    @instrument(method="prompts/get")
+    async def _get_prompt_instrumented(
+        self, name: str, arguments: dict[str, Any] | None = None
+    ) -> mcp_types.GetPromptResult:
+        """Instrumented wrapper for MCP telemetry."""
+        return await super().get_prompt(name, arguments)
 
     def __repr__(self) -> str:
         return f"EvalContext({self.trace_id[:8]}..., name={self.eval_name!r}, reward={self.reward})"
