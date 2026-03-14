@@ -849,11 +849,9 @@ class ScenarioMixin:
                 # No second yield - default to success
                 return EvaluationResult(reward=1.0, done=True)
         else:
-            # Remote scenario - read resource to get evaluation result.
-            # Try self.read_resource() first so subclass hooks (e.g. telemetry
-            # instrumentation in EvalContext) are invoked.  Fall back to the
-            # specific connection that served setup when aggregate routing
-            # doesn't know about the dynamic scenario resource yet.
+            # Remote scenario - read resource via session's connection
+            # (resource routing may not include dynamic scenario resources,
+            #  so go directly to the connection that served setup)
             try:
                 conn_name = session.connection_name
                 logger.debug(
@@ -861,23 +859,21 @@ class ScenarioMixin:
                     session.resource_uri,
                     conn_name,
                 )
-                try:
-                    contents = await self.read_resource(session.resource_uri)  # type: ignore[attr-defined]
-                except Exception:
-                    conn = self._connections.get(conn_name) if conn_name else None  # type: ignore[attr-defined]
-                    if conn:
-                        contents = await conn.read_resource(session.resource_uri)
-                    elif self._connections:  # type: ignore[attr-defined]
-                        for fallback_conn in self._connections.values():  # type: ignore[attr-defined]
-                            try:
-                                contents = await fallback_conn.read_resource(session.resource_uri)
-                                break
-                            except Exception:  # noqa: S112
-                                continue
-                        else:
-                            raise
+                conn = self._connections.get(conn_name) if conn_name else None  # type: ignore[attr-defined]
+                if not conn and self._connections:  # type: ignore[attr-defined]
+                    # Fallback: try each connection directly (mirrors get_prompt fallback)
+                    for fallback_conn in self._connections.values():  # type: ignore[attr-defined]
+                        try:
+                            contents = await fallback_conn.read_resource(session.resource_uri)
+                            break
+                        except Exception:  # noqa: S112
+                            continue
                     else:
-                        raise
+                        contents = await self.read_resource(session.resource_uri)  # type: ignore[attr-defined]
+                elif conn:
+                    contents = await conn.read_resource(session.resource_uri)
+                else:
+                    contents = await self.read_resource(session.resource_uri)  # type: ignore[attr-defined]
                 if contents:
                     first = contents[0]
                     if hasattr(first, "text") and isinstance(first.text, str):  # type: ignore[union-attr]

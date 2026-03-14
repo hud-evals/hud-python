@@ -24,8 +24,6 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from types import TracebackType
 
-    import mcp.types as mcp_types
-
     from hud.eval.task import Task
     from hud.tools.types import EvaluationResult
     from hud.types import MCPToolResult
@@ -748,12 +746,6 @@ class EvalContext(Environment):
         return True
 
     async def _execute_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
-        """Execute a tool with automatic telemetry recording.
-
-        Overrides Environment._execute_tool to record MCP spans for the eval context.
-        Instrumentation is disabled when connected to a remote HUD server (telemetry is
-        recorded server-side in that case).
-        """
         if not self._should_instrument():
             return await super()._execute_tool(name, arguments)
         return await self._execute_tool_instrumented(name, arguments)
@@ -762,38 +754,34 @@ class EvalContext(Environment):
     async def _execute_tool_instrumented(
         self, name: str, arguments: dict[str, Any]
     ) -> MCPToolResult:
-        """Instrumented wrapper."""
         return await super()._execute_tool(name, arguments)
 
-    async def read_resource(
-        self, uri: str, **kwargs: Any
-    ) -> list[mcp_types.TextResourceContents | mcp_types.BlobResourceContents]:
-        """Read a resource with automatic telemetry recording."""
+    async def run_scenario_setup(
+        self,
+        scenario_name: str,
+        args: dict[str, Any],
+        session_id: str | None = None,
+    ) -> str | None:
         if not self._should_instrument():
-            return await super().read_resource(uri, **kwargs)
-        return await self._read_resource_instrumented(uri, **kwargs)
-
-    @instrument(method="resources/read")
-    async def _read_resource_instrumented(
-        self, uri: str, **kwargs: Any
-    ) -> list[mcp_types.TextResourceContents | mcp_types.BlobResourceContents]:
-        """Instrumented wrapper for MCP telemetry."""
-        return await super().read_resource(uri, **kwargs)
-
-    async def get_prompt(
-        self, name: str, arguments: dict[str, Any] | None = None
-    ) -> mcp_types.GetPromptResult:
-        """Get a prompt with automatic telemetry recording."""
-        if not self._should_instrument():
-            return await super().get_prompt(name, arguments)
-        return await self._get_prompt_instrumented(name, arguments)
+            return await super().run_scenario_setup(scenario_name, args, session_id)
+        return await self._run_setup_instrumented(scenario_name, args)
 
     @instrument(method="prompts/get")
-    async def _get_prompt_instrumented(
-        self, name: str, arguments: dict[str, Any] | None = None
-    ) -> mcp_types.GetPromptResult:
-        """Instrumented wrapper for MCP telemetry."""
-        return await super().get_prompt(name, arguments)
+    async def _run_setup_instrumented(self, name: str, arguments: dict[str, Any]) -> str | None:
+        return await super().run_scenario_setup(name, arguments)
+
+    async def run_scenario_evaluate(
+        self,
+        scenario_name: str,
+        session_id: str | None = None,
+    ) -> EvaluationResult:
+        if not self._should_instrument():
+            return await super().run_scenario_evaluate(scenario_name, session_id)
+        return await self._run_evaluate_instrumented(scenario_name)
+
+    @instrument(method="resources/read")
+    async def _run_evaluate_instrumented(self, uri: str) -> EvaluationResult:
+        return await super().run_scenario_evaluate(uri)
 
     def __repr__(self) -> str:
         return f"EvalContext({self.trace_id[:8]}..., name={self.eval_name!r}, reward={self.reward})"

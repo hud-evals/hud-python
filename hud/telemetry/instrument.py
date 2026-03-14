@@ -242,13 +242,27 @@ def instrument(
             if record_result and result is not None and error is None:
                 try:
                     serialized = _serialize_value(result)
-                    # Wrap raw contents list in ReadResourceResult envelope.
-                    if (
-                        is_mcp
-                        and effective_method == "resources/read"
-                        and isinstance(serialized, list)
-                    ):
-                        serialized = {"contents": serialized}
+                    if is_mcp and effective_method == "prompts/get":
+                        if isinstance(serialized, str):
+                            serialized = {
+                                "messages": [
+                                    {
+                                        "role": "user",
+                                        "content": {
+                                            "type": "text",
+                                            "text": serialized,
+                                        },
+                                    }
+                                ]
+                            }
+                    elif is_mcp and effective_method == "resources/read":
+                        if isinstance(serialized, list):
+                            serialized = {"contents": serialized}
+                        elif isinstance(serialized, dict) and "reward" in serialized:
+                            uri = args_dict.get("uri", "") if args_dict else ""
+                            serialized = {
+                                "contents": [{"uri": uri, "text": json.dumps(serialized)}]
+                            }
                     attributes.result = serialized
                 except Exception as e:
                     logger.debug("Failed to serialize result: %s", e)
