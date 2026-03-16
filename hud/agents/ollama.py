@@ -11,7 +11,6 @@ import logging
 from typing import Any, ClassVar
 
 import httpx
-from openai import AsyncOpenAI
 
 from hud.settings import settings
 from hud.types import AgentType, BaseAgentConfig
@@ -43,9 +42,8 @@ class OllamaAgent(OpenAIChatAgent):
         # Resolve base_url from settings when not explicitly provided
         if params and params.base_url is None:
             params.base_url = settings.ollama_base_url
-        elif not params:
-            if kwargs.get("base_url") is None and kwargs.get("openai_client") is None:
-                kwargs["base_url"] = settings.ollama_base_url
+        elif not params and kwargs.get("base_url") is None and kwargs.get("openai_client") is None:
+            kwargs["base_url"] = settings.ollama_base_url
 
         # Ensure api_key defaults so AsyncOpenAI doesn't raise
         if params and params.api_key is None:

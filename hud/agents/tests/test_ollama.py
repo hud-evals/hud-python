@@ -14,9 +14,10 @@ from hud.types import AgentType
 @pytest.fixture()
 def _patch_settings():
     """Patch settings so tests don't need real env vars."""
-    with patch("hud.agents.openai_chat.settings") as mock_settings, patch(
-        "hud.agents.ollama.settings"
-    ) as mock_ollama_settings:
+    with (
+        patch("hud.agents.openai_chat.settings") as mock_settings,
+        patch("hud.agents.ollama.settings") as mock_ollama_settings,
+    ):
         mock_settings.api_key = None
         mock_settings.hud_gateway_url = "https://inference.hud.ai"
         mock_ollama_settings.ollama_base_url = "http://localhost:11434/v1"
@@ -121,9 +122,10 @@ class TestOllamaHealthAndModels:
 
 class TestOllamaSettings:
     def test_ollama_base_url_from_settings(self):
-        with patch("hud.agents.openai_chat.settings") as mock_chat, patch(
-            "hud.agents.ollama.settings"
-        ) as mock_ollama:
+        with (
+            patch("hud.agents.openai_chat.settings") as mock_chat,
+            patch("hud.agents.ollama.settings") as mock_ollama,
+        ):
             mock_chat.api_key = None
             mock_chat.hud_gateway_url = "https://inference.hud.ai"
             mock_ollama.ollama_base_url = "http://custom:9999/v1"
@@ -177,8 +179,9 @@ class TestOllamaInheritedBehavior:
 
     @pytest.mark.asyncio()
     async def test_format_tool_results_inherited(self):
-        from hud.types import MCPToolCall, MCPToolResult
         from mcp import types
+
+        from hud.types import MCPToolCall, MCPToolResult
 
         agent = OllamaAgent.create()
         calls = [MCPToolCall(id="tc1", name="test_tool", arguments={})]
