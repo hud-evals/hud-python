@@ -249,3 +249,10 @@ addopts = ""
 markers = [
     "integration: marks tests as integration tests (require HUD_API_KEY, network access)",
 ]
+
+[tool.bandit]
+exclude_dirs = ["*/tests/*", "*/examples/*"]
+skips = [
+    "B101",  # assert used intentionally in validation
+    "B603",  # subprocess calls with shell=False are acceptable
+]

@@ -1,0 +1,61 @@
+name: Security
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "*" ]
+
+jobs:
+  bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Run Bandit security linter
+        run: |
+          uv run --with bandit bandit -r hud/ \
+            -c pyproject.toml \
+            --format json \
+            --output bandit-report.json \
+            || true
+          uv run --with bandit bandit -r hud/ \
+            -c pyproject.toml \
+            --format screen
+
+      - name: Upload Bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+  semgrep:
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        env:
+          SEMGREP_RULES: >-
+            p/python
+            p/security-audit
+            p/command-injection
+            p/secrets
+        run: semgrep ci --json --output semgrep-report.json || true
+
+      - name: Display results
+        if: always()
+        run: semgrep ci || true
+
+      - name: Upload Semgrep report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-report
+          path: semgrep-report.json
