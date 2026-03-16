@@ -130,6 +130,12 @@ class Settings(BaseSettings):
         validation_alias="OPENROUTER_API_KEY",
     )
 
+    ollama_base_url: str = Field(
+        default="http://localhost:11434/v1",
+        description="Base URL for local Ollama server",
+        validation_alias="OLLAMA_BASE_URL",
+    )
+
     wandb_api_key: str | None = Field(
         default=None,
         description="API key for Weights & Biases",

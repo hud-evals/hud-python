@@ -138,6 +138,24 @@ class OpenAIChatCreateParams(BaseCreateParams, OpenAIChatConfig):
 
 
 # -----------------------------------------------------------------------------
+# Ollama (OpenAI-compatible local models)
+# -----------------------------------------------------------------------------
+
+
+class OllamaConfig(OpenAIChatConfig):
+    """Configuration for OllamaAgent (local models via Ollama)."""
+
+    model_name: str = "Ollama"
+    model: str = Field(default="llama3.2", validation_alias=_model_alias)
+    base_url: str | None = Field(default=None)  # Resolved from settings at runtime
+    api_key: str | None = Field(default="ollama")
+
+
+class OllamaCreateParams(BaseCreateParams, OllamaConfig):
+    pass
+
+
+# -----------------------------------------------------------------------------
 # Operator
 # -----------------------------------------------------------------------------
 

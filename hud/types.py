@@ -27,6 +27,7 @@ class AgentType(str, Enum):
     GEMINI = "gemini"
     GEMINI_CUA = "gemini_cua"
     OPENAI_COMPATIBLE = "openai_compatible"
+    OLLAMA = "ollama"
     INTEGRATION_TEST = "integration_test"
 
     @property
@@ -55,6 +56,10 @@ class AgentType(str, Enum):
             from hud.agents.openai_chat import OpenAIChatAgent
 
             return OpenAIChatAgent
+        elif self == AgentType.OLLAMA:
+            from hud.agents.ollama import OllamaAgent
+
+            return OllamaAgent
         elif self == AgentType.INTEGRATION_TEST:
             from hud.agents.misc.integration_test_agent import IntegrationTestRunner
 
@@ -69,6 +74,7 @@ class AgentType(str, Enum):
             ClaudeConfig,
             GeminiConfig,
             GeminiCUAConfig,
+            OllamaConfig,
             OpenAIChatConfig,
             OpenAIConfig,
             OperatorConfig,
@@ -81,6 +87,7 @@ class AgentType(str, Enum):
             AgentType.GEMINI: GeminiConfig,
             AgentType.GEMINI_CUA: GeminiCUAConfig,
             AgentType.OPENAI_COMPATIBLE: OpenAIChatConfig,
+            AgentType.OLLAMA: OllamaConfig,
             AgentType.INTEGRATION_TEST: BaseAgentConfig,
         }
         if self not in mapping:
