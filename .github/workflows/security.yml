@@ -21,15 +21,16 @@ jobs:
 
       - name: Run Bandit security linter
         run: |
+          # TODO: Later, make Bandit findings fail CI on main instead of ignoring them.
           uv run --with bandit bandit -r hud/ \
             -c pyproject.toml \
             --format json \
             --output bandit-report.json \
-            # TODO: Later, make Bandit findings fail CI on main instead of ignoring them.
             || true
           uv run --with bandit bandit -r hud/ \
             -c pyproject.toml \
-            --format screen
+            --format screen \
+            || true
 
       - name: Upload Bandit report
         if: always()
@@ -43,22 +44,25 @@ jobs:
     timeout-minutes: 20
     container:
       image: semgrep/semgrep:1.90.0
+    env:
+      SEMGREP_RULES: >-
+        p/python
+        p/security-audit
+        p/command-injection
+        p/secrets
     steps:
       - uses: actions/checkout@v4
 
       - name: Run Semgrep
-        env:
-          SEMGREP_RULES: >-
-            p/python
-            p/security-audit
-            p/command-injection
-            p/secrets
         # TODO: Later, remove `|| true` (at least on main) so important Semgrep findings can block merges.
-        run: semgrep ci --json --output semgrep-report.json || true
+        run: |
+          CONFIG_ARGS=""
+          for config in $SEMGREP_RULES; do
+            CONFIG_ARGS="$CONFIG_ARGS --config $config"
+          done
 
-      - name: Display results
-        if: always()
-        run: semgrep ci || true
+          # Prints results to stdout (text) and also writes JSON for artifacts.
+          semgrep scan $CONFIG_ARGS --json-output semgrep-report.json || true
 
       - name: Upload Semgrep report
         if: always()
