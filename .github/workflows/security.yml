@@ -1,5 +1,8 @@
 name: Security
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [ "main" ]
@@ -9,6 +12,7 @@ on:
 jobs:
   bandit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -21,6 +25,7 @@ jobs:
             -c pyproject.toml \
             --format json \
             --output bandit-report.json \
+            # TODO: Later, make Bandit findings fail CI on main instead of ignoring them.
             || true
           uv run --with bandit bandit -r hud/ \
             -c pyproject.toml \
@@ -35,8 +40,9 @@ jobs:
 
   semgrep:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container:
-      image: semgrep/semgrep
+      image: semgrep/semgrep:1.90.0
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +53,7 @@ jobs:
             p/security-audit
             p/command-injection
             p/secrets
+        # TODO: Later, remove `|| true` (at least on main) so important Semgrep findings can block merges.
         run: semgrep ci --json --output semgrep-report.json || true
 
       - name: Display results
