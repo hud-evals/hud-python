@@ -170,7 +170,7 @@ class TestOllamaInheritedBehavior:
         from mcp import types
 
         agent = OllamaAgent.create()
-        blocks = [types.TextContent(type="text", text="hello")]
+        blocks: list[types.ContentBlock] = [types.TextContent(type="text", text="hello")]
         result = await agent.format_blocks(blocks)
         assert result[0]["role"] == "user"
         assert result[0]["content"][0]["text"] == "hello"

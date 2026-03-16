@@ -53,7 +53,7 @@ class OllamaAgent(OpenAIChatAgent):
         elif not params and kwargs.get("api_key") is None and kwargs.get("openai_client") is None:
             kwargs["api_key"] = "ollama"
 
-        super().__init__(params, **kwargs)
+        super().__init__(params, **kwargs)  # pyright: ignore[reportArgumentType]
 
     @property
     def _ollama_api_base(self) -> str:
