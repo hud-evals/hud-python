@@ -222,6 +222,8 @@ class AnthropicComputerTool(HudComputerTool):
             return compressed
         except Exception as e:
             logger.warning("Failed to compress screenshot: %s", e)
+            if skip_resize:
+                return screenshot_base64
             return await super()._rescale_screenshot(screenshot_base64)
 
     def to_params(
@@ -698,7 +700,7 @@ class AnthropicComputerTool(HudComputerTool):
                     result.base64_image = await self._rescale_screenshot(
                         result.base64_image, skip_resize=True
                     )
-            elif self.rescale_images:
+            elif self.rescale_images or self.screenshot_quality is not None:
                 result.base64_image = await self._rescale_screenshot(result.base64_image)
 
         # Handle screenshot for actions that need it
