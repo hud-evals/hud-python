@@ -98,7 +98,9 @@ class TestMessageFormat:
         mock_result.citations = []
         mock_result.reward = 1.0
 
-        with patch("hud.eval.task.Task.run", new_callable=AsyncMock, return_value=mock_result):
+        dummy_task.run = AsyncMock(return_value=mock_result)
+
+        with patch.object(chat, "_create_agent", return_value=MagicMock()):
             await chat.send("hello")
 
         assert len(chat.messages) == 2
