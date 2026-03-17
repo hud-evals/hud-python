@@ -131,37 +131,6 @@ class AnthropicComputerTool(HudComputerTool):
             title: Human-readable display name for the tool (auto-generated from class name)
             description: Tool description (auto-generated from docstring if not provided)
         """
-        # Create instance-level native_specs with display dimensions
-        instance_native_specs: NativeToolSpecs = {
-            AgentType.CLAUDE: [
-                NativeToolSpec(
-                    api_type="computer_20251124",
-                    api_name="computer",
-                    beta="computer-use-2025-11-24",
-                    role="computer",
-                    supported_models=(
-                        "*claude-opus-4-5*",
-                        "*claude-opus-4-6*",
-                        "*claude-sonnet-4-6*",
-                    ),
-                    extra={
-                        "display_width": width,
-                        "display_height": height,
-                    },
-                ),
-                NativeToolSpec(
-                    api_type="computer_20250124",
-                    api_name="computer",
-                    beta="computer-use-2025-01-24",
-                    role="computer",
-                    extra={
-                        "display_width": width,
-                        "display_height": height,
-                    },
-                ),
-            ],
-        }
-
         super().__init__(
             executor=executor,
             platform_type=platform_type,
@@ -172,7 +141,6 @@ class AnthropicComputerTool(HudComputerTool):
             name=name or "anthropic_computer",
             title=title or "Anthropic Computer Tool",
             description=description or "Control computer with mouse, keyboard, and screenshot",
-            native_specs=instance_native_specs,
             **kwargs,
         )
         self.screenshot_quality = screenshot_quality
