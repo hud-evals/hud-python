@@ -94,13 +94,8 @@ async def count_scenario(sentence: str, letter: str):
     correct = str(sentence.lower().count(letter.lower()))
     yield 1.0 if correct in answer else 0.0
 
-# Create task and run agent
-task = env("count", sentence="Strawberry", letter="r")
-agent = create_agent("claude-sonnet-4-5")
-
-async with hud.eval(task) as ctx:
-    result = await agent.run(ctx, max_steps=10)
-
+# Create task and run agent in one line
+result = await env("count", sentence="Strawberry", letter="r").run("claude-sonnet-4-5")
 print(f"Reward: {result.reward}")
 ```
 

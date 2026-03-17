@@ -93,32 +93,15 @@ class TestMessageFormat:
     async def test_send_stores_prompt_message_format(self, dummy_task: Any) -> None:
         chat = Chat(dummy_task, model="test-model")
 
-        mock_agent = MagicMock()
         mock_result = MagicMock()
         mock_result.content = "response text"
         mock_result.citations = []
-        mock_agent.run = AsyncMock(return_value=mock_result)
+        mock_result.reward = 1.0
 
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+        dummy_task.run = AsyncMock(return_value=mock_result)
 
-        with (
-            patch.object(chat, "_create_agent", return_value=mock_agent),
-            patch("hud.eval.manager.run_eval") as mock_eval,
-        ):
-            mock_eval.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
-            mock_eval.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            # Patch the import inside send()
-            import hud
-
-            original_eval = hud.eval
-            hud.eval = MagicMock(return_value=mock_ctx)
-            try:
-                await chat.send("hello")
-            finally:
-                hud.eval = original_eval
+        with patch.object(chat, "_create_agent", return_value=MagicMock()):
+            await chat.send("hello")
 
         assert len(chat.messages) == 2
 

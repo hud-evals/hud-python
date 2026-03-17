@@ -6,6 +6,7 @@ when running with Claude models that support native str_replace editing.
 
 from __future__ import annotations
 
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import ClassVar, Literal, get_args
@@ -123,6 +124,11 @@ class EditTool(BaseTool):
     def validate_path(self, command: str, path: Path) -> None:
         """Check that the path/command combination is valid."""
         if not path.is_absolute():
+            if sys.platform == "win32":
+                raise ToolError(
+                    f"The path {path} is not an absolute path. "
+                    f"On Windows, use a full path like C:\\Users\\...\\{path.name}"
+                )
             suggested_path = Path("") / path
             raise ToolError(
                 f"The path {path} is not an absolute path, it should start with `/`. "

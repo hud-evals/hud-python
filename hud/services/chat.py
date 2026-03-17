@@ -153,8 +153,6 @@ class Chat(AgentExecutor):
         Returns:
             Trace with the agent's response in ``trace.content``
         """
-        import hud
-
         blocks = _content_to_blocks(message)
 
         # Build PromptMessage-compatible content (single block dict or block list)
@@ -166,9 +164,12 @@ class Chat(AgentExecutor):
         task_args["messages"] = list(self.messages)
         task = self._task.model_copy(update={"args": task_args})
 
-        async with hud.eval(task, trace=self._trace, quiet=self._quiet) as ctx:
-            agent = self._create_agent()
-            result = await agent.run(ctx, max_steps=self._max_steps)
+        result = await task.run(
+            self._create_agent(),
+            max_steps=self._max_steps,
+            trace=self._trace,
+            quiet=self._quiet,
+        )
 
         assistant_msg: dict[str, Any] = {
             "role": "assistant",
