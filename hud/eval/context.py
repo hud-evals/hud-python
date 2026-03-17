@@ -401,6 +401,12 @@ class EvalContext(Environment):
                 if getattr(agent_config, "append_setup_tool", False):
                     ctx.append_setup_output = True
 
+        # Persist system_prompt to metadata so it's stored in the backend
+        if ctx.system_prompt:
+            ac = ctx.metadata.setdefault("agent_config", {})
+            if isinstance(ac, dict):
+                ac["system_prompt"] = ctx.system_prompt
+
         return ctx
 
     async def _run_task_scenario_setup(self) -> None:
@@ -536,6 +542,12 @@ class EvalContext(Environment):
 
     def _build_base_payload(self) -> EvalPayload:
         """Build the base payload for enter/exit."""
+        # Ensure system_prompt is in metadata before sending
+        if self.system_prompt:
+            ac = self.metadata.setdefault("agent_config", {})
+            if isinstance(ac, dict):
+                ac.setdefault("system_prompt", self.system_prompt)
+
         return EvalPayload(
             prompt=self.prompt,
             code_snippet=self.code_snippet,
