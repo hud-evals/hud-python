@@ -36,6 +36,15 @@ def _short_scenario_name(name: str) -> str:
     return name.rsplit(":", 1)[-1] if ":" in name else name
 
 
+def _compute_remote_signature(remote_task: dict[str, Any]) -> str:
+    """Compute signature from a remote task dict (from platform API)."""
+    scenario = remote_task.get("scenario") or ""
+    args = remote_task.get("args") if isinstance(remote_task.get("args"), dict) else {}
+    validation = remote_task.get("validation")
+    agent_config = remote_task.get("agent_config")
+    return _compute_signature(scenario, args, validation, agent_config or None)
+
+
 def _compute_signature(
     scenario_name: str,
     args: dict[str, Any],
@@ -231,21 +240,7 @@ def _diff_and_display(
             to_create.append(spec)
             continue
 
-        remote_scenario = _short_scenario_name(existing.get("scenario") or "")
-        remote_args = existing.get("args") if isinstance(existing.get("args"), dict) else {}
-        remote_sig_data: dict[str, Any] = {"args": remote_args}
-        remote_validation = existing.get("validation")
-        if remote_validation is not None:
-            remote_sig_data["validation"] = remote_validation
-        remote_agent_config = existing.get("agent_config")
-        if remote_agent_config:
-            remote_sig_data["agent_config"] = remote_agent_config
-        remote_sig = f"{remote_scenario}|" + json.dumps(
-            remote_sig_data,
-            sort_keys=True,
-            default=str,
-            separators=(",", ":"),
-        )
+        remote_sig = _compute_remote_signature(existing)
 
         if remote_sig == spec["signature"]:
             unchanged += 1
@@ -292,25 +287,7 @@ def _detect_slug_renames(
 
     for spec in to_create:
         for remote_slug, remote_task in remote_by_slug.items():
-            remote_scenario = _short_scenario_name(remote_task.get("scenario") or "")
-            remote_args = (
-                remote_task.get("args") if isinstance(remote_task.get("args"), dict) else {}
-            )
-            remote_sig_data: dict[str, Any] = {"args": remote_args}
-            remote_validation = remote_task.get("validation")
-            if remote_validation is not None:
-                remote_sig_data["validation"] = remote_validation
-            remote_agent_config = remote_task.get("agent_config")
-            if remote_agent_config:
-                remote_sig_data["agent_config"] = remote_agent_config
-
-            remote_sig = f"{remote_scenario}|" + json.dumps(
-                remote_sig_data,
-                sort_keys=True,
-                default=str,
-                separators=(",", ":"),
-            )
-
+            remote_sig = _compute_remote_signature(remote_task)
             if remote_sig == spec["signature"]:
                 hud_console.info(
                     f"    (looks like '{remote_slug}' was renamed to '{spec['slug']}')"
@@ -701,11 +678,13 @@ def sync_env_command(
             hud_console.info("\nAborted.")
             raise typer.Exit(0) from None
 
+        displayed = envs[:10]
         try:
             idx = int(selection) - 1
-            if 0 <= idx < len(envs):
-                registry_id = envs[idx]["id"]
-                env_display = envs[idx].get("name_display") or envs[idx].get("name", "unnamed")
+            if 0 <= idx < len(displayed):
+                registry_id = displayed[idx]["id"]
+                selected = displayed[idx]
+                env_display = selected.get("name_display") or selected.get("name", "unnamed")
             else:
                 hud_console.error("Invalid selection")
                 raise typer.Exit(1)

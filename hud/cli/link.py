@@ -180,18 +180,17 @@ def link_command(
         help="Skip confirmation prompts",
     ),
 ) -> None:
-    """🔗 Link directory to existing HUD environment.
+    """Link directory to existing HUD environment (deprecated).
 
-    [not dim]Connects a local directory to an existing platform environment,
-    so future 'hud deploy' commands update that environment.
-
-    Similar to 'vercel link' for Vercel projects.
+    [not dim]Deprecated: Use 'hud sync env' instead.
 
     Examples:
-        hud link                    # Interactive selection
-        hud link --id abc123...     # Link to specific environment
-        hud link environments/browser[/not dim]
+        hud sync env my-env         # Link by name
+        hud sync env                # Interactive selection[/not dim]
     """
+    from hud.utils.hud_console import HUDConsole as _HC
+
+    _HC().warning("'hud link' is deprecated. Use 'hud sync env' instead.")
     link_environment(
         directory=directory,
         registry_id=registry_id,

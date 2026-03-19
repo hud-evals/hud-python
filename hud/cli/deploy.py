@@ -236,13 +236,12 @@ def deploy_environment(
     if not validation_issues:
         hud_console.success("Validation passed")
 
-    # Load existing config for registry_id (prefer config.json, fall back to deploy.json)
+    # Load existing config for registry_id (config.json, auto-migrates deploy.json)
     from hud.cli.utils.project_config import load_project_config
 
     project_config = load_project_config(env_dir)
-    deploy_link = _load_deploy_link(env_dir)
     if not registry_id:
-        registry_id = project_config.get("registryId") or deploy_link.get("registryId")
+        registry_id = project_config.get("registryId")
         if registry_id:
             hud_console.info(f"Rebuilding existing environment: {registry_id[:8]}...")
 
@@ -267,11 +266,7 @@ def deploy_environment(
     if not skip_dotenv:
         dotenv_path = env_dir / ".env"
         if dotenv_path.exists():
-            sync_pref = (
-                project_config.get("syncEnv")
-                if project_config.get("syncEnv") is not None
-                else deploy_link.get("syncEnv")
-            )
+            sync_pref = project_config.get("syncEnv")
 
             if sync_pref is None:
                 keys = _peek_env_keys(dotenv_path)
@@ -590,7 +585,6 @@ def _save_deploy_link(
     env_name: str | None = None,
 ) -> None:
     """Save deploy linking info to .hud/config.json."""
-    from hud.cli.utils.name_check import check_and_fix_env_name
     from hud.cli.utils.project_config import save_project_config
 
     try:
@@ -603,9 +597,6 @@ def _save_deploy_link(
             console.success(f"Linked to environment: {reg_id[:8]}...")
             if changed:
                 console.dim_info("Config saved to:", ".hud/config.json")
-
-            if env_name:
-                check_and_fix_env_name(env_dir, env_name, console)
     except Exception as e:
         console.warning(f"Failed to save deploy link: {e}")
 
