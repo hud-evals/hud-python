@@ -77,9 +77,7 @@ async def _resolve_scenario_name(client: Any, scenario: str) -> str:
 
     available = [p.name.split(":", 1)[-1] for p in prompts if ":" in p.name]
     raise typer.Exit(
-        hud_console.error(
-            f"Scenario '{scenario}' not found. Available: {', '.join(available)}"
-        )
+        hud_console.error(f"Scenario '{scenario}' not found. Available: {', '.join(available)}")
         or 1
     )
 
@@ -152,7 +150,7 @@ def grade_cmd(
             contents = await client.read_resource(full_name)
             first = contents[0] if isinstance(contents, list) else contents
             text = first.text if hasattr(first, "text") else str(first)
-            print(json.dumps(json.loads(text), indent=2))  # noqa: T201
+            print(json.dumps(json.loads(text)))  # noqa: T201
         finally:
             await client.__aexit__(None, None, None)
 
@@ -182,7 +180,7 @@ def run_cmd(
             contents = await client.read_resource(full_name)
             first = contents[0] if isinstance(contents, list) else contents
             text = first.text if hasattr(first, "text") else str(first)
-            print(json.dumps(json.loads(text), indent=2))  # noqa: T201
+            print(json.dumps(json.loads(text)))  # noqa: T201
         finally:
             await client.__aexit__(None, None, None)
 
