@@ -485,10 +485,9 @@ class OpenAIAgent(MCPAgent):
                         type="computer_screenshot",
                         image_url=f"data:image/png;base64,{screenshot}",
                     ),
-                    acknowledged_safety_checks=(
-                        acknowledged_checks if acknowledged_checks else None
-                    ),
                 )
+                if acknowledged_checks:
+                    output_payload["acknowledged_safety_checks"] = acknowledged_checks
                 computer_outputs.append(output_payload)
                 self.pending_call_id = None
                 self.pending_safety_checks = []
