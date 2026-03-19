@@ -425,7 +425,9 @@ def sync_tasks_command(
                 timeout=10.0,
             )
             if resp.status_code == 200:
-                taskset_display = resp.json().get("evalset_name", resolved_taskset_id[:8])
+                taskset_display = resp.json().get("evalset_name") or resolved_taskset_id[:8]
+            else:
+                taskset_display = resolved_taskset_id[:8]
         except Exception:
             taskset_display = resolved_taskset_id[:8]
 
