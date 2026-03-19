@@ -5,6 +5,9 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import questionary
+import typer
+
 from hud.utils.hud_console import HUDConsole
 
 from .templates import DOCKERFILE_HUD, ENV_PY, PYPROJECT_TOML
@@ -64,10 +67,8 @@ def _is_empty_or_trivial(directory: Path) -> bool:
     if not directory.exists():
         return True
     files = list(directory.iterdir())
-    # Empty
     if not files:
         return True
-    # Only has hidden files or common trivial files
     trivial = {".git", ".gitignore", ".DS_Store", "README.md", "LICENSE"}
     return all(f.name in trivial or f.name.startswith(".") for f in files)
 
@@ -79,43 +80,38 @@ def _has_project_files(directory: Path) -> bool:
     return any(f.name in PROJECT_INDICATORS for f in directory.iterdir())
 
 
-def smart_init(
-    name: str | None = None,
-    directory: str = ".",
-    force: bool = False,
-) -> None:
-    """Initialize HUD environment files in a directory.
+def _prompt_init_mode(target: Path) -> str | None:
+    """Ask the user whether to init inside the current directory or create a new one.
 
-    - If directory is empty: delegate to preset selection
-    - If directory has project files: add HUD files to existing project
-    - Otherwise: create new HUD environment
+    Returns "here", "new", or None if cancelled.
     """
-    from hud.settings import settings
+    try:
+        selected = questionary.select(
+            f"Directory '{target.name}' already contains files. How would you like to initialize?",
+            choices=[
+                questionary.Choice(
+                    "Add HUD files to this directory",
+                    value="here",
+                ),
+                questionary.Choice(
+                    "Create a new environment in a subdirectory (from preset)",
+                    value="new",
+                ),
+            ],
+        ).ask()
+        return selected
+    except KeyboardInterrupt:
+        return None
 
+
+def _init_in_existing_directory(
+    target: Path,
+    name: str | None,
+    force: bool,
+) -> None:
+    """Add HUD files to an existing project directory."""
     hud_console = HUDConsole()
 
-    # Check for API key first
-    if not settings.api_key:
-        hud_console.error("HUD_API_KEY not found")
-        hud_console.info("")
-        hud_console.info("Set your API key:")
-        hud_console.info("  hud set HUD_API_KEY=your-key-here")
-        hud_console.info("  Or: export HUD_API_KEY=your-key")
-        hud_console.info("")
-        hud_console.info("Get your key at: https://hud.ai/project/api-keys")
-        return
-
-    target = Path(directory).resolve()
-
-    # If directory is empty, use preset selection
-    if _is_empty_or_trivial(target):
-        from hud.cli.init import create_environment
-
-        hud_console.info("Empty directory - showing preset selection")
-        create_environment(name, directory, force, preset=None)
-        return
-
-    # Directory has files - use smart init
     target.mkdir(parents=True, exist_ok=True)
     env_name = _normalize_name(name or target.name)
     has_pyproject = (target / "pyproject.toml").exists()
@@ -127,15 +123,13 @@ def smart_init(
     else:
         hud_console.info("Creating HUD environment in existing directory")
 
-    created = []
+    created: list[str] = []
 
-    # Create pyproject.toml if needed
     if not has_pyproject:
         pyproject = target / "pyproject.toml"
         pyproject.write_text(PYPROJECT_TOML.format(name=env_name.replace("_", "-")))
         created.append("pyproject.toml")
 
-    # Create Dockerfile.hud
     dockerfile = target / "Dockerfile.hud"
     if not dockerfile.exists() or force:
         dockerfile.write_text(DOCKERFILE_HUD)
@@ -143,7 +137,6 @@ def smart_init(
     else:
         hud_console.warning("Dockerfile.hud exists, skipping (use --force)")
 
-    # Create env.py
     env_py = target / "env.py"
     if not env_py.exists() or force:
         env_py.write_text(ENV_PY.format(env_name=env_name))
@@ -151,7 +144,6 @@ def smart_init(
     else:
         hud_console.warning("env.py exists, skipping (use --force)")
 
-    # Add dependency
     dep_result = _add_hud_dependency(target)
     if dep_result == "added":
         hud_console.success("Added hud-python dependency")
@@ -160,7 +152,6 @@ def smart_init(
     else:
         hud_console.info("Run manually: uv add hud-python openai")
 
-    # Summary
     if created:
         hud_console.section_title("Created")
         for f in created:
@@ -186,6 +177,48 @@ def smart_init(
     hud_console.section_title("Files")
     hud_console.info("• env.py         Your tools, scripts, and test code")
     hud_console.info("• Dockerfile.hud Container config for remote deployment")
+
+
+def smart_init(
+    name: str | None = None,
+    directory: str = ".",
+    force: bool = False,
+) -> None:
+    """Initialize HUD environment, always prompting the user for what to do."""
+    from hud.settings import settings
+
+    hud_console = HUDConsole()
+
+    if not settings.api_key:
+        hud_console.error("HUD_API_KEY not found")
+        hud_console.info("")
+        hud_console.info("Set your API key:")
+        hud_console.info("  hud set HUD_API_KEY=your-key-here")
+        hud_console.info("  Or: export HUD_API_KEY=your-key")
+        hud_console.info("")
+        hud_console.info("Get your key at: https://hud.ai/project/api-keys")
+        return
+
+    target = Path(directory).resolve()
+
+    if _is_empty_or_trivial(target):
+        from hud.cli.init import create_environment
+
+        create_environment(name, directory, force, preset=None)
+        return
+
+    # Non-empty directory — ask the user what they want
+    mode = _prompt_init_mode(target)
+
+    if mode is None:
+        raise typer.Exit(0)
+
+    if mode == "here":
+        _init_in_existing_directory(target, name, force)
+    else:
+        from hud.cli.init import create_environment
+
+        create_environment(name, directory, force, preset=None)
 
 
 __all__ = ["smart_init"]
