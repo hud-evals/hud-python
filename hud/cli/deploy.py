@@ -67,6 +67,44 @@ def _peek_env_keys(env_path: Path) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _handle_name_conflict(
+    error: Any,
+    console: HUDConsole,
+) -> str | None:
+    """Handle a 409 name conflict from trigger-direct. Returns registry_id to rebuild, or None."""
+    try:
+        detail = error.response.json().get("detail", {})
+    except Exception:
+        console.error("Environment name already exists on your team")
+        return None
+
+    if not isinstance(detail, dict):
+        console.error(f"Environment name conflict: {detail}")
+        return None
+
+    existing_name = detail.get("existing_name", "unknown")
+    existing_id = detail.get("existing_registry_id", "")
+
+    console.warning(f"Environment '{existing_name}' already exists on your team")
+    console.info(f"  Registry ID: {existing_id[:8]}...")
+    console.info("")
+    console.info("  (1) Link to existing environment and rebuild it")
+    console.info("  (2) Cancel")
+
+    try:
+        choice = input("\n  Select [1/2]: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        console.info("\n  Cancelled.")
+        return None
+
+    if choice == "1":
+        console.info(f"  Linking to existing: {existing_id[:8]}...")
+        return existing_id
+
+    console.info("  Cancelled. Use --name to choose a different name.")
+    return None
+
+
 def collect_environment_variables(
     directory: Path,
     env_flags: list[str] | None,
@@ -198,33 +236,44 @@ def deploy_environment(
     if not validation_issues:
         hud_console.success("Validation passed")
 
-    # Load existing deploy link for registry_id and syncEnv preference
+    # Load existing config for registry_id (prefer config.json, fall back to deploy.json)
+    from hud.cli.utils.project_config import load_project_config
+
+    project_config = load_project_config(env_dir)
     deploy_link = _load_deploy_link(env_dir)
     if not registry_id:
-        registry_id = deploy_link.get("registryId")
+        registry_id = project_config.get("registryId") or deploy_link.get("registryId")
         if registry_id:
             hud_console.info(f"Rebuilding existing environment: {registry_id[:8]}...")
 
-    # Determine environment name from pyproject.toml or directory
+    # Determine environment name from --name flag or directory
     if not name:
-        name, name_source = get_environment_name(env_dir, None)
-        if name_source == "config":
-            hud_console.info(f"Using name from pyproject.toml: {name}")
+        name, _name_source = get_environment_name(env_dir, None)
 
     hud_console.info(f"Environment name: {name}")
 
-    # Resolve whether to include .env vars
-    # Priority: --no-env flag > explicit --env/--env-file > saved preference > prompt
-    has_explicit_env = bool(env) or bool(env_file)
-    skip_dotenv = no_env
+    # Check if local Environment("...") name matches deploy name BEFORE building.
+    # This ensures the Docker image gets the correct name baked in.
+    from hud.cli.utils.name_check import check_and_fix_env_name
 
-    if not skip_dotenv and not has_explicit_env:
+    check_and_fix_env_name(env_dir, name, hud_console)
+
+    # Resolve whether to include .env vars
+    # When --env flags are explicit, they are the ONLY env vars used (no .env auto-load).
+    # When no --env flags, use saved syncEnv preference or prompt.
+    has_explicit_env = bool(env) or bool(env_file)
+    skip_dotenv = no_env or has_explicit_env
+
+    if not skip_dotenv:
         dotenv_path = env_dir / ".env"
         if dotenv_path.exists():
-            sync_pref = deploy_link.get("syncEnv")
+            sync_pref = (
+                project_config.get("syncEnv")
+                if project_config.get("syncEnv") is not None
+                else deploy_link.get("syncEnv")
+            )
 
             if sync_pref is None:
-                # First time: show keys and prompt
                 keys = _peek_env_keys(dotenv_path)
                 if keys:
                     hud_console.info(f"Found .env with {len(keys)} variable(s): {', '.join(keys)}")
@@ -235,8 +284,10 @@ def deploy_environment(
                     except (EOFError, KeyboardInterrupt):
                         answer = "n"
                     sync_pref = answer in ("", "y", "yes")
-                    _update_deploy_link(env_dir, syncEnv=sync_pref)
-                    hud_console.dim_info("Preference saved to:", ".hud/deploy.json")
+                    from hud.cli.utils.project_config import save_project_config as _save_cfg
+
+                    _save_cfg({"syncEnv": sync_pref}, env_dir)
+                    hud_console.dim_info("Preference saved to:", ".hud/config.json")
                 else:
                     sync_pref = False
 
@@ -344,7 +395,7 @@ def deploy_environment(
     # Save deploy link as soon as we have a registry_id, regardless of build success
     # This enables rebuilds even if the first build failed
     if result.get("registry_id"):
-        _save_deploy_link(env_dir, result, hud_console)
+        _save_deploy_link(env_dir, result, hud_console, env_name=name)
 
     if not result.get("success"):
         raise typer.Exit(1)
@@ -444,14 +495,28 @@ async def _deploy_async(
             trigger_response.raise_for_status()
             trigger_data = trigger_response.json()
         except httpx.HTTPStatusError as e:
-            console.error(f"Failed to trigger build: {e.response.status_code}")
-            try:
-                error_detail = e.response.json().get("detail", "")
-                if error_detail:
-                    console.error(f"Error: {error_detail}")
-            except Exception:  # noqa: S110
-                pass
-            return {"success": False}
+            if e.response.status_code == 409:
+                conflict = _handle_name_conflict(e, console)
+                if conflict:
+                    trigger_payload["registry_id"] = conflict
+                    trigger_response = await client.post(
+                        f"{api_url.rstrip('/')}/builds/trigger-direct",
+                        json=trigger_payload,
+                        headers=headers,
+                    )
+                    trigger_response.raise_for_status()
+                    trigger_data = trigger_response.json()
+                else:
+                    return {"success": False}
+            else:
+                console.error(f"Failed to trigger build: {e.response.status_code}")
+                try:
+                    error_detail = e.response.json().get("detail", "")
+                    if error_detail:
+                        console.error(f"Error: {error_detail}")
+                except Exception:  # noqa: S110
+                    pass
+                return {"success": False}
         except Exception as e:
             console.error(f"Failed to trigger build: {e}")
             return {"success": False}
@@ -522,21 +587,25 @@ def _save_deploy_link(
     env_dir: Path,
     result: dict[str, Any],
     console: HUDConsole,
+    env_name: str | None = None,
 ) -> None:
-    """Save deploy linking info to .hud/deploy.json.
+    """Save deploy linking info to .hud/config.json."""
+    from hud.cli.utils.name_check import check_and_fix_env_name
+    from hud.cli.utils.project_config import save_project_config
 
-    Uses _update_deploy_link to merge with existing data (preserves syncEnv, etc.).
-    """
     try:
-        _update_deploy_link(
-            env_dir,
-            registryId=result.get("registry_id"),
-            version=result.get("version"),
-        )
         reg_id = result.get("registry_id")
         if reg_id:
+            config_data: dict[str, Any] = {"registryId": reg_id}
+            if env_name:
+                config_data["registryName"] = env_name
+            changed = save_project_config(config_data, env_dir)
             console.success(f"Linked to environment: {reg_id[:8]}...")
-            console.dim_info("Link stored in:", ".hud/deploy.json")
+            if changed:
+                console.dim_info("Config saved to:", ".hud/config.json")
+
+            if env_name:
+                check_and_fix_env_name(env_dir, env_name, console)
     except Exception as e:
         console.warning(f"Failed to save deploy link: {e}")
 

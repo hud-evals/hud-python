@@ -42,6 +42,8 @@ from .models import models_command  # noqa: E402
 from .push import push_command  # noqa: E402
 from .rft import rft_run_command  # noqa: E402
 from .rft_status import rft_status_typer_command  # noqa: E402
+from .scenario import scenario_app  # noqa: E402
+from .sync import sync_app  # noqa: E402
 
 _EXTRA_ARGS = {"allow_extra_args": True, "ignore_unknown_options": True}
 
@@ -113,6 +115,12 @@ rft_app = typer.Typer(help="🚀 Reinforcement Fine-Tuning (RFT) commands")
 rft_app.command("run")(rft_run_command)
 rft_app.command("status")(rft_status_typer_command)
 app.add_typer(rft_app, name="rft")
+
+# Scenario subcommand group
+app.add_typer(scenario_app, name="scenario")
+
+# Sync subcommand group
+app.add_typer(sync_app, name="sync")
 
 
 # ---------------------------------------------------------------------------

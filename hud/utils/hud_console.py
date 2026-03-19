@@ -29,10 +29,10 @@ if TYPE_CHECKING:
     from rich.status import Status
 # HUD Brand Colors - Optimized for both light and dark modes
 GOLD = "rgb(192,150,12)"  # #c0960c - Primary brand color
-RED = "rgb(220,50,47)"  # Slightly muted red that works on both backgrounds
-GREEN = "rgb(133,153,0)"  # Slightly muted green that works on both backgrounds
+RED = "rgb(205,92,92)"  # Indian red / coral — warm, readable on both backgrounds
+GREEN = "rgb(60,140,80)"  # Forest green — rich, not neon
 DIM = "bright_black"  # Grey that's visible on both light and dark backgrounds
-YELLOW = "yellow"
+YELLOW = "rgb(218,165,32)"  # Goldenrod — saturated amber, not raw yellow
 TEXT = "bright_white"  # Off-white that's readable on dark, not too bright on light
 SECONDARY = "rgb(108,113,196)"  # Muted blue-purple for secondary text
 
@@ -76,7 +76,8 @@ class HUDConsole:
             stderr: If True, output to stderr (default), otherwise stdout
         """
         console = self._stderr_console if stderr else self._stdout_console
-        console.print(Panel.fit(f"{icon} [bold]{title}[/bold]", border_style=GOLD))
+        label = f"{icon} [bold]{title}[/bold]" if icon else f"[bold]{title}[/bold]"
+        console.print(Panel.fit(label, border_style=GOLD))
 
     def section_title(self, title: str, stderr: bool = True) -> None:
         """Print a section title in gold.
@@ -96,7 +97,7 @@ class HUDConsole:
             stderr: If True, output to stderr (default), otherwise stdout
         """
         console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"[{GREEN}]✅ {escape(message)}[/{GREEN}]")
+        console.print(f"[{GREEN}]\u2714 {escape(message)}[/{GREEN}]")
 
     def error(self, message: str, stderr: bool = True) -> None:
         """Print an error message.
@@ -110,9 +111,11 @@ class HUDConsole:
         escaped_message = escape(message)
         if "NoneType: None" not in tb:
             escaped_tb = escape(tb)
-            console.print(f"[{RED} not bold]❌ {escaped_message}\n{escaped_tb}[/{RED} not bold]")
+            console.print(
+                f"[{RED} not bold]\u2716 {escaped_message}\n{escaped_tb}[/{RED} not bold]"
+            )
         else:
-            console.print(f"[{RED} not bold]❌ {escaped_message}[/{RED} not bold]")
+            console.print(f"[{RED} not bold]\u2716 {escaped_message}[/{RED} not bold]")
 
     def warning(self, message: str, stderr: bool = True) -> None:
         """Print a warning message.
@@ -122,7 +125,7 @@ class HUDConsole:
             stderr: If True, output to stderr (default), otherwise stdout
         """
         console = self._stderr_console if stderr else self._stdout_console
-        console.print(f"⚠️  [{YELLOW} not bold]{escape(message)}[/{YELLOW} not bold]")
+        console.print(f"[{YELLOW} not bold]\u26a0 {escape(message)}[/{YELLOW} not bold]")
 
     def info(self, message: str, stderr: bool = True) -> None:
         """Print an info message.

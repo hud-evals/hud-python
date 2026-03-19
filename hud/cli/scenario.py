@@ -1,0 +1,136 @@
+"""CLI proxy for scenario operations against a running MCP server.
+
+Requires an HTTP server running (e.g. hud dev env:env --port 8080).
+Dockerfile.hud should use --port 8080 (not --stdio) to support these commands.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from typing import Any
+
+import typer
+
+from hud.utils.hud_console import HUDConsole
+
+hud_console = HUDConsole()
+
+scenario_app = typer.Typer(
+    help="Run scenario operations (list, setup, grade) against a running server",
+    rich_markup_mode="rich",
+)
+
+DEFAULT_URL = "http://localhost:8080/mcp"
+
+
+async def _client(url: str) -> Any:
+    from fastmcp import Client
+
+    client = Client(url)
+    await client.__aenter__()
+    return client
+
+
+def _parse_args(args_json: str | None) -> dict[str, str]:
+    if not args_json:
+        return {}
+    try:
+        raw = json.loads(args_json)
+    except json.JSONDecodeError as e:
+        hud_console.error(f"Invalid JSON: {e}")
+        raise typer.Exit(1) from None
+    return {k: json.dumps(v) if not isinstance(v, str) else v for k, v in raw.items()}
+
+
+@scenario_app.command(name="list")
+def list_cmd(
+    url: str = typer.Option(DEFAULT_URL, "--url", "-u"),
+) -> None:
+    """List scenarios on the running server."""
+
+    async def _run() -> None:
+        client = await _client(url)
+        try:
+            for p in sorted(await client.list_prompts(), key=lambda x: x.name):
+                if ":" not in p.name:
+                    continue
+                name = p.name.split(":", 1)[-1]
+                args = ", ".join(a.name for a in (p.arguments or []))
+                print(f"  {name}({args})" if args else f"  {name}")  # noqa: T201
+        finally:
+            await client.__aexit__(None, None, None)
+
+    asyncio.run(_run())
+
+
+@scenario_app.command(name="setup")
+def setup_cmd(
+    scenario: str = typer.Argument(..., help="env:scenario or just scenario name"),
+    args: str | None = typer.Option(None, "--args", "-a", help="JSON args"),
+    url: str = typer.Option(DEFAULT_URL, "--url", "-u"),
+) -> None:
+    """Run setup, print the prompt."""
+
+    async def _run() -> None:
+        client = await _client(url)
+        try:
+            result = await client.get_prompt(scenario, _parse_args(args))
+            for msg in result.messages:
+                print(msg.content.text if hasattr(msg.content, "text") else msg.content)  # noqa: T201
+        finally:
+            await client.__aexit__(None, None, None)
+
+    asyncio.run(_run())
+
+
+@scenario_app.command(name="grade")
+def grade_cmd(
+    scenario: str = typer.Argument(..., help="env:scenario or just scenario name"),
+    answer: str = typer.Option("", "--answer", "-A"),
+    url: str = typer.Option(DEFAULT_URL, "--url", "-u"),
+) -> None:
+    """Submit answer and grade, print the result."""
+
+    async def _run() -> None:
+        client = await _client(url)
+        try:
+            short_name = scenario.split(":")[-1] if ":" in scenario else scenario
+            await client.call_tool("_hud_submit", {"scenario": short_name, "answer": answer})
+            contents = await client.read_resource(scenario)
+            first = contents[0] if isinstance(contents, list) else contents
+            text = first.text if hasattr(first, "text") else str(first)
+            print(json.dumps(json.loads(text), indent=2))  # noqa: T201
+        finally:
+            await client.__aexit__(None, None, None)
+
+    asyncio.run(_run())
+
+
+@scenario_app.command(name="run")
+def run_cmd(
+    scenario: str = typer.Argument(..., help="env:scenario or just scenario name"),
+    args: str | None = typer.Option(None, "--args", "-a", help="JSON args"),
+    answer: str = typer.Option("", "--answer", "-A"),
+    url: str = typer.Option(DEFAULT_URL, "--url", "-u"),
+) -> None:
+    """Setup + grade in one shot (for testing graders)."""
+
+    async def _run() -> None:
+        client = await _client(url)
+        try:
+            result = await client.get_prompt(scenario, _parse_args(args))
+            for msg in result.messages:
+                prompt = msg.content.text if hasattr(msg.content, "text") else str(msg.content)
+                hud_console.info(f"Prompt: {prompt}")
+
+            short_name = scenario.split(":")[-1] if ":" in scenario else scenario
+            await client.call_tool("_hud_submit", {"scenario": short_name, "answer": answer})
+            contents = await client.read_resource(scenario)
+            first = contents[0] if isinstance(contents, list) else contents
+            text = first.text if hasattr(first, "text") else str(first)
+            print(json.dumps(json.loads(text), indent=2))  # noqa: T201
+        finally:
+            await client.__aexit__(None, None, None)
+
+    asyncio.run(_run())
